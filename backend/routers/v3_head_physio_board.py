@@ -88,7 +88,7 @@ async def hp_recommend_package(
 
     await v3_col("leads").update_one(
         {"id": payload.lead_id},
-        {"$set": {"branch_stage": "Follow-up Package Upsell", "updated_at": now_iso()}},
+        {"$set": {"branch_stage": "Follow Up", "updated_at": now_iso()}},
     )
 
     activity = {

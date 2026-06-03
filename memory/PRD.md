@@ -25,8 +25,12 @@ Build FITSIOMAX OS - multi-role SaaS for physiotherapy/fitness business with:
 - Branch Picker Popup, Appointment Booking Flow (Calendly-style)
 
 ### Branch Admin Board (3 Tabs)
-#### Tab 1: Patient Pipeline
-- 8-stage Kanban: New Appointment -> Call & Confirm -> Head Physio Appointment -> Consultation Fee Collected -> Consultation Done -> Follow-up Package Upsell -> Package Paid -> Jr. Physio Assigned
+#### Tab 1: Appointment (renamed from Patient Pipeline — Feb 2026)
+- **8-stage Kanban**: New Appointment · Qualified · Portfolio · Follow Up · Appointment Date & Time · Branch · Assigned Physio · Cancelled
+- **Clickable dashboard cards** above the kanban — click any card (e.g. "Qualified · 5") to filter the kanban to that single stage; click again or "Clear" to reset; "All Stages" card shows full board.
+- One-time idempotent migration (`seed.migrate_branch_stages`) maps legacy stage names ("Call & Confirm", "Head Physio Appointment", "Consultation Fee Collected", "Consultation Done", "Follow-up Package Upsell", "Package Paid", "Jr. Physio Assigned") → new stages on backend startup.
+- `pipeline_stages` collection auto-reseeded with new sales-type stages.
+- Backend `v3_branch_admin.assign_physio` now sets `branch_stage="Assigned Physio"`; `collect_fee` no longer auto-changes stage.
 
 #### Tab 2: Head Physio Calendar
 - Left: Doctor list + Add Head Physio (creates user + doctor)

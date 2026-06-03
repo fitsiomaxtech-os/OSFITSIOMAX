@@ -36,24 +36,24 @@ import { FinanceBoard } from "@/components/FinanceBoard";
 
 const BRANCH_STAGES = [
   "New Appointment",
-  "Call & Confirm",
-  "Head Physio Appointment",
-  "Consultation Fee Collected",
-  "Consultation Done",
-  "Follow-up Package Upsell",
-  "Package Paid",
-  "Jr. Physio Assigned",
+  "Qualified",
+  "Portfolio",
+  "Follow Up",
+  "Appointment Date & Time",
+  "Branch",
+  "Assigned Physio",
+  "Cancelled",
 ];
 
 const STAGE_COLORS = {
   "New Appointment": { bg: "bg-blue-500", light: "bg-blue-50 text-blue-700 border-blue-200", col: "border-blue-200 bg-blue-50/40" },
-  "Call & Confirm": { bg: "bg-amber-500", light: "bg-amber-50 text-amber-700 border-amber-200", col: "border-amber-200 bg-amber-50/40" },
-  "Head Physio Appointment": { bg: "bg-violet-500", light: "bg-violet-50 text-violet-700 border-violet-200", col: "border-violet-200 bg-violet-50/40" },
-  "Consultation Fee Collected": { bg: "bg-teal-500", light: "bg-teal-50 text-teal-700 border-teal-200", col: "border-teal-200 bg-teal-50/40" },
-  "Consultation Done": { bg: "bg-green-500", light: "bg-green-50 text-green-700 border-green-200", col: "border-green-200 bg-green-50/40" },
-  "Follow-up Package Upsell": { bg: "bg-orange-500", light: "bg-orange-50 text-orange-700 border-orange-200", col: "border-orange-200 bg-orange-50/40" },
-  "Package Paid": { bg: "bg-emerald-500", light: "bg-emerald-50 text-emerald-700 border-emerald-200", col: "border-emerald-200 bg-emerald-50/40" },
-  "Jr. Physio Assigned": { bg: "bg-sky-500", light: "bg-sky-50 text-sky-700 border-sky-200", col: "border-sky-200 bg-sky-50/40" },
+  "Qualified": { bg: "bg-amber-500", light: "bg-amber-50 text-amber-700 border-amber-200", col: "border-amber-200 bg-amber-50/40" },
+  "Portfolio": { bg: "bg-violet-500", light: "bg-violet-50 text-violet-700 border-violet-200", col: "border-violet-200 bg-violet-50/40" },
+  "Follow Up": { bg: "bg-orange-500", light: "bg-orange-50 text-orange-700 border-orange-200", col: "border-orange-200 bg-orange-50/40" },
+  "Appointment Date & Time": { bg: "bg-teal-500", light: "bg-teal-50 text-teal-700 border-teal-200", col: "border-teal-200 bg-teal-50/40" },
+  "Branch": { bg: "bg-emerald-500", light: "bg-emerald-50 text-emerald-700 border-emerald-200", col: "border-emerald-200 bg-emerald-50/40" },
+  "Assigned Physio": { bg: "bg-sky-500", light: "bg-sky-50 text-sky-700 border-sky-200", col: "border-sky-200 bg-sky-50/40" },
+  "Cancelled": { bg: "bg-rose-500", light: "bg-rose-50 text-rose-700 border-rose-200", col: "border-rose-200 bg-rose-50/40" },
 };
 
 export const BranchAdminBoard = ({ branchId }) => {
@@ -62,6 +62,7 @@ export const BranchAdminBoard = ({ branchId }) => {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedLead, setSelectedLead] = useState(null);
   const [activeView, setActiveView] = useState("pipeline");
+  const [stageFilter, setStageFilter] = useState(null); // null = show all stages
 
   const loadBoard = useCallback(async () => {
     if (!branchId) return;
@@ -94,7 +95,7 @@ export const BranchAdminBoard = ({ branchId }) => {
   };
 
   const VIEW_TABS = [
-    { key: "pipeline", label: "Patient Pipeline", icon: LayoutDashboard },
+    { key: "pipeline", label: "Appointment", icon: LayoutDashboard },
     { key: "head_physio", label: "Head Physio Calendar", icon: Stethoscope },
     { key: "finance", label: "Finance", icon: CreditCard },
   ];
@@ -131,16 +132,30 @@ export const BranchAdminBoard = ({ branchId }) => {
         <>
           {/* Metric Strip */}
       <div className="flex gap-2 overflow-x-auto pb-1" data-testid="branch-metrics">
-        <div className="flex-shrink-0 rounded-lg border border-sky-200 bg-sky-50 px-4 py-2" data-testid="branch-metric-total">
-          <p className="text-[10px] font-medium text-slate-500">Total</p>
+        <button
+          type="button"
+          onClick={() => setStageFilter(null)}
+          className={`flex-shrink-0 rounded-lg border px-4 py-2 text-left transition-shadow hover:shadow-md ${stageFilter === null ? "border-sky-500 bg-sky-100 ring-2 ring-sky-300" : "border-sky-200 bg-sky-50"}`}
+          data-testid="branch-metric-total"
+        >
+          <p className="text-[10px] font-medium text-slate-500">All Stages</p>
           <p className="text-xl font-bold text-sky-700">{totalLeads}</p>
-        </div>
-        {BRANCH_STAGES.map((stage) => (
-          <div key={stage} className={`flex-shrink-0 rounded-lg border px-3 py-2 ${STAGE_COLORS[stage]?.col || "border-slate-200 bg-slate-50"}`} data-testid={`branch-metric-${stage}`}>
-            <p className="text-[10px] font-medium text-slate-500 whitespace-nowrap">{stage}</p>
-            <p className="text-lg font-bold text-slate-800">{boardData.stage_counts?.[stage] || 0}</p>
-          </div>
-        ))}
+        </button>
+        {BRANCH_STAGES.map((stage) => {
+          const isActive = stageFilter === stage;
+          return (
+            <button
+              key={stage}
+              type="button"
+              onClick={() => setStageFilter(isActive ? null : stage)}
+              className={`flex-shrink-0 rounded-lg border px-3 py-2 text-left transition-shadow hover:shadow-md ${STAGE_COLORS[stage]?.col || "border-slate-200 bg-slate-50"} ${isActive ? "ring-2 ring-offset-1 ring-slate-700" : ""}`}
+              data-testid={`branch-metric-${stage}`}
+            >
+              <p className="text-[10px] font-medium text-slate-500 whitespace-nowrap">{stage}</p>
+              <p className="text-lg font-bold text-slate-800">{boardData.stage_counts?.[stage] || 0}</p>
+            </button>
+          );
+        })}
       </div>
 
       {/* Toolbar */}
@@ -155,8 +170,15 @@ export const BranchAdminBoard = ({ branchId }) => {
       </div>
 
       {/* Kanban Board */}
+      {stageFilter && (
+        <div className="flex items-center gap-2 text-xs text-slate-600" data-testid="branch-stage-filter-indicator">
+          <span>Filtering by:</span>
+          <span className={`rounded-full border px-2 py-0.5 font-medium ${STAGE_COLORS[stageFilter]?.light || ""}`}>{stageFilter}</span>
+          <button type="button" onClick={() => setStageFilter(null)} className="text-sky-600 hover:underline" data-testid="branch-stage-filter-clear">Clear</button>
+        </div>
+      )}
       <div className="flex gap-2.5 overflow-x-auto pb-2" data-testid="branch-kanban">
-        {BRANCH_STAGES.map((stage) => {
+        {(stageFilter ? [stageFilter] : BRANCH_STAGES).map((stage) => {
           const stageLeads = filteredLeads.filter((l) => l.branch_stage === stage);
           return (
             <div key={stage} className={`min-w-[240px] flex-1 rounded-lg border p-2.5 ${STAGE_COLORS[stage]?.col || "border-slate-200 bg-slate-50"}`} data-testid={`branch-col-${stage}`}>

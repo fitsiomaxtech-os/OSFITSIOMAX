@@ -2,7 +2,50 @@ import uuid
 from database import db, v2_col, v3_col
 from utils import now_iso
 from security import hash_password
-from constants import V3_VERTICALS
+from constants import V3_VERTICALS, V3_BRANCH_STAGES
+
+
+# Maps deprecated branch_stage labels (legacy 8-stage flow) to the new flow.
+# Idempotent: runs every startup; only touches leads with a legacy value.
+_LEGACY_BRANCH_STAGE_MAP = {
+    "Call & Confirm": "Qualified",
+    "Head Physio Appointment": "Appointment Date & Time",
+    "Consultation Fee Collected": "Qualified",
+    "Consultation Done": "Portfolio",
+    "Follow-up Package Upsell": "Follow Up",
+    "Package Paid": "Branch",
+    "Jr. Physio Assigned": "Assigned Physio",
+}
+
+
+async def migrate_branch_stages() -> None:
+    """Map legacy branch_stage values to the new 8-stage flow. Safe to re-run."""
+    for old, new in _LEGACY_BRANCH_STAGE_MAP.items():
+        await v3_col("leads").update_many(
+            {"branch_stage": old},
+            {"$set": {"branch_stage": new, "updated_at": now_iso()}},
+        )
+    # Re-seed pipeline_stages of type=sales with the new names if any legacy entries exist.
+    legacy_sales = await v3_col("pipeline_stages").find(
+        {"type": "sales", "name": {"$in": list(_LEGACY_BRANCH_STAGE_MAP.keys())}},
+        {"_id": 0, "id": 1},
+    ).to_list(50)
+    if legacy_sales:
+        await v3_col("pipeline_stages").delete_many({"type": "sales"})
+        SALES_COLORS = ["#0ea5e9", "#22c55e", "#a855f7", "#f59e0b", "#06b6d4", "#14b8a6", "#6366f1", "#ef4444"]
+        docs = []
+        for idx, name in enumerate(V3_BRANCH_STAGES):
+            docs.append({
+                "id": str(uuid.uuid4()),
+                "name": name,
+                "color": SALES_COLORS[idx % len(SALES_COLORS)],
+                "type": "sales",
+                "order": idx,
+                "is_final": name in ("Assigned Physio", "Cancelled"),
+                "created_at": now_iso(),
+            })
+        if docs:
+            await v3_col("pipeline_stages").insert_many(docs)
 
 
 async def ensure_v1_seed_data() -> None:

@@ -145,7 +145,7 @@ function PatientsTab({ patients, onRecommend, onSelect, loading }) {
               <p className="text-[10px] text-slate-400 flex items-center gap-1"><Phone className="h-3 w-3" />{p.phone}</p>
             </div>
             <span className={`rounded-full px-2 py-0.5 text-[9px] font-semibold ${
-              p.branch_stage === "Consultation Done" ? "bg-emerald-100 text-emerald-700" :
+              p.branch_stage === "Portfolio" ? "bg-emerald-100 text-emerald-700" :
               p.has_recommendation ? "bg-violet-100 text-violet-700" :
               "bg-slate-100 text-slate-500"
             }`}>

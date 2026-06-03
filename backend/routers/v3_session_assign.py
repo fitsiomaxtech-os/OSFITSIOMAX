@@ -81,7 +81,7 @@ async def assign_sessions(
         {"$set": {
             "assigned_physio_id": payload.physio_id,
             "assigned_physio_name": physio["full_name"],
-            "branch_stage": "Jr. Physio Assigned",
+            "branch_stage": "Assigned Physio",
             "updated_at": now_iso(),
         }},
     )

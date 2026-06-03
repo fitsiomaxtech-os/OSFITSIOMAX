@@ -25,11 +25,11 @@ V3_STAGES = [
 
 V3_BRANCH_STAGES = [
     "New Appointment",
-    "Call & Confirm",
-    "Head Physio Appointment",
-    "Consultation Fee Collected",
-    "Consultation Done",
-    "Follow-up Package Upsell",
-    "Package Paid",
-    "Jr. Physio Assigned",
+    "Qualified",
+    "Portfolio",
+    "Follow Up",
+    "Appointment Date & Time",
+    "Branch",
+    "Assigned Physio",
+    "Cancelled",
 ]

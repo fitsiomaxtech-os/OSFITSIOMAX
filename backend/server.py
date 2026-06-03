@@ -4,7 +4,7 @@ import os
 import logging
 
 from database import client
-from seed import ensure_v1_seed_data, v2_seed, v3_seed
+from seed import ensure_v1_seed_data, v2_seed, v3_seed, migrate_branch_stages
 from routers import v1, v2, v3_auth, v3_config, v3_leads, v3_branch_admin, v3_appointments, v3_sheets, v3_dashboard, v3_head_physio, v3_finance, v3_head_physio_board, v3_physio_board, v3_session_assign, v3_patient_view, v3_marketing, v3_stages, v3_hr, v3_lead_fields, v3_branch_mgmt, v3_google_sheets
 
 app = FastAPI()
@@ -45,6 +45,7 @@ async def startup_seed_data():
     await ensure_v1_seed_data()
     await v2_seed()
     await v3_seed()
+    await migrate_branch_stages()
 
 
 @app.on_event("shutdown")

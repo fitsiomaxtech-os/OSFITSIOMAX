@@ -54,12 +54,10 @@ async def v3_collect_fee(lead_id: str, payload: V3CollectFeeInput, user: V3UserO
     updates = {"updated_at": now_iso()}
     if payload.fee_type == "consultation":
         updates["consultation_fee"] = payload.amount
-        updates["branch_stage"] = "Consultation Fee Collected"
     elif payload.fee_type == "package":
         updates["package_amount"] = payload.amount
         if payload.package_weeks:
             updates["package_weeks"] = payload.package_weeks
-        updates["branch_stage"] = "Package Paid"
     await v3_col("leads").update_one({"id": lead_id}, {"$set": updates})
     activity = {
         "id": str(uuid.uuid4()),
@@ -86,7 +84,7 @@ async def v3_assign_physio(lead_id: str, payload: V3AssignPhysioInput, user: V3U
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {
         "assigned_physio_id": payload.physio_id,
         "assigned_physio_name": physio["full_name"],
-        "branch_stage": "Jr. Physio Assigned",
+        "branch_stage": "Assigned Physio",
         "updated_at": now_iso(),
     }})
     activity = {

@@ -57,7 +57,7 @@ async def _ensure_seed() -> None:
             "color": SALES_COLORS[idx % len(SALES_COLORS)],
             "type": "sales",
             "order": idx,
-            "is_final": name in ("Package Paid", "Jr. Physio Assigned"),
+            "is_final": name in ("Assigned Physio", "Cancelled"),
             "created_at": now_iso(),
         })
     if docs:
