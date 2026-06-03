@@ -2,7 +2,7 @@ import uuid
 from database import db, v2_col, v3_col
 from utils import now_iso
 from security import hash_password
-from constants import V3_VERTICALS, V3_BRANCH_STAGES
+from constants import V3_VERTICALS, V3_BRANCH_STAGES, V3_STAGES
 
 
 # Maps deprecated branch_stage labels (legacy 8-stage flow) to the new flow.
@@ -17,14 +17,37 @@ _LEGACY_BRANCH_STAGE_MAP = {
     "Jr. Physio Assigned": "Assigned Physio",
 }
 
+# Maps deprecated pre-sales stage labels → new 4-stage flow.
+_LEGACY_PRESALES_STAGE_MAP = {
+    "New Lead": "New Leads",
+    "Pre-sales Qualified": "Follow Up",
+    "Assigned to Branch": "Appointment",
+    "Branch Confirmed": "Appointment",
+    "Appointment Booked": "Appointment",
+    "Completed": "Appointment",
+}
+
 
 async def migrate_branch_stages() -> None:
-    """Map legacy branch_stage values to the new 8-stage flow. Safe to re-run."""
+    """Map legacy branch_stage and pre-sales stage values to new flows. Safe to re-run."""
+    # Branch stage migration
     for old, new in _LEGACY_BRANCH_STAGE_MAP.items():
         await v3_col("leads").update_many(
             {"branch_stage": old},
             {"$set": {"branch_stage": new, "updated_at": now_iso()}},
         )
+    # Pre-sales stage migration
+    for old, new in _LEGACY_PRESALES_STAGE_MAP.items():
+        await v3_col("leads").update_many(
+            {"stage": old},
+            {"$set": {"stage": new, "updated_at": now_iso()}},
+        )
+    # When pre-sales stage = "Appointment" and branch_stage is empty, push to "New Appointment" so
+    # it appears in Branch Admin's New Appointment column.
+    await v3_col("leads").update_many(
+        {"stage": "Appointment", "$or": [{"branch_stage": None}, {"branch_stage": ""}, {"branch_stage": {"$exists": False}}]},
+        {"$set": {"branch_stage": "New Appointment", "updated_at": now_iso()}},
+    )
     # Re-seed pipeline_stages of type=sales with the new names if any legacy entries exist.
     legacy_sales = await v3_col("pipeline_stages").find(
         {"type": "sales", "name": {"$in": list(_LEGACY_BRANCH_STAGE_MAP.keys())}},
@@ -42,6 +65,27 @@ async def migrate_branch_stages() -> None:
                 "type": "sales",
                 "order": idx,
                 "is_final": name in ("Assigned Physio", "Cancelled"),
+                "created_at": now_iso(),
+            })
+        if docs:
+            await v3_col("pipeline_stages").insert_many(docs)
+    # Re-seed pipeline_stages of type=pre_sales with the new names if any legacy entries exist.
+    legacy_pre = await v3_col("pipeline_stages").find(
+        {"type": "pre_sales", "name": {"$in": list(_LEGACY_PRESALES_STAGE_MAP.keys())}},
+        {"_id": 0, "id": 1},
+    ).to_list(50)
+    if legacy_pre:
+        await v3_col("pipeline_stages").delete_many({"type": "pre_sales"})
+        PRESALES_COLORS = ["#0ea5e9", "#ef4444", "#f59e0b", "#22c55e"]
+        docs = []
+        for idx, name in enumerate(V3_STAGES):
+            docs.append({
+                "id": str(uuid.uuid4()),
+                "name": name,
+                "color": PRESALES_COLORS[idx % len(PRESALES_COLORS)],
+                "type": "pre_sales",
+                "order": idx,
+                "is_final": name == "Appointment",
                 "created_at": now_iso(),
             })
         if docs:

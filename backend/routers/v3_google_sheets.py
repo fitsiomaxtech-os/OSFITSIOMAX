@@ -267,7 +267,7 @@ async def pull_source(source_id: str, range_: str = Query("A1:Z10000"), _: V3Use
             "vertical": std_payload.get("vertical") or "offline_physiotherapy",
             "source_tab": source["name"],
             "source_type": "google_sheets",
-            "stage": "New Lead",
+            "stage": "New Leads",
             "branch_id": None,
             "notes": std_payload.get("notes", ""),
             "extra_fields": {**{k: v for k, v in std_payload.items() if k not in ("name", "email", "phone", "vertical", "notes")}, **custom_payload},

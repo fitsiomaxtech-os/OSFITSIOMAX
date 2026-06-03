@@ -130,102 +130,118 @@ export const BranchAdminBoard = ({ branchId }) => {
         <FinanceBoard />
       ) : (
         <>
-          {/* Metric Strip */}
-      <div className="flex gap-2 overflow-x-auto pb-1" data-testid="branch-metrics">
-        <button
-          type="button"
-          onClick={() => setStageFilter(null)}
-          className={`flex-shrink-0 rounded-lg border px-4 py-2 text-left transition-shadow hover:shadow-md ${stageFilter === null ? "border-sky-500 bg-sky-100 ring-2 ring-sky-300" : "border-sky-200 bg-sky-50"}`}
-          data-testid="branch-metric-total"
-        >
-          <p className="text-[10px] font-medium text-slate-500">All Stages</p>
-          <p className="text-xl font-bold text-sky-700">{totalLeads}</p>
-        </button>
-        {BRANCH_STAGES.map((stage) => {
-          const isActive = stageFilter === stage;
-          return (
+          {/* Dashboard Stage Cards — equal-sized, centered grid */}
+          <div className="grid gap-3 grid-cols-3 sm:grid-cols-3 lg:grid-cols-9" data-testid="branch-metrics">
             <button
-              key={stage}
               type="button"
-              onClick={() => setStageFilter(isActive ? null : stage)}
-              className={`flex-shrink-0 rounded-lg border px-3 py-2 text-left transition-shadow hover:shadow-md ${STAGE_COLORS[stage]?.col || "border-slate-200 bg-slate-50"} ${isActive ? "ring-2 ring-offset-1 ring-slate-700" : ""}`}
-              data-testid={`branch-metric-${stage}`}
+              onClick={() => setStageFilter(null)}
+              className={`flex flex-col items-center justify-center rounded-xl border-2 px-3 py-4 text-center transition-all hover:shadow-md ${stageFilter === null ? "border-sky-500 bg-sky-50 ring-2 ring-sky-200" : "border-sky-200 bg-white hover:bg-sky-50/40"}`}
+              data-testid="branch-metric-total"
             >
-              <p className="text-[10px] font-medium text-slate-500 whitespace-nowrap">{stage}</p>
-              <p className="text-lg font-bold text-slate-800">{boardData.stage_counts?.[stage] || 0}</p>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-sky-600">All Stages</p>
+              <p className="mt-1 text-2xl font-bold text-slate-900">{totalLeads}</p>
             </button>
-          );
-        })}
-      </div>
+            {BRANCH_STAGES.map((stage) => {
+              const isActive = stageFilter === stage;
+              const colorMap = STAGE_COLORS[stage] || {};
+              return (
+                <button
+                  key={stage}
+                  type="button"
+                  onClick={() => setStageFilter(isActive ? null : stage)}
+                  className={`flex flex-col items-center justify-center rounded-xl border-2 px-3 py-4 text-center transition-all hover:shadow-md ${colorMap.col || "border-slate-200 bg-white"} ${isActive ? "ring-2 ring-offset-1 ring-slate-700 shadow-md" : ""}`}
+                  data-testid={`branch-metric-${stage}`}
+                >
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-600 leading-tight min-h-[28px] flex items-center justify-center">{stage}</p>
+                  <p className="mt-1 text-2xl font-bold text-slate-900">{boardData.stage_counts?.[stage] || 0}</p>
+                </button>
+              );
+            })}
+          </div>
 
-      {/* Toolbar */}
-      <div className="flex items-center gap-3" data-testid="branch-toolbar">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-          <Input className="pl-9" placeholder="Search patients..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} data-testid="branch-search" />
-        </div>
-        <Button size="sm" variant="outline" onClick={loadBoard} data-testid="branch-refresh-btn">
-          <RefreshCw className="mr-1 h-4 w-4" /> Refresh
-        </Button>
-      </div>
-
-      {/* Kanban Board */}
-      {stageFilter && (
-        <div className="flex items-center gap-2 text-xs text-slate-600" data-testid="branch-stage-filter-indicator">
-          <span>Filtering by:</span>
-          <span className={`rounded-full border px-2 py-0.5 font-medium ${STAGE_COLORS[stageFilter]?.light || ""}`}>{stageFilter}</span>
-          <button type="button" onClick={() => setStageFilter(null)} className="text-sky-600 hover:underline" data-testid="branch-stage-filter-clear">Clear</button>
-        </div>
-      )}
-      <div className="flex gap-2.5 overflow-x-auto pb-2" data-testid="branch-kanban">
-        {(stageFilter ? [stageFilter] : BRANCH_STAGES).map((stage) => {
-          const stageLeads = filteredLeads.filter((l) => l.branch_stage === stage);
-          return (
-            <div key={stage} className={`min-w-[240px] flex-1 rounded-lg border p-2.5 ${STAGE_COLORS[stage]?.col || "border-slate-200 bg-slate-50"}`} data-testid={`branch-col-${stage}`}>
-              <div className="mb-2 flex items-center justify-between">
-                <p className="text-xs font-semibold text-slate-700 leading-tight">{stage}</p>
-                <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-medium text-slate-600 shadow-sm">{stageLeads.length}</span>
-              </div>
-              <div className="space-y-1.5">
-                {stageLeads.map((lead) => (
-                  <div
-                    key={lead.id}
-                    onClick={() => setSelectedLead(lead)}
-                    className="cursor-pointer rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm transition-shadow hover:shadow-md"
-                    data-testid={`branch-card-${lead.id}`}
-                  >
-                    <div className="flex items-start gap-2">
-                      <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-violet-100 text-xs font-bold text-violet-700">
-                        {lead.name?.charAt(0)?.toUpperCase() || "?"}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-xs font-medium text-slate-800">{lead.name}</p>
-                        <p className="truncate text-[10px] text-slate-500">{lead.phone}</p>
-                      </div>
-                    </div>
-                    {(lead.consultation_fee || lead.package_amount || lead.assigned_physio_name) && (
-                      <div className="mt-1.5 flex flex-wrap gap-1">
-                        {lead.consultation_fee && (
-                          <span className="rounded bg-teal-50 px-1.5 py-0.5 text-[9px] font-medium text-teal-700">Fee: Rs.{lead.consultation_fee}</span>
-                        )}
-                        {lead.package_amount && (
-                          <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[9px] font-medium text-emerald-700">Pkg: Rs.{lead.package_amount}</span>
-                        )}
-                        {lead.assigned_physio_name && (
-                          <span className="rounded bg-sky-50 px-1.5 py-0.5 text-[9px] font-medium text-sky-700">{lead.assigned_physio_name}</span>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                ))}
-                {stageLeads.length === 0 && (
-                  <p className="py-3 text-center text-[10px] text-slate-400">Empty</p>
-                )}
-              </div>
+          {/* Toolbar */}
+          <div className="flex items-center gap-3" data-testid="branch-toolbar">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+              <Input className="pl-9" placeholder="Search patients..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} data-testid="branch-search" />
             </div>
-          );
-        })}
-      </div>
+            {stageFilter && (
+              <div className="flex items-center gap-2 text-xs text-slate-600" data-testid="branch-stage-filter-indicator">
+                <span>Showing:</span>
+                <span className={`rounded-full border px-2 py-0.5 font-medium ${STAGE_COLORS[stageFilter]?.light || ""}`}>{stageFilter}</span>
+                <button type="button" onClick={() => setStageFilter(null)} className="text-sky-600 hover:underline" data-testid="branch-stage-filter-clear">Clear</button>
+              </div>
+            )}
+            <Button size="sm" variant="outline" onClick={loadBoard} data-testid="branch-refresh-btn">
+              <RefreshCw className="mr-1 h-4 w-4" /> Refresh
+            </Button>
+          </div>
+
+          {/* List View (table) */}
+          <div className="overflow-hidden rounded-lg border border-slate-200 bg-white" data-testid="branch-list">
+            <table className="min-w-full divide-y divide-slate-200 text-sm">
+              <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="px-4 py-3">Patient</th>
+                  <th className="px-4 py-3">Phone</th>
+                  <th className="px-4 py-3">Stage</th>
+                  <th className="px-4 py-3">Assigned Physio</th>
+                  <th className="px-4 py-3 text-right">Fee / Package</th>
+                  <th className="px-4 py-3 text-right">Updated</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {(() => {
+                  const visible = (stageFilter ? filteredLeads.filter((l) => l.branch_stage === stageFilter) : filteredLeads);
+                  if (visible.length === 0) {
+                    return (
+                      <tr>
+                        <td colSpan={6} className="px-4 py-10 text-center text-sm text-slate-400" data-testid="branch-list-empty">
+                          No patients {stageFilter ? `in stage "${stageFilter}"` : "yet"}.
+                        </td>
+                      </tr>
+                    );
+                  }
+                  return visible.map((lead) => {
+                    const stageColor = STAGE_COLORS[lead.branch_stage]?.light || "bg-slate-100 text-slate-600 border-slate-200";
+                    return (
+                      <tr
+                        key={lead.id}
+                        onClick={() => setSelectedLead(lead)}
+                        className="cursor-pointer transition-colors hover:bg-slate-50"
+                        data-testid={`branch-row-${lead.id}`}
+                      >
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-violet-100 text-xs font-bold text-violet-700">
+                              {lead.name?.charAt(0)?.toUpperCase() || "?"}
+                            </div>
+                            <span className="font-medium text-slate-800">{lead.name}</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">{lead.phone || "—"}</td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${stageColor}`}>
+                            {lead.branch_stage || "—"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">{lead.assigned_physio_name || <span className="text-slate-400">—</span>}</td>
+                        <td className="px-4 py-3 text-right">
+                          {(lead.consultation_fee || lead.package_amount) ? (
+                            <div className="flex flex-wrap justify-end gap-1">
+                              {lead.consultation_fee && <span className="rounded bg-teal-50 px-1.5 py-0.5 text-[10px] font-medium text-teal-700">Fee Rs.{lead.consultation_fee}</span>}
+                              {lead.package_amount && <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">Pkg Rs.{lead.package_amount}</span>}
+                            </div>
+                          ) : <span className="text-slate-400">—</span>}
+                        </td>
+                        <td className="px-4 py-3 text-right text-xs text-slate-400">{(lead.updated_at || "").slice(0, 10)}</td>
+                      </tr>
+                    );
+                  });
+                })()}
+              </tbody>
+            </table>
+          </div>
 
       {/* Lead Detail Modal */}
       {selectedLead && (

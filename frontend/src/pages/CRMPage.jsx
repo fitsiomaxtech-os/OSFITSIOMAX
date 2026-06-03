@@ -64,46 +64,32 @@ const ROLE_META = {
 };
 
 const PIPELINE_STAGES = [
-  "New Lead",
-  "Pre-sales Qualified",
-  "Assigned to Branch",
-  "Branch Confirmed",
-  "Appointment Booked",
-  "Completed",
+  "New Leads",
+  "RNR",
+  "Follow Up",
+  "Appointment",
 ];
 
 const STAGE_THEME = {
-  "New Lead": {
+  "New Leads": {
     active: "border-blue-300 bg-blue-50 text-blue-700",
     inactive: "border-blue-200 bg-white text-blue-600",
     column: "border-blue-200 bg-blue-50",
     metric: "text-blue-600",
   },
-  "Pre-sales Qualified": {
+  "RNR": {
+    active: "border-rose-300 bg-rose-50 text-rose-700",
+    inactive: "border-rose-200 bg-white text-rose-700",
+    column: "border-rose-200 bg-rose-50",
+    metric: "text-rose-600",
+  },
+  "Follow Up": {
     active: "border-amber-300 bg-amber-50 text-amber-700",
     inactive: "border-amber-200 bg-white text-amber-700",
     column: "border-amber-200 bg-amber-50",
     metric: "text-amber-600",
   },
-  "Assigned to Branch": {
-    active: "border-violet-300 bg-violet-50 text-violet-700",
-    inactive: "border-violet-200 bg-white text-violet-700",
-    column: "border-violet-200 bg-violet-50",
-    metric: "text-violet-600",
-  },
-  "Branch Confirmed": {
-    active: "border-teal-300 bg-teal-50 text-teal-700",
-    inactive: "border-teal-200 bg-white text-teal-700",
-    column: "border-teal-200 bg-teal-50",
-    metric: "text-teal-600",
-  },
-  "Appointment Booked": {
-    active: "border-green-300 bg-green-50 text-green-700",
-    inactive: "border-green-200 bg-white text-green-700",
-    column: "border-green-200 bg-green-50",
-    metric: "text-green-600",
-  },
-  Completed: {
+  "Appointment": {
     active: "border-emerald-300 bg-emerald-50 text-emerald-700",
     inactive: "border-emerald-200 bg-white text-emerald-700",
     column: "border-emerald-200 bg-emerald-50",

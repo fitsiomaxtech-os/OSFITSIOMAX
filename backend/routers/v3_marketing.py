@@ -149,9 +149,9 @@ class BulkDelete(BaseModel):
 
 @router.get("/dashboard")
 async def marketing_dashboard(_: V3UserOut = Depends(v3_require_roles("super_admin"))):
-    pre_sales_count = await v3_col("leads").count_documents({"stage": {"$in": ["New Lead", "Pre-sales Qualified"]}})
-    sales_count = await v3_col("leads").count_documents({"stage": {"$in": ["Assigned to Branch", "Branch Confirmed", "Appointment Booked"]}})
-    completed_count = await v3_col("leads").count_documents({"stage": "Completed"})
+    pre_sales_count = await v3_col("leads").count_documents({"stage": {"$in": ["New Leads", "RNR", "Follow Up"]}})
+    sales_count = await v3_col("leads").count_documents({"stage": "Appointment"})
+    completed_count = await v3_col("leads").count_documents({"branch_stage": "Assigned Physio"})
     total_pre_sales_ever = pre_sales_count + sales_count + completed_count
     conv = (completed_count / total_pre_sales_ever * 100.0) if total_pre_sales_ever else 0.0
 
@@ -221,12 +221,12 @@ async def get_team_members(_: V3UserOut = Depends(v3_require_roles("super_admin"
         for u in users:
             lead_filter = {"assigned_user_id": u["id"]}
             if tier == "sales":
-                lead_filter = {"assigned_user_id": u["id"], "stage": {"$in": ["Assigned to Branch", "Branch Confirmed", "Appointment Booked"]}}
+                lead_filter = {"assigned_user_id": u["id"], "stage": "Appointment"}
             else:
-                lead_filter = {"assigned_user_id": u["id"], "stage": {"$in": ["New Lead", "Pre-sales Qualified"]}}
+                lead_filter = {"assigned_user_id": u["id"], "stage": {"$in": ["New Leads", "RNR", "Follow Up"]}}
             current_leads = await v3_col("leads").count_documents(lead_filter)
             total_assigned = await v3_col("leads").count_documents({"assigned_user_id": u["id"]})
-            closed = await v3_col("leads").count_documents({"assigned_user_id": u["id"], "stage": "Completed"})
+            closed = await v3_col("leads").count_documents({"assigned_user_id": u["id"], "branch_stage": "Assigned Physio"})
             conv = (closed / total_assigned * 100.0) if total_assigned else 0.0
             out.append({
                 "id": u["id"],
@@ -280,9 +280,9 @@ async def all_leads(
 ):
     query: Dict[str, Any] = {}
     if stage_type == "pre_sales":
-        query["stage"] = {"$in": ["New Lead", "Pre-sales Qualified"]}
+        query["stage"] = {"$in": ["New Leads", "RNR", "Follow Up"]}
     elif stage_type == "sales":
-        query["stage"] = {"$in": ["Assigned to Branch", "Branch Confirmed", "Appointment Booked", "Completed"]}
+        query["stage"] = "Appointment"
     if source:
         query["source_tab"] = source
     if assigned_to:
@@ -442,7 +442,7 @@ async def sync_source(source_id: str, payload: MarketingSyncInput, _: V3UserOut 
             "vertical": std_payload.get("vertical") or "offline_physiotherapy",
             "source_tab": source["name"],
             "source_type": source.get("source_type", "google_sheets"),
-            "stage": "New Lead",
+            "stage": "New Leads",
             "branch_id": None,
             "notes": std_payload.get("notes", ""),
             "extra_fields": {**{k: v for k, v in std_payload.items() if k not in ("name", "email", "phone", "vertical", "notes")}, **custom_payload},

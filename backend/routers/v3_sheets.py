@@ -83,7 +83,7 @@ async def v3_sync_sheet(connection_id: str, payload: V3SheetSyncInput, _: V3User
                 "vertical": row.get(vertical_key, "offline_physiotherapy"),
                 "source_tab": tab.tab_name,
                 "source_type": "google_sheet",
-                "stage": "New Lead",
+                "stage": "New Leads",
                 "branch_id": None,
                 "notes": "Imported from Google Sheet",
                 "extra_fields": extra_fields,

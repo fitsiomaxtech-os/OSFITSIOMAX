@@ -15,12 +15,10 @@ V3_VERTICALS = [
 ]
 
 V3_STAGES = [
-    "New Lead",
-    "Pre-sales Qualified",
-    "Assigned to Branch",
-    "Branch Confirmed",
-    "Appointment Booked",
-    "Completed",
+    "New Leads",
+    "RNR",
+    "Follow Up",
+    "Appointment",
 ]
 
 V3_BRANCH_STAGES = [

@@ -24,13 +24,18 @@ Build FITSIOMAX OS - multi-role SaaS for physiotherapy/fitness business with:
 - Add New Lead popup, Lead Detail Modal (Overview, Remarks, Follow-up, Activity)
 - Branch Picker Popup, Appointment Booking Flow (Calendly-style)
 
-### Branch Admin Board (3 Tabs)
-#### Tab 1: Appointment (renamed from Patient Pipeline — Feb 2026)
-- **8-stage Kanban**: New Appointment · Qualified · Portfolio · Follow Up · Appointment Date & Time · Branch · Assigned Physio · Cancelled
-- **Clickable dashboard cards** above the kanban — click any card (e.g. "Qualified · 5") to filter the kanban to that single stage; click again or "Clear" to reset; "All Stages" card shows full board.
-- One-time idempotent migration (`seed.migrate_branch_stages`) maps legacy stage names ("Call & Confirm", "Head Physio Appointment", "Consultation Fee Collected", "Consultation Done", "Follow-up Package Upsell", "Package Paid", "Jr. Physio Assigned") → new stages on backend startup.
-- `pipeline_stages` collection auto-reseeded with new sales-type stages.
-- Backend `v3_branch_admin.assign_physio` now sets `branch_stage="Assigned Physio"`; `collect_fee` no longer auto-changes stage.
+### Pre-Sales CRM Stages (Refreshed - Feb 2026) ✅
+- New 4-stage pre-sales flow: **New Leads · RNR · Follow Up · Appointment**. "Branch Confirmed", "Assigned to Branch", "Appointment Booked", "Completed", "Pre-sales Qualified" removed.
+- Idempotent migration in `seed.migrate_branch_stages` maps every legacy pre-sales stage value to a new one and re-seeds `pipeline_stages` (type=pre_sales).
+- **Hand-off bridge**: When a lead's `stage` is set to "Appointment" (via `PUT /api/v3/leads/{id}` or `POST /move-stage` or `POST /assign-branch` or `POST /confirm` or `POST /book-appointment`), the backend automatically sets `branch_stage="New Appointment"` (only if not already on a branch stage). This causes the lead to immediately surface in **Branch Admin → Appointment → New Appointment** without any extra clicks.
+- `v3_marketing.py` aggregations updated to new stage names (pre-sales count = New Leads/RNR/Follow Up; sales count = Appointment; closed = branch_stage=Assigned Physio).
+
+### Branch Admin Board (3 Tabs) — Appointment redesign (Feb 2026) ✅
+#### Tab 1: Appointment (was Patient Pipeline, was Kanban)
+- **No more kanban** — replaced by a clean centered list view (table).
+- **9 dashboard stage cards** in an equal-sized grid (All Stages + 8 stages): bigger, uniform width, centered text + count, colored per stage, with hover/active states. Click any card to filter the list below to that one stage; click again or click "Clear" to reset.
+- Table columns: Patient (avatar + name) · Phone · Stage badge · Assigned Physio · Fee/Package · Updated date. Clicking a row opens the existing lead detail modal.
+- All 8 stages still available: New Appointment · Qualified · Portfolio · Follow Up · Appointment Date & Time · Branch · Assigned Physio · Cancelled.
 
 #### Tab 2: Head Physio Calendar
 - Left: Doctor list + Add Head Physio (creates user + doctor)

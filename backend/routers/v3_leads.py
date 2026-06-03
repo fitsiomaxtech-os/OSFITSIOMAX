@@ -57,7 +57,7 @@ async def v3_manual_lead(payload: V3LeadCreate, _: V3UserOut = Depends(v3_requir
         "vertical": payload.vertical,
         "source_tab": payload.source_tab,
         "source_type": payload.source_type,
-        "stage": "New Lead",
+        "stage": "New Leads",
         "branch_id": payload.branch_id,
         "notes": payload.notes,
         "extra_fields": payload.extra_fields or {},
@@ -91,6 +91,13 @@ async def v3_edit_lead(
         raise HTTPException(status_code=400, detail="No updates provided")
 
     updates["updated_at"] = now_iso()
+    # Hand-off bridge: when stage is set to "Appointment" via PUT, push lead into Branch Admin
+    # New Appointment column (only if branch_stage isn't already set on the lead).
+    if updates.get("stage") == "Appointment":
+        existing = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0, "id": 1, "branch_stage": 1})
+        if existing is not None and not existing.get("branch_stage"):
+            updates["branch_stage"] = "New Appointment"
+
     filter_query: Dict[str, object] = {"id": lead_id}
     if user.role == "branch_admin" and user.branch_id:
         filter_query["branch_id"] = user.branch_id
@@ -108,7 +115,7 @@ async def v3_edit_lead(
 
 @router.post("/leads/{lead_id}/qualify", response_model=V3LeadOut)
 async def v3_qualify_lead(lead_id: str, _: V3UserOut = Depends(v3_require_roles("pre_sales", "business_dev", "super_admin"))):
-    await v3_col("leads").update_one({"id": lead_id}, {"$set": {"stage": "Pre-sales Qualified", "updated_at": now_iso()}})
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": {"stage": "Follow Up", "updated_at": now_iso()}})
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -119,7 +126,7 @@ async def v3_qualify_lead(lead_id: str, _: V3UserOut = Depends(v3_require_roles(
 async def v3_assign_branch(lead_id: str, payload: V3AssignBranchInput, _: V3UserOut = Depends(v3_require_roles("pre_sales", "business_dev", "super_admin"))):
     await v3_col("leads").update_one(
         {"id": lead_id},
-        {"$set": {"branch_id": payload.branch_id, "stage": "Assigned to Branch", "branch_stage": "New Appointment", "updated_at": now_iso()}},
+        {"$set": {"branch_id": payload.branch_id, "stage": "Appointment", "branch_stage": "New Appointment", "updated_at": now_iso()}},
     )
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
@@ -133,7 +140,7 @@ async def v3_confirm_lead(lead_id: str, user: V3UserOut = Depends(v3_require_rol
     if user.role == "branch_admin":
         filter_query["branch_id"] = user.branch_id
 
-    result = await v3_col("leads").update_one(filter_query, {"$set": {"stage": "Branch Confirmed", "updated_at": now_iso()}})
+    result = await v3_col("leads").update_one(filter_query, {"$set": {"stage": "Appointment", "branch_stage": "New Appointment", "updated_at": now_iso()}})
     if result.matched_count == 0:
         exists = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0, "id": 1})
         if not exists:
@@ -174,7 +181,7 @@ async def v3_book_appointment(lead_id: str, payload: V3BookAppointmentInput, use
         "created_at": now_iso(),
     }
     await v3_col("appointments").insert_one(appointment.copy())
-    await v3_col("leads").update_one({"id": lead_id}, {"$set": {"stage": "Appointment Booked", "updated_at": now_iso()}})
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": {"stage": "Appointment", "branch_stage": "New Appointment", "updated_at": now_iso()}})
     return V3AppointmentOut(**appointment)
 
 
@@ -250,7 +257,12 @@ async def v3_move_stage(lead_id: str, payload: V3MoveStageInput, user: V3UserOut
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     old_stage = lead.get("stage", "Unknown")
-    await v3_col("leads").update_one({"id": lead_id}, {"$set": {"stage": payload.stage, "updated_at": now_iso()}})
+    updates = {"stage": payload.stage, "updated_at": now_iso()}
+    # Hand-off bridge: when pre-sales moves a lead into "Appointment", make it visible
+    # in Branch Admin > Appointment > New Appointment column (only if not already on a branch stage).
+    if payload.stage == "Appointment" and not lead.get("branch_stage"):
+        updates["branch_stage"] = "New Appointment"
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": updates})
     activity = {
         "id": str(uuid.uuid4()),
         "lead_id": lead_id,

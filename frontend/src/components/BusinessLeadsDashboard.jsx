@@ -44,21 +44,17 @@ const TABS = [
 ];
 
 const PIPELINE_STAGES = [
-  "New Lead",
-  "Pre-sales Qualified",
-  "Assigned to Branch",
-  "Branch Confirmed",
-  "Appointment Booked",
-  "Completed",
+  "New Leads",
+  "RNR",
+  "Follow Up",
+  "Appointment",
 ];
 
 const STAGE_COLOR = {
-  "New Lead": "bg-blue-50 text-blue-700 border-blue-200",
-  "Pre-sales Qualified": "bg-amber-50 text-amber-700 border-amber-200",
-  "Assigned to Branch": "bg-violet-50 text-violet-700 border-violet-200",
-  "Branch Confirmed": "bg-teal-50 text-teal-700 border-teal-200",
-  "Appointment Booked": "bg-green-50 text-green-700 border-green-200",
-  Completed: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  "New Leads": "bg-blue-50 text-blue-700 border-blue-200",
+  "RNR": "bg-rose-50 text-rose-700 border-rose-200",
+  "Follow Up": "bg-amber-50 text-amber-700 border-amber-200",
+  "Appointment": "bg-emerald-50 text-emerald-700 border-emerald-200",
 };
 
 const defaultBranchForm = {
@@ -827,12 +823,12 @@ function LeadMasterTab({
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex flex-wrap items-center gap-1">
-                      {lead.stage === "New Lead" && (
+                      {lead.stage === "New Leads" && (
                         <Button size="sm" onClick={() => qualifyNow(lead.id)} className="h-7 bg-amber-500 px-2 text-xs text-white hover:bg-amber-600" data-testid={`bd-lead-qualify-${lead.id}`}>
                           Qualify
                         </Button>
                       )}
-                      {["New Lead", "Pre-sales Qualified"].includes(lead.stage) && (
+                      {["New Leads", "RNR", "Follow Up"].includes(lead.stage) && (
                         <>
                           <select
                             value={assignBranchSelection[lead.id] || ""}
