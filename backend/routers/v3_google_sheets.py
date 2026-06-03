@@ -184,19 +184,62 @@ async def list_spreadsheets(_: V3UserOut = Depends(v3_require_roles("super_admin
     )
 
 
+# ---------- Auto-sync settings (lightweight — accessible to pre_sales too) ----------
+
+class AutoSyncToggle(BaseModel):
+    auto_sync_enabled: Optional[bool] = None
+    auto_sync_interval_minutes: Optional[int] = None
+
+
+@router.get("/auto-sync/sources")
+async def auto_sync_sources(_: V3UserOut = Depends(v3_require_roles("super_admin", "pre_sales", "business_dev", "marketing_head"))):
+    """Lightweight list of Google Sheets sources with their auto-sync settings + status."""
+    connected = await v3_col("google_sheets_tokens").find_one({"id": TOKEN_DOC_ID}, {"_id": 0, "refresh_token": 1})
+    sources = await v3_col("marketing_sources").find(
+        {"source_type": "google_sheets", "is_active": True},
+        {"_id": 0},
+    ).sort("created_at", -1).to_list(200)
+    # Strip out heavy fields we don't need
+    keep = {"id", "name", "spreadsheet_id", "sheet_name", "last_synced", "row_count", "auto_sync_enabled", "auto_sync_interval_minutes"}
+    sources = [{k: v for k, v in s.items() if k in keep} for s in sources]
+    return {
+        "connected": bool(connected and connected.get("refresh_token")),
+        "sources": sources,
+    }
+
+
+@router.patch("/auto-sync/sources/{source_id}")
+async def auto_sync_toggle(source_id: str, payload: AutoSyncToggle, _: V3UserOut = Depends(v3_require_roles("super_admin", "pre_sales", "business_dev", "marketing_head"))):
+    updates = {k: v for k, v in payload.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+    if "auto_sync_interval_minutes" in updates:
+        updates["auto_sync_interval_minutes"] = max(int(updates["auto_sync_interval_minutes"]), 5)
+    updates["updated_at"] = now_iso()
+    res = await v3_col("marketing_sources").update_one({"id": source_id}, {"$set": updates})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Source not found")
+    return await v3_col("marketing_sources").find_one(
+        {"id": source_id},
+        {"_id": 0, "id": 1, "name": 1, "auto_sync_enabled": 1, "auto_sync_interval_minutes": 1, "last_synced": 1},
+    )
+
+
 # ---------- Pull (real Sheets API → existing dedupe/import logic) ----------
 
-@router.post("/pull/{source_id}")
-async def pull_source(source_id: str, range_: str = Query("A1:Z10000"), _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Dict[str, Any]:
+    """Pull rows from a Google Sheet into Leads. Returns result dict.
+    Raises HTTPException for caller-facing errors; returns {"error": str} for scheduler usage.
+    """
     source = await v3_col("marketing_sources").find_one({"id": source_id}, {"_id": 0})
     if not source:
-        raise HTTPException(status_code=404, detail="Source not found")
+        return {"error": "source_not_found", "imported": 0}
     if not source.get("spreadsheet_id"):
-        raise HTTPException(status_code=400, detail="Source has no spreadsheet_id. Edit the source and paste the Google Sheet URL.")
+        return {"error": "no_spreadsheet_id", "imported": 0}
 
     creds = await _get_creds()
     if not creds:
-        raise HTTPException(status_code=400, detail="Not connected to Google. Click 'Continue with Google' first.")
+        return {"error": "not_connected", "imported": 0}
 
     sheet_name = source.get("sheet_name") or "Sheet1"
     a1_range = f"'{sheet_name}'!{range_}"
@@ -205,7 +248,7 @@ async def pull_source(source_id: str, range_: str = Query("A1:Z10000"), _: V3Use
         svc = await asyncio.to_thread(lambda: build("sheets", "v4", credentials=creds))
         resp = await asyncio.to_thread(lambda: svc.spreadsheets().values().get(spreadsheetId=source["spreadsheet_id"], range=a1_range).execute())
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Sheets API error: {str(e)[:200]}")
+        return {"error": f"sheets_api: {str(e)[:200]}", "imported": 0}
 
     values = resp.get("values", [])
     if not values:
@@ -215,11 +258,9 @@ async def pull_source(source_id: str, range_: str = Query("A1:Z10000"), _: V3Use
     headers = [str(h).strip() for h in values[0]]
     rows = []
     for r in values[1:]:
-        # pad to headers length
         padded = list(r) + [""] * (len(headers) - len(r))
         rows.append({headers[i]: padded[i] for i in range(len(headers))})
 
-    # Ensure mapping
     mapping = dict(source.get("column_mapping") or {})
     if not all(k in mapping for k in ("name", "phone")):
         inferred = auto_map_columns(headers)
@@ -297,3 +338,63 @@ async def pull_source(source_id: str, range_: str = Query("A1:Z10000"), _: V3Use
         "mapping_used": mapping,
         "sample_errors": sample_errors,
     }
+
+
+@router.post("/pull/{source_id}")
+async def pull_source(source_id: str, range_: str = Query("A1:Z10000"), _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    result = await _internal_pull_source(source_id, range_)
+    if result.get("error"):
+        err = result["error"]
+        if err == "source_not_found":
+            raise HTTPException(status_code=404, detail="Source not found")
+        if err == "no_spreadsheet_id":
+            raise HTTPException(status_code=400, detail="Source has no spreadsheet_id. Edit the source and paste the Google Sheet URL.")
+        if err == "not_connected":
+            raise HTTPException(status_code=400, detail="Not connected to Google. Click 'Continue with Google' first.")
+        raise HTTPException(status_code=502, detail=err)
+    return result
+
+
+# ---------- Background auto-sync scheduler ----------
+
+_SCHEDULER_TASK: Optional[asyncio.Task] = None
+
+
+async def _auto_sync_loop() -> None:
+    """Runs every 60s. Pulls each source whose auto_sync_enabled=True and whose
+    last_synced is older than its auto_sync_interval_minutes."""
+    while True:
+        try:
+            now = datetime.now(timezone.utc)
+            sources = await v3_col("marketing_sources").find(
+                {"source_type": "google_sheets", "is_active": True, "auto_sync_enabled": True, "spreadsheet_id": {"$ne": ""}},
+                {"_id": 0},
+            ).to_list(200)
+            for s in sources:
+                interval = max(int(s.get("auto_sync_interval_minutes") or 30), 5)
+                last = s.get("last_synced")
+                due = True
+                if last:
+                    try:
+                        last_dt = datetime.fromisoformat(last.replace("Z", "+00:00"))
+                        if last_dt.tzinfo is None:
+                            last_dt = last_dt.replace(tzinfo=timezone.utc)
+                        due = (now - last_dt).total_seconds() >= interval * 60
+                    except Exception:
+                        due = True
+                if due:
+                    try:
+                        await _internal_pull_source(s["id"])
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        await asyncio.sleep(60)
+
+
+def start_auto_sync_scheduler() -> None:
+    """Spawn the singleton scheduler task. Safe to call multiple times."""
+    global _SCHEDULER_TASK
+    if _SCHEDULER_TASK is None or _SCHEDULER_TASK.done():
+        loop = asyncio.get_event_loop()
+        _SCHEDULER_TASK = loop.create_task(_auto_sync_loop())

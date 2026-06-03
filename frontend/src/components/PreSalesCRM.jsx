@@ -11,6 +11,7 @@ import { LeadEditModal } from "@/components/LeadEditModal";
 import { CreateLeadModal } from "@/components/CreateLeadModal";
 import { SourcePill } from "@/components/marketing/SourcePill";
 import { MaskedContact } from "@/components/MaskedContact";
+import { AutoSyncPopover } from "@/components/AutoSyncPopover";
 
 const initials = (name) => (name || "?").split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
 
@@ -89,13 +90,14 @@ export const PreSalesCRM = ({ onManageStages }) => {
       </div>
 
       {/* Toolbar */}
-      <div className="grid gap-2 md:grid-cols-6">
+      <div className="grid gap-2 md:grid-cols-7">
         <div className="md:col-span-2 relative">
           <Search className="pointer-events-none absolute left-2 top-2.5 h-4 w-4 text-slate-400" />
           <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search leads by name, email, phone..." className="pl-8" data-testid="presales-search" />
         </div>
         <Button variant="outline" onClick={() => setSortNewest((s) => !s)} data-testid="presales-sort"><CalendarIcon className="mr-1 h-4 w-4" />{sortNewest ? "Newest first" : "Oldest first"}</Button>
-        <Input value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} placeholder="Source filter" data-testid="presales-source-filter" />
+        <div className="flex justify-start md:justify-center"><AutoSyncPopover /></div>
+        <Input className="md:col-span-2" value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} placeholder="Source filter" data-testid="presales-source-filter" />
       </div>
 
       {/* Stage chips */}

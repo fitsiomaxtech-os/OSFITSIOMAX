@@ -120,6 +120,8 @@ class MarketingSourceUpdate(BaseModel):
     column_mapping: Optional[Dict[str, str]] = None
     custom_fields: Optional[List[str]] = None
     is_active: Optional[bool] = None
+    auto_sync_enabled: Optional[bool] = None
+    auto_sync_interval_minutes: Optional[int] = None
 
 
 class MarketingSyncInput(BaseModel):

@@ -142,6 +142,17 @@ Build FITSIOMAX OS - multi-role SaaS for physiotherapy/fitness business with:
 - Domain → VPS connection (user is starting deployment; awaiting domain name + VPS IP)
 - Live end-to-end Google Sheets OAuth — **manual user verification pending** (technical wiring complete; PKCE fix applied Feb 2026)
 
+### Google Sheets Auto-sync (Feb 2026) ✅
+- **Background scheduler**: `routers/v3_google_sheets._auto_sync_loop` (singleton asyncio task started in `server.startup_seed_data`). Runs every 60s, picks all `marketing_sources` where `source_type=google_sheets`, `is_active=True`, `auto_sync_enabled=True`, `spreadsheet_id != ""`, and pulls each one whose `last_synced` is older than `auto_sync_interval_minutes` (min 5).
+- Pull logic extracted into `_internal_pull_source(source_id)` (callable from the scheduler without auth + HTTPException). The `POST /pull/{id}` endpoint wraps it.
+- **Pre-Sales CRM toolbar** got a new **Auto-sync** popover button (lightning icon, between "Newest first" and "Source filter"). Visible to `super_admin / pre_sales / business_dev / marketing_head`.
+  - Lists every connected Google Sheets source.
+  - Per-source on/off toggle.
+  - Interval select (5 / 15 / 30 / 60 / 180 / 360 min).
+  - Shows last sync timestamp.
+  - Disconnected-state notice points user to Marketing Board for OAuth.
+- New endpoints: `GET /api/v3/marketing/google-sheets/auto-sync/sources`, `PATCH .../auto-sync/sources/{id}`.
+
 ### Google Sheets OAuth (Feb 2026) ✅ Technical wiring complete — minimal scope
 - **Scopes requested:** `https://www.googleapis.com/auth/spreadsheets.readonly` ONLY. No Drive, no email, no profile, no OpenID (user explicitly requested privacy-first).
 - Trade-off: no "Browse my Sheets" picker (Drive scope removed). Users **paste the Google Sheet URL** in Add Source → the spreadsheet ID is auto-extracted client-side via regex `/spreadsheets/d/([a-zA-Z0-9_-]+)/`.

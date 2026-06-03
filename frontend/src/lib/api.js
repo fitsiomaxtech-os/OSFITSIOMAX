@@ -205,6 +205,8 @@ export const gsAuthUrl = async () => (await api.get("/marketing/google-sheets/au
 export const gsDisconnect = async () => (await api.post("/marketing/google-sheets/disconnect")).data;
 export const gsListSpreadsheets = async (nameContains) => (await api.get(`/marketing/google-sheets/spreadsheets${nameContains ? `?name_contains=${encodeURIComponent(nameContains)}` : ""}`)).data;
 export const gsPull = async (sourceId) => (await api.post(`/marketing/google-sheets/pull/${sourceId}`)).data;
+export const gsAutoSyncSources = async () => (await api.get("/marketing/google-sheets/auto-sync/sources")).data;
+export const gsAutoSyncToggle = async (sourceId, payload) => (await api.patch(`/marketing/google-sheets/auto-sync/sources/${sourceId}`, payload)).data;
 
 export const hrCreateEmployee = async (payload) => (await api.post("/hr/employees", payload)).data;
 export const hrUpdateEmployee = async (id, payload) => (await api.patch(`/hr/employees/${id}`, payload)).data;
