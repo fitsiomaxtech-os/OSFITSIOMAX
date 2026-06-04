@@ -154,8 +154,8 @@ export const PreSalesCRM = ({ onManageStages }) => {
         <Input className="h-10 w-[200px]" value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} placeholder="Source filter" data-testid="presales-source-filter" />
       </div>
 
-      {/* Stage Tabs — segmented bar, equal-width, larger hit-target */}
-      <div className="rounded-xl border border-slate-200 bg-white p-1 shadow-sm" data-testid="presales-stage-tabs">
+      {/* Stage Tabs — sticky at the top when scrolling the lead list */}
+      <div className="sticky top-0 z-20 -mx-1 rounded-xl border border-slate-200 bg-white/95 p-1 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/80" data-testid="presales-stage-tabs">
         <div className="grid grid-cols-2 gap-1 sm:grid-cols-3 lg:grid-cols-5">
           <StageTab label="All" active={stageFilter === "All"} onClick={() => setStageFilter("All")} color="#0ea5e9" testid="presales-chip-all" />
           {stages.map((s) => (
