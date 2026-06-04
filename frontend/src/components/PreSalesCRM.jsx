@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Eye, Plus, RefreshCw, Search, Settings as Cog, Calendar as CalendarIcon, Phone, FileText, StickyNote, ArrowRight, CheckCircle2, X, Pencil } from "lucide-react";
+import { Eye, Plus, RefreshCw, Search, Settings as Cog, Calendar as CalendarIcon, Phone, FileText, StickyNote, ArrowRight, CheckCircle2, X, Pencil, PhoneOff } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import {
-  getLeads, createManualLead, stagesList, updateLead,
+  getLeads, createManualLead, stagesList, updateLead, rnrAttempt,
 } from "@/lib/api";
 import { LeadEditModal } from "@/components/LeadEditModal";
 import { CreateLeadModal } from "@/components/CreateLeadModal";
@@ -186,7 +186,14 @@ export const PreSalesCRM = ({ onManageStages }) => {
                       <td className="px-3 py-3"><MaskedContact phone={l.phone} email={l.email} /></td>
                       <td className="px-3 py-3"><SourcePill source={l.source_tab || l.source_type} /></td>
                       <td className="px-3 py-3">
-                        <span className="inline-flex h-6 items-center rounded border px-2 text-[10px] font-semibold" style={{ borderColor: stg?.color || "#cbd5e1", color: stg?.color || "#64748b" }}>{l.stage}</span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="inline-flex h-6 items-center rounded border px-2 text-[10px] font-semibold" style={{ borderColor: stg?.color || "#cbd5e1", color: stg?.color || "#64748b" }}>{l.stage}</span>
+                          {l.stage === "RNR" && (l.rnr_attempts || 0) > 0 && (
+                            <span className="inline-flex items-center gap-0.5 rounded-full bg-rose-100 px-1.5 py-0.5 text-[9px] font-bold text-rose-700" title={`${l.rnr_attempts} unanswered call attempts`} data-testid={`presales-rnr-badge-${l.id}`}>
+                              <PhoneOff className="h-2.5 w-2.5" />×{l.rnr_attempts}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-3 py-3 text-xs text-slate-600">{l.department || "—"}</td>
                       <td className="px-3 py-3 text-xs text-slate-400">{(l.created_at || "").slice(0, 10)}</td>
@@ -362,6 +369,38 @@ const LeadDetailDialog = ({ lead, stages, onClose, onSaved, onMoveStage }) => {
               );
             })}
           </div>
+
+          {currentLead.stage === "RNR" && (
+            <div className="mt-3 flex items-center justify-between rounded-lg border border-rose-200 bg-rose-50 px-3 py-2" data-testid="presales-detail-rnr-tracker">
+              <div className="flex items-center gap-2">
+                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-rose-100 text-rose-600">
+                  <PhoneOff className="h-3.5 w-3.5" />
+                </span>
+                <div>
+                  <p className="text-xs font-semibold text-rose-700">Client Not Answered</p>
+                  <p className="text-[11px] text-rose-500">
+                    Attempts so far: <span className="font-bold">{currentLead.rnr_attempts || 0}</span>
+                    {currentLead.rnr_last_attempt_at && <span className="ml-2">· last {new Date(currentLead.rnr_last_attempt_at).toLocaleString()}</span>}
+                  </p>
+                </div>
+              </div>
+              <Button
+                size="sm"
+                onClick={async () => {
+                  try {
+                    const updated = await rnrAttempt(currentLead.id);
+                    setCurrentLead(updated);
+                    toast.success(`Attempt logged (#${updated.rnr_attempts})`);
+                    onSaved && onSaved();
+                  } catch (e) { toast.error(e?.response?.data?.detail || "Failed"); }
+                }}
+                className="h-8 bg-rose-600 text-white hover:bg-rose-700"
+                data-testid="presales-detail-rnr-attempt"
+              >
+                <PhoneOff className="mr-1 h-3.5 w-3.5" /> +1 No Answer
+              </Button>
+            </div>
+          )}
         </div>
       </div>
       )}

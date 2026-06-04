@@ -189,6 +189,8 @@ class V3LeadOut(BaseModel):
     condition: Optional[str] = ""
     assigned_user_id: Optional[str] = None
     assigned_user_name: Optional[str] = None
+    rnr_attempts: Optional[int] = 0
+    rnr_last_attempt_at: Optional[str] = None
     created_at: str
     updated_at: str
 

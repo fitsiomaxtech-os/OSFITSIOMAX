@@ -275,3 +275,28 @@ async def v3_move_stage(lead_id: str, payload: V3MoveStageInput, user: V3UserOut
     await v3_col("lead_activity").insert_one(activity.copy())
     updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     return V3LeadOut(**updated)
+
+
+@router.post("/leads/{lead_id}/rnr-attempt", response_model=V3LeadOut)
+async def v3_rnr_attempt(lead_id: str, user: V3UserOut = Depends(v3_require_roles("pre_sales", "business_dev", "super_admin", "branch_admin"))):
+    """Increment the 'rnr_attempts' counter on a lead (Ring-Not-Responded)."""
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    new_count = int(lead.get("rnr_attempts") or 0) + 1
+    await v3_col("leads").update_one(
+        {"id": lead_id},
+        {"$set": {"rnr_attempts": new_count, "rnr_last_attempt_at": now_iso(), "updated_at": now_iso()}},
+    )
+    activity = {
+        "id": str(uuid.uuid4()),
+        "lead_id": lead_id,
+        "action": "rnr_attempt",
+        "details": f"Call attempt #{new_count} — client did not answer",
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": now_iso(),
+    }
+    await v3_col("lead_activity").insert_one(activity.copy())
+    updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    return V3LeadOut(**updated)
