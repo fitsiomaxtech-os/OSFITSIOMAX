@@ -103,9 +103,9 @@ export const PreSalesCRM = ({ onManageStages }) => {
       {/* Stage Tabs — segmented bar, equal-width, larger hit-target */}
       <div className="rounded-xl border border-slate-200 bg-white p-1 shadow-sm" data-testid="presales-stage-tabs">
         <div className="grid grid-cols-2 gap-1 sm:grid-cols-3 lg:grid-cols-5">
-          <StageTab label="All" count={stageCounts.All} active={stageFilter === "All"} onClick={() => setStageFilter("All")} color="#0ea5e9" testid="presales-chip-all" />
+          <StageTab label="All" active={stageFilter === "All"} onClick={() => setStageFilter("All")} color="#0ea5e9" testid="presales-chip-all" />
           {stages.map((s) => (
-            <StageTab key={s.id} label={s.name} count={stageCounts[s.name] || 0} active={stageFilter === s.name} onClick={() => setStageFilter(s.name)} color={s.color} testid={`presales-chip-${s.name}`} />
+            <StageTab key={s.id} label={s.name} active={stageFilter === s.name} onClick={() => setStageFilter(s.name)} color={s.color} testid={`presales-chip-${s.name}`} />
           ))}
         </div>
       </div>
@@ -161,22 +161,24 @@ const KpiCard = ({ label, value, color, active, onClick, testid }) => (
   </button>
 );
 
-const StageTab = ({ label, count, active, onClick, color, testid }) => (
-  <button
-    onClick={onClick}
-    data-testid={testid}
-    type="button"
-    className={`relative flex flex-col items-center justify-center rounded-lg px-3 py-2.5 text-center transition-all ${
-      active
-        ? "bg-slate-900 text-white shadow-sm"
-        : "bg-white text-slate-600 hover:bg-slate-50"
-    }`}
-    style={active ? { background: color } : undefined}
-  >
-    <span className="text-[11px] font-semibold uppercase tracking-wide leading-tight">{label}</span>
-    <span className={`mt-0.5 text-base font-bold leading-tight ${active ? "text-white" : "text-slate-900"}`}>{count}</span>
-  </button>
-);
+const StageTab = ({ label, active, onClick, color, testid }) => {
+  const tint = color || "#0ea5e9";
+  return (
+    <button
+      onClick={onClick}
+      data-testid={testid}
+      type="button"
+      className="relative flex items-center justify-center rounded-lg px-4 py-3 text-center transition-all hover:shadow-sm"
+      style={
+        active
+          ? { background: tint, color: "#ffffff", boxShadow: `0 2px 8px ${tint}40` }
+          : { background: `${tint}14`, color: tint, border: `1px solid ${tint}33` }
+      }
+    >
+      <span className="text-xs font-semibold uppercase tracking-wider leading-tight">{label}</span>
+    </button>
+  );
+};
 
 // Legacy compact chip kept for callers that haven't migrated yet (unused after redesign).
 const ChipTab = ({ label, active, onClick, color, testid }) => (
