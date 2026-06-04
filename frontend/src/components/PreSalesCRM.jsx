@@ -12,6 +12,7 @@ import { CreateLeadModal } from "@/components/CreateLeadModal";
 import { SourcePill } from "@/components/marketing/SourcePill";
 import { MaskedContact } from "@/components/MaskedContact";
 import { AutoSyncPopover } from "@/components/AutoSyncPopover";
+import { DateFilterPopover } from "@/components/DateFilterPopover";
 
 const initials = (name) => (name || "?").split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
 
@@ -60,6 +61,7 @@ export const PreSalesCRM = ({ onManageStages }) => {
   const [stageFilter, setStageFilter] = useState("All");
   const [sourceFilter, setSourceFilter] = useState("");
   const [sortNewest, setSortNewest] = useState(true);
+  const [dateFilter, setDateFilter] = useState(null);
   const [editing, setEditing] = useState(null);
   const [showCreate, setShowCreate] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -87,6 +89,17 @@ export const PreSalesCRM = ({ onManageStages }) => {
     let rows = leads;
     if (stageFilter !== "All") rows = rows.filter((l) => l.stage === stageFilter);
     if (sourceFilter) rows = rows.filter((l) => (l.source_tab || l.source_type || "").toLowerCase().includes(sourceFilter.toLowerCase()));
+    if (dateFilter) {
+      const from = dateFilter.from?.getTime();
+      const to = dateFilter.to?.getTime();
+      rows = rows.filter((l) => {
+        const ts = new Date(l.created_at || 0).getTime();
+        if (!ts) return false;
+        if (from && ts < from) return false;
+        if (to && ts > to) return false;
+        return true;
+      });
+    }
     if (search) {
       const q = search.toLowerCase();
       rows = rows.filter((l) => (l.name || "").toLowerCase().includes(q) || (l.phone || "").includes(q) || (l.email || "").toLowerCase().includes(q));
@@ -95,7 +108,7 @@ export const PreSalesCRM = ({ onManageStages }) => {
       const da = a.created_at || ""; const db = b.created_at || "";
       return sortNewest ? db.localeCompare(da) : da.localeCompare(db);
     });
-  }, [leads, stageFilter, sourceFilter, search, sortNewest]);
+  }, [leads, stageFilter, sourceFilter, search, sortNewest, dateFilter]);
 
   const moveToStage = async (leadId, stageName) => {
     try { await updateLead(leadId, { stage: stageName }); toast.success(`Moved to ${stageName}`); load(); }
@@ -128,14 +141,15 @@ export const PreSalesCRM = ({ onManageStages }) => {
       </div>
 
       {/* Toolbar */}
-      <div className="grid gap-2 md:grid-cols-7">
+      <div className="grid gap-2 md:grid-cols-8">
         <div className="md:col-span-2 relative">
           <Search className="pointer-events-none absolute left-2 top-2.5 h-4 w-4 text-slate-400" />
           <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search leads by name, email, phone..." className="pl-8" data-testid="presales-search" />
         </div>
         <Button variant="outline" onClick={() => setSortNewest((s) => !s)} data-testid="presales-sort"><CalendarIcon className="mr-1 h-4 w-4" />{sortNewest ? "Newest first" : "Oldest first"}</Button>
-        <div className="flex justify-start md:justify-center"><AutoSyncPopover /></div>
-        <Input className="md:col-span-2" value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} placeholder="Source filter" data-testid="presales-source-filter" />
+        <div className="flex justify-start"><DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="presales-date-filter" /></div>
+        <div className="flex justify-start"><AutoSyncPopover /></div>
+        <Input className="md:col-span-3" value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} placeholder="Source filter" data-testid="presales-source-filter" />
       </div>
 
       {/* Stage Tabs — segmented bar, equal-width, larger hit-target */}
