@@ -100,12 +100,14 @@ export const PreSalesCRM = ({ onManageStages }) => {
         <Input className="md:col-span-2" value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} placeholder="Source filter" data-testid="presales-source-filter" />
       </div>
 
-      {/* Stage chips */}
-      <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2 overflow-x-auto" data-testid="presales-stage-chips">
-        <ChipTab label={`All (${stageCounts.All})`} active={stageFilter === "All"} onClick={() => setStageFilter("All")} color="#0ea5e9" testid="presales-chip-all" />
-        {stages.map((s) => (
-          <ChipTab key={s.id} label={`${s.name} (${stageCounts[s.name] || 0})`} active={stageFilter === s.name} onClick={() => setStageFilter(s.name)} color={s.color} testid={`presales-chip-${s.name}`} />
-        ))}
+      {/* Stage Tabs — segmented bar, equal-width, larger hit-target */}
+      <div className="rounded-xl border border-slate-200 bg-white p-1 shadow-sm" data-testid="presales-stage-tabs">
+        <div className="grid grid-cols-2 gap-1 sm:grid-cols-3 lg:grid-cols-5">
+          <StageTab label="All" count={stageCounts.All} active={stageFilter === "All"} onClick={() => setStageFilter("All")} color="#0ea5e9" testid="presales-chip-all" />
+          {stages.map((s) => (
+            <StageTab key={s.id} label={s.name} count={stageCounts[s.name] || 0} active={stageFilter === s.name} onClick={() => setStageFilter(s.name)} color={s.color} testid={`presales-chip-${s.name}`} />
+          ))}
+        </div>
       </div>
 
       {/* Leads table */}
@@ -159,6 +161,24 @@ const KpiCard = ({ label, value, color, active, onClick, testid }) => (
   </button>
 );
 
+const StageTab = ({ label, count, active, onClick, color, testid }) => (
+  <button
+    onClick={onClick}
+    data-testid={testid}
+    type="button"
+    className={`relative flex flex-col items-center justify-center rounded-lg px-3 py-2.5 text-center transition-all ${
+      active
+        ? "bg-slate-900 text-white shadow-sm"
+        : "bg-white text-slate-600 hover:bg-slate-50"
+    }`}
+    style={active ? { background: color } : undefined}
+  >
+    <span className="text-[11px] font-semibold uppercase tracking-wide leading-tight">{label}</span>
+    <span className={`mt-0.5 text-base font-bold leading-tight ${active ? "text-white" : "text-slate-900"}`}>{count}</span>
+  </button>
+);
+
+// Legacy compact chip kept for callers that haven't migrated yet (unused after redesign).
 const ChipTab = ({ label, active, onClick, color, testid }) => (
   <button onClick={onClick} data-testid={testid} className={`whitespace-nowrap rounded-full px-3 py-1 text-xs font-medium transition ${active ? "text-white" : "text-slate-600 bg-slate-100 hover:bg-slate-200"}`} style={active ? { background: color } : undefined}>
     <span className="mr-1 inline-block h-2 w-2 rounded-full" style={{ background: color }} />{label}
