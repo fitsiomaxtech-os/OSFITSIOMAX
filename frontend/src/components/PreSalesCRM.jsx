@@ -186,13 +186,32 @@ export const PreSalesCRM = ({ onManageStages }) => {
                       <td className="px-3 py-3"><MaskedContact phone={l.phone} email={l.email} /></td>
                       <td className="px-3 py-3"><SourcePill source={l.source_tab || l.source_type} /></td>
                       <td className="px-3 py-3">
-                        <div className="flex items-center gap-1.5">
-                          <span className="inline-flex h-6 items-center rounded border px-2 text-[10px] font-semibold" style={{ borderColor: stg?.color || "#cbd5e1", color: stg?.color || "#64748b" }}>{l.stage}</span>
-                          {l.stage === "RNR" && (l.rnr_attempts || 0) > 0 && (
-                            <span className="inline-flex items-center gap-0.5 rounded-full bg-rose-100 px-1.5 py-0.5 text-[9px] font-bold text-rose-700" title={`${l.rnr_attempts} unanswered call attempts`} data-testid={`presales-rnr-badge-${l.id}`}>
-                              <PhoneOff className="h-2.5 w-2.5" />×{l.rnr_attempts}
-                            </span>
-                          )}
+                        <div className="flex flex-col items-start gap-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="inline-flex h-6 items-center rounded border px-2 text-[10px] font-semibold" style={{ borderColor: stg?.color || "#cbd5e1", color: stg?.color || "#64748b" }}>{l.stage}</span>
+                            {l.stage === "RNR" && (l.rnr_attempts || 0) > 0 && (
+                              <span className="inline-flex items-center gap-0.5 rounded-full bg-rose-100 px-1.5 py-0.5 text-[9px] font-bold text-rose-700" title={`${l.rnr_attempts} unanswered call attempts`} data-testid={`presales-rnr-badge-${l.id}`}>
+                                <PhoneOff className="h-2.5 w-2.5" />×{l.rnr_attempts}
+                              </span>
+                            )}
+                          </div>
+                          {l.stage === "Follow Up" && l.next_follow_up_at && (() => {
+                            const dt = new Date(l.next_follow_up_at);
+                            const today = new Date(); today.setHours(0, 0, 0, 0);
+                            const diff = Math.floor((dt.getTime() - today.getTime()) / (24 * 60 * 60 * 1000));
+                            const isToday = diff === 0;
+                            const isTomorrow = diff === 1;
+                            const isPast = dt.getTime() < Date.now();
+                            const tone = isPast ? "bg-rose-50 text-rose-700 border-rose-200" : isToday ? "bg-amber-50 text-amber-700 border-amber-300" : "bg-emerald-50 text-emerald-700 border-emerald-200";
+                            return (
+                              <span className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold ${tone}`} data-testid={`presales-followup-badge-${l.id}`}>
+                                <Clock className="h-2.5 w-2.5" />
+                                {isToday ? "Today" : isTomorrow ? "Tomorrow" : dt.toLocaleDateString(undefined, { day: "2-digit", month: "short" })}
+                                {" · "}
+                                {dt.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false })}
+                              </span>
+                            );
+                          })()}
                         </div>
                       </td>
                       <td className="px-3 py-3 text-xs text-slate-600">{l.department || "—"}</td>
