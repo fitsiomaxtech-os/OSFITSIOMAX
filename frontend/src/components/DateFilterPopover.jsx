@@ -56,7 +56,7 @@ export const DateFilterPopover = ({ value, onChange, testid = "date-filter" }) =
 
   const showAll = () => { onChange(null); setOpen(false); };
 
-  const activeLabel = value?.label || "All Leads";
+  const activeLabel = value?.label || "Date Filter";
   const isActive = !!value;
 
   return (
