@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import {
-  getLeads, createManualLead, stagesList, updateLead, rnrAttempt, scheduleFollowUp, scheduleAppointment, getBranches,
+  getLeads, createManualLead, stagesList, updateLead, rnrAttempt, scheduleFollowUp, scheduleAppointment, getBranches, leadActivity,
 } from "@/lib/api";
 import { LeadEditModal } from "@/components/LeadEditModal";
 import { CreateLeadModal } from "@/components/CreateLeadModal";
@@ -280,10 +280,19 @@ const LeadDetailDialog = ({ lead, stages, onClose, onSaved, onMoveStage }) => {
   const [followUpDraft, setFollowUpDraft] = useState(null); // { date, time, remarks } | null
   const [appointmentDraft, setAppointmentDraft] = useState(null); // { mode, branch_id } | null
   const [branches, setBranches] = useState([]);
+  const [activity, setActivity] = useState([]);
+  const [activityLoading, setActivityLoading] = useState(false);
 
   useEffect(() => {
     getBranches().then(setBranches).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (tab === "history" && currentLead?.id) {
+      setActivityLoading(true);
+      leadActivity(currentLead.id).then(setActivity).catch(() => setActivity([])).finally(() => setActivityLoading(false));
+    }
+  }, [tab, currentLead?.id]);
 
   useEffect(() => { setCurrentLead(lead); }, [lead]);
 
@@ -326,9 +335,7 @@ const LeadDetailDialog = ({ lead, stages, onClose, onSaved, onMoveStage }) => {
           {[
             { key: "overview", color: "bg-sky-500" },
             { key: "history", color: "bg-violet-500" },
-            { key: "remarks", color: "bg-amber-500" },
             { key: "follow-up", color: "bg-emerald-500" },
-            { key: "activity", color: "bg-rose-500" },
           ].map((t) => (
             <button
               key={t.key}
@@ -388,7 +395,68 @@ const LeadDetailDialog = ({ lead, stages, onClose, onSaved, onMoveStage }) => {
               )}
             </div>
           )}
-          {tab !== "overview" && <p className="text-sm text-slate-400">(Coming in next iteration — current view focused on overview + stage moves.)</p>}
+          {tab !== "overview" && tab === "history" && (
+            <div className="space-y-2" data-testid="presales-detail-history">
+              {activityLoading && <p className="text-sm text-slate-400">Loading history...</p>}
+              {!activityLoading && activity.length === 0 && (
+                <div className="rounded-lg border border-dashed border-slate-200 bg-white p-6 text-center text-sm text-slate-400" data-testid="presales-history-empty">
+                  No activity recorded yet.
+                </div>
+              )}
+              {!activityLoading && activity.map((a) => (
+                <div key={a.id} className="flex items-start gap-3 rounded-lg border border-violet-100 bg-white p-3 shadow-sm" data-testid={`presales-history-row-${a.id}`}>
+                  <span className="mt-0.5 inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-violet-100 text-violet-600">
+                    <Clock className="h-3.5 w-3.5" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-md bg-violet-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-violet-700">{a.action || "event"}</span>
+                      <span className="text-[11px] text-slate-400">{new Date(a.created_at).toLocaleString()}</span>
+                    </div>
+                    {a.details && <p className="mt-1 text-sm text-slate-700">{a.details}</p>}
+                    <p className="mt-1 text-[11px] text-slate-400">
+                      by {a.created_by || "system"}{a.created_by_role ? ` · ${a.created_by_role}` : ""}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {tab === "follow-up" && (
+            <div className="space-y-2" data-testid="presales-detail-followups">
+              {(currentLead.follow_ups || []).length === 0 && (
+                <div className="rounded-lg border border-dashed border-slate-200 bg-white p-6 text-center text-sm text-slate-400" data-testid="presales-followups-empty">
+                  No follow-ups scheduled yet. Use <span className="font-semibold">Move to Stage → Follow Up</span> to schedule one.
+                </div>
+              )}
+              {(currentLead.follow_ups || []).slice().reverse().map((f) => {
+                const dt = new Date(`${f.date}T${f.time}:00`);
+                const isUpcoming = dt.getTime() > Date.now();
+                return (
+                  <div key={f.id} className={`flex items-start gap-3 rounded-lg border p-3 shadow-sm ${isUpcoming ? "border-emerald-200 bg-emerald-50/40" : "border-slate-200 bg-white"}`} data-testid={`presales-followup-tab-row-${f.id}`}>
+                    <span className={`mt-0.5 inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full ${isUpcoming ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                      <Bell className="h-3.5 w-3.5" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-sm font-semibold text-slate-800">
+                          {dt.toLocaleDateString(undefined, { weekday: "short", day: "2-digit", month: "short", year: "numeric" })} · {f.time}
+                        </p>
+                        {isUpcoming && <span className="rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-bold text-white">UPCOMING</span>}
+                      </div>
+                      {f.remarks && (
+                        <div className="mt-1.5 rounded-md bg-white px-2.5 py-1.5 text-sm text-slate-700 ring-1 ring-slate-100">
+                          {f.remarks}
+                        </div>
+                      )}
+                      <p className="mt-1.5 text-[11px] text-slate-400">Set by {f.created_by || "—"} · {new Date(f.created_at).toLocaleString()}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         <div className="border-t border-slate-200 bg-white px-5 py-3">
