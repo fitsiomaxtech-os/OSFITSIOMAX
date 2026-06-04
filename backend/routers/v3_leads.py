@@ -309,6 +309,46 @@ class V3FollowUpInput(BaseModel):
     remarks: Optional[str] = ""
 
 
+class V3AppointmentScheduleInput(BaseModel):
+    mode: str  # "offline" | "online"
+    branch_id: Optional[str] = None
+
+
+@router.post("/leads/{lead_id}/schedule-appointment", response_model=V3LeadOut)
+async def v3_schedule_appointment(lead_id: str, payload: V3AppointmentScheduleInput, user: V3UserOut = Depends(v3_require_roles("pre_sales", "business_dev", "super_admin", "branch_admin"))):
+    """Move lead to Appointment stage with mode (offline/online) and optional branch."""
+    if payload.mode not in ("offline", "online"):
+        raise HTTPException(status_code=400, detail="mode must be 'offline' or 'online'")
+    if payload.mode == "offline" and not payload.branch_id:
+        raise HTTPException(status_code=400, detail="Branch is required for offline appointments")
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    branch_name = None
+    if payload.branch_id:
+        b = await v3_col("branches").find_one({"id": payload.branch_id}, {"_id": 0, "branch_name": 1, "name": 1})
+        branch_name = b.get("branch_name") or b.get("name") if b else None
+    updates = {
+        "stage": "Appointment",
+        "appointment_mode": payload.mode,
+        "branch_id": payload.branch_id,
+        "branch_stage": "New Appointment",
+        "updated_at": now_iso(),
+    }
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": updates})
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": lead_id,
+        "action": "appointment_scheduled",
+        "details": f"Appointment scheduled · mode={payload.mode}" + (f" · branch={branch_name}" if branch_name else ""),
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": now_iso(),
+    })
+    updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    return V3LeadOut(**updated)
+
+
 @router.post("/leads/{lead_id}/follow-up", response_model=V3LeadOut)
 async def v3_schedule_follow_up(lead_id: str, payload: V3FollowUpInput, user: V3UserOut = Depends(v3_require_roles("pre_sales", "business_dev", "super_admin", "branch_admin"))):
     """Schedule a follow-up for a lead. Appends to follow_ups[] and moves stage to 'Follow Up'."""

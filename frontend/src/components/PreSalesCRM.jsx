@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Eye, Plus, RefreshCw, Search, Settings as Cog, Calendar as CalendarIcon, Phone, FileText, StickyNote, ArrowRight, CheckCircle2, X, Pencil, PhoneOff, Clock, Bell } from "lucide-react";
+import { Eye, Plus, RefreshCw, Search, Settings as Cog, Calendar as CalendarIcon, Phone, FileText, StickyNote, ArrowRight, CheckCircle2, X, Pencil, PhoneOff, Clock, Bell, Building2, Video } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import {
-  getLeads, createManualLead, stagesList, updateLead, rnrAttempt, scheduleFollowUp,
+  getLeads, createManualLead, stagesList, updateLead, rnrAttempt, scheduleFollowUp, scheduleAppointment, getBranches,
 } from "@/lib/api";
 import { LeadEditModal } from "@/components/LeadEditModal";
 import { CreateLeadModal } from "@/components/CreateLeadModal";
@@ -278,6 +278,12 @@ const LeadDetailDialog = ({ lead, stages, onClose, onSaved, onMoveStage }) => {
   const [showEdit, setShowEdit] = useState(false);
   const [currentLead, setCurrentLead] = useState(lead);
   const [followUpDraft, setFollowUpDraft] = useState(null); // { date, time, remarks } | null
+  const [appointmentDraft, setAppointmentDraft] = useState(null); // { mode, branch_id } | null
+  const [branches, setBranches] = useState([]);
+
+  useEffect(() => {
+    getBranches().then(setBranches).catch(() => {});
+  }, []);
 
   useEffect(() => { setCurrentLead(lead); }, [lead]);
 
@@ -403,6 +409,10 @@ const LeadDetailDialog = ({ lead, stages, onClose, onSaved, onMoveStage }) => {
                     time: "10:00",
                     remarks: "",
                   });
+                  return;
+                }
+                if (s.name === "Appointment") {
+                  setAppointmentDraft({ mode: "offline", branch_id: "" });
                   return;
                 }
                 await onMoveStage(currentLead.id, s.name);
@@ -531,6 +541,96 @@ const LeadDetailDialog = ({ lead, stages, onClose, onSaved, onMoveStage }) => {
                 data-testid="presales-followup-save"
               >
                 <CheckCircle2 className="mr-1 h-4 w-4" /> Save & Move to Follow Up
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {appointmentDraft && !showEdit && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4" data-testid="presales-appointment-modal">
+          <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between bg-gradient-to-r from-emerald-500 to-teal-600 px-5 py-4 text-white">
+              <div className="flex items-center gap-2">
+                <CalendarIcon className="h-5 w-5" />
+                <p className="text-base font-semibold">Schedule Appointment</p>
+              </div>
+              <button onClick={() => setAppointmentDraft(null)} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="presales-appointment-close">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="space-y-4 p-5">
+              <div>
+                <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-600">Appointment Type</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setAppointmentDraft({ ...appointmentDraft, mode: "offline" })}
+                    className={`flex items-center justify-center gap-2 rounded-lg border-2 px-4 py-3 text-sm font-semibold transition-all ${appointmentDraft.mode === "offline" ? "border-emerald-500 bg-emerald-50 text-emerald-700 shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"}`}
+                    data-testid="presales-appointment-mode-offline"
+                  >
+                    <Building2 className="h-4 w-4" /> Offline
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAppointmentDraft({ ...appointmentDraft, mode: "online", branch_id: "" })}
+                    className={`flex items-center justify-center gap-2 rounded-lg border-2 px-4 py-3 text-sm font-semibold transition-all ${appointmentDraft.mode === "online" ? "border-sky-500 bg-sky-50 text-sky-700 shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"}`}
+                    data-testid="presales-appointment-mode-online"
+                  >
+                    <Video className="h-4 w-4" /> Online
+                  </button>
+                </div>
+              </div>
+
+              {appointmentDraft.mode === "offline" && (
+                <div>
+                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-600">Select Branch *</label>
+                  <select
+                    value={appointmentDraft.branch_id}
+                    onChange={(e) => setAppointmentDraft({ ...appointmentDraft, branch_id: e.target.value })}
+                    className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm focus:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                    data-testid="presales-appointment-branch"
+                  >
+                    <option value="">-- choose a branch --</option>
+                    {branches.map((b) => (
+                      <option key={b.id} value={b.id}>{b.branch_name || b.name}</option>
+                    ))}
+                  </select>
+                  <p className="mt-1.5 text-[11px] text-slate-500">
+                    The selected branch's admin will see this lead in their <span className="font-semibold">New Appointment</span> column.
+                  </p>
+                </div>
+              )}
+
+              {appointmentDraft.mode === "online" && (
+                <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-sky-700">
+                  Online consultation — no branch selection required. The Head Physio will host the session via video call.
+                </div>
+              )}
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/40 px-5 py-3">
+              <Button variant="outline" onClick={() => setAppointmentDraft(null)} data-testid="presales-appointment-cancel">Cancel</Button>
+              <Button
+                className={appointmentDraft.mode === "offline" ? "bg-emerald-500 text-white hover:bg-emerald-600" : "bg-sky-500 text-white hover:bg-sky-600"}
+                onClick={async () => {
+                  if (appointmentDraft.mode === "offline" && !appointmentDraft.branch_id) {
+                    toast.error("Please select a branch");
+                    return;
+                  }
+                  try {
+                    const updated = await scheduleAppointment(currentLead.id, appointmentDraft);
+                    setCurrentLead(updated);
+                    setAppointmentDraft(null);
+                    const branchName = appointmentDraft.mode === "offline"
+                      ? (branches.find((b) => b.id === appointmentDraft.branch_id)?.branch_name || branches.find((b) => b.id === appointmentDraft.branch_id)?.name || "selected branch")
+                      : "Online";
+                    toast.success(`Appointment sent to ${branchName}`);
+                    onSaved && onSaved();
+                  } catch (e) { toast.error(e?.response?.data?.detail || "Failed to schedule appointment"); }
+                }}
+                data-testid="presales-appointment-save"
+              >
+                <CheckCircle2 className="mr-1 h-4 w-4" /> Schedule Appointment
               </Button>
             </div>
           </div>

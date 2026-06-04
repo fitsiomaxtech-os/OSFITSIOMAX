@@ -193,6 +193,7 @@ class V3LeadOut(BaseModel):
     rnr_last_attempt_at: Optional[str] = None
     follow_ups: Optional[List[Dict[str, Any]]] = []
     next_follow_up_at: Optional[str] = None
+    appointment_mode: Optional[str] = None  # "offline" | "online"
     created_at: str
     updated_at: str
 

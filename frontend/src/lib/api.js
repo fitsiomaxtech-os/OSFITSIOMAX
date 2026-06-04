@@ -82,6 +82,7 @@ export const createManualLead = async (payload) => (await api.post("/leads/manua
 export const updateLead = async (leadId, payload) => (await api.put(`/leads/${leadId}`, payload)).data;
 export const rnrAttempt = async (leadId) => (await api.post(`/leads/${leadId}/rnr-attempt`)).data;
 export const scheduleFollowUp = async (leadId, payload) => (await api.post(`/leads/${leadId}/follow-up`, payload)).data;
+export const scheduleAppointment = async (leadId, payload) => (await api.post(`/leads/${leadId}/schedule-appointment`, payload)).data;
 export const qualifyLead = async (leadId) => (await api.post(`/leads/${leadId}/qualify`)).data;
 export const assignLeadBranch = async (leadId, payload) => (await api.post(`/leads/${leadId}/assign-branch`, payload)).data;
 export const confirmLead = async (leadId) => (await api.post(`/leads/${leadId}/confirm`)).data;
