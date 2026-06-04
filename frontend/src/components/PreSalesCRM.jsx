@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Eye, Plus, RefreshCw, Search, Settings as Cog, Calendar as CalendarIcon } from "lucide-react";
+import { Eye, Plus, RefreshCw, Search, Settings as Cog, Calendar as CalendarIcon, Phone, FileText, StickyNote, ArrowRight, CheckCircle2, X, Pencil } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -257,63 +257,110 @@ const LeadDetailDialog = ({ lead, stages, onClose, onSaved, onMoveStage }) => {
   const refreshAndKeep = () => { onSaved && onSaved(); };
 
   return (
-    <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4" data-testid="presales-detail-dialog">
+    <div className="fixed inset-0 z-30 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" data-testid="presales-detail-dialog">
       {!showEdit && (
-      <div className="w-full max-w-3xl rounded-lg bg-white shadow-xl">
-        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
-          <div className="flex items-center gap-3">
-            <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-indigo-100 text-sm font-bold text-indigo-700">{initials(currentLead.name)}</span>
-            <div>
-              <p className="text-base font-semibold text-slate-900">{currentLead.name}</p>
-              <div className="mt-0.5 flex items-center gap-2">
-                <SourcePill source={currentLead.source_tab || currentLead.source_type} />
-                <span className="text-xs text-slate-500">{currentLead.stage}</span>
+      <div className="w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-slate-200">
+        {/* Colored gradient header */}
+        <div className="relative bg-gradient-to-r from-sky-500 via-indigo-500 to-violet-500 px-6 py-5 text-white">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span className={`inline-flex h-12 w-12 items-center justify-center rounded-full text-base font-bold shadow-md ${avatarColor(currentLead.name).bg} ${avatarColor(currentLead.name).fg}`}>{initials(currentLead.name)}</span>
+              <div>
+                <p className="text-lg font-semibold leading-tight" data-testid="presales-detail-name">{currentLead.name}</p>
+                <div className="mt-1 flex items-center gap-2">
+                  <span className="rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white backdrop-blur-sm">
+                    {currentLead.source_tab || currentLead.source_type || "—"}
+                  </span>
+                  <span className="rounded-full bg-white/95 px-2.5 py-0.5 text-[11px] font-semibold text-slate-700">
+                    {currentLead.stage}
+                  </span>
+                </div>
               </div>
             </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button size="sm" variant="outline" onClick={() => setShowEdit(true)} data-testid="presales-detail-edit-btn">✏ Edit</Button>
-            <button onClick={onClose} className="text-slate-400 hover:text-slate-600" data-testid="presales-detail-close">✕</button>
+            <div className="flex items-center gap-2">
+              <Button size="sm" onClick={() => setShowEdit(true)} className="h-8 bg-white text-indigo-600 hover:bg-white/90" data-testid="presales-detail-edit-btn">
+                <Pencil className="mr-1 h-3.5 w-3.5" /> Edit
+              </Button>
+              <button onClick={onClose} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="presales-detail-close">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-3 border-b border-slate-200 px-5 py-2 text-xs">
-          {["overview", "history", "remarks", "follow-up", "activity"].map((t) => (
-            <button key={t} onClick={() => setTab(t)} className={`rounded px-2 py-1 ${tab === t ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"}`} data-testid={`presales-detail-tab-${t}`}>{t}</button>
+        {/* Pill tabs */}
+        <div className="flex flex-wrap gap-1.5 border-b border-slate-100 bg-slate-50/60 px-5 py-2.5">
+          {[
+            { key: "overview", color: "bg-sky-500" },
+            { key: "history", color: "bg-violet-500" },
+            { key: "remarks", color: "bg-amber-500" },
+            { key: "follow-up", color: "bg-emerald-500" },
+            { key: "activity", color: "bg-rose-500" },
+          ].map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`rounded-full px-3.5 py-1 text-xs font-semibold capitalize transition-all ${tab === t.key ? `${t.color} text-white shadow-sm` : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"}`}
+              data-testid={`presales-detail-tab-${t.key}`}
+            >
+              {t.key}
+            </button>
           ))}
         </div>
 
-        <div className="max-h-[55vh] overflow-y-auto p-5">
+        <div className="max-h-[55vh] overflow-y-auto bg-slate-50/30 p-5">
           {tab === "overview" && (
-            <div className="space-y-4">
-              <Section title="Contact Information">
-                <Row k="Phone" v={currentLead.phone} />
-                <Row k="Email" v={currentLead.email || "—"} />
-                <Row k="Location" v={currentLead.location || "—"} />
-              </Section>
-              <Section title="Additional Details">
-                <Row k="Expected Consultation" v={currentLead.expected_consultation_date || "—"} />
-                <Row k="Months of Pain" v={currentLead.months_of_pain ?? "—"} />
-                <Row k="Age" v={currentLead.age ?? "—"} />
-                <Row k="Gender" v={currentLead.gender || "—"} />
-                <Row k="Occupation" v={currentLead.occupation || "—"} />
-                <Row k="Department" v={currentLead.department || "—"} />
-                <Row k="Vertical" v={currentLead.vertical} />
-              </Section>
-              {currentLead.notes && <Section title="Notes"><p className="text-sm text-slate-600">{currentLead.notes}</p></Section>}
+            <div className="space-y-3">
+              <ColorSection title="Contact Information" tone="sky" icon={<Phone className="h-4 w-4" />}>
+                <ColorRow k="Phone" v={currentLead.phone} />
+                <ColorRow k="Email" v={currentLead.email || "—"} />
+                <ColorRow k="Location" v={currentLead.location || "—"} />
+              </ColorSection>
+              <ColorSection title="Additional Details" tone="violet" icon={<FileText className="h-4 w-4" />}>
+                <ColorRow k="Expected Consultation" v={currentLead.expected_consultation_date || "—"} />
+                <ColorRow k="Months of Pain" v={currentLead.months_of_pain ?? "—"} />
+                <ColorRow k="Age" v={currentLead.age ?? "—"} />
+                <ColorRow k="Gender" v={currentLead.gender || "—"} />
+                <ColorRow k="Occupation" v={currentLead.occupation || "—"} />
+                <ColorRow k="Department" v={currentLead.department || "—"} />
+                <ColorRow k="Vertical" v={currentLead.vertical} />
+              </ColorSection>
+              {currentLead.notes && (
+                <ColorSection title="Notes" tone="amber" icon={<StickyNote className="h-4 w-4" />}>
+                  <p className="text-sm leading-relaxed text-slate-700">{currentLead.notes}</p>
+                </ColorSection>
+              )}
             </div>
           )}
           {tab !== "overview" && <p className="text-sm text-slate-400">(Coming in next iteration — current view focused on overview + stage moves.)</p>}
         </div>
 
-        <div className="border-t border-slate-200 px-5 py-3">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Move to Stage:</p>
+        <div className="border-t border-slate-200 bg-white px-5 py-3">
+          <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">
+            <ArrowRight className="h-3.5 w-3.5 text-slate-400" />
+            Move to Stage
+          </p>
           <div className="flex flex-wrap gap-2" data-testid="presales-detail-move-stages">
-            {stages.map((s) => (
-              <button key={s.id} onClick={async () => { await onMoveStage(currentLead.id, s.name); setCurrentLead({ ...currentLead, stage: s.name }); }} disabled={currentLead.stage === s.name} className="rounded-md border px-3 py-1 text-xs font-medium transition disabled:opacity-50" style={{ borderColor: s.color, color: s.color, background: currentLead.stage === s.name ? `${s.color}22` : "white" }} data-testid={`presales-detail-move-${s.name}`}>
-                {s.name}
-              </button>
-            ))}
+            {stages.map((s) => {
+              const active = currentLead.stage === s.name;
+              return (
+                <button
+                  key={s.id}
+                  onClick={async () => { await onMoveStage(currentLead.id, s.name); setCurrentLead({ ...currentLead, stage: s.name }); }}
+                  disabled={active}
+                  className="rounded-lg px-3.5 py-1.5 text-xs font-semibold transition-all hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
+                  style={
+                    active
+                      ? { background: s.color, color: "#fff", boxShadow: `0 2px 8px ${s.color}40` }
+                      : { background: `${s.color}14`, color: s.color, border: `1px solid ${s.color}33` }
+                  }
+                  data-testid={`presales-detail-move-${s.name}`}
+                >
+                  {active && <CheckCircle2 className="mr-1 inline h-3 w-3" />}
+                  {s.name}
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -337,6 +384,33 @@ const Row = ({ k, v }) => (
   <div className="flex items-center justify-between text-xs">
     <span className="text-slate-500">{k}</span>
     <span className="text-slate-800">{String(v)}</span>
+  </div>
+);
+
+const TONE_MAP = {
+  sky: { bar: "bg-sky-500", iconBg: "bg-sky-100 text-sky-600", title: "text-sky-700", border: "border-sky-100" },
+  violet: { bar: "bg-violet-500", iconBg: "bg-violet-100 text-violet-600", title: "text-violet-700", border: "border-violet-100" },
+  amber: { bar: "bg-amber-500", iconBg: "bg-amber-100 text-amber-700", title: "text-amber-700", border: "border-amber-100" },
+  emerald: { bar: "bg-emerald-500", iconBg: "bg-emerald-100 text-emerald-700", title: "text-emerald-700", border: "border-emerald-100" },
+};
+
+const ColorSection = ({ title, tone = "sky", icon, children }) => {
+  const t = TONE_MAP[tone] || TONE_MAP.sky;
+  return (
+    <div className={`overflow-hidden rounded-xl border bg-white shadow-sm ${t.border}`}>
+      <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-2.5">
+        <span className={`flex h-7 w-7 items-center justify-center rounded-lg ${t.iconBg}`}>{icon}</span>
+        <p className={`text-xs font-bold uppercase tracking-wider ${t.title}`}>{title}</p>
+      </div>
+      <div className="space-y-2 px-4 py-3">{children}</div>
+    </div>
+  );
+};
+
+const ColorRow = ({ k, v }) => (
+  <div className="flex items-center justify-between text-sm">
+    <span className="text-xs font-medium text-slate-500">{k}</span>
+    <span className="font-medium text-slate-800">{String(v)}</span>
   </div>
 );
 
