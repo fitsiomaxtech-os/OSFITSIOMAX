@@ -19,6 +19,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
+import { DateFilterPopover } from "@/components/DateFilterPopover";
 import {
   addLeadRemark,
   assignPhysio,
@@ -63,6 +64,7 @@ export const BranchAdminBoard = ({ branchId }) => {
   const [selectedLead, setSelectedLead] = useState(null);
   const [activeView, setActiveView] = useState("pipeline");
   const [stageFilter, setStageFilter] = useState(null); // null = show all stages
+  const [dateFilter, setDateFilter] = useState(null); // { from, to, label, key } | null
 
   const loadBoard = useCallback(async () => {
     if (!branchId) return;
@@ -77,12 +79,26 @@ export const BranchAdminBoard = ({ branchId }) => {
   useEffect(() => { loadBoard(); }, [loadBoard]);
 
   const filteredLeads = useMemo(() => {
-    if (!searchQuery.trim()) return boardData.leads;
-    const q = searchQuery.toLowerCase();
-    return boardData.leads.filter((l) =>
-      l.name?.toLowerCase().includes(q) || l.phone?.includes(q) || l.email?.toLowerCase().includes(q)
-    );
-  }, [boardData.leads, searchQuery]);
+    let list = boardData.leads;
+    if (dateFilter) {
+      const from = dateFilter.from?.getTime();
+      const to = dateFilter.to?.getTime();
+      list = list.filter((l) => {
+        const ts = new Date(l.created_at || 0).getTime();
+        if (!ts) return false;
+        if (from && ts < from) return false;
+        if (to && ts > to) return false;
+        return true;
+      });
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter((l) =>
+        l.name?.toLowerCase().includes(q) || l.phone?.includes(q) || l.email?.toLowerCase().includes(q)
+      );
+    }
+    return list;
+  }, [boardData.leads, searchQuery, dateFilter]);
 
   const totalLeads = boardData.leads.length;
 
@@ -165,6 +181,7 @@ export const BranchAdminBoard = ({ branchId }) => {
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
               <Input className="pl-9" placeholder="Search patients..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} data-testid="branch-search" />
             </div>
+            <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="branch-date-filter" />
             {stageFilter && (
               <div className="flex items-center gap-2 text-xs text-slate-600" data-testid="branch-stage-filter-indicator">
                 <span>Showing:</span>
