@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Eye, Plus, RefreshCw, Search, Settings as Cog, Calendar as CalendarIcon, Phone, FileText, StickyNote, ArrowRight, CheckCircle2, X, Pencil, PhoneOff } from "lucide-react";
+import { Eye, Plus, RefreshCw, Search, Settings as Cog, Calendar as CalendarIcon, Phone, FileText, StickyNote, ArrowRight, CheckCircle2, X, Pencil, PhoneOff, Clock, Bell } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import {
-  getLeads, createManualLead, stagesList, updateLead, rnrAttempt,
+  getLeads, createManualLead, stagesList, updateLead, rnrAttempt, scheduleFollowUp,
 } from "@/lib/api";
 import { LeadEditModal } from "@/components/LeadEditModal";
 import { CreateLeadModal } from "@/components/CreateLeadModal";
@@ -258,6 +258,7 @@ const LeadDetailDialog = ({ lead, stages, onClose, onSaved, onMoveStage }) => {
   const [tab, setTab] = useState("overview");
   const [showEdit, setShowEdit] = useState(false);
   const [currentLead, setCurrentLead] = useState(lead);
+  const [followUpDraft, setFollowUpDraft] = useState(null); // { date, time, remarks } | null
 
   useEffect(() => { setCurrentLead(lead); }, [lead]);
 
@@ -337,6 +338,29 @@ const LeadDetailDialog = ({ lead, stages, onClose, onSaved, onMoveStage }) => {
                   <p className="text-sm leading-relaxed text-slate-700">{currentLead.notes}</p>
                 </ColorSection>
               )}
+              {(currentLead.follow_ups || []).length > 0 && (
+                <ColorSection title="Follow-up Reminders" tone="emerald" icon={<Bell className="h-4 w-4" />}>
+                  {(currentLead.follow_ups || []).slice().reverse().map((f) => {
+                    const dt = new Date(`${f.date}T${f.time}:00`);
+                    const isUpcoming = dt.getTime() > Date.now();
+                    return (
+                      <div key={f.id} className={`flex items-start justify-between gap-3 rounded-lg border p-2.5 ${isUpcoming ? "border-emerald-200 bg-emerald-50/60" : "border-slate-200 bg-slate-50"}`} data-testid={`presales-followup-row-${f.id}`}>
+                        <div className="flex items-start gap-2">
+                          <Clock className={`mt-0.5 h-4 w-4 ${isUpcoming ? "text-emerald-600" : "text-slate-400"}`} />
+                          <div>
+                            <p className="text-sm font-semibold text-slate-800">
+                              {dt.toLocaleDateString(undefined, { weekday: "short", day: "2-digit", month: "short", year: "numeric" })} · {f.time}
+                            </p>
+                            {f.remarks && <p className="mt-0.5 text-xs text-slate-600">{f.remarks}</p>}
+                            <p className="mt-0.5 text-[10px] text-slate-400">Set by {f.created_by || "—"}</p>
+                          </div>
+                        </div>
+                        {isUpcoming && <span className="rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-bold text-white">UPCOMING</span>}
+                      </div>
+                    );
+                  })}
+                </ColorSection>
+              )}
             </div>
           )}
           {tab !== "overview" && <p className="text-sm text-slate-400">(Coming in next iteration — current view focused on overview + stage moves.)</p>}
@@ -350,10 +374,25 @@ const LeadDetailDialog = ({ lead, stages, onClose, onSaved, onMoveStage }) => {
           <div className="flex flex-wrap gap-2" data-testid="presales-detail-move-stages">
             {stages.map((s) => {
               const active = currentLead.stage === s.name;
+              const handleClick = async () => {
+                if (s.name === "Follow Up") {
+                  // Open the follow-up scheduling form instead of moving immediately
+                  const today = new Date();
+                  const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
+                  setFollowUpDraft({
+                    date: tomorrow.toISOString().slice(0, 10),
+                    time: "10:00",
+                    remarks: "",
+                  });
+                  return;
+                }
+                await onMoveStage(currentLead.id, s.name);
+                setCurrentLead({ ...currentLead, stage: s.name });
+              };
               return (
                 <button
                   key={s.id}
-                  onClick={async () => { await onMoveStage(currentLead.id, s.name); setCurrentLead({ ...currentLead, stage: s.name }); }}
+                  onClick={handleClick}
                   disabled={active}
                   className="rounded-lg px-3.5 py-1.5 text-xs font-semibold transition-all hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
                   style={
@@ -407,6 +446,76 @@ const LeadDetailDialog = ({ lead, stages, onClose, onSaved, onMoveStage }) => {
 
       {showEdit && (
         <LeadEditModal lead={currentLead} onClose={() => setShowEdit(false)} onSaved={() => { refreshAndKeep(); setShowEdit(false); }} />
+      )}
+
+      {followUpDraft && !showEdit && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4" data-testid="presales-followup-modal">
+          <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between bg-gradient-to-r from-amber-500 to-orange-500 px-5 py-4 text-white">
+              <div className="flex items-center gap-2">
+                <Bell className="h-5 w-5" />
+                <p className="text-base font-semibold">Schedule Follow-Up</p>
+              </div>
+              <button onClick={() => setFollowUpDraft(null)} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="presales-followup-close">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="space-y-4 p-5">
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-600">Date *</label>
+                <Input
+                  type="date"
+                  value={followUpDraft.date}
+                  min={new Date().toISOString().slice(0, 10)}
+                  onChange={(e) => setFollowUpDraft({ ...followUpDraft, date: e.target.value })}
+                  data-testid="presales-followup-date"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-600">Time *</label>
+                <Input
+                  type="time"
+                  value={followUpDraft.time}
+                  onChange={(e) => setFollowUpDraft({ ...followUpDraft, time: e.target.value })}
+                  data-testid="presales-followup-time"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-600">Remarks</label>
+                <textarea
+                  rows={3}
+                  className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-amber-400 focus:outline-none focus:ring-1 focus:ring-amber-400"
+                  placeholder="What to discuss in the next call..."
+                  value={followUpDraft.remarks}
+                  onChange={(e) => setFollowUpDraft({ ...followUpDraft, remarks: e.target.value })}
+                  data-testid="presales-followup-remarks"
+                />
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/40 px-5 py-3">
+              <Button variant="outline" onClick={() => setFollowUpDraft(null)} data-testid="presales-followup-cancel">Cancel</Button>
+              <Button
+                className="bg-amber-500 text-white hover:bg-amber-600"
+                onClick={async () => {
+                  if (!followUpDraft.date || !followUpDraft.time) {
+                    toast.error("Date and time are required");
+                    return;
+                  }
+                  try {
+                    const updated = await scheduleFollowUp(currentLead.id, followUpDraft);
+                    setCurrentLead(updated);
+                    setFollowUpDraft(null);
+                    toast.success(`Follow-up scheduled for ${followUpDraft.date} at ${followUpDraft.time}`);
+                    onSaved && onSaved();
+                  } catch (e) { toast.error(e?.response?.data?.detail || "Failed to schedule"); }
+                }}
+                data-testid="presales-followup-save"
+              >
+                <CheckCircle2 className="mr-1 h-4 w-4" /> Save & Move to Follow Up
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

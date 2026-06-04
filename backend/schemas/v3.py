@@ -191,6 +191,8 @@ class V3LeadOut(BaseModel):
     assigned_user_name: Optional[str] = None
     rnr_attempts: Optional[int] = 0
     rnr_last_attempt_at: Optional[str] = None
+    follow_ups: Optional[List[Dict[str, Any]]] = []
+    next_follow_up_at: Optional[str] = None
     created_at: str
     updated_at: str
 

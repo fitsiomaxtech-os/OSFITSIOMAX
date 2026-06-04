@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends
 from typing import Optional, Dict
+from pydantic import BaseModel
 import uuid
 
 from database import v3_col
@@ -298,5 +299,42 @@ async def v3_rnr_attempt(lead_id: str, user: V3UserOut = Depends(v3_require_role
         "created_at": now_iso(),
     }
     await v3_col("lead_activity").insert_one(activity.copy())
+    updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    return V3LeadOut(**updated)
+
+
+class V3FollowUpInput(BaseModel):
+    date: str  # YYYY-MM-DD
+    time: str  # HH:MM (24h)
+    remarks: Optional[str] = ""
+
+
+@router.post("/leads/{lead_id}/follow-up", response_model=V3LeadOut)
+async def v3_schedule_follow_up(lead_id: str, payload: V3FollowUpInput, user: V3UserOut = Depends(v3_require_roles("pre_sales", "business_dev", "super_admin", "branch_admin"))):
+    """Schedule a follow-up for a lead. Appends to follow_ups[] and moves stage to 'Follow Up'."""
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    entry = {
+        "id": str(uuid.uuid4()),
+        "date": payload.date,
+        "time": payload.time,
+        "remarks": (payload.remarks or "").strip(),
+        "created_by": user.full_name,
+        "created_at": now_iso(),
+    }
+    await v3_col("leads").update_one(
+        {"id": lead_id},
+        {"$push": {"follow_ups": entry}, "$set": {"stage": "Follow Up", "next_follow_up_at": f"{payload.date}T{payload.time}:00", "updated_at": now_iso()}},
+    )
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": lead_id,
+        "action": "follow_up_scheduled",
+        "details": f"Follow-up on {payload.date} at {payload.time} — {entry['remarks'] or 'no remarks'}",
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": now_iso(),
+    })
     updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     return V3LeadOut(**updated)
