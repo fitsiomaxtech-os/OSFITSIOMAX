@@ -255,6 +255,7 @@ const LeadDetailDialog = ({ lead, stages, onClose, onSaved, onMoveStage }) => {
 
   return (
     <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4" data-testid="presales-detail-dialog">
+      {!showEdit && (
       <div className="w-full max-w-3xl rounded-lg bg-white shadow-xl">
         <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
           <div className="flex items-center gap-3">
@@ -313,6 +314,7 @@ const LeadDetailDialog = ({ lead, stages, onClose, onSaved, onMoveStage }) => {
           </div>
         </div>
       </div>
+      )}
 
       {showEdit && (
         <LeadEditModal lead={currentLead} onClose={() => setShowEdit(false)} onSaved={() => { refreshAndKeep(); setShowEdit(false); }} />
