@@ -47,14 +47,14 @@ const BRANCH_STAGES = [
 ];
 
 const STAGE_COLORS = {
-  "New Appointment": { bg: "bg-blue-500", light: "bg-blue-50 text-blue-700 border-blue-200", col: "border-blue-200 bg-blue-50/40" },
-  "Qualified": { bg: "bg-amber-500", light: "bg-amber-50 text-amber-700 border-amber-200", col: "border-amber-200 bg-amber-50/40" },
-  "Portfolio": { bg: "bg-violet-500", light: "bg-violet-50 text-violet-700 border-violet-200", col: "border-violet-200 bg-violet-50/40" },
-  "Follow Up": { bg: "bg-orange-500", light: "bg-orange-50 text-orange-700 border-orange-200", col: "border-orange-200 bg-orange-50/40" },
-  "Appointment Date & Time": { bg: "bg-teal-500", light: "bg-teal-50 text-teal-700 border-teal-200", col: "border-teal-200 bg-teal-50/40" },
-  "Branch": { bg: "bg-emerald-500", light: "bg-emerald-50 text-emerald-700 border-emerald-200", col: "border-emerald-200 bg-emerald-50/40" },
-  "Assigned Physio": { bg: "bg-sky-500", light: "bg-sky-50 text-sky-700 border-sky-200", col: "border-sky-200 bg-sky-50/40" },
-  "Cancelled": { bg: "bg-rose-500", light: "bg-rose-50 text-rose-700 border-rose-200", col: "border-rose-200 bg-rose-50/40" },
+  "New Appointment": { bg: "bg-blue-500", light: "bg-blue-50 text-blue-700 border-blue-200", col: "border-blue-200 bg-blue-50/40", text: "text-blue-600", count: "text-blue-700" },
+  "Qualified": { bg: "bg-amber-500", light: "bg-amber-50 text-amber-700 border-amber-200", col: "border-amber-200 bg-amber-50/40", text: "text-amber-600", count: "text-amber-700" },
+  "Portfolio": { bg: "bg-violet-500", light: "bg-violet-50 text-violet-700 border-violet-200", col: "border-violet-200 bg-violet-50/40", text: "text-violet-600", count: "text-violet-700" },
+  "Follow Up": { bg: "bg-orange-500", light: "bg-orange-50 text-orange-700 border-orange-200", col: "border-orange-200 bg-orange-50/40", text: "text-orange-600", count: "text-orange-700" },
+  "Appointment Date & Time": { bg: "bg-teal-500", light: "bg-teal-50 text-teal-700 border-teal-200", col: "border-teal-200 bg-teal-50/40", text: "text-teal-600", count: "text-teal-700" },
+  "Branch": { bg: "bg-emerald-500", light: "bg-emerald-50 text-emerald-700 border-emerald-200", col: "border-emerald-200 bg-emerald-50/40", text: "text-emerald-600", count: "text-emerald-700" },
+  "Assigned Physio": { bg: "bg-sky-500", light: "bg-sky-50 text-sky-700 border-sky-200", col: "border-sky-200 bg-sky-50/40", text: "text-sky-600", count: "text-sky-700" },
+  "Cancelled": { bg: "bg-rose-500", light: "bg-rose-50 text-rose-700 border-rose-200", col: "border-rose-200 bg-rose-50/40", text: "text-rose-600", count: "text-rose-700" },
 };
 
 export const BranchAdminBoard = ({ branchId }) => {
@@ -155,7 +155,7 @@ export const BranchAdminBoard = ({ branchId }) => {
               data-testid="branch-metric-total"
             >
               <p className="text-[11px] font-semibold uppercase tracking-wide text-sky-600">All Stages</p>
-              <p className="mt-1 text-2xl font-bold text-slate-900">{totalLeads}</p>
+              <p className="mt-1 text-2xl font-bold text-sky-700">{totalLeads}</p>
             </button>
             {BRANCH_STAGES.map((stage) => {
               const isActive = stageFilter === stage;
@@ -168,8 +168,8 @@ export const BranchAdminBoard = ({ branchId }) => {
                   className={`flex flex-col items-center justify-center rounded-xl border-2 px-3 py-4 text-center transition-all hover:shadow-md ${colorMap.col || "border-slate-200 bg-white"} ${isActive ? "ring-2 ring-offset-1 ring-slate-700 shadow-md" : ""}`}
                   data-testid={`branch-metric-${stage}`}
                 >
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-600 leading-tight min-h-[28px] flex items-center justify-center">{stage}</p>
-                  <p className="mt-1 text-2xl font-bold text-slate-900">{boardData.stage_counts?.[stage] || 0}</p>
+                  <p className={`text-[11px] font-semibold uppercase tracking-wide leading-tight min-h-[28px] flex items-center justify-center ${colorMap.text || "text-slate-600"}`}>{stage}</p>
+                  <p className={`mt-1 text-2xl font-bold ${colorMap.count || "text-slate-900"}`}>{boardData.stage_counts?.[stage] || 0}</p>
                 </button>
               );
             })}
