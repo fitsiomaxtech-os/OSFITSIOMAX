@@ -72,6 +72,9 @@ export const PreSalesCRM = ({ onManageStages }) => {
       const [stgs, ldList] = await Promise.all([stagesList("pre_sales"), getLeads({})]);
       setStages(stgs);
       setLeads(ldList);
+      // If a lead is currently open in the detail dialog, refresh its reference
+      // so saved edits show up immediately.
+      setEditing((prev) => prev ? (ldList.find((l) => l.id === prev.id) || prev) : prev);
     } catch (e) { toast.error("Failed to load"); }
     setLoading(false);
   }, []);
