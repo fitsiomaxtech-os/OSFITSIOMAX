@@ -68,7 +68,7 @@ export const AutoSyncPopover = () => {
         variant="outline"
         onClick={() => setOpen((v) => !v)}
         data-testid="presales-autosync-btn"
-        className={anyEnabled ? "border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100" : ""}
+        className={`h-10 ${anyEnabled ? "border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100" : ""}`}
       >
         <Zap className={`mr-1 h-4 w-4 ${anyEnabled ? "fill-emerald-500 text-emerald-600" : ""}`} />
         Auto-sync

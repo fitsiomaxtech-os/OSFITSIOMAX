@@ -64,7 +64,7 @@ export const DateFilterPopover = ({ value, onChange, testid = "date-filter" }) =
       <PopoverTrigger asChild>
         <Button
           variant="outline"
-          className={isActive ? "border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100" : ""}
+          className={`h-10 ${isActive ? "border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100" : ""}`}
           data-testid={`${testid}-btn`}
         >
           <CalendarIcon className="mr-2 h-4 w-4" />

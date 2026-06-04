@@ -141,15 +141,17 @@ export const PreSalesCRM = ({ onManageStages }) => {
       </div>
 
       {/* Toolbar */}
-      <div className="grid gap-2 md:grid-cols-8">
-        <div className="md:col-span-2 relative">
+      <div className="flex flex-wrap items-center gap-2" data-testid="presales-toolbar">
+        <div className="relative min-w-[260px] flex-1">
           <Search className="pointer-events-none absolute left-2 top-2.5 h-4 w-4 text-slate-400" />
-          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search leads by name, email, phone..." className="pl-8" data-testid="presales-search" />
+          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search leads by name, email, phone..." className="h-10 pl-8" data-testid="presales-search" />
         </div>
-        <Button variant="outline" onClick={() => setSortNewest((s) => !s)} data-testid="presales-sort"><CalendarIcon className="mr-1 h-4 w-4" />{sortNewest ? "Newest first" : "Oldest first"}</Button>
-        <div className="flex justify-start"><DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="presales-date-filter" /></div>
-        <div className="flex justify-start"><AutoSyncPopover /></div>
-        <Input className="md:col-span-3" value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} placeholder="Source filter" data-testid="presales-source-filter" />
+        <Button variant="outline" className="h-10" onClick={() => setSortNewest((s) => !s)} data-testid="presales-sort">
+          <CalendarIcon className="mr-1 h-4 w-4" />{sortNewest ? "Newest first" : "Oldest first"}
+        </Button>
+        <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="presales-date-filter" />
+        <AutoSyncPopover />
+        <Input className="h-10 w-[200px]" value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} placeholder="Source filter" data-testid="presales-source-filter" />
       </div>
 
       {/* Stage Tabs — segmented bar, equal-width, larger hit-target */}
