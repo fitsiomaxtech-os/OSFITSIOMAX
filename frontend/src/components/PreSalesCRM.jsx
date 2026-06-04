@@ -177,7 +177,7 @@ export const PreSalesCRM = ({ onManageStages }) => {
                   const stg = stages.find((s) => s.name === l.stage);
                   const ac = avatarColor(l.name);
                   return (
-                    <tr key={l.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`presales-lead-row-${l.id}`}>
+                    <tr key={l.id} onClick={() => setEditing(l)} className="cursor-pointer border-t border-slate-100 transition-colors hover:bg-slate-50" data-testid={`presales-lead-row-${l.id}`}>
                       <td className="px-4 py-3"><span className={`inline-flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold ${ac.bg} ${ac.fg}`}>{initials(l.name)}</span></td>
                       <td className="px-3 py-3 font-medium text-slate-800">{l.name}</td>
                       <td className="px-3 py-3"><MaskedContact phone={l.phone} email={l.email} /></td>
