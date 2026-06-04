@@ -15,6 +15,44 @@ import { AutoSyncPopover } from "@/components/AutoSyncPopover";
 
 const initials = (name) => (name || "?").split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
 
+// Deterministic avatar color per first letter so A→one hue, B→another, etc.
+// Tailwind 26-letter palette (bg + text pair) chosen for legibility on white rows.
+const AVATAR_PALETTE = [
+  { bg: "bg-red-100",     fg: "text-red-700" },     // A
+  { bg: "bg-orange-100",  fg: "text-orange-700" },  // B
+  { bg: "bg-amber-100",   fg: "text-amber-700" },   // C
+  { bg: "bg-yellow-100",  fg: "text-yellow-800" },  // D
+  { bg: "bg-lime-100",    fg: "text-lime-700" },    // E
+  { bg: "bg-green-100",   fg: "text-green-700" },   // F
+  { bg: "bg-emerald-100", fg: "text-emerald-700" }, // G
+  { bg: "bg-teal-100",    fg: "text-teal-700" },    // H
+  { bg: "bg-cyan-100",    fg: "text-cyan-700" },    // I
+  { bg: "bg-sky-100",     fg: "text-sky-700" },     // J
+  { bg: "bg-blue-100",    fg: "text-blue-700" },    // K
+  { bg: "bg-indigo-100",  fg: "text-indigo-700" },  // L
+  { bg: "bg-violet-100",  fg: "text-violet-700" },  // M
+  { bg: "bg-purple-100",  fg: "text-purple-700" },  // N
+  { bg: "bg-fuchsia-100", fg: "text-fuchsia-700" }, // O
+  { bg: "bg-pink-100",    fg: "text-pink-700" },    // P
+  { bg: "bg-rose-100",    fg: "text-rose-700" },    // Q
+  { bg: "bg-red-200",     fg: "text-red-800" },     // R
+  { bg: "bg-orange-200",  fg: "text-orange-800" },  // S
+  { bg: "bg-amber-200",   fg: "text-amber-800" },   // T
+  { bg: "bg-lime-200",    fg: "text-lime-800" },    // U
+  { bg: "bg-emerald-200", fg: "text-emerald-800" }, // V
+  { bg: "bg-cyan-200",    fg: "text-cyan-800" },    // W
+  { bg: "bg-blue-200",    fg: "text-blue-800" },    // X
+  { bg: "bg-violet-200",  fg: "text-violet-800" },  // Y
+  { bg: "bg-pink-200",    fg: "text-pink-800" },    // Z
+];
+
+const avatarColor = (name) => {
+  const c = (name || "?").trim().charAt(0).toUpperCase();
+  const idx = c.charCodeAt(0) - 65;
+  if (idx < 0 || idx > 25) return { bg: "bg-slate-100", fg: "text-slate-700" };
+  return AVATAR_PALETTE[idx];
+};
+
 export const PreSalesCRM = ({ onManageStages }) => {
   const [stages, setStages] = useState([]);
   const [leads, setLeads] = useState([]);
@@ -121,9 +159,10 @@ export const PreSalesCRM = ({ onManageStages }) => {
               <tbody>
                 {filtered.map((l) => {
                   const stg = stages.find((s) => s.name === l.stage);
+                  const ac = avatarColor(l.name);
                   return (
                     <tr key={l.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`presales-lead-row-${l.id}`}>
-                      <td className="px-4 py-3"><span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-indigo-100 text-xs font-bold text-indigo-700">{initials(l.name)}</span></td>
+                      <td className="px-4 py-3"><span className={`inline-flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold ${ac.bg} ${ac.fg}`}>{initials(l.name)}</span></td>
                       <td className="px-3 py-3 font-medium text-slate-800">{l.name}</td>
                       <td className="px-3 py-3"><MaskedContact phone={l.phone} email={l.email} /></td>
                       <td className="px-3 py-3"><SourcePill source={l.source_tab || l.source_type} /></td>
