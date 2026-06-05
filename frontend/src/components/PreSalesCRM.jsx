@@ -11,7 +11,7 @@ import { LeadEditModal } from "@/components/LeadEditModal";
 import { CreateLeadModal } from "@/components/CreateLeadModal";
 import { SourcePill } from "@/components/marketing/SourcePill";
 import { MaskedContact } from "@/components/MaskedContact";
-import { AutoSyncPopover } from "@/components/AutoSyncPopover";
+import { PullFromSheetButton } from "@/components/PullFromSheetButton";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 
 const initials = (name) => (name || "?").split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
@@ -153,7 +153,7 @@ export const PreSalesCRM = ({ onManageStages }) => {
           <CalendarIcon className="mr-1 h-4 w-4" />{sortNewest ? "Newest first" : "Oldest first"}
         </Button>
         <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="presales-date-filter" />
-        <AutoSyncPopover />
+        <PullFromSheetButton onPulled={load} />
         <Input className="h-10 w-[200px]" value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} placeholder="Source filter" data-testid="presales-source-filter" />
       </div>
 
