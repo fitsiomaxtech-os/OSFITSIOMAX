@@ -243,10 +243,28 @@ async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Di
 
     sheet_name = source.get("sheet_name") or "Sheet1"
     a1_range = f"'{sheet_name}'!{range_}"
+    persist_updates: Dict[str, Any] = {}
 
     try:
         svc = await asyncio.to_thread(lambda: build("sheets", "v4", credentials=creds))
-        resp = await asyncio.to_thread(lambda: svc.spreadsheets().values().get(spreadsheetId=source["spreadsheet_id"], range=a1_range).execute())
+        try:
+            resp = await asyncio.to_thread(lambda: svc.spreadsheets().values().get(spreadsheetId=source["spreadsheet_id"], range=a1_range).execute())
+        except Exception as range_err:
+            # If the configured tab name doesn't exist, auto-discover the first real tab and retry once.
+            err_text = str(range_err)
+            if "Unable to parse range" in err_text or "Unable to parse" in err_text or "Requested entity was not found" in err_text:
+                meta = await asyncio.to_thread(lambda: svc.spreadsheets().get(spreadsheetId=source["spreadsheet_id"], fields="sheets.properties.title").execute())
+                tab_titles = [s["properties"]["title"] for s in meta.get("sheets", []) if s.get("properties")]
+                if not tab_titles:
+                    return {"error": "no_tabs_found", "imported": 0}
+                discovered = tab_titles[0]
+                a1_range = f"'{discovered}'!{range_}"
+                resp = await asyncio.to_thread(lambda: svc.spreadsheets().values().get(spreadsheetId=source["spreadsheet_id"], range=a1_range).execute())
+                # Persist the discovered tab so subsequent pulls skip this fallback
+                persist_updates["sheet_name"] = discovered
+                persist_updates["available_tabs"] = tab_titles
+            else:
+                raise
     except Exception as e:
         return {"error": f"sheets_api: {str(e)[:200]}", "imported": 0}
 
@@ -326,6 +344,7 @@ async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Di
     update = {"last_synced": now_iso(), "row_count": new_row_count, "headers_detected": headers}
     if mapping != (source.get("column_mapping") or {}):
         update["column_mapping"] = mapping
+    update.update(persist_updates)
     await v3_col("marketing_sources").update_one({"id": source_id}, {"$set": update})
 
     return {

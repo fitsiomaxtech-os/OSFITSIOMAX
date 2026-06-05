@@ -31,16 +31,20 @@ export const PullFromSheetButton = ({ onPulled }) => {
       let totalDup = 0;
       let totalNoPhone = 0;
       const errors = [];
-      for (const s of sources) {
-        try {
-          const r = await gsPull(s.id);
+      // Run pulls in parallel — much faster, avoids serial-timeout cascades
+      const results = await Promise.allSettled(sources.map((s) => gsPull(s.id)));
+      results.forEach((res, i) => {
+        const s = sources[i];
+        if (res.status === "fulfilled") {
+          const r = res.value || {};
           totalImported += r.imported || 0;
           totalDup += r.skipped_duplicate || 0;
           totalNoPhone += r.skipped_no_phone || 0;
-        } catch (e) {
-          errors.push(`${s.name}: ${e?.response?.data?.detail || e?.message || "failed"}`);
+        } else {
+          const detail = res.reason?.response?.data?.detail || res.reason?.message || "failed";
+          errors.push(`${s.name}: ${String(detail).slice(0, 80)}`);
         }
-      }
+      });
       if (errors.length) {
         toast.error(`Some sources failed: ${errors.join(" | ")}`);
       }
