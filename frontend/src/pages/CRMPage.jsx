@@ -810,11 +810,12 @@ export const CRMPage = ({ auth, onLogout }) => {
           <div data-testid="doctor-appointments-section">
             <Card className="border-slate-200 bg-white" data-testid="doctor-setup-card">
                 <CardHeader>
-                  <CardTitle className="text-base">Head Physio / Physio Setup</CardTitle>
+                  <CardTitle className="text-base">Fitsiomax Experts</CardTitle>
                 </CardHeader>
                 <CardContent>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500" data-testid="fitsiomax-expert-add-heading">Add Fitsiomax Expert</p>
                   <form className="grid gap-2 md:grid-cols-2" onSubmit={createDoctorNow} data-testid="doctor-setup-form">
-                    <Input value={doctorForm.full_name} onChange={(e) => setDoctorForm((p) => ({ ...p, full_name: e.target.value }))} placeholder="Doctor name" data-testid="doctor-setup-name-input" />
+                    <Input value={doctorForm.full_name} onChange={(e) => setDoctorForm((p) => ({ ...p, full_name: e.target.value }))} placeholder="Fitsiomax Expert name" data-testid="doctor-setup-name-input" />
                     <select value={doctorForm.profile_type} onChange={(e) => setDoctorForm((p) => ({ ...p, profile_type: e.target.value }))} className="h-9 rounded-md border border-slate-200 px-3 text-sm" data-testid="doctor-setup-profile-select">
                       <option value="head_physio">Head Physio</option>
                       <option value="physio">Physio</option>
@@ -825,13 +826,13 @@ export const CRMPage = ({ auth, onLogout }) => {
                     </select>
                     <Input value={doctorForm.specialization} onChange={(e) => setDoctorForm((p) => ({ ...p, specialization: e.target.value }))} placeholder="Specialization" data-testid="doctor-setup-specialization-input" />
                     <div className="md:col-span-2">
-                      <Button type="submit" data-testid="doctor-setup-submit-button">Create Profile</Button>
+                      <Button type="submit" data-testid="doctor-setup-submit-button">Create Fitsiomax Expert</Button>
                     </div>
                   </form>
 
                   <form className="mt-3 grid gap-2 md:grid-cols-3" onSubmit={addSlotNow} data-testid="doctor-slot-form">
                     <select value={slotDoctorId} onChange={(e) => setSlotDoctorId(e.target.value)} className="h-9 rounded-md border border-slate-200 px-3 text-sm" data-testid="doctor-slot-doctor-select">
-                      <option value="">Doctor</option>
+                      <option value="">Assign Fitsiomax Expert</option>
                       {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.full_name}</option>)}
                     </select>
                     <Input type="datetime-local" value={slotTime} onChange={(e) => setSlotTime(e.target.value)} data-testid="doctor-slot-time-input" />
