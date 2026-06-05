@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Users, ShieldCheck, BarChart3, Plus, Pencil, Trash2, Eye, KeyRound, X, UserPlus } from "lucide-react";
+import { Users, ShieldCheck, BarChart3, Plus, Pencil, Trash2, Eye, KeyRound, X, UserPlus, Stethoscope } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,11 +7,13 @@ import { toast } from "@/components/ui/sonner";
 import {
   hrDashboard, hrEmployees, hrCreateEmployee, hrUpdateEmployee, hrDeleteEmployee,
   hrUsers, hrCreateUser, hrResetPassword, hrDeactivateUser, hrUpdateUserRole, hrMeta,
+  getBranches, getDoctors, createDoctor, addDoctorSlots,
 } from "@/lib/api";
 
 const TABS = [
   { key: "dashboard", label: "Dashboard", icon: BarChart3 },
   { key: "employees", label: "Employees", icon: Users },
+  { key: "experts", label: "Fitsiomax Experts", icon: Stethoscope },
   { key: "roles", label: "Roles & Credentials", icon: ShieldCheck },
 ];
 
@@ -38,6 +40,7 @@ export const HRBoard = () => {
       </div>
       {tab === "dashboard" && <DashboardTab />}
       {tab === "employees" && <EmployeesTab meta={meta} />}
+      {tab === "experts" && <FitsiomaxExpertsTab />}
       {tab === "roles" && <RolesTab meta={meta} />}
     </div>
   );
@@ -430,5 +433,133 @@ const Select = ({ value, onChange, options = [], testid }) => (
     {options.map((o) => <option key={o} value={o}>{o || "Select"}</option>)}
   </select>
 );
+
+// ---------- Fitsiomax Experts (moved from Super Admin Master View) ----------
+const FitsiomaxExpertsTab = () => {
+  const [doctors, setDoctors] = useState([]);
+  const [branches, setBranches] = useState([]);
+  const [doctorForm, setDoctorForm] = useState({ full_name: "", profile_type: "physio", branch_id: "", specialization: "" });
+  const [slotDoctorId, setSlotDoctorId] = useState("");
+  const [slotTime, setSlotTime] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const refresh = useCallback(async () => {
+    try {
+      const [docs, brs] = await Promise.all([getDoctors(), getBranches()]);
+      setDoctors(docs || []);
+      setBranches(brs || []);
+    } catch (err) {
+      toast.error("Failed to load Fitsiomax Experts");
+    }
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const createDoctorNow = async (event) => {
+    event.preventDefault();
+    if (!doctorForm.full_name.trim()) {
+      toast.error("Enter a name");
+      return;
+    }
+    try {
+      setSaving(true);
+      await createDoctor({ ...doctorForm, branch_id: doctorForm.branch_id || null });
+      setDoctorForm({ full_name: "", profile_type: "physio", branch_id: "", specialization: "" });
+      await refresh();
+      toast.success("Fitsiomax Expert created");
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to create");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const addSlotNow = async (event) => {
+    event.preventDefault();
+    if (!slotDoctorId || !slotTime) {
+      toast.error("Select expert and slot time");
+      return;
+    }
+    try {
+      setSaving(true);
+      await addDoctorSlots(slotDoctorId, { slots: [slotTime] });
+      setSlotTime("");
+      toast.success("Slot added");
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to add slot");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card className="border-slate-200 bg-white" data-testid="hr-experts-card">
+      <CardHeader>
+        <CardTitle className="text-base">Fitsiomax Experts</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500" data-testid="hr-experts-add-heading">Add Fitsiomax Expert</p>
+        <form className="grid gap-2 md:grid-cols-2" onSubmit={createDoctorNow} data-testid="hr-experts-create-form">
+          <Input
+            value={doctorForm.full_name}
+            onChange={(e) => setDoctorForm((p) => ({ ...p, full_name: e.target.value }))}
+            placeholder="Fitsiomax Expert name"
+            data-testid="hr-experts-name-input"
+          />
+          <select
+            value={doctorForm.profile_type}
+            onChange={(e) => setDoctorForm((p) => ({ ...p, profile_type: e.target.value }))}
+            className="h-9 rounded-md border border-slate-200 px-3 text-sm"
+            data-testid="hr-experts-profile-select"
+          >
+            <option value="head_physio">Head Physio</option>
+            <option value="physio">Physio</option>
+          </select>
+          <select
+            value={doctorForm.branch_id}
+            onChange={(e) => setDoctorForm((p) => ({ ...p, branch_id: e.target.value }))}
+            className="h-9 rounded-md border border-slate-200 px-3 text-sm"
+            data-testid="hr-experts-branch-select"
+          >
+            <option value="">Branch</option>
+            {branches.map((branch) => (
+              <option key={branch.id} value={branch.id}>{branch.branch_name}</option>
+            ))}
+          </select>
+          <Input
+            value={doctorForm.specialization}
+            onChange={(e) => setDoctorForm((p) => ({ ...p, specialization: e.target.value }))}
+            placeholder="Specialization"
+            data-testid="hr-experts-specialization-input"
+          />
+          <div className="md:col-span-2">
+            <Button type="submit" disabled={saving} data-testid="hr-experts-create-submit">Create Fitsiomax Expert</Button>
+          </div>
+        </form>
+
+        <form className="mt-3 grid gap-2 md:grid-cols-3" onSubmit={addSlotNow} data-testid="hr-experts-slot-form">
+          <select
+            value={slotDoctorId}
+            onChange={(e) => setSlotDoctorId(e.target.value)}
+            className="h-9 rounded-md border border-slate-200 px-3 text-sm"
+            data-testid="hr-experts-slot-doctor-select"
+          >
+            <option value="">Assign Fitsiomax Expert</option>
+            {doctors.map((doctor) => (
+              <option key={doctor.id} value={doctor.id}>{doctor.full_name}</option>
+            ))}
+          </select>
+          <Input
+            type="datetime-local"
+            value={slotTime}
+            onChange={(e) => setSlotTime(e.target.value)}
+            data-testid="hr-experts-slot-time-input"
+          />
+          <Button type="submit" variant="outline" disabled={saving} data-testid="hr-experts-slot-submit">Add Slot</Button>
+        </form>
+      </CardContent>
+    </Card>
+  );
+};
 
 export default HRBoard;
