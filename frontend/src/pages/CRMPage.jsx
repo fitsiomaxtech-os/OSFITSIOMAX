@@ -807,37 +807,7 @@ export const CRMPage = ({ auth, onLogout }) => {
         )}
 
         {showSuperAdminBoard && superAdminView === "master" && (
-          <Card className="border-slate-200 bg-white" data-testid="branch-booking-card">
-            <CardHeader>
-              <CardTitle className="text-base">Branch Booking Board</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="grid gap-2 md:grid-cols-4">
-                <select value={selectedLeadForBooking} onChange={(e) => setSelectedLeadForBooking(e.target.value)} className="h-9 rounded-md border border-slate-200 px-3 text-sm" data-testid="branch-booking-lead-select">
-                  <option value="">Select lead</option>
-                  {leads.filter((lead) => ["Assigned to Branch", "Branch Confirmed"].includes(lead.stage)).map((lead) => (
-                    <option key={lead.id} value={lead.id}>{lead.name} · {lead.phone}</option>
-                  ))}
-                </select>
-                <Input type="datetime-local" value={bookingTime} onChange={(e) => setBookingTime(e.target.value)} data-testid="branch-booking-time-input" />
-                <Button onClick={checkDoctorsNow} className="bg-blue-500 text-white hover:bg-blue-600" data-testid="branch-check-doctors-button">Check Available</Button>
-                <select value={selectedDoctorForBooking} onChange={(e) => setSelectedDoctorForBooking(e.target.value)} className="h-9 rounded-md border border-slate-200 px-3 text-sm" data-testid="branch-available-doctor-select">
-                  <option value="">Choose doctor</option>
-                  {availableDoctors.map((doctor) => (
-                    <option key={doctor.id} value={doctor.id}>{doctor.full_name} ({doctor.profile_type})</option>
-                  ))}
-                </select>
-              </div>
-              <Button onClick={bookNow} className="bg-indigo-500 text-white hover:bg-indigo-600" data-testid="branch-book-appointment-button">Book Appointment</Button>
-              <p className="text-xs text-slate-500" data-testid="branch-booking-note">
-                Only available doctors are shown; already booked doctors remain hidden.
-              </p>
-            </CardContent>
-          </Card>
-        )}
-
-        {showSuperAdminBoard && superAdminView === "master" && (
-          <div className="grid gap-4 lg:grid-cols-2" data-testid="doctor-appointments-section">
+          <div data-testid="doctor-appointments-section">
             <Card className="border-slate-200 bg-white" data-testid="doctor-setup-card">
                 <CardHeader>
                   <CardTitle className="text-base">Head Physio / Physio Setup</CardTitle>
@@ -869,31 +839,6 @@ export const CRMPage = ({ auth, onLogout }) => {
                   </form>
                 </CardContent>
               </Card>
-
-            <Card className="border-slate-200 bg-white" data-testid="appointments-card">
-              <CardHeader>
-                <div className="flex flex-wrap items-center gap-2">
-                  <CardTitle className="text-base">Appointments Board</CardTitle>
-                  <Button size="sm" variant={appointmentFilter === "all" ? "default" : "outline"} onClick={() => setAppointmentFilter("all")} data-testid="appointments-filter-all-button">All</Button>
-                  <Button size="sm" variant={appointmentFilter === "today" ? "default" : "outline"} onClick={() => setAppointmentFilter("today")} data-testid="appointments-filter-today-button">Today</Button>
-                  <Button size="sm" variant={appointmentFilter === "new" ? "default" : "outline"} onClick={() => setAppointmentFilter("new")} data-testid="appointments-filter-new-button">New</Button>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                {filteredAppointmentsForPhysioBoards.map((appointment) => (
-                  <div key={appointment.id} className="rounded border border-slate-200 bg-slate-50 p-2" data-testid={`appointments-row-${appointment.id}`}>
-                    <p className="text-sm text-slate-800" data-testid={`appointments-lead-${appointment.id}`}>{appointment.lead_name}</p>
-                    <p className="text-xs text-slate-500" data-testid={`appointments-doctor-${appointment.id}`}>{appointment.doctor_name} · {appointment.slot_time}</p>
-                    <p className="text-xs text-slate-500" data-testid={`appointments-status-${appointment.id}`}>{appointment.status}</p>
-                    {(showSuperAdminBoard || showHeadPhysioBoard || showPhysioBoard) && appointment.status !== "completed" && (
-                      <Button size="sm" className="mt-2 bg-emerald-500 text-white hover:bg-emerald-600" onClick={() => completeNow(appointment.id)} data-testid={`appointments-complete-${appointment.id}`}>
-                        Mark Completed
-                      </Button>
-                    )}
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
           </div>
         )}
 
