@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Plus, Pencil, Trash2, X, Users, MapPin, Phone, Mail, TrendingUp, BarChart3, RefreshCw } from "lucide-react";
+import { Plus, Pencil, Trash2, X, Users, MapPin, Phone, Mail, TrendingUp, BarChart3, RefreshCw, Layers } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,12 +7,14 @@ import { toast } from "@/components/ui/sonner";
 import {
   bmList, bmCreateWithExistingAdmin, bmReassignAdmin, bmPerformance, bmPerformanceSummary,
   updateBranch, deleteBranch, hrBranchAdminCandidates,
+  getVerticals, createVertical,
 } from "@/lib/api";
 import { BranchDetailPage } from "@/components/branch/BranchDetailPage";
 import { BranchFormDialogV2 } from "@/components/branch/BranchFormDialogV2";
 
 const TABS = [
   { key: "creation", label: "Creation & Manager", icon: Users },
+  { key: "service_type", label: "Service Type", icon: Layers },
   { key: "performance", label: "Performance", icon: TrendingUp },
 ];
 
@@ -42,6 +44,7 @@ export const BranchManagementBoard = () => {
         })}
       </div>
       {tab === "creation" && <CreationTab onDrillIn={setDrilledBranchId} />}
+      {tab === "service_type" && <ServiceTypeTab />}
       {tab === "performance" && <PerformanceTab onDrillIn={setDrilledBranchId} />}
     </div>
   );
@@ -340,5 +343,78 @@ const DetailStat = ({ label, value, color }) => (
     <p className="mt-1 text-lg font-bold" style={{ color }}>{value}</p>
   </div>
 );
+
+// ---------- Service Type (moved from Super Admin Master View "Business Verticals") ----------
+const ServiceTypeTab = () => {
+  const [items, setItems] = useState([]);
+  const [name, setName] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const fetchItems = useCallback(async () => {
+    try {
+      const rows = await getVerticals();
+      const defaults = ["offline_physiotherapy", "online_physiotherapy", "online_fitness", "offline_fitness_gym"];
+      setItems(rows && rows.length ? rows : defaults.map((n) => ({ id: n, name: n })));
+    } catch (err) {
+      toast.error("Failed to load service types");
+    }
+  }, []);
+
+  useEffect(() => { fetchItems(); }, [fetchItems]);
+
+  const addItem = async (event) => {
+    event.preventDefault();
+    if (!name.trim()) {
+      toast.error("Enter a service type name");
+      return;
+    }
+    try {
+      setLoading(true);
+      await createVertical({ name: name.trim(), active: true });
+      setName("");
+      await fetchItems();
+      toast.success("Service type added");
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to add service type");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Card className="border-slate-200 bg-white" data-testid="service-type-card">
+      <CardHeader>
+        <CardTitle className="text-base">Service Type</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <form className="flex gap-2" onSubmit={addItem} data-testid="service-type-form">
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="new_service_type"
+            data-testid="service-type-input"
+          />
+          <Button type="submit" disabled={loading} data-testid="service-type-submit">Add</Button>
+        </form>
+        <div className="space-y-1">
+          {items.map((item) => (
+            <div
+              key={item.id}
+              className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
+              data-testid={`service-type-row-${item.id}`}
+            >
+              {item.name}
+            </div>
+          ))}
+          {items.length === 0 && (
+            <p className="rounded border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-500">
+              No service types yet. Add one above.
+            </p>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
 
 export default BranchManagementBoard;

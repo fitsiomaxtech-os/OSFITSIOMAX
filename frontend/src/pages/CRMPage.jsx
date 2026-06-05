@@ -680,48 +680,6 @@ export const CRMPage = ({ auth, onLogout }) => {
         )}
 
         {showSuperAdminBoard && superAdminView === "master" && (
-          <div className="grid gap-4 lg:grid-cols-2" data-testid="super-admin-board-section">
-            <Card className="border-slate-200 bg-white" data-testid="super-admin-vertical-card">
-              <CardHeader>
-                <CardTitle className="text-base">Business Verticals</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <form className="flex gap-2" onSubmit={addVerticalNow} data-testid="super-admin-vertical-form">
-                  <Input value={verticalName} onChange={(e) => setVerticalName(e.target.value)} placeholder="new_vertical" data-testid="super-admin-vertical-input" />
-                  <Button type="submit" data-testid="super-admin-vertical-submit">Add</Button>
-                </form>
-                <div className="space-y-1">
-                  {verticals.map((item) => (
-                    <div key={item.id} className="rounded border border-slate-200 bg-slate-50 px-2 py-1 text-sm" data-testid={`super-admin-vertical-row-${item.id}`}>
-                      {item.name}
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border-slate-200 bg-white" data-testid="super-admin-branch-card">
-              <CardHeader>
-                <CardTitle className="text-base">Create Branch</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <form className="grid gap-2 md:grid-cols-2" onSubmit={createBranchNow} data-testid="super-admin-branch-form">
-                  <Input value={branchForm.branch_name} onChange={(e) => setBranchForm((p) => ({ ...p, branch_name: e.target.value }))} placeholder="Branch Name" data-testid="super-admin-branch-name-input" />
-                  <Input value={branchForm.address} onChange={(e) => setBranchForm((p) => ({ ...p, address: e.target.value }))} placeholder="Address" data-testid="super-admin-branch-address-input" />
-                  <Input value={branchForm.admin_name} onChange={(e) => setBranchForm((p) => ({ ...p, admin_name: e.target.value }))} placeholder="Admin Name" data-testid="super-admin-branch-admin-name-input" />
-                  <Input value={branchForm.admin_email} onChange={(e) => setBranchForm((p) => ({ ...p, admin_email: e.target.value }))} placeholder="Admin Email" data-testid="super-admin-branch-admin-email-input" />
-                  <Input value={branchForm.admin_password} onChange={(e) => setBranchForm((p) => ({ ...p, admin_password: e.target.value }))} placeholder="Admin Password" data-testid="super-admin-branch-admin-password-input" />
-                  <Input value={branchForm.admin_phone} onChange={(e) => setBranchForm((p) => ({ ...p, admin_phone: e.target.value }))} placeholder="Admin Phone" data-testid="super-admin-branch-admin-phone-input" />
-                  <div className="md:col-span-2">
-                    <Button type="submit" data-testid="super-admin-branch-submit">Create Branch</Button>
-                  </div>
-                </form>
-              </CardContent>
-            </Card>
-          </div>
-        )}
-
-        {showSuperAdminBoard && superAdminView === "master" && (
           <Card className="border-slate-200 bg-white" data-testid="lead-master-card">
             <CardHeader>
               <CardTitle className="text-base">Lead Master Board</CardTitle>
