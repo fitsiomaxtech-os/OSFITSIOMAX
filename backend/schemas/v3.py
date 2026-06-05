@@ -194,6 +194,9 @@ class V3LeadOut(BaseModel):
     follow_ups: Optional[List[Dict[str, Any]]] = []
     next_follow_up_at: Optional[str] = None
     appointment_mode: Optional[str] = None  # "offline" | "online"
+    appointment_date: Optional[str] = None
+    appointment_time: Optional[str] = None
+    appointment_datetime: Optional[str] = None
     created_at: str
     updated_at: str
 

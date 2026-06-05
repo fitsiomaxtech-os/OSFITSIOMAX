@@ -13,8 +13,9 @@ _LEGACY_BRANCH_STAGE_MAP = {
     "Consultation Fee Collected": "Qualified",
     "Consultation Done": "Portfolio",
     "Follow-up Package Upsell": "Follow Up",
-    "Package Paid": "Branch",
+    "Package Paid": "Appointment Date & Time",
     "Jr. Physio Assigned": "Assigned Physio",
+    "Branch": "Appointment Date & Time",
 }
 
 # Maps deprecated pre-sales stage labels → new 4-stage flow.

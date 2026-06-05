@@ -27,7 +27,6 @@ V3_BRANCH_STAGES = [
     "Portfolio",
     "Follow Up",
     "Appointment Date & Time",
-    "Branch",
     "Assigned Physio",
     "Cancelled",
 ]

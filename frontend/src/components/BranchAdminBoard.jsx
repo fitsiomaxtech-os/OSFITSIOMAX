@@ -24,6 +24,7 @@ import { DateFilterPopover } from "@/components/DateFilterPopover";
 import {
   addLeadRemark,
   assignPhysio,
+  scheduleBranchAppointment,
   bookAppointment,
   collectFee,
   getAvailableDoctors,
@@ -42,7 +43,6 @@ const BRANCH_STAGES = [
   "Portfolio",
   "Follow Up",
   "Appointment Date & Time",
-  "Branch",
   "Assigned Physio",
   "Cancelled",
 ];
@@ -53,7 +53,6 @@ const STAGE_COLORS = {
   "Portfolio": { bg: "bg-violet-500", light: "bg-violet-50 text-violet-700 border-violet-200", col: "border-violet-200 bg-violet-50/40", text: "text-violet-600", count: "text-violet-700" },
   "Follow Up": { bg: "bg-orange-500", light: "bg-orange-50 text-orange-700 border-orange-200", col: "border-orange-200 bg-orange-50/40", text: "text-orange-600", count: "text-orange-700" },
   "Appointment Date & Time": { bg: "bg-teal-500", light: "bg-teal-50 text-teal-700 border-teal-200", col: "border-teal-200 bg-teal-50/40", text: "text-teal-600", count: "text-teal-700" },
-  "Branch": { bg: "bg-emerald-500", light: "bg-emerald-50 text-emerald-700 border-emerald-200", col: "border-emerald-200 bg-emerald-50/40", text: "text-emerald-600", count: "text-emerald-700" },
   "Assigned Physio": { bg: "bg-sky-500", light: "bg-sky-50 text-sky-700 border-sky-200", col: "border-sky-200 bg-sky-50/40", text: "text-sky-600", count: "text-sky-700" },
   "Cancelled": { bg: "bg-rose-500", light: "bg-rose-50 text-rose-700 border-rose-200", col: "border-rose-200 bg-rose-50/40", text: "text-rose-600", count: "text-rose-700" },
 };
@@ -148,7 +147,7 @@ export const BranchAdminBoard = ({ branchId }) => {
       ) : (
         <>
           {/* Dashboard Stage Cards — equal-sized, centered grid */}
-          <div className="grid gap-3 grid-cols-3 sm:grid-cols-3 lg:grid-cols-9" data-testid="branch-metrics">
+          <div className="grid gap-3 grid-cols-3 sm:grid-cols-4 lg:grid-cols-8" data-testid="branch-metrics">
             <button
               type="button"
               onClick={() => setStageFilter(null)}
@@ -301,6 +300,7 @@ function BranchLeadModal({ lead, branchId, onClose, onUpdate, reloadBoard }) {
 
   // Jr. Physio assignment
   const [allDoctors, setAllDoctors] = useState([]);
+  const [apptDraft, setApptDraft] = useState(null); // { appointment_date, appointment_time, physio_id, notes, final_stage } | null
   const [selectedPhysioId, setSelectedPhysioId] = useState("");
 
   useEffect(() => {
@@ -497,12 +497,25 @@ function BranchLeadModal({ lead, branchId, onClose, onUpdate, reloadBoard }) {
                   {BRANCH_STAGES.map((stage) => {
                     const isActive = lead.branch_stage === stage;
                     const c = STAGE_COLORS[stage] || {};
+                    const handleClick = () => {
+                      if (stage === "Appointment Date & Time") {
+                        setApptDraft({
+                          appointment_date: lead.appointment_date || new Date(Date.now() + 86400000).toISOString().slice(0, 10),
+                          appointment_time: lead.appointment_time || "10:00",
+                          physio_id: lead.assigned_physio_id || "",
+                          notes: "",
+                          final_stage: "Assigned Physio",
+                        });
+                        return;
+                      }
+                      moveStage(stage);
+                    };
                     return (
                       <button
                         key={stage}
                         type="button"
                         disabled={isActive}
-                        onClick={() => moveStage(stage)}
+                        onClick={handleClick}
                         className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-all hover:shadow-md disabled:cursor-not-allowed disabled:opacity-90 ${isActive ? `${c.bg || "bg-slate-500"} text-white shadow-sm` : `${c.light || "bg-slate-100 text-slate-600 border border-slate-200"}`}`}
                         data-testid={`branch-stage-btn-${stage}`}
                       >
@@ -661,6 +674,93 @@ function BranchLeadModal({ lead, branchId, onClose, onUpdate, reloadBoard }) {
           )}
         </div>
       </div>
+
+      {/* Appointment Date & Time Popup */}
+      {apptDraft && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) setApptDraft(null); }} data-testid="branch-appt-modal">
+          <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between bg-gradient-to-r from-teal-500 to-cyan-600 px-5 py-4 text-white">
+              <div className="flex items-center gap-2">
+                <Calendar className="h-5 w-5" />
+                <p className="text-base font-semibold">Appointment Date & Time</p>
+              </div>
+              <button onClick={() => setApptDraft(null)} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="branch-appt-close">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="space-y-4 p-5">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-slate-600">Appointment Date *</label>
+                  <Input type="date" value={apptDraft.appointment_date} min={new Date().toISOString().slice(0, 10)} onChange={(e) => setApptDraft({ ...apptDraft, appointment_date: e.target.value })} data-testid="branch-appt-date" />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-slate-600">Appointment Time *</label>
+                  <Input type="time" value={apptDraft.appointment_time} onChange={(e) => setApptDraft({ ...apptDraft, appointment_time: e.target.value })} data-testid="branch-appt-time" />
+                </div>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-600">Assign Physio / Doctor *</label>
+                <select
+                  value={apptDraft.physio_id}
+                  onChange={(e) => setApptDraft({ ...apptDraft, physio_id: e.target.value })}
+                  className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm focus:border-teal-400 focus:outline-none focus:ring-1 focus:ring-teal-400"
+                  data-testid="branch-appt-physio"
+                >
+                  <option value="">-- choose a physio --</option>
+                  {allDoctors.map((d) => (
+                    <option key={d.id} value={d.id}>{d.full_name} {d.specialization ? `· ${d.specialization}` : ""}</option>
+                  ))}
+                </select>
+                {allDoctors.length === 0 && <p className="mt-1 text-[11px] text-amber-700">No physios available in this branch. Add staff in HR Module.</p>}
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-600">Notes</label>
+                <textarea
+                  rows={3}
+                  className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-teal-400 focus:outline-none focus:ring-1 focus:ring-teal-400"
+                  placeholder="Optional notes about the appointment..."
+                  value={apptDraft.notes}
+                  onChange={(e) => setApptDraft({ ...apptDraft, notes: e.target.value })}
+                  data-testid="branch-appt-notes"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-600">Move to *</label>
+                <select
+                  value={apptDraft.final_stage}
+                  onChange={(e) => setApptDraft({ ...apptDraft, final_stage: e.target.value })}
+                  className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm focus:border-teal-400 focus:outline-none focus:ring-1 focus:ring-teal-400"
+                  data-testid="branch-appt-final-stage"
+                >
+                  <option value="Assigned Physio">Assigned Physio</option>
+                  <option value="Cancelled">Cancelled</option>
+                </select>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/40 px-5 py-3">
+              <Button variant="outline" onClick={() => setApptDraft(null)} data-testid="branch-appt-cancel">Cancel</Button>
+              <Button
+                className="bg-teal-600 text-white hover:bg-teal-700"
+                onClick={async () => {
+                  if (!apptDraft.appointment_date || !apptDraft.appointment_time) { toast.error("Date and time are required"); return; }
+                  if (!apptDraft.physio_id) { toast.error("Please select a physio"); return; }
+                  try {
+                    await scheduleBranchAppointment(lead.id, apptDraft);
+                    toast.success(`Appointment ${apptDraft.appointment_date} ${apptDraft.appointment_time} → ${apptDraft.final_stage}`);
+                    setApptDraft(null);
+                    await reloadBoard();
+                    onClose && onClose();
+                  } catch (e) { toast.error(e?.response?.data?.detail || "Failed to schedule"); }
+                }}
+                data-testid="branch-appt-save"
+              >
+                Save & Move
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
