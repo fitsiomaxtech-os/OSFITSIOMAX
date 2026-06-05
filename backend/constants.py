@@ -23,7 +23,6 @@ V3_STAGES = [
 
 V3_BRANCH_STAGES = [
     "New Appointment",
-    "Qualified",
     "Portfolio",
     "Follow Up",
     "Appointment Date & Time",

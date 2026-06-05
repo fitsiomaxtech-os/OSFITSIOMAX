@@ -1,0 +1,30 @@
+{
+  "summary": "Iteration 28 - Verified removal of 'Qualified' stage from Branch Admin V3 + Pre-Sales-style sticky segmented stage head bar in BranchAdminBoard. Backend: 4/4 pytest passing - GET /api/v3/stages?type=sales returns exactly 6 stages (New Appointment, Portfolio, Follow Up, Appointment Date & Time, Assigned Physio, Cancelled) with NO 'Qualified'; GET /api/v3/branch-board/{branch_id} returns stage_counts with all 6 expected keys and NO 'Qualified' key; no lead has branch_stage='Qualified' (migration succeeded - those leads now in 'New Appointment'); POST /api/v3/leads/{lead_id}/branch-stage with branch_stage='Qualified' is rejected with 400 'Invalid branch stage'. Frontend: Logged in as Branch Admin via screen1 demo dropdown, landed on Branch Admin Master View. The new sticky segmented head bar (data-testid='branch-metrics') renders exactly 7 tabs in the required order: ALL STAGES(8), NEW APPOINTMENT(5), PORTFOLIO(0), FOLLOW UP(1), APPOINTMENT DATE & TIME(0), ASSIGNED PHYSIO(1), CANCELLED(0). NO 'Qualified' tab anywhere. Labels are uppercase as required. Clicking 'Follow Up' tab activates the branch-stage-filter-indicator and filters the table; clicking it again toggles the filter off (indicator disappears). Opened first lead row -> modal Pipeline Stage section shows exactly 6 branch-stage-btn-* buttons (New Appointment, Portfolio, Follow Up, Appointment Date & Time, Assigned Physio, Cancelled) with NO 'Qualified' button. Note: route to login dropdown is a native <select> (data-testid='screen1-demo-user-dropdown'); option values are emails (e.g. branchadmin@fitsiomax.com), option labels are role names ('Branch Admin').",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_branch_qualified_removal_iteration28.py",
+    "/app/test_reports/pytest/pytest_results_iteration28.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "BranchAdminBoard.jsx line ~148: sticky top offset is hardcoded to top-[88px]; if the outer page header height changes, the head bar will overlap or leave a gap. Consider deriving from a CSS variable or matching the Pre-Sales board's offset constant.",
+    "BranchAdminBoard.jsx BranchStageTab uses inline style for background with hex+alpha suffix ('#3b82f614'); fine in modern browsers but a bit unusual. Acceptable.",
+    "seed.py migrate_branch_stages() deletes legacy 'Qualified' from pipeline_stages and remaps lead branch_stage 'Qualified' -> 'New Appointment'. This is correct, but the function runs on every startup; suggest guarding with idempotency check (e.g., skip if no docs match) or logging the count migrated for observability.",
+    "v3_branch_admin.v3_branch_board_new loads all leads (1000 cap) into memory and computes stage_counts in Python. For high-volume branches use a Mongo aggregation $group by branch_stage."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_branch_qualified_removal_iteration28.py"
+  ],
+  "success_rate": {"backend": "100% (4/4)", "frontend": "100% - 7 tabs in correct order, no Qualified, filter toggle works, modal pipeline has 6 stage buttons"},
+  "test_credentials": "From /app/memory/test_credentials.md - branchadmin@fitsiomax.com/branch123 (branch_admin), admin@fitsiomax.com/admin123 (super_admin). Login via POST /api/v3/auth/login returns {token, user} (token + V3UserOut directly, no /auth/me endpoint).",
+  "seed_data_creation": "None. Existing seeded data already had migrated branch_stage values.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Branch Admin board endpoints are: GET /api/v3/branch-board/{branch_id} (NOT /branches/{id}/board) and POST /api/v3/leads/{lead_id}/branch-stage (NOT /branches/{id}/leads/{id}/stage). Login returns user inline as {token, user}; there's no /api/v3/auth/me. The screen1 demo dropdown is a native <select> with email values and role labels - use sel.select_option('branchadmin@fitsiomax.com'). Frontend head bar testids: branch-metrics (container), branch-metric-total (All Stages), branch-metric-<StageName> (one per stage). Modal stage buttons testid: branch-stage-btn-<StageName>. Stage filter indicator: branch-stage-filter-indicator. Verified at https://lead-manager-100.preview.emergentagent.com.",
+  "rca of the issue": "No bug. Feature implementation verified end-to-end - 'Qualified' fully removed from constants/seed/migration/board endpoint/stages endpoint/frontend BRANCH_STAGES/head bar tabs/modal pipeline buttons. The new sticky segmented head bar matches the Pre-Sales style with hex-tinted active/inactive states sourced from STAGE_COLORS[stage].hex."
+}

@@ -8,9 +8,10 @@ from constants import V3_VERTICALS, V3_BRANCH_STAGES, V3_STAGES
 # Maps deprecated branch_stage labels (legacy 8-stage flow) to the new flow.
 # Idempotent: runs every startup; only touches leads with a legacy value.
 _LEGACY_BRANCH_STAGE_MAP = {
-    "Call & Confirm": "Qualified",
+    "Call & Confirm": "New Appointment",
+    "Qualified": "New Appointment",
     "Head Physio Appointment": "Appointment Date & Time",
-    "Consultation Fee Collected": "Qualified",
+    "Consultation Fee Collected": "New Appointment",
     "Consultation Done": "Portfolio",
     "Follow-up Package Upsell": "Follow Up",
     "Package Paid": "Appointment Date & Time",
@@ -37,6 +38,8 @@ async def migrate_branch_stages() -> None:
             {"branch_stage": old},
             {"$set": {"branch_stage": new, "updated_at": now_iso()}},
         )
+    # Remove "Qualified" from pipeline_stages (sales type) since it was removed from V3_BRANCH_STAGES
+    await v3_col("pipeline_stages").delete_many({"type": "sales", "name": "Qualified"})
     # Pre-sales stage migration
     for old, new in _LEGACY_PRESALES_STAGE_MAP.items():
         await v3_col("leads").update_many(
