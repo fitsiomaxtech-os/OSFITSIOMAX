@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import {
-  getLeads, createManualLead, stagesList, updateLead, rnrAttempt, scheduleFollowUp, scheduleAppointment, getBranches, leadActivity,
+  getLeads, createManualLead, stagesList, updateLead, rnrAttempt, scheduleFollowUp, scheduleAppointment, getBranches, getDoctors, leadActivity,
 } from "@/lib/api";
 import { LeadEditModal } from "@/components/LeadEditModal";
 import { CreateLeadModal } from "@/components/CreateLeadModal";
@@ -278,13 +278,15 @@ const LeadDetailDialog = ({ lead, stages, onClose, onSaved, onMoveStage }) => {
   const [showEdit, setShowEdit] = useState(false);
   const [currentLead, setCurrentLead] = useState(lead);
   const [followUpDraft, setFollowUpDraft] = useState(null); // { date, time, remarks } | null
-  const [appointmentDraft, setAppointmentDraft] = useState(null); // { mode, branch_id } | null
+  const [appointmentDraft, setAppointmentDraft] = useState(null); // { mode, branch_id, assigned_physio_id } | null
   const [branches, setBranches] = useState([]);
+  const [doctors, setDoctors] = useState([]);
   const [activity, setActivity] = useState([]);
   const [activityLoading, setActivityLoading] = useState(false);
 
   useEffect(() => {
     getBranches().then(setBranches).catch(() => {});
+    getDoctors().then(setDoctors).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -480,7 +482,7 @@ const LeadDetailDialog = ({ lead, stages, onClose, onSaved, onMoveStage }) => {
                   return;
                 }
                 if (s.name === "Appointment") {
-                  setAppointmentDraft({ mode: "offline", branch_id: "" });
+                  setAppointmentDraft({ mode: "offline", branch_id: "", assigned_physio_id: "" });
                   return;
                 }
                 await onMoveStage(currentLead.id, s.name);
@@ -641,7 +643,7 @@ const LeadDetailDialog = ({ lead, stages, onClose, onSaved, onMoveStage }) => {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setAppointmentDraft({ ...appointmentDraft, mode: "online", branch_id: "" })}
+                    onClick={() => setAppointmentDraft({ ...appointmentDraft, mode: "online", branch_id: "", assigned_physio_id: "" })}
                     className={`flex items-center justify-center gap-2 rounded-lg border-2 px-4 py-3 text-sm font-semibold transition-all ${appointmentDraft.mode === "online" ? "border-sky-500 bg-sky-50 text-sky-700 shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"}`}
                     data-testid="presales-appointment-mode-online"
                   >
@@ -655,7 +657,7 @@ const LeadDetailDialog = ({ lead, stages, onClose, onSaved, onMoveStage }) => {
                   <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-600">Select Branch *</label>
                   <select
                     value={appointmentDraft.branch_id}
-                    onChange={(e) => setAppointmentDraft({ ...appointmentDraft, branch_id: e.target.value })}
+                    onChange={(e) => setAppointmentDraft({ ...appointmentDraft, branch_id: e.target.value, assigned_physio_id: "" })}
                     className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm focus:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-400"
                     data-testid="presales-appointment-branch"
                   >
@@ -675,6 +677,38 @@ const LeadDetailDialog = ({ lead, stages, onClose, onSaved, onMoveStage }) => {
                   Online consultation — no branch selection required. The Head Physio will host the session via video call.
                 </div>
               )}
+
+              {/* Assign Fitsiomax Expert — required for both offline & online */}
+              {(() => {
+                const filtered = appointmentDraft.mode === "offline" && appointmentDraft.branch_id
+                  ? doctors.filter((d) => d.branch_id === appointmentDraft.branch_id)
+                  : doctors;
+                const expertOptions = filtered.length > 0 ? filtered : doctors;
+                const fallbackUsed = appointmentDraft.mode === "offline" && appointmentDraft.branch_id && filtered.length === 0 && doctors.length > 0;
+                return (
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-600">Assign Fitsiomax Expert *</label>
+                    <select
+                      value={appointmentDraft.assigned_physio_id || ""}
+                      onChange={(e) => setAppointmentDraft({ ...appointmentDraft, assigned_physio_id: e.target.value })}
+                      disabled={appointmentDraft.mode === "offline" && !appointmentDraft.branch_id}
+                      className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm focus:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-400 disabled:bg-slate-100 disabled:cursor-not-allowed"
+                      data-testid="presales-appointment-expert"
+                    >
+                      <option value="">-- select expert --</option>
+                      {expertOptions.map((d) => (
+                        <option key={d.id} value={d.id}>{d.full_name} {d.profile_type ? `(${d.profile_type})` : ""}</option>
+                      ))}
+                    </select>
+                    {appointmentDraft.mode === "offline" && !appointmentDraft.branch_id && (
+                      <p className="mt-1.5 text-[11px] text-slate-500">Choose a branch first to see its experts.</p>
+                    )}
+                    {fallbackUsed && (
+                      <p className="mt-1.5 text-[11px] text-amber-600">No experts mapped to this branch — showing all experts.</p>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
             <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/40 px-5 py-3">
               <Button variant="outline" onClick={() => setAppointmentDraft(null)} data-testid="presales-appointment-cancel">Cancel</Button>
@@ -683,6 +717,10 @@ const LeadDetailDialog = ({ lead, stages, onClose, onSaved, onMoveStage }) => {
                 onClick={async () => {
                   if (appointmentDraft.mode === "offline" && !appointmentDraft.branch_id) {
                     toast.error("Please select a branch");
+                    return;
+                  }
+                  if (!appointmentDraft.assigned_physio_id) {
+                    toast.error("Please assign a Fitsiomax Expert");
                     return;
                   }
                   try {

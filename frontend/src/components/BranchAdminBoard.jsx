@@ -42,7 +42,6 @@ const BRANCH_STAGES = [
   "Portfolio",
   "Follow Up",
   "Appointment Date & Time",
-  "Assigned Physio",
   "Cancelled",
 ];
 
@@ -51,7 +50,6 @@ const STAGE_COLORS = {
   "Portfolio": { bg: "bg-violet-500", light: "bg-violet-50 text-violet-700 border-violet-200", col: "border-violet-200 bg-violet-50/40", text: "text-violet-600", count: "text-violet-700", hex: "#8b5cf6" },
   "Follow Up": { bg: "bg-orange-500", light: "bg-orange-50 text-orange-700 border-orange-200", col: "border-orange-200 bg-orange-50/40", text: "text-orange-600", count: "text-orange-700", hex: "#f97316" },
   "Appointment Date & Time": { bg: "bg-teal-500", light: "bg-teal-50 text-teal-700 border-teal-200", col: "border-teal-200 bg-teal-50/40", text: "text-teal-600", count: "text-teal-700", hex: "#14b8a6" },
-  "Assigned Physio": { bg: "bg-sky-500", light: "bg-sky-50 text-sky-700 border-sky-200", col: "border-sky-200 bg-sky-50/40", text: "text-sky-600", count: "text-sky-700", hex: "#0ea5e9" },
   "Cancelled": { bg: "bg-rose-500", light: "bg-rose-50 text-rose-700 border-rose-200", col: "border-rose-200 bg-rose-50/40", text: "text-rose-600", count: "text-rose-700", hex: "#f43f5e" },
 };
 
@@ -522,7 +520,7 @@ function BranchLeadModal({ lead, branchId, onClose, onUpdate, reloadBoard }) {
                           appointment_time: lead.appointment_time || "10:00",
                           physio_id: lead.assigned_physio_id || "",
                           notes: "",
-                          final_stage: "Assigned Physio",
+                          final_stage: "Appointment Date & Time",
                         });
                         return;
                       }
@@ -751,7 +749,7 @@ function BranchLeadModal({ lead, branchId, onClose, onUpdate, reloadBoard }) {
                   className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm focus:border-teal-400 focus:outline-none focus:ring-1 focus:ring-teal-400"
                   data-testid="branch-appt-final-stage"
                 >
-                  <option value="Assigned Physio">Assigned Physio</option>
+                  <option value="Appointment Date & Time">Appointment Date & Time</option>
                   <option value="Cancelled">Cancelled</option>
                 </select>
               </div>

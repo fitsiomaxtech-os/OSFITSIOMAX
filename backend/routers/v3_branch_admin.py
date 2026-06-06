@@ -86,7 +86,7 @@ async def v3_assign_physio(lead_id: str, payload: V3AssignPhysioInput, user: V3U
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {
         "assigned_physio_id": payload.physio_id,
         "assigned_physio_name": physio["full_name"],
-        "branch_stage": "Assigned Physio",
+        "branch_stage": "Appointment Date & Time",
         "updated_at": now_iso(),
     }})
     activity = {
@@ -108,14 +108,14 @@ class V3BranchAppointmentInput(BaseModel):
     appointment_time: str   # HH:MM
     physio_id: str
     notes: Optional[str] = ""
-    final_stage: str = "Assigned Physio"   # "Assigned Physio" or "Cancelled"
+    final_stage: str = "Appointment Date & Time"   # "Appointment Date & Time" or "Cancelled"
 
 
 @router.post("/leads/{lead_id}/schedule-branch-appointment", response_model=V3LeadOut)
 async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointmentInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
     """Schedule appointment date/time, assign physio, add notes, then move to final stage."""
-    if payload.final_stage not in ("Assigned Physio", "Cancelled"):
-        raise HTTPException(status_code=400, detail="final_stage must be 'Assigned Physio' or 'Cancelled'")
+    if payload.final_stage not in ("Appointment Date & Time", "Cancelled"):
+        raise HTTPException(status_code=400, detail="final_stage must be 'Appointment Date & Time' or 'Cancelled'")
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")

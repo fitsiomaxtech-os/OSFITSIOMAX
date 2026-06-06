@@ -15,7 +15,8 @@ _LEGACY_BRANCH_STAGE_MAP = {
     "Consultation Done": "Portfolio",
     "Follow-up Package Upsell": "Follow Up",
     "Package Paid": "Appointment Date & Time",
-    "Jr. Physio Assigned": "Assigned Physio",
+    "Jr. Physio Assigned": "Appointment Date & Time",
+    "Assigned Physio": "Appointment Date & Time",
     "Branch": "Appointment Date & Time",
 }
 
@@ -38,8 +39,8 @@ async def migrate_branch_stages() -> None:
             {"branch_stage": old},
             {"$set": {"branch_stage": new, "updated_at": now_iso()}},
         )
-    # Remove "Qualified" from pipeline_stages (sales type) since it was removed from V3_BRANCH_STAGES
-    await v3_col("pipeline_stages").delete_many({"type": "sales", "name": "Qualified"})
+    # Remove "Qualified" and "Assigned Physio" from pipeline_stages (sales type)
+    await v3_col("pipeline_stages").delete_many({"type": "sales", "name": {"$in": ["Qualified", "Assigned Physio"]}})
     # Pre-sales stage migration
     for old, new in _LEGACY_PRESALES_STAGE_MAP.items():
         await v3_col("leads").update_many(

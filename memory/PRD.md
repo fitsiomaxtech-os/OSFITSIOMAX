@@ -35,7 +35,7 @@ Build FITSIOMAX OS - multi-role SaaS for physiotherapy/fitness business with:
 - **No more kanban** — replaced by a clean centered list view (table).
 - **Pre-Sales-style sticky segmented head bar** (Feb 2026 update): replaces the previous 9-card grid. 7 colored pill tabs in sticky bar at top — All Stages + 6 branch stages. Each tab shows the stage name (uppercase) and count of leads; click to filter the list below to that stage, click again to clear.
 - Table columns: Patient (avatar + name) · Phone · Stage badge · Assigned Physio · Fee/Package · Updated date. Clicking a row opens the existing lead detail modal.
-- **"Qualified" stage REMOVED (Feb 2026)**. Final 6 stages: New Appointment · Portfolio · Follow Up · Appointment Date & Time · Assigned Physio · Cancelled. Migration in `seed.migrate_branch_stages` re-maps any legacy `branch_stage="Qualified"` leads to "New Appointment" and deletes the legacy `pipeline_stages` doc.
+- **"Qualified" stage REMOVED (Feb 2026)**. After 2nd round of stage cleanup, **"Assigned Physio" stage also REMOVED (Feb 2026)** — physio assignment is now done upstream in the Pre-Sales Schedule Appointment popup. Final 5 stages: New Appointment · Portfolio · Follow Up · Appointment Date & Time · Cancelled. Migration in `seed.migrate_branch_stages` re-maps `Assigned Physio` → `Appointment Date & Time` and deletes both legacy `pipeline_stages` docs.
 
 #### Tab 2: Head Physio Calendar
 - Left: Doctor list + Add Head Physio (creates user + doctor)
