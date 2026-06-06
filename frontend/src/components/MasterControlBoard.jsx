@@ -70,22 +70,31 @@ export const MasterControlBoard = () => {
   const refreshRef = useRef(null);
 
   useEffect(() => {
-    let alive = true;
     const fetchOnce = async () => {
       try {
-        const res = await getMasterControl();
-        if (alive) setData(res);
+        const params = {};
+        if (filters.branch) params.branch_id = filters.branch;
+        if (filters.service) params.service_type = filters.service;
+        if (filters.expert) params.expert_id = filters.expert;
+        if (filters.time_range) params.time_range = filters.time_range;
+        const res = await getMasterControl(params);
+        setData(res);
       } catch (err) {
         console.error("Master control fetch error:", err);
       }
     };
     refreshRef.current = fetchOnce;
     fetchOnce();
-    Promise.all([getBranches().catch(() => []), getDoctors().catch(() => []), getVerticals().catch(() => [])])
-      .then(([b, d, v]) => { if (alive) { setBranches(b || []); setDoctors(d || []); setVerticals(v || []); } });
     const id = setInterval(fetchOnce, REFRESH_MS);
-    return () => { alive = false; clearInterval(id); };
+    return () => clearInterval(id);
+  }, [filters.branch, filters.service, filters.expert, filters.time_range]);
+
+  useEffect(() => {
+    Promise.all([getBranches().catch(() => []), getDoctors().catch(() => []), getVerticals().catch(() => [])])
+      .then(([b, d, v]) => { setBranches(b || []); setDoctors(d || []); setVerticals(v || []); });
   }, []);
+
+  // Trigger an immediate refetch via the latest effect when filters change is now handled by deps above.
 
   const refresh = useCallback(() => { const fn = refreshRef.current; if (fn) fn(); }, []);
 
@@ -273,7 +282,7 @@ export const MasterControlBoard = () => {
               {/* Filters */}
               <div className="grid gap-3 md:grid-cols-4" data-testid="live-filters">
                 <FilterSelect label="Branch" value={filters.branch} onChange={(v) => setFilters({ ...filters, branch: v })} options={[{ value: "", label: "All Branches" }, ...branches.map((b) => ({ value: b.id, label: b.branch_name || b.name }))]} testid="filter-branch" />
-                <FilterSelect label="Service Type" value={filters.service} onChange={(v) => setFilters({ ...filters, service: v })} options={[{ value: "", label: "All Service Types" }, ...verticals.map((v) => ({ value: v.id, label: v.name }))]} testid="filter-service" />
+                <FilterSelect label="Service Type" value={filters.service} onChange={(v) => setFilters({ ...filters, service: v })} options={[{ value: "", label: "All Service Types" }, ...verticals.map((v) => ({ value: v.name, label: v.name }))]} testid="filter-service" />
                 <FilterSelect label="Expert" value={filters.expert} onChange={(v) => setFilters({ ...filters, expert: v })} options={[{ value: "", label: "All Experts" }, ...doctors.map((d) => ({ value: d.id, label: d.full_name }))]} testid="filter-expert" />
                 <FilterSelect label="Time Range" value={filters.time_range} onChange={(v) => setFilters({ ...filters, time_range: v })} options={[{ value: "current", label: "Current Academic Year (2025 - 2026)" }, { value: "last_30", label: "Last 30 Days" }, { value: "last_90", label: "Last 90 Days" }]} testid="filter-time-range" />
               </div>

@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from datetime import datetime, timezone, timedelta
+from typing import Optional
 
 from database import v3_col
 from deps import v3_current_user, v3_require_roles
@@ -110,40 +111,81 @@ async def v3_branch_board(branch_id: str, _: V3UserOut = Depends(v3_current_user
 
 
 @router.get("/boards/master-control")
-async def v3_master_control(_: V3UserOut = Depends(v3_require_roles("super_admin"))):
-    """Aggregated metrics for the Super Admin Master Control Board (attention, today queue, sync, analytics)."""
+async def v3_master_control(
+    branch_id: Optional[str] = Query(None),
+    service_type: Optional[str] = Query(None),   # vertical name
+    expert_id: Optional[str] = Query(None),      # assigned_physio_id
+    time_range: Optional[str] = Query("current"),
+    _: V3UserOut = Depends(v3_require_roles("super_admin")),
+):
+    """Aggregated metrics for the Super Admin Master Control Board (attention, today queue, sync, analytics).
+
+    Filters applied across all aggregations (counts, journey, analytics):
+    - branch_id, service_type, expert_id, time_range ("current" | "last_30" | "last_90" | "all")
+    """
     leads = v3_col("leads")
     now = datetime.now(timezone.utc)
     today_iso = now.date().isoformat()
-    period_start = (now - timedelta(days=30)).isoformat()
-    prev_start = (now - timedelta(days=60)).isoformat()
-    total_leads = await leads.count_documents({})
+
+    # Time range bounds
+    range_start_iso = None
+    if time_range == "last_30":
+        range_start_iso = (now - timedelta(days=30)).isoformat()
+    elif time_range == "last_90":
+        range_start_iso = (now - timedelta(days=90)).isoformat()
+    elif time_range in (None, "", "current"):
+        # Current Academic Year: 1 April of current FY → 31 March next year
+        fy_start_year = now.year if now.month >= 4 else now.year - 1
+        range_start_iso = datetime(fy_start_year, 4, 1, tzinfo=timezone.utc).isoformat()
+
+    # Build a base filter to merge into every count_documents() call
+    base = {}
+    if branch_id:
+        base["branch_id"] = branch_id
+    if service_type:
+        base["vertical"] = service_type
+    if expert_id:
+        base["assigned_physio_id"] = expert_id
+    if range_start_iso:
+        base["created_at"] = {"$gte": range_start_iso}
+
+    def merged(extra=None):
+        out = dict(base)
+        if extra:
+            for k, v in extra.items():
+                if k in out and isinstance(out[k], dict) and isinstance(v, dict):
+                    out[k] = {**out[k], **v}
+                else:
+                    out[k] = v
+        return out
+
+    total_leads = await leads.count_documents(merged())
 
     # Patient journey counts (label → count) — 8 pills
     journey = {
-        "New Lead": await leads.count_documents({"stage": "New Leads"}),
-        "RNR": await leads.count_documents({"stage": "RNR"}),
-        "Follow Up": await leads.count_documents({"stage": "Follow Up"}),
-        "Appointment": await leads.count_documents({"stage": "Appointment"}),
-        "New Appointment": await leads.count_documents({"branch_stage": "New Appointment"}),
-        "Portfolio": await leads.count_documents({"branch_stage": "Portfolio"}),
-        "Appointment Date & Time": await leads.count_documents({"branch_stage": "Appointment Date & Time"}),
-        "Patient": await leads.count_documents({"branch_stage": "Appointment Date & Time", "appointment_date": {"$ne": None}}),
+        "New Lead": await leads.count_documents(merged({"stage": "New Leads"})),
+        "RNR": await leads.count_documents(merged({"stage": "RNR"})),
+        "Follow Up": await leads.count_documents(merged({"stage": "Follow Up"})),
+        "Appointment": await leads.count_documents(merged({"stage": "Appointment"})),
+        "New Appointment": await leads.count_documents(merged({"branch_stage": "New Appointment"})),
+        "Portfolio": await leads.count_documents(merged({"branch_stage": "Portfolio"})),
+        "Appointment Date & Time": await leads.count_documents(merged({"branch_stage": "Appointment Date & Time"})),
+        "Patient": await leads.count_documents(merged({"branch_stage": "Appointment Date & Time", "appointment_date": {"$ne": None}})),
     }
 
     # Attention Required
     attention = {
-        "follow_up_pending": await leads.count_documents({"stage": "Follow Up"}),
-        "date_time_pending": await leads.count_documents({"branch_stage": "Portfolio"}),
-        "branch_pending": await leads.count_documents({"stage": "Appointment", "branch_id": None}),
-        "expert_pending": await leads.count_documents({"stage": "Appointment", "assigned_physio_id": None}),
+        "follow_up_pending": await leads.count_documents(merged({"stage": "Follow Up"})),
+        "date_time_pending": await leads.count_documents(merged({"branch_stage": "Portfolio"})),
+        "branch_pending": await leads.count_documents(merged({"stage": "Appointment", "branch_id": None})),
+        "expert_pending": await leads.count_documents(merged({"stage": "Appointment", "assigned_physio_id": None})),
         "sync_issue": 0,
     }
 
     # Today's Priority Queue
-    todays_follow_ups = await leads.count_documents({"stage": "Follow Up", "follow_up_date": today_iso})
-    appointments_today = await leads.count_documents({"appointment_date": today_iso})
-    new_appointments = await leads.count_documents({"branch_stage": "New Appointment"})
+    todays_follow_ups = await leads.count_documents(merged({"stage": "Follow Up", "follow_up_date": today_iso}))
+    appointments_today = await leads.count_documents(merged({"appointment_date": today_iso}))
+    new_appointments = await leads.count_documents(merged({"branch_stage": "New Appointment"}))
     pending_branch_actions = attention["date_time_pending"] + attention["branch_pending"]
     today_queue = {
         "todays_follow_ups": todays_follow_ups,
@@ -152,7 +194,7 @@ async def v3_master_control(_: V3UserOut = Depends(v3_require_roles("super_admin
         "pending_branch_actions": pending_branch_actions,
     }
 
-    # Sync & System Health (placeholder data — real wiring once sheet connectors expose telemetry)
+    # Sync & System Health — global, not lead-filtered
     last_conn = await v3_col("sheet_connections").find_one({}, {"_id": 0, "last_synced_at": 1, "status": 1})
     sync_health = {
         "sheet_status": "Connected" if last_conn else "Not Connected",
@@ -162,31 +204,42 @@ async def v3_master_control(_: V3UserOut = Depends(v3_require_roles("super_admin
         "mapping_status": "All Mapped" if last_conn else "—",
     }
 
-    # Live Analytics — Lead Workflow split (pre-sales heavy buckets)
+    # Live Analytics — Lead Workflow split (filter-aware via journey counts)
     workflow = [
         {"name": "New", "value": journey["New Lead"]},
         {"name": "In Review", "value": journey["Follow Up"] + journey["RNR"]},
         {"name": "Confirmed", "value": journey["Appointment"] + journey["New Appointment"] + journey["Portfolio"] + journey["Appointment Date & Time"]},
-        {"name": "Archived", "value": await leads.count_documents({"branch_stage": "Cancelled"})},
+        {"name": "Archived", "value": await leads.count_documents(merged({"branch_stage": "Cancelled"}))},
     ]
 
     # Patient Information Completion
     not_empty = {"$nin": [None, ""]}
-    completed = await leads.count_documents({"name": not_empty, "phone": not_empty, "email": not_empty})
+    completed = await leads.count_documents(merged({"name": not_empty, "phone": not_empty, "email": not_empty}))
     patient_info = [
         {"name": "Completed", "value": completed},
         {"name": "Incomplete", "value": max(total_leads - completed, 0)},
     ]
 
-    current_records = await leads.count_documents({"created_at": {"$gte": period_start}})
-    previous_records = await leads.count_documents({"created_at": {"$gte": prev_start, "$lt": period_start}})
+    # Period comparison — current vs previous (always 30-day window regardless of time_range)
+    cur_start = (now - timedelta(days=30)).isoformat()
+    prev_start = (now - timedelta(days=60)).isoformat()
+    base_no_time = {k: v for k, v in base.items() if k != "created_at"}
+
+    def merged_no_time(extra=None):
+        out = dict(base_no_time)
+        if extra:
+            out.update(extra)
+        return out
+
+    current_records = await leads.count_documents(merged_no_time({"created_at": {"$gte": cur_start}}))
+    previous_records = await leads.count_documents(merged_no_time({"created_at": {"$gte": prev_start, "$lt": cur_start}}))
 
     def pct(n, d):
         return round((n / d) * 100, 2) if d else 0.0
 
-    patient_profile = await leads.count_documents({"name": not_empty, "phone": not_empty})
-    appointment_details = await leads.count_documents({"appointment_date": {"$ne": None}})
-    expert_assignment = await leads.count_documents({"assigned_physio_id": {"$ne": None}})
+    patient_profile = await leads.count_documents(merged({"name": not_empty, "phone": not_empty}))
+    appointment_details = await leads.count_documents(merged({"appointment_date": {"$ne": None}}))
+    expert_assignment = await leads.count_documents(merged({"assigned_physio_id": {"$ne": None}}))
 
     progress = {
         "patient_profile": {"completed": patient_profile, "total": total_leads, "percent": pct(patient_profile, total_leads)},
@@ -196,6 +249,7 @@ async def v3_master_control(_: V3UserOut = Depends(v3_require_roles("super_admin
 
     return {
         "live_time": now.isoformat(),
+        "applied_filters": {"branch_id": branch_id, "service_type": service_type, "expert_id": expert_id, "time_range": time_range},
         "journey": journey,
         "attention": attention,
         "today_queue": today_queue,
