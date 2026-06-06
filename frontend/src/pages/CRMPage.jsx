@@ -51,6 +51,7 @@ import { HeadPhysioBoard } from "@/components/HeadPhysioBoard";
 import { PhysioBoard } from "@/components/PhysioBoard";
 import { MarketingBoard } from "@/components/marketing/MarketingBoard";
 import { PreSalesCRM } from "@/components/PreSalesCRM";
+import { MasterControlBoard } from "@/components/MasterControlBoard";
 import { PipelineStageManagement } from "@/components/PipelineStageManagement";
 import { HRBoard } from "@/components/hr/HRBoard";
 import { BranchManagementBoard } from "@/components/branch/BranchManagementBoard";
@@ -736,6 +737,9 @@ export const CRMPage = ({ auth, onLogout }) => {
                 ))}
               </CardContent>
             </Card>
+
+            {/* Master Control Board + Live Analytics Overview */}
+            <MasterControlBoard />
           </div>
         )}
 

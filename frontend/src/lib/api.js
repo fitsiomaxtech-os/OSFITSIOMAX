@@ -101,6 +101,7 @@ export const syncSheetConnection = async (connectionId, payload) =>
 
 export const getMasterBoard = async () => (await api.get("/boards/master")).data;
 export const getBranchMasterBoard = async () => (await api.get("/boards/branch-master")).data;
+export const getMasterControl = async () => (await api.get("/boards/master-control")).data;
 export const getBranchBoardOld = async (branchId) => (await api.get(`/boards/branch/${branchId}`)).data;
 
 export const getTeamMembers = async (params) => (await api.get("/team-members", { params })).data;
