@@ -298,20 +298,6 @@ export const MasterControlBoard = () => {
                 <PeriodBar period={cur} label="Current Period" sublabel="(2025 - 2026)" color="#22c55e" bg="#f0fdf4" testid="period-current" />
                 <PeriodBar period={prev} label="Previous Period" sublabel="(2024 - 2025)" color="#3b82f6" bg="#eff6ff" testid="period-previous" />
               </div>
-
-              {/* Progress bars */}
-              <div className="rounded-xl border border-slate-200 p-4" data-testid="progress-section">
-                <div className="mb-3 flex items-center justify-end">
-                  <span className="rounded-md bg-slate-50 px-2 py-1 text-xs font-medium text-slate-600" data-testid="progress-total">
-                    Total Records&nbsp;-&nbsp;<b className="text-slate-900">{a.total_records || 0}</b>
-                  </span>
-                </div>
-                <div className="space-y-4">
-                  <ProgressRow icon={UserPlus} label="Patient Profile" color="#22c55e" data={prog.patient_profile} testid="progress-profile" />
-                  <ProgressRow icon={Calendar} label="Appointment Details" color="#3b82f6" data={prog.appointment_details} testid="progress-appointment" />
-                  <ProgressRow icon={UserCheck} label="Expert Assignment" color="#8b5cf6" data={prog.expert_assignment} testid="progress-expert" />
-                </div>
-              </div>
             </>
           )}
         </CardContent>
