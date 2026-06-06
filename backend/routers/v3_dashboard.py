@@ -194,14 +194,40 @@ async def v3_master_control(
         "pending_branch_actions": pending_branch_actions,
     }
 
-    # Sync & System Health — global, not lead-filtered
-    last_conn = await v3_col("sheet_connections").find_one({}, {"_id": 0, "last_synced_at": 1, "status": 1})
+    # Sync & System Health — read from marketing_sources (the actual production sheet ingestion collection)
+    sources = await v3_col("marketing_sources").find({}, {"_id": 0}).to_list(1000)
+    last_source = None
+    latest_iso = None
+    for src in sources:
+        ls = src.get("last_synced") or src.get("last_synced_at")
+        if ls and (latest_iso is None or ls > latest_iso):
+            latest_iso = ls
+            last_source = src
+
+    connected_count = sum(1 for s in sources if s.get("oauth_connected") or s.get("last_synced") or s.get("last_synced_at"))
+    new_rows_total = sum(int(s.get("last_sync_imported") or 0) for s in sources)
+    duplicates_total = sum(int(s.get("last_sync_skipped_duplicate") or 0) for s in sources)
+
+    # Mapping status — how many sources have column_mapping set vs total
+    sources_with_mapping = sum(1 for s in sources if (s.get("column_mapping") or {}))
+    if not sources:
+        mapping_status = "—"
+    elif sources_with_mapping == len(sources):
+        mapping_status = "All Mapped"
+    elif sources_with_mapping == 0:
+        mapping_status = "Not Mapped"
+    else:
+        mapping_status = f"{sources_with_mapping}/{len(sources)} Mapped"
+
     sync_health = {
-        "sheet_status": "Connected" if last_conn else "Not Connected",
-        "last_sync": last_conn.get("last_synced_at") if last_conn else None,
-        "new_rows": 0,
-        "duplicates_skipped": 0,
-        "mapping_status": "All Mapped" if last_conn else "—",
+        "sheet_status": "Connected" if connected_count > 0 else ("Configured" if sources else "Not Connected"),
+        "sources_total": len(sources),
+        "sources_connected": connected_count,
+        "last_sync": latest_iso,
+        "last_sync_source": (last_source or {}).get("name") if last_source else None,
+        "new_rows": new_rows_total,
+        "duplicates_skipped": duplicates_total,
+        "mapping_status": mapping_status,
     }
 
     # Live Analytics — Lead Workflow split (filter-aware via journey counts)

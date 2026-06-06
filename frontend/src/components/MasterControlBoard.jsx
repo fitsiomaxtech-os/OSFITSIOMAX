@@ -201,8 +201,13 @@ export const MasterControlBoard = () => {
               <p className="mb-3 text-sm font-semibold text-slate-700">4. Sync &amp; System Health</p>
               <ul className="space-y-2.5 text-xs">
                 <li className="flex items-center justify-between"><span className="flex items-center gap-2 text-slate-600"><LinkIcon className="h-3.5 w-3.5 text-slate-400" /> Google Sheet Sync</span>
-                  <span className={data.sync_health?.sheet_status === "Connected" ? "font-semibold text-emerald-600" : "font-semibold text-slate-500"} data-testid="sync-status">{data.sync_health?.sheet_status || "—"}</span>
+                  <span className={data.sync_health?.sheet_status === "Connected" ? "font-semibold text-emerald-600" : (data.sync_health?.sheet_status === "Configured" ? "font-semibold text-amber-600" : "font-semibold text-rose-500")} data-testid="sync-status">{data.sync_health?.sheet_status || "—"}</span>
                 </li>
+                {data.sync_health?.last_sync_source && (
+                  <li className="flex items-center justify-between"><span className="flex items-center gap-2 text-slate-500"><FileSpreadsheet className="h-3.5 w-3.5 text-slate-400" /> Source</span>
+                    <span className="font-semibold text-slate-700" data-testid="sync-source">{data.sync_health.last_sync_source}</span>
+                  </li>
+                )}
                 <li className="flex items-center justify-between"><span className="flex items-center gap-2 text-slate-600"><Clock className="h-3.5 w-3.5 text-slate-400" /> Last Sync</span>
                   <span className="font-semibold text-slate-700" data-testid="sync-last">{formatTime(data.sync_health?.last_sync)}</span>
                 </li>
@@ -213,7 +218,7 @@ export const MasterControlBoard = () => {
                   <span className="font-semibold text-slate-700" data-testid="sync-duplicates">{data.sync_health?.duplicates_skipped ?? 0}</span>
                 </li>
                 <li className="flex items-center justify-between"><span className="flex items-center gap-2 text-slate-600"><MapPin className="h-3.5 w-3.5 text-slate-400" /> Mapping Status</span>
-                  <span className="font-semibold text-emerald-600" data-testid="sync-mapping">{data.sync_health?.mapping_status || "—"}</span>
+                  <span className={data.sync_health?.mapping_status === "All Mapped" ? "font-semibold text-emerald-600" : "font-semibold text-slate-700"} data-testid="sync-mapping">{data.sync_health?.mapping_status || "—"}</span>
                 </li>
               </ul>
             </section>

@@ -341,7 +341,15 @@ async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Di
         imported += 1
 
     new_row_count = (source.get("row_count") or 0) + imported
-    update = {"last_synced": now_iso(), "row_count": new_row_count, "headers_detected": headers}
+    update = {
+        "last_synced": now_iso(),
+        "row_count": new_row_count,
+        "headers_detected": headers,
+        "last_sync_imported": imported,
+        "last_sync_skipped_no_phone": skipped_no_phone,
+        "last_sync_skipped_duplicate": skipped_duplicate,
+        "last_sync_rows_received": len(rows),
+    }
     if mapping != (source.get("column_mapping") or {}):
         update["column_mapping"] = mapping
     update.update(persist_updates)
