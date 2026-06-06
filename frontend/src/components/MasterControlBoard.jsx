@@ -156,8 +156,8 @@ export const MasterControlBoard = () => {
             </div>
           </section>
 
-          {/* 2 / 3 / 4 / 5 — four-column block */}
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {/* 2 / 3 / 4 — three-column block */}
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {/* 2. Attention Required */}
             <section className="rounded-xl border border-slate-200 p-4" data-testid="attention-required">
               <p className="mb-3 text-sm font-semibold text-slate-700">2. Attention Required</p>
@@ -221,28 +221,6 @@ export const MasterControlBoard = () => {
                   <span className={data.sync_health?.mapping_status === "All Mapped" ? "font-semibold text-emerald-600" : "font-semibold text-slate-700"} data-testid="sync-mapping">{data.sync_health?.mapping_status || "—"}</span>
                 </li>
               </ul>
-            </section>
-
-            {/* 5. Quick Actions */}
-            <section className="rounded-xl border border-slate-200 p-4" data-testid="quick-actions">
-              <p className="mb-3 text-sm font-semibold text-slate-700">5. Quick Actions</p>
-              <div className="grid grid-cols-2 gap-2">
-                {QUICK_ACTIONS.map((q) => {
-                  const Icon = q.icon;
-                  const span = q.key === "view_history" ? "col-span-2" : "";
-                  return (
-                    <button
-                      key={q.key}
-                      onClick={() => setQuickAction(q.key)}
-                      className={`flex items-center justify-center gap-2 rounded-lg px-3 py-3 text-xs font-semibold transition hover:scale-[1.02] ${span}`}
-                      style={{ background: q.bg, color: q.color }}
-                      data-testid={`quick-action-${q.key}`}
-                    >
-                      <Icon className="h-3.5 w-3.5" /> {q.label}
-                    </button>
-                  );
-                })}
-              </div>
             </section>
           </div>
         </CardContent>
