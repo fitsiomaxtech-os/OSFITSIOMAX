@@ -696,48 +696,6 @@ export const CRMPage = ({ auth, onLogout }) => {
 
         {(showSuperAdminBoard && superAdminView === "master") && (
           <div className="space-y-4" data-testid="super-admin-master-snapshot">
-            {/* Pre-Sales Dashboard cards */}
-            <Card className="border-slate-200 bg-white" data-testid="top-board-card">
-              <CardHeader>
-                <CardTitle className="text-base text-slate-900" data-testid="top-board-title">
-                  Pre-Sales Dashboard
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5" data-testid="presales-dashboard-cards">
-                <SnapshotCard label="Total Leads" value={masterBoard.total || 0} color="#22c55e" testid="presales-card-total" />
-                {PIPELINE_STAGES.map((stage) => (
-                  <SnapshotCard
-                    key={stage}
-                    label={stage}
-                    value={masterBoard.stage_counts?.[stage] || 0}
-                    color={PRESALES_HEX[stage] || "#0ea5e9"}
-                    testid={`presales-card-${stage}`}
-                  />
-                ))}
-              </CardContent>
-            </Card>
-
-            {/* Branch Admin Master View cards */}
-            <Card className="border-slate-200 bg-white" data-testid="branch-admin-master-card">
-              <CardHeader>
-                <CardTitle className="text-base text-slate-900" data-testid="branch-admin-master-title">
-                  Branch Admin Master View
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6" data-testid="branch-admin-dashboard-cards">
-                <SnapshotCard label="Total Leads" value={branchMaster.total || 0} color="#22c55e" testid="branch-admin-card-total" />
-                {BRANCH_PIPELINE_STAGES.map((stage) => (
-                  <SnapshotCard
-                    key={stage}
-                    label={stage}
-                    value={branchMaster.branch_stage_counts?.[stage] || 0}
-                    color={BRANCH_HEX[stage] || "#0ea5e9"}
-                    testid={`branch-admin-card-${stage}`}
-                  />
-                ))}
-              </CardContent>
-            </Card>
-
             {/* Master Control Board + Live Analytics Overview */}
             <MasterControlBoard />
           </div>
