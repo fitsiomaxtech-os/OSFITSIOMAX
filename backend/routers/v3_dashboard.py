@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 
 from database import v3_col
 from deps import v3_current_user, v3_require_roles
-from constants import V3_STAGES
+from constants import V3_STAGES, V3_BRANCH_STAGES
 from schemas.v3 import V3UserOut, V3LeadOut
 
 router = APIRouter(prefix="/api/v3")
@@ -86,7 +86,18 @@ async def v3_master_board(_: V3UserOut = Depends(v3_current_user)):
     stage_counts = {}
     for stage in V3_STAGES:
         stage_counts[stage] = await v3_col("leads").count_documents({"stage": stage})
-    return {"stage_counts": stage_counts}
+    total = await v3_col("leads").count_documents({})
+    return {"stage_counts": stage_counts, "total": total}
+
+
+@router.get("/boards/branch-master")
+async def v3_branch_master_board(_: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin", "head_physio"))):
+    """Aggregated counts across all branches keyed by branch_stage (for Super Admin Master View)."""
+    branch_stage_counts = {}
+    for stage in V3_BRANCH_STAGES:
+        branch_stage_counts[stage] = await v3_col("leads").count_documents({"branch_stage": stage})
+    total = await v3_col("leads").count_documents({"branch_stage": {"$in": V3_BRANCH_STAGES}})
+    return {"branch_stage_counts": branch_stage_counts, "total": total}
 
 
 @router.get("/boards/branch/{branch_id}")

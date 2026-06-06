@@ -35,6 +35,7 @@ import {
   getDoctors,
   getLeads,
   getMasterBoard,
+  getBranchMasterBoard,
   getSheetConnections,
   getVerticals,
   qualifyLead,
@@ -69,6 +70,40 @@ const PIPELINE_STAGES = [
   "Follow Up",
   "Appointment",
 ];
+
+const PRESALES_HEX = {
+  "New Leads": "#3b82f6",
+  "RNR": "#f43f5e",
+  "Follow Up": "#f59e0b",
+  "Appointment": "#10b981",
+};
+
+const BRANCH_PIPELINE_STAGES = [
+  "New Appointment",
+  "Portfolio",
+  "Follow Up",
+  "Appointment Date & Time",
+  "Cancelled",
+];
+
+const BRANCH_HEX = {
+  "New Appointment": "#3b82f6",
+  "Portfolio": "#8b5cf6",
+  "Follow Up": "#f97316",
+  "Appointment Date & Time": "#14b8a6",
+  "Cancelled": "#f43f5e",
+};
+
+const SnapshotCard = ({ label, value, color, testid }) => (
+  <div
+    className="rounded-2xl p-4 text-left transition"
+    style={{ background: `${color}14`, border: `1px solid ${color}33` }}
+    data-testid={testid}
+  >
+    <p className="text-xs font-medium" style={{ color }}>{label}</p>
+    <p className="mt-1 text-3xl font-bold" style={{ color }}>{value}</p>
+  </div>
+);
 
 const STAGE_THEME = {
   "New Leads": {
@@ -164,7 +199,8 @@ const LOGO_URL =
   "https://customer-assets.emergentagent.com/job_3d74aa9e-a241-4207-b148-2bbe29802707/artifacts/nozl77ti_Logo%20Icon.webp";
 
 export const CRMPage = ({ auth, onLogout }) => {
-  const [masterBoard, setMasterBoard] = useState({ stage_counts: {} });
+  const [masterBoard, setMasterBoard] = useState({ stage_counts: {}, total: 0 });
+  const [branchMaster, setBranchMaster] = useState({ branch_stage_counts: {}, total: 0 });
   const [branchBoard, setBranchBoard] = useState({ stage_counts: {} });
   const [verticals, setVerticals] = useState([]);
   const [branches, setBranches] = useState([]);
@@ -238,9 +274,10 @@ export const CRMPage = ({ auth, onLogout }) => {
     setLoading(true);
     const canManageSheets = ["super_admin", "business_dev"].includes(role);
 
-    const [masterData, branchRows, leadRows, doctorRows, appointmentRows, verticalRows, sheetRows] =
+    const [masterData, branchMasterData, branchRows, leadRows, doctorRows, appointmentRows, verticalRows, sheetRows] =
       await Promise.all([
-        safeCall(() => getMasterBoard(), { stage_counts: {} }),
+        safeCall(() => getMasterBoard(), { stage_counts: {}, total: 0 }),
+        role === "super_admin" ? safeCall(() => getBranchMasterBoard(), { branch_stage_counts: {}, total: 0 }) : Promise.resolve({ branch_stage_counts: {}, total: 0 }),
         safeCall(() => getBranches(), []),
         safeCall(() =>
           getLeads({
@@ -257,6 +294,7 @@ export const CRMPage = ({ auth, onLogout }) => {
       ]);
 
     setMasterBoard(masterData);
+    setBranchMaster(branchMasterData);
     setBranches(branchRows);
     setLeads(leadRows);
     setDoctors(doctorRows);
@@ -656,23 +694,49 @@ export const CRMPage = ({ auth, onLogout }) => {
         )}
 
         {(showSuperAdminBoard && superAdminView === "master") && (
-          <Card className="border-slate-200 bg-white" data-testid="top-board-card">
-            <CardHeader>
-              <CardTitle className="text-base text-slate-900" data-testid="top-board-title">
-                Master Flow Snapshot
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="grid gap-3 md:grid-cols-3">
-              {PIPELINE_STAGES.map((stage) => (
-                <div key={stage} className={`rounded-md border p-3 ${STAGE_THEME[stage]?.column || "border-slate-200 bg-slate-50"}`} data-testid={`top-board-stage-${stage}`}>
-                  <p className="text-xs text-slate-500" data-testid={`top-board-stage-label-${stage}`}>{stage}</p>
-                  <p className={`text-2xl font-semibold ${STAGE_THEME[stage]?.metric || "text-sky-600"}`} data-testid={`top-board-stage-value-${stage}`}>
-                    {masterBoard.stage_counts?.[stage] || 0}
-                  </p>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
+          <div className="space-y-4" data-testid="super-admin-master-snapshot">
+            {/* Pre-Sales Dashboard cards */}
+            <Card className="border-slate-200 bg-white" data-testid="top-board-card">
+              <CardHeader>
+                <CardTitle className="text-base text-slate-900" data-testid="top-board-title">
+                  Pre-Sales Dashboard
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5" data-testid="presales-dashboard-cards">
+                <SnapshotCard label="Total Leads" value={masterBoard.total || 0} color="#22c55e" testid="presales-card-total" />
+                {PIPELINE_STAGES.map((stage) => (
+                  <SnapshotCard
+                    key={stage}
+                    label={stage}
+                    value={masterBoard.stage_counts?.[stage] || 0}
+                    color={PRESALES_HEX[stage] || "#0ea5e9"}
+                    testid={`presales-card-${stage}`}
+                  />
+                ))}
+              </CardContent>
+            </Card>
+
+            {/* Branch Admin Master View cards */}
+            <Card className="border-slate-200 bg-white" data-testid="branch-admin-master-card">
+              <CardHeader>
+                <CardTitle className="text-base text-slate-900" data-testid="branch-admin-master-title">
+                  Branch Admin Master View
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6" data-testid="branch-admin-dashboard-cards">
+                <SnapshotCard label="Total Leads" value={branchMaster.total || 0} color="#22c55e" testid="branch-admin-card-total" />
+                {BRANCH_PIPELINE_STAGES.map((stage) => (
+                  <SnapshotCard
+                    key={stage}
+                    label={stage}
+                    value={branchMaster.branch_stage_counts?.[stage] || 0}
+                    color={BRANCH_HEX[stage] || "#0ea5e9"}
+                    testid={`branch-admin-card-${stage}`}
+                  />
+                ))}
+              </CardContent>
+            </Card>
+          </div>
         )}
 
         {showBusinessDevBoard && (
