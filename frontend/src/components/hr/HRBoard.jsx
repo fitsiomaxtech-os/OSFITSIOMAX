@@ -329,10 +329,11 @@ const RolesTab = ({ meta }) => {
                     <td className="px-3 py-2">
                       <button
                         onClick={() => setActionTarget(u)}
-                        className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:border-slate-300 hover:bg-slate-50"
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                        aria-label={`Actions for ${u.full_name}`}
                         data-testid={`hr-user-actions-${u.id}`}
                       >
-                        <MoreVertical className="h-3.5 w-3.5" /> Actions
+                        <MoreVertical className="h-4 w-4" />
                       </button>
                     </td>
                   </tr>
