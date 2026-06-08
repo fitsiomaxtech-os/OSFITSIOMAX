@@ -227,6 +227,8 @@ export const hrCreateUser = async (payload) => (await api.post("/hr/users", payl
 export const hrUpdateUserRole = async (id, role) => (await api.patch(`/hr/users/${id}/role?role=${role}`)).data;
 export const hrResetPassword = async (id, password) => (await api.patch(`/hr/users/${id}/reset-password?password=${encodeURIComponent(password)}`)).data;
 export const hrDeactivateUser = async (id) => (await api.delete(`/hr/users/${id}`)).data;
+export const hrActivateUser = async (id) => (await api.patch(`/hr/users/${id}/activate`)).data;
+export const hrDeleteUserPermanent = async (id) => (await api.delete(`/hr/users/${id}/permanent`)).data;
 
 // Custom Lead Fields
 export const leadFieldsList = async () => (await api.get("/lead-fields")).data;

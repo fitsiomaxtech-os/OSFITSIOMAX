@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { Users, ShieldCheck, BarChart3, Plus, Pencil, Trash2, Eye, KeyRound, X, UserPlus, Stethoscope } from "lucide-react";
+import { Users, ShieldCheck, BarChart3, Plus, Pencil, Trash2, Eye, KeyRound, X, UserPlus, Stethoscope, MoreVertical, CheckCircle2, XCircle, AlertOctagon } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import {
   hrDashboard, hrEmployees, hrCreateEmployee, hrUpdateEmployee, hrDeleteEmployee,
-  hrUsers, hrCreateUser, hrResetPassword, hrDeactivateUser, hrUpdateUserRole, hrMeta,
+  hrUsers, hrCreateUser, hrResetPassword, hrDeactivateUser, hrActivateUser, hrDeleteUserPermanent, hrUpdateUserRole, hrMeta,
   getBranches, getDoctors, createDoctor, addDoctorSlots,
 } from "@/lib/api";
 
@@ -289,26 +289,13 @@ const RolesTab = ({ meta }) => {
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
   const [showCreate, setShowCreate] = useState(false);
-  const [resetTarget, setResetTarget] = useState(null);
-  const [newPwd, setNewPwd] = useState("");
+  const [actionTarget, setActionTarget] = useState(null);
 
   const load = useCallback(() => hrUsers({ search, role: roleFilter !== "all" ? roleFilter : undefined }).then(setUsers).catch((e) => console.warn("[load failed]", e?.message || e)), [search, roleFilter]);
   useEffect(() => { load(); }, [load]);
 
   const changeRole = async (u, role) => {
     try { await hrUpdateUserRole(u.id, role); toast.success("Role updated"); load(); }
-    catch (e) { toast.error(e?.response?.data?.detail || "Failed"); }
-  };
-
-  const deactivate = async (u) => {
-    if (!window.confirm(`Deactivate ${u.full_name}?`)) return;
-    try { await hrDeactivateUser(u.id); toast.success("Deactivated"); load(); }
-    catch (e) { toast.error(e?.response?.data?.detail || "Failed"); }
-  };
-
-  const submitReset = async () => {
-    if (newPwd.length < 6) { toast.error("Min 6 characters"); return; }
-    try { await hrResetPassword(resetTarget.id, newPwd); toast.success("Password reset"); setResetTarget(null); setNewPwd(""); }
     catch (e) { toast.error(e?.response?.data?.detail || "Failed"); }
   };
 
@@ -340,10 +327,13 @@ const RolesTab = ({ meta }) => {
                     <td className="px-3 py-2 text-xs text-emerald-600">{u.linked_employee ? `${u.linked_employee.employee_code} - ${u.linked_employee.designation || u.linked_employee.full_name}` : "—"}</td>
                     <td className="px-3 py-2"><span className={`rounded px-2 py-0.5 text-xs ${u.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}`}>{u.is_active ? "Active" : "Inactive"}</span></td>
                     <td className="px-3 py-2">
-                      <div className="flex gap-2">
-                        <button onClick={() => setResetTarget(u)} className="text-orange-500 hover:text-orange-700" data-testid={`hr-user-pwd-${u.id}`}><KeyRound className="h-4 w-4" /></button>
-                        <button onClick={() => deactivate(u)} className="text-red-500 hover:text-red-700" data-testid={`hr-user-del-${u.id}`}><Trash2 className="h-4 w-4" /></button>
-                      </div>
+                      <button
+                        onClick={() => setActionTarget(u)}
+                        className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:border-slate-300 hover:bg-slate-50"
+                        data-testid={`hr-user-actions-${u.id}`}
+                      >
+                        <MoreVertical className="h-3.5 w-3.5" /> Actions
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -356,15 +346,148 @@ const RolesTab = ({ meta }) => {
 
       {showCreate && <CreateUserModal meta={meta} onClose={() => setShowCreate(false)} onSaved={() => { setShowCreate(false); load(); }} />}
 
-      {resetTarget && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" data-testid="hr-reset-pwd-modal">
-          <div className="w-full max-w-sm space-y-3 rounded-lg bg-white p-5 shadow-xl">
-            <h3 className="text-base font-semibold">Reset Password — {resetTarget.full_name}</h3>
-            <Input type="password" placeholder="New password (min 6)" value={newPwd} onChange={(e) => setNewPwd(e.target.value)} data-testid="hr-reset-pwd-input" />
-            <div className="flex gap-2"><Button variant="outline" onClick={() => { setResetTarget(null); setNewPwd(""); }} className="flex-1" data-testid="hr-reset-pwd-cancel">Cancel</Button><Button onClick={submitReset} className="flex-1" data-testid="hr-reset-pwd-submit">Reset</Button></div>
-          </div>
-        </div>
+      {actionTarget && (
+        <UserActionsModal
+          user={actionTarget}
+          onClose={() => setActionTarget(null)}
+          onDone={() => { setActionTarget(null); load(); }}
+        />
       )}
+    </div>
+  );
+};
+
+const UserActionsModal = ({ user, onClose, onDone }) => {
+  const [mode, setMode] = useState(null); // null | "password" | "delete"
+  const [pwd, setPwd] = useState("");
+  const [confirmPwd, setConfirmPwd] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submitPwd = async () => {
+    if (pwd.length < 6) { toast.error("Password must be at least 6 characters"); return; }
+    if (pwd !== confirmPwd) { toast.error("Passwords do not match"); return; }
+    try {
+      setBusy(true);
+      await hrResetPassword(user.id, pwd);
+      toast.success(`Password updated for ${user.full_name}`);
+      onDone();
+    } catch (e) { toast.error(e?.response?.data?.detail || "Failed to update password"); }
+    finally { setBusy(false); }
+  };
+
+  const doActivate = async () => {
+    try { setBusy(true); await hrActivateUser(user.id); toast.success(`${user.full_name} activated`); onDone(); }
+    catch (e) { toast.error(e?.response?.data?.detail || "Failed"); }
+    finally { setBusy(false); }
+  };
+
+  const doDeactivate = async () => {
+    try { setBusy(true); await hrDeactivateUser(user.id); toast.success(`${user.full_name} deactivated`); onDone(); }
+    catch (e) { toast.error(e?.response?.data?.detail || "Failed"); }
+    finally { setBusy(false); }
+  };
+
+  const doDelete = async () => {
+    try {
+      setBusy(true);
+      await hrDeleteUserPermanent(user.id);
+      toast.success(`${user.full_name} permanently deleted`);
+      onDone();
+    } catch (e) { toast.error(e?.response?.data?.detail || "Failed to delete"); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" data-testid="hr-user-actions-modal">
+      <div className="w-full max-w-md space-y-4 rounded-xl bg-white p-5 shadow-2xl">
+        <div className="flex items-start justify-between">
+          <div>
+            <h3 className="text-base font-semibold text-slate-800" data-testid="hr-actions-title">Actions — {user.full_name}</h3>
+            <p className="text-xs text-slate-500">{user.email} · <span className={user.is_active ? "text-emerald-600" : "text-slate-500"}>{user.is_active ? "Active" : "Inactive"}</span></p>
+          </div>
+          <button onClick={onClose} className="rounded-md p-1 text-slate-400 hover:bg-slate-100" data-testid="hr-actions-close"><X className="h-4 w-4" /></button>
+        </div>
+
+        {!mode && (
+          <div className="grid gap-2">
+            <button
+              onClick={() => setMode("password")}
+              className="flex items-center gap-3 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2.5 text-left hover:bg-orange-100"
+              data-testid="hr-actions-change-password"
+            >
+              <KeyRound className="h-4 w-4 text-orange-600" />
+              <div>
+                <p className="text-sm font-semibold text-orange-700">Change Password</p>
+                <p className="text-[11px] text-orange-600">Set a new password for this user.</p>
+              </div>
+            </button>
+
+            {user.is_active ? (
+              <button
+                onClick={doDeactivate}
+                disabled={busy}
+                className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-left hover:bg-slate-100 disabled:opacity-60"
+                data-testid="hr-actions-deactivate"
+              >
+                <XCircle className="h-4 w-4 text-slate-600" />
+                <div>
+                  <p className="text-sm font-semibold text-slate-700">Deactivate</p>
+                  <p className="text-[11px] text-slate-500">User keeps their data but can no longer log in.</p>
+                </div>
+              </button>
+            ) : (
+              <button
+                onClick={doActivate}
+                disabled={busy}
+                className="flex items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-left hover:bg-emerald-100 disabled:opacity-60"
+                data-testid="hr-actions-activate"
+              >
+                <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                <div>
+                  <p className="text-sm font-semibold text-emerald-700">Activate</p>
+                  <p className="text-[11px] text-emerald-600">Restore login access for this user.</p>
+                </div>
+              </button>
+            )}
+
+            <button
+              onClick={() => setMode("delete")}
+              className="flex items-center gap-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2.5 text-left hover:bg-rose-100"
+              data-testid="hr-actions-delete"
+            >
+              <AlertOctagon className="h-4 w-4 text-rose-600" />
+              <div>
+                <p className="text-sm font-semibold text-rose-700">Permanently Delete</p>
+                <p className="text-[11px] text-rose-600">Cannot be undone — user record is removed completely.</p>
+              </div>
+            </button>
+          </div>
+        )}
+
+        {mode === "password" && (
+          <div className="space-y-3" data-testid="hr-actions-password-form">
+            <Input type="password" placeholder="New password (min 6)" value={pwd} onChange={(e) => setPwd(e.target.value)} data-testid="hr-actions-password-new" />
+            <Input type="password" placeholder="Confirm new password" value={confirmPwd} onChange={(e) => setConfirmPwd(e.target.value)} data-testid="hr-actions-password-confirm" />
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => { setMode(null); setPwd(""); setConfirmPwd(""); }} className="flex-1" data-testid="hr-actions-password-back">Back</Button>
+              <Button onClick={submitPwd} disabled={busy} className="flex-1 bg-orange-500 hover:bg-orange-600" data-testid="hr-actions-password-save">Update Password</Button>
+            </div>
+          </div>
+        )}
+
+        {mode === "delete" && (
+          <div className="space-y-3" data-testid="hr-actions-delete-confirm">
+            <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">
+              <p className="font-semibold">Confirm permanent deletion</p>
+              <p className="mt-1">This will delete <b>{user.full_name}</b> ({user.email}) permanently. This action cannot be undone.</p>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setMode(null)} className="flex-1" data-testid="hr-actions-delete-cancel">Cancel</Button>
+              <Button onClick={doDelete} disabled={busy} className="flex-1 bg-rose-600 hover:bg-rose-700" data-testid="hr-actions-delete-confirm-btn">Yes, Delete Permanently</Button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
@@ -443,7 +566,7 @@ const FitsiomaxExpertsTab = () => {
   const [slotTime, setSlotTime] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const refresh = useCallback(async () => {
+  const reloadList = async () => {
     try {
       const [docs, brs] = await Promise.all([getDoctors(), getBranches()]);
       setDoctors(docs || []);
@@ -451,9 +574,19 @@ const FitsiomaxExpertsTab = () => {
     } catch (err) {
       toast.error("Failed to load Fitsiomax Experts");
     }
-  }, []);
+  };
 
-  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const [docs, brs] = await Promise.all([getDoctors(), getBranches()]);
+        setDoctors(docs || []);
+        setBranches(brs || []);
+      } catch (err) {
+        toast.error("Failed to load Fitsiomax Experts");
+      }
+    })();
+  }, []);
 
   const createDoctorNow = async (event) => {
     event.preventDefault();
@@ -465,7 +598,7 @@ const FitsiomaxExpertsTab = () => {
       setSaving(true);
       await createDoctor({ ...doctorForm, branch_id: doctorForm.branch_id || null });
       setDoctorForm({ full_name: "", profile_type: "physio", branch_id: "", specialization: "" });
-      await refresh();
+      await reloadList();
       toast.success("Fitsiomax Expert created");
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed to create");

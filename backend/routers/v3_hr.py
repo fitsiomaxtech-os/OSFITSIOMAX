@@ -256,6 +256,24 @@ async def deactivate_user(user_id: str, _: V3UserOut = Depends(v3_require_roles(
     return {"message": "User deactivated"}
 
 
+@router.patch("/users/{user_id}/activate")
+async def activate_user(user_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    res = await v3_col("users").update_one({"id": user_id}, {"$set": {"is_active": True}})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"message": "User activated"}
+
+
+@router.delete("/users/{user_id}/permanent")
+async def delete_user_permanent(user_id: str, current: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    if user_id == current.id:
+        raise HTTPException(status_code=400, detail="You cannot delete your own account")
+    res = await v3_col("users").delete_one({"id": user_id})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"message": "User permanently deleted"}
+
+
 # ---------- Branch Admin Picker (for super-admin Branch creation flow) ----------
 
 @router.get("/branch-admin-candidates")
