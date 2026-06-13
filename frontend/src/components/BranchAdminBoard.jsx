@@ -38,6 +38,7 @@ import {
 import { HeadPhysioCalendar } from "@/components/HeadPhysioCalendar";
 import { FinanceBoard } from "@/components/FinanceBoard";
 import { ConsultationsBoard } from "@/components/ConsultationsBoard";
+import { SmartBookingPicker } from "@/components/SmartBookingPicker";
 
 const BRANCH_STAGES = [
   "New Appointment",
@@ -737,47 +738,15 @@ function BranchLeadModal({ lead, branchId, onClose, onUpdate, reloadBoard }) {
               </button>
             </div>
             <div className="space-y-4 p-5">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="mb-1 block text-xs font-semibold text-slate-600">Appointment Date *</label>
-                  <Input type="date" value={apptDraft.appointment_date} min={new Date().toISOString().slice(0, 10)} onChange={(e) => setApptDraft({ ...apptDraft, appointment_date: e.target.value })} data-testid="branch-appt-date" />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-semibold text-slate-600">Appointment Time *</label>
-                  <Input type="time" value={apptDraft.appointment_time} onChange={(e) => setApptDraft({ ...apptDraft, appointment_time: e.target.value })} data-testid="branch-appt-time" />
-                </div>
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-semibold text-slate-600">Assign Physio / Doctor *</label>
-                {(!apptDraft.appointment_date || !apptDraft.appointment_time) ? (
-                  <div className="rounded-md border border-dashed border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-700" data-testid="branch-appt-physio-hint">
-                    Pick the appointment <b>date</b> and <b>time</b> first — available experts will appear here.
-                  </div>
-                ) : apptExperts.loading ? (
-                  <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">Checking experts availability…</div>
-                ) : apptExperts.experts.length === 0 ? (
-                  <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700" data-testid="branch-appt-physio-empty">
-                    No experts are free at this date &amp; time at this branch{apptExperts.busy_count > 0 ? ` (${apptExperts.busy_count} already booked)` : ""}. Try another slot.
-                  </div>
-                ) : (
-                  <>
-                    <select
-                      value={apptDraft.physio_id}
-                      onChange={(e) => setApptDraft({ ...apptDraft, physio_id: e.target.value })}
-                      className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm focus:border-teal-400 focus:outline-none focus:ring-1 focus:ring-teal-400"
-                      data-testid="branch-appt-physio"
-                    >
-                      <option value="">-- choose an available expert --</option>
-                      {apptExperts.experts.map((d) => (
-                        <option key={d.id} value={d.id}>{d.full_name} {d.specialization ? `· ${d.specialization}` : ""}</option>
-                      ))}
-                    </select>
-                    <p className="mt-1 text-[11px] text-emerald-600" data-testid="branch-appt-physio-count">
-                      {apptExperts.available_count} available · {apptExperts.busy_count} already booked at this slot
-                    </p>
-                  </>
-                )}
-              </div>
+              <SmartBookingPicker
+                branchId={branchId}
+                value={{
+                  appointment_date: apptDraft.appointment_date,
+                  appointment_time: apptDraft.appointment_time,
+                  physio_id: apptDraft.physio_id,
+                }}
+                onChange={(v) => setApptDraft({ ...apptDraft, ...v })}
+              />
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600">Notes</label>
                 <textarea

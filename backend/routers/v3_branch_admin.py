@@ -1,6 +1,8 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 from typing import Optional
+from datetime import datetime, date as dt_date, timedelta
+from calendar import monthrange
 import uuid
 
 from database import v3_col
@@ -235,3 +237,140 @@ async def v3_move_consultation_stage(lead_id: str, payload: V3ConsultationStageI
     })
     updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     return V3LeadOut(**updated)
+
+
+# ---------- Smart Booking ----------
+
+DEFAULT_SLOTS = [f"{h:02d}:{m:02d}" for h in range(9, 18) for m in (0, 30)]  # 09:00 → 17:30 every 30 min
+
+
+async def _branch_experts(branch_id: str):
+    rows = await v3_col("doctors").find({"branch_id": branch_id}, {"_id": 0}).to_list(500)
+    return rows or await v3_col("doctors").find({}, {"_id": 0}).to_list(500)
+
+
+def _expert_slots(expert: dict):
+    """Return the 30-min HH:MM slot list for an expert — manual slots if defined, else default grid."""
+    custom = expert.get("slots") or []
+    norm = []
+    for s in custom:
+        if isinstance(s, str) and len(s) >= 5 and s[2] == ":":
+            norm.append(s[:5])
+    return norm if norm else DEFAULT_SLOTS
+
+
+async def _booked_by_expert(branch_id: str, date_str: str):
+    """Return {expert_id: set(HH:MM)} of already-booked slots for a branch on a date."""
+    cursor = v3_col("leads").find(
+        {"branch_id": branch_id, "appointment_date": date_str,
+         "assigned_physio_id": {"$ne": None}, "branch_stage": {"$ne": "Cancelled"}},
+        {"_id": 0, "assigned_physio_id": 1, "appointment_time": 1}
+    )
+    booked = {}
+    async for ld in cursor:
+        eid = ld.get("assigned_physio_id")
+        t = (ld.get("appointment_time") or "")[:5]
+        if not eid or not t:
+            continue
+        booked.setdefault(eid, set()).add(t)
+    return booked
+
+
+@router.get("/branch-admin/calendar-availability/{branch_id}")
+async def v3_calendar_availability(
+    branch_id: str,
+    month: str = Query(..., description="YYYY-MM"),
+    _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio")),
+):
+    """Return per-day availability for a branch in a given month."""
+    try:
+        y, m = month.split("-")
+        y, m = int(y), int(m)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="month must be YYYY-MM") from exc
+    _, last_day = monthrange(y, m)
+    experts = await _branch_experts(branch_id)
+    days = {}
+    for d in range(1, last_day + 1):
+        date_str = f"{y:04d}-{m:02d}-{d:02d}"
+        booked = await _booked_by_expert(branch_id, date_str)
+        # Count experts who have at least 1 free slot today
+        free_experts = 0
+        for e in experts:
+            slots = set(_expert_slots(e))
+            taken = booked.get(e.get("id"), set())
+            if slots - taken:
+                free_experts += 1
+        days[date_str] = {
+            "available_experts": free_experts,
+            "total_experts": len(experts),
+            "fully_booked": free_experts == 0 and len(experts) > 0,
+        }
+    return {"month": month, "branch_id": branch_id, "experts_total": len(experts), "days": days}
+
+
+@router.get("/branch-admin/day-slots/{branch_id}")
+async def v3_day_slots(
+    branch_id: str,
+    date: str = Query(..., description="YYYY-MM-DD"),
+    _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio")),
+):
+    """Return 30-min slots for a given day with the list of available experts per slot."""
+    experts = await _branch_experts(branch_id)
+    booked = await _booked_by_expert(branch_id, date)
+    # Union of all slots offered by any expert that day
+    all_slots = set()
+    for e in experts:
+        all_slots.update(_expert_slots(e))
+    out = []
+    for t in sorted(all_slots):
+        free_experts = []
+        for e in experts:
+            if t not in _expert_slots(e):
+                continue
+            if t in booked.get(e.get("id"), set()):
+                continue
+            free_experts.append({"id": e["id"], "full_name": e.get("full_name"), "specialization": e.get("specialization"), "profile_type": e.get("profile_type")})
+        out.append({"time": t, "available_experts": free_experts, "available_count": len(free_experts)})
+    return {"date": date, "branch_id": branch_id, "slots": out}
+
+
+@router.get("/branch-admin/expert-calendar/{expert_id}")
+async def v3_expert_calendar(
+    expert_id: str,
+    month: str = Query(..., description="YYYY-MM"),
+    _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio")),
+):
+    """Return per-day availability for a single expert in a month + the slots they offer."""
+    try:
+        y, m = month.split("-")
+        y, m = int(y), int(m)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="month must be YYYY-MM") from exc
+    expert = await v3_col("doctors").find_one({"id": expert_id}, {"_id": 0})
+    if not expert:
+        raise HTTPException(status_code=404, detail="Expert not found")
+    slots = _expert_slots(expert)
+    _, last_day = monthrange(y, m)
+    days = {}
+    branch_id = expert.get("branch_id")
+    for d in range(1, last_day + 1):
+        date_str = f"{y:04d}-{m:02d}-{d:02d}"
+        if branch_id:
+            booked = await _booked_by_expert(branch_id, date_str)
+            taken = booked.get(expert_id, set())
+        else:
+            # Fallback: look at any lead assigned to this expert that day
+            cursor = v3_col("leads").find(
+                {"assigned_physio_id": expert_id, "appointment_date": date_str, "branch_stage": {"$ne": "Cancelled"}},
+                {"_id": 0, "appointment_time": 1},
+            )
+            taken = set()
+            async for ld in cursor:
+                t = (ld.get("appointment_time") or "")[:5]
+                if t:
+                    taken.add(t)
+        free_slots = [s for s in slots if s not in taken]
+        days[date_str] = {"available_slots": free_slots, "total_slots": len(slots), "fully_booked": len(free_slots) == 0}
+    return {"expert_id": expert_id, "expert_name": expert.get("full_name"), "month": month, "slots_per_day": slots, "days": days}
+

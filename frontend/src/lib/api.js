@@ -127,6 +127,9 @@ export const assignPhysio = async (leadId, payload) => (await api.post(`/leads/$
 export const scheduleBranchAppointment = async (leadId, payload) => (await api.post(`/leads/${leadId}/schedule-branch-appointment`, payload)).data;
 export const getConsultationsBoard = async (branchId) => (await api.get(`/branch-admin/consultations/${branchId}/board`)).data;
 export const getAvailableExperts = async (branchId, date, time) => (await api.get(`/branch-admin/available-experts/${branchId}`, { params: { date, time } })).data;
+export const getCalendarAvailability = async (branchId, month) => (await api.get(`/branch-admin/calendar-availability/${branchId}`, { params: { month } })).data;
+export const getDaySlots = async (branchId, date) => (await api.get(`/branch-admin/day-slots/${branchId}`, { params: { date } })).data;
+export const getExpertCalendar = async (expertId, month) => (await api.get(`/branch-admin/expert-calendar/${expertId}`, { params: { month } })).data;
 export const moveConsultationStage = async (leadId, consultation_stage) => (await api.post(`/leads/${leadId}/move-consultation-stage`, { consultation_stage })).data;
 
 export const createHeadPhysio = async (payload) => (await api.post("/branch/head-physios", payload)).data;
