@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Eye, Plus, RefreshCw, Search, Settings as Cog, Calendar as CalendarIcon, Phone, FileText, StickyNote, ArrowRight, CheckCircle2, X, Pencil, PhoneOff, Clock, Bell, Building2, Video } from "lucide-react";
+import { Eye, Plus, RefreshCw, Search, Settings as Cog, Calendar as CalendarIcon, Phone, FileText, StickyNote, ArrowRight, CheckCircle2, X, Pencil, PhoneOff, Clock, Bell, Building2, Video, Trash2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import {
-  getLeads, createManualLead, stagesList, updateLead, rnrAttempt, scheduleFollowUp, scheduleAppointment, getBranches, leadActivity,
+  getLeads, createManualLead, stagesList, updateLead, rnrAttempt, scheduleFollowUp, scheduleAppointment, getBranches, leadActivity, deleteLead,
 } from "@/lib/api";
 import { LeadEditModal } from "@/components/LeadEditModal";
 import { CreateLeadModal } from "@/components/CreateLeadModal";
@@ -54,7 +54,7 @@ const avatarColor = (name) => {
   return AVATAR_PALETTE[idx];
 };
 
-export const PreSalesCRM = ({ onManageStages }) => {
+export const PreSalesCRM = ({ onManageStages, role }) => {
   const [stages, setStages] = useState([]);
   const [leads, setLeads] = useState([]);
   const [branches, setBranches] = useState([]);
@@ -67,6 +67,7 @@ export const PreSalesCRM = ({ onManageStages }) => {
   const [dateFilter, setDateFilter] = useState(null);
   const [editing, setEditing] = useState(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(null);
   const [loading, setLoading] = useState(false);
 
   const load = useCallback(async () => {
@@ -330,7 +331,18 @@ export const PreSalesCRM = ({ onManageStages }) => {
                         })() : (l.department || "—")}
                       </td>
                       <td className="px-3 py-3 text-xs text-slate-400">{(l.created_at || "").slice(0, 10)}</td>
-                      <td className="px-3 py-3"><button onClick={() => setEditing(l)} className="text-slate-500 hover:text-sky-600" data-testid={`presales-lead-view-${l.id}`}><Eye className="h-4 w-4" /></button></td>
+                      <td className="px-3 py-3">
+                        <div className="flex items-center gap-1">
+                          <button onClick={(e) => { e.stopPropagation(); setEditing(l); }} className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-sky-600" data-testid={`presales-lead-view-${l.id}`} title="View / Edit">
+                            <Eye className="h-4 w-4" />
+                          </button>
+                          {role === "super_admin" && (
+                            <button onClick={(e) => { e.stopPropagation(); setConfirmDelete(l); }} className="rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600" data-testid={`presales-lead-delete-${l.id}`} title="Delete lead">
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
                     </tr>
                   );
                 })}
@@ -347,6 +359,41 @@ export const PreSalesCRM = ({ onManageStages }) => {
 
       {showCreate && (
         <CreateLeadModal onClose={() => setShowCreate(false)} onSaved={load} />
+      )}
+
+      {confirmDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" data-testid="presales-delete-dialog">
+          <div className="w-full max-w-sm space-y-4 rounded-xl bg-white p-5 shadow-2xl">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-rose-100">
+                <Trash2 className="h-5 w-5 text-rose-600" />
+              </div>
+              <div>
+                <h3 className="text-base font-semibold text-slate-900" data-testid="presales-delete-title">Delete lead?</h3>
+                <p className="mt-1 text-xs text-slate-500">This will permanently delete <b className="text-slate-700">{confirmDelete.name || "this lead"}</b> along with its activity history and follow-ups. This cannot be undone.</p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="outline" onClick={() => setConfirmDelete(null)} data-testid="presales-delete-cancel">Cancel</Button>
+              <Button
+                onClick={async () => {
+                  try {
+                    await deleteLead(confirmDelete.id);
+                    toast.success(`Deleted ${confirmDelete.name || "lead"}`);
+                    setConfirmDelete(null);
+                    load();
+                  } catch (e) {
+                    toast.error(e?.response?.data?.detail || "Delete failed");
+                  }
+                }}
+                className="bg-rose-600 hover:bg-rose-700"
+                data-testid="presales-delete-confirm"
+              >
+                Yes, Delete
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

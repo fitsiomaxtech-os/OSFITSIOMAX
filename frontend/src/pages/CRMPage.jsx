@@ -683,7 +683,7 @@ export const CRMPage = ({ auth, onLogout }) => {
         )}
 
         {showSuperAdminBoard && superAdminView === "presales" && (
-          <PreSalesCRM onManageStages={() => setSuperAdminView("stages")} />
+          <PreSalesCRM onManageStages={() => setSuperAdminView("stages")} role={role} />
         )}
 
         {showSuperAdminBoard && superAdminView === "stages" && (
@@ -691,7 +691,7 @@ export const CRMPage = ({ auth, onLogout }) => {
         )}
 
         {showPreSalesBoard && (
-          <PreSalesCRM />
+          <PreSalesCRM role={role} />
         )}
 
         {(showSuperAdminBoard && superAdminView === "master") && (

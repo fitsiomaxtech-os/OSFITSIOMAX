@@ -81,6 +81,22 @@ async def v3_manual_lead(payload: V3LeadCreate, _: V3UserOut = Depends(v3_requir
     return V3LeadOut(**lead)
 
 
+@router.delete("/leads/{lead_id}")
+async def v3_delete_lead(
+    lead_id: str,
+    user: V3UserOut = Depends(v3_require_roles("super_admin")),
+):
+    """Permanently delete a lead and its activity history. Super Admin only."""
+    res = await v3_col("leads").delete_one({"id": lead_id})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    # Clean up related records
+    await v3_col("lead_activity").delete_many({"lead_id": lead_id})
+    await v3_col("lead_followups").delete_many({"lead_id": lead_id})
+    return {"message": "Lead deleted", "lead_id": lead_id}
+
+
+
 @router.put("/leads/{lead_id}", response_model=V3LeadOut)
 async def v3_edit_lead(
     lead_id: str,
