@@ -36,6 +36,7 @@ import {
 } from "@/lib/api";
 import { HeadPhysioCalendar } from "@/components/HeadPhysioCalendar";
 import { FinanceBoard } from "@/components/FinanceBoard";
+import { ConsultationsBoard } from "@/components/ConsultationsBoard";
 
 const BRANCH_STAGES = [
   "New Appointment",
@@ -107,7 +108,8 @@ export const BranchAdminBoard = ({ branchId }) => {
   };
 
   const VIEW_TABS = [
-    { key: "pipeline", label: "Appointment", icon: LayoutDashboard },
+    { key: "pipeline", label: "Appointment Lead", icon: LayoutDashboard },
+    { key: "consultations", label: "Consultations", icon: Stethoscope },
     { key: "head_physio", label: "Head Physio Calendar", icon: Stethoscope },
     { key: "finance", label: "Finance", icon: CreditCard },
   ];
@@ -138,6 +140,8 @@ export const BranchAdminBoard = ({ branchId }) => {
 
       {activeView === "head_physio" ? (
         <HeadPhysioCalendar branchId={branchId} />
+      ) : activeView === "consultations" ? (
+        <ConsultationsBoard branchId={branchId} />
       ) : activeView === "finance" ? (
         <FinanceBoard />
       ) : (

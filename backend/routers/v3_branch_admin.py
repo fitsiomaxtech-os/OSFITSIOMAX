@@ -6,10 +6,10 @@ import uuid
 from database import v3_col
 from utils import now_iso
 from deps import v3_require_roles
-from constants import V3_BRANCH_STAGES
+from constants import V3_BRANCH_STAGES, V3_CONSULTATION_STAGES
 from schemas.v3 import (
     V3UserOut, V3LeadOut,
-    V3BranchStageInput, V3CollectFeeInput, V3AssignPhysioInput,
+    V3BranchStageInput, V3CollectFeeInput, V3AssignPhysioInput, V3ConsultationStageInput,
 )
 
 router = APIRouter(prefix="/api/v3")
@@ -87,6 +87,7 @@ async def v3_assign_physio(lead_id: str, payload: V3AssignPhysioInput, user: V3U
         "assigned_physio_id": payload.physio_id,
         "assigned_physio_name": physio["full_name"],
         "branch_stage": "Appointment Date & Time",
+        "consultation_stage": lead.get("consultation_stage") or "New Appointment",
         "updated_at": now_iso(),
     }})
     activity = {
@@ -132,6 +133,9 @@ async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointm
         "branch_stage": payload.final_stage,
         "updated_at": now_iso(),
     }
+    # When the appointment is booked (not cancelled), seed the Consultations pipeline
+    if payload.final_stage == "Appointment Date & Time":
+        updates["consultation_stage"] = lead.get("consultation_stage") or "New Appointment"
     if payload.notes and payload.notes.strip():
         existing_notes = (lead.get("notes") or "").strip()
         appended = f"[Appt {payload.appointment_date} {payload.appointment_time}] {payload.notes.strip()}"
@@ -142,6 +146,44 @@ async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointm
         "lead_id": lead_id,
         "action": "branch_appointment_scheduled",
         "details": f"Appointment {payload.appointment_date} {payload.appointment_time} with {physio['full_name']} → {payload.final_stage}" + (f" · Notes: {payload.notes.strip()}" if payload.notes else ""),
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": now_iso(),
+    })
+    updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    return V3LeadOut(**updated)
+
+
+
+@router.get("/branch-admin/consultations/{branch_id}/board")
+async def v3_consultations_board(branch_id: str, _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio"))):
+    """Return all leads in the Consultations pipeline for a branch, grouped by consultation_stage."""
+    query = {"branch_id": branch_id, "consultation_stage": {"$ne": None}}
+    leads_docs = await v3_col("leads").find(query, {"_id": 0}).sort("updated_at", -1).to_list(2000)
+    stage_counts = {}
+    for stage in V3_CONSULTATION_STAGES:
+        stage_counts[stage] = sum(1 for ld in leads_docs if ld.get("consultation_stage") == stage)
+    lead_list = [V3LeadOut(**ld).model_dump() for ld in leads_docs]
+    return {"leads": lead_list, "stage_counts": stage_counts, "stages": V3_CONSULTATION_STAGES}
+
+
+@router.post("/leads/{lead_id}/move-consultation-stage", response_model=V3LeadOut)
+async def v3_move_consultation_stage(lead_id: str, payload: V3ConsultationStageInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio"))):
+    if payload.consultation_stage not in V3_CONSULTATION_STAGES:
+        raise HTTPException(status_code=400, detail=f"Invalid consultation_stage. Allowed: {V3_CONSULTATION_STAGES}")
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    previous = lead.get("consultation_stage") or "—"
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": {
+        "consultation_stage": payload.consultation_stage,
+        "updated_at": now_iso(),
+    }})
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": lead_id,
+        "action": "consultation_stage_moved",
+        "details": f"Consultation: {previous} → {payload.consultation_stage}",
         "created_by": user.full_name,
         "created_by_role": user.role,
         "created_at": now_iso(),

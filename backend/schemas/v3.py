@@ -167,6 +167,7 @@ class V3LeadOut(BaseModel):
     source_type: str
     stage: str
     branch_stage: Optional[str] = None
+    consultation_stage: Optional[str] = None
     branch_id: Optional[str] = None
     notes: Optional[str] = ""
     extra_fields: Dict[str, Any]
@@ -276,6 +277,10 @@ class V3MoveStageInput(BaseModel):
 
 class V3BranchStageInput(BaseModel):
     branch_stage: str
+
+
+class V3ConsultationStageInput(BaseModel):
+    consultation_stage: str
 
 
 class V3CollectFeeInput(BaseModel):

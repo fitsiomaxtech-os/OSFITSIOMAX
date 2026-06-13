@@ -28,3 +28,12 @@ V3_BRANCH_STAGES = [
     "Appointment Date & Time",
     "Cancelled",
 ]
+
+V3_CONSULTATION_STAGES = [
+    "New Appointment",
+    "Clinic Visit",
+    "Package Chosen",
+    "Follow Up",
+    "Completed",
+    "Cancelled",
+]

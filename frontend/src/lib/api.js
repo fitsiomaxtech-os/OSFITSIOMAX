@@ -125,6 +125,8 @@ export const moveBranchStage = async (leadId, payload) => (await api.post(`/lead
 export const collectFee = async (leadId, payload) => (await api.post(`/leads/${leadId}/collect-fee`, payload)).data;
 export const assignPhysio = async (leadId, payload) => (await api.post(`/leads/${leadId}/assign-physio`, payload)).data;
 export const scheduleBranchAppointment = async (leadId, payload) => (await api.post(`/leads/${leadId}/schedule-branch-appointment`, payload)).data;
+export const getConsultationsBoard = async (branchId) => (await api.get(`/branch-admin/consultations/${branchId}/board`)).data;
+export const moveConsultationStage = async (leadId, consultation_stage) => (await api.post(`/leads/${leadId}/move-consultation-stage`, { consultation_stage })).data;
 
 export const createHeadPhysio = async (payload) => (await api.post("/branch/head-physios", payload)).data;
 export const getDoctorCalendar = async (doctorId) => (await api.get(`/doctors/${doctorId}/calendar`)).data;
