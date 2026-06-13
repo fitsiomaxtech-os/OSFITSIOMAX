@@ -57,8 +57,11 @@ const avatarColor = (name) => {
 export const PreSalesCRM = ({ onManageStages }) => {
   const [stages, setStages] = useState([]);
   const [leads, setLeads] = useState([]);
+  const [branches, setBranches] = useState([]);
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState("All");
+  const [apptMode, setApptMode] = useState("offline"); // "offline" | "online"
+  const [apptBranchFilter, setApptBranchFilter] = useState(""); // "" = all branches for offline
   const [sourceFilter, setSourceFilter] = useState("");
   const [sortNewest, setSortNewest] = useState(true);
   const [dateFilter, setDateFilter] = useState(null);
@@ -80,6 +83,7 @@ export const PreSalesCRM = ({ onManageStages }) => {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { getBranches().then(setBranches).catch(() => {}); }, []);
 
   const stageCounts = useMemo(() => {
     const map = { All: leads.length };
@@ -88,9 +92,32 @@ export const PreSalesCRM = ({ onManageStages }) => {
     return map;
   }, [leads, stages]);
 
+  const apptCounts = useMemo(() => {
+    const appts = leads.filter((l) => l.stage === "Appointment");
+    const offline = appts.filter((l) => (l.appointment_mode || "offline") === "offline");
+    const online = appts.filter((l) => l.appointment_mode === "online");
+    const byBranch = {};
+    offline.forEach((l) => {
+      const key = l.branch_id || "__unassigned__";
+      byBranch[key] = (byBranch[key] || 0) + 1;
+    });
+    return { offlineTotal: offline.length, onlineTotal: online.length, byBranch };
+  }, [leads]);
+
   const filtered = useMemo(() => {
     let rows = leads;
     if (stageFilter !== "All") rows = rows.filter((l) => l.stage === stageFilter);
+    // When viewing Appointment stage, further filter by mode and (if offline) selected branch
+    if (stageFilter === "Appointment") {
+      rows = rows.filter((l) => (l.appointment_mode || "offline") === apptMode);
+      if (apptMode === "offline" && apptBranchFilter) {
+        if (apptBranchFilter === "__unassigned__") {
+          rows = rows.filter((l) => !l.branch_id);
+        } else {
+          rows = rows.filter((l) => l.branch_id === apptBranchFilter);
+        }
+      }
+    }
     if (sourceFilter) rows = rows.filter((l) => (l.source_tab || l.source_type || "").toLowerCase().includes(sourceFilter.toLowerCase()));
     if (dateFilter) {
       const from = dateFilter.from?.getTime();
@@ -111,7 +138,7 @@ export const PreSalesCRM = ({ onManageStages }) => {
       const da = a.created_at || ""; const db = b.created_at || "";
       return sortNewest ? db.localeCompare(da) : da.localeCompare(db);
     });
-  }, [leads, stageFilter, sourceFilter, search, sortNewest, dateFilter]);
+  }, [leads, stageFilter, apptMode, apptBranchFilter, sourceFilter, search, sortNewest, dateFilter]);
 
   const moveToStage = async (leadId, stageName) => {
     try { await updateLead(leadId, { stage: stageName }); toast.success(`Moved to ${stageName}`); load(); }
@@ -167,13 +194,77 @@ export const PreSalesCRM = ({ onManageStages }) => {
         </div>
       </div>
 
+      {/* Appointment sub-tabs: Offline / Online + branch chips (offline only) */}
+      {stageFilter === "Appointment" && (
+        <div className="space-y-2 rounded-xl border border-slate-200 bg-white p-3" data-testid="presales-appointment-substages">
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => { setApptMode("offline"); setApptBranchFilter(""); }}
+              className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition ${apptMode === "offline" ? "bg-emerald-500 text-white shadow" : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"}`}
+              data-testid="appt-mode-offline"
+            >
+              Offline
+              <span className={`rounded-full px-1.5 text-[11px] font-bold ${apptMode === "offline" ? "bg-white/25 text-white" : "bg-emerald-200 text-emerald-800"}`}>{apptCounts.offlineTotal}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => { setApptMode("online"); setApptBranchFilter(""); }}
+              className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition ${apptMode === "online" ? "bg-sky-500 text-white shadow" : "bg-sky-50 text-sky-700 hover:bg-sky-100"}`}
+              data-testid="appt-mode-online"
+            >
+              Online
+              <span className={`rounded-full px-1.5 text-[11px] font-bold ${apptMode === "online" ? "bg-white/25 text-white" : "bg-sky-200 text-sky-800"}`}>{apptCounts.onlineTotal}</span>
+            </button>
+          </div>
+
+          {apptMode === "offline" && (
+            <div className="flex flex-wrap gap-1.5 border-t border-slate-100 pt-2" data-testid="appt-branch-chips">
+              <button
+                type="button"
+                onClick={() => setApptBranchFilter("")}
+                className={`rounded-full px-3 py-1 text-xs font-semibold transition ${apptBranchFilter === "" ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}
+                data-testid="appt-branch-all"
+              >
+                All Branches <span className="opacity-70">({apptCounts.offlineTotal})</span>
+              </button>
+              {branches.map((b) => {
+                const count = apptCounts.byBranch[b.id] || 0;
+                const isActive = apptBranchFilter === b.id;
+                return (
+                  <button
+                    key={b.id}
+                    type="button"
+                    onClick={() => setApptBranchFilter(isActive ? "" : b.id)}
+                    className={`rounded-full px-3 py-1 text-xs font-semibold transition ${isActive ? "bg-emerald-500 text-white" : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"}`}
+                    data-testid={`appt-branch-${b.id}`}
+                  >
+                    {b.branch_name || b.name} <span className="opacity-70">({count})</span>
+                  </button>
+                );
+              })}
+              {apptCounts.byBranch.__unassigned__ > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setApptBranchFilter("__unassigned__")}
+                  className={`rounded-full px-3 py-1 text-xs font-semibold transition ${apptBranchFilter === "__unassigned__" ? "bg-rose-500 text-white" : "bg-rose-50 text-rose-700 hover:bg-rose-100"}`}
+                  data-testid="appt-branch-unassigned"
+                >
+                  Unassigned <span className="opacity-70">({apptCounts.byBranch.__unassigned__})</span>
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Leads table */}
       <Card data-testid="presales-leads-card">
         <CardContent className="p-0">
           <div className="overflow-auto">
             <table className="min-w-full text-sm">
               <thead className="bg-slate-50 text-left text-xs text-slate-500">
-                <tr><th className="px-4 py-2 w-12"></th><th className="px-3 py-2">LEAD</th><th className="px-3 py-2">CONTACT</th><th className="px-3 py-2">SOURCE</th><th className="px-3 py-2">STAGE</th><th className="px-3 py-2">DEPARTMENT</th><th className="px-3 py-2">CREATED</th><th className="px-3 py-2">ACTIONS</th></tr>
+                <tr><th className="px-4 py-2 w-12"></th><th className="px-3 py-2">LEAD</th><th className="px-3 py-2">CONTACT</th><th className="px-3 py-2">SOURCE</th><th className="px-3 py-2">STAGE</th><th className="px-3 py-2">{stageFilter === "Appointment" ? "BRANCH ADMIN STATUS" : "DEPARTMENT"}</th><th className="px-3 py-2">CREATED</th><th className="px-3 py-2">ACTIONS</th></tr>
               </thead>
               <tbody>
                 {filtered.map((l) => {
@@ -214,7 +305,30 @@ export const PreSalesCRM = ({ onManageStages }) => {
                           })()}
                         </div>
                       </td>
-                      <td className="px-3 py-3 text-xs text-slate-600">{l.department || "—"}</td>
+                      <td className="px-3 py-3 text-xs">
+                        {stageFilter === "Appointment" ? (() => {
+                          const branchName = l.branch_id ? (branches.find((b) => b.id === l.branch_id)?.branch_name || branches.find((b) => b.id === l.branch_id)?.name) : (l.appointment_mode === "online" ? "Online Consultation" : "Unassigned");
+                          const status = l.branch_stage || "Pending";
+                          const statusColor = {
+                            "New Appointment": "bg-blue-50 text-blue-700 border-blue-200",
+                            "Portfolio": "bg-violet-50 text-violet-700 border-violet-200",
+                            "Follow Up": "bg-orange-50 text-orange-700 border-orange-200",
+                            "Appointment Date & Time": "bg-teal-50 text-teal-700 border-teal-200",
+                            "Cancelled": "bg-rose-50 text-rose-700 border-rose-200",
+                          }[status] || "bg-slate-50 text-slate-600 border-slate-200";
+                          return (
+                            <div className="flex flex-col gap-1" data-testid={`presales-branch-status-${l.id}`}>
+                              <span className="font-semibold text-slate-700">{branchName || "—"}</span>
+                              <span className={`inline-flex w-fit items-center rounded border px-1.5 text-[10px] font-semibold ${statusColor}`}>{status}</span>
+                              {l.assigned_physio_name ? (
+                                <span className="text-[10px] text-emerald-600">Expert: {l.assigned_physio_name}</span>
+                              ) : (
+                                <span className="text-[10px] text-amber-600">Pending Expert</span>
+                              )}
+                            </div>
+                          );
+                        })() : (l.department || "—")}
+                      </td>
                       <td className="px-3 py-3 text-xs text-slate-400">{(l.created_at || "").slice(0, 10)}</td>
                       <td className="px-3 py-3"><button onClick={() => setEditing(l)} className="text-slate-500 hover:text-sky-600" data-testid={`presales-lead-view-${l.id}`}><Eye className="h-4 w-4" /></button></td>
                     </tr>
