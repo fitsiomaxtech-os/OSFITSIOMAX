@@ -155,6 +155,51 @@ async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointm
 
 
 
+@router.get("/branch-admin/available-experts/{branch_id}")
+async def v3_available_experts(
+    branch_id: str,
+    date: str,
+    time: str,
+    _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio")),
+):
+    """Return only branch experts who have NO consultation booked at the given date+time.
+
+    A physio is considered booked when another lead in this branch has the same
+    appointment_date + appointment_time and is not in a final-cancelled state.
+    """
+    if not date or not time:
+        raise HTTPException(status_code=400, detail="date and time are required")
+    # All experts at this branch
+    branch_experts = await v3_col("doctors").find(
+        {"branch_id": branch_id}, {"_id": 0}
+    ).to_list(500)
+    # All experts (fallback when no branch-mapped experts)
+    if not branch_experts:
+        branch_experts = await v3_col("doctors").find({}, {"_id": 0}).to_list(500)
+
+    # Find leads already taking those slots
+    busy_lead_query = {
+        "appointment_date": date,
+        "appointment_time": time,
+        "assigned_physio_id": {"$ne": None},
+        "branch_stage": {"$ne": "Cancelled"},
+    }
+    busy_leads = await v3_col("leads").find(busy_lead_query, {"_id": 0, "assigned_physio_id": 1}).to_list(500)
+    busy_ids = {ld["assigned_physio_id"] for ld in busy_leads if ld.get("assigned_physio_id")}
+
+    available = [d for d in branch_experts if d.get("id") not in busy_ids]
+    return {
+        "date": date,
+        "time": time,
+        "branch_id": branch_id,
+        "total_branch_experts": len(branch_experts),
+        "available_count": len(available),
+        "busy_count": len(busy_ids & {d["id"] for d in branch_experts}),
+        "experts": available,
+    }
+
+
+
 @router.get("/branch-admin/consultations/{branch_id}/board")
 async def v3_consultations_board(branch_id: str, _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio"))):
     """Return all leads in the Consultations pipeline for a branch, grouped by consultation_stage."""

@@ -30,6 +30,7 @@ import {
   getAvailableDoctors,
   getBranchBoard,
   getDoctors,
+  getAvailableExperts,
   getLeadActivity,
   getLeadRemarks,
   moveBranchStage,
@@ -321,6 +322,33 @@ function BranchLeadModal({ lead, branchId, onClose, onUpdate, reloadBoard }) {
   // Jr. Physio assignment
   const [allDoctors, setAllDoctors] = useState([]);
   const [apptDraft, setApptDraft] = useState(null); // { appointment_date, appointment_time, physio_id, notes, final_stage } | null
+  const [apptExperts, setApptExperts] = useState({ experts: [], available_count: 0, busy_count: 0, loading: false });
+
+  const fetchAvailableExperts = useCallback(async (branch, dateStr, timeStr) => {
+    if (!branch || !dateStr || !timeStr) return;
+    setApptExperts((p) => ({ ...p, loading: true }));
+    try {
+      const res = await getAvailableExperts(branch, dateStr, timeStr);
+      setApptExperts({
+        experts: res.experts || [],
+        available_count: res.available_count || 0,
+        busy_count: res.busy_count || 0,
+        loading: false,
+      });
+      setApptDraft((curr) => {
+        if (!curr || !curr.physio_id) return curr;
+        const stillAvail = (res.experts || []).some((dd) => dd.id === curr.physio_id);
+        return stillAvail ? curr : { ...curr, physio_id: "" };
+      });
+    } catch {
+      setApptExperts({ experts: [], available_count: 0, busy_count: 0, loading: false });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!apptDraft || !apptDraft.appointment_date || !apptDraft.appointment_time || !branchId) return;
+    fetchAvailableExperts(branchId, apptDraft.appointment_date, apptDraft.appointment_time);
+  }, [apptDraft?.appointment_date, apptDraft?.appointment_time, branchId, fetchAvailableExperts]);
   const [selectedPhysioId, setSelectedPhysioId] = useState("");
 
   useEffect(() => {
@@ -721,18 +749,34 @@ function BranchLeadModal({ lead, branchId, onClose, onUpdate, reloadBoard }) {
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600">Assign Physio / Doctor *</label>
-                <select
-                  value={apptDraft.physio_id}
-                  onChange={(e) => setApptDraft({ ...apptDraft, physio_id: e.target.value })}
-                  className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm focus:border-teal-400 focus:outline-none focus:ring-1 focus:ring-teal-400"
-                  data-testid="branch-appt-physio"
-                >
-                  <option value="">-- choose a physio --</option>
-                  {allDoctors.map((d) => (
-                    <option key={d.id} value={d.id}>{d.full_name} {d.specialization ? `· ${d.specialization}` : ""}</option>
-                  ))}
-                </select>
-                {allDoctors.length === 0 && <p className="mt-1 text-[11px] text-amber-700">No physios available in this branch. Add staff in HR Module.</p>}
+                {(!apptDraft.appointment_date || !apptDraft.appointment_time) ? (
+                  <div className="rounded-md border border-dashed border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-700" data-testid="branch-appt-physio-hint">
+                    Pick the appointment <b>date</b> and <b>time</b> first — available experts will appear here.
+                  </div>
+                ) : apptExperts.loading ? (
+                  <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">Checking experts availability…</div>
+                ) : apptExperts.experts.length === 0 ? (
+                  <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700" data-testid="branch-appt-physio-empty">
+                    No experts are free at this date &amp; time at this branch{apptExperts.busy_count > 0 ? ` (${apptExperts.busy_count} already booked)` : ""}. Try another slot.
+                  </div>
+                ) : (
+                  <>
+                    <select
+                      value={apptDraft.physio_id}
+                      onChange={(e) => setApptDraft({ ...apptDraft, physio_id: e.target.value })}
+                      className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm focus:border-teal-400 focus:outline-none focus:ring-1 focus:ring-teal-400"
+                      data-testid="branch-appt-physio"
+                    >
+                      <option value="">-- choose an available expert --</option>
+                      {apptExperts.experts.map((d) => (
+                        <option key={d.id} value={d.id}>{d.full_name} {d.specialization ? `· ${d.specialization}` : ""}</option>
+                      ))}
+                    </select>
+                    <p className="mt-1 text-[11px] text-emerald-600" data-testid="branch-appt-physio-count">
+                      {apptExperts.available_count} available · {apptExperts.busy_count} already booked at this slot
+                    </p>
+                  </>
+                )}
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600">Notes</label>
