@@ -86,24 +86,30 @@ export const SmartBookingPicker = ({ branchId, value, onChange }) => {
   return (
     <div className="space-y-3" data-testid="smart-booking-picker">
       {/* Top toggle */}
-      <div className="flex gap-2 rounded-lg bg-slate-100 p-1">
-        <button
-          type="button"
-          onClick={() => { setMode("slot"); setPickedExpert(null); }}
-          className={`flex-1 rounded-md px-3 py-2 text-sm font-semibold transition ${mode === "slot" ? "bg-white text-teal-600 shadow" : "text-slate-600"}`}
-          data-testid="smart-mode-slot"
-        >
-          <CalendarDays className="mr-1 inline h-3.5 w-3.5" /> Find a Slot
-        </button>
-        <button
-          type="button"
-          onClick={() => { setMode("expert"); onChange({ appointment_date: "", appointment_time: "", physio_id: "" }); }}
-          className={`flex-1 rounded-md px-3 py-2 text-sm font-semibold transition ${mode === "expert" ? "bg-white text-teal-600 shadow" : "text-slate-600"}`}
-          data-testid="smart-mode-expert"
-        >
-          <User className="mr-1 inline h-3.5 w-3.5" /> Find an Expert
-        </button>
+      <div className="flex items-center justify-between">
+        <div className="flex flex-1 gap-2 rounded-lg bg-slate-100 p-1">
+          <button
+            type="button"
+            onClick={() => { setMode("slot"); setPickedExpert(null); }}
+            className={`flex-1 rounded-md px-3 py-2 text-sm font-semibold transition ${mode === "slot" ? "bg-white text-teal-600 shadow" : "text-slate-600"}`}
+            data-testid="smart-mode-slot"
+          >
+            <CalendarDays className="mr-1 inline h-3.5 w-3.5" /> Find a Slot
+          </button>
+          <button
+            type="button"
+            onClick={() => { setMode("expert"); onChange({ appointment_date: "", appointment_time: "", physio_id: "" }); }}
+            className={`flex-1 rounded-md px-3 py-2 text-sm font-semibold transition ${mode === "expert" ? "bg-white text-teal-600 shadow" : "text-slate-600"}`}
+            data-testid="smart-mode-expert"
+          >
+            <User className="mr-1 inline h-3.5 w-3.5" /> Find an Expert
+          </button>
+        </div>
       </div>
+      <p className="-mt-1 flex items-center gap-1.5 text-[11px] text-slate-500" data-testid="smart-slot-type-hint">
+        <CalendarDays className="h-3 w-3 text-teal-500" />
+        Showing <b className="text-teal-700">Initial Consultation</b> slots only (defined on Head Physio Calendar).
+      </p>
 
       {/* Month nav */}
       {(mode === "slot" || (mode === "expert" && pickedExpert)) && (

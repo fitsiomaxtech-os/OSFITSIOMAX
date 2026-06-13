@@ -250,7 +250,18 @@ async def _branch_experts(branch_id: str):
 
 
 def _expert_slots(expert: dict):
-    """Return the 30-min HH:MM slot list for an expert — manual slots if defined, else default grid."""
+    """Return the 30-min HH:MM slot list for an expert.
+
+    Prefer slot_details filtered to consultation_type == "Initial Consultation"
+    (because Smart Booking only books fresh appointments, not follow-ups/reviews).
+    Falls back to the legacy `slots` list, then to the default 09:00-17:30 grid.
+    """
+    details = expert.get("slot_details") or []
+    initial = [d.get("slot_time", "")[:5] for d in details
+               if (d.get("consultation_type") or "Initial Consultation") == "Initial Consultation"
+               and d.get("slot_time")]
+    if initial:
+        return sorted(set(initial))
     custom = expert.get("slots") or []
     norm = []
     for s in custom:
