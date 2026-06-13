@@ -130,6 +130,11 @@ export const getAvailableExperts = async (branchId, date, time) => (await api.ge
 export const getCalendarAvailability = async (branchId, month) => (await api.get(`/branch-admin/calendar-availability/${branchId}`, { params: { month } })).data;
 export const getDaySlots = async (branchId, date) => (await api.get(`/branch-admin/day-slots/${branchId}`, { params: { date } })).data;
 export const getExpertCalendar = async (expertId, month) => (await api.get(`/branch-admin/expert-calendar/${expertId}`, { params: { month } })).data;
+export const listPackages = async (params = {}) => (await api.get("/packages", { params })).data;
+export const createPackage = async (payload) => (await api.post("/packages", payload)).data;
+export const updatePackage = async (id, payload) => (await api.put(`/packages/${id}`, payload)).data;
+export const deletePackage = async (id) => (await api.delete(`/packages/${id}`)).data;
+export const sellPackage = async (leadId, payload) => (await api.post(`/leads/${leadId}/sell-package`, payload)).data;
 export const moveConsultationStage = async (leadId, consultation_stage) => (await api.post(`/leads/${leadId}/move-consultation-stage`, { consultation_stage })).data;
 
 export const createHeadPhysio = async (payload) => (await api.post("/branch/head-physios", payload)).data;

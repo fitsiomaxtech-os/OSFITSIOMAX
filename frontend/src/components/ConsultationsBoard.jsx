@@ -4,7 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
-import { getConsultationsBoard, moveConsultationStage } from "@/lib/api";
+import { getConsultationsBoard, moveConsultationStage, listPackages, sellPackage } from "@/lib/api";
 
 const STAGES = [
   "New Appointment",
@@ -29,6 +29,9 @@ export const ConsultationsBoard = ({ branchId }) => {
   const [stageFilter, setStageFilter] = useState(null);
   const [search, setSearch] = useState("");
   const [selectedLead, setSelectedLead] = useState(null);
+  const [packages, setPackages] = useState([]);
+  const [pkgPick, setPkgPick] = useState("");
+  const [pkgPaid, setPkgPaid] = useState("");
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -74,6 +77,10 @@ export const ConsultationsBoard = ({ branchId }) => {
     }
     return rows;
   }, [board.leads, stageFilter, search]);
+
+  useEffect(() => {
+    listPackages({ active_only: true }).then(setPackages).catch(() => setPackages([]));
+  }, []);
 
   const moveStage = async (lead, next) => {
     if (next === lead.consultation_stage) return;
@@ -216,6 +223,54 @@ export const ConsultationsBoard = ({ branchId }) => {
                   );
                 })}
               </div>
+            </div>
+
+            {/* Sell Package quick form */}
+            <div className="rounded-lg border border-violet-200 bg-violet-50 p-3" data-testid="cons-sell-package">
+              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-violet-700">Sell Package</p>
+              {selectedLead.package_name ? (
+                <p className="text-xs text-violet-800">Current package: <b>{selectedLead.package_name}</b> · {selectedLead.package_weeks}w · ₹{selectedLead.package_paid ?? selectedLead.package_price}</p>
+              ) : null}
+              <div className="mt-2 grid grid-cols-3 gap-2">
+                <select value={pkgPick} onChange={(e) => setPkgPick(e.target.value)} className="col-span-2 h-9 rounded-md border border-violet-200 px-2 text-xs" data-testid="cons-pkg-select">
+                  <option value="">-- choose a package --</option>
+                  {packages.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name} · {p.weeks}w · ₹{p.price}</option>
+                  ))}
+                </select>
+                <Input
+                  type="number"
+                  min="0"
+                  value={pkgPaid}
+                  onChange={(e) => setPkgPaid(e.target.value)}
+                  placeholder="Paid"
+                  className="h-9"
+                  data-testid="cons-pkg-paid"
+                />
+              </div>
+              <Button
+                className="mt-2 w-full bg-violet-600 hover:bg-violet-700"
+                onClick={async () => {
+                  if (!pkgPick) { toast.error("Choose a package"); return; }
+                  try {
+                    await sellPackage(selectedLead.id, { package_id: pkgPick, paid_amount: pkgPaid ? parseFloat(pkgPaid) : null });
+                    toast.success("Package sold — moved to Package Chosen");
+                    setPkgPick(""); setPkgPaid("");
+                    setSelectedLead(null);
+                    setBoard((b) => {
+                      const leads = (b.leads || []).map((l) => l.id === selectedLead.id ? { ...l, consultation_stage: "Package Chosen" } : l);
+                      const stage_counts = {};
+                      STAGES.forEach((ss) => { stage_counts[ss] = leads.filter((l) => l.consultation_stage === ss).length; });
+                      return { ...b, leads, stage_counts };
+                    });
+                  } catch (err) {
+                    toast.error(err?.response?.data?.detail || "Failed to sell");
+                  }
+                }}
+                data-testid="cons-pkg-sell"
+              >
+                Sell & Move to Package Chosen
+              </Button>
             </div>
           </div>
         </div>

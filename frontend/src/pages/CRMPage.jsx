@@ -55,6 +55,7 @@ import { MasterControlBoard } from "@/components/MasterControlBoard";
 import { PipelineStageManagement } from "@/components/PipelineStageManagement";
 import { HRBoard } from "@/components/hr/HRBoard";
 import { BranchManagementBoard } from "@/components/branch/BranchManagementBoard";
+import { PackagesBoard } from "@/components/PackagesBoard";
 
 const ROLE_META = {
   super_admin: { label: "Super Admin", icon: ShieldCheck },
@@ -667,6 +668,7 @@ export const CRMPage = ({ auth, onLogout }) => {
             <button onClick={() => setSuperAdminView("stages")} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${superAdminView === "stages" ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"}`} data-testid="super-admin-tab-stages">Pipeline Stages</button>
             <button onClick={() => setSuperAdminView("hr")} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${superAdminView === "hr" ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"}`} data-testid="super-admin-tab-hr">HR Admin</button>
             <button onClick={() => setSuperAdminView("branches")} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${superAdminView === "branches" ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"}`} data-testid="super-admin-tab-branches">Branch Management</button>
+            <button onClick={() => setSuperAdminView("packages")} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${superAdminView === "packages" ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"}`} data-testid="super-admin-tab-packages">Packages</button>
           </div>
         )}
 
@@ -676,6 +678,10 @@ export const CRMPage = ({ auth, onLogout }) => {
 
         {showSuperAdminBoard && superAdminView === "branches" && (
           <BranchManagementBoard />
+        )}
+
+        {showSuperAdminBoard && superAdminView === "packages" && (
+          <PackagesBoard />
         )}
 
         {showSuperAdminBoard && superAdminView === "marketing" && (
