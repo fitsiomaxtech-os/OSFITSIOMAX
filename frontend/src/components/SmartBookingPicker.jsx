@@ -116,7 +116,7 @@ export const SmartBookingPicker = ({ branchId, value, onChange }) => {
 
       {/* --- Find a Slot --- */}
       {mode === "slot" && (
-        <>
+        <div className="grid gap-3 lg:grid-cols-2">
           <CalendarGrid
             grid={grid}
             cursor={cursor}
@@ -127,50 +127,58 @@ export const SmartBookingPicker = ({ branchId, value, onChange }) => {
             mode="branch"
             testid="smart-calendar-branch"
           />
-          {value?.appointment_date && daySlots && (
-            <div data-testid="smart-day-slots">
-              <p className="mb-1 text-xs font-semibold text-slate-700">Available time slots — {value.appointment_date}</p>
-              <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-6">
-                {daySlots.slots.map((s) => {
-                  const free = s.available_count > 0;
-                  const active = value.appointment_time === s.time;
-                  return (
-                    <button
-                      key={s.time}
-                      type="button"
-                      disabled={!free}
-                      onClick={() => onPickTime(s.time, value.physio_id && s.available_experts.find((e) => e.id === value.physio_id) ? value.physio_id : "")}
-                      className={`rounded-md border px-2 py-1.5 text-xs font-semibold transition ${active ? "border-teal-500 bg-teal-500 text-white" : free ? "border-slate-200 bg-white text-slate-700 hover:border-teal-300" : "cursor-not-allowed border-slate-100 bg-slate-50 text-slate-300 line-through"}`}
-                      data-testid={`smart-slot-${s.time}`}
-                    >
-                      {s.time} <span className="ml-0.5 opacity-60">({s.available_count})</span>
-                    </button>
-                  );
-                })}
-                {daySlots.slots.length === 0 && <p className="col-span-full text-xs text-slate-400">No slots configured.</p>}
-              </div>
-              {value.appointment_time && (
-                <div className="mt-2 rounded-md border border-slate-200 p-2" data-testid="smart-slot-experts">
-                  <p className="mb-1 text-xs font-semibold text-slate-700">Available experts at {value.appointment_time}</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {(daySlots.slots.find((s) => s.time === value.appointment_time)?.available_experts || []).map((e) => (
+          <div className="rounded-md border border-slate-200 bg-white p-3" data-testid="smart-slot-panel">
+            {!value?.appointment_date ? (
+              <p className="flex h-full items-center justify-center text-center text-xs text-slate-400">
+                Pick a date on the calendar to see available time slots.
+              </p>
+            ) : !daySlots ? (
+              <p className="text-xs text-slate-400">Loading slots…</p>
+            ) : (
+              <div data-testid="smart-day-slots">
+                <p className="mb-1 text-xs font-semibold text-slate-700">Time slots — {value.appointment_date}</p>
+                <div className="grid max-h-56 grid-cols-3 gap-1.5 overflow-y-auto pr-1">
+                  {daySlots.slots.map((s) => {
+                    const free = s.available_count > 0;
+                    const active = value.appointment_time === s.time;
+                    return (
                       <button
-                        key={e.id}
+                        key={s.time}
                         type="button"
-                        onClick={() => onPickExpert(e.id)}
-                        className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${value.physio_id === e.id ? "border-teal-500 bg-teal-500 text-white" : "border-slate-200 bg-white text-slate-700 hover:border-teal-300"}`}
-                        data-testid={`smart-expert-${e.id}`}
+                        disabled={!free}
+                        onClick={() => onPickTime(s.time, value.physio_id && s.available_experts.find((e) => e.id === value.physio_id) ? value.physio_id : "")}
+                        className={`rounded-md border px-2 py-1.5 text-xs font-semibold transition ${active ? "border-teal-500 bg-teal-500 text-white" : free ? "border-slate-200 bg-white text-slate-700 hover:border-teal-300" : "cursor-not-allowed border-slate-100 bg-slate-50 text-slate-300 line-through"}`}
+                        data-testid={`smart-slot-${s.time}`}
                       >
-                        {value.physio_id === e.id && <CheckCircle2 className="mr-1 inline h-3 w-3" />}
-                        {e.full_name} {e.profile_type === "head_physio" ? "· Head" : ""}
+                        {s.time} <span className="ml-0.5 opacity-60">({s.available_count})</span>
                       </button>
-                    ))}
-                  </div>
+                    );
+                  })}
+                  {daySlots.slots.length === 0 && <p className="col-span-full text-xs text-slate-400">No slots configured.</p>}
                 </div>
-              )}
-            </div>
-          )}
-        </>
+                {value.appointment_time && (
+                  <div className="mt-3 border-t border-slate-100 pt-2" data-testid="smart-slot-experts">
+                    <p className="mb-1 text-xs font-semibold text-slate-700">Available at {value.appointment_time}</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {(daySlots.slots.find((s) => s.time === value.appointment_time)?.available_experts || []).map((e) => (
+                        <button
+                          key={e.id}
+                          type="button"
+                          onClick={() => onPickExpert(e.id)}
+                          className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${value.physio_id === e.id ? "border-teal-500 bg-teal-500 text-white" : "border-slate-200 bg-white text-slate-700 hover:border-teal-300"}`}
+                          data-testid={`smart-expert-${e.id}`}
+                        >
+                          {value.physio_id === e.id && <CheckCircle2 className="mr-1 inline h-3 w-3" />}
+                          {e.full_name} {e.profile_type === "head_physio" ? "· Head" : ""}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
       {/* --- Find an Expert --- */}
@@ -198,40 +206,48 @@ export const SmartBookingPicker = ({ branchId, value, onChange }) => {
             <span>Viewing: <b>{pickedExpert.full_name}</b> · {pickedExpert.specialization || "—"}</span>
             <button type="button" onClick={() => { setPickedExpert(null); onChange({ appointment_date: "", appointment_time: "", physio_id: "" }); }} className="font-semibold underline" data-testid="smart-change-expert">Change</button>
           </div>
-          <CalendarGrid
-            grid={grid}
-            cursor={cursor}
-            days={expertCal?.days}
-            selectedDate={value?.appointment_date}
-            onPick={(d) => onChange({ appointment_date: d, appointment_time: "", physio_id: pickedExpert.id })}
-            loading={loading}
-            mode="expert"
-            testid="smart-calendar-expert"
-          />
-          {value?.appointment_date && expertCal && (
-            <div data-testid="smart-expert-day">
-              <p className="mb-1 text-xs font-semibold text-slate-700">Free slots — {value.appointment_date}</p>
-              <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-6">
-                {(expertCal.days?.[value.appointment_date]?.available_slots || []).map((t) => {
-                  const active = value.appointment_time === t;
-                  return (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() => onChange({ ...(value || {}), appointment_time: t, physio_id: pickedExpert.id })}
-                      className={`rounded-md border px-2 py-1.5 text-xs font-semibold transition ${active ? "border-teal-500 bg-teal-500 text-white" : "border-slate-200 bg-white text-slate-700 hover:border-teal-300"}`}
-                      data-testid={`smart-expert-slot-${t}`}
-                    >
-                      {t}
-                    </button>
-                  );
-                })}
-                {(expertCal.days?.[value.appointment_date]?.available_slots || []).length === 0 && (
-                  <p className="col-span-full text-xs text-slate-400">No free slots that day.</p>
-                )}
-              </div>
+          <div className="grid gap-3 lg:grid-cols-2">
+            <CalendarGrid
+              grid={grid}
+              cursor={cursor}
+              days={expertCal?.days}
+              selectedDate={value?.appointment_date}
+              onPick={(d) => onChange({ appointment_date: d, appointment_time: "", physio_id: pickedExpert.id })}
+              loading={loading}
+              mode="expert"
+              testid="smart-calendar-expert"
+            />
+            <div className="rounded-md border border-slate-200 bg-white p-3" data-testid="smart-expert-day">
+              {!value?.appointment_date ? (
+                <p className="flex h-full items-center justify-center text-center text-xs text-slate-400">
+                  Pick a date to see {pickedExpert.full_name}&rsquo;s free slots.
+                </p>
+              ) : (
+                <>
+                  <p className="mb-1 text-xs font-semibold text-slate-700">Free slots — {value.appointment_date}</p>
+                  <div className="grid max-h-56 grid-cols-3 gap-1.5 overflow-y-auto pr-1">
+                    {(expertCal?.days?.[value.appointment_date]?.available_slots || []).map((t) => {
+                      const active = value.appointment_time === t;
+                      return (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => onChange({ ...(value || {}), appointment_time: t, physio_id: pickedExpert.id })}
+                          className={`rounded-md border px-2 py-1.5 text-xs font-semibold transition ${active ? "border-teal-500 bg-teal-500 text-white" : "border-slate-200 bg-white text-slate-700 hover:border-teal-300"}`}
+                          data-testid={`smart-expert-slot-${t}`}
+                        >
+                          {t}
+                        </button>
+                      );
+                    })}
+                    {(expertCal?.days?.[value.appointment_date]?.available_slots || []).length === 0 && (
+                      <p className="col-span-full text-xs text-slate-400">No free slots that day.</p>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
-          )}
+          </div>
         </>
       )}
     </div>

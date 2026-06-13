@@ -727,7 +727,7 @@ function BranchLeadModal({ lead, branchId, onClose, onUpdate, reloadBoard }) {
       {/* Appointment Date & Time Popup */}
       {apptDraft && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) setApptDraft(null); }} data-testid="branch-appt-modal">
-          <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
+          <div className="w-full max-w-4xl overflow-hidden rounded-2xl bg-white shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between bg-gradient-to-r from-teal-500 to-cyan-600 px-5 py-4 text-white">
               <div className="flex items-center gap-2">
                 <Calendar className="h-5 w-5" />
