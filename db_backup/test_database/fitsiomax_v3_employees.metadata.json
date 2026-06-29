@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"}],"uuid":"3c35a1089b7740c6b7e956b754a6022d","collectionName":"fitsiomax_v3_employees","type":"collection"}
