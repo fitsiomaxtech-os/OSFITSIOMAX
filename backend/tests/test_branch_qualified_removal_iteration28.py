@@ -24,7 +24,7 @@ EXPECTED_BRANCH_STAGES = [
 
 @pytest.fixture(scope="module")
 def super_token():
-    r = requests.post(f"{BASE_URL}/api/v3/auth/login", json={"email": "admin@fitsiomax.com", "password": "admin123"})
+    r = requests.post(f"{BASE_URL}/api/v3/auth/login", json={"email": "fitsiomaxtech@gmail.com", "password": "FitsioMax06"})
     assert r.status_code == 200, r.text
     return r.json()["token"]
 

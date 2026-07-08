@@ -41,7 +41,7 @@ def _login(api_client, email, password):
 def auth_headers(api_client):
     # Auth module: validate all six requested role logins
     creds = {
-        "super_admin": ("admin@fitsiomax.com", "admin123"),
+        "super_admin": ("fitsiomaxtech@gmail.com", "FitsioMax06"),
         "business_dev": ("businessdev@fitsiomax.com", "bd123"),
         "pre_sales": ("presales@fitsiomax.com", "presales123"),
         "branch_admin": ("branchadmin@fitsiomax.com", "branch123"),

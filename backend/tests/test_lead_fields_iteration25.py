@@ -8,7 +8,7 @@ BASE_URL = (os.environ.get("REACT_APP_BACKEND_URL") or "https://lead-manager-100
 API = f"{BASE_URL}/api/v3"
 
 CREDS = {
-    "super_admin": ("admin@fitsiomax.com", "admin123"),
+    "super_admin": ("fitsiomaxtech@gmail.com", "FitsioMax06"),
     "pre_sales": ("presales@fitsiomax.com", "presales123"),
     "branch_admin": ("branchadmin@fitsiomax.com", "branch123"),
     "head_physio": ("headphysio@fitsiomax.com", "head123"),

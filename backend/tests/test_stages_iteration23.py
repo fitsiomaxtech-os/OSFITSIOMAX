@@ -19,7 +19,7 @@ def _login(email, password):
 
 @pytest.fixture(scope="module")
 def admin_token():
-    return _login("admin@fitsiomax.com", "admin123")
+    return _login("fitsiomaxtech@gmail.com", "FitsioMax06")
 
 
 @pytest.fixture(scope="module")

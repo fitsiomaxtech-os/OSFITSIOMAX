@@ -12,7 +12,7 @@ import requests
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://lead-manager-100.preview.emergentagent.com").rstrip("/")
 API = f"{BASE_URL}/api"
 
-SUPER_ADMIN = {"email": "admin@fitsiomax.com", "password": "admin123"}
+SUPER_ADMIN = {"email": "fitsiomaxtech@gmail.com", "password": "FitsioMax06"}
 
 VALID_ROLES = {"super_admin", "business_dev", "pre_sales", "branch_admin", "head_physio", "physio", "marketing_head"}
 EXPECTED_DEPTS = {"Sales", "Operations", "Purchase", "HR", "Architecture", "Accounts", "Planning", "Quality"}

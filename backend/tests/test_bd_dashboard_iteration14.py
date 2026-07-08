@@ -13,8 +13,8 @@ BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 # Test credentials
 BD_EMAIL = "businessdev@fitsiomax.com"
 BD_PASSWORD = "bd123"
-ADMIN_EMAIL = "admin@fitsiomax.com"
-ADMIN_PASSWORD = "admin123"
+ADMIN_EMAIL = "fitsiomaxtech@gmail.com"
+ADMIN_PASSWORD = "FitsioMax06"
 PRESALES_EMAIL = "presales@fitsiomax.com"
 PRESALES_PASSWORD = "presales123"
 

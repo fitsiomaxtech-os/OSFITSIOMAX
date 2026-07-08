@@ -12,7 +12,7 @@ BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
 # Demo users credentials
 DEMO_USERS = [
-    {"email": "admin@fitsiomax.com", "password": "admin123", "role": "super_admin"},
+    {"email": "fitsiomaxtech@gmail.com", "password": "FitsioMax06", "role": "super_admin"},
     {"email": "businessdev@fitsiomax.com", "password": "bd123", "role": "business_dev"},
     {"email": "presales@fitsiomax.com", "password": "presales123", "role": "pre_sales"},
     {"email": "branchadmin@fitsiomax.com", "password": "branch123", "role": "branch_admin"},
@@ -56,7 +56,7 @@ class TestV3AuthLogin:
     def test_login_invalid_credentials(self):
         """Test login with wrong password fails"""
         response = requests.post(f"{BASE_URL}/api/v3/auth/login", json={
-            "email": "admin@fitsiomax.com",
+            "email": "fitsiomaxtech@gmail.com",
             "password": "wrongpassword"
         })
         assert response.status_code == 401
@@ -78,8 +78,8 @@ class TestV3Branches:
     @pytest.fixture
     def admin_token(self):
         response = requests.post(f"{BASE_URL}/api/v3/auth/login", json={
-            "email": "admin@fitsiomax.com",
-            "password": "admin123"
+            "email": "fitsiomaxtech@gmail.com",
+            "password": "FitsioMax06"
         })
         if response.status_code != 200:
             pytest.skip("Admin login failed")
@@ -202,8 +202,8 @@ class TestV3Leads:
     @pytest.fixture
     def admin_token(self):
         response = requests.post(f"{BASE_URL}/api/v3/auth/login", json={
-            "email": "admin@fitsiomax.com",
-            "password": "admin123"
+            "email": "fitsiomaxtech@gmail.com",
+            "password": "FitsioMax06"
         })
         if response.status_code != 200:
             pytest.skip("Admin login failed")
@@ -379,8 +379,8 @@ class TestV3BranchAdminActions:
     @pytest.fixture
     def admin_token(self):
         response = requests.post(f"{BASE_URL}/api/v3/auth/login", json={
-            "email": "admin@fitsiomax.com",
-            "password": "admin123"
+            "email": "fitsiomaxtech@gmail.com",
+            "password": "FitsioMax06"
         })
         if response.status_code != 200:
             pytest.skip("Admin login failed")
@@ -492,8 +492,8 @@ class TestV3Doctors:
     @pytest.fixture
     def admin_token(self):
         response = requests.post(f"{BASE_URL}/api/v3/auth/login", json={
-            "email": "admin@fitsiomax.com",
-            "password": "admin123"
+            "email": "fitsiomaxtech@gmail.com",
+            "password": "FitsioMax06"
         })
         if response.status_code != 200:
             pytest.skip("Admin login failed")
@@ -598,8 +598,8 @@ class TestV3Appointments:
     @pytest.fixture
     def admin_token(self):
         response = requests.post(f"{BASE_URL}/api/v3/auth/login", json={
-            "email": "admin@fitsiomax.com",
-            "password": "admin123"
+            "email": "fitsiomaxtech@gmail.com",
+            "password": "FitsioMax06"
         })
         if response.status_code != 200:
             pytest.skip("Admin login failed")
@@ -643,8 +643,8 @@ class TestV3Dashboard:
     @pytest.fixture
     def admin_token(self):
         response = requests.post(f"{BASE_URL}/api/v3/auth/login", json={
-            "email": "admin@fitsiomax.com",
-            "password": "admin123"
+            "email": "fitsiomaxtech@gmail.com",
+            "password": "FitsioMax06"
         })
         if response.status_code != 200:
             pytest.skip("Admin login failed")
@@ -919,8 +919,8 @@ class TestV3Verticals:
     @pytest.fixture
     def admin_token(self):
         response = requests.post(f"{BASE_URL}/api/v3/auth/login", json={
-            "email": "admin@fitsiomax.com",
-            "password": "admin123"
+            "email": "fitsiomaxtech@gmail.com",
+            "password": "FitsioMax06"
         })
         if response.status_code != 200:
             pytest.skip("Admin login failed")
@@ -946,8 +946,8 @@ class TestV3Logout:
         """Test POST /api/v3/auth/logout"""
         # Login first
         login_resp = requests.post(f"{BASE_URL}/api/v3/auth/login", json={
-            "email": "admin@fitsiomax.com",
-            "password": "admin123"
+            "email": "fitsiomaxtech@gmail.com",
+            "password": "FitsioMax06"
         })
         assert login_resp.status_code == 200
         token = login_resp.json()["token"]

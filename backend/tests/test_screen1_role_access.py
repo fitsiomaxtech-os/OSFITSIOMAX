@@ -11,7 +11,7 @@ BASE_URL = os.environ.get("REACT_APP_BACKEND_URL")
 
 # Screen 1 auth module: login + me + logout for all six role credentials
 ROLE_CREDENTIALS = [
-    ("admin@fitsiomax.com", "admin123", "super_admin"),
+    ("fitsiomaxtech@gmail.com", "FitsioMax06", "super_admin"),
     ("businessdev@fitsiomax.com", "bd123", "business_dev"),
     ("presales@fitsiomax.com", "presales123", "pre_sales"),
     ("branchadmin@fitsiomax.com", "branch123", "branch_admin"),
@@ -69,7 +69,7 @@ def test_v3_protected_route_access_after_login(api_client, email, password, _exp
 def test_v3_invalid_login_fails(api_client):
     response = api_client.post(
         f"{BASE_URL}/api/v3/auth/login",
-        json={"email": "admin@fitsiomax.com", "password": "wrong-pass"},
+        json={"email": "fitsiomaxtech@gmail.com", "password": "wrong-pass"},
         timeout=25,
     )
 
@@ -81,7 +81,7 @@ def test_v3_invalid_login_fails(api_client):
 def test_v3_logout_invalidates_session(api_client):
     login_resp = api_client.post(
         f"{BASE_URL}/api/v3/auth/login",
-        json={"email": "admin@fitsiomax.com", "password": "admin123"},
+        json={"email": "fitsiomaxtech@gmail.com", "password": "FitsioMax06"},
         timeout=25,
     )
     assert login_resp.status_code == 200

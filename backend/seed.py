@@ -97,6 +97,15 @@ async def migrate_branch_stages() -> None:
             await v3_col("pipeline_stages").insert_many(docs)
 
 
+async def deactivate_legacy_demo_admin() -> None:
+    """Disable the old demo super_admin account (admin@fitsiomax.com / admin123).
+    Replaced by a real Super Admin login; kept as a record for audit, not deleted. Safe to re-run."""
+    await v3_col("users").update_one(
+        {"email": "admin@fitsiomax.com", "role": "super_admin"},
+        {"$set": {"is_active": False}},
+    )
+
+
 async def ensure_v1_seed_data() -> None:
     users_count = await db.users.count_documents({})
     if users_count == 0:
@@ -225,7 +234,6 @@ async def v2_seed() -> None:
 async def v3_seed() -> None:
     seed_users = [
         {"full_name": "Super Admin", "email": "fitsiomaxtech@gmail.com", "password": "FitsioMax06", "role": "super_admin"},
-        {"full_name": "Super Admin", "email": "admin@fitsiomax.com", "password": "admin123", "role": "super_admin"},
         {"full_name": "Business Development", "email": "businessdev@fitsiomax.com", "password": "bd123", "role": "business_dev"},
         {"full_name": "Pre Sales", "email": "presales@fitsiomax.com", "password": "presales123", "role": "pre_sales"},
         {"full_name": "Branch Admin", "email": "branchadmin@fitsiomax.com", "password": "branch123", "role": "branch_admin"},

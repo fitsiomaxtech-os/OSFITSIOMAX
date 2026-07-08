@@ -28,7 +28,7 @@ if not BASE_URL:
         pass
 
 CREDS = {
-    "super_admin":  ("admin@fitsiomax.com",       "admin123"),
+    "super_admin":  ("fitsiomaxtech@gmail.com",   "FitsioMax06"),
     "business_dev": ("businessdev@fitsiomax.com", "bd123"),
     "pre_sales":    ("presales@fitsiomax.com",    "presales123"),
     "branch_admin": ("branchadmin@fitsiomax.com", "branch123"),
@@ -74,7 +74,7 @@ def test_login_all_roles(role):
 
 def test_login_invalid():
     r = requests.post(f"{BASE_URL}/api/v3/auth/login",
-                      json={"email": "admin@fitsiomax.com", "password": "wrong"}, timeout=20)
+                      json={"email": "fitsiomaxtech@gmail.com", "password": "wrong"}, timeout=20)
     assert r.status_code == 401
 
 

@@ -31,7 +31,7 @@ def H(tok):
 
 @pytest.fixture(scope="session")
 def super_token():
-    return _login("admin@fitsiomax.com", "admin123")
+    return _login("fitsiomaxtech@gmail.com", "FitsioMax06")
 
 
 @pytest.fixture(scope="session")

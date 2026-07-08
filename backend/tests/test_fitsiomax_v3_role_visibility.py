@@ -39,7 +39,7 @@ def _login(api_client, email: str, password: str):
 def role_headers(api_client):
     # Auth module: login for role visibility + completion checks
     creds = {
-        "admin": ("admin@fitsiomax.com", "admin123"),
+        "admin": ("fitsiomaxtech@gmail.com", "FitsioMax06"),
         "pre_sales": ("presales@fitsiomax.com", "presales123"),
         "head_physio": ("headphysio@fitsiomax.com", "head123"),
         "physio": ("physio@fitsiomax.com", "physio123"),

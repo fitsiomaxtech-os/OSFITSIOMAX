@@ -14,8 +14,8 @@ BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://lead-manager-100.pre
 # Test credentials
 BRANCH_ADMIN_EMAIL = "branchadmin@fitsiomax.com"
 BRANCH_ADMIN_PASSWORD = "branch123"
-SUPER_ADMIN_EMAIL = "admin@fitsiomax.com"
-SUPER_ADMIN_PASSWORD = "admin123"
+SUPER_ADMIN_EMAIL = "fitsiomaxtech@gmail.com"
+SUPER_ADMIN_PASSWORD = "FitsioMax06"
 
 # Branch stages
 BRANCH_STAGES = [

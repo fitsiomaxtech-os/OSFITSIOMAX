@@ -55,7 +55,7 @@ def test_default_branch_admin_has_non_null_branch_id(api_client):
 
 def test_confirm_endpoint_returns_scoped_error_for_out_of_branch_lead(api_client):
     # Confirm endpoint module for branch scope enforcement and non-silent failure
-    admin_headers, _ = _login(api_client, "admin@fitsiomax.com", "admin123")
+    admin_headers, _ = _login(api_client, "fitsiomaxtech@gmail.com", "FitsioMax06")
     presales_headers, _ = _login(api_client, "presales@fitsiomax.com", "presales123")
 
     suffix = uuid.uuid4().hex[:8]
@@ -168,7 +168,7 @@ def test_sheet_connection_callback_url_is_env_driven(api_client):
 
 def test_default_branch_admin_confirm_check_doctor_and_book_flow(api_client):
     # End-to-end branch-admin flow module using default branchadmin credentials
-    admin_headers, _ = _login(api_client, "admin@fitsiomax.com", "admin123")
+    admin_headers, _ = _login(api_client, "fitsiomaxtech@gmail.com", "FitsioMax06")
     presales_headers, _ = _login(api_client, "presales@fitsiomax.com", "presales123")
     branch_headers, branch_user = _login(api_client, "branchadmin@fitsiomax.com", "branch123")
 
