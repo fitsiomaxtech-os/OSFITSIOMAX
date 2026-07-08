@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -15,6 +16,8 @@ export const LoginPage = ({ onLogin }) => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const location = useLocation();
+  const navigate = useNavigate();
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -23,6 +26,7 @@ export const LoginPage = ({ onLogin }) => {
       const data = await apiLogin(email, password);
       onLogin(data);
       toast.success("Login successful");
+      navigate(location.state?.from || "/app", { replace: true });
     } catch (error) {
       toast.error(error?.response?.data?.detail || "Login failed");
     } finally {

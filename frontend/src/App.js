@@ -1,10 +1,18 @@
 import { useMemo, useState } from "react";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import "@/App.css";
 import { LoginPage } from "@/pages/LoginPage";
 import { CRMPage } from "@/pages/CRMPage";
 import { CreateSuperAdminPage } from "@/pages/CreateSuperAdminPage";
 import { clearSession, loadSession, saveSession } from "@/lib/session";
+
+const RequireAuth = ({ isAuthenticated, children }) => {
+  const location = useLocation();
+  if (!isAuthenticated) {
+    return <Navigate to="/" replace state={{ from: location.pathname }} />;
+  }
+  return children;
+};
 
 function App() {
   const [auth, setAuth] = useState(loadSession());
@@ -37,21 +45,17 @@ function App() {
         <Route
           path="/app"
           element={
-            isAuthenticated ? (
+            <RequireAuth isAuthenticated={isAuthenticated}>
               <CRMPage auth={auth} onLogout={handleLogout} />
-            ) : (
-              <Navigate to="/" replace />
-            )
+            </RequireAuth>
           }
         />
         <Route
           path="/app/create-super-admin"
           element={
-            isAuthenticated ? (
+            <RequireAuth isAuthenticated={isAuthenticated}>
               <CreateSuperAdminPage auth={auth} />
-            ) : (
-              <Navigate to="/" replace />
-            )
+            </RequireAuth>
           }
         />
         <Route path="*" element={<Navigate to={isAuthenticated ? "/app" : "/"} replace />} />
