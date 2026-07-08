@@ -8,6 +8,9 @@ import { toast } from "@/components/ui/sonner";
 const BG_IMAGE =
   "https://images.pexels.com/photos/62693/pexels-photo-62693.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940";
 
+const LOGO_URL =
+  "https://customer-assets.emergentagent.com/job_3d74aa9e-a241-4207-b148-2bbe29802707/artifacts/nozl77ti_Logo%20Icon.webp";
+
 export const LoginPage = ({ onLogin }) => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -47,6 +50,12 @@ export const LoginPage = ({ onLogin }) => {
           data-testid="screen1-login-card"
         >
           <CardHeader className="space-y-1 pb-2 text-center">
+            <img
+              src={LOGO_URL}
+              alt="Fitsiomax"
+              className="mx-auto h-16 w-16 rounded-lg object-contain"
+              data-testid="screen1-login-logo"
+            />
             <h1 className="font-heading text-3xl font-bold text-slate-900" data-testid="screen1-login-title">
               FITSIOMAX OS
             </h1>
