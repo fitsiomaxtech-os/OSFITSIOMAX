@@ -53,8 +53,8 @@ export const CreateSuperAdminPublicPage = () => {
       toast.error("Password must be at least 6 characters");
       return;
     }
-    if (form.mobile_number && !/^\d{10}$/.test(form.mobile_number)) {
-      toast.error("Mobile number must be 10 digits");
+    if (form.mobile_number && !/^\d{10,13}$/.test(form.mobile_number)) {
+      toast.error("Mobile number must be 10-13 digits");
       return;
     }
 
