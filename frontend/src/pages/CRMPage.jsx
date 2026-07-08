@@ -7,8 +7,6 @@ import {
   Database,
   Headphones,
   LogOut,
-  RefreshCw,
-  Settings,
   ShieldCheck,
   Stethoscope,
   UserRound,
@@ -628,23 +626,6 @@ export const CRMPage = ({ auth, onLogout }) => {
             </div>
             <div className="flex items-center gap-3">
               <span className="text-sm font-medium text-sky-700" data-testid="role-board-user-greeting">Hi {auth.user.full_name?.split(" ")[0]}</span>
-              <Button
-                variant="outline"
-                size="sm"
-                className="border-slate-200 text-slate-600 hover:bg-slate-50"
-                data-testid="role-board-settings-button"
-              >
-                <Settings className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={loadEverything}
-                className="border-slate-200 text-slate-600 hover:bg-slate-50"
-                data-testid="role-board-refresh-button"
-              >
-                <RefreshCw className="h-4 w-4" />
-              </Button>
               <Button
                 variant="outline"
                 size="sm"
