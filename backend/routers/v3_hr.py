@@ -82,6 +82,8 @@ class UserAccountCreate(BaseModel):
     role: Literal["super_admin", "business_dev", "pre_sales", "branch_admin", "head_physio", "physio", "marketing_head"]
     employee_id: Optional[str] = None
     branch_id: Optional[str] = None
+    mobile_number: Optional[str] = None
+    aadhar_number: Optional[str] = None
 
 
 async def _next_emp_code() -> str:
@@ -220,6 +222,8 @@ async def create_user_account(payload: UserAccountCreate, _: V3UserOut = Depends
         "role": payload.role,
         "branch_id": payload.branch_id,
         "employee_id": payload.employee_id,
+        "mobile_number": payload.mobile_number,
+        "aadhar_number": payload.aadhar_number,
         "is_active": True,
         "created_at": now_iso(),
     }

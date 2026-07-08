@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Activity,
   Briefcase,
@@ -201,6 +202,7 @@ const LOGO_URL =
   "https://customer-assets.emergentagent.com/job_3d74aa9e-a241-4207-b148-2bbe29802707/artifacts/nozl77ti_Logo%20Icon.webp";
 
 export const CRMPage = ({ auth, onLogout }) => {
+  const navigate = useNavigate();
   const [masterBoard, setMasterBoard] = useState({ stage_counts: {}, total: 0 });
   const [branchMaster, setBranchMaster] = useState({ branch_stage_counts: {}, total: 0 });
   const [branchBoard, setBranchBoard] = useState({ stage_counts: {} });
@@ -669,6 +671,7 @@ export const CRMPage = ({ auth, onLogout }) => {
             <button onClick={() => setSuperAdminView("hr")} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${superAdminView === "hr" ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"}`} data-testid="super-admin-tab-hr">HR Admin</button>
             <button onClick={() => setSuperAdminView("branches")} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${superAdminView === "branches" ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"}`} data-testid="super-admin-tab-branches">Branch Management</button>
             <button onClick={() => setSuperAdminView("packages")} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${superAdminView === "packages" ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"}`} data-testid="super-admin-tab-packages">Packages</button>
+            <button onClick={() => navigate("/app/create-super-admin")} className="inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100" data-testid="super-admin-tab-create-super-admin">+ Create Super Admin</button>
           </div>
         )}
 

@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import "@/App.css";
 import { LoginPage } from "@/pages/LoginPage";
 import { CRMPage } from "@/pages/CRMPage";
+import { CreateSuperAdminPage } from "@/pages/CreateSuperAdminPage";
 import { clearSession, loadSession, saveSession } from "@/lib/session";
 
 function App() {
@@ -38,6 +39,16 @@ function App() {
           element={
             isAuthenticated ? (
               <CRMPage auth={auth} onLogout={handleLogout} />
+            ) : (
+              <Navigate to="/" replace />
+            )
+          }
+        />
+        <Route
+          path="/app/create-super-admin"
+          element={
+            isAuthenticated ? (
+              <CreateSuperAdminPage auth={auth} />
             ) : (
               <Navigate to="/" replace />
             )
