@@ -1,3 +1,4 @@
+# Trigger test commit to verify SSH deploy secrets
 name: Deploy to VPS
 
 on:
