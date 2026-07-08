@@ -158,7 +158,9 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={load} data-testid="presales-refresh-btn"><RefreshCw className="h-4 w-4" /></Button>
-          <Button variant="outline" onClick={onManageStages} data-testid="presales-manage-stages-btn"><Cog className="h-4 w-4 mr-1" />Manage Stages</Button>
+          {role === "super_admin" && (
+            <Button variant="outline" onClick={onManageStages} data-testid="presales-manage-stages-btn"><Cog className="h-4 w-4 mr-1" />Manage Stages</Button>
+          )}
           <Button onClick={() => setShowCreate(true)} className="bg-indigo-600 hover:bg-indigo-700" data-testid="presales-create-lead-btn"><Plus className="h-4 w-4 mr-1" />Create Lead</Button>
         </div>
       </div>
