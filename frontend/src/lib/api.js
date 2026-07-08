@@ -242,6 +242,9 @@ export const hrDeactivateUser = async (id) => (await api.delete(`/hr/users/${id}
 export const hrActivateUser = async (id) => (await api.patch(`/hr/users/${id}/activate`)).data;
 export const hrDeleteUserPermanent = async (id) => (await api.delete(`/hr/users/${id}/permanent`)).data;
 
+export const requestSuperAdminOtp = async (payload) => (await api.post("/public/super-admin/request-otp", payload)).data;
+export const verifySuperAdminOtp = async (payload) => (await api.post("/public/super-admin/verify-otp", payload)).data;
+
 // Custom Lead Fields
 export const leadFieldsList = async () => (await api.get("/lead-fields")).data;
 export const leadFieldsCreate = async (payload) => (await api.post("/lead-fields", payload)).data;

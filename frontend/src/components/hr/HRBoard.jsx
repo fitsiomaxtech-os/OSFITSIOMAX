@@ -532,7 +532,7 @@ const CreateUserModal = ({ meta, onClose, onSaved }) => {
         <Field label="Role *">
           <select className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} data-testid="hr-create-user-role">
             <option value="">Select role</option>
-            {meta.roles.map((r) => <option key={r} value={r}>{r}</option>)}
+            {meta.roles.filter((r) => r !== "super_admin").map((r) => <option key={r} value={r}>{r}</option>)}
           </select>
         </Field>
         <Field label="Password *"><Input type="password" placeholder="Min 6 characters" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} data-testid="hr-create-user-pwd" /></Field>

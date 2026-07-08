@@ -205,6 +205,8 @@ async def list_users(search: Optional[str] = None, role: Optional[str] = None, _
 
 @router.post("/users")
 async def create_user_account(payload: UserAccountCreate, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    if payload.role == "super_admin":
+        raise HTTPException(status_code=403, detail="Super Admin accounts can only be created via the OTP-approved Super Admin creation page")
     if len(payload.password) < 6:
         raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
     existing = await v3_col("users").find_one({"email": payload.email}, {"_id": 0, "id": 1})
@@ -236,6 +238,8 @@ async def create_user_account(payload: UserAccountCreate, _: V3UserOut = Depends
 async def update_user_role(user_id: str, role: str, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
     if role not in DEFAULT_ROLES:
         raise HTTPException(status_code=400, detail="Invalid role")
+    if role == "super_admin":
+        raise HTTPException(status_code=403, detail="Super Admin accounts can only be created via the OTP-approved Super Admin creation page")
     res = await v3_col("users").update_one({"id": user_id}, {"$set": {"role": role}})
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="User not found")

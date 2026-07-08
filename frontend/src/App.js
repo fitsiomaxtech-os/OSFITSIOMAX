@@ -3,7 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-route
 import "@/App.css";
 import { LoginPage } from "@/pages/LoginPage";
 import { CRMPage } from "@/pages/CRMPage";
-import { CreateSuperAdminPage } from "@/pages/CreateSuperAdminPage";
+import { CreateSuperAdminPublicPage } from "@/pages/CreateSuperAdminPublicPage";
 import { clearSession, loadSession, saveSession } from "@/lib/session";
 
 const RequireAuth = ({ isAuthenticated, children }) => {
@@ -50,14 +50,7 @@ function App() {
             </RequireAuth>
           }
         />
-        <Route
-          path="/app/create-super-admin"
-          element={
-            <RequireAuth isAuthenticated={isAuthenticated}>
-              <CreateSuperAdminPage auth={auth} />
-            </RequireAuth>
-          }
-        />
+        <Route path="/createsuperadmin" element={<CreateSuperAdminPublicPage />} />
         <Route path="*" element={<Navigate to={isAuthenticated ? "/app" : "/"} replace />} />
       </Routes>
     </BrowserRouter>
