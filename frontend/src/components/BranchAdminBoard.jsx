@@ -43,7 +43,6 @@ import { SmartBookingPicker } from "@/components/SmartBookingPicker";
 const BRANCH_STAGES = [
   "New Appointment",
   "Portfolio",
-  "Follow Up",
   "Appointment Date & Time",
   "Cancelled",
 ];
@@ -51,7 +50,6 @@ const BRANCH_STAGES = [
 const STAGE_COLORS = {
   "New Appointment": { bg: "bg-blue-500", light: "bg-blue-50 text-blue-700 border-blue-200", col: "border-blue-200 bg-blue-50/40", text: "text-blue-600", count: "text-blue-700", hex: "#3b82f6" },
   "Portfolio": { bg: "bg-yellow-500", light: "bg-yellow-50 text-yellow-700 border-yellow-200", col: "border-yellow-200 bg-yellow-50/40", text: "text-yellow-600", count: "text-yellow-700", hex: "#eab308" },
-  "Follow Up": { bg: "bg-orange-500", light: "bg-orange-50 text-orange-700 border-orange-200", col: "border-orange-200 bg-orange-50/40", text: "text-orange-600", count: "text-orange-700", hex: "#f97316" },
   "Appointment Date & Time": { bg: "bg-teal-500", light: "bg-teal-50 text-teal-700 border-teal-200", col: "border-teal-200 bg-teal-50/40", text: "text-teal-600", count: "text-teal-700", hex: "#14b8a6" },
   "Cancelled": { bg: "bg-rose-500", light: "bg-rose-50 text-rose-700 border-rose-200", col: "border-rose-200 bg-rose-50/40", text: "text-rose-600", count: "text-rose-700", hex: "#f43f5e" },
 };
