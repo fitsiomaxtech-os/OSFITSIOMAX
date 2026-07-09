@@ -22,7 +22,7 @@ const PlaceholderPanel = ({ label, testid }) => (
 
 const CONSULTATION_SUBTABS = [
   { key: "consultation", label: "Consultation", icon: Stethoscope },
-  { key: "assessment", label: "Consultation + Assessment", icon: ClipboardList },
+  { key: "assessment", label: "Cost + Assessment", icon: ClipboardList },
   { key: "sessions", label: "Session Creation", icon: CalendarRange },
 ];
 
@@ -163,7 +163,7 @@ const ConsultationTab = () => {
       </div>
 
       {sub === "consultation" && <ConsultationBoardPanel />}
-      {sub === "assessment" && <PlaceholderPanel label="Consultation + Assessment" testid="consultation-subpanel-assessment" />}
+      {sub === "assessment" && <PlaceholderPanel label="Cost + Assessment" testid="consultation-subpanel-assessment" />}
       {sub === "sessions" && <SessionCreationPanel />}
     </div>
   );
