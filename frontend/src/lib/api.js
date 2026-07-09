@@ -43,6 +43,11 @@ export const apiLogout = async () => {
   return data;
 };
 
+export const forgotPassword = async (identifier) => (await api.post("/auth/forgot-password", { identifier })).data;
+export const verifyResetOtp = async (payload) => (await api.post("/auth/verify-reset-otp", payload)).data;
+export const validateResetToken = async (token) => (await api.get("/auth/reset-password/validate", { params: { token } })).data;
+export const resetPassword = async (payload) => (await api.post("/auth/reset-password", payload)).data;
+
 export const getRoleSelectionMock = async () => {
   return {
     leads_preview: [

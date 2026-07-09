@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { apiLogin } from "@/lib/api";
 import { toast } from "@/components/ui/sonner";
+import { ForgotPasswordModal } from "@/components/ForgotPasswordModal";
 
 const BG_IMAGE =
   "https://images.pexels.com/photos/62693/pexels-photo-62693.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940";
@@ -16,6 +17,7 @@ export const LoginPage = ({ onLogin }) => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [forgotOpen, setForgotOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -35,7 +37,7 @@ export const LoginPage = ({ onLogin }) => {
   };
 
   const handleForgotPassword = () => {
-    toast.info("Please contact your admin to reset your password.");
+    setForgotOpen(true);
   };
 
   return (
@@ -126,6 +128,8 @@ export const LoginPage = ({ onLogin }) => {
           </CardContent>
         </Card>
       </div>
+
+      <ForgotPasswordModal open={forgotOpen} onOpenChange={setForgotOpen} />
     </div>
   );
 };

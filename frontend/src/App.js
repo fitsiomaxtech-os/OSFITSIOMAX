@@ -4,6 +4,7 @@ import "@/App.css";
 import { LoginPage } from "@/pages/LoginPage";
 import { CRMPage } from "@/pages/CRMPage";
 import { CreateSuperAdminPublicPage } from "@/pages/CreateSuperAdminPublicPage";
+import { ResetPasswordPage } from "@/pages/ResetPasswordPage";
 import { clearSession, loadSession, saveSession } from "@/lib/session";
 
 const RequireAuth = ({ isAuthenticated, children }) => {
@@ -51,6 +52,7 @@ function App() {
           }
         />
         <Route path="/createsuperadmin" element={<CreateSuperAdminPublicPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="*" element={<Navigate to={isAuthenticated ? "/app" : "/"} replace />} />
       </Routes>
     </BrowserRouter>
