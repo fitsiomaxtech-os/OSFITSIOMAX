@@ -258,3 +258,13 @@ export const leadFieldsDelete = async (id) => (await api.delete(`/lead-fields/${
 
 export const hrBranchAdminCandidates = async () => (await api.get("/hr/branch-admin-candidates")).data;
 
+// FITSIO STORE
+export const uploadStoreImage = async (file) => {
+  const form = new FormData();
+  form.append("file", file);
+  const { data } = await api.post("/store/upload-image", form);
+  return data;
+};
+export const createStoreItem = async (payload) => (await api.post("/store/items", payload)).data;
+export const listStoreItems = async (category) => (await api.get("/store/items", { params: category ? { category } : {} })).data;
+

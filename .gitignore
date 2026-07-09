@@ -4,6 +4,9 @@
 .idea/
 .vscode/
 
+# Uploaded user content
+backend/uploads/
+
 # Dependencies
 node_modules/
 /node_modules
