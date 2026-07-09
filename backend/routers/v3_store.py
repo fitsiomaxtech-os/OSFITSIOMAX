@@ -71,3 +71,11 @@ async def list_store_items(category: Optional[str] = None, _: V3UserOut = Depend
     q = {"category": category} if category else {}
     docs = await v3_col("store_items").find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
     return docs
+
+
+@router.delete("/items/{item_id}")
+async def delete_store_item(item_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    res = await v3_col("store_items").delete_one({"id": item_id})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return {"message": "Item deleted"}
