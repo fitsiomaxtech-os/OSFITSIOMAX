@@ -44,7 +44,7 @@ async def v3_get_leads(
             created_query["$lte"] = end_date
         query["created_at"] = created_query
 
-    rows = await v3_col("leads").find(query, {"_id": 0}).sort("updated_at", -1).to_list(1000)
+    rows = await v3_col("leads").find(query, {"_id": 0}).sort("updated_at", -1).to_list(20000)
     return [V3LeadOut(**row) for row in rows]
 
 

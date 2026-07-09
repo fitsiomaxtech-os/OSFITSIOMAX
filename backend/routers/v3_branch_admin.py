@@ -19,7 +19,7 @@ router = APIRouter(prefix="/api/v3")
 
 @router.get("/branch-board/{branch_id}")
 async def v3_branch_board_new(branch_id: str, _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev"))):
-    leads = await v3_col("leads").find({"branch_id": branch_id}, {"_id": 0}).sort("updated_at", -1).to_list(1000)
+    leads = await v3_col("leads").find({"branch_id": branch_id}, {"_id": 0}).sort("updated_at", -1).to_list(20000)
     stage_counts = {}
     for stage in V3_BRANCH_STAGES:
         stage_counts[stage] = sum(1 for lead in leads if lead.get("branch_stage") == stage)
