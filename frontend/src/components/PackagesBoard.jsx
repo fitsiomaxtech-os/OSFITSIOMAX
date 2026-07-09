@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Stethoscope, Activity, Dumbbell, ClipboardList, CalendarRange, Plus } from "lucide-react";
+import { Stethoscope, Activity, Dumbbell, ClipboardList, CalendarRange, Plus, Trash2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -67,49 +67,73 @@ const ConsultationBoardPanel = () => {
 };
 
 const WEEKS_PER_MONTH = 4;
+const makeMonth = () => ({ weeks: Array.from({ length: WEEKS_PER_MONTH }, () => ({ created: false, details: "" })) });
 
 const SessionCreationPanel = () => {
-  const [months, setMonths] = useState([{ weeks: Array(WEEKS_PER_MONTH).fill("") }]);
+  const [months, setMonths] = useState([makeMonth()]);
+  const [selected, setSelected] = useState(0); // flat index across all weeks
 
-  const addMonth = () => setMonths((m) => [...m, { weeks: Array(WEEKS_PER_MONTH).fill("") }]);
+  const addMonth = () => setMonths((m) => [...m, makeMonth()]);
 
-  const setWeekValue = (monthIdx, weekIdx, value) => {
-    setMonths((m) => m.map((mo, i) => {
-      if (i !== monthIdx) return mo;
+  const flatWeeks = months.flatMap((mo, monthIdx) => mo.weeks.map((w, weekIdx) => ({ ...w, monthIdx, weekIdx })));
+  const selectedWeek = flatWeeks[selected];
+
+  const updateSelectedWeek = (patch) => {
+    setMonths((m) => m.map((mo, mi) => {
+      if (mi !== selectedWeek.monthIdx) return mo;
       const weeks = mo.weeks.slice();
-      weeks[weekIdx] = value;
+      weeks[selectedWeek.weekIdx] = { ...weeks[selectedWeek.weekIdx], ...patch };
       return { ...mo, weeks };
     }));
   };
 
-  let weekCounter = 0;
+  const createSession = () => updateSelectedWeek({ created: true });
+  const deleteSession = () => updateSelectedWeek({ created: false, details: "" });
 
   return (
     <div className="space-y-4" data-testid="consultation-subpanel-sessions">
-      {months.map((month, monthIdx) => (
-        <Card key={monthIdx} data-testid={`session-month-${monthIdx + 1}`}>
-          <CardContent className="space-y-3 p-4">
-            <p className="text-sm font-semibold text-slate-800">Month {monthIdx + 1}</p>
-            <div className="grid gap-2 sm:grid-cols-2">
-              {month.weeks.map((val, weekIdx) => {
-                weekCounter += 1;
-                const label = `Week ${weekCounter} Session`;
-                return (
-                  <div key={weekIdx} className="space-y-1">
-                    <label className="text-xs font-medium text-slate-600">{label}</label>
-                    <Input
-                      value={val}
-                      onChange={(e) => setWeekValue(monthIdx, weekIdx, e.target.value)}
-                      placeholder="Session details..."
-                      data-testid={`session-week-${weekCounter}-input`}
-                    />
-                  </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
-      ))}
+      <div className="flex flex-wrap gap-2" data-testid="session-week-selector">
+        {flatWeeks.map((w, idx) => (
+          <button
+            key={idx}
+            onClick={() => setSelected(idx)}
+            data-testid={`session-week-chip-${idx + 1}`}
+            className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+              idx === selected
+                ? "bg-sky-600 text-white"
+                : w.created
+                ? "border border-emerald-200 bg-emerald-50 text-emerald-700"
+                : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+            }`}
+          >
+            Week {idx + 1}
+          </button>
+        ))}
+      </div>
+
+      <Card data-testid="session-selected-week-panel">
+        <CardContent className="space-y-3 p-4">
+          <p className="text-sm font-semibold text-slate-800">Month {selectedWeek.monthIdx + 1} · Week {selected + 1} Session</p>
+          {selectedWeek.created ? (
+            <>
+              <Input
+                value={selectedWeek.details}
+                onChange={(e) => updateSelectedWeek({ details: e.target.value })}
+                placeholder="Session details..."
+                data-testid={`session-week-${selected + 1}-input`}
+              />
+              <Button variant="outline" className="text-rose-600 hover:bg-rose-50" onClick={deleteSession} data-testid="session-delete-btn">
+                <Trash2 className="mr-1 h-4 w-4" />Delete Session
+              </Button>
+            </>
+          ) : (
+            <Button onClick={createSession} data-testid="session-create-btn">
+              <Plus className="mr-1 h-4 w-4" />Create Session
+            </Button>
+          )}
+        </CardContent>
+      </Card>
+
       <Button variant="outline" onClick={addMonth} data-testid="session-add-month">
         <Plus className="mr-1 h-4 w-4" />Add Month
       </Button>
