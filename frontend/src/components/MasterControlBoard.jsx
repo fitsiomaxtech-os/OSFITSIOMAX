@@ -217,9 +217,11 @@ export const MasterControlBoard = () => {
                 <li className="flex items-center justify-between"><span className="flex items-center gap-2 text-slate-600"><LinkIcon className="h-3.5 w-3.5 text-slate-400" /> Google Sheet Sync</span>
                   <span className={data.sync_health?.sheet_status === "Connected" ? "font-semibold text-emerald-600" : (data.sync_health?.sheet_status === "Configured" ? "font-semibold text-amber-600" : "font-semibold text-rose-500")} data-testid="sync-status">{data.sync_health?.sheet_status || "—"}</span>
                 </li>
-                {data.sync_health?.last_sync_source && (
+                {data.sync_health?.sources_total > 0 && (
                   <li className="flex items-center justify-between"><span className="flex items-center gap-2 text-slate-500"><FileSpreadsheet className="h-3.5 w-3.5 text-slate-400" /> Source</span>
-                    <span className="font-semibold text-slate-700" data-testid="sync-source">{data.sync_health.last_sync_source}</span>
+                    <span className="font-semibold text-slate-700" data-testid="sync-source">
+                      {data.sync_health.sources_connected} Sheet{data.sync_health.sources_connected === 1 ? "" : "s"} Connected
+                    </span>
                   </li>
                 )}
                 <li className="flex items-center justify-between"><span className="flex items-center gap-2 text-slate-600"><Clock className="h-3.5 w-3.5 text-slate-400" /> Last Sync</span>
