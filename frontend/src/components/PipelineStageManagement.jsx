@@ -60,8 +60,8 @@ export const PipelineStageManagement = ({ onBack }) => {
 
   return (
     <div className="space-y-5" data-testid="pipeline-stages-page">
-      <div className="flex items-start justify-between">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex flex-wrap items-center gap-3">
           <Button variant="ghost" size="sm" onClick={onBack} data-testid="stages-back-btn"><ArrowLeft className="h-4 w-4 mr-1" />Settings</Button>
           <div>
             <h2 className="text-2xl font-bold text-slate-900">Pipeline Stage Management</h2>
@@ -83,7 +83,7 @@ export const PipelineStageManagement = ({ onBack }) => {
 
       <Card data-testid="stages-list-card">
         <CardHeader><CardTitle className="text-base">{type === "pre_sales" ? "Pre-Sales" : "Branch"} Pipeline Stages</CardTitle></CardHeader>
-        <CardContent>
+        <CardContent className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-left text-xs text-slate-500"><tr><th className="py-2">Order</th><th>Color</th><th>Stage Name</th><th>Leads</th><th>Final</th><th>Actions</th></tr></thead>
             <tbody>

@@ -69,6 +69,7 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
   const [showCreate, setShowCreate] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(50);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -141,6 +142,11 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
     });
   }, [leads, stageFilter, apptMode, apptBranchFilter, sourceFilter, search, sortNewest, dateFilter]);
 
+  // Rendering thousands of rows at once is fine on desktop but chokes mobile
+  // devices, so re-page back to 50 whenever the filtered set changes.
+  useEffect(() => { setVisibleCount(50); }, [stageFilter, apptMode, apptBranchFilter, sourceFilter, search, dateFilter, sortNewest]);
+  const visibleLeads = filtered.slice(0, visibleCount);
+
   const moveToStage = async (leadId, stageName) => {
     try { await updateLead(leadId, { stage: stageName }); toast.success(`Moved to ${stageName}`); load(); }
     catch (e) { toast.error(e?.response?.data?.detail || "Move failed"); }
@@ -151,12 +157,12 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
 
   return (
     <div className="space-y-5" data-testid="presales-crm-page">
-      <div className="flex items-start justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2 className="text-2xl font-bold text-slate-900">Pre-Sales CRM</h2>
           <p className="text-sm text-slate-500">Manage incoming leads, follow-ups, and stage transitions.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={load} data-testid="presales-refresh-btn"><RefreshCw className="h-4 w-4" /></Button>
           {role === "super_admin" && (
             <Button variant="outline" onClick={onManageStages} data-testid="presales-manage-stages-btn"><Cog className="h-4 w-4 mr-1" />Manage Stages</Button>
@@ -270,7 +276,7 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
                 <tr><th className="px-4 py-2 w-12"></th><th className="px-3 py-2">LEAD</th><th className="px-3 py-2">CONTACT</th><th className="px-3 py-2">SOURCE</th><th className="px-3 py-2">STAGE</th><th className="px-3 py-2">{stageFilter === "Appointment" ? "BRANCH ADMIN STATUS" : "DEPARTMENT"}</th><th className="px-3 py-2">CREATED</th><th className="px-3 py-2">ACTIONS</th></tr>
               </thead>
               <tbody>
-                {filtered.map((l) => {
+                {visibleLeads.map((l) => {
                   const stg = stages.find((s) => s.name === l.stage);
                   const ac = avatarColor(l.name);
                   return (
@@ -352,6 +358,13 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
               </tbody>
             </table>
           </div>
+          {filtered.length > visibleCount && (
+            <div className="flex items-center justify-center border-t border-slate-100 p-3">
+              <Button variant="outline" onClick={() => setVisibleCount((c) => c + 50)} data-testid="presales-load-more">
+                Load More ({filtered.length - visibleCount} remaining)
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
 

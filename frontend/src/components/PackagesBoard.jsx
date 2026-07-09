@@ -66,7 +66,7 @@ export const PackagesBoard = () => {
           <CardTitle className="flex items-center gap-2 text-base"><PackageIcon className="h-4 w-4 text-violet-500" /> Comprehensive Packages</CardTitle>
           <Button onClick={startNew} className="bg-violet-600 hover:bg-violet-700" data-testid="packages-new"><Plus className="mr-1 h-4 w-4" />New Package</Button>
         </CardHeader>
-        <CardContent className="p-0">
+        <CardContent className="overflow-x-auto p-0">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-xs uppercase text-slate-500">
               <tr><th className="px-4 py-2 text-left">Name</th><th className="px-4 py-2 text-left">Weeks</th><th className="px-4 py-2 text-left">Sessions</th><th className="px-4 py-2 text-left">Price</th><th className="px-4 py-2 text-left">Services</th><th className="px-4 py-2 text-left">Status</th><th className="px-4 py-2"></th></tr>
