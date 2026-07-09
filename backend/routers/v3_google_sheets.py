@@ -368,7 +368,7 @@ async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Di
 
 
 @router.post("/pull/{source_id}")
-async def pull_source(source_id: str, range_: str = Query("A1:Z10000"), _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def pull_source(source_id: str, range_: str = Query("A1:Z10000"), _: V3UserOut = Depends(v3_require_roles("super_admin", "pre_sales"))):
     result = await _internal_pull_source(source_id, range_)
     if result.get("error"):
         err = result["error"]
