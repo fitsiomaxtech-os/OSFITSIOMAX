@@ -1,6 +1,8 @@
 import { useState } from "react";
-import { Stethoscope, CalendarRange, Pill, Dumbbell, ShoppingCart, Activity } from "lucide-react";
+import { Stethoscope, CalendarRange, Pill, Dumbbell, ShoppingCart, Activity, Plus } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { toast } from "@/components/ui/sonner";
 
 const TABS = [
   { key: "consultations", label: "Consultations", icon: Stethoscope },
@@ -21,6 +23,25 @@ const PlaceholderPanel = ({ label, testid }) => (
       {label} panel — setup coming soon.
     </CardContent>
   </Card>
+);
+
+const PhysiotherapyPanel = () => (
+  <div className="space-y-3" data-testid="consultations-subpanel-physiotherapy">
+    <div className="flex items-center justify-end">
+      <Button
+        size="sm"
+        onClick={() => toast.info("Create Physiotherapy item — coming soon")}
+        data-testid="physiotherapy-create-btn"
+      >
+        <Plus className="mr-1 h-4 w-4" />Create
+      </Button>
+    </div>
+    <Card>
+      <CardContent className="p-8 text-center text-sm text-slate-400">
+        Physiotherapy panel — setup coming soon.
+      </CardContent>
+    </Card>
+  </div>
 );
 
 const ConsultationsPanel = () => {
@@ -44,9 +65,8 @@ const ConsultationsPanel = () => {
         })}
       </div>
 
-      {CONSULTATIONS_SUBTABS.map((t) => sub === t.key && (
-        <PlaceholderPanel key={t.key} label={t.label} testid={`consultations-subpanel-${t.key}`} />
-      ))}
+      {sub === "physiotherapy" && <PhysiotherapyPanel />}
+      {sub === "fitness" && <PlaceholderPanel label="Fitness" testid="consultations-subpanel-fitness" />}
     </div>
   );
 };
