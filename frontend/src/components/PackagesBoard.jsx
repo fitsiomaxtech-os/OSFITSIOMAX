@@ -1,11 +1,11 @@
 import { useState } from "react";
-import { Stethoscope, CalendarRange, Tablet, Dumbbell, ShoppingCart } from "lucide-react";
+import { Stethoscope, CalendarRange, Pill, Dumbbell, ShoppingCart } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 
 const TABS = [
   { key: "consultations", label: "Consultations", icon: Stethoscope },
   { key: "sessions", label: "Sessions", icon: CalendarRange },
-  { key: "tablet", label: "Tablet", icon: Tablet },
+  { key: "tablet", label: "Tablet", icon: Pill },
   { key: "equipment", label: "Equipment", icon: Dumbbell },
   { key: "vending_machine", label: "Vending Machine", icon: ShoppingCart },
 ];
