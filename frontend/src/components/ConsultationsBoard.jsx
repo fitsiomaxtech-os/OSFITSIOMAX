@@ -66,8 +66,6 @@ export const ConsultationsBoard = ({ branchId }) => {
     }
   }, [branchId]);
 
-  const totalLeads = board.leads?.length || 0;
-
   const filtered = useMemo(() => {
     let rows = board.leads || [];
     if (stageFilter) rows = rows.filter((l) => l.consultation_stage === stageFilter);
@@ -102,24 +100,6 @@ export const ConsultationsBoard = ({ branchId }) => {
 
   return (
     <div className="space-y-3" data-testid="consultations-board">
-      {/* Stage head bar */}
-      <div className="sticky top-[88px] z-10 -mx-1 rounded-xl border border-slate-200 bg-white/95 p-1 shadow-sm">
-        <div className="grid grid-cols-2 gap-1 sm:grid-cols-4 lg:grid-cols-7">
-          <StageTab label="All" count={totalLeads} active={stageFilter === null} onClick={() => setStageFilter(null)} color="#0ea5e9" testid="cons-tab-all" />
-          {STAGES.map((s) => (
-            <StageTab
-              key={s}
-              label={s}
-              count={board.stage_counts?.[s] || 0}
-              active={stageFilter === s}
-              onClick={() => setStageFilter(stageFilter === s ? null : s)}
-              color={STAGE_META[s].hex}
-              testid={`cons-tab-${s}`}
-            />
-          ))}
-        </div>
-      </div>
-
       {/* Search */}
       <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2">
         <Search className="h-4 w-4 text-slate-400" />
@@ -276,26 +256,6 @@ export const ConsultationsBoard = ({ branchId }) => {
         </div>
       )}
     </div>
-  );
-};
-
-const StageTab = ({ label, count, active, onClick, color, testid }) => {
-  const tint = color || "#0ea5e9";
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      data-testid={testid}
-      className="relative flex flex-col items-center justify-center rounded-lg px-3 py-2.5 text-center transition-all hover:shadow-sm"
-      style={
-        active
-          ? { background: tint, color: "#ffffff", boxShadow: `0 2px 8px ${tint}40` }
-          : { background: `${tint}14`, color: tint, border: `1px solid ${tint}33` }
-      }
-    >
-      <span className="text-[11px] font-semibold uppercase leading-tight">{label}</span>
-      <span className="mt-0.5 text-lg font-bold leading-none">{count}</span>
-    </button>
   );
 };
 
