@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Stethoscope, CalendarRange, Pill, Dumbbell, ShoppingCart } from "lucide-react";
+import { Stethoscope, CalendarRange, Pill, Dumbbell, ShoppingCart, Activity } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 
 const TABS = [
@@ -10,6 +10,11 @@ const TABS = [
   { key: "vending_machine", label: "Vending Machine", icon: ShoppingCart },
 ];
 
+const CONSULTATIONS_SUBTABS = [
+  { key: "physiotherapy", label: "Physiotherapy", icon: Activity },
+  { key: "fitness", label: "Fitness", icon: Dumbbell },
+];
+
 const PlaceholderPanel = ({ label, testid }) => (
   <Card data-testid={testid}>
     <CardContent className="p-8 text-center text-sm text-slate-400">
@@ -17,6 +22,34 @@ const PlaceholderPanel = ({ label, testid }) => (
     </CardContent>
   </Card>
 );
+
+const ConsultationsPanel = () => {
+  const [sub, setSub] = useState("physiotherapy");
+  return (
+    <div className="space-y-4" data-testid="packages-panel-consultations">
+      <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="consultations-subtabs">
+        {CONSULTATIONS_SUBTABS.map((t) => {
+          const Icon = t.icon;
+          const active = sub === t.key;
+          return (
+            <button
+              key={t.key}
+              onClick={() => setSub(t.key)}
+              data-testid={`consultations-subtab-${t.key}`}
+              className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${active ? "bg-sky-50 text-sky-600" : "text-slate-600 hover:bg-slate-50"}`}
+            >
+              <Icon className="h-4 w-4" />{t.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {CONSULTATIONS_SUBTABS.map((t) => sub === t.key && (
+        <PlaceholderPanel key={t.key} label={t.label} testid={`consultations-subpanel-${t.key}`} />
+      ))}
+    </div>
+  );
+};
 
 export const PackagesBoard = () => {
   const [tab, setTab] = useState("consultations");
@@ -45,7 +78,8 @@ export const PackagesBoard = () => {
         })}
       </div>
 
-      {TABS.map((t) => tab === t.key && (
+      {tab === "consultations" && <ConsultationsPanel />}
+      {tab !== "consultations" && TABS.map((t) => tab === t.key && (
         <PlaceholderPanel key={t.key} label={t.label} testid={`packages-panel-${t.key}`} />
       ))}
     </div>
