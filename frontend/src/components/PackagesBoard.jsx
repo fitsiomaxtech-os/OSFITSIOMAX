@@ -1,8 +1,6 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Stethoscope, Activity, Dumbbell } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
-import { getBranches } from "@/lib/api";
-import { ConsultationsBoard } from "@/components/ConsultationsBoard";
 
 const TABS = [
   { key: "consultation", label: "Consultation", icon: Stethoscope },
@@ -17,46 +15,6 @@ const PlaceholderPanel = ({ label, testid }) => (
     </CardContent>
   </Card>
 );
-
-const ConsultationPanel = () => {
-  const [branches, setBranches] = useState([]);
-  const [branchId, setBranchId] = useState("");
-
-  useEffect(() => {
-    getBranches().then((rows) => {
-      setBranches(rows);
-      if (rows.length === 1) setBranchId(rows[0].id);
-    }).catch(() => {});
-  }, []);
-
-  return (
-    <div className="space-y-3" data-testid="packages-panel-consultation">
-      <div className="flex items-center gap-2">
-        <label className="text-xs font-medium text-slate-600">Branch</label>
-        <select
-          value={branchId}
-          onChange={(e) => setBranchId(e.target.value)}
-          className="h-9 rounded-md border border-slate-200 px-2 text-sm"
-          data-testid="packages-consultation-branch-select"
-        >
-          <option value="">Select branch...</option>
-          {branches.map((b) => (
-            <option key={b.id} value={b.id}>{b.branch_name || b.name}</option>
-          ))}
-        </select>
-      </div>
-      {branchId ? (
-        <ConsultationsBoard branchId={branchId} />
-      ) : (
-        <Card>
-          <CardContent className="p-8 text-center text-sm text-slate-400">
-            Select a branch to view its consultations.
-          </CardContent>
-        </Card>
-      )}
-    </div>
-  );
-};
 
 export const PackagesBoard = () => {
   const [tab, setTab] = useState("consultation");
@@ -85,7 +43,7 @@ export const PackagesBoard = () => {
         })}
       </div>
 
-      {tab === "consultation" && <ConsultationPanel />}
+      {tab === "consultation" && <PlaceholderPanel label="Consultation" testid="packages-panel-consultation" />}
       {tab === "treatment" && <PlaceholderPanel label="Treatment" testid="packages-panel-treatment" />}
       {tab === "rehab" && <PlaceholderPanel label="Rehab" testid="packages-panel-rehab" />}
     </div>
