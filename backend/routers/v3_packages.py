@@ -10,7 +10,7 @@ from database import v3_col
 from deps import v3_require_roles
 from schemas.v3 import V3UserOut
 
-router = APIRouter(prefix="/v3", tags=["packages"])
+router = APIRouter(prefix="/api/v3", tags=["packages"])
 
 
 def _now():
