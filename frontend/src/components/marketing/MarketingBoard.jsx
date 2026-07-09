@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  BarChart3, FileSpreadsheet, Layers, Users, Target,
+  BarChart3, FileSpreadsheet, Layers, Users,
   Plus, RefreshCw, Trash2, Link as LinkIcon, ArrowRightLeft, X,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,7 +11,6 @@ import {
   mkDashboard, mkGetDistribution, mkPatchDistribution, mkRefreshDistribution,
   mkGetTeam, mkCreateTeamMember, mkAllLeads, mkAssignLead, mkDeleteLead, mkBulkDelete,
   mkGetSources, mkCreateSource, mkUpdateSource, mkDeleteSource, mkSyncSource,
-  mkPerformance,
   gsStatus, gsAuthUrl, gsDisconnect, gsPull,
 } from "@/lib/api";
 import { MaskedContact } from "@/components/MaskedContact";
@@ -22,7 +21,6 @@ const SUB_TABS = [
   { key: "lead_sources", label: "Lead Sources", icon: FileSpreadsheet },
   { key: "all_leads", label: "All Leads", icon: Layers },
   { key: "team", label: "Team & Distribution", icon: Users },
-  { key: "performance", label: "Performance", icon: Target },
 ];
 
 const KPI = ({ label, value, accent, testid }) => (
@@ -622,42 +620,6 @@ const TeamCard = ({ title, members, kind }) => (
   </Card>
 );
 
-// ============ Performance ============
-
-const PerformanceTab = () => {
-  const [data, setData] = useState(null);
-  useEffect(() => { mkPerformance().then(setData).catch((e) => console.warn("[load failed]", e?.message || e)); }, []);
-  if (!data) return <p className="text-sm text-slate-500">Loading...</p>;
-
-  const maxFunnel = Math.max(...data.funnel.map((r) => r.count), 1);
-  const maxPre = Math.max(...data.leads_per_pre_sales.map((r) => r.count), 1);
-  const maxSales = Math.max(...data.deals_per_sales.map((r) => r.count), 1);
-
-  const Row = ({ label, count, total, color }) => (
-    <div className="flex items-center gap-2">
-      <div className="w-44 truncate text-xs text-slate-600">{label}</div>
-      <div className="h-3 flex-1 overflow-hidden rounded bg-slate-100">
-        <div className={`h-full rounded ${color}`} style={{ width: `${(count / total) * 100}%` }} />
-      </div>
-      <div className="w-10 text-right text-xs font-semibold">{count}</div>
-    </div>
-  );
-
-  return (
-    <div className="grid gap-4 lg:grid-cols-2" data-testid="mk-performance-tab">
-      <Card><CardHeader><CardTitle className="text-base">Conversion Funnel</CardTitle></CardHeader><CardContent className="space-y-2">
-        {data.funnel.map((r) => <Row key={r.stage} label={r.stage} count={r.count} total={maxFunnel} color="bg-sky-500" />)}
-      </CardContent></Card>
-      <Card><CardHeader><CardTitle className="text-base">Leads per Pre-Sales Agent</CardTitle></CardHeader><CardContent className="space-y-2">
-        {data.leads_per_pre_sales.length === 0 ? <p className="text-xs text-slate-400">No data.</p> : data.leads_per_pre_sales.map((r) => <Row key={r.name} label={r.name} count={r.count} total={maxPre} color="bg-amber-500" />)}
-      </CardContent></Card>
-      <Card><CardHeader><CardTitle className="text-base">Deals Closed per Sales (Branch Admin)</CardTitle></CardHeader><CardContent className="space-y-2">
-        {data.deals_per_sales.length === 0 ? <p className="text-xs text-slate-400">No data.</p> : data.deals_per_sales.map((r) => <Row key={r.name} label={r.name} count={r.count} total={maxSales} color="bg-green-500" />)}
-      </CardContent></Card>
-    </div>
-  );
-};
-
 // ============ Dialog shell ============
 
 const DialogShell = ({ title, onClose, children, testid }) => (
@@ -700,7 +662,6 @@ export const MarketingBoard = ({ branches = [] }) => {
       {tab === "lead_sources" && <SourcesTab />}
       {tab === "all_leads" && <AllLeadsTab team={team} />}
       {tab === "team" && <TeamTab team={team} reloadTeam={reloadTeam} branches={branches} />}
-      {tab === "performance" && <PerformanceTab />}
     </div>
   );
 };

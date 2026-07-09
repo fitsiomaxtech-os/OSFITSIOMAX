@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { Pie, PieChart, Cell, ResponsiveContainer } from "recharts";
-import { getMasterControl, getBranches, getDoctors, getLeads, getVerticals, updateLead, moveLeadStage } from "@/lib/api";
+import { getMasterControl, getBranches, getDoctors, getLeads, getVerticals, updateLead, moveLeadStage, mkPerformance } from "@/lib/api";
 
 const REFRESH_MS = 30000;
 
@@ -66,6 +66,11 @@ export const MasterControlBoard = () => {
   const [branches, setBranches] = useState([]);
   const [doctors, setDoctors] = useState([]);
   const [verticals, setVerticals] = useState([]);
+  const [perf, setPerf] = useState(null);
+
+  useEffect(() => {
+    mkPerformance().then(setPerf).catch((e) => console.warn("[load failed]", e?.message || e));
+  }, []);
 
   const refreshRef = useRef(null);
 
@@ -156,8 +161,8 @@ export const MasterControlBoard = () => {
             </div>
           </section>
 
-          {/* 2 / 3 / 4 — three-column block */}
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {/* 2 / 3 — two-column block */}
+          <div className="grid gap-4 md:grid-cols-2">
             {/* 2. Attention Required */}
             <section className="rounded-xl border border-slate-200 p-4" data-testid="attention-required">
               <p className="mb-3 text-sm font-semibold text-slate-700">2. Attention Required</p>
@@ -195,10 +200,19 @@ export const MasterControlBoard = () => {
                 })}
               </div>
             </section>
+          </div>
 
-            {/* 4. Sync & System Health */}
+          {/* 4 / 5 — two-column block */}
+          <div className="grid gap-4 md:grid-cols-2">
+            {/* 4. Performance */}
+            <section className="rounded-xl border border-slate-200 p-4" data-testid="master-control-performance">
+              <p className="mb-3 text-sm font-semibold text-slate-700">4. Performance</p>
+              <PerformanceSection perf={perf} />
+            </section>
+
+            {/* 5. Sync & System Health */}
             <section className="rounded-xl border border-slate-200 p-4" data-testid="sync-health">
-              <p className="mb-3 text-sm font-semibold text-slate-700">4. Sync &amp; System Health</p>
+              <p className="mb-3 text-sm font-semibold text-slate-700">5. Sync &amp; System Health</p>
               <ul className="space-y-2.5 text-xs">
                 <li className="flex items-center justify-between"><span className="flex items-center gap-2 text-slate-600"><LinkIcon className="h-3.5 w-3.5 text-slate-400" /> Google Sheet Sync</span>
                   <span className={data.sync_health?.sheet_status === "Connected" ? "font-semibold text-emerald-600" : (data.sync_health?.sheet_status === "Configured" ? "font-semibold text-amber-600" : "font-semibold text-rose-500")} data-testid="sync-status">{data.sync_health?.sheet_status || "—"}</span>
@@ -295,6 +309,47 @@ export const MasterControlBoard = () => {
           doctors={doctors}
         />
       )}
+    </div>
+  );
+};
+
+const PerformanceBar = ({ label, count, total, color }) => (
+  <div className="flex items-center gap-2">
+    <div className="w-20 truncate text-[11px] text-slate-600" title={label}>{label}</div>
+    <div className="h-2 flex-1 overflow-hidden rounded bg-slate-100">
+      <div className="h-full rounded" style={{ width: `${(count / total) * 100}%`, background: color }} />
+    </div>
+    <div className="w-6 text-right text-[11px] font-semibold text-slate-700">{count}</div>
+  </div>
+);
+
+const PerformanceSection = ({ perf }) => {
+  if (!perf) return <p className="text-xs text-slate-400">Loading...</p>;
+
+  const maxFunnel = Math.max(...perf.funnel.map((r) => r.count), 1);
+  const maxPre = Math.max(...perf.leads_per_pre_sales.map((r) => r.count), 1);
+  const maxSales = Math.max(...perf.deals_per_sales.map((r) => r.count), 1);
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <p className="mb-1.5 text-[11px] font-semibold text-slate-500">Conversion Funnel</p>
+        <div className="space-y-1.5">
+          {perf.funnel.map((r) => <PerformanceBar key={r.stage} label={r.stage} count={r.count} total={maxFunnel} color="#0ea5e9" />)}
+        </div>
+      </div>
+      <div>
+        <p className="mb-1.5 text-[11px] font-semibold text-slate-500">Leads per Pre-Sales Agent</p>
+        {perf.leads_per_pre_sales.length === 0
+          ? <p className="text-[11px] text-slate-400">No data.</p>
+          : <div className="max-h-24 space-y-1.5 overflow-y-auto">{perf.leads_per_pre_sales.map((r) => <PerformanceBar key={r.name} label={r.name} count={r.count} total={maxPre} color="#f59e0b" />)}</div>}
+      </div>
+      <div>
+        <p className="mb-1.5 text-[11px] font-semibold text-slate-500">Deals Closed per Sales (Branch Admin)</p>
+        {perf.deals_per_sales.length === 0
+          ? <p className="text-[11px] text-slate-400">No data.</p>
+          : <div className="max-h-24 space-y-1.5 overflow-y-auto">{perf.deals_per_sales.map((r) => <PerformanceBar key={r.name} label={r.name} count={r.count} total={maxSales} color="#22c55e" />)}</div>}
+      </div>
     </div>
   );
 };
