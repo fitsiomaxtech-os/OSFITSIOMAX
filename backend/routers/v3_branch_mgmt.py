@@ -126,11 +126,9 @@ async def reassign_branch_admin(branch_id: str, payload: AssignAdmin, _: V3UserO
 
 @router.get("/head-physio-candidates")
 async def head_physio_candidates(_: V3UserOut = Depends(v3_require_roles("super_admin"))):
-    rows = await v3_col("doctors").find(
-        {"profile_type": "head_physio", "$or": [{"branch_id": None}, {"branch_id": ""}, {"branch_id": {"$exists": False}}]},
-        {"_id": 0},
-    ).to_list(500)
-    return rows
+    rows = await v3_col("doctors").find({"profile_type": "head_physio"}, {"_id": 0}).to_list(500)
+    branches = {b["id"]: b.get("branch_name") for b in await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1}).to_list(500)}
+    return [{**d, "assigned_branch": branches.get(d.get("branch_id")) if d.get("branch_id") else None} for d in rows]
 
 
 @router.patch("/{branch_id}/head-physio")
@@ -141,9 +139,8 @@ async def assign_head_physio(branch_id: str, payload: AssignHeadPhysio, _: V3Use
     doctor = await v3_col("doctors").find_one({"id": payload.doctor_id, "profile_type": "head_physio"}, {"_id": 0})
     if not doctor:
         raise HTTPException(status_code=404, detail="Head Physio not found")
-    if doctor.get("branch_id"):
-        raise HTTPException(status_code=409, detail="This Head Physio is already assigned to a branch")
 
+    # Assigns or moves this Head Physio to the given branch (overwrites any prior branch link).
     await v3_col("doctors").update_one({"id": payload.doctor_id}, {"$set": {"branch_id": branch_id}})
     if doctor.get("user_id"):
         await v3_col("users").update_one({"id": doctor["user_id"]}, {"$set": {"branch_id": branch_id}})

@@ -362,6 +362,7 @@ const AssignHeadPhysioDialog = ({ branchId, onClose, onSaved }) => {
   const [candidates, setCandidates] = useState([]);
   const [pick, setPick] = useState("");
   useEffect(() => { bmHeadPhysioCandidates().then(setCandidates).catch((e) => console.warn("[load hp candidates]", e?.message || e)); }, []);
+  const available = candidates.filter((c) => c.branch_id !== branchId);
 
   const save = async () => {
     if (!pick) { toast.error("Pick a Head Physio"); return; }
@@ -376,11 +377,11 @@ const AssignHeadPhysioDialog = ({ branchId, onClose, onSaved }) => {
           <h3 className="text-base font-semibold">Assign Head Physio</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600" data-testid="branch-hp-assign-close"><X className="h-4 w-4" /></button>
         </div>
-        <p className="text-xs text-slate-500">Only Head Physios not yet assigned to any branch are listed. Create more in HR → Roles &amp; Credentials.</p>
+        <p className="text-xs text-slate-500">Showing all Head Physios from HR → Roles &amp; Credentials. Picking one already assigned elsewhere moves them here.</p>
         <select className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm" value={pick} onChange={(e) => setPick(e.target.value)} data-testid="branch-hp-assign-select">
           <option value="">— Select Head Physio —</option>
-          {candidates.length === 0 && <option disabled>No unassigned Head Physios</option>}
-          {candidates.map((c) => <option key={c.id} value={c.id}>{c.full_name}{c.specialization ? ` · ${c.specialization}` : ""}</option>)}
+          {available.length === 0 && <option disabled>No other Head Physios — create one in HR</option>}
+          {available.map((c) => <option key={c.id} value={c.id}>{c.full_name}{c.assigned_branch ? ` · currently at ${c.assigned_branch}` : " · unassigned"}</option>)}
         </select>
         <div className="flex gap-2 pt-2"><Button variant="outline" onClick={onClose} className="flex-1" data-testid="branch-hp-assign-cancel">Cancel</Button><Button onClick={save} className="flex-1 bg-sky-600 hover:bg-sky-700" data-testid="branch-hp-assign-submit">Assign</Button></div>
       </div>

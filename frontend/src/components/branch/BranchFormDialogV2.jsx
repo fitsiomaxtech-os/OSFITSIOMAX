@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
-import { X, MapPin, Clock, BarChart3 } from "lucide-react";
+import { X, MapPin, Clock, BarChart3, Stethoscope } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
-import { bmCreateWithExistingAdmin, updateBranch, hrBranchAdminCandidates, bmPerformance } from "@/lib/api";
+import { bmCreateWithExistingAdmin, updateBranch, hrBranchAdminCandidates, bmPerformance, bmHeadPhysioCandidates, bmAssignHeadPhysio } from "@/lib/api";
 
 const TABS = [
   { key: "details", label: "Branch Details", icon: MapPin },
   { key: "hours", label: "Opening Hours", icon: Clock },
   { key: "finance", label: "Finance Summary", icon: BarChart3 },
+  { key: "head_physio", label: "Head Physio", icon: Stethoscope },
 ];
 
 const DAYS = [
@@ -41,13 +42,33 @@ export const BranchFormDialogV2 = ({ branch, onClose, onSaved }) => {
     weekly_hours: branch?.weekly_hours && Object.keys(branch.weekly_hours).length ? { ...emptyWeekly(), ...branch.weekly_hours } : emptyWeekly(),
   });
   const [finance, setFinance] = useState(null);
+  const [hpCandidates, setHpCandidates] = useState([]);
+  const [hpPick, setHpPick] = useState("");
+  const [hpSaving, setHpSaving] = useState(false);
+
+  const loadHpCandidates = () => bmHeadPhysioCandidates().then(setHpCandidates).catch((e) => console.warn("[hp candidates]", e?.message || e));
 
   useEffect(() => {
     if (!isEdit) hrBranchAdminCandidates().then(setCandidates).catch((e) => console.warn("[candidates]", e?.message || e));
     if (isEdit && branch?.id) bmPerformance(branch.id).then(setFinance).catch((e) => console.warn("[perf]", e?.message || e));
+    if (isEdit && branch?.id) loadHpCandidates();
   }, [isEdit, branch?.id]);
 
   const available = useMemo(() => candidates.filter((c) => !c.assigned_branch || c.id === branch?.admin_user_id), [candidates, branch?.admin_user_id]);
+  const assignedHeadPhysios = useMemo(() => hpCandidates.filter((c) => c.branch_id === branch?.id), [hpCandidates, branch?.id]);
+  const availableHeadPhysios = useMemo(() => hpCandidates.filter((c) => c.branch_id !== branch?.id), [hpCandidates, branch?.id]);
+
+  const assignHeadPhysio = async () => {
+    if (!hpPick) { toast.error("Pick a Head Physio"); return; }
+    setHpSaving(true);
+    try {
+      await bmAssignHeadPhysio(branch.id, hpPick);
+      toast.success("Head Physio assigned");
+      setHpPick("");
+      await loadHpCandidates();
+    } catch (e) { toast.error(e?.response?.data?.detail || "Assign failed"); }
+    setHpSaving(false);
+  };
 
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
   const setDay = (dayKey, patch) => setForm((p) => ({ ...p, weekly_hours: { ...p.weekly_hours, [dayKey]: { ...p.weekly_hours[dayKey], ...patch } } }));
@@ -90,7 +111,7 @@ export const BranchFormDialogV2 = ({ branch, onClose, onSaved }) => {
           {TABS.map((t) => {
             const Icon = t.icon;
             const active = tab === t.key;
-            const disabled = t.key === "finance" && !isEdit;
+            const disabled = (t.key === "finance" || t.key === "head_physio") && !isEdit;
             return (
               <button key={t.key} disabled={disabled} onClick={() => setTab(t.key)} className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-xs font-medium transition ${active ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"} ${disabled ? "opacity-40 cursor-not-allowed" : ""}`} data-testid={`bf2-tab-${t.key}`}>
                 <Icon className="h-3.5 w-3.5" />{t.label}{disabled && <span className="text-[10px]">(after create)</span>}
@@ -194,6 +215,44 @@ export const BranchFormDialogV2 = ({ branch, onClose, onSaved }) => {
                   </div>
                 </>
               )}
+            </div>
+          )}
+
+          {tab === "head_physio" && (
+            <div className="space-y-4" data-testid="bf2-head-physio-tab">
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Assigned to this branch</p>
+                {assignedHeadPhysios.length === 0 ? (
+                  <p className="text-sm text-slate-400">No Head Physio assigned yet.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {assignedHeadPhysios.map((d) => (
+                      <div key={d.id} className="flex items-center justify-between rounded-md border border-slate-200 p-3" data-testid={`bf2-hp-assigned-${d.id}`}>
+                        <div>
+                          <p className="text-sm font-semibold text-slate-800">{d.full_name}</p>
+                          <p className="text-xs text-slate-500">{d.specialization || "Head Physio"} · {(d.slots || []).length} time slots configured</p>
+                        </div>
+                        <span className="rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-600">Current</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t border-slate-200 pt-4">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Assign a Head Physio</p>
+                <p className="mb-2 text-xs text-slate-500">Showing all Head Physios from HR → Roles &amp; Credentials. Picking one already assigned elsewhere moves them to this branch.</p>
+                <div className="flex gap-2">
+                  <select className="h-10 flex-1 rounded-md border border-slate-200 px-3 text-sm" value={hpPick} onChange={(e) => setHpPick(e.target.value)} data-testid="bf2-hp-select">
+                    <option value="">— Select Head Physio —</option>
+                    {availableHeadPhysios.length === 0 && <option disabled>No other Head Physios — create one in HR</option>}
+                    {availableHeadPhysios.map((c) => (
+                      <option key={c.id} value={c.id}>{c.full_name}{c.assigned_branch ? ` · currently at ${c.assigned_branch}` : " · unassigned"}</option>
+                    ))}
+                  </select>
+                  <Button onClick={assignHeadPhysio} disabled={hpSaving} className="bg-sky-600 hover:bg-sky-700" data-testid="bf2-hp-assign-submit">{hpSaving ? "Assigning..." : "Assign"}</Button>
+                </div>
+              </div>
             </div>
           )}
         </div>
