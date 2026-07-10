@@ -402,10 +402,65 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved }) => {
   );
 };
 
+const ViewItemModal = ({ item, kind, onClose, onEdit }) => {
+  const isSession = kind === "session";
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} data-testid="item-view-modal">
+      <div className="flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div className="flex shrink-0 items-center justify-between bg-gradient-to-r from-sky-500 to-indigo-600 px-5 py-3 text-white">
+          <p className="flex-1 truncate text-base font-semibold" data-testid="item-view-name">{item.name}</p>
+          <div className="flex shrink-0 items-center gap-1">
+            <button onClick={onEdit} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="item-view-edit" title="Edit">
+              <Pencil className="h-4 w-4" />
+            </button>
+            <button onClick={onClose} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="item-view-close" title="Close">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+        <div className="flex-1 space-y-3 overflow-y-auto p-5">
+          {item.image_url && <img src={item.image_url} alt={item.name} className="h-48 w-full rounded-lg object-cover" />}
+          {item.description && <p className="text-sm text-slate-600">{item.description}</p>}
+
+          <div className={`rounded-xl border p-3 ${isSession ? "border-emerald-100 bg-emerald-50/50" : "border-sky-100 bg-sky-50/50"}`}>
+            {isSession ? (
+              <>
+                <p className="text-2xl font-extrabold text-slate-900">₹{(item.price ?? 0) * (item.sessions_count ?? 0)}</p>
+                <p className="text-[11px] text-slate-500">₹{item.price ?? 0} × {item.sessions_count ?? 0} sessions</p>
+              </>
+            ) : (
+              <p className="text-2xl font-extrabold text-slate-900">₹{item.price ?? 0}</p>
+            )}
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold ${item.mode === "online" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
+                {item.mode === "online" ? <Wifi className="h-3.5 w-3.5" /> : <MapPin className="h-3.5 w-3.5" />}
+                {item.mode === "online" ? "Online" : "Offline"}
+              </span>
+              {isSession ? (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-200 px-3 py-1 text-xs font-bold text-slate-700">
+                  {item.sessions_count ?? 0} sessions
+                </span>
+              ) : (
+                item.duration_minutes && (
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-200 px-3 py-1 text-xs font-bold text-slate-700">
+                    <Clock className="h-3.5 w-3.5" />
+                    {DURATION_OPTIONS.find((d) => d.minutes === item.duration_minutes)?.label || `${item.duration_minutes} mins`}
+                  </span>
+                )
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const SessionsPhysiotherapyPanel = () => {
   const [items, setItems] = useState([]);
   const [showCreate, setShowCreate] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
+  const [viewingItem, setViewingItem] = useState(null);
 
   const loadItems = () => listStoreItems("physiotherapy", "session").then(setItems).catch(() => {});
   useEffect(() => { loadItems(); }, []);
@@ -444,7 +499,7 @@ const SessionsPhysiotherapyPanel = () => {
                   <p className="flex-1 font-semibold text-slate-800">{it.name}</p>
                   <div className="flex shrink-0 gap-1">
                     <button
-                      onClick={() => setEditingItem(it)}
+                      onClick={() => setViewingItem(it)}
                       className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-sky-600"
                       data-testid={`session-item-${it.id}-view`}
                       title="View"
@@ -485,6 +540,14 @@ const SessionsPhysiotherapyPanel = () => {
 
       {showCreate && <CreateSessionPackageModal onClose={() => setShowCreate(false)} onSaved={loadItems} />}
       {editingItem && <CreateSessionPackageModal item={editingItem} onClose={() => setEditingItem(null)} onSaved={loadItems} />}
+      {viewingItem && (
+        <ViewItemModal
+          item={viewingItem}
+          kind="session"
+          onClose={() => setViewingItem(null)}
+          onEdit={() => { setEditingItem(viewingItem); setViewingItem(null); }}
+        />
+      )}
     </div>
   );
 };
@@ -520,6 +583,7 @@ const PhysiotherapyPanel = () => {
   const [items, setItems] = useState([]);
   const [showCreate, setShowCreate] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
+  const [viewingItem, setViewingItem] = useState(null);
 
   const loadItems = () => listStoreItems("physiotherapy", "consultation").then(setItems).catch(() => {});
   useEffect(() => { loadItems(); }, []);
@@ -558,7 +622,7 @@ const PhysiotherapyPanel = () => {
                   <p className="flex-1 font-semibold text-slate-800">{it.name}</p>
                   <div className="flex shrink-0 gap-1">
                     <button
-                      onClick={() => setEditingItem(it)}
+                      onClick={() => setViewingItem(it)}
                       className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-sky-600"
                       data-testid={`consultation-item-${it.id}-view`}
                       title="View"
@@ -601,6 +665,14 @@ const PhysiotherapyPanel = () => {
 
       {showCreate && <CreateConsultationModal onClose={() => setShowCreate(false)} onSaved={loadItems} />}
       {editingItem && <CreateConsultationModal item={editingItem} onClose={() => setEditingItem(null)} onSaved={loadItems} />}
+      {viewingItem && (
+        <ViewItemModal
+          item={viewingItem}
+          kind="consultation"
+          onClose={() => setViewingItem(null)}
+          onEdit={() => { setEditingItem(viewingItem); setViewingItem(null); }}
+        />
+      )}
     </div>
   );
 };
