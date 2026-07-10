@@ -38,6 +38,8 @@ export const apiLogin = async (email, password) => {
   return data;
 };
 
+export const apiMe = async () => (await api.get("/auth/me")).data;
+
 export const apiLogout = async () => {
   const { data } = await api.post("/auth/logout");
   return data;

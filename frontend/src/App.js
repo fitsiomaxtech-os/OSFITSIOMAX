@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import "@/App.css";
 import { LoginPage } from "@/pages/LoginPage";
@@ -6,6 +6,7 @@ import { CRMPage } from "@/pages/CRMPage";
 import { CreateSuperAdminPublicPage } from "@/pages/CreateSuperAdminPublicPage";
 import { ResetPasswordPage } from "@/pages/ResetPasswordPage";
 import { clearSession, loadSession, saveSession } from "@/lib/session";
+import { apiMe } from "@/lib/api";
 
 const RequireAuth = ({ isAuthenticated, children }) => {
   const location = useLocation();
@@ -19,6 +20,21 @@ function App() {
   const [auth, setAuth] = useState(loadSession());
 
   const isAuthenticated = useMemo(() => Boolean(auth?.token), [auth]);
+
+  useEffect(() => {
+    if (!auth?.token) return;
+    apiMe()
+      .then((user) => {
+        setAuth((prev) => {
+          if (!prev) return prev;
+          const next = { ...prev, user };
+          saveSession(next);
+          return next;
+        });
+      })
+      .catch(() => { /* keep cached profile if the refresh fails */ });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auth?.token]);
 
   const handleLogin = (loginResponse) => {
     saveSession(loginResponse);

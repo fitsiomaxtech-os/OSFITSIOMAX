@@ -74,7 +74,9 @@ export const BranchAdminBoard = ({ branchId }) => {
     try {
       const data = await getBranchBoard(branchId);
       setBoardData(data);
-    } catch { /* silent */ }
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "Failed to load branch board");
+    }
     setLoading(false);
   }, [branchId]);
 

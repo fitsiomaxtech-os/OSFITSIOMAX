@@ -34,6 +34,11 @@ async def v3_login(payload: V3LoginRequest):
     return V3LoginResponse(token=token, user=V3UserOut(**user_public))
 
 
+@router.get("/auth/me", response_model=V3UserOut)
+async def v3_me(user: V3UserOut = Depends(v3_current_user)):
+    return user
+
+
 @router.post("/auth/logout")
 async def v3_logout(user: V3UserOut = Depends(v3_current_user), authorization: str = Header(...)):
     token = authorization.split(" ", 1)[1].strip()
