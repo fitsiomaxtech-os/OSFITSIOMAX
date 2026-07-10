@@ -19,9 +19,6 @@ import {
   MapPin,
   Clock,
   CalendarRange,
-  Pill,
-  FlaskConical,
-  Dumbbell,
   ShoppingCart,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -44,8 +41,9 @@ import {
   moveBranchStage,
   listStoreItems,
 } from "@/lib/api";
+import { HeadPhysioCalendar } from "@/components/HeadPhysioCalendar";
 import { FinanceBoard } from "@/components/FinanceBoard";
-import { BranchConsultationsPanel, BranchSessionsPanel } from "@/components/BranchStoreBoard";
+import { BranchSessionsPanel, FitsiomaxStorePanel } from "@/components/BranchStoreBoard";
 import { SmartBookingPicker } from "@/components/SmartBookingPicker";
 import { DURATION_OPTIONS, PlaceholderPanel } from "@/components/PackagesBoard";
 
@@ -124,10 +122,7 @@ export const BranchAdminBoard = ({ branchId }) => {
     { key: "sessions", label: "Treatment Sessions", icon: CalendarRange },
     { key: "rehab", label: "Rehab", icon: Activity },
     { key: "finance", label: "Finance", icon: CreditCard },
-    { key: "tablet", label: "Tablet", icon: Pill },
-    { key: "supplementary", label: "Supplementary", icon: FlaskConical },
-    { key: "equipment", label: "Equipment", icon: Dumbbell },
-    { key: "vending_machine", label: "Vending Machine", icon: ShoppingCart },
+    { key: "store", label: "Fitsiomax Store", icon: ShoppingCart },
   ];
 
   return (
@@ -155,21 +150,26 @@ export const BranchAdminBoard = ({ branchId }) => {
       </div>
 
       {activeView === "consultations" ? (
-        <BranchConsultationsPanel branchId={branchId} />
+        <div className="space-y-4" data-testid="branch-consultations-headphysio">
+          <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="branch-consultations-subtabs">
+            <button
+              type="button"
+              className="inline-flex items-center gap-2 rounded-md bg-sky-50 px-3 py-2 text-sm font-medium text-sky-600"
+              data-testid="branch-consultations-subtab-head_physio"
+            >
+              <Calendar className="h-4 w-4" />Head Physio
+            </button>
+          </div>
+          <HeadPhysioCalendar branchId={branchId} />
+        </div>
       ) : activeView === "sessions" ? (
         <BranchSessionsPanel />
       ) : activeView === "rehab" ? (
         <PlaceholderPanel label="Rehab" testid="branch-rehab-panel" />
       ) : activeView === "finance" ? (
         <FinanceBoard />
-      ) : activeView === "tablet" ? (
-        <PlaceholderPanel label="Tablet" testid="branch-store-panel-tablet" />
-      ) : activeView === "supplementary" ? (
-        <PlaceholderPanel label="Supplementary" testid="branch-store-panel-supplementary" />
-      ) : activeView === "equipment" ? (
-        <PlaceholderPanel label="Equipment" testid="branch-store-panel-equipment" />
-      ) : activeView === "vending_machine" ? (
-        <PlaceholderPanel label="Vending Machine" testid="branch-store-panel-vending_machine" />
+      ) : activeView === "store" ? (
+        <FitsiomaxStorePanel />
       ) : (
         <>
           {/* Stage Head Bar — Pre-Sales style sticky segmented tabs */}

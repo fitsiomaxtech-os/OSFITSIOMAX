@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import { Eye, Clock, CalendarCheck, CalendarDays } from "lucide-react";
+import { Eye, Clock, CalendarCheck } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
 import { listStoreItems } from "@/lib/api";
-import { HeadPhysioCalendar } from "@/components/HeadPhysioCalendar";
 import {
+  TABS,
   CONSULTATIONS_SUBTABS,
   SESSIONS_SUBTABS,
   PlaceholderPanel,
@@ -95,7 +95,7 @@ const BranchItemsPanel = ({ category, itemType, emptyLabel, testidPrefix }) => {
   );
 };
 
-export const BranchConsultationsPanel = ({ branchId }) => {
+export const BranchConsultationsPanel = () => {
   const [sub, setSub] = useState("physiotherapy");
   return (
     <div className="space-y-4" data-testid="branch-store-panel-consultations">
@@ -114,13 +114,6 @@ export const BranchConsultationsPanel = ({ branchId }) => {
             </button>
           );
         })}
-        <button
-          onClick={() => setSub("head_physio")}
-          data-testid="branch-consultations-subtab-head_physio"
-          className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${sub === "head_physio" ? "bg-sky-50 text-sky-600" : "text-slate-600 hover:bg-slate-50"}`}
-        >
-          <CalendarDays className="h-4 w-4" />Head Physio Calendar
-        </button>
       </div>
 
       {sub === "physiotherapy" && (
@@ -132,7 +125,6 @@ export const BranchConsultationsPanel = ({ branchId }) => {
         />
       )}
       {sub === "fitness" && <PlaceholderPanel label="Fitness" testid="branch-consultations-subpanel-fitness" />}
-      {sub === "head_physio" && <HeadPhysioCalendar branchId={branchId} />}
     </div>
   );
 };
@@ -171,3 +163,38 @@ export const BranchSessionsPanel = () => {
   );
 };
 
+export const FitsiomaxStorePanel = () => {
+  const [tab, setTab] = useState("consultations");
+
+  return (
+    <div className="space-y-4" data-testid="branch-store-board">
+      <div>
+        <h2 className="text-2xl font-bold text-slate-900">Fitsiomax Store</h2>
+        <p className="text-sm text-slate-500">View-only mirror of Super Admin's store — Consultations, Sessions, Tablet, Supplementary, Equipment, and Vending Machine.</p>
+      </div>
+
+      <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="branch-store-subtabs">
+        {TABS.map((t) => {
+          const Icon = t.icon;
+          const active = tab === t.key;
+          return (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              data-testid={`branch-store-subtab-${t.key}`}
+              className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${active ? "bg-violet-50 text-violet-600" : "text-slate-600 hover:bg-slate-50"}`}
+            >
+              <Icon className="h-4 w-4" />{t.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {tab === "consultations" && <BranchConsultationsPanel />}
+      {tab === "sessions" && <BranchSessionsPanel />}
+      {tab !== "consultations" && tab !== "sessions" && TABS.map((t) => tab === t.key && (
+        <PlaceholderPanel key={t.key} label={t.label} testid={`branch-store-panel-${t.key}`} />
+      ))}
+    </div>
+  );
+};
