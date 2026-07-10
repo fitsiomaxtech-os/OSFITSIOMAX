@@ -525,7 +525,7 @@ const SessionsPhysiotherapyPanel = () => {
                     </button>
                   </div>
                 </div>
-                {it.image_url && <img src={it.image_url} alt={it.name} className="aspect-square w-full rounded-lg object-cover" />}
+                {it.image_url && <img src={it.image_url} alt={it.name} className="mx-auto aspect-square w-3/4 rounded-lg object-cover" />}
                 {it.description && <p className="line-clamp-2 text-xs text-slate-500">{it.description}</p>}
 
                 <SessionPriceBoxes item={it} testid={`session-item-${it.id}-highlights`} />
