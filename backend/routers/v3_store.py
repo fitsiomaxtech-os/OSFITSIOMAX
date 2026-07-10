@@ -44,6 +44,7 @@ class StoreItemIn(BaseModel):
     description: Optional[str] = ""
     image_url: Optional[str] = None
     mode: str  # "online" | "offline"
+    price: float = 0
 
 
 class StoreItemOut(StoreItemIn):
@@ -58,6 +59,8 @@ async def create_store_item(payload: StoreItemIn, _: V3UserOut = Depends(v3_requ
         raise HTTPException(status_code=400, detail="Name is required")
     if payload.mode not in ("online", "offline"):
         raise HTTPException(status_code=400, detail="Mode must be 'online' or 'offline'")
+    if payload.price < 0:
+        raise HTTPException(status_code=400, detail="Price cannot be negative")
     doc = payload.model_dump()
     doc["id"] = str(uuid.uuid4())
     doc["created_at"] = _now()
@@ -72,6 +75,8 @@ async def update_store_item(item_id: str, payload: StoreItemIn, _: V3UserOut = D
         raise HTTPException(status_code=400, detail="Name is required")
     if payload.mode not in ("online", "offline"):
         raise HTTPException(status_code=400, detail="Mode must be 'online' or 'offline'")
+    if payload.price < 0:
+        raise HTTPException(status_code=400, detail="Price cannot be negative")
     update = payload.model_dump()
     update["updated_at"] = _now()
     res = await v3_col("store_items").update_one({"id": item_id}, {"$set": update})

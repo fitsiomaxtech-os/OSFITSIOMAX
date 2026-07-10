@@ -28,15 +28,23 @@ const PlaceholderPanel = ({ label, testid }) => (
   </Card>
 );
 
+const DEFAULT_PRICE = { online: 1200, offline: 800 };
+
 const CreateConsultationModal = ({ item, onClose, onSaved }) => {
   const isEdit = Boolean(item);
   const [name, setName] = useState(item?.name || "");
   const [description, setDescription] = useState(item?.description || "");
   const [mode, setMode] = useState(item?.mode || "online");
+  const [price, setPrice] = useState(item?.price ?? DEFAULT_PRICE[item?.mode || "online"]);
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(item?.image_url || null);
   const [saving, setSaving] = useState(false);
   const fileInputRef = useRef(null);
+
+  const selectMode = (m) => {
+    setMode(m);
+    setPrice(DEFAULT_PRICE[m]);
+  };
 
   const handleImageChange = (e) => {
     const file = e.target.files?.[0];
@@ -54,7 +62,7 @@ const CreateConsultationModal = ({ item, onClose, onSaved }) => {
         const uploaded = await uploadStoreImage(imageFile);
         image_url = uploaded.url;
       }
-      const payload = { category: "physiotherapy", name: name.trim(), description, image_url, mode };
+      const payload = { category: "physiotherapy", name: name.trim(), description, image_url, mode, price: Number(price) || 0 };
       if (isEdit) {
         await updateStoreItem(item.id, payload);
         toast.success("Consultation updated");
@@ -130,7 +138,7 @@ const CreateConsultationModal = ({ item, onClose, onSaved }) => {
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
-                onClick={() => setMode("online")}
+                onClick={() => selectMode("online")}
                 className={`rounded-md border px-3 py-2 text-sm font-medium ${mode === "online" ? "border-sky-500 bg-sky-50 text-sky-700" : "border-slate-200 text-slate-600"}`}
                 data-testid="consultation-create-mode-online"
               >
@@ -138,12 +146,26 @@ const CreateConsultationModal = ({ item, onClose, onSaved }) => {
               </button>
               <button
                 type="button"
-                onClick={() => setMode("offline")}
+                onClick={() => selectMode("offline")}
                 className={`rounded-md border px-3 py-2 text-sm font-medium ${mode === "offline" ? "border-sky-500 bg-sky-50 text-sky-700" : "border-slate-200 text-slate-600"}`}
                 data-testid="consultation-create-mode-offline"
               >
                 Offline
               </button>
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-slate-600">Price</label>
+            <div className="relative">
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-500">₹</span>
+              <Input
+                type="number"
+                min="0"
+                value={price}
+                onChange={(e) => setPrice(e.target.value)}
+                className="pl-7"
+                data-testid="consultation-create-price"
+              />
             </div>
           </div>
         </div>
@@ -199,6 +221,7 @@ const PhysiotherapyPanel = () => {
                 {it.image_url && <img src={it.image_url} alt={it.name} className="h-32 w-full rounded-lg object-cover" />}
                 <p className="font-semibold text-slate-800">{it.name}</p>
                 {it.description && <p className="line-clamp-2 text-xs text-slate-500">{it.description}</p>}
+                <p className="text-sm font-bold text-slate-800">₹{it.price ?? 0}</p>
                 <div className="flex items-center justify-between">
                   <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${it.mode === "online" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
                     {it.mode === "online" ? "Online" : "Offline"}
