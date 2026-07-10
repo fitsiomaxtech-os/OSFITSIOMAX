@@ -423,9 +423,11 @@ const ViewItemModal = ({ item, kind, onClose, onEdit }) => {
               </p>
             ) : (
               item.duration_minutes && (
-                <div className="mt-2">
-                  <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-200 px-3 py-1 text-xs font-bold text-slate-700">
-                    <Clock className="h-3.5 w-3.5" />
+                <div className="mt-1.5 flex items-center justify-between rounded-lg bg-sky-50 px-2.5 py-1.5">
+                  <span className="inline-flex items-center gap-1.5 text-xs font-bold text-sky-800">
+                    <Clock className="h-3.5 w-3.5" />Consultation Duration
+                  </span>
+                  <span className="text-sm font-extrabold text-sky-900">
                     {DURATION_OPTIONS.find((d) => d.minutes === item.duration_minutes)?.label || `${item.duration_minutes} mins`}
                   </span>
                 </div>
@@ -629,9 +631,11 @@ const PhysiotherapyPanel = () => {
                 <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-3" data-testid={`consultation-item-${it.id}-highlights`}>
                   <PriceModeBadges item={it} isSession={false} />
                   {it.duration_minutes && (
-                    <div className="mt-2">
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-200 px-3 py-1 text-xs font-bold text-slate-700">
-                        <Clock className="h-3.5 w-3.5" />
+                    <div className="mt-1.5 flex items-center justify-between rounded-lg bg-sky-50 px-2.5 py-1.5">
+                      <span className="inline-flex items-center gap-1.5 text-xs font-bold text-sky-800">
+                        <Clock className="h-3.5 w-3.5" />Consultation Duration
+                      </span>
+                      <span className="text-sm font-extrabold text-sky-900">
                         {DURATION_OPTIONS.find((d) => d.minutes === it.duration_minutes)?.label || `${it.duration_minutes} mins`}
                       </span>
                     </div>
