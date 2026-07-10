@@ -50,7 +50,8 @@ class StoreItemIn(BaseModel):
     price_online: float = 1200
     price_offline: float = 800
     duration_minutes: int = 30  # one of VALID_DURATIONS_MINUTES; consultation items only
-    sessions_count: Optional[int] = None  # session items only
+    sessions_online: Optional[int] = None  # session items only
+    sessions_offline: Optional[int] = None  # session items only
 
 
 class StoreItemOut(StoreItemIn):
@@ -60,7 +61,7 @@ class StoreItemOut(StoreItemIn):
 
 
 def _normalize_legacy_prices(doc: dict) -> dict:
-    """Back-fill price_online/price_offline for items created before dual pricing existed."""
+    """Back-fill fields for items created before dual online/offline pricing existed."""
     if "price_online" not in doc or "price_offline" not in doc:
         legacy_price = doc.get("price")
         legacy_mode = doc.get("mode")
@@ -69,6 +70,11 @@ def _normalize_legacy_prices(doc: dict) -> dict:
                 doc.setdefault("price_online", legacy_price)
             elif legacy_mode == "offline":
                 doc.setdefault("price_offline", legacy_price)
+    if "sessions_online" not in doc or "sessions_offline" not in doc:
+        legacy_sessions = doc.get("sessions_count")
+        if legacy_sessions is not None:
+            doc.setdefault("sessions_online", legacy_sessions)
+            doc.setdefault("sessions_offline", legacy_sessions)
     return doc
 
 
@@ -82,8 +88,10 @@ async def create_store_item(payload: StoreItemIn, _: V3UserOut = Depends(v3_requ
         raise HTTPException(status_code=400, detail="item_type must be 'consultation' or 'session'")
     if payload.item_type == "consultation" and payload.duration_minutes not in VALID_DURATIONS_MINUTES:
         raise HTTPException(status_code=400, detail="Duration must be one of 15, 30, 45, 60, or 120 minutes")
-    if payload.item_type == "session" and (not payload.sessions_count or payload.sessions_count < 1):
-        raise HTTPException(status_code=400, detail="Sessions count must be at least 1")
+    if payload.item_type == "session" and (not payload.sessions_online or payload.sessions_online < 1):
+        raise HTTPException(status_code=400, detail="Online sessions count must be at least 1")
+    if payload.item_type == "session" and (not payload.sessions_offline or payload.sessions_offline < 1):
+        raise HTTPException(status_code=400, detail="Offline sessions count must be at least 1")
     doc = payload.model_dump()
     doc["id"] = str(uuid.uuid4())
     doc["created_at"] = _now()
@@ -102,8 +110,10 @@ async def update_store_item(item_id: str, payload: StoreItemIn, _: V3UserOut = D
         raise HTTPException(status_code=400, detail="item_type must be 'consultation' or 'session'")
     if payload.item_type == "consultation" and payload.duration_minutes not in VALID_DURATIONS_MINUTES:
         raise HTTPException(status_code=400, detail="Duration must be one of 15, 30, 45, 60, or 120 minutes")
-    if payload.item_type == "session" and (not payload.sessions_count or payload.sessions_count < 1):
-        raise HTTPException(status_code=400, detail="Sessions count must be at least 1")
+    if payload.item_type == "session" and (not payload.sessions_online or payload.sessions_online < 1):
+        raise HTTPException(status_code=400, detail="Online sessions count must be at least 1")
+    if payload.item_type == "session" and (not payload.sessions_offline or payload.sessions_offline < 1):
+        raise HTTPException(status_code=400, detail="Offline sessions count must be at least 1")
     update = payload.model_dump()
     update["updated_at"] = _now()
     res = await v3_col("store_items").update_one({"id": item_id}, {"$set": update})

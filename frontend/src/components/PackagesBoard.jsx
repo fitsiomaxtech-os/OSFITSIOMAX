@@ -216,7 +216,8 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved }) => {
   const [description, setDescription] = useState(item?.description || "");
   const [priceOnline, setPriceOnline] = useState(item?.price_online ?? DEFAULT_PRICE_ONLINE);
   const [priceOffline, setPriceOffline] = useState(item?.price_offline ?? DEFAULT_PRICE_OFFLINE);
-  const [sessionsCount, setSessionsCount] = useState(item?.sessions_count ?? "");
+  const [sessionsOnline, setSessionsOnline] = useState(item?.sessions_online ?? "");
+  const [sessionsOffline, setSessionsOffline] = useState(item?.sessions_offline ?? "");
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(item?.image_url || null);
   const [saving, setSaving] = useState(false);
@@ -229,13 +230,13 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved }) => {
     setImagePreview(URL.createObjectURL(file));
   };
 
-  const sessions = Number(sessionsCount) || 0;
-  const totalOnline = (Number(priceOnline) || 0) * sessions;
-  const totalOffline = (Number(priceOffline) || 0) * sessions;
+  const totalOnline = (Number(priceOnline) || 0) * (Number(sessionsOnline) || 0);
+  const totalOffline = (Number(priceOffline) || 0) * (Number(sessionsOffline) || 0);
 
   const submit = async () => {
     if (!name.trim()) { toast.error("Package name is required"); return; }
-    if (!sessionsCount || Number(sessionsCount) < 1) { toast.error("Enter number of sessions"); return; }
+    if (!sessionsOnline || Number(sessionsOnline) < 1) { toast.error("Enter number of Online sessions"); return; }
+    if (!sessionsOffline || Number(sessionsOffline) < 1) { toast.error("Enter number of Offline sessions"); return; }
     setSaving(true);
     try {
       let image_url = item?.image_url || null;
@@ -251,7 +252,8 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved }) => {
         image_url,
         price_online: Number(priceOnline) || 0,
         price_offline: Number(priceOffline) || 0,
-        sessions_count: Number(sessionsCount),
+        sessions_online: Number(sessionsOnline),
+        sessions_offline: Number(sessionsOffline),
       };
       if (isEdit) {
         await updateStoreItem(item.id, payload);
@@ -327,39 +329,36 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved }) => {
           </div>
 
           <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600">Price (Per Session)</label>
-            <PriceFields
-              priceOnline={priceOnline}
-              setPriceOnline={setPriceOnline}
-              priceOffline={priceOffline}
-              setPriceOffline={setPriceOffline}
-              onlineTestId="session-create-price-online"
-              offlineTestId="session-create-price-offline"
-            />
-          </div>
-
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600">Sessions</label>
-            <Input
-              type="number"
-              min="1"
-              value={sessionsCount}
-              onChange={(e) => setSessionsCount(e.target.value)}
-              placeholder="Enter number of sessions"
-              data-testid="session-create-sessions-count"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-2" data-testid="session-create-total">
-            <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 p-3">
-              <p className="flex items-center gap-1 text-xs font-semibold text-emerald-700"><Wifi className="h-3 w-3" />Online Total</p>
-              <p className="text-[10px] text-emerald-600">Price × Sessions</p>
-              <p className="mt-1 text-lg font-extrabold text-emerald-800" data-testid="session-create-total-online">₹{totalOnline}</p>
-            </div>
-            <div className="rounded-lg border border-amber-100 bg-amber-50/60 p-3">
-              <p className="flex items-center gap-1 text-xs font-semibold text-amber-700"><MapPin className="h-3 w-3" />Offline Total</p>
-              <p className="text-[10px] text-amber-600">Price × Sessions</p>
-              <p className="mt-1 text-lg font-extrabold text-amber-800" data-testid="session-create-total-offline">₹{totalOffline}</p>
+            <label className="mb-1 block text-xs font-semibold text-slate-600">Online &amp; Offline Setup</label>
+            <div className="grid grid-cols-2 gap-2" data-testid="session-create-mode-boxes">
+              <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 p-3">
+                <p className="mb-2 flex items-center gap-1 text-xs font-bold text-emerald-800"><Wifi className="h-3 w-3" />Online Mode</p>
+                <label className="mb-0.5 block text-[10px] font-semibold text-emerald-700">Per Session</label>
+                <div className="relative mb-2">
+                  <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-emerald-600">₹</span>
+                  <Input type="number" min="0" value={priceOnline} onChange={(e) => setPriceOnline(e.target.value)} className="h-8 pl-6 text-sm" data-testid="session-create-price-online" />
+                </div>
+                <label className="mb-0.5 block text-[10px] font-semibold text-emerald-700">Sessions</label>
+                <Input type="number" min="1" value={sessionsOnline} onChange={(e) => setSessionsOnline(e.target.value)} placeholder="e.g. 5" className="h-8 text-sm" data-testid="session-create-sessions-online" />
+                <div className="mt-2 flex items-center justify-between border-t border-emerald-200 pt-1.5">
+                  <span className="text-[11px] font-semibold text-emerald-700">Total Amount</span>
+                  <span className="text-sm font-extrabold text-emerald-900" data-testid="session-create-total-online">₹{totalOnline}</span>
+                </div>
+              </div>
+              <div className="rounded-lg border border-amber-100 bg-amber-50/60 p-3">
+                <p className="mb-2 flex items-center gap-1 text-xs font-bold text-amber-800"><MapPin className="h-3 w-3" />Offline Mode</p>
+                <label className="mb-0.5 block text-[10px] font-semibold text-amber-700">Per Session</label>
+                <div className="relative mb-2">
+                  <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-amber-600">₹</span>
+                  <Input type="number" min="0" value={priceOffline} onChange={(e) => setPriceOffline(e.target.value)} className="h-8 pl-6 text-sm" data-testid="session-create-price-offline" />
+                </div>
+                <label className="mb-0.5 block text-[10px] font-semibold text-amber-700">Sessions</label>
+                <Input type="number" min="1" value={sessionsOffline} onChange={(e) => setSessionsOffline(e.target.value)} placeholder="e.g. 4" className="h-8 text-sm" data-testid="session-create-sessions-offline" />
+                <div className="mt-2 flex items-center justify-between border-t border-amber-200 pt-1.5">
+                  <span className="text-[11px] font-semibold text-amber-700">Total Amount</span>
+                  <span className="text-sm font-extrabold text-amber-900" data-testid="session-create-total-offline">₹{totalOffline}</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -381,7 +380,7 @@ const PriceModeBadges = ({ item, isSession }) => (
         <Wifi className="h-3.5 w-3.5" />Online
       </span>
       <span className="text-sm font-extrabold text-emerald-900">
-        ₹{isSession ? (item.price_online ?? 0) * (item.sessions_count ?? 0) : (item.price_online ?? 0)}
+        ₹{isSession ? (item.price_online ?? 0) * (item.sessions_online ?? 0) : (item.price_online ?? 0)}
       </span>
     </div>
     <div className="flex items-center justify-between rounded-lg bg-amber-50 px-2.5 py-1.5">
@@ -389,7 +388,7 @@ const PriceModeBadges = ({ item, isSession }) => (
         <MapPin className="h-3.5 w-3.5" />Offline
       </span>
       <span className="text-sm font-extrabold text-amber-900">
-        ₹{isSession ? (item.price_offline ?? 0) * (item.sessions_count ?? 0) : (item.price_offline ?? 0)}
+        ₹{isSession ? (item.price_offline ?? 0) * (item.sessions_offline ?? 0) : (item.price_offline ?? 0)}
       </span>
     </div>
   </div>
@@ -401,10 +400,10 @@ const SessionPriceBoxes = ({ item, testid }) => (
       <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-emerald-800"><Wifi className="h-3.5 w-3.5" />Online Mode</p>
       <div className="space-y-1.5 text-xs text-emerald-800">
         <div className="flex items-center justify-between"><span>Per Session</span><span className="font-bold">₹{item.price_online ?? 0}</span></div>
-        <div className="flex items-center justify-between"><span>Total Sessions</span><span className="font-bold">{item.sessions_count ?? 0} Sessions</span></div>
+        <div className="flex items-center justify-between"><span>Total Sessions</span><span className="font-bold">{item.sessions_online ?? 0} Sessions</span></div>
         <div className="mt-1 flex items-center justify-between border-t border-emerald-200 pt-1.5">
           <span className="font-semibold">Total Amount</span>
-          <span className="text-sm font-extrabold text-emerald-900">₹{(item.price_online ?? 0) * (item.sessions_count ?? 0)}</span>
+          <span className="text-sm font-extrabold text-emerald-900">₹{(item.price_online ?? 0) * (item.sessions_online ?? 0)}</span>
         </div>
       </div>
     </div>
@@ -412,10 +411,10 @@ const SessionPriceBoxes = ({ item, testid }) => (
       <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-amber-800"><MapPin className="h-3.5 w-3.5" />Offline Mode</p>
       <div className="space-y-1.5 text-xs text-amber-800">
         <div className="flex items-center justify-between"><span>Per Session</span><span className="font-bold">₹{item.price_offline ?? 0}</span></div>
-        <div className="flex items-center justify-between"><span>Total Sessions</span><span className="font-bold">{item.sessions_count ?? 0} Sessions</span></div>
+        <div className="flex items-center justify-between"><span>Total Sessions</span><span className="font-bold">{item.sessions_offline ?? 0} Sessions</span></div>
         <div className="mt-1 flex items-center justify-between border-t border-amber-200 pt-1.5">
           <span className="font-semibold">Total Amount</span>
-          <span className="text-sm font-extrabold text-amber-900">₹{(item.price_offline ?? 0) * (item.sessions_count ?? 0)}</span>
+          <span className="text-sm font-extrabold text-amber-900">₹{(item.price_offline ?? 0) * (item.sessions_offline ?? 0)}</span>
         </div>
       </div>
     </div>
