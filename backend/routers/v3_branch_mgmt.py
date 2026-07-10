@@ -30,6 +30,10 @@ class AssignAdmin(BaseModel):
     admin_user_id: str
 
 
+class AssignHeadPhysio(BaseModel):
+    doctor_id: str
+
+
 @router.get("")
 async def list_branches_full(_: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev", "marketing_head"))):
     branches = await v3_col("branches").find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
@@ -118,6 +122,32 @@ async def reassign_branch_admin(branch_id: str, payload: AssignAdmin, _: V3UserO
     )
     await v3_col("users").update_one({"id": payload.admin_user_id}, {"$set": {"branch_id": branch_id}})
     return await v3_col("branches").find_one({"id": branch_id}, {"_id": 0})
+
+
+@router.get("/head-physio-candidates")
+async def head_physio_candidates(_: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    rows = await v3_col("doctors").find(
+        {"profile_type": "head_physio", "$or": [{"branch_id": None}, {"branch_id": ""}, {"branch_id": {"$exists": False}}]},
+        {"_id": 0},
+    ).to_list(500)
+    return rows
+
+
+@router.patch("/{branch_id}/head-physio")
+async def assign_head_physio(branch_id: str, payload: AssignHeadPhysio, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    branch = await v3_col("branches").find_one({"id": branch_id}, {"_id": 0})
+    if not branch:
+        raise HTTPException(status_code=404, detail="Branch not found")
+    doctor = await v3_col("doctors").find_one({"id": payload.doctor_id, "profile_type": "head_physio"}, {"_id": 0})
+    if not doctor:
+        raise HTTPException(status_code=404, detail="Head Physio not found")
+    if doctor.get("branch_id"):
+        raise HTTPException(status_code=409, detail="This Head Physio is already assigned to a branch")
+
+    await v3_col("doctors").update_one({"id": payload.doctor_id}, {"$set": {"branch_id": branch_id}})
+    if doctor.get("user_id"):
+        await v3_col("users").update_one({"id": doctor["user_id"]}, {"$set": {"branch_id": branch_id}})
+    return await v3_col("doctors").find_one({"id": payload.doctor_id}, {"_id": 0})
 
 
 @router.get("/{branch_id}/performance")

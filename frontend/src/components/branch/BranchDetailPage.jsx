@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
-import { bmDetail, updateBranch, bmReassignAdmin, hrBranchAdminCandidates } from "@/lib/api";
+import { bmDetail, updateBranch, bmReassignAdmin, hrBranchAdminCandidates, bmHeadPhysioCandidates, bmAssignHeadPhysio } from "@/lib/api";
 import { BranchFormDialogV2 } from "@/components/branch/BranchFormDialogV2";
 
 const TABS = [
@@ -59,7 +59,7 @@ export const BranchDetailPage = ({ branchId, onBack }) => {
       {tab === "summary" && <SummaryTab data={data} branchId={branchId} onChanged={load} />}
       {tab === "staff" && <StaffTab staff={data.staff} />}
       {tab === "performance" && <PerformanceTab perf={data.performance} />}
-      {tab === "head_physio" && <HeadPhysioTab hp={data.head_physio_section} />}
+      {tab === "head_physio" && <HeadPhysioTab hp={data.head_physio_section} branchId={branchId} onChanged={load} />}
 
       {showEdit && <BranchFormDialogV2 branch={b} onClose={() => setShowEdit(false)} onSaved={() => { setShowEdit(false); load(); }} />}
     </div>
@@ -285,13 +285,18 @@ const PerformanceTab = ({ perf }) => {
 
 // ---------- Head Physio tab ----------
 
-const HeadPhysioTab = ({ hp }) => (
+const HeadPhysioTab = ({ hp, branchId, onChanged }) => {
+  const [showAssign, setShowAssign] = useState(false);
+  return (
   <div className="space-y-4" data-testid="branch-head-physio-tab">
     <div className="grid gap-3 sm:grid-cols-2">
       <Card data-testid="branch-hp-calendars">
-        <CardHeader><CardTitle className="text-base">Head Physio Calendars</CardTitle></CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between gap-2">
+          <CardTitle className="text-base">Head Physio Calendars</CardTitle>
+          <button onClick={() => setShowAssign(true)} className="text-sky-600 hover:text-sky-700 p-1" title="Assign a Head Physio" data-testid="branch-hp-assign-btn"><UserCog className="h-4 w-4" /></button>
+        </CardHeader>
         <CardContent>
-          {hp.calendars.length === 0 ? <p className="text-sm text-slate-400">No Head Physio calendars yet. Create them from the Master View → Doctor Setup.</p> : (
+          {hp.calendars.length === 0 ? <p className="text-sm text-slate-400">No Head Physio assigned yet. Click the assign icon above to link an unassigned Head Physio from HR → Roles &amp; Credentials.</p> : (
             <div className="space-y-2">
               {hp.calendars.map((d) => (
                 <div key={d.id} className="flex items-center justify-between rounded-md border border-slate-200 p-3" data-testid={`branch-hp-cal-${d.id}`}>
@@ -347,8 +352,41 @@ const HeadPhysioTab = ({ hp }) => (
         )}
       </CardContent>
     </Card>
+
+    {showAssign && <AssignHeadPhysioDialog branchId={branchId} onClose={() => setShowAssign(false)} onSaved={() => { setShowAssign(false); onChanged && onChanged(); }} />}
   </div>
-);
+  );
+};
+
+const AssignHeadPhysioDialog = ({ branchId, onClose, onSaved }) => {
+  const [candidates, setCandidates] = useState([]);
+  const [pick, setPick] = useState("");
+  useEffect(() => { bmHeadPhysioCandidates().then(setCandidates).catch((e) => console.warn("[load hp candidates]", e?.message || e)); }, []);
+
+  const save = async () => {
+    if (!pick) { toast.error("Pick a Head Physio"); return; }
+    try { await bmAssignHeadPhysio(branchId, pick); toast.success("Head Physio assigned"); onSaved(); }
+    catch (e) { toast.error(e?.response?.data?.detail || "Assign failed"); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" data-testid="branch-hp-assign-dialog">
+      <div className="w-full max-w-md rounded-lg bg-white p-5 shadow-xl space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-base font-semibold">Assign Head Physio</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600" data-testid="branch-hp-assign-close"><X className="h-4 w-4" /></button>
+        </div>
+        <p className="text-xs text-slate-500">Only Head Physios not yet assigned to any branch are listed. Create more in HR → Roles &amp; Credentials.</p>
+        <select className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm" value={pick} onChange={(e) => setPick(e.target.value)} data-testid="branch-hp-assign-select">
+          <option value="">— Select Head Physio —</option>
+          {candidates.length === 0 && <option disabled>No unassigned Head Physios</option>}
+          {candidates.map((c) => <option key={c.id} value={c.id}>{c.full_name}{c.specialization ? ` · ${c.specialization}` : ""}</option>)}
+        </select>
+        <div className="flex gap-2 pt-2"><Button variant="outline" onClick={onClose} className="flex-1" data-testid="branch-hp-assign-cancel">Cancel</Button><Button onClick={save} className="flex-1 bg-sky-600 hover:bg-sky-700" data-testid="branch-hp-assign-submit">Assign</Button></div>
+      </div>
+    </div>
+  );
+};
 
 // ---------- shared ----------
 
