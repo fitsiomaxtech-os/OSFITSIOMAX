@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Stethoscope, CalendarRange, Pill, Dumbbell, ShoppingCart, Activity, Plus, X } from "lucide-react";
+import { Stethoscope, CalendarRange, Pill, Dumbbell, ShoppingCart, Activity, Plus, X, FlaskConical } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +10,7 @@ const TABS = [
   { key: "consultations", label: "Consultations", icon: Stethoscope },
   { key: "sessions", label: "Sessions", icon: CalendarRange },
   { key: "tablet", label: "Tablet", icon: Pill },
+  { key: "supplementary", label: "Supplementary", icon: FlaskConical },
   { key: "equipment", label: "Equipment", icon: Dumbbell },
   { key: "vending_machine", label: "Vending Machine", icon: ShoppingCart },
 ];
@@ -210,7 +211,7 @@ export const PackagesBoard = () => {
     <div className="space-y-4" data-testid="packages-board">
       <div>
         <h2 className="text-2xl font-bold text-slate-900">FITSIO STORE</h2>
-        <p className="text-sm text-slate-500">Manage Consultations, Sessions, Tablet, Equipment, and Vending Machine.</p>
+        <p className="text-sm text-slate-500">Manage Consultations, Sessions, Tablet, Supplementary, Equipment, and Vending Machine.</p>
       </div>
 
       <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="packages-subtabs">
