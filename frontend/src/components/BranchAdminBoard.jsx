@@ -42,6 +42,7 @@ import {
   listStoreItems,
 } from "@/lib/api";
 import { HeadPhysioCalendar } from "@/components/HeadPhysioCalendar";
+import { ConsultationsBoard } from "@/components/ConsultationsBoard";
 import { FinanceBoard } from "@/components/FinanceBoard";
 import { BranchSessionsPanel, FitsiomaxStorePanel } from "@/components/BranchStoreBoard";
 import { SmartBookingPicker } from "@/components/SmartBookingPicker";
@@ -67,6 +68,7 @@ export const BranchAdminBoard = ({ branchId }) => {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedLead, setSelectedLead] = useState(null);
   const [activeView, setActiveView] = useState("pipeline");
+  const [consultationsSubTab, setConsultationsSubTab] = useState("consultation");
   const [stageFilter, setStageFilter] = useState(null); // null = show all stages
   const [dateFilter, setDateFilter] = useState(null); // { from, to, label, key } | null
 
@@ -154,13 +156,26 @@ export const BranchAdminBoard = ({ branchId }) => {
           <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="branch-consultations-subtabs">
             <button
               type="button"
-              className="inline-flex items-center gap-2 rounded-md bg-sky-50 px-3 py-2 text-sm font-medium text-sky-600"
+              onClick={() => setConsultationsSubTab("consultation")}
+              className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${consultationsSubTab === "consultation" ? "bg-sky-50 text-sky-600" : "text-slate-600 hover:bg-slate-50"}`}
+              data-testid="branch-consultations-subtab-consultation"
+            >
+              <User className="h-4 w-4" />Consultation
+            </button>
+            <button
+              type="button"
+              onClick={() => setConsultationsSubTab("head_physio")}
+              className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${consultationsSubTab === "head_physio" ? "bg-sky-50 text-sky-600" : "text-slate-600 hover:bg-slate-50"}`}
               data-testid="branch-consultations-subtab-head_physio"
             >
               <Calendar className="h-4 w-4" />Consultant Calendar
             </button>
           </div>
-          <HeadPhysioCalendar branchId={branchId} />
+          {consultationsSubTab === "consultation" ? (
+            <ConsultationsBoard branchId={branchId} />
+          ) : (
+            <HeadPhysioCalendar branchId={branchId} />
+          )}
         </div>
       ) : activeView === "sessions" ? (
         <BranchSessionsPanel />
