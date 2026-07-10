@@ -108,7 +108,7 @@ export const BranchAdminBoard = ({ branchId }) => {
 
   const VIEW_TABS = [
     { key: "pipeline", label: "Appointment Lead", icon: LayoutDashboard },
-    { key: "consultations", label: "Consultations", icon: Stethoscope },
+    { key: "consultations", label: "FITSIO STORE", icon: Stethoscope },
     { key: "head_physio", label: "Head Physio Calendar", icon: Stethoscope },
     { key: "finance", label: "Finance", icon: CreditCard },
   ];
