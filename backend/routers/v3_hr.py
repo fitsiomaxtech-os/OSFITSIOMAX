@@ -230,6 +230,18 @@ async def create_user_account(payload: UserAccountCreate, _: V3UserOut = Depends
         "created_at": now_iso(),
     }
     await v3_col("users").insert_one(user.copy())
+    if payload.role == "head_physio":
+        await v3_col("doctors").insert_one({
+            "id": str(uuid.uuid4()),
+            "full_name": payload.full_name,
+            "profile_type": "head_physio",
+            "branch_id": payload.branch_id,
+            "specialization": "",
+            "slots": [],
+            "slot_details": [],
+            "user_id": user["id"],
+            "created_at": now_iso(),
+        })
     safe = {k: v for k, v in user.items() if k != "password"}
     return safe
 
@@ -243,6 +255,21 @@ async def update_user_role(user_id: str, role: str, _: V3UserOut = Depends(v3_re
     res = await v3_col("users").update_one({"id": user_id}, {"$set": {"role": role}})
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="User not found")
+    if role == "head_physio":
+        has_doctor = await v3_col("doctors").find_one({"user_id": user_id}, {"_id": 0, "id": 1})
+        if not has_doctor:
+            user = await v3_col("users").find_one({"id": user_id}, {"_id": 0})
+            await v3_col("doctors").insert_one({
+                "id": str(uuid.uuid4()),
+                "full_name": user["full_name"],
+                "profile_type": "head_physio",
+                "branch_id": user.get("branch_id"),
+                "specialization": "",
+                "slots": [],
+                "slot_details": [],
+                "user_id": user_id,
+                "created_at": now_iso(),
+            })
     return {"message": "Role updated"}
 
 

@@ -106,6 +106,29 @@ async def deactivate_legacy_demo_admin() -> None:
     )
 
 
+async def sync_head_physio_doctors() -> None:
+    """Head physios created via HR's Roles & Credentials only get a `users` row; Branch Admin's
+    calendar reads the separate `doctors` collection. Backfill a matching doctors row (linked via
+    user_id) for any head_physio user that doesn't have one yet, so their calendar is manageable.
+    Safe to re-run."""
+    linked_user_ids = set(await v3_col("doctors").distinct("user_id"))
+    cursor = v3_col("users").find({"role": "head_physio", "is_active": True}, {"_id": 0})
+    async for user in cursor:
+        if user["id"] in linked_user_ids:
+            continue
+        await v3_col("doctors").insert_one({
+            "id": str(uuid.uuid4()),
+            "full_name": user["full_name"],
+            "profile_type": "head_physio",
+            "branch_id": user.get("branch_id"),
+            "specialization": "",
+            "slots": [],
+            "slot_details": [],
+            "user_id": user["id"],
+            "created_at": now_iso(),
+        })
+
+
 async def ensure_v1_seed_data() -> None:
     users_count = await db.users.count_documents({})
     if users_count == 0:
