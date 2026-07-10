@@ -30,12 +30,21 @@ const PlaceholderPanel = ({ label, testid }) => (
 
 const DEFAULT_PRICE = { online: 1200, offline: 800 };
 
+const DURATION_OPTIONS = [
+  { minutes: 15, label: "15 mins" },
+  { minutes: 30, label: "30 mins" },
+  { minutes: 45, label: "45 mins" },
+  { minutes: 60, label: "1 hour" },
+  { minutes: 120, label: "2 hours" },
+];
+
 const CreateConsultationModal = ({ item, onClose, onSaved }) => {
   const isEdit = Boolean(item);
   const [name, setName] = useState(item?.name || "");
   const [description, setDescription] = useState(item?.description || "");
   const [mode, setMode] = useState(item?.mode || "online");
   const [price, setPrice] = useState(item?.price ?? DEFAULT_PRICE[item?.mode || "online"]);
+  const [duration, setDuration] = useState(item?.duration_minutes ?? 30);
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(item?.image_url || null);
   const [saving, setSaving] = useState(false);
@@ -62,7 +71,7 @@ const CreateConsultationModal = ({ item, onClose, onSaved }) => {
         const uploaded = await uploadStoreImage(imageFile);
         image_url = uploaded.url;
       }
-      const payload = { category: "physiotherapy", name: name.trim(), description, image_url, mode, price: Number(price) || 0 };
+      const payload = { category: "physiotherapy", name: name.trim(), description, image_url, mode, price: Number(price) || 0, duration_minutes: duration };
       if (isEdit) {
         await updateStoreItem(item.id, payload);
         toast.success("Consultation updated");
@@ -155,6 +164,22 @@ const CreateConsultationModal = ({ item, onClose, onSaved }) => {
             </div>
           </div>
           <div>
+            <label className="mb-1 block text-xs font-semibold text-slate-600">Consultation Duration</label>
+            <div className="flex flex-wrap gap-2" data-testid="consultation-create-duration">
+              {DURATION_OPTIONS.map((d) => (
+                <button
+                  key={d.minutes}
+                  type="button"
+                  onClick={() => setDuration(d.minutes)}
+                  className={`rounded-md border px-3 py-1.5 text-sm font-medium ${duration === d.minutes ? "border-sky-500 bg-sky-50 text-sky-700" : "border-slate-200 text-slate-600"}`}
+                  data-testid={`consultation-create-duration-${d.minutes}`}
+                >
+                  {d.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600">Price</label>
             <div className="relative">
               <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-500">₹</span>
@@ -223,9 +248,16 @@ const PhysiotherapyPanel = () => {
                 {it.description && <p className="line-clamp-2 text-xs text-slate-500">{it.description}</p>}
                 <p className="text-sm font-bold text-slate-800">₹{it.price ?? 0}</p>
                 <div className="flex items-center justify-between">
-                  <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${it.mode === "online" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
-                    {it.mode === "online" ? "Online" : "Offline"}
-                  </span>
+                  <div className="flex flex-wrap items-center gap-1">
+                    <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${it.mode === "online" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
+                      {it.mode === "online" ? "Online" : "Offline"}
+                    </span>
+                    {it.duration_minutes && (
+                      <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
+                        {DURATION_OPTIONS.find((d) => d.minutes === it.duration_minutes)?.label || `${it.duration_minutes} mins`}
+                      </span>
+                    )}
+                  </div>
                   <div className="flex gap-1">
                     <button
                       onClick={() => setEditingItem(it)}
