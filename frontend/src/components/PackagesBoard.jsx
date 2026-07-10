@@ -90,14 +90,14 @@ const CreateConsultationModal = ({ item, onClose, onSaved }) => {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} data-testid="consultation-create-modal">
-      <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
-        <div className="flex items-center justify-between bg-gradient-to-r from-sky-500 to-indigo-600 px-5 py-4 text-white">
+      <div className="flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div className="flex shrink-0 items-center justify-between bg-gradient-to-r from-sky-500 to-indigo-600 px-5 py-3 text-white">
           <p className="text-base font-semibold">{isEdit ? "Edit Consultation" : "Consultation"}</p>
           <button onClick={onClose} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="consultation-create-close">
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div className="space-y-4 p-5">
+        <div className="flex-1 space-y-3 overflow-y-auto p-5">
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600">Name</label>
             <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Initial Physiotherapy Assessment" data-testid="consultation-create-name" />
@@ -105,7 +105,7 @@ const CreateConsultationModal = ({ item, onClose, onSaved }) => {
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600">Description</label>
             <textarea
-              rows={3}
+              rows={2}
               className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400"
               placeholder="Describe this consultation..."
               value={description}
@@ -120,7 +120,7 @@ const CreateConsultationModal = ({ item, onClose, onSaved }) => {
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="relative aspect-square w-36 overflow-hidden rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 transition hover:border-sky-400 hover:bg-sky-50/60"
+              className="relative aspect-square w-24 overflow-hidden rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 transition hover:border-sky-400 hover:bg-sky-50/60"
               data-testid="consultation-create-image-dropzone"
             >
               {imagePreview ? (
@@ -194,7 +194,7 @@ const CreateConsultationModal = ({ item, onClose, onSaved }) => {
             </div>
           </div>
         </div>
-        <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/40 px-5 py-3">
+        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/40 px-5 py-3">
           <Button variant="outline" onClick={onClose} data-testid="consultation-create-cancel">Cancel</Button>
           <Button onClick={submit} disabled={saving} className="bg-sky-600 text-white hover:bg-sky-700" data-testid="consultation-create-submit">
             {saving ? (isEdit ? "Saving..." : "Creating...") : (isEdit ? "Save Changes" : "Create")}
