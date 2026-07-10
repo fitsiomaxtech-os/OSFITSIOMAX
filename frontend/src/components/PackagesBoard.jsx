@@ -33,7 +33,8 @@ const PlaceholderPanel = ({ label, testid }) => (
   </Card>
 );
 
-const DEFAULT_PRICE = { online: 1200, offline: 800 };
+const DEFAULT_PRICE_ONLINE = 1200;
+const DEFAULT_PRICE_OFFLINE = 800;
 
 const DURATION_OPTIONS = [
   { minutes: 15, label: "15 mins" },
@@ -43,22 +44,36 @@ const DURATION_OPTIONS = [
   { minutes: 120, label: "2 hours" },
 ];
 
+const PriceFields = ({ priceOnline, setPriceOnline, priceOffline, setPriceOffline, onlineTestId, offlineTestId }) => (
+  <div className="grid grid-cols-2 gap-2">
+    <div>
+      <label className="mb-1 flex items-center gap-1 text-xs font-semibold text-slate-600"><Wifi className="h-3 w-3 text-emerald-600" />Online Price</label>
+      <div className="relative">
+        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-500">₹</span>
+        <Input type="number" min="0" value={priceOnline} onChange={(e) => setPriceOnline(e.target.value)} className="pl-7" data-testid={onlineTestId} />
+      </div>
+    </div>
+    <div>
+      <label className="mb-1 flex items-center gap-1 text-xs font-semibold text-slate-600"><MapPin className="h-3 w-3 text-amber-600" />Offline Price</label>
+      <div className="relative">
+        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-500">₹</span>
+        <Input type="number" min="0" value={priceOffline} onChange={(e) => setPriceOffline(e.target.value)} className="pl-7" data-testid={offlineTestId} />
+      </div>
+    </div>
+  </div>
+);
+
 const CreateConsultationModal = ({ item, onClose, onSaved }) => {
   const isEdit = Boolean(item);
   const [name, setName] = useState(item?.name || "");
   const [description, setDescription] = useState(item?.description || "");
-  const [mode, setMode] = useState(item?.mode || "online");
-  const [price, setPrice] = useState(item?.price ?? DEFAULT_PRICE[item?.mode || "online"]);
+  const [priceOnline, setPriceOnline] = useState(item?.price_online ?? DEFAULT_PRICE_ONLINE);
+  const [priceOffline, setPriceOffline] = useState(item?.price_offline ?? DEFAULT_PRICE_OFFLINE);
   const [duration, setDuration] = useState(item?.duration_minutes ?? 30);
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(item?.image_url || null);
   const [saving, setSaving] = useState(false);
   const fileInputRef = useRef(null);
-
-  const selectMode = (m) => {
-    setMode(m);
-    setPrice(DEFAULT_PRICE[m]);
-  };
 
   const handleImageChange = (e) => {
     const file = e.target.files?.[0];
@@ -76,7 +91,16 @@ const CreateConsultationModal = ({ item, onClose, onSaved }) => {
         const uploaded = await uploadStoreImage(imageFile);
         image_url = uploaded.url;
       }
-      const payload = { item_type: "consultation", category: "physiotherapy", name: name.trim(), description, image_url, mode, price: Number(price) || 0, duration_minutes: duration };
+      const payload = {
+        item_type: "consultation",
+        category: "physiotherapy",
+        name: name.trim(),
+        description,
+        image_url,
+        price_online: Number(priceOnline) || 0,
+        price_offline: Number(priceOffline) || 0,
+        duration_minutes: duration,
+      };
       if (isEdit) {
         await updateStoreItem(item.id, payload);
         toast.success("Consultation updated");
@@ -148,27 +172,6 @@ const CreateConsultationModal = ({ item, onClose, onSaved }) => {
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600">Mode</label>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => selectMode("online")}
-                className={`rounded-md border px-3 py-2 text-sm font-medium ${mode === "online" ? "border-sky-500 bg-sky-50 text-sky-700" : "border-slate-200 text-slate-600"}`}
-                data-testid="consultation-create-mode-online"
-              >
-                Online
-              </button>
-              <button
-                type="button"
-                onClick={() => selectMode("offline")}
-                className={`rounded-md border px-3 py-2 text-sm font-medium ${mode === "offline" ? "border-sky-500 bg-sky-50 text-sky-700" : "border-slate-200 text-slate-600"}`}
-                data-testid="consultation-create-mode-offline"
-              >
-                Offline
-              </button>
-            </div>
-          </div>
-          <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600">Consultation Duration</label>
             <div className="flex flex-wrap gap-2" data-testid="consultation-create-duration">
               {DURATION_OPTIONS.map((d) => (
@@ -186,17 +189,14 @@ const CreateConsultationModal = ({ item, onClose, onSaved }) => {
           </div>
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600">Price</label>
-            <div className="relative">
-              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-500">₹</span>
-              <Input
-                type="number"
-                min="0"
-                value={price}
-                onChange={(e) => setPrice(e.target.value)}
-                className="pl-7"
-                data-testid="consultation-create-price"
-              />
-            </div>
+            <PriceFields
+              priceOnline={priceOnline}
+              setPriceOnline={setPriceOnline}
+              priceOffline={priceOffline}
+              setPriceOffline={setPriceOffline}
+              onlineTestId="consultation-create-price-online"
+              offlineTestId="consultation-create-price-offline"
+            />
           </div>
         </div>
         <div className="flex shrink-0 items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/40 px-5 py-3">
@@ -214,18 +214,13 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved }) => {
   const isEdit = Boolean(item);
   const [name, setName] = useState(item?.name || "");
   const [description, setDescription] = useState(item?.description || "");
-  const [mode, setMode] = useState(item?.mode || "online");
-  const [price, setPrice] = useState(item?.price ?? DEFAULT_PRICE[item?.mode || "online"]);
+  const [priceOnline, setPriceOnline] = useState(item?.price_online ?? DEFAULT_PRICE_ONLINE);
+  const [priceOffline, setPriceOffline] = useState(item?.price_offline ?? DEFAULT_PRICE_OFFLINE);
   const [sessionsCount, setSessionsCount] = useState(item?.sessions_count ?? "");
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(item?.image_url || null);
   const [saving, setSaving] = useState(false);
   const fileInputRef = useRef(null);
-
-  const selectMode = (m) => {
-    setMode(m);
-    setPrice(DEFAULT_PRICE[m]);
-  };
 
   const handleImageChange = (e) => {
     const file = e.target.files?.[0];
@@ -234,7 +229,9 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved }) => {
     setImagePreview(URL.createObjectURL(file));
   };
 
-  const totalAmount = (Number(price) || 0) * (Number(sessionsCount) || 0);
+  const sessions = Number(sessionsCount) || 0;
+  const totalOnline = (Number(priceOnline) || 0) * sessions;
+  const totalOffline = (Number(priceOffline) || 0) * sessions;
 
   const submit = async () => {
     if (!name.trim()) { toast.error("Package name is required"); return; }
@@ -252,8 +249,8 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved }) => {
         name: name.trim(),
         description,
         image_url,
-        mode,
-        price: Number(price) || 0,
+        price_online: Number(priceOnline) || 0,
+        price_offline: Number(priceOffline) || 0,
         sessions_count: Number(sessionsCount),
       };
       if (isEdit) {
@@ -328,67 +325,42 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved }) => {
               className="hidden"
             />
           </div>
+
           <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600">Mode</label>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => selectMode("online")}
-                className={`rounded-md border px-3 py-2 text-sm font-medium ${mode === "online" ? "border-sky-500 bg-sky-50 text-sky-700" : "border-slate-200 text-slate-600"}`}
-                data-testid="session-create-mode-online"
-              >
-                Online
-              </button>
-              <button
-                type="button"
-                onClick={() => selectMode("offline")}
-                className={`rounded-md border px-3 py-2 text-sm font-medium ${mode === "offline" ? "border-sky-500 bg-sky-50 text-sky-700" : "border-slate-200 text-slate-600"}`}
-                data-testid="session-create-mode-offline"
-              >
-                Offline
-              </button>
-            </div>
+            <label className="mb-1 block text-xs font-semibold text-slate-600">Price (Per Session)</label>
+            <PriceFields
+              priceOnline={priceOnline}
+              setPriceOnline={setPriceOnline}
+              priceOffline={priceOffline}
+              setPriceOffline={setPriceOffline}
+              onlineTestId="session-create-price-online"
+              offlineTestId="session-create-price-offline"
+            />
           </div>
 
-          <div className="flex items-start gap-2 rounded-lg border border-sky-100 bg-sky-50/70 p-2.5 text-xs text-sky-800" data-testid="session-create-mode-notice">
-            <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-sky-200 text-[10px] font-bold text-sky-800">i</span>
-            <span>
-              {mode === "online" ? "Online" : "Offline"} mode selected. Default price set to ₹{DEFAULT_PRICE[mode]} per session.
-            </span>
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-slate-600">Sessions</label>
+            <Input
+              type="number"
+              min="1"
+              value={sessionsCount}
+              onChange={(e) => setSessionsCount(e.target.value)}
+              placeholder="Enter number of sessions"
+              data-testid="session-create-sessions-count"
+            />
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="mb-1 block text-xs font-semibold text-slate-600">Price (Per Session)</label>
-              <div className="relative">
-                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-500">₹</span>
-                <Input
-                  type="number"
-                  min="0"
-                  value={price}
-                  onChange={(e) => setPrice(e.target.value)}
-                  className="pl-7"
-                  data-testid="session-create-price"
-                />
-              </div>
+          <div className="grid grid-cols-2 gap-2" data-testid="session-create-total">
+            <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 p-3">
+              <p className="flex items-center gap-1 text-xs font-semibold text-emerald-700"><Wifi className="h-3 w-3" />Online Total</p>
+              <p className="text-[10px] text-emerald-600">Price × Sessions</p>
+              <p className="mt-1 text-lg font-extrabold text-emerald-800" data-testid="session-create-total-online">₹{totalOnline}</p>
             </div>
-            <div>
-              <label className="mb-1 block text-xs font-semibold text-slate-600">Sessions</label>
-              <Input
-                type="number"
-                min="1"
-                value={sessionsCount}
-                onChange={(e) => setSessionsCount(e.target.value)}
-                placeholder="Enter number of sessions"
-                data-testid="session-create-sessions-count"
-              />
+            <div className="rounded-lg border border-amber-100 bg-amber-50/60 p-3">
+              <p className="flex items-center gap-1 text-xs font-semibold text-amber-700"><MapPin className="h-3 w-3" />Offline Total</p>
+              <p className="text-[10px] text-amber-600">Price × Sessions</p>
+              <p className="mt-1 text-lg font-extrabold text-amber-800" data-testid="session-create-total-offline">₹{totalOffline}</p>
             </div>
-          </div>
-
-          <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 p-3" data-testid="session-create-total">
-            <p className="text-xs font-semibold text-emerald-700">Total Amount</p>
-            <p className="text-[10px] text-emerald-600">Price × Sessions</p>
-            <p className="mt-1 text-xl font-extrabold text-emerald-800">₹{totalAmount}</p>
           </div>
         </div>
         <div className="flex shrink-0 items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/40 px-5 py-3">
@@ -401,6 +373,27 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved }) => {
     </div>
   );
 };
+
+const PriceModeBadges = ({ item, isSession }) => (
+  <div className="mt-2 space-y-1.5">
+    <div className="flex items-center justify-between rounded-lg bg-emerald-50 px-2.5 py-1.5">
+      <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-800">
+        <Wifi className="h-3.5 w-3.5" />Online
+      </span>
+      <span className="text-sm font-extrabold text-emerald-900">
+        ₹{isSession ? (item.price_online ?? 0) * (item.sessions_count ?? 0) : (item.price_online ?? 0)}
+      </span>
+    </div>
+    <div className="flex items-center justify-between rounded-lg bg-amber-50 px-2.5 py-1.5">
+      <span className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-800">
+        <MapPin className="h-3.5 w-3.5" />Offline
+      </span>
+      <span className="text-sm font-extrabold text-amber-900">
+        ₹{isSession ? (item.price_offline ?? 0) * (item.sessions_count ?? 0) : (item.price_offline ?? 0)}
+      </span>
+    </div>
+  </div>
+);
 
 const ViewItemModal = ({ item, kind, onClose, onEdit }) => {
   const isSession = kind === "session";
@@ -422,33 +415,29 @@ const ViewItemModal = ({ item, kind, onClose, onEdit }) => {
           {item.image_url && <img src={item.image_url} alt={item.name} className="h-48 w-full rounded-lg object-cover" />}
           {item.description && <p className="text-sm text-slate-600">{item.description}</p>}
 
-          <div className={`rounded-xl border p-3 ${isSession ? "border-emerald-100 bg-emerald-50/50" : "border-sky-100 bg-sky-50/50"}`}>
+          <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-3">
+            <PriceModeBadges item={item} isSession={isSession} />
             {isSession ? (
-              <>
-                <p className="text-2xl font-extrabold text-slate-900">₹{(item.price ?? 0) * (item.sessions_count ?? 0)}</p>
-                <p className="text-[11px] text-slate-500">₹{item.price ?? 0} × {item.sessions_count ?? 0} sessions</p>
-              </>
+              <p className="mt-2 text-[11px] text-slate-500">
+                ₹{item.price_online ?? 0} / ₹{item.price_offline ?? 0} per session × {item.sessions_count ?? 0} sessions
+              </p>
             ) : (
-              <p className="text-2xl font-extrabold text-slate-900">₹{item.price ?? 0}</p>
-            )}
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold ${item.mode === "online" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
-                {item.mode === "online" ? <Wifi className="h-3.5 w-3.5" /> : <MapPin className="h-3.5 w-3.5" />}
-                {item.mode === "online" ? "Online" : "Offline"}
-              </span>
-              {isSession ? (
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-200 px-3 py-1 text-xs font-bold text-slate-700">
-                  {item.sessions_count ?? 0} sessions
-                </span>
-              ) : (
-                item.duration_minutes && (
+              item.duration_minutes && (
+                <div className="mt-2">
                   <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-200 px-3 py-1 text-xs font-bold text-slate-700">
                     <Clock className="h-3.5 w-3.5" />
                     {DURATION_OPTIONS.find((d) => d.minutes === item.duration_minutes)?.label || `${item.duration_minutes} mins`}
                   </span>
-                )
-              )}
-            </div>
+                </div>
+              )
+            )}
+            {isSession && (
+              <div className="mt-2">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-200 px-3 py-1 text-xs font-bold text-slate-700">
+                  {item.sessions_count ?? 0} sessions
+                </span>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -519,14 +508,9 @@ const SessionsPhysiotherapyPanel = () => {
                 {it.image_url && <img src={it.image_url} alt={it.name} className="h-32 w-full rounded-lg object-cover" />}
                 {it.description && <p className="line-clamp-2 text-xs text-slate-500">{it.description}</p>}
 
-                <div className="rounded-xl border border-emerald-100 bg-emerald-50/50 p-3" data-testid={`session-item-${it.id}-highlights`}>
-                  <p className="text-2xl font-extrabold text-slate-900">₹{(it.price ?? 0) * (it.sessions_count ?? 0)}</p>
-                  <p className="text-[10px] text-slate-500">₹{it.price ?? 0} × {it.sessions_count ?? 0} sessions</p>
+                <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-3" data-testid={`session-item-${it.id}-highlights`}>
+                  <PriceModeBadges item={it} isSession />
                   <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold ${it.mode === "online" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
-                      {it.mode === "online" ? <Wifi className="h-3.5 w-3.5" /> : <MapPin className="h-3.5 w-3.5" />}
-                      {it.mode === "online" ? "Online" : "Offline"}
-                    </span>
                     <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-200 px-3 py-1 text-xs font-bold text-slate-700">
                       {it.sessions_count ?? 0} sessions
                     </span>
@@ -642,20 +626,16 @@ const PhysiotherapyPanel = () => {
                 {it.image_url && <img src={it.image_url} alt={it.name} className="h-32 w-full rounded-lg object-cover" />}
                 {it.description && <p className="line-clamp-2 text-xs text-slate-500">{it.description}</p>}
 
-                <div className="rounded-xl border border-sky-100 bg-sky-50/50 p-3" data-testid={`consultation-item-${it.id}-highlights`}>
-                  <p className="text-2xl font-extrabold text-slate-900">₹{it.price ?? 0}</p>
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold ${it.mode === "online" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
-                      {it.mode === "online" ? <Wifi className="h-3.5 w-3.5" /> : <MapPin className="h-3.5 w-3.5" />}
-                      {it.mode === "online" ? "Online" : "Offline"}
-                    </span>
-                    {it.duration_minutes && (
+                <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-3" data-testid={`consultation-item-${it.id}-highlights`}>
+                  <PriceModeBadges item={it} isSession={false} />
+                  {it.duration_minutes && (
+                    <div className="mt-2">
                       <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-200 px-3 py-1 text-xs font-bold text-slate-700">
                         <Clock className="h-3.5 w-3.5" />
                         {DURATION_OPTIONS.find((d) => d.minutes === it.duration_minutes)?.label || `${it.duration_minutes} mins`}
                       </span>
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>

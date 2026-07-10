@@ -47,8 +47,8 @@ class StoreItemIn(BaseModel):
     name: str
     description: Optional[str] = ""
     image_url: Optional[str] = None
-    mode: str  # "online" | "offline"
-    price: float = 0
+    price_online: float = 1200
+    price_offline: float = 800
     duration_minutes: int = 30  # one of VALID_DURATIONS_MINUTES; consultation items only
     sessions_count: Optional[int] = None  # session items only
 
@@ -59,13 +59,24 @@ class StoreItemOut(StoreItemIn):
     updated_at: str
 
 
+def _normalize_legacy_prices(doc: dict) -> dict:
+    """Back-fill price_online/price_offline for items created before dual pricing existed."""
+    if "price_online" not in doc or "price_offline" not in doc:
+        legacy_price = doc.get("price")
+        legacy_mode = doc.get("mode")
+        if legacy_price is not None:
+            if legacy_mode == "online":
+                doc.setdefault("price_online", legacy_price)
+            elif legacy_mode == "offline":
+                doc.setdefault("price_offline", legacy_price)
+    return doc
+
+
 @router.post("/items", response_model=StoreItemOut)
 async def create_store_item(payload: StoreItemIn, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
     if not payload.name.strip():
         raise HTTPException(status_code=400, detail="Name is required")
-    if payload.mode not in ("online", "offline"):
-        raise HTTPException(status_code=400, detail="Mode must be 'online' or 'offline'")
-    if payload.price < 0:
+    if payload.price_online < 0 or payload.price_offline < 0:
         raise HTTPException(status_code=400, detail="Price cannot be negative")
     if payload.item_type not in ("consultation", "session"):
         raise HTTPException(status_code=400, detail="item_type must be 'consultation' or 'session'")
@@ -85,9 +96,7 @@ async def create_store_item(payload: StoreItemIn, _: V3UserOut = Depends(v3_requ
 async def update_store_item(item_id: str, payload: StoreItemIn, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
     if not payload.name.strip():
         raise HTTPException(status_code=400, detail="Name is required")
-    if payload.mode not in ("online", "offline"):
-        raise HTTPException(status_code=400, detail="Mode must be 'online' or 'offline'")
-    if payload.price < 0:
+    if payload.price_online < 0 or payload.price_offline < 0:
         raise HTTPException(status_code=400, detail="Price cannot be negative")
     if payload.item_type not in ("consultation", "session"):
         raise HTTPException(status_code=400, detail="item_type must be 'consultation' or 'session'")
@@ -115,7 +124,7 @@ async def list_store_items(category: Optional[str] = None, item_type: Optional[s
     elif item_type:
         q["item_type"] = item_type
     docs = await v3_col("store_items").find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
-    return docs
+    return [_normalize_legacy_prices(d) for d in docs]
 
 
 @router.delete("/items/{item_id}")
