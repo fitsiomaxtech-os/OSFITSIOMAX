@@ -395,6 +395,33 @@ const PriceModeBadges = ({ item, isSession }) => (
   </div>
 );
 
+const SessionPriceBoxes = ({ item, testid }) => (
+  <div className="grid grid-cols-2 gap-2" data-testid={testid}>
+    <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 p-3">
+      <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-emerald-800"><Wifi className="h-3.5 w-3.5" />Online Mode</p>
+      <div className="space-y-1.5 text-xs text-emerald-800">
+        <div className="flex items-center justify-between"><span>Per Session</span><span className="font-bold">₹{item.price_online ?? 0}</span></div>
+        <div className="flex items-center justify-between"><span>Total Sessions</span><span className="font-bold">{item.sessions_count ?? 0} Sessions</span></div>
+        <div className="mt-1 flex items-center justify-between border-t border-emerald-200 pt-1.5">
+          <span className="font-semibold">Total Amount</span>
+          <span className="text-sm font-extrabold text-emerald-900">₹{(item.price_online ?? 0) * (item.sessions_count ?? 0)}</span>
+        </div>
+      </div>
+    </div>
+    <div className="rounded-xl border border-amber-100 bg-amber-50/60 p-3">
+      <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-amber-800"><MapPin className="h-3.5 w-3.5" />Offline Mode</p>
+      <div className="space-y-1.5 text-xs text-amber-800">
+        <div className="flex items-center justify-between"><span>Per Session</span><span className="font-bold">₹{item.price_offline ?? 0}</span></div>
+        <div className="flex items-center justify-between"><span>Total Sessions</span><span className="font-bold">{item.sessions_count ?? 0} Sessions</span></div>
+        <div className="mt-1 flex items-center justify-between border-t border-amber-200 pt-1.5">
+          <span className="font-semibold">Total Amount</span>
+          <span className="text-sm font-extrabold text-amber-900">₹{(item.price_offline ?? 0) * (item.sessions_count ?? 0)}</span>
+        </div>
+      </div>
+    </div>
+  </div>
+);
+
 const ViewItemModal = ({ item, kind, onClose, onEdit }) => {
   const isSession = kind === "session";
   return (
@@ -416,30 +443,7 @@ const ViewItemModal = ({ item, kind, onClose, onEdit }) => {
           {item.description && <p className="text-sm text-slate-600">{item.description}</p>}
 
           {isSession ? (
-            <div className="grid grid-cols-2 gap-2" data-testid="item-view-session-boxes">
-              <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 p-3" data-testid="item-view-online-box">
-                <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-emerald-800"><Wifi className="h-3.5 w-3.5" />Online Mode</p>
-                <div className="space-y-1.5 text-xs text-emerald-800">
-                  <div className="flex items-center justify-between"><span>Per Session</span><span className="font-bold">₹{item.price_online ?? 0}</span></div>
-                  <div className="flex items-center justify-between"><span>Total Sessions</span><span className="font-bold">{item.sessions_count ?? 0} Sessions</span></div>
-                  <div className="mt-1 flex items-center justify-between border-t border-emerald-200 pt-1.5">
-                    <span className="font-semibold">Total Amount</span>
-                    <span className="text-sm font-extrabold text-emerald-900">₹{(item.price_online ?? 0) * (item.sessions_count ?? 0)}</span>
-                  </div>
-                </div>
-              </div>
-              <div className="rounded-xl border border-amber-100 bg-amber-50/60 p-3" data-testid="item-view-offline-box">
-                <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-amber-800"><MapPin className="h-3.5 w-3.5" />Offline Mode</p>
-                <div className="space-y-1.5 text-xs text-amber-800">
-                  <div className="flex items-center justify-between"><span>Per Session</span><span className="font-bold">₹{item.price_offline ?? 0}</span></div>
-                  <div className="flex items-center justify-between"><span>Total Sessions</span><span className="font-bold">{item.sessions_count ?? 0} Sessions</span></div>
-                  <div className="mt-1 flex items-center justify-between border-t border-amber-200 pt-1.5">
-                    <span className="font-semibold">Total Amount</span>
-                    <span className="text-sm font-extrabold text-amber-900">₹{(item.price_offline ?? 0) * (item.sessions_count ?? 0)}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <SessionPriceBoxes item={item} testid="item-view-session-boxes" />
           ) : (
             <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-3">
               <PriceModeBadges item={item} isSession={false} />
@@ -512,6 +516,14 @@ const SessionsPhysiotherapyPanel = () => {
                       <Eye className="h-3.5 w-3.5" />
                     </button>
                     <button
+                      onClick={() => setEditingItem(it)}
+                      className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-sky-600"
+                      data-testid={`session-item-${it.id}-edit`}
+                      title="Edit"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                    <button
                       onClick={() => handleDelete(it)}
                       className="rounded-md p-1.5 text-slate-500 hover:bg-rose-50 hover:text-rose-600"
                       data-testid={`session-item-${it.id}-delete`}
@@ -524,14 +536,7 @@ const SessionsPhysiotherapyPanel = () => {
                 {it.image_url && <img src={it.image_url} alt={it.name} className="h-32 w-full rounded-lg object-cover" />}
                 {it.description && <p className="line-clamp-2 text-xs text-slate-500">{it.description}</p>}
 
-                <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-3" data-testid={`session-item-${it.id}-highlights`}>
-                  <PriceModeBadges item={it} isSession />
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-200 px-3 py-1 text-xs font-bold text-slate-700">
-                      {it.sessions_count ?? 0} sessions
-                    </span>
-                  </div>
-                </div>
+                <SessionPriceBoxes item={it} testid={`session-item-${it.id}-highlights`} />
               </CardContent>
             </Card>
           ))}
