@@ -46,6 +46,10 @@ export const HeadPhysioCalendar = ({ branchId }) => {
   const [pendingSlots, setPendingSlots] = useState([]);
   const [saving, setSaving] = useState(false);
 
+  const [repeatDays, setRepeatDays] = useState([]);
+  const [repeatWeeks, setRepeatWeeks] = useState(4);
+  const [repeating, setRepeating] = useState(false);
+
   const loadDoctors = useCallback(async () => {
     if (!branchId) return;
     try {
@@ -180,6 +184,56 @@ export const HeadPhysioCalendar = ({ branchId }) => {
     setSaving(false);
   };
 
+  const toggleRepeatDay = (dow) => {
+    setRepeatDays((prev) => (prev.includes(dow) ? prev.filter((d) => d !== dow) : [...prev, dow]));
+  };
+
+  const getSourceSlotsForRepeat = () => {
+    if (!selectedDate) return [];
+    return generateTimeGrid()
+      .map((time) => ({ time, state: getSlotState(time), detail: getSlotDetail(time) }))
+      .filter((s) => s.state === "existing" || s.state === "adding")
+      .map((s) => ({ time: s.time, duration: s.detail?.duration || slotDuration, consultation_type: s.detail?.consultation_type || slotType }));
+  };
+
+  const getRepeatTargetDates = () => {
+    if (!selectedDate || repeatDays.length === 0) return [];
+    const start = new Date(selectedDate + "T00:00:00");
+    const end = new Date(start);
+    end.setDate(end.getDate() + repeatWeeks * 7);
+    const dates = [];
+    const cursor = new Date(start);
+    cursor.setDate(cursor.getDate() + 1);
+    while (cursor <= end) {
+      if (repeatDays.includes(cursor.getDay())) {
+        dates.push(`${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}-${String(cursor.getDate()).padStart(2, "0")}`);
+      }
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return dates;
+  };
+
+  const applyRepeat = async () => {
+    const sourceSlots = getSourceSlotsForRepeat();
+    if (sourceSlots.length === 0) { toast.error("No time slots configured on this day to repeat"); return; }
+    const targetDates = getRepeatTargetDates();
+    if (targetDates.length === 0) { toast.error("Pick at least one day of the week to repeat on"); return; }
+    setRepeating(true);
+    try {
+      if (pendingSlots.length > 0) await saveChanges();
+      const newSlots = targetDates.flatMap((date) =>
+        sourceSlots.map((s) => ({ slot_time: `${date}T${s.time}`, duration: s.duration, consultation_type: s.consultation_type }))
+      );
+      await addCalendarSlots(selectedDoctor.id, { slots: newSlots });
+      toast.success(`Applied ${sourceSlots.length} slot${sourceSlots.length > 1 ? "s" : ""} to ${targetDates.length} day${targetDates.length > 1 ? "s" : ""}`);
+      await loadCalendar();
+      await loadDoctors();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Repeat failed");
+    }
+    setRepeating(false);
+  };
+
   const countSlotsForDay = (day) => {
     const d = dateStr(day);
     return getSimpleSlotsForDate(d).length;
@@ -305,7 +359,7 @@ export const HeadPhysioCalendar = ({ branchId }) => {
                       <button
                         key={day}
                         type="button"
-                        onClick={() => { setSelectedDate(d); setPendingSlots([]); }}
+                        onClick={() => { setSelectedDate(d); setPendingSlots([]); setRepeatDays([new Date(d + "T00:00:00").getDay()]); }}
                         className={`h-9 rounded-lg text-xs font-medium relative transition-all ${
                           isSelected
                             ? "bg-violet-600 text-white shadow-sm"
@@ -362,6 +416,50 @@ export const HeadPhysioCalendar = ({ branchId }) => {
                       ))}
                     </div>
                   </div>
+
+                  {selectedDate && (
+                    <div data-testid="repeat-schedule-panel">
+                      <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-1 block">Repeat Schedule</label>
+                      <p className="mb-2 text-[10px] text-slate-400">Copy this day's time slots to other days.</p>
+                      <div className="flex gap-1" data-testid="repeat-day-options">
+                        {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((lbl, dow) => (
+                          <button
+                            key={dow}
+                            type="button"
+                            onClick={() => toggleRepeatDay(dow)}
+                            className={`h-7 w-7 rounded-md border text-[10px] font-semibold transition-all ${
+                              repeatDays.includes(dow) ? "border-violet-400 bg-violet-50 text-violet-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"
+                            }`}
+                            data-testid={`repeat-day-${dow}`}
+                          >
+                            {lbl}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="mt-2 flex items-center gap-2">
+                        <span className="text-[10px] text-slate-500">For next</span>
+                        <input
+                          type="number"
+                          min={1}
+                          max={12}
+                          value={repeatWeeks}
+                          onChange={(e) => setRepeatWeeks(Math.max(1, Math.min(12, Number(e.target.value) || 1)))}
+                          className="h-7 w-14 rounded-md border border-slate-200 px-2 text-[11px]"
+                          data-testid="repeat-weeks-input"
+                        />
+                        <span className="text-[10px] text-slate-500">week(s)</span>
+                      </div>
+                      <Button
+                        size="sm"
+                        onClick={applyRepeat}
+                        disabled={repeating}
+                        className="mt-2 w-full bg-violet-600 hover:bg-violet-700 text-white text-xs"
+                        data-testid="repeat-apply-btn"
+                      >
+                        {repeating ? "Applying..." : "Apply to Selected Days"}
+                      </Button>
+                    </div>
+                  )}
                 </div>
               </div>
 
