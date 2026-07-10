@@ -18,6 +18,11 @@ import {
   Wifi,
   MapPin,
   Clock,
+  CalendarRange,
+  Pill,
+  FlaskConical,
+  Dumbbell,
+  ShoppingCart,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -39,11 +44,10 @@ import {
   moveBranchStage,
   listStoreItems,
 } from "@/lib/api";
-import { HeadPhysioCalendar } from "@/components/HeadPhysioCalendar";
 import { FinanceBoard } from "@/components/FinanceBoard";
-import { BranchStoreBoard } from "@/components/BranchStoreBoard";
+import { BranchConsultationsPanel, BranchSessionsPanel } from "@/components/BranchStoreBoard";
 import { SmartBookingPicker } from "@/components/SmartBookingPicker";
-import { DURATION_OPTIONS } from "@/components/PackagesBoard";
+import { DURATION_OPTIONS, PlaceholderPanel } from "@/components/PackagesBoard";
 
 const BRANCH_STAGES = [
   "New Appointment",
@@ -116,9 +120,14 @@ export const BranchAdminBoard = ({ branchId }) => {
 
   const VIEW_TABS = [
     { key: "pipeline", label: "Appointment Lead", icon: LayoutDashboard },
-    { key: "consultations", label: "FITSIO STORE", icon: Stethoscope },
-    { key: "head_physio", label: "Head Physio Calendar", icon: Stethoscope },
+    { key: "consultations", label: "Consultations", icon: Stethoscope },
+    { key: "sessions", label: "Treatment Sessions", icon: CalendarRange },
+    { key: "rehab", label: "Rehab", icon: Activity },
     { key: "finance", label: "Finance", icon: CreditCard },
+    { key: "tablet", label: "Tablet", icon: Pill },
+    { key: "supplementary", label: "Supplementary", icon: FlaskConical },
+    { key: "equipment", label: "Equipment", icon: Dumbbell },
+    { key: "vending_machine", label: "Vending Machine", icon: ShoppingCart },
   ];
 
   return (
@@ -145,12 +154,22 @@ export const BranchAdminBoard = ({ branchId }) => {
         })}
       </div>
 
-      {activeView === "head_physio" ? (
-        <HeadPhysioCalendar branchId={branchId} />
-      ) : activeView === "consultations" ? (
-        <BranchStoreBoard />
+      {activeView === "consultations" ? (
+        <BranchConsultationsPanel branchId={branchId} />
+      ) : activeView === "sessions" ? (
+        <BranchSessionsPanel />
+      ) : activeView === "rehab" ? (
+        <PlaceholderPanel label="Rehab" testid="branch-rehab-panel" />
       ) : activeView === "finance" ? (
         <FinanceBoard />
+      ) : activeView === "tablet" ? (
+        <PlaceholderPanel label="Tablet" testid="branch-store-panel-tablet" />
+      ) : activeView === "supplementary" ? (
+        <PlaceholderPanel label="Supplementary" testid="branch-store-panel-supplementary" />
+      ) : activeView === "equipment" ? (
+        <PlaceholderPanel label="Equipment" testid="branch-store-panel-equipment" />
+      ) : activeView === "vending_machine" ? (
+        <PlaceholderPanel label="Vending Machine" testid="branch-store-panel-vending_machine" />
       ) : (
         <>
           {/* Stage Head Bar — Pre-Sales style sticky segmented tabs */}
