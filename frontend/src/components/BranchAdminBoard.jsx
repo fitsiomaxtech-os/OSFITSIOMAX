@@ -30,9 +30,7 @@ import {
   addLeadRemark,
   assignPhysio,
   scheduleBranchAppointment,
-  bookAppointment,
   collectFee,
-  getAvailableDoctors,
   getBranchBoard,
   getDoctors,
   getAvailableExperts,
@@ -428,12 +426,6 @@ function BranchLeadModal({ lead, branchId, onClose, onUpdate, reloadBoard }) {
   const [packageWeeks, setPackageWeeks] = useState("8");
   const [packageAmount, setPackageAmount] = useState("");
 
-  // Appointment booking
-  const [doctors, setDoctors] = useState([]);
-  const [selectedDate, setSelectedDate] = useState("");
-  const [selectedSlot, setSelectedSlot] = useState("");
-  const [selectedDoctorId, setSelectedDoctorId] = useState("");
-
   // Jr. Physio assignment
   const [allDoctors, setAllDoctors] = useState([]);
   const [apptDraft, setApptDraft] = useState(null); // { appointment_date, appointment_time, physio_id, notes, final_stage } | null
@@ -483,7 +475,7 @@ function BranchLeadModal({ lead, branchId, onClose, onUpdate, reloadBoard }) {
   };
   const loadDoctors = async () => {
     if (!branchId) return;
-    try { const d = await getDoctors({ branch_id: branchId }); setDoctors(d); setAllDoctors(d); } catch { /* silent */ }
+    try { const d = await getDoctors({ branch_id: branchId }); setAllDoctors(d); } catch { /* silent */ }
   };
 
   const moveStage = async (stage) => {
@@ -520,18 +512,6 @@ function BranchLeadModal({ lead, branchId, onClose, onUpdate, reloadBoard }) {
     }
   };
 
-  const bookNow = async () => {
-    if (!selectedDoctorId || !selectedSlot) { toast.error("Select doctor and time"); return; }
-    try {
-      await bookAppointment(lead.id, { doctor_id: selectedDoctorId, slot_time: selectedSlot });
-      toast.success("Head Physio appointment booked!");
-      setSelectedDate(""); setSelectedSlot(""); setSelectedDoctorId("");
-      await reloadBoard();
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || "Booking failed");
-    }
-  };
-
   const assignPhysioNow = async () => {
     if (!selectedPhysioId) { toast.error("Select a Jr. Physio"); return; }
     try {
@@ -554,17 +534,6 @@ function BranchLeadModal({ lead, branchId, onClose, onUpdate, reloadBoard }) {
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed");
     }
-  };
-
-  const generateTimeSlots = () => {
-    if (!selectedDate) return [];
-    const slots = [];
-    for (let h = 8; h <= 20; h++) {
-      for (let m = 0; m < 60; m += 30) {
-        slots.push(`${selectedDate}T${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:00`);
-      }
-    }
-    return slots;
   };
 
   const TABS = [
@@ -707,50 +676,6 @@ function BranchLeadModal({ lead, branchId, onClose, onUpdate, reloadBoard }) {
                     <Button size="sm" onClick={collectConsultationFee} className="bg-teal-600 text-white hover:bg-teal-700" data-testid="branch-consultation-fee-btn">Collect</Button>
                   </div>
                 )}
-              </div>
-
-              {/* Head Physio Appointment */}
-              <div className="rounded-lg border border-violet-200 bg-violet-50/30 p-4" data-testid="branch-action-appointment">
-                <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-violet-700"><Calendar className="h-3.5 w-3.5" /> Head Physio Appointment</p>
-                <div className="space-y-2">
-                  <Input type="date" value={selectedDate} onChange={(e) => { setSelectedDate(e.target.value); setSelectedSlot(""); setSelectedDoctorId(""); }} data-testid="branch-appt-date" />
-                  {selectedDate && (
-                    <div className="grid grid-cols-4 gap-1" data-testid="branch-appt-slots">
-                      {generateTimeSlots().map((slot) => {
-                        const t = slot.slice(11, 16);
-                        return (
-                          <button key={slot} type="button" onClick={() => setSelectedSlot(slot)}
-                            className={`rounded-md border px-2 py-1.5 text-[11px] font-medium ${selectedSlot === slot ? "border-violet-500 bg-violet-100 text-violet-800" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}
-                            data-testid={`branch-slot-${t}`}>{t}</button>
-                        );
-                      })}
-                    </div>
-                  )}
-                  {selectedSlot && (
-                    <div className="space-y-1.5" data-testid="branch-appt-doctors">
-                      {doctors.map((doc) => {
-                        const hasSlot = (doc.slots || []).some((s) => s.startsWith(selectedSlot.slice(0, 16)));
-                        return (
-                          <button key={doc.id} type="button" onClick={() => hasSlot && setSelectedDoctorId(doc.id)} disabled={!hasSlot}
-                            className={`flex w-full items-center gap-3 rounded-md border p-2.5 text-left transition-all ${!hasSlot ? "cursor-not-allowed border-slate-100 bg-slate-50 opacity-40" : selectedDoctorId === doc.id ? "border-violet-400 bg-violet-50 shadow-sm" : "border-slate-200 bg-white hover:bg-slate-50"}`}
-                            data-testid={`branch-doctor-${doc.id}`}>
-                            <div className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold ${hasSlot ? "bg-violet-100 text-violet-700" : "bg-slate-100 text-slate-400"}`}>
-                              {doc.full_name?.charAt(0) || "D"}
-                            </div>
-                            <div className="flex-1">
-                              <p className={`text-sm font-medium ${hasSlot ? "text-slate-800" : "text-slate-400"}`}>{doc.full_name}</p>
-                              <p className="text-[10px] text-slate-400">{doc.specialization || "Physiotherapist"}</p>
-                            </div>
-                            <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${hasSlot ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-400"}`}>
-                              {hasSlot ? "Available" : "Unavailable"}
-                            </span>
-                          </button>
-                        );
-                      })}
-                      <Button size="sm" onClick={bookNow} disabled={!selectedDoctorId} className="bg-violet-600 text-white hover:bg-violet-700" data-testid="branch-book-btn">Book Appointment</Button>
-                    </div>
-                  )}
-                </div>
               </div>
 
               {/* Package Payment */}
