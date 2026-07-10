@@ -157,7 +157,7 @@ export const BranchAdminBoard = ({ branchId }) => {
               className="inline-flex items-center gap-2 rounded-md bg-sky-50 px-3 py-2 text-sm font-medium text-sky-600"
               data-testid="branch-consultations-subtab-head_physio"
             >
-              <Calendar className="h-4 w-4" />Head Physio
+              <Calendar className="h-4 w-4" />Consultant Calendar
             </button>
           </div>
           <HeadPhysioCalendar branchId={branchId} />
