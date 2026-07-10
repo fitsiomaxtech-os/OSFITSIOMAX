@@ -516,14 +516,6 @@ const SessionsPhysiotherapyPanel = () => {
                       <Eye className="h-3.5 w-3.5" />
                     </button>
                     <button
-                      onClick={() => setEditingItem(it)}
-                      className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-sky-600"
-                      data-testid={`session-item-${it.id}-edit`}
-                      title="Edit"
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                    </button>
-                    <button
                       onClick={() => handleDelete(it)}
                       className="rounded-md p-1.5 text-slate-500 hover:bg-rose-50 hover:text-rose-600"
                       data-testid={`session-item-${it.id}-delete`}
@@ -533,7 +525,7 @@ const SessionsPhysiotherapyPanel = () => {
                     </button>
                   </div>
                 </div>
-                {it.image_url && <img src={it.image_url} alt={it.name} className="h-32 w-full rounded-lg object-cover" />}
+                {it.image_url && <img src={it.image_url} alt={it.name} className="aspect-square w-full rounded-lg object-cover" />}
                 {it.description && <p className="line-clamp-2 text-xs text-slate-500">{it.description}</p>}
 
                 <SessionPriceBoxes item={it} testid={`session-item-${it.id}-highlights`} />
