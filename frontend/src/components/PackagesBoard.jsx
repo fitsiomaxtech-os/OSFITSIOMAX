@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Stethoscope, CalendarRange, Pill, Dumbbell, ShoppingCart, Activity, Plus, X, FlaskConical, Pencil, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Stethoscope, CalendarRange, Pill, Dumbbell, ShoppingCart, Activity, Plus, X, FlaskConical, Pencil, Trash2, ImagePlus } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,6 +36,7 @@ const CreateConsultationModal = ({ item, onClose, onSaved }) => {
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(item?.image_url || null);
   const [saving, setSaving] = useState(false);
+  const fileInputRef = useRef(null);
 
   const handleImageChange = (e) => {
     const file = e.target.files?.[0];
@@ -97,16 +98,32 @@ const CreateConsultationModal = ({ item, onClose, onSaved }) => {
           </div>
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600">
-              Image <span className="font-normal text-slate-400">(Recommended: 1080 x 1080px)</span>
+              Image <span className="font-normal text-slate-400">(Square, 1080 x 1080px)</span>
             </label>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="relative aspect-square w-36 overflow-hidden rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 transition hover:border-sky-400 hover:bg-sky-50/60"
+              data-testid="consultation-create-image-dropzone"
+            >
+              {imagePreview ? (
+                <img src={imagePreview} alt="preview" className="h-full w-full object-cover" data-testid="consultation-create-image-preview" />
+              ) : (
+                <div className="flex h-full w-full flex-col items-center justify-center gap-1 p-2 text-center">
+                  <ImagePlus className="h-6 w-6 text-slate-400" />
+                  <span className="text-[11px] font-semibold text-slate-500">1080 x 1080</span>
+                  <span className="text-[10px] text-slate-400">(1:1 ratio)</span>
+                </div>
+              )}
+            </button>
             <input
+              ref={fileInputRef}
               type="file"
               accept="image/png,image/jpeg,image/webp"
               onChange={handleImageChange}
               data-testid="consultation-create-image"
-              className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-sky-50 file:px-3 file:py-1.5 file:text-sky-700 hover:file:bg-sky-100"
+              className="hidden"
             />
-            {imagePreview && <img src={imagePreview} alt="preview" className="mt-2 h-24 w-24 rounded-lg border border-slate-200 object-cover" data-testid="consultation-create-image-preview" />}
           </div>
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600">Mode</label>
