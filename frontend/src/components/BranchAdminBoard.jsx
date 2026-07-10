@@ -15,6 +15,9 @@ import {
   RefreshCw,
   LayoutDashboard,
   FileText,
+  Wifi,
+  MapPin,
+  Clock,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -34,11 +37,13 @@ import {
   getLeadActivity,
   getLeadRemarks,
   moveBranchStage,
+  listStoreItems,
 } from "@/lib/api";
 import { HeadPhysioCalendar } from "@/components/HeadPhysioCalendar";
 import { FinanceBoard } from "@/components/FinanceBoard";
 import { BranchStoreBoard } from "@/components/BranchStoreBoard";
 import { SmartBookingPicker } from "@/components/SmartBookingPicker";
+import { DURATION_OPTIONS } from "@/components/PackagesBoard";
 
 const BRANCH_STAGES = [
   "New Appointment",
@@ -300,6 +305,81 @@ const BranchStageTab = ({ label, count, active, onClick, color, testid }) => {
   );
 };
 
+/* ─── Consultations & Sessions list (inside lead popup) ─── */
+const LeadPackageRow = ({ item, isSession, onBook }) => (
+  <div className="flex items-center justify-between gap-3 px-3 py-2.5" data-testid={`lead-package-row-${item.id}`}>
+    <div className="min-w-0 flex-1">
+      <p className="truncate text-sm font-semibold text-slate-800">{item.name}</p>
+      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+        <span className="inline-flex items-center gap-1 font-semibold text-emerald-700">
+          <Wifi className="h-3 w-3" />Online ₹{item.price_online ?? 0}{isSession ? ` × ${item.sessions_online ?? 0}` : ""}
+        </span>
+        <span className="inline-flex items-center gap-1 font-semibold text-amber-700">
+          <MapPin className="h-3 w-3" />Offline ₹{item.price_offline ?? 0}{isSession ? ` × ${item.sessions_offline ?? 0}` : ""}
+        </span>
+        {!isSession && item.duration_minutes && (
+          <span className="inline-flex items-center gap-1 text-slate-500">
+            <Clock className="h-3 w-3" />
+            {DURATION_OPTIONS.find((d) => d.minutes === item.duration_minutes)?.label || `${item.duration_minutes} mins`}
+          </span>
+        )}
+      </div>
+    </div>
+    <Button size="sm" onClick={() => onBook(item)} className="shrink-0 bg-emerald-600 text-white hover:bg-emerald-700" data-testid={`lead-package-book-${item.id}`}>
+      Book
+    </Button>
+  </div>
+);
+
+const LeadPackagesTab = () => {
+  const [consultations, setConsultations] = useState([]);
+  const [sessions, setSessions] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.all([
+      listStoreItems("physiotherapy", "consultation").catch(() => []),
+      listStoreItems("physiotherapy", "session").catch(() => []),
+    ]).then(([c, s]) => {
+      setConsultations(c);
+      setSessions(s);
+      setLoading(false);
+    });
+  }, []);
+
+  const handleBook = (item) => toast.info(`Booking "${item.name}" — coming soon`);
+
+  if (loading) {
+    return <p className="py-6 text-center text-sm text-slate-400">Loading packages...</p>;
+  }
+
+  return (
+    <div className="space-y-4" data-testid="branch-lead-packages-tab">
+      <div>
+        <p className="mb-2 text-xs font-bold uppercase tracking-wider text-sky-700">Consultations</p>
+        {consultations.length === 0 ? (
+          <p className="rounded-lg border border-slate-200 bg-white py-4 text-center text-xs text-slate-400">No consultations available.</p>
+        ) : (
+          <div className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white" data-testid="lead-consultations-list">
+            {consultations.map((it) => <LeadPackageRow key={it.id} item={it} isSession={false} onBook={handleBook} />)}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <p className="mb-2 text-xs font-bold uppercase tracking-wider text-emerald-700">Sessions</p>
+        {sessions.length === 0 ? (
+          <p className="rounded-lg border border-slate-200 bg-white py-4 text-center text-xs text-slate-400">No session packages available.</p>
+        ) : (
+          <div className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white" data-testid="lead-sessions-list">
+            {sessions.map((it) => <LeadPackageRow key={it.id} item={it} isSession onBook={handleBook} />)}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 /* ─── Branch Lead Detail Modal ─── */
 function BranchLeadModal({ lead, branchId, onClose, onUpdate, reloadBoard }) {
   const [activeTab, setActiveTab] = useState("overview");
@@ -453,6 +533,7 @@ function BranchLeadModal({ lead, branchId, onClose, onUpdate, reloadBoard }) {
 
   const TABS = [
     { key: "overview", label: "Overview", color: "bg-sky-500" },
+    { key: "packages", label: "Consultations & Sessions", color: "bg-emerald-500" },
     { key: "actions", label: "Actions", color: "bg-violet-500" },
     { key: "remarks", label: "Remarks", color: "bg-amber-500" },
     { key: "activity", label: "Activity", color: "bg-rose-500" },
@@ -574,6 +655,8 @@ function BranchLeadModal({ lead, branchId, onClose, onUpdate, reloadBoard }) {
               </div>
             </div>
           )}
+
+          {activeTab === "packages" && <LeadPackagesTab />}
 
           {activeTab === "actions" && (
             <>
