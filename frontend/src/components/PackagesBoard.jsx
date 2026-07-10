@@ -635,7 +635,7 @@ const PhysiotherapyPanel = () => {
                     </button>
                   </div>
                 </div>
-                {it.image_url && <img src={it.image_url} alt={it.name} className="h-32 w-full rounded-lg object-cover" />}
+                {it.image_url && <img src={it.image_url} alt={it.name} className="h-[200px] w-full rounded-lg object-cover" />}
                 {it.description && <p className="line-clamp-2 text-xs text-slate-500">{it.description}</p>}
 
                 <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-3" data-testid={`consultation-item-${it.id}-highlights`}>
