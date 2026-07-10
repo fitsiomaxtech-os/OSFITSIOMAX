@@ -267,4 +267,6 @@ export const uploadStoreImage = async (file) => {
 };
 export const createStoreItem = async (payload) => (await api.post("/store/items", payload)).data;
 export const listStoreItems = async (category) => (await api.get("/store/items", { params: category ? { category } : {} })).data;
+export const updateStoreItem = async (id, payload) => (await api.put(`/store/items/${id}`, payload)).data;
+export const deleteStoreItem = async (id) => (await api.delete(`/store/items/${id}`)).data;
 

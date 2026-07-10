@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
-import { Stethoscope, CalendarRange, Pill, Dumbbell, ShoppingCart, Activity, Plus, X, FlaskConical } from "lucide-react";
+import { Stethoscope, CalendarRange, Pill, Dumbbell, ShoppingCart, Activity, Plus, X, FlaskConical, Pencil, Trash2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
-import { uploadStoreImage, createStoreItem, listStoreItems } from "@/lib/api";
+import { uploadStoreImage, createStoreItem, updateStoreItem, deleteStoreItem, listStoreItems } from "@/lib/api";
 
 const TABS = [
   { key: "consultations", label: "Consultations", icon: Stethoscope },
@@ -28,12 +28,13 @@ const PlaceholderPanel = ({ label, testid }) => (
   </Card>
 );
 
-const CreateConsultationModal = ({ onClose, onCreated }) => {
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [mode, setMode] = useState("online");
+const CreateConsultationModal = ({ item, onClose, onSaved }) => {
+  const isEdit = Boolean(item);
+  const [name, setName] = useState(item?.name || "");
+  const [description, setDescription] = useState(item?.description || "");
+  const [mode, setMode] = useState(item?.mode || "online");
   const [imageFile, setImageFile] = useState(null);
-  const [imagePreview, setImagePreview] = useState(null);
+  const [imagePreview, setImagePreview] = useState(item?.image_url || null);
   const [saving, setSaving] = useState(false);
 
   const handleImageChange = (e) => {
@@ -47,17 +48,23 @@ const CreateConsultationModal = ({ onClose, onCreated }) => {
     if (!name.trim()) { toast.error("Consultation name is required"); return; }
     setSaving(true);
     try {
-      let image_url = null;
+      let image_url = item?.image_url || null;
       if (imageFile) {
         const uploaded = await uploadStoreImage(imageFile);
         image_url = uploaded.url;
       }
-      await createStoreItem({ category: "physiotherapy", name: name.trim(), description, image_url, mode });
-      toast.success("Consultation created");
-      onCreated();
+      const payload = { category: "physiotherapy", name: name.trim(), description, image_url, mode };
+      if (isEdit) {
+        await updateStoreItem(item.id, payload);
+        toast.success("Consultation updated");
+      } else {
+        await createStoreItem(payload);
+        toast.success("Consultation created");
+      }
+      onSaved();
       onClose();
     } catch (err) {
-      toast.error(err?.response?.data?.detail || "Failed to create");
+      toast.error(err?.response?.data?.detail || `Failed to ${isEdit ? "update" : "create"}`);
     } finally {
       setSaving(false);
     }
@@ -67,7 +74,7 @@ const CreateConsultationModal = ({ onClose, onCreated }) => {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} data-testid="consultation-create-modal">
       <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
         <div className="flex items-center justify-between bg-gradient-to-r from-sky-500 to-indigo-600 px-5 py-4 text-white">
-          <p className="text-base font-semibold">Consultation</p>
+          <p className="text-base font-semibold">{isEdit ? "Edit Consultation" : "Consultation"}</p>
           <button onClick={onClose} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="consultation-create-close">
             <X className="h-4 w-4" />
           </button>
@@ -126,7 +133,7 @@ const CreateConsultationModal = ({ onClose, onCreated }) => {
         <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/40 px-5 py-3">
           <Button variant="outline" onClick={onClose} data-testid="consultation-create-cancel">Cancel</Button>
           <Button onClick={submit} disabled={saving} className="bg-sky-600 text-white hover:bg-sky-700" data-testid="consultation-create-submit">
-            {saving ? "Creating..." : "Create"}
+            {saving ? (isEdit ? "Saving..." : "Creating...") : (isEdit ? "Save Changes" : "Create")}
           </Button>
         </div>
       </div>
@@ -137,9 +144,21 @@ const CreateConsultationModal = ({ onClose, onCreated }) => {
 const PhysiotherapyPanel = () => {
   const [items, setItems] = useState([]);
   const [showCreate, setShowCreate] = useState(false);
+  const [editingItem, setEditingItem] = useState(null);
 
   const loadItems = () => listStoreItems("physiotherapy").then(setItems).catch(() => {});
   useEffect(() => { loadItems(); }, []);
+
+  const handleDelete = async (it) => {
+    if (!window.confirm(`Permanently delete "${it.name}"? This cannot be undone.`)) return;
+    try {
+      await deleteStoreItem(it.id);
+      toast.success("Consultation deleted permanently");
+      loadItems();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to delete");
+    }
+  };
 
   return (
     <div className="space-y-3" data-testid="consultations-subpanel-physiotherapy">
@@ -163,16 +182,37 @@ const PhysiotherapyPanel = () => {
                 {it.image_url && <img src={it.image_url} alt={it.name} className="h-32 w-full rounded-lg object-cover" />}
                 <p className="font-semibold text-slate-800">{it.name}</p>
                 {it.description && <p className="line-clamp-2 text-xs text-slate-500">{it.description}</p>}
-                <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${it.mode === "online" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
-                  {it.mode === "online" ? "Online" : "Offline"}
-                </span>
+                <div className="flex items-center justify-between">
+                  <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${it.mode === "online" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
+                    {it.mode === "online" ? "Online" : "Offline"}
+                  </span>
+                  <div className="flex gap-1">
+                    <button
+                      onClick={() => setEditingItem(it)}
+                      className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-sky-600"
+                      data-testid={`consultation-item-${it.id}-edit`}
+                      title="Edit"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(it)}
+                      className="rounded-md p-1.5 text-slate-500 hover:bg-rose-50 hover:text-rose-600"
+                      data-testid={`consultation-item-${it.id}-delete`}
+                      title="Delete permanently"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
               </CardContent>
             </Card>
           ))}
         </div>
       )}
 
-      {showCreate && <CreateConsultationModal onClose={() => setShowCreate(false)} onCreated={loadItems} />}
+      {showCreate && <CreateConsultationModal onClose={() => setShowCreate(false)} onSaved={loadItems} />}
+      {editingItem && <CreateConsultationModal item={editingItem} onClose={() => setEditingItem(null)} onSaved={loadItems} />}
     </div>
   );
 };

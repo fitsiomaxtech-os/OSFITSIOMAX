@@ -66,6 +66,21 @@ async def create_store_item(payload: StoreItemIn, _: V3UserOut = Depends(v3_requ
     return doc
 
 
+@router.put("/items/{item_id}", response_model=StoreItemOut)
+async def update_store_item(item_id: str, payload: StoreItemIn, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    if not payload.name.strip():
+        raise HTTPException(status_code=400, detail="Name is required")
+    if payload.mode not in ("online", "offline"):
+        raise HTTPException(status_code=400, detail="Mode must be 'online' or 'offline'")
+    update = payload.model_dump()
+    update["updated_at"] = _now()
+    res = await v3_col("store_items").update_one({"id": item_id}, {"$set": update})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Item not found")
+    doc = await v3_col("store_items").find_one({"id": item_id}, {"_id": 0})
+    return doc
+
+
 @router.get("/items", response_model=List[StoreItemOut])
 async def list_store_items(category: Optional[str] = None, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
     q = {"category": category} if category else {}
