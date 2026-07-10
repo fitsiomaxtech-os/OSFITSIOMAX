@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { uploadStoreImage, createStoreItem, updateStoreItem, deleteStoreItem, listStoreItems } from "@/lib/api";
 
-const TABS = [
+export const TABS = [
   { key: "consultations", label: "Consultations", icon: Stethoscope },
   { key: "sessions", label: "Sessions", icon: CalendarRange },
   { key: "tablet", label: "Tablet", icon: Pill },
@@ -15,17 +15,17 @@ const TABS = [
   { key: "vending_machine", label: "Vending Machine", icon: ShoppingCart },
 ];
 
-const CONSULTATIONS_SUBTABS = [
+export const CONSULTATIONS_SUBTABS = [
   { key: "physiotherapy", label: "Physiotherapy", icon: Activity },
   { key: "fitness", label: "Fitness", icon: Dumbbell },
 ];
 
-const SESSIONS_SUBTABS = [
+export const SESSIONS_SUBTABS = [
   { key: "physiotherapy", label: "Physiotherapy", icon: Activity },
   { key: "fitness", label: "Fitness", icon: Dumbbell },
 ];
 
-const PlaceholderPanel = ({ label, testid }) => (
+export const PlaceholderPanel = ({ label, testid }) => (
   <Card data-testid={testid}>
     <CardContent className="p-8 text-center text-sm text-slate-400">
       {label} panel — setup coming soon.
@@ -36,7 +36,7 @@ const PlaceholderPanel = ({ label, testid }) => (
 const DEFAULT_PRICE_ONLINE = 1200;
 const DEFAULT_PRICE_OFFLINE = 800;
 
-const DURATION_OPTIONS = [
+export const DURATION_OPTIONS = [
   { minutes: 15, label: "15 mins" },
   { minutes: 30, label: "30 mins" },
   { minutes: 45, label: "45 mins" },
@@ -373,7 +373,7 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved }) => {
   );
 };
 
-const PriceModeBadges = ({ item, isSession }) => (
+export const PriceModeBadges = ({ item, isSession }) => (
   <div className="mt-2 space-y-1.5">
     <div className="flex items-center justify-between rounded-lg bg-emerald-50 px-2.5 py-1.5">
       <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-800">
@@ -394,7 +394,7 @@ const PriceModeBadges = ({ item, isSession }) => (
   </div>
 );
 
-const SessionPriceBoxes = ({ item, testid }) => (
+export const SessionPriceBoxes = ({ item, testid }) => (
   <div className="grid grid-cols-2 gap-2" data-testid={testid}>
     <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 p-3">
       <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-emerald-800"><Wifi className="h-3.5 w-3.5" />Online Mode</p>
@@ -421,7 +421,7 @@ const SessionPriceBoxes = ({ item, testid }) => (
   </div>
 );
 
-const ViewItemModal = ({ item, kind, onClose, onEdit }) => {
+export const ViewItemModal = ({ item, kind, onClose, onEdit, canEdit = true }) => {
   const isSession = kind === "session";
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} data-testid="item-view-modal">
@@ -429,9 +429,11 @@ const ViewItemModal = ({ item, kind, onClose, onEdit }) => {
         <div className="flex shrink-0 items-center justify-between bg-gradient-to-r from-sky-500 to-indigo-600 px-5 py-3 text-white">
           <p className="flex-1 truncate text-base font-semibold" data-testid="item-view-name">{item.name}</p>
           <div className="flex shrink-0 items-center gap-1">
-            <button onClick={onEdit} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="item-view-edit" title="Edit">
-              <Pencil className="h-4 w-4" />
-            </button>
+            {canEdit && (
+              <button onClick={onEdit} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="item-view-edit" title="Edit">
+                <Pencil className="h-4 w-4" />
+              </button>
+            )}
             <button onClick={onClose} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="item-view-close" title="Close">
               <X className="h-4 w-4" />
             </button>
