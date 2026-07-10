@@ -37,7 +37,6 @@ import {
 } from "@/lib/api";
 import { HeadPhysioCalendar } from "@/components/HeadPhysioCalendar";
 import { FinanceBoard } from "@/components/FinanceBoard";
-import { ConsultationsBoard } from "@/components/ConsultationsBoard";
 import { SmartBookingPicker } from "@/components/SmartBookingPicker";
 
 const BRANCH_STAGES = [
@@ -141,7 +140,11 @@ export const BranchAdminBoard = ({ branchId }) => {
       {activeView === "head_physio" ? (
         <HeadPhysioCalendar branchId={branchId} />
       ) : activeView === "consultations" ? (
-        <ConsultationsBoard branchId={branchId} />
+        <Card data-testid="branch-consultations-placeholder">
+          <CardContent className="p-8 text-center text-sm text-slate-400">
+            Consultations panel — setup coming soon.
+          </CardContent>
+        </Card>
       ) : activeView === "finance" ? (
         <FinanceBoard />
       ) : (
