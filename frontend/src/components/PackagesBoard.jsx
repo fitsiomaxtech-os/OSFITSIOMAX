@@ -415,14 +415,35 @@ const ViewItemModal = ({ item, kind, onClose, onEdit }) => {
           {item.image_url && <img src={item.image_url} alt={item.name} className="h-48 w-full rounded-lg object-cover" />}
           {item.description && <p className="text-sm text-slate-600">{item.description}</p>}
 
-          <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-3">
-            <PriceModeBadges item={item} isSession={isSession} />
-            {isSession ? (
-              <p className="mt-2 text-[11px] text-slate-500">
-                ₹{item.price_online ?? 0} / ₹{item.price_offline ?? 0} per session × {item.sessions_count ?? 0} sessions
-              </p>
-            ) : (
-              item.duration_minutes && (
+          {isSession ? (
+            <div className="grid grid-cols-2 gap-2" data-testid="item-view-session-boxes">
+              <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 p-3" data-testid="item-view-online-box">
+                <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-emerald-800"><Wifi className="h-3.5 w-3.5" />Online Mode</p>
+                <div className="space-y-1.5 text-xs text-emerald-800">
+                  <div className="flex items-center justify-between"><span>Per Session</span><span className="font-bold">₹{item.price_online ?? 0}</span></div>
+                  <div className="flex items-center justify-between"><span>Total Sessions</span><span className="font-bold">{item.sessions_count ?? 0} Sessions</span></div>
+                  <div className="mt-1 flex items-center justify-between border-t border-emerald-200 pt-1.5">
+                    <span className="font-semibold">Total Amount</span>
+                    <span className="text-sm font-extrabold text-emerald-900">₹{(item.price_online ?? 0) * (item.sessions_count ?? 0)}</span>
+                  </div>
+                </div>
+              </div>
+              <div className="rounded-xl border border-amber-100 bg-amber-50/60 p-3" data-testid="item-view-offline-box">
+                <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-amber-800"><MapPin className="h-3.5 w-3.5" />Offline Mode</p>
+                <div className="space-y-1.5 text-xs text-amber-800">
+                  <div className="flex items-center justify-between"><span>Per Session</span><span className="font-bold">₹{item.price_offline ?? 0}</span></div>
+                  <div className="flex items-center justify-between"><span>Total Sessions</span><span className="font-bold">{item.sessions_count ?? 0} Sessions</span></div>
+                  <div className="mt-1 flex items-center justify-between border-t border-amber-200 pt-1.5">
+                    <span className="font-semibold">Total Amount</span>
+                    <span className="text-sm font-extrabold text-amber-900">₹{(item.price_offline ?? 0) * (item.sessions_count ?? 0)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-3">
+              <PriceModeBadges item={item} isSession={false} />
+              {item.duration_minutes && (
                 <div className="mt-1.5 flex items-center justify-between rounded-lg bg-sky-50 px-2.5 py-1.5">
                   <span className="inline-flex items-center gap-1.5 text-xs font-bold text-sky-800">
                     <Clock className="h-3.5 w-3.5" />Consultation Duration
@@ -431,16 +452,9 @@ const ViewItemModal = ({ item, kind, onClose, onEdit }) => {
                     {DURATION_OPTIONS.find((d) => d.minutes === item.duration_minutes)?.label || `${item.duration_minutes} mins`}
                   </span>
                 </div>
-              )
-            )}
-            {isSession && (
-              <div className="mt-2">
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-200 px-3 py-1 text-xs font-bold text-slate-700">
-                  {item.sessions_count ?? 0} sessions
-                </span>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>
