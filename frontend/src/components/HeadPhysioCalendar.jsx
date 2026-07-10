@@ -4,18 +4,13 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
-  Plus,
   Stethoscope,
   Trash2,
-  User,
-  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import {
   addCalendarSlots,
-  createHeadPhysio,
   getDoctorCalendar,
   getDoctors,
   removeCalendarSlots,
@@ -40,7 +35,6 @@ function getFirstDayOfMonth(year, month) {
 export const HeadPhysioCalendar = ({ branchId }) => {
   const [doctors, setDoctors] = useState([]);
   const [selectedDoctor, setSelectedDoctor] = useState(null);
-  const [showAddForm, setShowAddForm] = useState(false);
   const [calendarData, setCalendarData] = useState(null);
 
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth());
@@ -199,20 +193,18 @@ export const HeadPhysioCalendar = ({ branchId }) => {
       {/* LEFT PANEL — Doctor List */}
       <div className="w-72 flex-shrink-0 flex flex-col border border-slate-200 rounded-xl bg-white overflow-hidden" data-testid="doctor-list-panel">
         <div className="p-4 border-b border-slate-100 bg-slate-50/60">
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
               <Stethoscope className="h-4 w-4 text-violet-500" /> Head Physios
             </h3>
             <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-semibold text-violet-700">{doctors.length}</span>
           </div>
-          <Button size="sm" className="w-full bg-violet-600 hover:bg-violet-700 text-white text-xs" onClick={() => setShowAddForm(true)} data-testid="add-head-physio-btn">
-            <Plus className="h-3.5 w-3.5 mr-1" /> Add Head Physio
-          </Button>
+          <p className="mt-1 text-[10px] text-slate-400">Managed by HR Admin</p>
         </div>
 
         <div className="flex-1 overflow-y-auto p-2 space-y-1.5" data-testid="doctor-list">
           {doctors.length === 0 && (
-            <p className="text-xs text-slate-400 text-center py-6">No Head Physios yet</p>
+            <p className="text-xs text-slate-400 text-center py-6">No Head Physios assigned to this branch yet — ask HR Admin to add one.</p>
           )}
           {doctors.map((doc) => {
             const isActive = selectedDoctor?.id === doc.id;
@@ -466,77 +458,6 @@ export const HeadPhysioCalendar = ({ branchId }) => {
         )}
       </div>
 
-      {/* Add Head Physio Modal */}
-      {showAddForm && (
-        <AddHeadPhysioModal
-          onClose={() => setShowAddForm(false)}
-          onCreated={() => { setShowAddForm(false); loadDoctors(); }}
-        />
-      )}
     </div>
   );
 };
-
-
-function AddHeadPhysioModal({ onClose, onCreated }) {
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [specialization, setSpecialization] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-
-  const handleSubmit = async () => {
-    if (!name.trim() || !email.trim() || !password.trim()) {
-      toast.error("Name, email and password are required");
-      return;
-    }
-    setSubmitting(true);
-    try {
-      await createHeadPhysio({ full_name: name, email, password, specialization });
-      toast.success("Head Physio created successfully");
-      onCreated();
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || "Failed to create");
-    }
-    setSubmitting(false);
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} data-testid="add-head-physio-modal-overlay">
-      <div className="w-full max-w-md rounded-xl bg-white shadow-2xl" data-testid="add-head-physio-modal">
-        <div className="flex items-center justify-between border-b border-slate-200 p-5">
-          <h3 className="text-base font-semibold text-slate-800 flex items-center gap-2">
-            <User className="h-4 w-4 text-violet-500" /> Add Head Physio
-          </h3>
-          <button type="button" onClick={onClose} className="rounded-md p-1 hover:bg-slate-100">
-            <X className="h-5 w-5 text-slate-400" />
-          </button>
-        </div>
-        <div className="p-5 space-y-3">
-          <div>
-            <label className="text-xs font-medium text-slate-600 mb-1 block">Full Name</label>
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Dr. Ramesh Kumar" data-testid="hp-name-input" />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-slate-600 mb-1 block">Email</label>
-            <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="ramesh@fitsiomax.com" data-testid="hp-email-input" />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-slate-600 mb-1 block">Password</label>
-            <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Login password" data-testid="hp-password-input" />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-slate-600 mb-1 block">Specialization</label>
-            <Input value={specialization} onChange={(e) => setSpecialization(e.target.value)} placeholder="e.g. Orthopedic, Neurological" data-testid="hp-specialization-input" />
-          </div>
-        </div>
-        <div className="flex justify-end gap-2 border-t border-slate-200 p-4">
-          <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
-          <Button size="sm" onClick={handleSubmit} disabled={submitting} className="bg-violet-600 hover:bg-violet-700 text-white" data-testid="hp-create-btn">
-            {submitting ? "Creating..." : "Create Head Physio"}
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}

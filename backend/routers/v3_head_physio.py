@@ -1,65 +1,15 @@
 from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Optional
-import uuid
 
 from database import v3_col
 from utils import now_iso, normalize_slot_time
-from security import hash_password
 from deps import v3_require_roles
 from schemas.v3 import (
     V3UserOut, V3DoctorOut,
-    V3CreateHeadPhysioInput, V3CalendarSlotsInput, V3RemoveSlotsInput,
+    V3CalendarSlotsInput, V3RemoveSlotsInput,
 )
 
 router = APIRouter(prefix="/api/v3")
-
-
-@router.post("/branch/head-physios")
-async def create_head_physio(payload: V3CreateHeadPhysioInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
-    branch_id = user.branch_id
-    if not branch_id:
-        raise HTTPException(status_code=400, detail="No branch assigned to your account")
-
-    email = payload.email.lower().strip()
-    exists = await v3_col("users").find_one({"email": email}, {"_id": 0})
-    if exists:
-        raise HTTPException(status_code=409, detail="A user with this email already exists")
-
-    user_id = str(uuid.uuid4())
-    doctor_id = str(uuid.uuid4())
-
-    await v3_col("users").insert_one({
-        "id": user_id,
-        "full_name": payload.full_name.strip(),
-        "email": email,
-        "password": hash_password(payload.password),
-        "role": "head_physio",
-        "branch_id": branch_id,
-        "is_active": True,
-        "created_at": now_iso(),
-    })
-
-    doctor = {
-        "id": doctor_id,
-        "full_name": payload.full_name.strip(),
-        "profile_type": "head_physio",
-        "branch_id": branch_id,
-        "specialization": payload.specialization or "",
-        "slots": [],
-        "slot_details": [],
-        "user_id": user_id,
-        "created_at": now_iso(),
-    }
-    await v3_col("doctors").insert_one(doctor.copy())
-
-    return {
-        "doctor_id": doctor_id,
-        "user_id": user_id,
-        "full_name": payload.full_name.strip(),
-        "email": email,
-        "specialization": payload.specialization or "",
-        "branch_id": branch_id,
-    }
 
 
 @router.get("/doctors/{doctor_id}/calendar")

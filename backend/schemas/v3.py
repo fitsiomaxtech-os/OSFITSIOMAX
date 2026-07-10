@@ -293,13 +293,6 @@ class V3AssignPhysioInput(BaseModel):
     physio_id: str
 
 
-class V3CreateHeadPhysioInput(BaseModel):
-    full_name: str
-    email: str
-    password: str
-    specialization: Optional[str] = ""
-
-
 class V3SlotDetail(BaseModel):
     slot_time: str
     duration: int = 30
