@@ -266,7 +266,12 @@ export const uploadStoreImage = async (file) => {
   return data;
 };
 export const createStoreItem = async (payload) => (await api.post("/store/items", payload)).data;
-export const listStoreItems = async (category) => (await api.get("/store/items", { params: category ? { category } : {} })).data;
+export const listStoreItems = async (category, itemType) => {
+  const params = {};
+  if (category) params.category = category;
+  if (itemType) params.item_type = itemType;
+  return (await api.get("/store/items", { params })).data;
+};
 export const updateStoreItem = async (id, payload) => (await api.put(`/store/items/${id}`, payload)).data;
 export const deleteStoreItem = async (id) => (await api.delete(`/store/items/${id}`)).data;
 

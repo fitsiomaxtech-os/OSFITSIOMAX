@@ -42,13 +42,15 @@ VALID_DURATIONS_MINUTES = {15, 30, 45, 60, 120}
 
 
 class StoreItemIn(BaseModel):
+    item_type: str = "consultation"  # "consultation" | "session"
     category: str
     name: str
     description: Optional[str] = ""
     image_url: Optional[str] = None
     mode: str  # "online" | "offline"
     price: float = 0
-    duration_minutes: int = 30  # one of VALID_DURATIONS_MINUTES
+    duration_minutes: int = 30  # one of VALID_DURATIONS_MINUTES; consultation items only
+    sessions_count: Optional[int] = None  # session items only
 
 
 class StoreItemOut(StoreItemIn):
@@ -65,8 +67,12 @@ async def create_store_item(payload: StoreItemIn, _: V3UserOut = Depends(v3_requ
         raise HTTPException(status_code=400, detail="Mode must be 'online' or 'offline'")
     if payload.price < 0:
         raise HTTPException(status_code=400, detail="Price cannot be negative")
-    if payload.duration_minutes not in VALID_DURATIONS_MINUTES:
+    if payload.item_type not in ("consultation", "session"):
+        raise HTTPException(status_code=400, detail="item_type must be 'consultation' or 'session'")
+    if payload.item_type == "consultation" and payload.duration_minutes not in VALID_DURATIONS_MINUTES:
         raise HTTPException(status_code=400, detail="Duration must be one of 15, 30, 45, 60, or 120 minutes")
+    if payload.item_type == "session" and (not payload.sessions_count or payload.sessions_count < 1):
+        raise HTTPException(status_code=400, detail="Sessions count must be at least 1")
     doc = payload.model_dump()
     doc["id"] = str(uuid.uuid4())
     doc["created_at"] = _now()
@@ -83,8 +89,12 @@ async def update_store_item(item_id: str, payload: StoreItemIn, _: V3UserOut = D
         raise HTTPException(status_code=400, detail="Mode must be 'online' or 'offline'")
     if payload.price < 0:
         raise HTTPException(status_code=400, detail="Price cannot be negative")
-    if payload.duration_minutes not in VALID_DURATIONS_MINUTES:
+    if payload.item_type not in ("consultation", "session"):
+        raise HTTPException(status_code=400, detail="item_type must be 'consultation' or 'session'")
+    if payload.item_type == "consultation" and payload.duration_minutes not in VALID_DURATIONS_MINUTES:
         raise HTTPException(status_code=400, detail="Duration must be one of 15, 30, 45, 60, or 120 minutes")
+    if payload.item_type == "session" and (not payload.sessions_count or payload.sessions_count < 1):
+        raise HTTPException(status_code=400, detail="Sessions count must be at least 1")
     update = payload.model_dump()
     update["updated_at"] = _now()
     res = await v3_col("store_items").update_one({"id": item_id}, {"$set": update})
@@ -95,8 +105,15 @@ async def update_store_item(item_id: str, payload: StoreItemIn, _: V3UserOut = D
 
 
 @router.get("/items", response_model=List[StoreItemOut])
-async def list_store_items(category: Optional[str] = None, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
-    q = {"category": category} if category else {}
+async def list_store_items(category: Optional[str] = None, item_type: Optional[str] = None, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    q = {}
+    if category:
+        q["category"] = category
+    if item_type == "consultation":
+        # items created before item_type existed are consultations by default
+        q["item_type"] = {"$in": ["consultation", None]}
+    elif item_type:
+        q["item_type"] = item_type
     docs = await v3_col("store_items").find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
     return docs
 
