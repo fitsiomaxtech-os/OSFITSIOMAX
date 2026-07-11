@@ -460,6 +460,13 @@ const EditMetaDialog = ({ branch, onClose, onSaved }) => {
   );
 };
 
+const Field = ({ label, children, className = "" }) => (
+  <div className={`space-y-1 ${className}`}>
+    <label className="text-xs font-medium text-slate-700">{label}</label>
+    {children}
+  </div>
+);
+
 const EditAdminContactDialog = ({ branch, onClose, onSaved }) => {
   const [form, setForm] = useState({
     admin_name: branch.admin_name || "",
