@@ -178,6 +178,8 @@ class V3LeadOut(BaseModel):
     notes: Optional[str] = ""
     extra_fields: Dict[str, Any]
     consultation_fee: Optional[float] = None
+    consultation_item_name: Optional[str] = None
+    consultation_mode: Optional[str] = None
     package_amount: Optional[float] = None
     package_weeks: Optional[int] = None
     package_id: Optional[str] = None

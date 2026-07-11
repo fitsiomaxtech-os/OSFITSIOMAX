@@ -136,29 +136,48 @@ async def sell_store_item(lead_id: str, payload: V3SellStoreItemInput, user: V3U
     if not item:
         raise HTTPException(status_code=404, detail="Store item not found")
 
+    item_type = item.get("item_type", "consultation")
+    if user.role == "head_physio" and item_type != "session":
+        raise HTTPException(status_code=403, detail="Consultants can only sell sessions, not consultations")
+
     price = item.get("price_online") if payload.mode == "online" else item.get("price_offline")
-    sessions = None
-    if item.get("item_type") == "session":
-        sessions = item.get("sessions_online") if payload.mode == "online" else item.get("sessions_offline")
     paid = payload.paid_amount if payload.paid_amount is not None else price
 
-    await v3_col("leads").update_one({"id": lead_id}, {"$set": {
-        "package_id": item["id"],
-        "package_name": item["name"],
-        "package_price": price,
-        "package_paid": paid,
-        "package_sessions": sessions,
-        "package_mode": payload.mode,
-        "consultation_stage": "Package Chosen",
-        "updated_at": _now(),
-    }})
+    if item_type == "session":
+        sessions = item.get("sessions_online") if payload.mode == "online" else item.get("sessions_offline")
+        updates = {
+            "package_id": item["id"],
+            "package_name": item["name"],
+            "package_price": price,
+            "package_paid": paid,
+            "package_sessions": sessions,
+            "package_mode": payload.mode,
+            "consultation_stage": "Package Chosen",
+            "updated_at": _now(),
+        }
+        action = "session_sold"
+        details = f"Sold session package '{item['name']}' ({payload.mode}) for ₹{paid} · {sessions} sessions"
+    else:
+        sessions = None
+        updates = {
+            "consultation_fee": paid,
+            "consultation_item_name": item["name"],
+            "consultation_mode": payload.mode,
+            "consultation_stage": "Clinic Visit",
+            "updated_at": _now(),
+        }
+        action = "consultation_paid"
+        details = f"Consultation '{item['name']}' ({payload.mode}) paid: ₹{paid}"
+
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": updates})
     await v3_col("lead_activity").insert_one({
         "id": str(uuid.uuid4()),
         "lead_id": lead_id,
-        "action": "store_item_sold",
-        "details": f"Sold '{item['name']}' ({payload.mode}) for ₹{paid}" + (f" · {sessions} sessions" if sessions else "") + (f" · {payload.notes}" if payload.notes else ""),
+        "action": action,
+        "details": details + (f" · {payload.notes}" if payload.notes else ""),
         "created_by": user.full_name,
         "created_by_role": user.role,
         "created_at": _now(),
     })
-    return {"message": "Store item sold", "lead_id": lead_id, "item": item, "mode": payload.mode, "sessions": sessions, "paid": paid}
+    updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    return {"message": "Sold", "lead_id": lead_id, "item": item, "mode": payload.mode, "sessions": sessions, "paid": paid, "lead": V3LeadOut(**updated).model_dump()}

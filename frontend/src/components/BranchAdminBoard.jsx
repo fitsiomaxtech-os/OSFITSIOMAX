@@ -170,7 +170,7 @@ export const BranchAdminBoard = ({ branchId }) => {
             </button>
           </div>
           {consultationsSubTab === "consultation" ? (
-            <ConsultationsBoard branchId={branchId} />
+            <ConsultationsBoard branchId={branchId} viewerRole="branch_admin" />
           ) : (
             <HeadPhysioCalendar branchId={branchId} />
           )}

@@ -81,7 +81,7 @@ export const HeadPhysioBoard = ({ branchId, user }) => {
         })}
       </div>
 
-      {activeTab === "consultations" && <ConsultationsBoard branchId={branchId} />}
+      {activeTab === "consultations" && <ConsultationsBoard branchId={branchId} viewerRole="head_physio" />}
 
       {activeTab === "rehab" && (
         <PatientsTab

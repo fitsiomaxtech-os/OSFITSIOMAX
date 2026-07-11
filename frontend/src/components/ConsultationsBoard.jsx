@@ -24,7 +24,8 @@ const STAGE_META = {
   "Cancelled":        { hex: "#f43f5e", icon: XCircle },
 };
 
-export const ConsultationsBoard = ({ branchId }) => {
+export const ConsultationsBoard = ({ branchId, viewerRole }) => {
+  const isConsultant = viewerRole === "head_physio";
   const [board, setBoard] = useState({ leads: [], stage_counts: {} });
   const [stageFilter, setStageFilter] = useState(null);
   const [search, setSearch] = useState("");
@@ -128,21 +129,21 @@ export const ConsultationsBoard = ({ branchId }) => {
     if (!pick.item_id) { toast.error("Choose an item"); return; }
     setSelling(true);
     try {
-      await sellStoreItem(selectedLead.id, {
+      const res = await sellStoreItem(selectedLead.id, {
         item_id: pick.item_id,
         mode: pick.mode,
         paid_amount: pick.paid ? parseFloat(pick.paid) : null,
       });
-      toast.success("Sold — moved to Package Chosen");
+      toast.success("Sold successfully");
       resetPick({ item_id: "", mode: "offline", paid: "" });
-      setSelectedLead(null);
+      const updatedLead = res.lead;
       setBoard((b) => {
-        const leads = (b.leads || []).map((l) => l.id === selectedLead.id ? { ...l, consultation_stage: "Package Chosen" } : l);
+        const leads = (b.leads || []).map((l) => l.id === updatedLead.id ? updatedLead : l);
         const stage_counts = {};
         STAGES.forEach((s) => { stage_counts[s] = leads.filter((l) => l.consultation_stage === s).length; });
         return { ...b, leads, stage_counts };
       });
-      load();
+      setSelectedLead(updatedLead);
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed to sell");
     }
@@ -225,13 +226,15 @@ export const ConsultationsBoard = ({ branchId }) => {
                 {selectedLead.assigned_physio_name && (
                   <p className="mt-0.5 text-xs text-emerald-600">Expert: {selectedLead.assigned_physio_name}</p>
                 )}
-                {selectedLead.package_name && (
-                  <p className="mt-0.5 text-xs text-violet-600">
-                    Current package: <b>{selectedLead.package_name}</b>
-                    {selectedLead.package_sessions ? ` · ${selectedLead.package_sessions} sessions` : ""}
-                    {selectedLead.package_mode ? ` · ${selectedLead.package_mode}` : ""}
-                    {" · ₹"}{selectedLead.package_paid ?? selectedLead.package_price}
-                  </p>
+                {isConsultant && (
+                  <span
+                    className={`mt-1.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                      selectedLead.consultation_fee ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
+                    }`}
+                    data-testid="cons-consultation-paid-badge"
+                  >
+                    {selectedLead.consultation_fee ? "Consultation Paid" : "Consultation Pending"}
+                  </span>
                 )}
               </div>
               <button onClick={() => setSelectedLead(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-detail-close"><XCircle className="h-4 w-4" /></button>
@@ -261,32 +264,53 @@ export const ConsultationsBoard = ({ branchId }) => {
               </Button>
             </div>
 
-            <div>
-              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-600">Move to Stage</p>
-              <div className="grid grid-cols-2 gap-1.5">
-                {STAGES.map((s) => {
-                  const meta = STAGE_META[s];
-                  const active = selectedLead.consultation_stage === s;
-                  return (
-                    <button
-                      key={s}
-                      onClick={() => moveStage(selectedLead, s)}
-                      disabled={active}
-                      className="flex items-center justify-between rounded-lg border px-3 py-2 text-xs font-semibold transition disabled:opacity-100"
-                      style={
-                        active
-                          ? { background: meta.hex, color: "white", borderColor: meta.hex }
-                          : { background: `${meta.hex}10`, color: meta.hex, borderColor: `${meta.hex}33` }
-                      }
-                      data-testid={`cons-move-${s}`}
-                    >
-                      <span>{s}</span>
-                      {active && <CheckCircle2 className="h-3 w-3" />}
-                    </button>
-                  );
-                })}
+            {/* Payment Summary */}
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3" data-testid="cons-payment-summary">
+              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-600">Payment Summary</p>
+              <div className="space-y-1.5 text-xs text-slate-700">
+                <div className="flex items-center justify-between">
+                  <span>Consultation{selectedLead.consultation_item_name ? ` · ${selectedLead.consultation_item_name}` : ""}{selectedLead.consultation_mode ? ` (${selectedLead.consultation_mode})` : ""}</span>
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${selectedLead.consultation_fee ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-500"}`}>
+                    {selectedLead.consultation_fee ? `₹${selectedLead.consultation_fee} Paid` : "Not paid"}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span>Sessions{selectedLead.package_name ? ` · ${selectedLead.package_name}` : ""}{selectedLead.package_sessions ? ` · ${selectedLead.package_sessions} sessions` : ""}{selectedLead.package_mode ? ` (${selectedLead.package_mode})` : ""}</span>
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${selectedLead.package_paid ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-500"}`}>
+                    {selectedLead.package_paid ? `₹${selectedLead.package_paid} Paid` : "Not sold yet"}
+                  </span>
+                </div>
               </div>
             </div>
+
+            {!isConsultant && (
+              <div>
+                <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-600">Move to Stage</p>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {STAGES.map((s) => {
+                    const meta = STAGE_META[s];
+                    const active = selectedLead.consultation_stage === s;
+                    return (
+                      <button
+                        key={s}
+                        onClick={() => moveStage(selectedLead, s)}
+                        disabled={active}
+                        className="flex items-center justify-between rounded-lg border px-3 py-2 text-xs font-semibold transition disabled:opacity-100"
+                        style={
+                          active
+                            ? { background: meta.hex, color: "white", borderColor: meta.hex }
+                            : { background: `${meta.hex}10`, color: meta.hex, borderColor: `${meta.hex}33` }
+                        }
+                        data-testid={`cons-move-${s}`}
+                      >
+                        <span>{s}</span>
+                        {active && <CheckCircle2 className="h-3 w-3" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* Sell from Fitsiomax Store */}
             <div className="space-y-3">
@@ -294,25 +318,29 @@ export const ConsultationsBoard = ({ branchId }) => {
                 <ShoppingBag className="h-3.5 w-3.5" /> Sell from Fitsiomax Store
               </p>
 
-              <StoreSellSection
-                title="Consultations"
-                items={consultationItems}
-                pick={consultPick}
-                setPick={setConsultPick}
-                onSell={() => sellItem(consultPick, setConsultPick)}
-                selling={selling}
-                testPrefix="cons-store-consult"
-              />
-
-              <StoreSellSection
-                title="Sessions"
-                items={sessionItems}
-                pick={sessionPick}
-                setPick={setSessionPick}
-                onSell={() => sellItem(sessionPick, setSessionPick)}
-                selling={selling}
-                testPrefix="cons-store-session"
-              />
+              {isConsultant ? (
+                <StoreSellSection
+                  title="Sessions"
+                  items={sessionItems}
+                  pick={sessionPick}
+                  setPick={setSessionPick}
+                  onSell={() => sellItem(sessionPick, setSessionPick)}
+                  selling={selling}
+                  testPrefix="cons-store-session"
+                  buttonLabel="Sell & Move to Package Chosen"
+                />
+              ) : (
+                <StoreSellSection
+                  title="Consultations"
+                  items={consultationItems}
+                  pick={consultPick}
+                  setPick={setConsultPick}
+                  onSell={() => sellItem(consultPick, setConsultPick)}
+                  selling={selling}
+                  testPrefix="cons-store-consult"
+                  buttonLabel="Record Consultation Payment"
+                />
+              )}
             </div>
           </div>
         </div>
@@ -321,7 +349,7 @@ export const ConsultationsBoard = ({ branchId }) => {
   );
 };
 
-function StoreSellSection({ title, items, pick, setPick, onSell, selling, testPrefix }) {
+function StoreSellSection({ title, items, pick, setPick, onSell, selling, testPrefix, buttonLabel }) {
   const selectedItem = items.find((i) => i.id === pick.item_id);
   const price = selectedItem ? (pick.mode === "online" ? selectedItem.price_online : selectedItem.price_offline) : null;
   const sessions = selectedItem?.item_type === "session"
@@ -380,7 +408,7 @@ function StoreSellSection({ title, items, pick, setPick, onSell, selling, testPr
             disabled={selling || !pick.item_id}
             data-testid={`${testPrefix}-sell`}
           >
-            {selling ? "Selling..." : "Sell & Move to Package Chosen"}
+            {selling ? "Saving..." : buttonLabel}
           </Button>
         </>
       )}
