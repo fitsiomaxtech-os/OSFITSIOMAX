@@ -124,7 +124,7 @@ async def update_store_item(item_id: str, payload: StoreItemIn, _: V3UserOut = D
 
 
 @router.get("/items", response_model=List[StoreItemOut])
-async def list_store_items(category: Optional[str] = None, item_type: Optional[str] = None, _: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin"))):
+async def list_store_items(category: Optional[str] = None, item_type: Optional[str] = None, _: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin", "head_physio"))):
     q = {}
     if category:
         q["category"] = category

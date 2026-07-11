@@ -180,6 +180,13 @@ class V3LeadOut(BaseModel):
     consultation_fee: Optional[float] = None
     package_amount: Optional[float] = None
     package_weeks: Optional[int] = None
+    package_id: Optional[str] = None
+    package_name: Optional[str] = None
+    package_price: Optional[float] = None
+    package_paid: Optional[float] = None
+    package_sessions: Optional[int] = None
+    package_mode: Optional[str] = None
+    diagnosis: Optional[str] = None
     assigned_physio_id: Optional[str] = None
     assigned_physio_name: Optional[str] = None
     location: Optional[str] = None
@@ -206,6 +213,17 @@ class V3LeadOut(BaseModel):
     appointment_datetime: Optional[str] = None
     created_at: str
     updated_at: str
+
+
+class V3DiagnosisInput(BaseModel):
+    diagnosis: str
+
+
+class V3SellStoreItemInput(BaseModel):
+    item_id: str
+    mode: Literal["online", "offline"]
+    paid_amount: Optional[float] = None
+    notes: Optional[str] = ""
 
 
 class V3AssignBranchInput(BaseModel):

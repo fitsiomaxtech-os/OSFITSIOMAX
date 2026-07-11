@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from database import v3_col
 from deps import v3_require_roles
-from schemas.v3 import V3UserOut
+from schemas.v3 import V3UserOut, V3LeadOut, V3DiagnosisInput, V3SellStoreItemInput
 
 router = APIRouter(prefix="/api/v3", tags=["packages"])
 
@@ -106,3 +106,59 @@ async def sell_package(lead_id: str, payload: SellPackageInput, user: V3UserOut 
         "created_at": _now(),
     })
     return {"message": "Package sold", "lead_id": lead_id, "package": pkg, "paid": paid}
+
+
+@router.post("/leads/{lead_id}/diagnosis", response_model=V3LeadOut)
+async def save_diagnosis(lead_id: str, payload: V3DiagnosisInput, user: V3UserOut = Depends(v3_require_roles("head_physio", "branch_admin", "super_admin"))):
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": {"diagnosis": payload.diagnosis, "updated_at": _now()}})
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": lead_id,
+        "action": "diagnosis_recorded",
+        "details": f"Diagnosis recorded by {user.full_name}: {payload.diagnosis}",
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": _now(),
+    })
+    updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    return V3LeadOut(**updated)
+
+
+@router.post("/leads/{lead_id}/sell-store-item", response_model=dict)
+async def sell_store_item(lead_id: str, payload: V3SellStoreItemInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio"))):
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    item = await v3_col("store_items").find_one({"id": payload.item_id}, {"_id": 0})
+    if not item:
+        raise HTTPException(status_code=404, detail="Store item not found")
+
+    price = item.get("price_online") if payload.mode == "online" else item.get("price_offline")
+    sessions = None
+    if item.get("item_type") == "session":
+        sessions = item.get("sessions_online") if payload.mode == "online" else item.get("sessions_offline")
+    paid = payload.paid_amount if payload.paid_amount is not None else price
+
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": {
+        "package_id": item["id"],
+        "package_name": item["name"],
+        "package_price": price,
+        "package_paid": paid,
+        "package_sessions": sessions,
+        "package_mode": payload.mode,
+        "consultation_stage": "Package Chosen",
+        "updated_at": _now(),
+    }})
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": lead_id,
+        "action": "store_item_sold",
+        "details": f"Sold '{item['name']}' ({payload.mode}) for ₹{paid}" + (f" · {sessions} sessions" if sessions else "") + (f" · {payload.notes}" if payload.notes else ""),
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": _now(),
+    })
+    return {"message": "Store item sold", "lead_id": lead_id, "item": item, "mode": payload.mode, "sessions": sessions, "paid": paid}

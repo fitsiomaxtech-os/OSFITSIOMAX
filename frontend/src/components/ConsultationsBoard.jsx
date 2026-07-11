@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Calendar, MapPin, CheckCircle2, Package as PackageIcon, RefreshCw, XCircle, Search, Phone, User } from "lucide-react";
+import { Calendar, MapPin, CheckCircle2, Package as PackageIcon, RefreshCw, XCircle, Search, Phone, User, Stethoscope, ShoppingBag } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
-import { getConsultationsBoard, moveConsultationStage, listPackages, sellPackage } from "@/lib/api";
+import { getConsultationsBoard, moveConsultationStage, listStoreItems, sellStoreItem, saveLeadDiagnosis } from "@/lib/api";
 
 const STAGES = [
   "New Appointment",
@@ -29,9 +29,12 @@ export const ConsultationsBoard = ({ branchId }) => {
   const [stageFilter, setStageFilter] = useState(null);
   const [search, setSearch] = useState("");
   const [selectedLead, setSelectedLead] = useState(null);
-  const [packages, setPackages] = useState([]);
-  const [pkgPick, setPkgPick] = useState("");
-  const [pkgPaid, setPkgPaid] = useState("");
+  const [storeItems, setStoreItems] = useState([]);
+  const [consultPick, setConsultPick] = useState({ item_id: "", mode: "offline", paid: "" });
+  const [sessionPick, setSessionPick] = useState({ item_id: "", mode: "offline", paid: "" });
+  const [selling, setSelling] = useState(false);
+  const [diagnosis, setDiagnosis] = useState("");
+  const [savingDiagnosis, setSavingDiagnosis] = useState(false);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -77,8 +80,17 @@ export const ConsultationsBoard = ({ branchId }) => {
   }, [board.leads, stageFilter, search]);
 
   useEffect(() => {
-    listPackages({ active_only: true }).then(setPackages).catch(() => setPackages([]));
+    listStoreItems().then(setStoreItems).catch(() => setStoreItems([]));
   }, []);
+
+  useEffect(() => {
+    setDiagnosis(selectedLead?.diagnosis || "");
+    setConsultPick({ item_id: "", mode: "offline", paid: "" });
+    setSessionPick({ item_id: "", mode: "offline", paid: "" });
+  }, [selectedLead?.id]);
+
+  const consultationItems = storeItems.filter((i) => i.item_type !== "session");
+  const sessionItems = storeItems.filter((i) => i.item_type === "session");
 
   const moveStage = async (lead, next) => {
     if (next === lead.consultation_stage) return;
@@ -96,6 +108,45 @@ export const ConsultationsBoard = ({ branchId }) => {
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Move failed");
     }
+  };
+
+  const saveDiagnosis = async () => {
+    if (!diagnosis.trim()) { toast.error("Enter a diagnosis"); return; }
+    setSavingDiagnosis(true);
+    try {
+      const updated = await saveLeadDiagnosis(selectedLead.id, diagnosis.trim());
+      toast.success("Diagnosis saved");
+      setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === selectedLead.id ? { ...l, diagnosis: updated.diagnosis } : l) }));
+      setSelectedLead((prev) => (prev ? { ...prev, diagnosis: updated.diagnosis } : prev));
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to save diagnosis");
+    }
+    setSavingDiagnosis(false);
+  };
+
+  const sellItem = async (pick, resetPick) => {
+    if (!pick.item_id) { toast.error("Choose an item"); return; }
+    setSelling(true);
+    try {
+      await sellStoreItem(selectedLead.id, {
+        item_id: pick.item_id,
+        mode: pick.mode,
+        paid_amount: pick.paid ? parseFloat(pick.paid) : null,
+      });
+      toast.success("Sold — moved to Package Chosen");
+      resetPick({ item_id: "", mode: "offline", paid: "" });
+      setSelectedLead(null);
+      setBoard((b) => {
+        const leads = (b.leads || []).map((l) => l.id === selectedLead.id ? { ...l, consultation_stage: "Package Chosen" } : l);
+        const stage_counts = {};
+        STAGES.forEach((s) => { stage_counts[s] = leads.filter((l) => l.consultation_stage === s).length; });
+        return { ...b, leads, stage_counts };
+      });
+      load();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to sell");
+    }
+    setSelling(false);
   };
 
   return (
@@ -161,7 +212,7 @@ export const ConsultationsBoard = ({ branchId }) => {
       {/* Detail / move-stage dialog */}
       {selectedLead && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" data-testid="cons-detail-dialog">
-          <div className="w-full max-w-lg space-y-4 rounded-xl bg-white p-5 shadow-2xl">
+          <div className="w-full max-w-xl max-h-[90vh] overflow-y-auto space-y-4 rounded-xl bg-white p-5 shadow-2xl">
             <div className="flex items-start justify-between">
               <div>
                 <h3 className="text-base font-semibold text-slate-900" data-testid="cons-detail-title">{selectedLead.name || "Lead"}</h3>
@@ -174,8 +225,40 @@ export const ConsultationsBoard = ({ branchId }) => {
                 {selectedLead.assigned_physio_name && (
                   <p className="mt-0.5 text-xs text-emerald-600">Expert: {selectedLead.assigned_physio_name}</p>
                 )}
+                {selectedLead.package_name && (
+                  <p className="mt-0.5 text-xs text-violet-600">
+                    Current package: <b>{selectedLead.package_name}</b>
+                    {selectedLead.package_sessions ? ` · ${selectedLead.package_sessions} sessions` : ""}
+                    {selectedLead.package_mode ? ` · ${selectedLead.package_mode}` : ""}
+                    {" · ₹"}{selectedLead.package_paid ?? selectedLead.package_price}
+                  </p>
+                )}
               </div>
               <button onClick={() => setSelectedLead(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-detail-close"><XCircle className="h-4 w-4" /></button>
+            </div>
+
+            {/* Diagnosis */}
+            <div className="rounded-lg border border-sky-200 bg-sky-50 p-3" data-testid="cons-diagnosis">
+              <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-sky-700">
+                <Stethoscope className="h-3.5 w-3.5" /> Diagnosis
+              </p>
+              <textarea
+                value={diagnosis}
+                onChange={(e) => setDiagnosis(e.target.value)}
+                rows={2}
+                placeholder="Patient's diagnosis / clinical findings..."
+                className="w-full rounded-md border border-sky-200 bg-white px-3 py-2 text-xs"
+                data-testid="cons-diagnosis-input"
+              />
+              <Button
+                size="sm"
+                className="mt-2 bg-sky-600 hover:bg-sky-700 text-xs"
+                onClick={saveDiagnosis}
+                disabled={savingDiagnosis}
+                data-testid="cons-diagnosis-save"
+              >
+                {savingDiagnosis ? "Saving..." : "Save Diagnosis"}
+              </Button>
             </div>
 
             <div>
@@ -205,52 +288,31 @@ export const ConsultationsBoard = ({ branchId }) => {
               </div>
             </div>
 
-            {/* Sell Package quick form */}
-            <div className="rounded-lg border border-violet-200 bg-violet-50 p-3" data-testid="cons-sell-package">
-              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-violet-700">Sell Package</p>
-              {selectedLead.package_name ? (
-                <p className="text-xs text-violet-800">Current package: <b>{selectedLead.package_name}</b> · {selectedLead.package_weeks}w · ₹{selectedLead.package_paid ?? selectedLead.package_price}</p>
-              ) : null}
-              <div className="mt-2 grid grid-cols-3 gap-2">
-                <select value={pkgPick} onChange={(e) => setPkgPick(e.target.value)} className="col-span-2 h-9 rounded-md border border-violet-200 px-2 text-xs" data-testid="cons-pkg-select">
-                  <option value="">-- choose a package --</option>
-                  {packages.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name} · {p.weeks}w · ₹{p.price}</option>
-                  ))}
-                </select>
-                <Input
-                  type="number"
-                  min="0"
-                  value={pkgPaid}
-                  onChange={(e) => setPkgPaid(e.target.value)}
-                  placeholder="Paid"
-                  className="h-9"
-                  data-testid="cons-pkg-paid"
-                />
-              </div>
-              <Button
-                className="mt-2 w-full bg-violet-600 hover:bg-violet-700"
-                onClick={async () => {
-                  if (!pkgPick) { toast.error("Choose a package"); return; }
-                  try {
-                    await sellPackage(selectedLead.id, { package_id: pkgPick, paid_amount: pkgPaid ? parseFloat(pkgPaid) : null });
-                    toast.success("Package sold — moved to Package Chosen");
-                    setPkgPick(""); setPkgPaid("");
-                    setSelectedLead(null);
-                    setBoard((b) => {
-                      const leads = (b.leads || []).map((l) => l.id === selectedLead.id ? { ...l, consultation_stage: "Package Chosen" } : l);
-                      const stage_counts = {};
-                      STAGES.forEach((ss) => { stage_counts[ss] = leads.filter((l) => l.consultation_stage === ss).length; });
-                      return { ...b, leads, stage_counts };
-                    });
-                  } catch (err) {
-                    toast.error(err?.response?.data?.detail || "Failed to sell");
-                  }
-                }}
-                data-testid="cons-pkg-sell"
-              >
-                Sell & Move to Package Chosen
-              </Button>
+            {/* Sell from Fitsiomax Store */}
+            <div className="space-y-3">
+              <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-violet-700">
+                <ShoppingBag className="h-3.5 w-3.5" /> Sell from Fitsiomax Store
+              </p>
+
+              <StoreSellSection
+                title="Consultations"
+                items={consultationItems}
+                pick={consultPick}
+                setPick={setConsultPick}
+                onSell={() => sellItem(consultPick, setConsultPick)}
+                selling={selling}
+                testPrefix="cons-store-consult"
+              />
+
+              <StoreSellSection
+                title="Sessions"
+                items={sessionItems}
+                pick={sessionPick}
+                setPick={setSessionPick}
+                onSell={() => sellItem(sessionPick, setSessionPick)}
+                selling={selling}
+                testPrefix="cons-store-session"
+              />
             </div>
           </div>
         </div>
@@ -258,5 +320,72 @@ export const ConsultationsBoard = ({ branchId }) => {
     </div>
   );
 };
+
+function StoreSellSection({ title, items, pick, setPick, onSell, selling, testPrefix }) {
+  const selectedItem = items.find((i) => i.id === pick.item_id);
+  const price = selectedItem ? (pick.mode === "online" ? selectedItem.price_online : selectedItem.price_offline) : null;
+  const sessions = selectedItem?.item_type === "session"
+    ? (pick.mode === "online" ? selectedItem.sessions_online : selectedItem.sessions_offline)
+    : null;
+
+  return (
+    <div className="rounded-lg border border-violet-200 bg-violet-50 p-3" data-testid={testPrefix}>
+      <p className="mb-1.5 text-[11px] font-semibold text-violet-700">{title}</p>
+      {items.length === 0 ? (
+        <p className="text-xs text-violet-400">No {title.toLowerCase()} items in the store yet.</p>
+      ) : (
+        <>
+          <div className="grid grid-cols-3 gap-2">
+            <select
+              value={pick.item_id}
+              onChange={(e) => setPick({ ...pick, item_id: e.target.value })}
+              className="col-span-2 h-9 rounded-md border border-violet-200 px-2 text-xs"
+              data-testid={`${testPrefix}-select`}
+            >
+              <option value="">-- choose --</option>
+              {items.map((i) => (
+                <option key={i.id} value={i.id}>{i.name}</option>
+              ))}
+            </select>
+            <select
+              value={pick.mode}
+              onChange={(e) => setPick({ ...pick, mode: e.target.value })}
+              className="h-9 rounded-md border border-violet-200 px-2 text-xs"
+              data-testid={`${testPrefix}-mode`}
+            >
+              <option value="offline">Offline</option>
+              <option value="online">Online</option>
+            </select>
+          </div>
+
+          {selectedItem && (
+            <p className="mt-1.5 text-[11px] text-violet-600">
+              ₹{price}{sessions ? ` · ${sessions} sessions` : ""}
+            </p>
+          )}
+
+          <Input
+            type="number"
+            min="0"
+            value={pick.paid}
+            onChange={(e) => setPick({ ...pick, paid: e.target.value })}
+            placeholder={price != null ? `Paid (default ₹${price})` : "Paid"}
+            className="mt-2 h-9"
+            data-testid={`${testPrefix}-paid`}
+          />
+          <Button
+            size="sm"
+            className="mt-2 w-full bg-violet-600 hover:bg-violet-700 text-xs"
+            onClick={onSell}
+            disabled={selling || !pick.item_id}
+            data-testid={`${testPrefix}-sell`}
+          >
+            {selling ? "Selling..." : "Sell & Move to Package Chosen"}
+          </Button>
+        </>
+      )}
+    </div>
+  );
+}
 
 export default ConsultationsBoard;
