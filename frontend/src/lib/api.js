@@ -157,12 +157,14 @@ export const getBranchFinance = async (params = {}) => {
   return (await api.get(`/branch/finance?${query.toString()}`)).data;
 };
 
+export const getHPMyCalendar = async () => (await api.get("/head-physio/my-calendar")).data;
 export const getHPMyPatients = async () => (await api.get("/head-physio/my-patients")).data;
 export const hpRecommendPackage = async (payload) => (await api.post("/head-physio/recommend-package", payload)).data;
 export const hpGetSessions = async (leadId) => (await api.get(`/head-physio/sessions/${leadId}`)).data;
 export const hpGetAssessments = async (leadId) => (await api.get(`/head-physio/weekly-assessments/${leadId}`)).data;
 export const hpWeeklyReview = async (leadId, week, payload) => (await api.post(`/head-physio/weekly-review/${leadId}/${week}`, payload)).data;
 
+export const physioConsultations = async () => (await api.get("/physio/consultations")).data;
 export const physioToday = async () => (await api.get("/physio/today")).data;
 export const physioCalendar = async (month, year) => (await api.get(`/physio/calendar?month=${month}&year=${year}`)).data;
 export const physioPatients = async () => (await api.get("/physio/patients")).data;

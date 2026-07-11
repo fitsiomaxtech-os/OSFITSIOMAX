@@ -9,10 +9,24 @@ from security import hash_password
 from deps import v3_require_roles
 from schemas.v3 import (
     V3UserOut, V3CompleteSessionInput, V3JrPhysioWeeklyInput,
-    V3CreateJrPhysioInput,
+    V3CreateJrPhysioInput, V3LeadOut,
 )
 
 router = APIRouter(prefix="/api/v3")
+
+
+async def _resolve_doctor(user: V3UserOut) -> Optional[dict]:
+    """Find the doctors record for the logged-in physio/consultant, scoped to their own user_id."""
+    doctor = await v3_col("doctors").find_one(
+        {"user_id": user.id, "profile_type": "physio"},
+        {"_id": 0},
+    )
+    if not doctor:
+        doctor = await v3_col("doctors").find_one(
+            {"branch_id": user.branch_id, "profile_type": "physio", "user_id": {"$exists": True}},
+            {"_id": 0},
+        )
+    return doctor
 
 
 @router.post("/branch/jr-physios")
@@ -64,16 +78,7 @@ async def create_jr_physio(payload: V3CreateJrPhysioInput, user: V3UserOut = Dep
 
 @router.get("/physio/today")
 async def physio_today(user: V3UserOut = Depends(v3_require_roles("physio", "super_admin"))):
-    doctor = await v3_col("doctors").find_one(
-        {"branch_id": user.branch_id, "profile_type": "physio", "user_id": {"$exists": True}},
-        {"_id": 0},
-    )
-    if not doctor:
-        doctors = await v3_col("doctors").find(
-            {"branch_id": user.branch_id, "profile_type": "physio"},
-            {"_id": 0},
-        ).to_list(10)
-        doctor = doctors[0] if doctors else None
+    doctor = await _resolve_doctor(user)
 
     if not doctor:
         return {"sessions": [], "date": datetime.now(timezone.utc).date().isoformat()}
@@ -93,16 +98,7 @@ async def physio_calendar(
     year: Optional[int] = None,
     user: V3UserOut = Depends(v3_require_roles("physio", "super_admin")),
 ):
-    doctor = await v3_col("doctors").find_one(
-        {"branch_id": user.branch_id, "profile_type": "physio", "user_id": {"$exists": True}},
-        {"_id": 0},
-    )
-    if not doctor:
-        doctors = await v3_col("doctors").find(
-            {"branch_id": user.branch_id, "profile_type": "physio"},
-            {"_id": 0},
-        ).to_list(10)
-        doctor = doctors[0] if doctors else None
+    doctor = await _resolve_doctor(user)
 
     if not doctor:
         return {"sessions": [], "slots": [], "slot_details": []}
@@ -128,16 +124,7 @@ async def physio_calendar(
 
 @router.get("/physio/patients")
 async def physio_patients(user: V3UserOut = Depends(v3_require_roles("physio", "super_admin"))):
-    doctor = await v3_col("doctors").find_one(
-        {"branch_id": user.branch_id, "profile_type": "physio", "user_id": {"$exists": True}},
-        {"_id": 0},
-    )
-    if not doctor:
-        doctors = await v3_col("doctors").find(
-            {"branch_id": user.branch_id, "profile_type": "physio"},
-            {"_id": 0},
-        ).to_list(10)
-        doctor = doctors[0] if doctors else None
+    doctor = await _resolve_doctor(user)
 
     if not doctor:
         return {"patients": []}
@@ -170,6 +157,25 @@ async def physio_patients(user: V3UserOut = Depends(v3_require_roles("physio", "
         })
 
     return {"patients": patients}
+
+
+@router.get("/physio/consultations")
+async def physio_consultations(user: V3UserOut = Depends(v3_require_roles("physio", "super_admin"))):
+    """Leads/appointments assigned to this consultant by a branch manager (pre-package consultation pipeline)."""
+    doctor = await _resolve_doctor(user)
+    if not doctor:
+        return {"leads": []}
+
+    leads = await v3_col("leads").find(
+        {"assigned_physio_id": doctor["id"]},
+        {"_id": 0},
+    ).sort("appointment_datetime", -1).to_list(500)
+
+    return {
+        "leads": [V3LeadOut(**ld).model_dump() for ld in leads],
+        "doctor_id": doctor["id"],
+        "doctor_name": doctor["full_name"],
+    }
 
 
 @router.get("/physio/sessions/{lead_id}")

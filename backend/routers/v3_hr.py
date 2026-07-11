@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional, List, Literal, Dict, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 import uuid
 
 from database import v3_col
@@ -84,6 +84,12 @@ class UserAccountCreate(BaseModel):
     branch_id: Optional[str] = None
     mobile_number: Optional[str] = None
     aadhar_number: Optional[str] = None
+
+    @field_validator("role", mode="before")
+    @classmethod
+    def _normalize_role(cls, v):
+        # "consultant" is a legacy/UI alias for "physio" — same permissions, different label.
+        return "physio" if v == "consultant" else v
 
 
 async def _next_emp_code() -> str:

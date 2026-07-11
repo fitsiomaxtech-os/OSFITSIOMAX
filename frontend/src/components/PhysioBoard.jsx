@@ -16,6 +16,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
 import {
+  physioConsultations,
   physioToday,
   physioCalendar,
   physioPatients,
@@ -25,13 +26,14 @@ import {
 } from "@/lib/api";
 
 const TABS = [
+  { key: "consultations", label: "Consultations", icon: ClipboardList },
   { key: "today", label: "Today", icon: Clock },
   { key: "calendar", label: "Full Calendar", icon: CalendarDays },
   { key: "patients", label: "Patients", icon: Users },
 ];
 
 export const PhysioBoard = () => {
-  const [activeTab, setActiveTab] = useState("today");
+  const [activeTab, setActiveTab] = useState("consultations");
 
   return (
     <div className="space-y-4" data-testid="physio-board-root">
@@ -56,12 +58,72 @@ export const PhysioBoard = () => {
         })}
       </div>
 
+      {activeTab === "consultations" && <ConsultationsTab />}
       {activeTab === "today" && <TodayTab />}
       {activeTab === "calendar" && <CalendarTab />}
       {activeTab === "patients" && <PatientsTab />}
     </div>
   );
 };
+
+function ConsultationsTab() {
+  const [leads, setLeads] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await physioConsultations();
+      setLeads(data.leads || []);
+    } catch { /* silent */ }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const formatDateTime = (lead) => {
+    if (!lead.appointment_date) return "No appointment scheduled yet";
+    const time = lead.appointment_time ? ` · ${lead.appointment_time}` : "";
+    return `${lead.appointment_date}${time}`;
+  };
+
+  return (
+    <div data-testid="physio-consultations-tab">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-semibold text-slate-700">Assigned Consultations</h3>
+        <span className="rounded-full bg-sky-100 px-2.5 py-0.5 text-[10px] font-semibold text-sky-700">{leads.length} assigned</span>
+      </div>
+
+      {leads.length === 0 && !loading ? (
+        <div className="text-center py-16">
+          <ClipboardList className="h-10 w-10 text-slate-200 mx-auto mb-3" />
+          <p className="text-sm text-slate-400">No consultations assigned to you yet</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {leads.map((l) => (
+            <div key={l.id} className="rounded-xl border border-slate-200 bg-white p-4" data-testid={`consultation-lead-${l.id}`}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-slate-800">{l.name}</p>
+                  <p className="text-[10px] text-slate-400">{l.phone}</p>
+                </div>
+                {l.consultation_stage && (
+                  <span className="rounded-full bg-sky-100 px-2.5 py-1 text-[10px] font-semibold text-sky-700">{l.consultation_stage}</span>
+                )}
+              </div>
+              <div className="mt-2 flex items-center gap-1.5 text-xs text-slate-600">
+                <Calendar className="h-3.5 w-3.5 text-slate-400" /> {formatDateTime(l)}
+              </div>
+              {l.condition && <p className="text-[10px] text-slate-400 mt-1">Condition: {l.condition}</p>}
+              {l.notes && <p className="text-[10px] text-slate-500 mt-1 whitespace-pre-wrap">{l.notes}</p>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function TodayTab() {
   const [data, setData] = useState({ sessions: [], date: "" });

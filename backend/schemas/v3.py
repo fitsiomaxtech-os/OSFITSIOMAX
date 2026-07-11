@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 from typing import List, Optional, Dict, Literal, Any
 
 
@@ -11,6 +11,12 @@ class V3UserOut(BaseModel):
     role: Literal["super_admin", "business_dev", "pre_sales", "branch_admin", "head_physio", "physio"]
     branch_id: Optional[str] = None
     created_at: str
+
+    @field_validator("role", mode="before")
+    @classmethod
+    def _normalize_role(cls, v):
+        # "consultant" is a legacy/UI alias for "physio" — same permissions, different label.
+        return "physio" if v == "consultant" else v
 
 
 class V3LoginRequest(BaseModel):

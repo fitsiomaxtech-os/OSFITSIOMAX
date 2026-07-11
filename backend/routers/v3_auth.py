@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends, Header
+import re
 import uuid
 
 from database import v3_col
@@ -17,7 +18,13 @@ async def v3_root():
 
 @router.post("/auth/login", response_model=V3LoginResponse)
 async def v3_login(payload: V3LoginRequest):
-    user = await v3_col("users").find_one({"email": payload.email.lower(), "is_active": True}, {"_id": 0})
+    # Case-insensitive match: some accounts were created with mixed-case emails
+    # (e.g. "Consultant@fitsiomax.clinic") before account creation normalized to lowercase.
+    email = payload.email.strip()
+    user = await v3_col("users").find_one(
+        {"email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}, "is_active": True},
+        {"_id": 0},
+    )
     if not user or not verify_password(payload.password, user.get("password", "")):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 

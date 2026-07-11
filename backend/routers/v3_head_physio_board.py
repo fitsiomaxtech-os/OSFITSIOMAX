@@ -10,12 +10,46 @@ from schemas.v3 import V3UserOut, V3PackageRecommendInput, V3HeadPhysioReviewInp
 router = APIRouter(prefix="/api/v3")
 
 
-@router.get("/head-physio/my-patients")
-async def hp_my_patients(user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin"))):
+async def _resolve_hp_doctor(user: V3UserOut) -> Optional[dict]:
+    """Find the doctors record for the logged-in head physio/consultant, scoped to their own user_id."""
     doctor = await v3_col("doctors").find_one(
-        {"branch_id": user.branch_id, "profile_type": "head_physio"},
+        {"user_id": user.id, "profile_type": "head_physio"},
         {"_id": 0},
     )
+    if not doctor:
+        doctor = await v3_col("doctors").find_one(
+            {"branch_id": user.branch_id, "profile_type": "head_physio"},
+            {"_id": 0},
+        )
+    return doctor
+
+
+@router.get("/head-physio/my-calendar")
+async def hp_my_calendar(user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin"))):
+    """Read-only view of the logged-in consultant's own booked slots (branch admin manages slot availability)."""
+    doctor = await _resolve_hp_doctor(user)
+    if not doctor:
+        return {"slots": [], "slot_details": [], "booked": {}}
+
+    booked_rows = await v3_col("appointments").find(
+        {"doctor_id": doctor["id"], "status": "new_appointment"},
+        {"_id": 0, "slot_time": 1, "lead_name": 1, "id": 1},
+    ).to_list(1000)
+    booked_map = {row["slot_time"]: row for row in booked_rows}
+
+    return {
+        "doctor_id": doctor["id"],
+        "doctor_name": doctor["full_name"],
+        "specialization": doctor.get("specialization", ""),
+        "slots": doctor.get("slots", []),
+        "slot_details": doctor.get("slot_details", []),
+        "booked": booked_map,
+    }
+
+
+@router.get("/head-physio/my-patients")
+async def hp_my_patients(user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin"))):
+    doctor = await _resolve_hp_doctor(user)
     if not doctor:
         return {"patients": []}
 
@@ -63,10 +97,7 @@ async def hp_recommend_package(
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
-    doctor = await v3_col("doctors").find_one(
-        {"branch_id": user.branch_id, "profile_type": "head_physio"},
-        {"_id": 0},
-    )
+    doctor = await _resolve_hp_doctor(user)
 
     total_sessions = payload.recommended_weeks * payload.sessions_per_week
 

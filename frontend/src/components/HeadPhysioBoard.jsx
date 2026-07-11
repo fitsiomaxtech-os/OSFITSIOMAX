@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import {
+  Activity,
   Calendar,
+  CalendarClock,
   Check,
   ChevronRight,
   ClipboardList,
@@ -11,13 +13,16 @@ import {
   Send,
   Stethoscope,
   User,
+  UserCircle,
   Users,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
+import { ConsultationsBoard } from "@/components/ConsultationsBoard";
 import {
+  getHPMyCalendar,
   getHPMyPatients,
   hpRecommendPackage,
   hpGetAssessments,
@@ -26,12 +31,15 @@ import {
 } from "@/lib/api";
 
 const VIEW_TABS = [
-  { key: "patients", label: "My Patients", icon: Users },
-  { key: "assessments", label: "Weekly Reviews", icon: ClipboardList },
+  { key: "consultations", label: "Consultations", icon: Calendar },
+  { key: "assessments", label: "Review", icon: ClipboardList },
+  { key: "rehab", label: "Rehab", icon: Activity },
+  { key: "calendar", label: "Calendar", icon: CalendarClock },
+  { key: "profile", label: "My Profile", icon: UserCircle },
 ];
 
-export const HeadPhysioBoard = () => {
-  const [activeTab, setActiveTab] = useState("patients");
+export const HeadPhysioBoard = ({ branchId, user }) => {
+  const [activeTab, setActiveTab] = useState("consultations");
   const [patients, setPatients] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState(null);
@@ -73,7 +81,9 @@ export const HeadPhysioBoard = () => {
         })}
       </div>
 
-      {activeTab === "patients" && (
+      {activeTab === "consultations" && <ConsultationsBoard branchId={branchId} />}
+
+      {activeTab === "rehab" && (
         <PatientsTab
           patients={patients}
           onRecommend={(p) => setShowRecommendModal(p)}
@@ -88,6 +98,10 @@ export const HeadPhysioBoard = () => {
           onReview={(p, w) => setShowReviewModal({ patient: p, week: w })}
         />
       )}
+
+      {activeTab === "calendar" && <MyCalendarTab />}
+
+      {activeTab === "profile" && <MyProfileTab user={user} />}
 
       {showRecommendModal && (
         <RecommendPackageModal
@@ -117,6 +131,94 @@ export const HeadPhysioBoard = () => {
     </div>
   );
 };
+
+function MyCalendarTab() {
+  const [data, setData] = useState({ slots: [], booked: {} });
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { setData(await getHPMyCalendar()); } catch { /* silent */ }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const grouped = [...(data.slots || [])].sort().reduce((acc, slot) => {
+    const date = slot.split("T")[0];
+    (acc[date] = acc[date] || []).push(slot);
+    return acc;
+  }, {});
+  const dates = Object.keys(grouped).sort();
+
+  if (dates.length === 0 && !loading) {
+    return (
+      <div className="text-center py-16" data-testid="hp-calendar-empty">
+        <Calendar className="h-10 w-10 text-slate-200 mx-auto mb-3" />
+        <p className="text-sm text-slate-400">No calendar slots set up yet — ask your branch admin to add availability</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4" data-testid="hp-calendar-tab">
+      {dates.map((date) => (
+        <div key={date} className="rounded-xl border border-slate-200 bg-white p-4" data-testid={`hp-calendar-day-${date}`}>
+          <h4 className="text-sm font-semibold text-slate-700 mb-2">
+            {new Date(date + "T00:00").toLocaleDateString("en-IN", { weekday: "long", month: "short", day: "numeric" })}
+          </h4>
+          <div className="flex flex-wrap gap-2">
+            {grouped[date].map((slot) => {
+              const booking = data.booked?.[slot];
+              const time = slot.split("T")[1];
+              return (
+                <div
+                  key={slot}
+                  className={`rounded-lg border px-3 py-2 text-xs ${booking ? "border-teal-200 bg-teal-50 text-teal-700" : "border-slate-200 text-slate-500"}`}
+                  data-testid={`hp-calendar-slot-${slot}`}
+                >
+                  <p className="font-semibold">{time}</p>
+                  <p className="text-[10px]">{booking ? booking.lead_name : "Available"}</p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function MyProfileTab({ user }) {
+  if (!user) return null;
+  const fields = [
+    { label: "Name", value: user.full_name },
+    { label: "Email", value: user.email },
+    { label: "Role", value: "Consultant / Head Physio" },
+  ];
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-6 max-w-md" data-testid="hp-profile-tab">
+      <div className="flex items-center gap-3 mb-5">
+        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-teal-100 text-lg font-bold text-teal-700">
+          {user.full_name?.charAt(0)?.toUpperCase()}
+        </div>
+        <div>
+          <p className="text-base font-semibold text-slate-800">{user.full_name}</p>
+          <p className="text-xs text-slate-400">Consultant / Head Physio</p>
+        </div>
+      </div>
+      <div className="space-y-3">
+        {fields.map((f) => (
+          <div key={f.label} className="flex items-center justify-between border-b border-slate-100 pb-2">
+            <span className="text-xs text-slate-400">{f.label}</span>
+            <span className="text-sm text-slate-700">{f.value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function PatientsTab({ patients, onRecommend, onSelect, loading }) {
   if (patients.length === 0 && !loading) {
