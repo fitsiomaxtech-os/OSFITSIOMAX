@@ -327,12 +327,18 @@ class V3FollowUpInput(BaseModel):
 
 class V3AppointmentScheduleInput(BaseModel):
     mode: str  # "offline" | "online"
+    department: str = "physio"  # "physio" | "fitness" — chosen first, before mode
     branch_id: Optional[str] = None
+    diagnosis: Optional[str] = None  # basic diagnosis captured at Pre-Sales for the Physio/Offline path
 
 
 @router.post("/leads/{lead_id}/schedule-appointment", response_model=V3LeadOut)
 async def v3_schedule_appointment(lead_id: str, payload: V3AppointmentScheduleInput, user: V3UserOut = Depends(v3_require_roles("pre_sales", "business_dev", "super_admin", "branch_admin"))):
-    """Move lead to Appointment stage with mode (offline/online) and branch (offline only). Pre-Sales only assigns the branch; the Branch Admin assigns the Fitsiomax Expert later."""
+    """Move lead to Appointment stage with department (physio/fitness), mode (offline/online),
+    and branch (offline only). Pre-Sales only assigns the branch (+ a basic diagnosis for
+    Physio/Offline); the Branch Admin assigns the Fitsiomax Expert and appointment time later."""
+    if payload.department not in ("physio", "fitness"):
+        raise HTTPException(status_code=400, detail="department must be 'physio' or 'fitness'")
     if payload.mode not in ("offline", "online"):
         raise HTTPException(status_code=400, detail="mode must be 'offline' or 'online'")
     if payload.mode == "offline" and not payload.branch_id:
@@ -347,16 +353,24 @@ async def v3_schedule_appointment(lead_id: str, payload: V3AppointmentScheduleIn
     updates = {
         "stage": "Appointment",
         "appointment_mode": payload.mode,
+        "appointment_department": payload.department,
         "branch_id": payload.branch_id,
         "branch_stage": "New Appointment",
         "updated_at": now_iso(),
     }
+    if payload.diagnosis:
+        updates["diagnosis"] = payload.diagnosis
     await v3_col("leads").update_one({"id": lead_id}, {"$set": updates})
+    details = f"Appointment scheduled · {payload.department} · mode={payload.mode}"
+    if branch_name:
+        details += f" · branch={branch_name}"
+    if payload.diagnosis:
+        details += f" · diagnosis={payload.diagnosis}"
     await v3_col("lead_activity").insert_one({
         "id": str(uuid.uuid4()),
         "lead_id": lead_id,
         "action": "appointment_scheduled",
-        "details": f"Appointment scheduled · mode={payload.mode}" + (f" · branch={branch_name}" if branch_name else ""),
+        "details": details,
         "created_by": user.full_name,
         "created_by_role": user.role,
         "created_at": now_iso(),

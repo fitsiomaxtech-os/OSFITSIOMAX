@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Eye, Plus, RefreshCw, Search, Settings as Cog, Calendar as CalendarIcon, Phone, FileText, StickyNote, ArrowRight, CheckCircle2, X, Pencil, PhoneOff, Clock, Bell, Building2, Video, Trash2 } from "lucide-react";
+import { Eye, Plus, RefreshCw, Search, Settings as Cog, Calendar as CalendarIcon, Phone, FileText, StickyNote, ArrowRight, ArrowLeft, CheckCircle2, X, Pencil, PhoneOff, Clock, Bell, Building2, Video, Trash2, Dumbbell, Stethoscope, ClipboardList } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -454,7 +454,8 @@ const LeadDetailDialog = ({ lead, stages, onClose, onSaved, onMoveStage }) => {
   const [showEdit, setShowEdit] = useState(false);
   const [currentLead, setCurrentLead] = useState(lead);
   const [followUpDraft, setFollowUpDraft] = useState(null); // { date, time, remarks } | null
-  const [appointmentDraft, setAppointmentDraft] = useState(null); // { mode, branch_id, assigned_physio_id } | null
+  const [appointmentDraft, setAppointmentDraft] = useState(null); // { department, mode, branch_id, diagnosis } | null
+  const [appointmentResult, setAppointmentResult] = useState(null); // summary shown after a successful schedule
   const [branches, setBranches] = useState([]);
   const [activity, setActivity] = useState([]);
   const [activityLoading, setActivityLoading] = useState(false);
@@ -656,7 +657,7 @@ const LeadDetailDialog = ({ lead, stages, onClose, onSaved, onMoveStage }) => {
                   return;
                 }
                 if (s.name === "Appointment") {
-                  setAppointmentDraft({ mode: "offline", branch_id: "" });
+                  setAppointmentDraft({ department: "", mode: "", branch_id: "", diagnosis: "" });
                   return;
                 }
                 await onMoveStage(currentLead.id, s.name);
@@ -791,95 +792,199 @@ const LeadDetailDialog = ({ lead, stages, onClose, onSaved, onMoveStage }) => {
         </div>
       )}
 
-      {appointmentDraft && !showEdit && (
+      {appointmentDraft && !showEdit && (() => {
+        const step = !appointmentDraft.department ? "department" : !appointmentDraft.mode ? "mode" : "details";
+        const branchName = (id) => branches.find((b) => b.id === id)?.branch_name || branches.find((b) => b.id === id)?.name || "selected branch";
+        const closeAll = () => { setAppointmentDraft(null); setAppointmentResult(null); };
+        return (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4" data-testid="presales-appointment-modal">
           <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
             <div className="flex items-center justify-between bg-gradient-to-r from-emerald-500 to-teal-600 px-5 py-4 text-white">
               <div className="flex items-center gap-2">
                 <CalendarIcon className="h-5 w-5" />
-                <p className="text-base font-semibold">Schedule Appointment</p>
+                <p className="text-base font-semibold">{appointmentResult ? "Appointment Scheduled" : "Schedule Appointment"}</p>
               </div>
-              <button onClick={() => setAppointmentDraft(null)} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="presales-appointment-close">
+              <button onClick={closeAll} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="presales-appointment-close">
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="space-y-4 p-5">
-              <div>
-                <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-600">Appointment Type</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setAppointmentDraft({ ...appointmentDraft, mode: "offline" })}
-                    className={`flex items-center justify-center gap-2 rounded-lg border-2 px-4 py-3 text-sm font-semibold transition-all ${appointmentDraft.mode === "offline" ? "border-emerald-500 bg-emerald-50 text-emerald-700 shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"}`}
-                    data-testid="presales-appointment-mode-offline"
-                  >
-                    <Building2 className="h-4 w-4" /> Offline
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setAppointmentDraft({ ...appointmentDraft, mode: "online", branch_id: "" })}
-                    className={`flex items-center justify-center gap-2 rounded-lg border-2 px-4 py-3 text-sm font-semibold transition-all ${appointmentDraft.mode === "online" ? "border-sky-500 bg-sky-50 text-sky-700 shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"}`}
-                    data-testid="presales-appointment-mode-online"
-                  >
-                    <Video className="h-4 w-4" /> Online
-                  </button>
-                </div>
-              </div>
 
-              {appointmentDraft.mode === "offline" && (
+            {appointmentResult ? (
+              <>
+                <div className="space-y-3 p-5">
+                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-emerald-700">Assigned To</p>
+                    <dl className="space-y-1.5 text-sm">
+                      <div className="flex justify-between"><dt className="text-slate-500">Service</dt><dd className="font-semibold text-slate-800">{appointmentResult.department === "physio" ? "Physiotherapy" : "Fitness"}</dd></div>
+                      <div className="flex justify-between"><dt className="text-slate-500">Type</dt><dd className="font-semibold text-slate-800 capitalize">{appointmentResult.mode}</dd></div>
+                      {appointmentResult.mode === "offline" && (
+                        <div className="flex justify-between"><dt className="text-slate-500">Selected Branch</dt><dd className="font-semibold text-slate-800">{appointmentResult.branchName}</dd></div>
+                      )}
+                    </dl>
+                    <p className="mt-2 border-t border-emerald-200 pt-2 text-[11px] text-emerald-700">
+                      {appointmentResult.mode === "offline"
+                        ? "The branch admin will assign a Fitsiomax Expert and appointment time from here."
+                        : "The Head Physio will assign a time and host the session via video call."}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 p-3">
+                    <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-500">Lead Summary</p>
+                    <p className="text-sm font-semibold text-slate-800">{currentLead.name || "Unknown"}</p>
+                    <p className="text-xs text-slate-500">{currentLead.phone}</p>
+                  </div>
+                  {appointmentResult.diagnosis && (
+                    <div className="rounded-lg border border-slate-200 p-3">
+                      <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-500">Diagnosis (basis)</p>
+                      <p className="text-sm text-slate-700">{appointmentResult.diagnosis}</p>
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/40 px-5 py-3">
+                  <Button className="bg-emerald-500 text-white hover:bg-emerald-600" onClick={closeAll} data-testid="presales-appointment-done">
+                    <CheckCircle2 className="mr-1 h-4 w-4" /> Done
+                  </Button>
+                </div>
+              </>
+            ) : (
+            <>
+            <div className="space-y-4 p-5">
+              {step === "department" && (
                 <div>
-                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-600">Select Branch *</label>
-                  <select
-                    value={appointmentDraft.branch_id}
-                    onChange={(e) => setAppointmentDraft({ ...appointmentDraft, branch_id: e.target.value })}
-                    className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm focus:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-400"
-                    data-testid="presales-appointment-branch"
-                  >
-                    <option value="">-- choose a branch --</option>
-                    {branches.map((b) => (
-                      <option key={b.id} value={b.id}>{b.branch_name || b.name}</option>
-                    ))}
-                  </select>
-                  <p className="mt-1.5 text-[11px] text-slate-500">
-                    The selected branch's admin will see this lead in their <span className="font-semibold">New Appointment</span> column and assign a Fitsiomax Expert from there.
-                  </p>
+                  <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-600">Which service?</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setAppointmentDraft({ ...appointmentDraft, department: "physio" })}
+                      className="flex items-center justify-center gap-2 rounded-lg border-2 border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-600 transition-all hover:border-emerald-300 hover:text-emerald-700"
+                      data-testid="presales-appointment-dept-physio"
+                    >
+                      <Stethoscope className="h-4 w-4" /> Physiotherapy
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAppointmentDraft({ ...appointmentDraft, department: "fitness" })}
+                      className="flex items-center justify-center gap-2 rounded-lg border-2 border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-600 transition-all hover:border-teal-300 hover:text-teal-700"
+                      data-testid="presales-appointment-dept-fitness"
+                    >
+                      <Dumbbell className="h-4 w-4" /> Fitness
+                    </button>
+                  </div>
                 </div>
               )}
 
-              {appointmentDraft.mode === "online" && (
+              {step !== "department" && (
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setAppointmentDraft({ ...appointmentDraft, department: "", mode: "", branch_id: "" })}
+                    className="mb-2 flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-slate-700"
+                    data-testid="presales-appointment-back-department"
+                  >
+                    <ArrowLeft className="h-3.5 w-3.5" /> {appointmentDraft.department === "physio" ? "Physiotherapy" : "Fitness"}
+                  </button>
+                  <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-600">Appointment Type</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setAppointmentDraft({ ...appointmentDraft, mode: "offline" })}
+                      className={`flex items-center justify-center gap-2 rounded-lg border-2 px-4 py-3 text-sm font-semibold transition-all ${appointmentDraft.mode === "offline" ? "border-emerald-500 bg-emerald-50 text-emerald-700 shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"}`}
+                      data-testid="presales-appointment-mode-offline"
+                    >
+                      <Building2 className="h-4 w-4" /> Offline
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAppointmentDraft({ ...appointmentDraft, mode: "online", branch_id: "" })}
+                      className={`flex items-center justify-center gap-2 rounded-lg border-2 px-4 py-3 text-sm font-semibold transition-all ${appointmentDraft.mode === "online" ? "border-sky-500 bg-sky-50 text-sky-700 shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"}`}
+                      data-testid="presales-appointment-mode-online"
+                    >
+                      <Video className="h-4 w-4" /> Online
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {step === "details" && appointmentDraft.department === "fitness" && (
+                <div className="rounded-lg border border-teal-200 bg-teal-50 p-3 text-xs text-teal-700">
+                  Fitness scheduling is coming soon — for now, Physiotherapy appointments can be scheduled end-to-end.
+                </div>
+              )}
+
+              {step === "details" && appointmentDraft.department === "physio" && appointmentDraft.mode === "offline" && (
+                <>
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-600">Select Branch *</label>
+                    <select
+                      value={appointmentDraft.branch_id}
+                      onChange={(e) => setAppointmentDraft({ ...appointmentDraft, branch_id: e.target.value })}
+                      className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm focus:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                      data-testid="presales-appointment-branch"
+                    >
+                      <option value="">-- choose a branch --</option>
+                      {branches.map((b) => (
+                        <option key={b.id} value={b.id}>{b.branch_name || b.name}</option>
+                      ))}
+                    </select>
+                    <p className="mt-1.5 text-[11px] text-slate-500">
+                      The selected branch's admin will see this lead in their <span className="font-semibold">New Appointment</span> column and assign a Fitsiomax Expert from there.
+                    </p>
+                  </div>
+                  <div>
+                    <label className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-600">
+                      <ClipboardList className="h-3.5 w-3.5" /> Diagnosis (basic)
+                    </label>
+                    <textarea
+                      rows={3}
+                      className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                      placeholder="e.g. Lower back pain, 3 months"
+                      value={appointmentDraft.diagnosis}
+                      onChange={(e) => setAppointmentDraft({ ...appointmentDraft, diagnosis: e.target.value })}
+                      data-testid="presales-appointment-diagnosis"
+                    />
+                  </div>
+                </>
+              )}
+
+              {step === "details" && appointmentDraft.department === "physio" && appointmentDraft.mode === "online" && (
                 <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-sky-700">
                   Online consultation — no branch selection required. The Head Physio will host the session via video call.
                 </div>
               )}
             </div>
             <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/40 px-5 py-3">
-              <Button variant="outline" onClick={() => setAppointmentDraft(null)} data-testid="presales-appointment-cancel">Cancel</Button>
-              <Button
-                className={appointmentDraft.mode === "offline" ? "bg-emerald-500 text-white hover:bg-emerald-600" : "bg-sky-500 text-white hover:bg-sky-600"}
-                onClick={async () => {
-                  if (appointmentDraft.mode === "offline" && !appointmentDraft.branch_id) {
-                    toast.error("Please select a branch");
-                    return;
-                  }
-                  try {
-                    const updated = await scheduleAppointment(currentLead.id, appointmentDraft);
-                    setCurrentLead(updated);
-                    setAppointmentDraft(null);
-                    const branchName = appointmentDraft.mode === "offline"
-                      ? (branches.find((b) => b.id === appointmentDraft.branch_id)?.branch_name || branches.find((b) => b.id === appointmentDraft.branch_id)?.name || "selected branch")
-                      : "Online";
-                    toast.success(`Appointment sent to ${branchName}`);
-                    onSaved && onSaved();
-                  } catch (e) { toast.error(e?.response?.data?.detail || "Failed to schedule appointment"); }
-                }}
-                data-testid="presales-appointment-save"
-              >
-                <CheckCircle2 className="mr-1 h-4 w-4" /> Schedule Appointment
-              </Button>
+              <Button variant="outline" onClick={closeAll} data-testid="presales-appointment-cancel">Cancel</Button>
+              {step === "details" && appointmentDraft.department === "physio" && (
+                <Button
+                  className={appointmentDraft.mode === "offline" ? "bg-emerald-500 text-white hover:bg-emerald-600" : "bg-sky-500 text-white hover:bg-sky-600"}
+                  onClick={async () => {
+                    if (appointmentDraft.mode === "offline" && !appointmentDraft.branch_id) {
+                      toast.error("Please select a branch");
+                      return;
+                    }
+                    try {
+                      const updated = await scheduleAppointment(currentLead.id, appointmentDraft);
+                      setCurrentLead(updated);
+                      setAppointmentResult({
+                        department: appointmentDraft.department,
+                        mode: appointmentDraft.mode,
+                        branchName: appointmentDraft.mode === "offline" ? branchName(appointmentDraft.branch_id) : null,
+                        diagnosis: appointmentDraft.diagnosis,
+                      });
+                      onSaved && onSaved();
+                    } catch (e) { toast.error(e?.response?.data?.detail || "Failed to schedule appointment"); }
+                  }}
+                  data-testid="presales-appointment-save"
+                >
+                  <CheckCircle2 className="mr-1 h-4 w-4" /> Schedule Appointment
+                </Button>
+              )}
             </div>
+            </>
+            )}
           </div>
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 };

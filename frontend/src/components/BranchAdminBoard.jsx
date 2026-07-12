@@ -20,6 +20,7 @@ import {
   Clock,
   CalendarRange,
   ShoppingCart,
+  ClipboardList,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -599,6 +600,26 @@ function BranchLeadModal({ lead, branchId, onClose, onUpdate, reloadBoard }) {
                   <div className="flex items-center justify-between text-sm"><span className="text-xs font-medium text-slate-500">Email</span><span className="font-medium text-slate-800">{lead.email || "—"}</span></div>
                 </div>
               </div>
+
+              {(lead.appointment_department || lead.appointment_mode || lead.diagnosis) && (
+                <div className="overflow-hidden rounded-xl border border-blue-100 bg-white shadow-sm" data-testid="branch-lead-appointment-details">
+                  <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-2.5">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-100 text-blue-700"><ClipboardList className="h-4 w-4" /></span>
+                    <p className="text-xs font-bold uppercase tracking-wider text-blue-700">Appointment Details</p>
+                  </div>
+                  <div className="space-y-2 px-4 py-3">
+                    {lead.appointment_department && (
+                      <div className="flex items-center justify-between text-sm"><span className="text-xs font-medium text-slate-500">Service</span><span className="font-medium capitalize text-slate-800">{lead.appointment_department === "physio" ? "Physiotherapy" : "Fitness"}</span></div>
+                    )}
+                    {lead.appointment_mode && (
+                      <div className="flex items-center justify-between text-sm"><span className="text-xs font-medium text-slate-500">Type</span><span className="font-medium capitalize text-slate-800">{lead.appointment_mode}</span></div>
+                    )}
+                    {lead.diagnosis && (
+                      <div className="text-sm"><span className="text-xs font-medium text-slate-500">Diagnosis</span><p className="mt-0.5 font-medium text-slate-800">{lead.diagnosis}</p></div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {lead.assigned_physio_name && (
                 <div className="overflow-hidden rounded-xl border border-emerald-100 bg-white shadow-sm">

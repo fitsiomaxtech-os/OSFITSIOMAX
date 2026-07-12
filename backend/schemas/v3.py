@@ -210,6 +210,7 @@ class V3LeadOut(BaseModel):
     follow_ups: Optional[List[Dict[str, Any]]] = []
     next_follow_up_at: Optional[str] = None
     appointment_mode: Optional[str] = None  # "offline" | "online"
+    appointment_department: Optional[str] = None  # "physio" | "fitness" — chosen when scheduling the appointment
     appointment_date: Optional[str] = None
     appointment_time: Optional[str] = None
     appointment_datetime: Optional[str] = None
@@ -226,6 +227,15 @@ class V3SellStoreItemInput(BaseModel):
     mode: Literal["online", "offline"]
     paid_amount: Optional[float] = None
     notes: Optional[str] = ""
+
+
+class V3AssignPackageInput(BaseModel):
+    item_id: str
+    mode: Literal["online", "offline"]
+
+
+class V3CollectPackagePaymentInput(BaseModel):
+    paid_amount: float
 
 
 class V3AssignBranchInput(BaseModel):
