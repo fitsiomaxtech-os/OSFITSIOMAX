@@ -23,13 +23,13 @@ async def get_branch_finance(
     base_query = {"branch_id": branch_id}
 
     consultation_query = {**base_query, "consultation_fee": {"$gt": 0}}
-    package_query = {**base_query, "package_amount": {"$gt": 0}}
+    package_query = {**base_query, "package_paid": {"$gt": 0}}
 
     consultation_leads = await v3_col("leads").find(consultation_query, {"_id": 0}).to_list(2000)
     package_leads = await v3_col("leads").find(package_query, {"_id": 0}).to_list(2000)
 
     total_consultation = sum(l.get("consultation_fee", 0) for l in consultation_leads)
-    total_package = sum(l.get("package_amount", 0) for l in package_leads)
+    total_package = sum(l.get("package_paid", 0) for l in package_leads)
 
     all_branch_leads = await v3_col("leads").find(base_query, {"_id": 0}).to_list(2000)
     leads_with_no_fee = [l for l in all_branch_leads if (l.get("consultation_fee") or 0) == 0 and l.get("branch_stage") not in (None, "New Appointment")]
@@ -45,7 +45,7 @@ async def get_branch_finance(
         "total_patients": len(all_branch_leads),
     }
 
-    activity_query = {"action": "fee_collected"}
+    activity_query = {"action": {"$in": ["consultation_paid", "package_payment_collected"]}}
     lead_ids = [l["id"] for l in all_branch_leads]
     if lead_ids:
         activity_query["lead_id"] = {"$in": lead_ids}

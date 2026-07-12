@@ -282,4 +282,11 @@ export const deleteStoreItem = async (id) => (await api.delete(`/store/items/${i
 
 export const saveLeadDiagnosis = async (leadId, diagnosis) => (await api.post(`/leads/${leadId}/diagnosis`, { diagnosis })).data;
 export const sellStoreItem = async (leadId, payload) => (await api.post(`/leads/${leadId}/sell-store-item`, payload)).data;
+export const assignPackage = async (leadId, payload) => (await api.post(`/leads/${leadId}/assign-package`, payload)).data;
+export const collectPackagePayment = async (leadId, paidAmount, paymentMode = "cash") => (await api.post(`/leads/${leadId}/collect-package-payment`, { paid_amount: paidAmount, payment_mode: paymentMode })).data;
+
+export const savePhysioDiagnosis = async (leadId, report, locked = false) => (await api.post(`/leads/${leadId}/physio-diagnosis`, { report, locked })).data;
+export const unlockPhysioDiagnosis = async (leadId) => (await api.put(`/leads/${leadId}/physio-diagnosis/unlock`)).data;
+export const saveTreatmentSummary = async (leadId, summary, locked = false) => (await api.post(`/leads/${leadId}/treatment-summary`, { summary, locked })).data;
+export const unlockTreatmentSummary = async (leadId) => (await api.put(`/leads/${leadId}/treatment-summary/unlock`)).data;
 

@@ -186,9 +186,15 @@ class V3LeadOut(BaseModel):
     package_name: Optional[str] = None
     package_price: Optional[float] = None
     package_paid: Optional[float] = None
+    package_payment_mode: Optional[str] = None  # "cash" | "upi" | "card" | ...
     package_sessions: Optional[int] = None
     package_mode: Optional[str] = None
-    diagnosis: Optional[str] = None
+    diagnosis: Optional[str] = None  # Pre-Sales' basic diagnosis — read-only reference for the Head Physio
+    physio_diagnosis_report: Optional[str] = None  # Head Physio's own diagnosis report
+    physio_diagnosis_locked: Optional[bool] = False
+    treatment_summary: Optional[str] = None  # Head Physio's treatment plan
+    treatment_summary_locked: Optional[bool] = False
+    consultation_payment_mode: Optional[str] = None  # "cash" | "upi" | "card" | ...
     assigned_physio_id: Optional[str] = None
     assigned_physio_name: Optional[str] = None
     location: Optional[str] = None
@@ -222,20 +228,33 @@ class V3DiagnosisInput(BaseModel):
     diagnosis: str
 
 
+class V3PhysioDiagnosisInput(BaseModel):
+    report: str
+    locked: bool = False
+
+
+class V3TreatmentSummaryInput(BaseModel):
+    summary: str
+    locked: bool = False
+
+
 class V3SellStoreItemInput(BaseModel):
     item_id: str
     mode: Literal["online", "offline"]
     paid_amount: Optional[float] = None
+    payment_mode: str = "cash"
     notes: Optional[str] = ""
 
 
 class V3AssignPackageInput(BaseModel):
     item_id: str
     mode: Literal["online", "offline"]
+    sessions_override: Optional[int] = None  # doctor can override the item's default session count
 
 
 class V3CollectPackagePaymentInput(BaseModel):
     paid_amount: float
+    payment_mode: str = "cash"
 
 
 class V3AssignBranchInput(BaseModel):

@@ -8,7 +8,11 @@ from pydantic import BaseModel, Field
 
 from database import v3_col
 from deps import v3_require_roles
-from schemas.v3 import V3UserOut, V3LeadOut, V3DiagnosisInput, V3SellStoreItemInput
+from schemas.v3 import (
+    V3UserOut, V3LeadOut, V3DiagnosisInput, V3SellStoreItemInput,
+    V3AssignPackageInput, V3CollectPackagePaymentInput,
+    V3PhysioDiagnosisInput, V3TreatmentSummaryInput,
+)
 
 router = APIRouter(prefix="/api/v3", tags=["packages"])
 
@@ -128,56 +132,184 @@ async def save_diagnosis(lead_id: str, payload: V3DiagnosisInput, user: V3UserOu
 
 
 @router.post("/leads/{lead_id}/sell-store-item", response_model=dict)
-async def sell_store_item(lead_id: str, payload: V3SellStoreItemInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio"))):
+async def sell_store_item(lead_id: str, payload: V3SellStoreItemInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
+    """Branch admin sells + collects payment for a consultation item, in one step."""
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     item = await v3_col("store_items").find_one({"id": payload.item_id}, {"_id": 0})
     if not item:
         raise HTTPException(status_code=404, detail="Store item not found")
-
-    item_type = item.get("item_type", "consultation")
-    if user.role == "head_physio" and item_type != "session":
-        raise HTTPException(status_code=403, detail="Consultants can only sell sessions, not consultations")
+    if item.get("item_type", "consultation") == "session":
+        raise HTTPException(status_code=400, detail="Session packages are assigned by the consultant, then collected separately — use assign-package / collect-package-payment")
 
     price = item.get("price_online") if payload.mode == "online" else item.get("price_offline")
     paid = payload.paid_amount if payload.paid_amount is not None else price
 
-    if item_type == "session":
-        sessions = item.get("sessions_online") if payload.mode == "online" else item.get("sessions_offline")
-        updates = {
-            "package_id": item["id"],
-            "package_name": item["name"],
-            "package_price": price,
-            "package_paid": paid,
-            "package_sessions": sessions,
-            "package_mode": payload.mode,
-            "consultation_stage": "Package Chosen",
-            "updated_at": _now(),
-        }
-        action = "session_sold"
-        details = f"Sold session package '{item['name']}' ({payload.mode}) for ₹{paid} · {sessions} sessions"
-    else:
-        sessions = None
-        updates = {
-            "consultation_fee": paid,
-            "consultation_item_name": item["name"],
-            "consultation_mode": payload.mode,
-            "consultation_stage": "Clinic Visit",
-            "updated_at": _now(),
-        }
-        action = "consultation_paid"
-        details = f"Consultation '{item['name']}' ({payload.mode}) paid: ₹{paid}"
-
-    await v3_col("leads").update_one({"id": lead_id}, {"$set": updates})
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": {
+        "consultation_fee": paid,
+        "consultation_item_name": item["name"],
+        "consultation_mode": payload.mode,
+        "consultation_payment_mode": payload.payment_mode,
+        "consultation_stage": "Clinic Visit",
+        "updated_at": _now(),
+    }})
     await v3_col("lead_activity").insert_one({
         "id": str(uuid.uuid4()),
         "lead_id": lead_id,
-        "action": action,
-        "details": details + (f" · {payload.notes}" if payload.notes else ""),
+        "action": "consultation_paid",
+        "details": f"Consultation '{item['name']}' ({payload.mode}) paid: Rs.{paid} via {payload.payment_mode}" + (f" · {payload.notes}" if payload.notes else ""),
         "created_by": user.full_name,
         "created_by_role": user.role,
         "created_at": _now(),
     })
     updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
-    return {"message": "Sold", "lead_id": lead_id, "item": item, "mode": payload.mode, "sessions": sessions, "paid": paid, "lead": V3LeadOut(**updated).model_dump()}
+    return {"message": "Sold", "lead_id": lead_id, "item": item, "mode": payload.mode, "paid": paid, "lead": V3LeadOut(**updated).model_dump()}
+
+
+@router.post("/leads/{lead_id}/assign-package", response_model=dict)
+async def assign_package(lead_id: str, payload: V3AssignPackageInput, user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin"))):
+    """Consultant assigns a session package to the patient. The item's preset
+    session count (e.g. 7 for a 1-week package) is the default, but the
+    consultant can override it (e.g. 14 for 2 weeks) — price scales
+    proportionally from the item's per-session rate. No payment is collected
+    here — branch admin collects it separately via collect-package-payment."""
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    item = await v3_col("store_items").find_one({"id": payload.item_id}, {"_id": 0})
+    if not item:
+        raise HTTPException(status_code=404, detail="Store item not found")
+    if item.get("item_type") != "session":
+        raise HTTPException(status_code=400, detail="Only session items can be assigned")
+
+    base_price = item.get("price_online") if payload.mode == "online" else item.get("price_offline")
+    base_sessions = item.get("sessions_online") if payload.mode == "online" else item.get("sessions_offline")
+
+    sessions = payload.sessions_override if payload.sessions_override and payload.sessions_override > 0 else base_sessions
+    if base_sessions and base_price is not None:
+        per_session_rate = base_price / base_sessions
+        price = round(per_session_rate * sessions, 2)
+    else:
+        price = base_price
+
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": {
+        "package_id": item["id"],
+        "package_name": item["name"],
+        "package_price": price,
+        "package_sessions": sessions,
+        "package_mode": payload.mode,
+        "package_paid": None,
+        "package_payment_mode": None,
+        "consultation_stage": "Package Chosen",
+        "updated_at": _now(),
+    }})
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": lead_id,
+        "action": "package_assigned",
+        "details": f"Assigned session package '{item['name']}' ({payload.mode}) · {sessions} sessions · Rs.{price} — awaiting payment collection",
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": _now(),
+    })
+    updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    return {"message": "Package assigned", "lead": V3LeadOut(**updated).model_dump()}
+
+
+@router.post("/leads/{lead_id}/collect-package-payment", response_model=dict)
+async def collect_package_payment(lead_id: str, payload: V3CollectPackagePaymentInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
+    """Branch admin collects payment for a session package the consultant already assigned."""
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    if not lead.get("package_id"):
+        raise HTTPException(status_code=400, detail="No package assigned yet")
+
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": {
+        "package_paid": payload.paid_amount,
+        "package_payment_mode": payload.payment_mode,
+        "updated_at": _now(),
+    }})
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": lead_id,
+        "action": "package_payment_collected",
+        "details": f"Collected Rs.{payload.paid_amount} for package '{lead.get('package_name')}' via {payload.payment_mode}",
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": _now(),
+    })
+    updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    return {"message": "Payment collected", "lead": V3LeadOut(**updated).model_dump()}
+
+
+@router.post("/leads/{lead_id}/physio-diagnosis", response_model=V3LeadOut)
+async def save_physio_diagnosis(lead_id: str, payload: V3PhysioDiagnosisInput, user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin"))):
+    """Head Physio's own diagnosis report — separate from Pre-Sales' basic
+    `diagnosis` field, which stays read-only reference material here."""
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    if lead.get("physio_diagnosis_locked"):
+        raise HTTPException(status_code=400, detail="Diagnosis report is locked — unlock it first to edit")
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": {
+        "physio_diagnosis_report": payload.report,
+        "physio_diagnosis_locked": payload.locked,
+        "updated_at": _now(),
+    }})
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": lead_id,
+        "action": "physio_diagnosis_saved",
+        "details": f"Diagnosis report {'saved & locked' if payload.locked else 'saved'} by {user.full_name}",
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": _now(),
+    })
+    updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    return V3LeadOut(**updated)
+
+
+@router.put("/leads/{lead_id}/physio-diagnosis/unlock", response_model=V3LeadOut)
+async def unlock_physio_diagnosis(lead_id: str, user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin"))):
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": {"physio_diagnosis_locked": False, "updated_at": _now()}})
+    updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not updated:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    return V3LeadOut(**updated)
+
+
+@router.post("/leads/{lead_id}/treatment-summary", response_model=V3LeadOut)
+async def save_treatment_summary(lead_id: str, payload: V3TreatmentSummaryInput, user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin"))):
+    """Head Physio's treatment plan summary — what treatment to give the patient."""
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    if lead.get("treatment_summary_locked"):
+        raise HTTPException(status_code=400, detail="Treatment summary is locked — unlock it first to edit")
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": {
+        "treatment_summary": payload.summary,
+        "treatment_summary_locked": payload.locked,
+        "updated_at": _now(),
+    }})
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": lead_id,
+        "action": "treatment_summary_saved",
+        "details": f"Treatment summary {'saved & locked' if payload.locked else 'saved'} by {user.full_name}",
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": _now(),
+    })
+    updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    return V3LeadOut(**updated)
+
+
+@router.put("/leads/{lead_id}/treatment-summary/unlock", response_model=V3LeadOut)
+async def unlock_treatment_summary(lead_id: str, user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin"))):
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": {"treatment_summary_locked": False, "updated_at": _now()}})
+    updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not updated:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    return V3LeadOut(**updated)
