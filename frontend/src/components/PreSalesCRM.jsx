@@ -658,7 +658,7 @@ const LeadDetailDialog = ({ lead, stages, onClose, onSaved, onMoveStage }) => {
             Move to Stage
           </p>
           <div className="flex flex-wrap gap-2" data-testid="presales-detail-move-stages">
-            {stages.map((s) => {
+            {stages.filter((s) => s.name === "New Leads" ? currentLead.stage === "New Leads" : true).map((s) => {
               const active = currentLead.stage === s.name;
               const handleClick = async () => {
                 if (s.name === "Follow Up") {
