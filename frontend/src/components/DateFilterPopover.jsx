@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Calendar as CalendarIcon, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 
@@ -36,25 +37,47 @@ const presets = (today) => ([
   { key: "last_30",   label: "Last 30 Days", from: startOfDay(addDays(today, -29)),      to: endOfDay(today) },
 ]);
 
+const toInputValue = (d) => d ? new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10) : "";
+
 export const DateFilterPopover = ({ value, onChange, testid = "date-filter" }) => {
   const [open, setOpen] = useState(false);
+  const [showRange, setShowRange] = useState(false);
+  const [rangeFrom, setRangeFrom] = useState("");
+  const [rangeTo, setRangeTo] = useState("");
   const today = useMemo(() => new Date(), []);
   const list = useMemo(() => presets(today), [today]);
 
   const apply = (p) => {
     onChange({ key: p.key, label: p.label, from: p.from, to: p.to });
+    setShowRange(false);
     setOpen(false);
   };
 
   const applyExact = (d) => {
     if (!d) return;
     onChange({ key: "exact", label: fmtShort(d), from: startOfDay(d), to: endOfDay(d) });
+    setShowRange(false);
     setOpen(false);
   };
 
-  const clear = () => { onChange(null); setOpen(false); };
+  const openRange = () => {
+    setRangeFrom(value?.key === "range" ? toInputValue(value.from) : "");
+    setRangeTo(value?.key === "range" ? toInputValue(value.to) : "");
+    setShowRange(true);
+  };
 
-  const showAll = () => { onChange(null); setOpen(false); };
+  const applyRange = () => {
+    if (!rangeFrom || !rangeTo) return;
+    const from = startOfDay(new Date(`${rangeFrom}T00:00:00`));
+    const to = endOfDay(new Date(`${rangeTo}T00:00:00`));
+    onChange({ key: "range", label: `${fmtShort(from)} - ${fmtShort(to)}`, from, to });
+    setShowRange(false);
+    setOpen(false);
+  };
+
+  const clear = () => { onChange(null); setShowRange(false); setOpen(false); };
+
+  const showAll = () => { onChange(null); setShowRange(false); setOpen(false); };
 
   const activeLabel = value?.label || "Date Filter";
   const isActive = !!value;
@@ -94,6 +117,14 @@ export const DateFilterPopover = ({ value, onChange, testid = "date-filter" }) =
                 {p.label}
               </button>
             ))}
+            <button
+              type="button"
+              onClick={openRange}
+              className={`w-full rounded-md px-3 py-2 text-left text-sm transition-colors ${value?.key === "range" || showRange ? "bg-sky-100 font-semibold text-sky-700" : "text-slate-700 hover:bg-slate-100"}`}
+              data-testid={`${testid}-preset-range`}
+            >
+              Custom Range
+            </button>
             <div className="my-1 border-t border-slate-200" />
             <button
               type="button"
@@ -113,16 +144,40 @@ export const DateFilterPopover = ({ value, onChange, testid = "date-filter" }) =
             </button>
           </div>
 
-          {/* Calendar */}
-          <div className="p-2">
-            <Calendar
-              mode="single"
-              selected={value?.key === "exact" ? value.from : undefined}
-              onSelect={applyExact}
-              initialFocus
-              data-testid={`${testid}-calendar`}
-            />
-          </div>
+          {/* Calendar or Custom Range */}
+          {showRange ? (
+            <div className="w-64 space-y-3 p-4" data-testid={`${testid}-range-panel`}>
+              <p className="text-sm font-semibold text-slate-700">Custom Range</p>
+              <div className="space-y-2">
+                <div>
+                  <label className="text-xs font-medium text-slate-500">From</label>
+                  <Input type="date" value={rangeFrom} onChange={(e) => setRangeFrom(e.target.value)} data-testid={`${testid}-range-from`} />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-slate-500">To</label>
+                  <Input type="date" value={rangeTo} onChange={(e) => setRangeTo(e.target.value)} min={rangeFrom || undefined} data-testid={`${testid}-range-to`} />
+                </div>
+              </div>
+              <Button
+                className="w-full"
+                onClick={applyRange}
+                disabled={!rangeFrom || !rangeTo}
+                data-testid={`${testid}-range-apply`}
+              >
+                Apply
+              </Button>
+            </div>
+          ) : (
+            <div className="p-2">
+              <Calendar
+                mode="single"
+                selected={value?.key === "exact" ? value.from : undefined}
+                onSelect={applyExact}
+                initialFocus
+                data-testid={`${testid}-calendar`}
+              />
+            </div>
+          )}
         </div>
       </PopoverContent>
     </Popover>
