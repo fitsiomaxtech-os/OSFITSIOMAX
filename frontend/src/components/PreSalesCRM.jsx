@@ -87,45 +87,11 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
   useEffect(() => { load(); }, [load]);
   useEffect(() => { getBranches().then(setBranches).catch(() => {}); }, []);
 
-  const stageCounts = useMemo(() => {
-    const map = { All: leads.length };
-    stages.forEach((s) => { map[s.name] = 0; });
-    leads.forEach((l) => { if (map[l.stage] != null) map[l.stage] += 1; });
-    return map;
-  }, [leads, stages]);
-
-  const apptCounts = useMemo(() => {
-    const appts = leads.filter((l) => l.stage === "Appointment");
-    const offline = appts.filter((l) => (l.appointment_mode || "offline") === "offline");
-    const online = appts.filter((l) => l.appointment_mode === "online");
-    const byBranch = {};
-    offline.forEach((l) => {
-      const key = l.branch_id || "__unassigned__";
-      byBranch[key] = (byBranch[key] || 0) + 1;
-    });
-    return { offlineTotal: offline.length, onlineTotal: online.length, byBranch };
-  }, [leads]);
-
-  const sourceOptions = useMemo(() => {
-    const set = new Set();
-    leads.forEach((l) => { const s = l.source_tab || l.source_type; if (s) set.add(s); });
-    return [...set].sort((a, b) => a.localeCompare(b));
-  }, [leads]);
-
-  const filtered = useMemo(() => {
+  // Leads narrowed by Date Filter + Source filter only — feeds both the KPI
+  // summary cards and the table, so the cards stay dynamic with those two filters
+  // without also collapsing to whatever single stage tab is currently selected.
+  const dateSourceFiltered = useMemo(() => {
     let rows = leads;
-    if (stageFilter !== "All") rows = rows.filter((l) => l.stage === stageFilter);
-    // When viewing Appointment stage, further filter by mode and (if offline) selected branch
-    if (stageFilter === "Appointment") {
-      rows = rows.filter((l) => (l.appointment_mode || "offline") === apptMode);
-      if (apptMode === "offline" && apptBranchFilter) {
-        if (apptBranchFilter === "__unassigned__") {
-          rows = rows.filter((l) => !l.branch_id);
-        } else {
-          rows = rows.filter((l) => l.branch_id === apptBranchFilter);
-        }
-      }
-    }
     if (sourceFilter) rows = rows.filter((l) => (l.source_tab || l.source_type || "") === sourceFilter);
     if (dateFilter) {
       const from = dateFilter.from?.getTime();
@@ -138,6 +104,48 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
         return true;
       });
     }
+    return rows;
+  }, [leads, sourceFilter, dateFilter]);
+
+  const stageCounts = useMemo(() => {
+    const map = { All: dateSourceFiltered.length };
+    stages.forEach((s) => { map[s.name] = 0; });
+    dateSourceFiltered.forEach((l) => { if (map[l.stage] != null) map[l.stage] += 1; });
+    return map;
+  }, [dateSourceFiltered, stages]);
+
+  const apptCounts = useMemo(() => {
+    const appts = dateSourceFiltered.filter((l) => l.stage === "Appointment");
+    const offline = appts.filter((l) => (l.appointment_mode || "offline") === "offline");
+    const online = appts.filter((l) => l.appointment_mode === "online");
+    const byBranch = {};
+    offline.forEach((l) => {
+      const key = l.branch_id || "__unassigned__";
+      byBranch[key] = (byBranch[key] || 0) + 1;
+    });
+    return { offlineTotal: offline.length, onlineTotal: online.length, byBranch };
+  }, [dateSourceFiltered]);
+
+  const sourceOptions = useMemo(() => {
+    const set = new Set();
+    leads.forEach((l) => { const s = l.source_tab || l.source_type; if (s) set.add(s); });
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [leads]);
+
+  const filtered = useMemo(() => {
+    let rows = dateSourceFiltered;
+    if (stageFilter !== "All") rows = rows.filter((l) => l.stage === stageFilter);
+    // When viewing Appointment stage, further filter by mode and (if offline) selected branch
+    if (stageFilter === "Appointment") {
+      rows = rows.filter((l) => (l.appointment_mode || "offline") === apptMode);
+      if (apptMode === "offline" && apptBranchFilter) {
+        if (apptBranchFilter === "__unassigned__") {
+          rows = rows.filter((l) => !l.branch_id);
+        } else {
+          rows = rows.filter((l) => l.branch_id === apptBranchFilter);
+        }
+      }
+    }
     if (search) {
       const q = search.toLowerCase();
       rows = rows.filter((l) => (l.name || "").toLowerCase().includes(q) || (l.phone || "").includes(q) || (l.email || "").toLowerCase().includes(q));
@@ -146,7 +154,7 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
       const da = a.created_at || ""; const db = b.created_at || "";
       return sortNewest ? db.localeCompare(da) : da.localeCompare(db);
     });
-  }, [leads, stageFilter, apptMode, apptBranchFilter, sourceFilter, search, sortNewest, dateFilter]);
+  }, [dateSourceFiltered, stageFilter, apptMode, apptBranchFilter, search, sortNewest]);
 
   // Rendering thousands of rows at once is fine on desktop but chokes mobile
   // devices, so re-page back to 50 whenever the filtered set changes.
