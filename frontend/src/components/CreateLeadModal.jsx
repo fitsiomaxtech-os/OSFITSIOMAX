@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Plus, Settings, X, Trash2, Pencil } from "lucide-react";
+import { Settings, X, Trash2, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
@@ -29,7 +29,6 @@ export const CreateLeadModal = ({ onClose, onSaved, isSuperAdmin = true }) => {
   const [extraFields, setExtraFields] = useState({});
   const [customFields, setCustomFields] = useState([]);
   const [branches, setBranches] = useState([]);
-  const [showAddField, setShowAddField] = useState(false);
   const [showManage, setShowManage] = useState(false);
 
   const loadFields = () => leadFieldsList().then(setCustomFields).catch((e) => console.warn("[load failed]", e?.message || e));
@@ -75,11 +74,6 @@ export const CreateLeadModal = ({ onClose, onSaved, isSuperAdmin = true }) => {
             <p className="mt-0.5 text-xs text-slate-500">Enter lead details. Custom fields appear below.</p>
           </div>
           <div className="flex items-center gap-2">
-            {isSuperAdmin && (
-              <Button variant="outline" onClick={() => setShowAddField(true)} className="border-indigo-200 text-indigo-600 hover:bg-indigo-50" size="sm" data-testid="lead-add-field-btn">
-                <Plus className="h-4 w-4 mr-1" />Add Field
-              </Button>
-            )}
             <button onClick={onClose} className="text-slate-400 hover:text-slate-600" data-testid="lead-create-close"><X className="h-5 w-5" /></button>
           </div>
         </div>
@@ -144,7 +138,7 @@ export const CreateLeadModal = ({ onClose, onSaved, isSuperAdmin = true }) => {
               )}
             </div>
             {customFields.length === 0 ? (
-              <p className="text-xs text-slate-400">No custom fields yet. Click <span className="font-semibold">+ Add Field</span> above to create one.</p>
+              <p className="text-xs text-slate-400">No custom fields yet.</p>
             ) : (
               <div className="grid gap-4 sm:grid-cols-2">
                 {customFields.map((f) => <CustomFieldInput key={f.id} field={f} value={extraFields[f.key]} onChange={(v) => setExtra(f.key, v)} />)}
@@ -159,7 +153,6 @@ export const CreateLeadModal = ({ onClose, onSaved, isSuperAdmin = true }) => {
         </div>
       </div>
 
-      {showAddField && <AddCustomFieldDialog onClose={() => setShowAddField(false)} onSaved={() => { setShowAddField(false); loadFields(); }} />}
       {showManage && <ManageCustomFieldsDialog onClose={() => { setShowManage(false); loadFields(); }} />}
     </div>
   );
