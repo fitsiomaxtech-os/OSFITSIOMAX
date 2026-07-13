@@ -7,9 +7,12 @@ import {
   Database,
   Headphones,
   LogOut,
+  Mail,
   ShieldCheck,
   Stethoscope,
+  UserCircle,
   UserRound,
+  X,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -248,6 +251,7 @@ export const CRMPage = ({ auth, onLogout }) => {
   });
 
   const [loading, setLoading] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
 
   const role = auth.user.role;
   const roleLabel = ROLE_META[role]?.label || role;
@@ -626,6 +630,17 @@ export const CRMPage = ({ auth, onLogout }) => {
             </div>
             <div className="flex items-center gap-3">
               <span className="text-sm font-medium text-sky-700" data-testid="role-board-user-greeting">Hi {auth.user.full_name?.split(" ")[0]}</span>
+              {showPreSalesBoard && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowProfile(true)}
+                  className="border-slate-200 text-slate-600 hover:bg-slate-50"
+                  data-testid="role-board-profile-button"
+                >
+                  <UserCircle className="h-4 w-4 mr-1.5" />My Profile
+                </Button>
+              )}
               <Button
                 variant="outline"
                 size="sm"
@@ -638,6 +653,10 @@ export const CRMPage = ({ auth, onLogout }) => {
             </div>
           </div>
         </header>
+
+        {showProfile && (
+          <MyProfileModal user={auth.user} roleLabel={roleLabel} onClose={() => setShowProfile(false)} />
+        )}
 
         <div className="w-full space-y-6 px-6 py-6">
 
@@ -716,6 +735,61 @@ export const CRMPage = ({ auth, onLogout }) => {
           Loading boards...
         </div>
       )}
+    </div>
+  );
+};
+
+const MyProfileModal = ({ user, roleLabel, onClose }) => {
+  if (!user) return null;
+  const joinedOn = user.created_at
+    ? new Date(user.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })
+    : "—";
+  const fields = [
+    { label: "Employee ID", value: user.id ? `#${user.id.slice(-8).toUpperCase()}` : "—" },
+    { label: "Role", value: roleLabel || user.role },
+    { label: "Joined On", value: joinedOn },
+  ];
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
+      data-testid="my-profile-modal"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-6 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-5 flex items-start justify-between">
+          <h3 className="text-base font-semibold text-slate-900">My Profile</h3>
+          <button
+            onClick={onClose}
+            className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+            data-testid="my-profile-modal-close"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="mb-5 flex items-center gap-3">
+          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-sky-100 text-xl font-bold text-sky-700">
+            {user.full_name?.charAt(0)?.toUpperCase() || "?"}
+          </div>
+          <div>
+            <p className="text-base font-semibold text-slate-800">{user.full_name}</p>
+            <p className="flex items-center gap-1 text-xs text-slate-400"><Mail className="h-3 w-3" />{user.email}</p>
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          {fields.map((f) => (
+            <div key={f.label} className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <span className="text-xs text-slate-400">{f.label}</span>
+              <span className="text-sm font-medium text-slate-700">{f.value}</span>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 };
