@@ -13,6 +13,8 @@ const DEPARTMENT_OPTIONS = [
   { value: "offline_physio", label: "Offline Physio" },
   { value: "online_physio", label: "Online Physio" },
   { value: "fitness", label: "Fitness" },
+  { value: "offline_fitness", label: "Offline Fitness" },
+  { value: "online_fitness", label: "Online Fitness" },
 ];
 const GENDER_OPTIONS = ["Male", "Female", "Other"];
 
@@ -49,9 +51,15 @@ export const CreateLeadModal = ({ onClose, onSaved, isSuperAdmin = true }) => {
     else payload.months_of_pain = Number(payload.months_of_pain);
     if (payload.age === "") payload.age = null;
     else payload.age = Number(payload.age);
-    if (payload.department !== "offline_physio") payload.branch_id = "";
+    if (!["offline_physio", "offline_fitness"].includes(payload.department)) payload.branch_id = "";
     payload.source_type = "manual";
-    payload.vertical = payload.department === "online_physio" ? "online_physiotherapy" : payload.department === "fitness" ? "fitness" : "offline_physiotherapy";
+    const VERTICAL_MAP = {
+      online_physio: "online_physiotherapy",
+      fitness: "fitness",
+      offline_fitness: "offline_fitness",
+      online_fitness: "online_fitness",
+    };
+    payload.vertical = VERTICAL_MAP[payload.department] || "offline_physiotherapy";
     try {
       await createManualLead(payload);
       toast.success("Lead created");
@@ -111,7 +119,7 @@ export const CreateLeadModal = ({ onClose, onSaved, isSuperAdmin = true }) => {
               <Field label="Expected Consultation Date" className="sm:col-span-2"><Input type="date" value={form.expected_consultation_date} onChange={(e) => set("expected_consultation_date", e.target.value)} data-testid="lead-create-consultdate" /></Field>
             </div>
 
-            {form.department === "offline_physio" && (
+            {["offline_physio", "offline_fitness"].includes(form.department) && (
               <div className="mt-3 rounded-md border border-sky-200 bg-sky-50 p-3" data-testid="lead-create-branch-section">
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-sky-700">Assign to Branch</p>
                 <div className="grid gap-2 sm:grid-cols-2 max-h-44 overflow-y-auto">
