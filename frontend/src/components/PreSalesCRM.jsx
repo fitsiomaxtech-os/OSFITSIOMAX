@@ -415,7 +415,7 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
 };
 
 const KpiCard = ({ label, value, color, active, onClick, testid }) => (
-  <button onClick={onClick} data-testid={testid} className={`min-w-[160px] flex-none rounded-2xl p-4 text-left transition ${active ? "ring-2 ring-offset-2" : ""}`} style={{ background: `${color}14`, border: `1px solid ${color}33` }}>
+  <button onClick={onClick} data-testid={testid} className={`min-w-[160px] flex-none rounded-2xl p-4 text-left transition ${active ? "ring-2 ring-inset" : ""}`} style={{ background: `${color}14`, border: `1px solid ${color}33`, ...(active ? { "--tw-ring-color": color } : {}) }}>
     <p className="whitespace-nowrap text-xs font-medium" style={{ color }}>{label}</p>
     <p className="mt-1 text-3xl font-bold" style={{ color }}>{value}</p>
   </button>
