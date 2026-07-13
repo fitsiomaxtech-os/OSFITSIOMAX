@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Eye, Plus, RefreshCw, Search, Settings as Cog, Calendar as CalendarIcon, Phone, FileText, StickyNote, ArrowRight, ArrowLeft, CheckCircle2, X, Pencil, PhoneOff, Clock, Bell, Building2, Video, Trash2, Dumbbell, Stethoscope, ClipboardList } from "lucide-react";
+import { Eye, Plus, Search, Settings as Cog, Calendar as CalendarIcon, Phone, FileText, StickyNote, ArrowRight, ArrowLeft, CheckCircle2, X, Pencil, PhoneOff, Clock, Bell, Building2, Video, Trash2, Dumbbell, Stethoscope, ClipboardList } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -177,7 +177,6 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
           <p className="text-sm text-slate-500">Manage incoming leads, follow-ups, and stage transitions.</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={load} data-testid="presales-refresh-btn"><RefreshCw className="h-4 w-4" /></Button>
           {role === "super_admin" && (
             <Button variant="outline" onClick={onManageStages} data-testid="presales-manage-stages-btn"><Cog className="h-4 w-4 mr-1" />Manage Stages</Button>
           )}
