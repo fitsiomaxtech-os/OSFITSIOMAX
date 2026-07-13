@@ -106,6 +106,12 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
     return { offlineTotal: offline.length, onlineTotal: online.length, byBranch };
   }, [leads]);
 
+  const sourceOptions = useMemo(() => {
+    const set = new Set();
+    leads.forEach((l) => { const s = l.source_tab || l.source_type; if (s) set.add(s); });
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [leads]);
+
   const filtered = useMemo(() => {
     let rows = leads;
     if (stageFilter !== "All") rows = rows.filter((l) => l.stage === stageFilter);
@@ -120,7 +126,7 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
         }
       }
     }
-    if (sourceFilter) rows = rows.filter((l) => (l.source_tab || l.source_type || "").toLowerCase().includes(sourceFilter.toLowerCase()));
+    if (sourceFilter) rows = rows.filter((l) => (l.source_tab || l.source_type || "") === sourceFilter);
     if (dateFilter) {
       const from = dateFilter.from?.getTime();
       const to = dateFilter.to?.getTime();
@@ -190,7 +196,15 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
         </Button>
         <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="presales-date-filter" />
         <PullFromSheetButton onPulled={load} />
-        <Input className="h-10 w-[200px]" value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} placeholder="Source filter" data-testid="presales-source-filter" />
+        <select
+          className="h-10 w-[200px] rounded-md border border-slate-200 px-3 text-sm"
+          value={sourceFilter}
+          onChange={(e) => setSourceFilter(e.target.value)}
+          data-testid="presales-source-filter"
+        >
+          <option value="">All Sources</option>
+          {sourceOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
       </div>
 
       {/* Stage Tabs — sticky below the page header when scrolling */}
