@@ -172,7 +172,7 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
       </div>
 
       {/* KPI Cards */}
-      <div className="flex flex-nowrap gap-3 overflow-x-auto pb-1" data-testid="presales-kpi-row">
+      <div className="flex flex-nowrap gap-3" data-testid="presales-kpi-row">
         <KpiCard label="Total Leads" value={stageCounts.All} active={stageFilter === "All"} color="#22c55e" onClick={() => setStageFilter("All")} testid="presales-kpi-all" />
         {kpiStages.map((s) => (
           <KpiCard key={s.id} label={s.name} value={stageCounts[s.name] || 0} active={stageFilter === s.name} color={s.color} onClick={() => setStageFilter(s.name)} testid={`presales-kpi-${s.name}`} />
@@ -415,8 +415,8 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
 };
 
 const KpiCard = ({ label, value, color, active, onClick, testid }) => (
-  <button onClick={onClick} data-testid={testid} className={`min-w-[160px] flex-none rounded-2xl p-4 text-left transition ${active ? "ring-2 ring-inset" : ""}`} style={{ background: `${color}14`, border: `1px solid ${color}33`, ...(active ? { "--tw-ring-color": color } : {}) }}>
-    <p className="whitespace-nowrap text-xs font-medium" style={{ color }}>{label}</p>
+  <button onClick={onClick} data-testid={testid} className={`min-w-0 flex-1 rounded-2xl p-4 text-left transition ${active ? "ring-2 ring-inset" : ""}`} style={{ background: `${color}14`, border: `1px solid ${color}33`, ...(active ? { "--tw-ring-color": color } : {}) }}>
+    <p className="truncate text-xs font-medium" style={{ color }}>{label}</p>
     <p className="mt-1 text-3xl font-bold" style={{ color }}>{value}</p>
   </button>
 );
