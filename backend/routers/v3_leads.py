@@ -390,6 +390,7 @@ async def v3_schedule_follow_up(lead_id: str, payload: V3FollowUpInput, user: V3
         "date": payload.date,
         "time": payload.time,
         "remarks": (payload.remarks or "").strip(),
+        "status": "active",
         "created_by": user.full_name,
         "created_at": now_iso(),
     }
@@ -402,6 +403,59 @@ async def v3_schedule_follow_up(lead_id: str, payload: V3FollowUpInput, user: V3
         "lead_id": lead_id,
         "action": "follow_up_scheduled",
         "details": f"Follow-up on {payload.date} at {payload.time} — {entry['remarks'] or 'no remarks'}",
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": now_iso(),
+    })
+    updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    return V3LeadOut(**updated)
+
+
+class V3FollowUpRescheduleInput(BaseModel):
+    date: str  # YYYY-MM-DD
+    time: str  # HH:MM (24h)
+    reason: Optional[str] = ""
+
+
+@router.post("/leads/{lead_id}/follow-up/{followup_id}/reschedule", response_model=V3LeadOut)
+async def v3_reschedule_follow_up(lead_id: str, followup_id: str, payload: V3FollowUpRescheduleInput, user: V3UserOut = Depends(v3_require_roles("pre_sales", "business_dev", "super_admin", "branch_admin"))):
+    """Mark an existing follow-up as rescheduled (with a reason) and add a new active one in its place."""
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    follow_ups = lead.get("follow_ups") or []
+    old = next((f for f in follow_ups if f.get("id") == followup_id), None)
+    if not old:
+        raise HTTPException(status_code=404, detail="Follow-up not found")
+    reason = (payload.reason or "").strip()
+    for f in follow_ups:
+        if f.get("id") == followup_id:
+            f["status"] = "rescheduled"
+            f["reschedule_reason"] = reason
+    new_entry = {
+        "id": str(uuid.uuid4()),
+        "date": payload.date,
+        "time": payload.time,
+        "remarks": old.get("remarks", ""),
+        "status": "active",
+        "rescheduled_from": followup_id,
+        "created_by": user.full_name,
+        "created_at": now_iso(),
+    }
+    follow_ups.append(new_entry)
+    await v3_col("leads").update_one(
+        {"id": lead_id},
+        {"$set": {"follow_ups": follow_ups, "stage": "Follow Up", "next_follow_up_at": f"{payload.date}T{payload.time}:00", "updated_at": now_iso()}},
+    )
+    old_summary = f"{old.get('date')} at {old.get('time')}"
+    details = f"Follow-up rescheduled from {old_summary} to {payload.date} at {payload.time}"
+    if reason:
+        details += f" — reason: {reason}"
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": lead_id,
+        "action": "follow_up_rescheduled",
+        "details": details,
         "created_by": user.full_name,
         "created_by_role": user.role,
         "created_at": now_iso(),

@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import {
-  getLeads, createManualLead, stagesList, updateLead, rnrAttempt, scheduleFollowUp, scheduleAppointment, getBranches, leadActivity, deleteLead,
+  getLeads, createManualLead, stagesList, updateLead, rnrAttempt, scheduleFollowUp, rescheduleFollowUp, scheduleAppointment, getBranches, leadActivity, deleteLead,
 } from "@/lib/api";
 import { LeadEditModal } from "@/components/LeadEditModal";
 import { CreateLeadModal } from "@/components/CreateLeadModal";
@@ -468,6 +468,7 @@ const LeadDetailDialog = ({ lead, stages, onClose, onSaved, onMoveStage }) => {
   const [showEdit, setShowEdit] = useState(false);
   const [currentLead, setCurrentLead] = useState(lead);
   const [followUpDraft, setFollowUpDraft] = useState(null); // { date, time, remarks } | null
+  const [rescheduleDraft, setRescheduleDraft] = useState(null); // { followupId, date, time, reason } | null
   const [appointmentDraft, setAppointmentDraft] = useState(null); // { department, mode, branch_id, diagnosis } | null
   const [appointmentResult, setAppointmentResult] = useState(null); // summary shown after a successful schedule
   const [branches, setBranches] = useState([]);
@@ -563,9 +564,9 @@ const LeadDetailDialog = ({ lead, stages, onClose, onSaved, onMoveStage }) => {
                   <p className="text-sm leading-relaxed text-slate-700">{currentLead.notes}</p>
                 </ColorSection>
               )}
-              {(currentLead.follow_ups || []).length > 0 && (
+              {(currentLead.follow_ups || []).filter((f) => f.status !== "rescheduled").length > 0 && (
                 <ColorSection title="Follow-up Reminders" tone="emerald" icon={<Bell className="h-4 w-4" />}>
-                  {(currentLead.follow_ups || []).slice().reverse().map((f) => {
+                  {(currentLead.follow_ups || []).filter((f) => f.status !== "rescheduled").slice().reverse().map((f) => {
                     const dt = new Date(`${f.date}T${f.time}:00`);
                     const isUpcoming = dt.getTime() > Date.now();
                     return (
@@ -623,28 +624,53 @@ const LeadDetailDialog = ({ lead, stages, onClose, onSaved, onMoveStage }) => {
                   No follow-ups scheduled yet. Use <span className="font-semibold">Move to Stage → Follow Up</span> to schedule one.
                 </div>
               )}
-              {(currentLead.follow_ups || []).slice().reverse().map((f) => {
+              {(currentLead.follow_ups || []).slice().reverse().map((f, idx) => {
                 const dt = new Date(`${f.date}T${f.time}:00`);
                 const isUpcoming = dt.getTime() > Date.now();
+                const isRescheduled = f.status === "rescheduled";
+                const isActive = idx === 0 && !isRescheduled;
                 return (
-                  <div key={f.id} className={`flex items-start gap-3 rounded-lg border p-3 shadow-sm ${isUpcoming ? "border-emerald-200 bg-emerald-50/40" : "border-slate-200 bg-white"}`} data-testid={`presales-followup-tab-row-${f.id}`}>
-                    <span className={`mt-0.5 inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full ${isUpcoming ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                  <div
+                    key={f.id}
+                    className={`flex items-start gap-3 rounded-lg border p-3 shadow-sm ${
+                      isRescheduled ? "border-slate-200 bg-slate-50/70 opacity-70" : isUpcoming ? "border-emerald-200 bg-emerald-50/40" : "border-slate-200 bg-white"
+                    }`}
+                    data-testid={`presales-followup-tab-row-${f.id}`}
+                  >
+                    <span className={`mt-0.5 inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full ${isRescheduled ? "bg-slate-100 text-slate-400" : isUpcoming ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
                       <Bell className="h-3.5 w-3.5" />
                     </span>
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <p className="text-sm font-semibold text-slate-800">
+                        <p className={`text-sm font-semibold ${isRescheduled ? "text-slate-500 line-through decoration-slate-300" : "text-slate-800"}`}>
                           {dt.toLocaleDateString(undefined, { weekday: "short", day: "2-digit", month: "short", year: "numeric" })} · {f.time}
                         </p>
-                        {isUpcoming && <span className="rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-bold text-white">UPCOMING</span>}
+                        {isRescheduled && <span className="rounded-full bg-slate-300 px-2 py-0.5 text-[10px] font-bold text-white">RESCHEDULED</span>}
+                        {!isRescheduled && isUpcoming && <span className="rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-bold text-white">UPCOMING</span>}
                       </div>
                       {f.remarks && (
                         <div className="mt-1.5 rounded-md bg-white px-2.5 py-1.5 text-sm text-slate-700 ring-1 ring-slate-100">
                           {f.remarks}
                         </div>
                       )}
+                      {isRescheduled && f.reschedule_reason && (
+                        <div className="mt-1.5 rounded-md bg-amber-50 px-2.5 py-1.5 text-xs text-amber-700 ring-1 ring-amber-100">
+                          <span className="font-semibold">Reschedule reason:</span> {f.reschedule_reason}
+                        </div>
+                      )}
                       <p className="mt-1.5 text-[11px] text-slate-400">Set by {f.created_by || "—"} · {new Date(f.created_at).toLocaleString()}</p>
                     </div>
+                    {isActive && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 flex-shrink-0 border-amber-200 text-amber-700 hover:bg-amber-50"
+                        onClick={() => setRescheduleDraft({ followupId: f.id, date: f.date, time: f.time, reason: "" })}
+                        data-testid={`presales-followup-reschedule-${f.id}`}
+                      >
+                        Reschedule
+                      </Button>
+                    )}
                   </div>
                 );
               })}
@@ -802,6 +828,78 @@ const LeadDetailDialog = ({ lead, stages, onClose, onSaved, onMoveStage }) => {
                 data-testid="presales-followup-save"
               >
                 <CheckCircle2 className="mr-1 h-4 w-4" /> Save & Move to Follow Up
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {rescheduleDraft && !showEdit && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4" data-testid="presales-reschedule-modal">
+          <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between bg-gradient-to-r from-amber-500 to-orange-500 px-5 py-4 text-white">
+              <div className="flex items-center gap-2">
+                <Bell className="h-5 w-5" />
+                <p className="text-base font-semibold">Reschedule Follow-Up</p>
+              </div>
+              <button onClick={() => setRescheduleDraft(null)} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="presales-reschedule-close">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="space-y-4 p-5">
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-600">New Date *</label>
+                <Input
+                  type="date"
+                  value={rescheduleDraft.date}
+                  min={new Date().toISOString().slice(0, 10)}
+                  onChange={(e) => setRescheduleDraft({ ...rescheduleDraft, date: e.target.value })}
+                  data-testid="presales-reschedule-date"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-600">New Time *</label>
+                <Input
+                  type="time"
+                  value={rescheduleDraft.time}
+                  onChange={(e) => setRescheduleDraft({ ...rescheduleDraft, time: e.target.value })}
+                  data-testid="presales-reschedule-time"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-600">Reason for Reschedule *</label>
+                <textarea
+                  rows={3}
+                  className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-amber-400 focus:outline-none focus:ring-1 focus:ring-amber-400"
+                  placeholder="Why is this being rescheduled..."
+                  value={rescheduleDraft.reason}
+                  onChange={(e) => setRescheduleDraft({ ...rescheduleDraft, reason: e.target.value })}
+                  data-testid="presales-reschedule-reason"
+                />
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/40 px-5 py-3">
+              <Button variant="outline" onClick={() => setRescheduleDraft(null)} data-testid="presales-reschedule-cancel">Cancel</Button>
+              <Button
+                className="bg-amber-500 text-white hover:bg-amber-600"
+                onClick={async () => {
+                  if (!rescheduleDraft.date || !rescheduleDraft.time || !rescheduleDraft.reason.trim()) {
+                    toast.error("Date, time and reason are required");
+                    return;
+                  }
+                  try {
+                    const updated = await rescheduleFollowUp(currentLead.id, rescheduleDraft.followupId, {
+                      date: rescheduleDraft.date, time: rescheduleDraft.time, reason: rescheduleDraft.reason,
+                    });
+                    setCurrentLead(updated);
+                    setRescheduleDraft(null);
+                    toast.success(`Follow-up rescheduled to ${rescheduleDraft.date} at ${rescheduleDraft.time}`);
+                    onSaved && onSaved();
+                  } catch (e) { toast.error(e?.response?.data?.detail || "Failed to reschedule"); }
+                }}
+                data-testid="presales-reschedule-save"
+              >
+                <CheckCircle2 className="mr-1 h-4 w-4" /> Reschedule
               </Button>
             </div>
           </div>
