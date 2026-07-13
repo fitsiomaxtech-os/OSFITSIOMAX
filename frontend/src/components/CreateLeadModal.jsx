@@ -12,7 +12,6 @@ const SOURCE_OPTIONS = ["Meta", "SEO", "Referral", "Walk-In", "Website", "CSV Im
 const DEPARTMENT_OPTIONS = [
   { value: "offline_physio", label: "Offline Physio" },
   { value: "online_physio", label: "Online Physio" },
-  { value: "fitness", label: "Fitness" },
   { value: "offline_fitness", label: "Offline Fitness" },
   { value: "online_fitness", label: "Online Fitness" },
 ];
@@ -55,7 +54,6 @@ export const CreateLeadModal = ({ onClose, onSaved, isSuperAdmin = true }) => {
     payload.source_type = "manual";
     const VERTICAL_MAP = {
       online_physio: "online_physiotherapy",
-      fitness: "fitness",
       offline_fitness: "offline_fitness",
       online_fitness: "online_fitness",
     };
