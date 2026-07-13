@@ -511,9 +511,11 @@ const LeadDetailDialog = ({ lead, stages, onClose, onSaved, onMoveStage }) => {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <Button size="sm" onClick={() => setShowEdit(true)} className="h-8 bg-white text-indigo-600 hover:bg-white/90" data-testid="presales-detail-edit-btn">
-                <Pencil className="mr-1 h-3.5 w-3.5" /> Edit
-              </Button>
+              {currentLead.source_type === "manual" && (
+                <Button size="sm" onClick={() => setShowEdit(true)} className="h-8 bg-white text-indigo-600 hover:bg-white/90" data-testid="presales-detail-edit-btn">
+                  <Pencil className="mr-1 h-3.5 w-3.5" /> Edit
+                </Button>
+              )}
               <button onClick={onClose} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="presales-detail-close">
                 <X className="h-4 w-4" />
               </button>
