@@ -17,11 +17,19 @@ from schemas.v3 import (
 router = APIRouter(prefix="/api/v3")
 
 
+async def _branch_stage_names() -> list:
+    """Live Branch Stages as configured in Super Admin > Pipeline Stage Management,
+    falling back to the built-in defaults if none have been configured yet."""
+    rows = await v3_col("pipeline_stages").find({"type": "sales"}, {"_id": 0, "name": 1}).sort("order", 1).to_list(200)
+    names = [r["name"] for r in rows]
+    return names or V3_BRANCH_STAGES
+
+
 @router.get("/branch-board/{branch_id}")
 async def v3_branch_board_new(branch_id: str, _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev"))):
     leads = await v3_col("leads").find({"branch_id": branch_id}, {"_id": 0}).sort("updated_at", -1).to_list(20000)
     stage_counts = {}
-    for stage in V3_BRANCH_STAGES:
+    for stage in await _branch_stage_names():
         stage_counts[stage] = sum(1 for lead in leads if lead.get("branch_stage") == stage)
     lead_list = [V3LeadOut(**lead) for lead in leads]
     return {"leads": [lead.model_dump() for lead in lead_list], "stage_counts": stage_counts}
@@ -29,7 +37,7 @@ async def v3_branch_board_new(branch_id: str, _: V3UserOut = Depends(v3_require_
 
 @router.post("/leads/{lead_id}/branch-stage")
 async def v3_move_branch_stage(lead_id: str, payload: V3BranchStageInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
-    if payload.branch_stage not in V3_BRANCH_STAGES:
+    if payload.branch_stage not in await _branch_stage_names():
         raise HTTPException(status_code=400, detail="Invalid branch stage")
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:

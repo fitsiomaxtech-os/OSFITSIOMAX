@@ -39,6 +39,7 @@ import {
   getLeadRemarks,
   moveBranchStage,
   listStoreItems,
+  stagesList,
 } from "@/lib/api";
 import { HeadPhysioCalendar } from "@/components/HeadPhysioCalendar";
 import { ConsultationsBoard } from "@/components/ConsultationsBoard";
@@ -47,22 +48,9 @@ import { BranchSessionsPanel, FitsiomaxStorePanel } from "@/components/BranchSto
 import { SmartBookingPicker } from "@/components/SmartBookingPicker";
 import { DURATION_OPTIONS, PlaceholderPanel } from "@/components/PackagesBoard";
 
-const BRANCH_STAGES = [
-  "New Appointment",
-  "Portfolio",
-  "Appointment Date & Time",
-  "Cancelled",
-];
-
-const STAGE_COLORS = {
-  "New Appointment": { bg: "bg-blue-500", light: "bg-blue-50 text-blue-700 border-blue-200", col: "border-blue-200 bg-blue-50/40", text: "text-blue-600", count: "text-blue-700", hex: "#3b82f6" },
-  "Portfolio": { bg: "bg-yellow-500", light: "bg-yellow-50 text-yellow-700 border-yellow-200", col: "border-yellow-200 bg-yellow-50/40", text: "text-yellow-600", count: "text-yellow-700", hex: "#eab308" },
-  "Appointment Date & Time": { bg: "bg-teal-500", light: "bg-teal-50 text-teal-700 border-teal-200", col: "border-teal-200 bg-teal-50/40", text: "text-teal-600", count: "text-teal-700", hex: "#14b8a6" },
-  "Cancelled": { bg: "bg-rose-500", light: "bg-rose-50 text-rose-700 border-rose-200", col: "border-rose-200 bg-rose-50/40", text: "text-rose-600", count: "text-rose-700", hex: "#f43f5e" },
-};
-
 export const BranchAdminBoard = ({ branchId }) => {
   const [boardData, setBoardData] = useState({ leads: [], stage_counts: {} });
+  const [stages, setStages] = useState([]); // dynamic Branch Stages, from Super Admin > Pipeline Stage Management
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedLead, setSelectedLead] = useState(null);
@@ -84,6 +72,12 @@ export const BranchAdminBoard = ({ branchId }) => {
   }, [branchId]);
 
   useEffect(() => { loadBoard(); }, [loadBoard]);
+  useEffect(() => { stagesList("sales").then(setStages).catch(() => {}); }, []);
+
+  const stageColor = useCallback(
+    (name) => stages.find((s) => s.name === name)?.color || "#64748b",
+    [stages],
+  );
 
   const filteredLeads = useMemo(() => {
     let list = boardData.leads;
@@ -197,17 +191,17 @@ export const BranchAdminBoard = ({ branchId }) => {
                 color="#0ea5e9"
                 testid="branch-metric-total"
               />
-              {BRANCH_STAGES.map((stage) => {
+              {stages.map((s) => {
+                const stage = s.name;
                 const isActive = stageFilter === stage;
-                const colorMap = STAGE_COLORS[stage] || {};
                 return (
                   <BranchStageTab
-                    key={stage}
+                    key={s.id}
                     label={stage}
                     count={boardData.stage_counts?.[stage] || 0}
                     active={isActive}
                     onClick={() => setStageFilter(isActive ? null : stage)}
-                    color={colorMap.hex || "#64748b"}
+                    color={s.color || "#64748b"}
                     testid={`branch-metric-${stage}`}
                   />
                 );
@@ -225,7 +219,12 @@ export const BranchAdminBoard = ({ branchId }) => {
             {stageFilter && (
               <div className="flex items-center gap-2 text-xs text-slate-600" data-testid="branch-stage-filter-indicator">
                 <span>Showing:</span>
-                <span className={`rounded-full border px-2 py-0.5 font-medium ${STAGE_COLORS[stageFilter]?.light || ""}`}>{stageFilter}</span>
+                <span
+                  className="rounded-full border px-2 py-0.5 font-medium"
+                  style={{ background: `${stageColor(stageFilter)}14`, color: stageColor(stageFilter), border: `1px solid ${stageColor(stageFilter)}33` }}
+                >
+                  {stageFilter}
+                </span>
                 <button type="button" onClick={() => setStageFilter(null)} className="text-sky-600 hover:underline" data-testid="branch-stage-filter-clear">Clear</button>
               </div>
             )}
@@ -260,7 +259,7 @@ export const BranchAdminBoard = ({ branchId }) => {
                     );
                   }
                   return visible.map((lead) => {
-                    const stageColor = STAGE_COLORS[lead.branch_stage]?.light || "bg-slate-100 text-slate-600 border-slate-200";
+                    const rowStageHex = lead.branch_stage ? stageColor(lead.branch_stage) : null;
                     return (
                       <tr
                         key={lead.id}
@@ -278,7 +277,10 @@ export const BranchAdminBoard = ({ branchId }) => {
                         </td>
                         <td className="px-4 py-3 text-slate-600">{lead.phone || "—"}</td>
                         <td className="px-4 py-3">
-                          <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${stageColor}`}>
+                          <span
+                            className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium"
+                            style={rowStageHex ? { background: `${rowStageHex}14`, color: rowStageHex, border: `1px solid ${rowStageHex}33` } : { background: "#f1f5f9", color: "#475569", border: "1px solid #e2e8f0" }}
+                          >
                             {lead.branch_stage || "—"}
                           </span>
                         </td>
@@ -305,6 +307,7 @@ export const BranchAdminBoard = ({ branchId }) => {
         <BranchLeadModal
           lead={selectedLead}
           branchId={branchId}
+          stages={stages}
           onClose={() => setSelectedLead(null)}
           onUpdate={handleStageUpdate}
           reloadBoard={loadBoard}
@@ -416,7 +419,7 @@ const LeadPackagesTab = () => {
 };
 
 /* ─── Branch Lead Detail Modal ─── */
-function BranchLeadModal({ lead, branchId, onClose, onUpdate, reloadBoard }) {
+function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, reloadBoard }) {
   const [activeTab, setActiveTab] = useState("overview");
   const [remarks, setRemarks] = useState([]);
   const [newRemark, setNewRemark] = useState("");
@@ -545,7 +548,6 @@ function BranchLeadModal({ lead, branchId, onClose, onUpdate, reloadBoard }) {
     { key: "activity", label: "Activity", color: "bg-rose-500" },
   ];
 
-  const stageColorMap = STAGE_COLORS[lead.branch_stage] || {};
   const avatarFirstChar = (lead.name?.trim()?.charAt(0) || "?").toUpperCase();
 
   return (
@@ -648,9 +650,10 @@ function BranchLeadModal({ lead, branchId, onClose, onUpdate, reloadBoard }) {
                   <p className="text-xs font-bold uppercase tracking-wider text-violet-700">Pipeline Stage</p>
                 </div>
                 <div className="flex flex-wrap gap-2 px-4 py-3">
-                  {BRANCH_STAGES.map((stage) => {
+                  {(stages || []).map((s) => {
+                    const stage = s.name;
                     const isActive = lead.branch_stage === stage;
-                    const c = STAGE_COLORS[stage] || {};
+                    const tint = s.color || "#64748b";
                     const handleClick = () => {
                       if (stage === "Appointment Date & Time") {
                         setApptDraft({
@@ -666,11 +669,12 @@ function BranchLeadModal({ lead, branchId, onClose, onUpdate, reloadBoard }) {
                     };
                     return (
                       <button
-                        key={stage}
+                        key={s.id}
                         type="button"
                         disabled={isActive}
                         onClick={handleClick}
-                        className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-all hover:shadow-md disabled:cursor-not-allowed disabled:opacity-90 ${isActive ? `${c.bg || "bg-slate-500"} text-white shadow-sm` : `${c.light || "bg-slate-100 text-slate-600 border border-slate-200"}`}`}
+                        className="rounded-lg px-3 py-1.5 text-xs font-semibold transition-all hover:shadow-md disabled:cursor-not-allowed disabled:opacity-90"
+                        style={isActive ? { background: tint, color: "#ffffff" } : { background: `${tint}14`, color: tint, border: `1px solid ${tint}33` }}
                         data-testid={`branch-stage-btn-${stage}`}
                       >
                         {stage}

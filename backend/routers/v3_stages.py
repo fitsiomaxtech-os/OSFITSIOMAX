@@ -71,7 +71,8 @@ async def list_stages(type: Optional[Literal["pre_sales", "sales"]] = None, _: V
     rows = await v3_col("pipeline_stages").find(query, {"_id": 0}).sort([("type", 1), ("order", 1)]).to_list(500)
     counts = {}
     if type:
-        leads_pipeline = [{"$group": {"_id": "$stage", "n": {"$sum": 1}}}]
+        field = "stage" if type == "pre_sales" else "branch_stage"
+        leads_pipeline = [{"$group": {"_id": f"${field}", "n": {"$sum": 1}}}]
         async for row in v3_col("leads").aggregate(leads_pipeline):
             counts[row["_id"]] = row["n"]
     for r in rows:
