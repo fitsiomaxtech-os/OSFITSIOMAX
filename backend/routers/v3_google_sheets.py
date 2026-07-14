@@ -317,6 +317,7 @@ async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Di
                 custom_payload[key] = value
 
         assigned = await round_robin_assign("pre_sales")
+        source_branch_id = source.get("branch_id")
         lead = {
             "id": str(uuid.uuid4()),
             "name": (std_payload.get("name") or "").strip() or "Unknown",
@@ -326,8 +327,11 @@ async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Di
             "vertical": std_payload.get("vertical") or "offline_physiotherapy",
             "source_tab": source["name"],
             "source_type": "google_sheets",
-            "stage": "New Leads",
-            "branch_id": None,
+            # A source tagged with a branch (Marketing Board > Lead Sources > Edit > Branch)
+            # skips Pre-Sales entirely and lands straight in that branch's New Appointment column.
+            "stage": "Appointment" if source_branch_id else "New Leads",
+            "branch_id": source_branch_id,
+            "branch_stage": "New Appointment" if source_branch_id else None,
             "notes": std_payload.get("notes", ""),
             "extra_fields": {**{k: v for k, v in std_payload.items() if k not in ("name", "email", "phone", "vertical", "notes")}, **custom_payload},
             "assigned_user_id": assigned["id"] if assigned else None,

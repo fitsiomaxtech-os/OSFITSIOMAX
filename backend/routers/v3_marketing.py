@@ -113,6 +113,7 @@ class MarketingSourceCreate(BaseModel):
     spreadsheet_id: Optional[str] = ""
     source_type: Literal["meta", "seo", "referral", "walk_in", "website", "csv_import", "google_sheets", "other"] = "google_sheets"
     headers: Optional[List[str]] = None
+    branch_id: Optional[str] = None  # if set, every lead pulled from this source auto-assigns to this branch
 
 
 class MarketingSourceUpdate(BaseModel):
@@ -122,6 +123,7 @@ class MarketingSourceUpdate(BaseModel):
     spreadsheet_id: Optional[str] = None
     sheet_name: Optional[str] = None
     headers: Optional[List[str]] = None
+    branch_id: Optional[str] = None  # pass "" to clear back to "All Branches"
     column_mapping: Optional[Dict[str, str]] = None
     custom_fields: Optional[List[str]] = None
     is_active: Optional[bool] = None
@@ -361,6 +363,7 @@ async def create_source(payload: MarketingSourceCreate, _: V3UserOut = Depends(v
         "column_mapping": column_mapping,
         "custom_fields": detected_custom,
         "headers_detected": payload.headers or [],
+        "branch_id": payload.branch_id or None,
         "row_count": 0,
         "last_synced": None,
         "is_active": True,
@@ -449,6 +452,7 @@ async def sync_source(source_id: str, payload: MarketingSyncInput, _: V3UserOut 
                 custom_payload[key] = value
 
         assigned = await round_robin_assign("pre_sales")
+        source_branch_id = source.get("branch_id")
         lead = {
             "id": str(uuid.uuid4()),
             "name": (std_payload.get("name") or "").strip() or "Unknown",
@@ -458,8 +462,11 @@ async def sync_source(source_id: str, payload: MarketingSyncInput, _: V3UserOut 
             "vertical": std_payload.get("vertical") or "offline_physiotherapy",
             "source_tab": source["name"],
             "source_type": source.get("source_type", "google_sheets"),
-            "stage": "New Leads",
-            "branch_id": None,
+            # A source tagged with a branch (Marketing Board > Lead Sources > Edit > Branch)
+            # skips Pre-Sales entirely and lands straight in that branch's New Appointment column.
+            "stage": "Appointment" if source_branch_id else "New Leads",
+            "branch_id": source_branch_id,
+            "branch_stage": "New Appointment" if source_branch_id else None,
             "notes": std_payload.get("notes", ""),
             "extra_fields": {**{k: v for k, v in std_payload.items() if k not in ("name", "email", "phone", "vertical", "notes")}, **custom_payload},
             "assigned_user_id": assigned["id"] if assigned else None,

@@ -107,14 +107,14 @@ const OverviewTab = ({ branches }) => {
 
 // ============ Sources ============
 
-const SourcesTab = () => {
+const SourcesTab = ({ branches = [] }) => {
   const [sources, setSources] = useState([]);
   const [gs, setGs] = useState({ connected: false });
   const [showAdd, setShowAdd] = useState(false);
   const [showSync, setShowSync] = useState(null);
   const [showMap, setShowMap] = useState(null);
   const [showEdit, setShowEdit] = useState(null);
-  const [form, setForm] = useState({ name: "", sheet_url: "", spreadsheet_id: "", sheet_name: "Sheet1", source_type: "google_sheets", headers: "" });
+  const [form, setForm] = useState({ name: "", sheet_url: "", spreadsheet_id: "", sheet_name: "Sheet1", source_type: "google_sheets", headers: "", branch_id: "" });
   const [syncRows, setSyncRows] = useState(`[\n  {"name":"Aarav Sharma","phone":"9000000001","email":"aarav@example.com","city":"Chennai","condition":"Lower back pain","age":34}\n]`);
   const [syncResult, setSyncResult] = useState(null);
   const [pullResult, setPullResult] = useState(null);
@@ -181,9 +181,9 @@ const SourcesTab = () => {
     }
     const headers = form.headers.split(",").map((h) => h.trim()).filter(Boolean);
     try {
-      await mkCreateSource({ name: form.name, sheet_url: form.sheet_url, source_type: form.source_type, headers, spreadsheet_id: sheetId, sheet_name: form.sheet_name || "Sheet1" });
+      await mkCreateSource({ name: form.name, sheet_url: form.sheet_url, source_type: form.source_type, headers, spreadsheet_id: sheetId, sheet_name: form.sheet_name || "Sheet1", branch_id: form.branch_id || null });
       toast.success("Source added");
-      setForm({ name: "", sheet_url: "", spreadsheet_id: "", sheet_name: "Sheet1", source_type: "google_sheets", headers: "" });
+      setForm({ name: "", sheet_url: "", spreadsheet_id: "", sheet_name: "Sheet1", source_type: "google_sheets", headers: "", branch_id: "" });
       setShowAdd(false);
       load();
     } catch (e) { toast.error(e?.response?.data?.detail || "Create failed"); }
@@ -267,9 +267,12 @@ const SourcesTab = () => {
             <CardHeader className="flex flex-row items-start justify-between gap-2">
               <div>
                 <CardTitle className="text-base">{s.name}</CardTitle>
-                <div className="mt-1 flex items-center gap-2">
+                <div className="mt-1 flex flex-wrap items-center gap-2">
                   <SourcePill source={s.source_type} />
                   <span className={`inline-flex h-5 items-center rounded-full px-2 text-[10px] font-semibold ${s.is_active ? "bg-green-100 text-green-700" : "bg-slate-200 text-slate-600"}`}>{s.is_active ? "Active" : "Inactive"}</span>
+                  <span className={`inline-flex h-5 items-center rounded-full px-2 text-[10px] font-semibold ${s.branch_id ? "bg-violet-100 text-violet-700" : "bg-slate-100 text-slate-500"}`} data-testid={`mk-source-branch-${s.id}`}>
+                    {s.branch_id ? (branches.find((b) => b.id === s.branch_id)?.branch_name || "Unknown branch") : "All Branches"}
+                  </span>
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -324,6 +327,12 @@ const SourcesTab = () => {
           )}
           <Input placeholder="Headers (comma separated, e.g. Lead Name, Mobile, Email) — optional" value={form.headers} onChange={(e) => setForm({ ...form, headers: e.target.value })} data-testid="mk-add-source-headers" />
           <p className="text-xs text-slate-400">Headers auto-map to: name, phone, email, vertical, condition, age, preferred_branch, budget, notes.</p>
+          <label className="text-xs font-medium text-slate-600">Branch</label>
+          <select className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm" value={form.branch_id} onChange={(e) => setForm({ ...form, branch_id: e.target.value })} data-testid="mk-add-source-branch">
+            <option value="">All Branches (leads go to Pre-Sales as usual)</option>
+            {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
+          </select>
+          <p className="text-xs text-slate-400">Pick a branch if this sheet only ever has leads for ONE branch — every lead pulled from it will auto-assign straight there.</p>
           <Button onClick={submit} className="w-full" data-testid="mk-add-source-submit">Create Source</Button>
         </DialogShell>
       )}
@@ -360,13 +369,13 @@ const SourcesTab = () => {
       )}
 
       {showEdit && (
-        <EditSourceDialog source={showEdit} onClose={() => setShowEdit(null)} onSaved={() => { setShowEdit(null); load(); }} />
+        <EditSourceDialog source={showEdit} branches={branches} onClose={() => setShowEdit(null)} onSaved={() => { setShowEdit(null); load(); }} />
       )}
     </div>
   );
 };
 
-const EditSourceDialog = ({ source, onClose, onSaved }) => {
+const EditSourceDialog = ({ source, branches = [], onClose, onSaved }) => {
   const initialHeaders = (source.headers_detected || []).join(", ");
   const [name, setName] = useState(source.name || "");
   const [sourceType, setSourceType] = useState(source.source_type || "google_sheets");
@@ -374,6 +383,7 @@ const EditSourceDialog = ({ source, onClose, onSaved }) => {
   const [spreadsheetId, setSpreadsheetId] = useState(source.spreadsheet_id || "");
   const [sheetName, setSheetName] = useState(source.sheet_name || "Sheet1");
   const [headers, setHeaders] = useState(initialHeaders);
+  const [branchId, setBranchId] = useState(source.branch_id || "");
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(!!source.auto_sync_enabled);
   const [autoSyncInterval, setAutoSyncInterval] = useState(String(source.auto_sync_interval_minutes || 60));
 
@@ -394,6 +404,7 @@ const EditSourceDialog = ({ source, onClose, onSaved }) => {
       name: name.trim(),
       source_type: sourceType,
       sheet_url: sheetUrl,
+      branch_id: branchId || "",
       auto_sync_enabled: autoSyncEnabled,
       auto_sync_interval_minutes: Number(autoSyncInterval) || 60,
     };
@@ -446,6 +457,12 @@ const EditSourceDialog = ({ source, onClose, onSaved }) => {
       )}
       <Input placeholder="Headers (comma separated, e.g. Lead Name, Mobile, Email) — optional" value={headers} onChange={(e) => setHeaders(e.target.value)} data-testid="mk-edit-source-headers" />
       <p className="text-xs text-slate-400">Changing headers re-detects the column mapping. Leave as-is to keep your current mapping.</p>
+      <label className="text-xs font-medium text-slate-600">Branch</label>
+      <select className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm" value={branchId} onChange={(e) => setBranchId(e.target.value)} data-testid="mk-edit-source-branch">
+        <option value="">All Branches (leads go to Pre-Sales as usual)</option>
+        {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
+      </select>
+      <p className="text-xs text-slate-400">Pick a branch if this sheet only ever has leads for ONE branch — every lead pulled from it will auto-assign straight there.</p>
       <Button onClick={save} className="w-full" data-testid="mk-edit-source-save">Save Changes</Button>
     </DialogShell>
   );
@@ -752,7 +769,7 @@ export const MarketingBoard = ({ branches = [] }) => {
         ))}
       </div>
       {tab === "overview" && <OverviewTab branches={branches} />}
-      {tab === "lead_sources" && <SourcesTab />}
+      {tab === "lead_sources" && <SourcesTab branches={branches} />}
       {tab === "all_leads" && <AllLeadsTab team={team} />}
       {tab === "team" && <TeamTab team={team} reloadTeam={reloadTeam} branches={branches} />}
     </div>
