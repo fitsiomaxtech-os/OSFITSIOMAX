@@ -10,11 +10,19 @@ from schemas.v3 import V3UserOut, V3LeadOut
 router = APIRouter(prefix="/api/v3")
 
 
+async def _stage_names(stage_type: str, fallback: list) -> list:
+    """Live stage names from Super Admin > Pipeline Stage Management, falling back to the
+    built-in defaults if none have been configured yet (mirrors v3_branch_admin.py)."""
+    rows = await v3_col("pipeline_stages").find({"type": stage_type}, {"_id": 0, "name": 1}).sort("order", 1).to_list(200)
+    names = [r["name"] for r in rows]
+    return names or fallback
+
+
 @router.get("/dashboard/bd-summary")
 async def v3_bd_summary(_: V3UserOut = Depends(v3_require_roles("business_dev", "super_admin"))):
     total_leads = await v3_col("leads").count_documents({})
     stage_counts = {}
-    for stage in V3_STAGES:
+    for stage in await _stage_names("pre_sales", V3_STAGES):
         stage_counts[stage] = await v3_col("leads").count_documents({"stage": stage})
 
     source_pipeline = [
@@ -86,7 +94,7 @@ async def v3_lead_sources(_: V3UserOut = Depends(v3_require_roles("business_dev"
 @router.get("/boards/master")
 async def v3_master_board(_: V3UserOut = Depends(v3_current_user)):
     stage_counts = {}
-    for stage in V3_STAGES:
+    for stage in await _stage_names("pre_sales", V3_STAGES):
         stage_counts[stage] = await v3_col("leads").count_documents({"stage": stage})
     total = await v3_col("leads").count_documents({})
     return {"stage_counts": stage_counts, "total": total}
@@ -95,17 +103,18 @@ async def v3_master_board(_: V3UserOut = Depends(v3_current_user)):
 @router.get("/boards/branch-master")
 async def v3_branch_master_board(_: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin", "head_physio"))):
     """Aggregated counts across all branches keyed by branch_stage (for Super Admin Master View)."""
+    branch_stages = await _stage_names("sales", V3_BRANCH_STAGES)
     branch_stage_counts = {}
-    for stage in V3_BRANCH_STAGES:
+    for stage in branch_stages:
         branch_stage_counts[stage] = await v3_col("leads").count_documents({"branch_stage": stage})
-    total = await v3_col("leads").count_documents({"branch_stage": {"$in": V3_BRANCH_STAGES}})
+    total = await v3_col("leads").count_documents({"branch_stage": {"$in": branch_stages}})
     return {"branch_stage_counts": branch_stage_counts, "total": total}
 
 
 @router.get("/boards/branch/{branch_id}")
 async def v3_branch_board(branch_id: str, _: V3UserOut = Depends(v3_current_user)):
     stage_counts = {}
-    for stage in V3_STAGES:
+    for stage in await _stage_names("pre_sales", V3_STAGES):
         stage_counts[stage] = await v3_col("leads").count_documents({"stage": stage, "branch_id": branch_id})
     return {"branch_id": branch_id, "stage_counts": stage_counts}
 

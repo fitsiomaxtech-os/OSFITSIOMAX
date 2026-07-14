@@ -350,6 +350,10 @@ async def list_sources(_: V3UserOut = Depends(v3_require_roles("super_admin"))):
 
 @router.post("/sources")
 async def create_source(payload: MarketingSourceCreate, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    if payload.branch_id:
+        branch = await v3_col("branches").find_one({"id": payload.branch_id}, {"_id": 0, "id": 1})
+        if not branch:
+            raise HTTPException(status_code=404, detail="Branch not found")
     spreadsheet_id = payload.spreadsheet_id or (extract_spreadsheet_id(payload.sheet_url) if payload.sheet_url else "")
     column_mapping = auto_map_columns(payload.headers or []) if payload.headers else {}
     detected_custom = [h for h in (payload.headers or []) if h not in column_mapping.values()]
@@ -375,6 +379,10 @@ async def create_source(payload: MarketingSourceCreate, _: V3UserOut = Depends(v
 
 @router.patch("/sources/{source_id}")
 async def update_source(source_id: str, payload: MarketingSourceUpdate, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    if payload.branch_id:
+        branch = await v3_col("branches").find_one({"id": payload.branch_id}, {"_id": 0, "id": 1})
+        if not branch:
+            raise HTTPException(status_code=404, detail="Branch not found")
     updates = {k: v for k, v in payload.model_dump().items() if v is not None and k != "headers"}
     if payload.sheet_url and not payload.spreadsheet_id:
         extracted = extract_spreadsheet_id(payload.sheet_url)

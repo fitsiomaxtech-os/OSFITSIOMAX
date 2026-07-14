@@ -108,12 +108,25 @@ async def v3_edit_lead(
         raise HTTPException(status_code=400, detail="No updates provided")
 
     updates["updated_at"] = now_iso()
+
+    if "branch_id" in updates:
+        branch = await v3_col("branches").find_one({"id": updates["branch_id"]}, {"_id": 0, "id": 1})
+        if not branch:
+            raise HTTPException(status_code=404, detail="Branch not found")
+
+    existing = None
+    if updates.get("stage") == "Appointment" or "branch_id" in updates:
+        existing = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0, "id": 1, "branch_id": 1, "branch_stage": 1})
+
     # Hand-off bridge: when stage is set to "Appointment" via PUT, push lead into Branch Admin
     # New Appointment column (only if branch_stage isn't already set on the lead).
-    if updates.get("stage") == "Appointment":
-        existing = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0, "id": 1, "branch_stage": 1})
-        if existing is not None and not existing.get("branch_stage"):
-            updates["branch_stage"] = "New Appointment"
+    if updates.get("stage") == "Appointment" and "branch_stage" not in updates and existing is not None and not existing.get("branch_stage"):
+        updates["branch_stage"] = "New Appointment"
+
+    # Reassigning to a different branch must reset branch_stage — otherwise the lead silently
+    # carries its old branch's pipeline position (e.g. "Portfolio") onto the new branch's board.
+    if "branch_id" in updates and "branch_stage" not in updates and existing is not None and existing.get("branch_id") != updates["branch_id"]:
+        updates["branch_stage"] = "New Appointment"
 
     filter_query: Dict[str, object] = {"id": lead_id}
     if user.role == "branch_admin" and user.branch_id:
@@ -141,6 +154,9 @@ async def v3_qualify_lead(lead_id: str, _: V3UserOut = Depends(v3_require_roles(
 
 @router.post("/leads/{lead_id}/assign-branch", response_model=V3LeadOut)
 async def v3_assign_branch(lead_id: str, payload: V3AssignBranchInput, _: V3UserOut = Depends(v3_require_roles("pre_sales", "business_dev", "super_admin"))):
+    branch = await v3_col("branches").find_one({"id": payload.branch_id}, {"_id": 0, "id": 1})
+    if not branch:
+        raise HTTPException(status_code=404, detail="Branch not found")
     await v3_col("leads").update_one(
         {"id": lead_id},
         {"$set": {"branch_id": payload.branch_id, "stage": "Appointment", "branch_stage": "New Appointment", "updated_at": now_iso()}},
@@ -349,13 +365,16 @@ async def v3_schedule_appointment(lead_id: str, payload: V3AppointmentScheduleIn
     branch_name = None
     if payload.branch_id:
         b = await v3_col("branches").find_one({"id": payload.branch_id}, {"_id": 0, "branch_name": 1, "name": 1})
-        branch_name = b.get("branch_name") or b.get("name") if b else None
+        if not b:
+            raise HTTPException(status_code=404, detail="Branch not found")
+        branch_name = b.get("branch_name") or b.get("name")
     updates = {
         "stage": "Appointment",
         "appointment_mode": payload.mode,
         "appointment_department": payload.department,
         "branch_id": payload.branch_id,
-        "branch_stage": "New Appointment",
+        # Online appointments have no branch, so there's no branch board for them to sit in.
+        "branch_stage": "New Appointment" if payload.branch_id else None,
         "updated_at": now_iso(),
     }
     if payload.diagnosis:

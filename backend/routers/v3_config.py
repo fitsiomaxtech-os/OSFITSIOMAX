@@ -128,6 +128,17 @@ async def v3_delete_branch(branch_id: str, _: V3UserOut = Depends(v3_require_rol
     await v3_col("branches").delete_one({"id": branch_id})
     if existing.get("admin_user_id"):
         await v3_col("users").delete_one({"id": existing["admin_user_id"]})
+    # Don't leave leads/sources pointing at a branch that no longer exists — unassign them
+    # back to "no branch" so they fall back to the normal Pre-Sales flow instead of silently
+    # keeping a dead branch_id forever.
+    await v3_col("leads").update_many(
+        {"branch_id": branch_id},
+        {"$set": {"branch_id": None, "branch_stage": None}},
+    )
+    await v3_col("marketing_sources").update_many(
+        {"branch_id": branch_id},
+        {"$set": {"branch_id": None}},
+    )
     return {"message": "Branch deleted"}
 
 
