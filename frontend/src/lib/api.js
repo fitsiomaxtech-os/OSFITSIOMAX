@@ -200,6 +200,7 @@ export const mkCreateSource = async (payload) => (await api.post("/marketing/sou
 export const mkUpdateSource = async (sourceId, payload) => (await api.patch(`/marketing/sources/${sourceId}`, payload)).data;
 export const mkDeleteSource = async (sourceId) => (await api.delete(`/marketing/sources/${sourceId}`)).data;
 export const mkSyncSource = async (sourceId, rows) => (await api.post(`/marketing/sources/${sourceId}/sync`, { rows })).data;
+export const mkBackfillSourceBranch = async (sourceId) => (await api.post(`/marketing/sources/${sourceId}/backfill-branch`)).data;
 export const mkPerformance = async () => (await api.get("/marketing/performance")).data;
 
 

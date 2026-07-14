@@ -10,7 +10,7 @@ import { toast } from "@/components/ui/sonner";
 import {
   mkDashboard, mkGetDistribution, mkPatchDistribution, mkRefreshDistribution,
   mkGetTeam, mkCreateTeamMember, mkAllLeads, mkAssignLead, mkDeleteLead, mkBulkDelete,
-  mkGetSources, mkCreateSource, mkUpdateSource, mkDeleteSource, mkSyncSource,
+  mkGetSources, mkCreateSource, mkUpdateSource, mkDeleteSource, mkSyncSource, mkBackfillSourceBranch,
   gsStatus, gsAuthUrl, gsDisconnect, gsPull,
 } from "@/lib/api";
 import { MaskedContact } from "@/components/MaskedContact";
@@ -172,6 +172,15 @@ const SourcesTab = ({ branches = [] }) => {
     } catch (e) { toast.error(e?.response?.data?.detail || "Pull failed"); }
   };
 
+  const backfillNow = async (s) => {
+    try {
+      const res = await mkBackfillSourceBranch(s.id);
+      if (res.updated > 0) toast.success(`Assigned ${res.updated} existing lead${res.updated === 1 ? "" : "s"} to this branch`);
+      else toast("No unassigned leads found to backfill.");
+      load();
+    } catch (e) { toast.error(e?.response?.data?.detail || "Backfill failed"); }
+  };
+
   const submit = async () => {
     if (!form.name.trim()) { toast.error("Source name required"); return; }
     const sheetId = form.spreadsheet_id || extractSheetId(form.sheet_url);
@@ -292,6 +301,11 @@ const SourcesTab = ({ branches = [] }) => {
                 <Button size="sm" variant="outline" onClick={() => setShowSync(s)} data-testid={`mk-source-sync-${s.id}`}><RefreshCw className="mr-1 h-3 w-3" />Manual Sync (JSON)</Button>
                 <Button size="sm" variant="outline" onClick={() => setShowMap(s)} data-testid={`mk-source-map-${s.id}`}>Edit Mapping</Button>
                 <Button size="sm" variant="outline" onClick={() => toggleActive(s)} data-testid={`mk-source-toggle-${s.id}`}>{s.is_active ? "Deactivate" : "Activate"}</Button>
+                {s.branch_id && (
+                  <Button size="sm" variant="outline" onClick={() => backfillNow(s)} className="border-violet-200 text-violet-700 hover:bg-violet-50" data-testid={`mk-source-backfill-${s.id}`} title="Assign existing leads from this sheet (imported before the branch was tagged) to this branch">
+                    Backfill Existing Leads
+                  </Button>
+                )}
               </div>
               {pullResult && pullResult.source.id === s.id && (
                 <div className="rounded-md border border-emerald-200 bg-emerald-50 p-2 text-[11px] text-emerald-800" data-testid={`gs-pull-result-${s.id}`}>
