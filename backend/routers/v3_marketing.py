@@ -117,6 +117,11 @@ class MarketingSourceCreate(BaseModel):
 
 class MarketingSourceUpdate(BaseModel):
     name: Optional[str] = None
+    source_type: Optional[Literal["meta", "seo", "referral", "walk_in", "website", "csv_import", "google_sheets", "other"]] = None
+    sheet_url: Optional[str] = None
+    spreadsheet_id: Optional[str] = None
+    sheet_name: Optional[str] = None
+    headers: Optional[List[str]] = None
     column_mapping: Optional[Dict[str, str]] = None
     custom_fields: Optional[List[str]] = None
     is_active: Optional[bool] = None
@@ -367,7 +372,16 @@ async def create_source(payload: MarketingSourceCreate, _: V3UserOut = Depends(v
 
 @router.patch("/sources/{source_id}")
 async def update_source(source_id: str, payload: MarketingSourceUpdate, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
-    updates = {k: v for k, v in payload.model_dump().items() if v is not None}
+    updates = {k: v for k, v in payload.model_dump().items() if v is not None and k != "headers"}
+    if payload.sheet_url and not payload.spreadsheet_id:
+        extracted = extract_spreadsheet_id(payload.sheet_url)
+        if extracted:
+            updates["spreadsheet_id"] = extracted
+    if payload.headers is not None:
+        column_mapping = auto_map_columns(payload.headers) if payload.headers else {}
+        updates["headers_detected"] = payload.headers
+        updates["column_mapping"] = column_mapping
+        updates["custom_fields"] = [h for h in payload.headers if h not in column_mapping.values()]
     if not updates:
         raise HTTPException(status_code=400, detail="No updates provided")
     res = await v3_col("marketing_sources").update_one({"id": source_id}, {"$set": updates})

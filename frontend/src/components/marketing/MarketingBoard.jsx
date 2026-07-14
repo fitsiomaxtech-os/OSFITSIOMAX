@@ -367,18 +367,47 @@ const SourcesTab = () => {
 };
 
 const EditSourceDialog = ({ source, onClose, onSaved }) => {
+  const initialHeaders = (source.headers_detected || []).join(", ");
   const [name, setName] = useState(source.name || "");
+  const [sourceType, setSourceType] = useState(source.source_type || "google_sheets");
+  const [sheetUrl, setSheetUrl] = useState(source.sheet_url || "");
+  const [spreadsheetId, setSpreadsheetId] = useState(source.spreadsheet_id || "");
+  const [sheetName, setSheetName] = useState(source.sheet_name || "Sheet1");
+  const [headers, setHeaders] = useState(initialHeaders);
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(!!source.auto_sync_enabled);
   const [autoSyncInterval, setAutoSyncInterval] = useState(String(source.auto_sync_interval_minutes || 60));
 
+  const extractSheetId = (url) => {
+    if (!url) return "";
+    const m = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+    return m ? m[1] : "";
+  };
+
+  const onUrlChange = (url) => {
+    setSheetUrl(url);
+    setSpreadsheetId(extractSheetId(url) || spreadsheetId);
+  };
+
   const save = async () => {
     if (!name.trim()) { toast.error("Source name required"); return; }
+    const payload = {
+      name: name.trim(),
+      source_type: sourceType,
+      sheet_url: sheetUrl,
+      auto_sync_enabled: autoSyncEnabled,
+      auto_sync_interval_minutes: Number(autoSyncInterval) || 60,
+    };
+    if (sourceType === "google_sheets") {
+      payload.spreadsheet_id = spreadsheetId || extractSheetId(sheetUrl);
+      payload.sheet_name = sheetName || "Sheet1";
+    }
+    // Only touch headers/mapping if the user actually changed them — avoids
+    // silently wiping any manual "Edit Mapping" customization on every save.
+    if (headers !== initialHeaders) {
+      payload.headers = headers.split(",").map((h) => h.trim()).filter(Boolean);
+    }
     try {
-      await mkUpdateSource(source.id, {
-        name: name.trim(),
-        auto_sync_enabled: autoSyncEnabled,
-        auto_sync_interval_minutes: Number(autoSyncInterval) || 60,
-      });
+      await mkUpdateSource(source.id, payload);
       toast.success("Source updated");
       onSaved();
     } catch (e) { toast.error(e?.response?.data?.detail || "Update failed"); }
@@ -386,12 +415,20 @@ const EditSourceDialog = ({ source, onClose, onSaved }) => {
 
   return (
     <DialogShell title="Edit Source" onClose={onClose} testid="mk-edit-source-dialog">
-      <label className="text-xs font-medium text-slate-600">Source Name</label>
-      <Input value={name} onChange={(e) => setName(e.target.value)} data-testid="mk-edit-source-name" />
-
-      {source.source_type === "google_sheets" && (
+      <Input placeholder="Source name (e.g. Meta Ads, Walk-ins)" value={name} onChange={(e) => setName(e.target.value)} data-testid="mk-edit-source-name" />
+      <select className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm" value={sourceType} onChange={(e) => setSourceType(e.target.value)} data-testid="mk-edit-source-type">
+        {["meta", "seo", "referral", "walk_in", "website", "csv_import", "google_sheets", "other"].map((t) => <option key={t} value={t}>{t}</option>)}
+      </select>
+      {sourceType === "google_sheets" ? (
         <>
-          {source.sheet_url && <p className="truncate text-[11px] text-slate-400"><LinkIcon className="mr-1 inline h-3 w-3" />{source.sheet_url}</p>}
+          <Input placeholder="Paste Google Sheet URL (https://docs.google.com/spreadsheets/d/...)" value={sheetUrl} onChange={(e) => onUrlChange(e.target.value)} data-testid="mk-edit-source-url" />
+          {spreadsheetId && (
+            <p className="text-[10px] text-emerald-600">✓ Sheet ID detected: <code className="rounded bg-emerald-50 px-1">{spreadsheetId.slice(0, 24)}…</code></p>
+          )}
+          <Input placeholder="Worksheet/Tab name (default: Sheet1)" value={sheetName} onChange={(e) => setSheetName(e.target.value)} data-testid="mk-edit-source-sheetname" />
+          <p className="text-xs text-amber-700 bg-amber-50 rounded p-2">
+            <strong>Important:</strong> the sheet must be either accessible to the Google account you connected, OR shared as “Anyone with the link can view”.
+          </p>
           <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
             <input type="checkbox" checked={autoSyncEnabled} onChange={(e) => setAutoSyncEnabled(e.target.checked)} data-testid="mk-edit-source-autosync" />
             Auto-sync this sheet
@@ -404,8 +441,11 @@ const EditSourceDialog = ({ source, onClose, onSaved }) => {
             </div>
           )}
         </>
+      ) : (
+        <Input placeholder="Source URL (optional, for reference)" value={sheetUrl} onChange={(e) => setSheetUrl(e.target.value)} data-testid="mk-edit-source-url" />
       )}
-
+      <Input placeholder="Headers (comma separated, e.g. Lead Name, Mobile, Email) — optional" value={headers} onChange={(e) => setHeaders(e.target.value)} data-testid="mk-edit-source-headers" />
+      <p className="text-xs text-slate-400">Changing headers re-detects the column mapping. Leave as-is to keep your current mapping.</p>
       <Button onClick={save} className="w-full" data-testid="mk-edit-source-save">Save Changes</Button>
     </DialogShell>
   );
