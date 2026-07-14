@@ -327,9 +327,10 @@ async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Di
             "vertical": std_payload.get("vertical") or "offline_physiotherapy",
             "source_tab": source["name"],
             "source_type": "google_sheets",
-            # A source tagged with a branch (Marketing Board > Lead Sources > Edit > Branch)
-            # skips Pre-Sales entirely and lands straight in that branch's New Appointment column.
-            "stage": "Appointment" if source_branch_id else "New Leads",
+            # Pre-Sales stage stays normal ("New Leads") regardless — a source tagged with a
+            # branch only ADDS the branch assignment, landing the lead in that branch's New
+            # Appointment column too, without pulling it out of the usual Pre-Sales workflow.
+            "stage": "New Leads",
             "branch_id": source_branch_id,
             "branch_stage": "New Appointment" if source_branch_id else None,
             "notes": std_payload.get("notes", ""),
