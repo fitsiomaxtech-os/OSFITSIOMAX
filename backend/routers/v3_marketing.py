@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Optional, Dict, List, Any
 from urllib.parse import urlparse
-from difflib import SequenceMatcher
 import uuid
 import re
 
@@ -48,53 +47,6 @@ def extract_spreadsheet_id(url: str) -> str:
         return m.group(1)
     parsed = urlparse(url or "")
     return parsed.path.strip("/") or url
-
-
-LOCATION_KEY_HINT = re.compile(r"prefe?e?red?_?location|preferred_branch|\blocation\b|\bcity\b|\bbranch\b", re.IGNORECASE)
-BRANCH_NAME_STOPWORDS = re.compile(r"\b(branch|admin|clinic|center|centre)\b")
-
-
-def _normalize_branch_text(s: str) -> str:
-    s = (s or "").lower()
-    s = re.sub(r"[^a-z0-9]+", " ", s)
-    s = BRANCH_NAME_STOPWORDS.sub("", s)
-    return re.sub(r"\s+", " ", s).strip()
-
-
-def match_branch_by_location(text: str, branches: List[Dict[str, Any]]) -> Optional[str]:
-    """Fuzzy-match free-text location/branch answers (from messy Meta lead-form data,
-    typos and all) against real branch names. Conservative on purpose — returns None
-    rather than guess when nothing looks like a confident match."""
-    norm_text = _normalize_branch_text(text)
-    if not norm_text:
-        return None
-    compact_text = norm_text.replace(" ", "")
-    best_id, best_score = None, 0.0
-    for b in branches:
-        norm_branch = _normalize_branch_text(b.get("branch_name") or "")
-        if not norm_branch:
-            continue
-        compact_branch = norm_branch.replace(" ", "")
-        if compact_branch and compact_branch in compact_text:
-            return b["id"]
-        score = SequenceMatcher(None, norm_branch, norm_text).ratio()
-        if score > best_score:
-            best_score, best_id = score, b["id"]
-    return best_id if best_score >= 0.72 else None
-
-
-def extract_location_text(std_payload: Dict[str, Any], extra_fields: Dict[str, Any]) -> Optional[str]:
-    """Pull a location/branch-ish free-text answer off an imported row — checks the mapped
-    'preferred_branch' standard field first, then falls back to any unmapped column whose
-    HEADER name looks location-related (covers sheets where that column was never mapped,
-    e.g. a raw Meta form header like 'prefeered_location_?_')."""
-    value = std_payload.get("preferred_branch")
-    if value:
-        return str(value)
-    for key, val in (extra_fields or {}).items():
-        if val and LOCATION_KEY_HINT.search(key or ""):
-            return str(val)
-    return None
 
 
 def auto_map_columns(headers: List[str]) -> Dict[str, str]:
@@ -486,38 +438,6 @@ async def backfill_source_branch(source_id: str, _: V3UserOut = Depends(v3_requi
     return {"message": "Backfill complete", "updated": result.modified_count}
 
 
-@router.post("/leads/auto-assign-by-location")
-async def auto_assign_leads_by_location(_: V3UserOut = Depends(v3_require_roles("super_admin"))):
-    """System-wide sweep: for every unassigned lead, try to match its own location/preferred-
-    branch answer (from a mixed 'all branches' sheet) against a real branch and assign it.
-    Covers the whole existing backlog across every Lead Source in one go — new leads get this
-    automatically at import time (see sync_source / _internal_pull_source)."""
-    from pymongo import UpdateOne
-
-    branches = await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1}).to_list(500)
-    unassigned = await v3_col("leads").find(
-        {"branch_id": None, "extra_fields": {"$ne": {}}}, {"_id": 0, "id": 1, "extra_fields": 1},
-    ).to_list(20000)
-
-    ops = []
-    for lead in unassigned:
-        location_text = extract_location_text({}, lead.get("extra_fields") or {})
-        if not location_text:
-            continue
-        matched = match_branch_by_location(location_text, branches)
-        if matched:
-            ops.append(UpdateOne(
-                {"id": lead["id"]},
-                {"$set": {"branch_id": matched, "branch_stage": "New Appointment", "updated_at": now_iso()}},
-            ))
-
-    updated = 0
-    if ops:
-        res = await v3_col("leads").bulk_write(ops)
-        updated = res.modified_count
-    return {"message": "Auto-assign complete", "scanned": len(unassigned), "updated": updated}
-
-
 @router.post("/sources/{source_id}/sync")
 async def sync_source(source_id: str, payload: MarketingSyncInput, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
     source = await v3_col("marketing_sources").find_one({"id": source_id}, {"_id": 0})
@@ -540,10 +460,6 @@ async def sync_source(source_id: str, payload: MarketingSyncInput, _: V3UserOut 
     skipped_no_phone = 0
     skipped_duplicate = 0
     sample_errors: List[str] = []
-
-    # Only needed for sources NOT already tagged to one branch — those rows get
-    # matched individually against each lead's own location/preferred-branch answer.
-    all_branches = [] if source.get("branch_id") else await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1}).to_list(500)
 
     for idx, row in enumerate(payload.rows):
         phone_raw = str(row.get(phone_key, "") or "").strip()
@@ -574,11 +490,6 @@ async def sync_source(source_id: str, payload: MarketingSyncInput, _: V3UserOut 
 
         assigned = await round_robin_assign("pre_sales")
         source_branch_id = source.get("branch_id")
-        matched_branch_id = source_branch_id
-        if not matched_branch_id and all_branches:
-            location_text = extract_location_text(std_payload, custom_payload)
-            if location_text:
-                matched_branch_id = match_branch_by_location(location_text, all_branches)
         lead = {
             "id": str(uuid.uuid4()),
             "name": (std_payload.get("name") or "").strip() or "Unknown",
@@ -592,8 +503,8 @@ async def sync_source(source_id: str, payload: MarketingSyncInput, _: V3UserOut 
             # branch only ADDS the branch assignment, landing the lead in that branch's New
             # Appointment column too, without pulling it out of the usual Pre-Sales workflow.
             "stage": "New Leads",
-            "branch_id": matched_branch_id,
-            "branch_stage": "New Appointment" if matched_branch_id else None,
+            "branch_id": source_branch_id,
+            "branch_stage": "New Appointment" if source_branch_id else None,
             "notes": std_payload.get("notes", ""),
             "extra_fields": {**{k: v for k, v in std_payload.items() if k not in ("name", "email", "phone", "vertical", "notes")}, **custom_payload},
             "assigned_user_id": assigned["id"] if assigned else None,
