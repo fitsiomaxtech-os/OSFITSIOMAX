@@ -182,6 +182,11 @@ export const BranchAdminBoard = ({ branchId }) => {
         <FitsiomaxStorePanel />
       ) : (
         <>
+          <div data-testid="branch-pipeline-header">
+            <h2 className="text-2xl font-bold text-slate-900">Appointment Lead</h2>
+            <p className="text-sm text-slate-500">Track patients from first appointment through to their stage in your branch.</p>
+          </div>
+
           {/* Stage Head Bar — Pre-Sales style sticky segmented tabs */}
           <div className="sticky top-[88px] z-10 -mx-1 rounded-xl border border-slate-200 bg-white/95 p-1 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/80" data-testid="branch-metrics">
             <div className="flex flex-nowrap gap-1">
