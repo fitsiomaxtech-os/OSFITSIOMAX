@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   BarChart3, FileSpreadsheet, Layers, Users,
-  Plus, RefreshCw, Trash2, Link as LinkIcon, ArrowRightLeft, X,
+  Plus, RefreshCw, Trash2, Link as LinkIcon, ArrowRightLeft, X, Pencil,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -113,6 +113,7 @@ const SourcesTab = () => {
   const [showAdd, setShowAdd] = useState(false);
   const [showSync, setShowSync] = useState(null);
   const [showMap, setShowMap] = useState(null);
+  const [showEdit, setShowEdit] = useState(null);
   const [form, setForm] = useState({ name: "", sheet_url: "", spreadsheet_id: "", sheet_name: "Sheet1", source_type: "google_sheets", headers: "" });
   const [syncRows, setSyncRows] = useState(`[\n  {"name":"Aarav Sharma","phone":"9000000001","email":"aarav@example.com","city":"Chennai","condition":"Lower back pain","age":34}\n]`);
   const [syncResult, setSyncResult] = useState(null);
@@ -271,7 +272,10 @@ const SourcesTab = () => {
                   <span className={`inline-flex h-5 items-center rounded-full px-2 text-[10px] font-semibold ${s.is_active ? "bg-green-100 text-green-700" : "bg-slate-200 text-slate-600"}`}>{s.is_active ? "Active" : "Inactive"}</span>
                 </div>
               </div>
-              <button onClick={() => remove(s.id)} className="text-slate-400 hover:text-red-500" data-testid={`mk-source-delete-${s.id}`}><Trash2 className="h-4 w-4" /></button>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setShowEdit(s)} className="text-slate-400 hover:text-sky-600" data-testid={`mk-source-edit-${s.id}`} title="Edit source"><Pencil className="h-4 w-4" /></button>
+                <button onClick={() => remove(s.id)} className="text-slate-400 hover:text-red-500" data-testid={`mk-source-delete-${s.id}`} title="Delete source"><Trash2 className="h-4 w-4" /></button>
+              </div>
             </CardHeader>
             <CardContent className="space-y-2 text-xs text-slate-600">
               {s.sheet_url && <p className="truncate"><LinkIcon className="mr-1 inline h-3 w-3" />{s.sheet_url}</p>}
@@ -354,7 +358,56 @@ const SourcesTab = () => {
       {showMap && (
         <MappingEditor source={showMap} onClose={() => setShowMap(null)} onSaved={() => { setShowMap(null); load(); }} />
       )}
+
+      {showEdit && (
+        <EditSourceDialog source={showEdit} onClose={() => setShowEdit(null)} onSaved={() => { setShowEdit(null); load(); }} />
+      )}
     </div>
+  );
+};
+
+const EditSourceDialog = ({ source, onClose, onSaved }) => {
+  const [name, setName] = useState(source.name || "");
+  const [autoSyncEnabled, setAutoSyncEnabled] = useState(!!source.auto_sync_enabled);
+  const [autoSyncInterval, setAutoSyncInterval] = useState(String(source.auto_sync_interval_minutes || 60));
+
+  const save = async () => {
+    if (!name.trim()) { toast.error("Source name required"); return; }
+    try {
+      await mkUpdateSource(source.id, {
+        name: name.trim(),
+        auto_sync_enabled: autoSyncEnabled,
+        auto_sync_interval_minutes: Number(autoSyncInterval) || 60,
+      });
+      toast.success("Source updated");
+      onSaved();
+    } catch (e) { toast.error(e?.response?.data?.detail || "Update failed"); }
+  };
+
+  return (
+    <DialogShell title="Edit Source" onClose={onClose} testid="mk-edit-source-dialog">
+      <label className="text-xs font-medium text-slate-600">Source Name</label>
+      <Input value={name} onChange={(e) => setName(e.target.value)} data-testid="mk-edit-source-name" />
+
+      {source.source_type === "google_sheets" && (
+        <>
+          {source.sheet_url && <p className="truncate text-[11px] text-slate-400"><LinkIcon className="mr-1 inline h-3 w-3" />{source.sheet_url}</p>}
+          <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
+            <input type="checkbox" checked={autoSyncEnabled} onChange={(e) => setAutoSyncEnabled(e.target.checked)} data-testid="mk-edit-source-autosync" />
+            Auto-sync this sheet
+          </label>
+          {autoSyncEnabled && (
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-medium text-slate-600">Every</label>
+              <Input type="number" min="5" className="w-24" value={autoSyncInterval} onChange={(e) => setAutoSyncInterval(e.target.value)} data-testid="mk-edit-source-interval" />
+              <span className="text-xs text-slate-500">minutes</span>
+            </div>
+          )}
+        </>
+      )}
+
+      <Button onClick={save} className="w-full" data-testid="mk-edit-source-save">Save Changes</Button>
+    </DialogShell>
   );
 };
 
