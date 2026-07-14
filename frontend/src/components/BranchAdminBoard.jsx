@@ -60,15 +60,17 @@ export const BranchAdminBoard = ({ branchId }) => {
   const [dateFilter, setDateFilter] = useState(null); // { from, to, label, key } | null
 
   const loadBoard = useCallback(async () => {
-    if (!branchId) return;
+    if (!branchId) return null;
     setLoading(true);
+    let data = null;
     try {
-      const data = await getBranchBoard(branchId);
+      data = await getBranchBoard(branchId);
       setBoardData(data);
     } catch (error) {
       toast.error(error?.response?.data?.detail || "Failed to load branch board");
     }
     setLoading(false);
+    return data;
   }, [branchId]);
 
   useEffect(() => { loadBoard(); }, [loadBoard]);
@@ -104,9 +106,9 @@ export const BranchAdminBoard = ({ branchId }) => {
   const totalLeads = boardData.leads.length;
 
   const handleStageUpdate = async () => {
-    await loadBoard();
-    if (selectedLead) {
-      const updated = boardData.leads.find((l) => l.id === selectedLead.id);
+    const data = await loadBoard();
+    if (selectedLead && data) {
+      const updated = data.leads.find((l) => l.id === selectedLead.id);
       if (updated) setSelectedLead(updated);
     }
   };
@@ -310,7 +312,6 @@ export const BranchAdminBoard = ({ branchId }) => {
           stages={stages}
           onClose={() => setSelectedLead(null)}
           onUpdate={handleStageUpdate}
-          reloadBoard={loadBoard}
         />
       )}
         </>
@@ -419,7 +420,7 @@ const LeadPackagesTab = () => {
 };
 
 /* ─── Branch Lead Detail Modal ─── */
-function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, reloadBoard }) {
+function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate }) {
   const [activeTab, setActiveTab] = useState("overview");
   const [remarks, setRemarks] = useState([]);
   const [newRemark, setNewRemark] = useState("");
@@ -486,7 +487,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, reloadBoar
     try {
       const updated = await moveBranchStage(lead.id, { branch_stage: stage });
       toast.success(`Moved to ${stage}`);
-      await reloadBoard();
+      await onUpdate();
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Move failed");
     }
@@ -498,7 +499,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, reloadBoar
       await collectFee(lead.id, { fee_type: "consultation", amount: Number(feeAmount) });
       setFeeAmount("");
       toast.success("Consultation fee collected");
-      await reloadBoard();
+      await onUpdate();
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed");
     }
@@ -510,7 +511,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, reloadBoar
       await collectFee(lead.id, { fee_type: "package", amount: Number(packageAmount), package_weeks: Number(packageWeeks) });
       setPackageAmount("");
       toast.success("Package fee collected");
-      await reloadBoard();
+      await onUpdate();
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed");
     }
@@ -522,7 +523,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, reloadBoar
       await assignPhysio(lead.id, { physio_id: selectedPhysioId });
       toast.success("Jr. Physio assigned!");
       setSelectedPhysioId("");
-      await reloadBoard();
+      await onUpdate();
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Assignment failed");
     }
@@ -849,7 +850,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, reloadBoar
                     await scheduleBranchAppointment(lead.id, apptDraft);
                     toast.success(`Appointment ${apptDraft.appointment_date} ${apptDraft.appointment_time} → ${apptDraft.final_stage}`);
                     setApptDraft(null);
-                    await reloadBoard();
+                    await onUpdate();
                     onClose && onClose();
                   } catch (e) { toast.error(e?.response?.data?.detail || "Failed to schedule"); }
                 }}
