@@ -29,6 +29,7 @@ from deps import v3_require_roles
 from schemas.v3 import V3UserOut
 from routers.v3_marketing import (
     auto_map_columns, normalize_phone, STANDARD_FIELDS, round_robin_assign,
+    extract_location_text, match_branch_by_location,
 )
 
 
@@ -293,6 +294,10 @@ async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Di
     skipped_duplicate = 0
     sample_errors = []
 
+    # Only needed for sources NOT already tagged to one branch — those rows get
+    # matched individually against each lead's own location/preferred-branch answer.
+    all_branches = [] if source.get("branch_id") else await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1}).to_list(500)
+
     for idx, row in enumerate(rows):
         phone_raw = str(row.get(phone_key, "") or "").strip()
         phone_norm = normalize_phone(phone_raw)
@@ -318,6 +323,11 @@ async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Di
 
         assigned = await round_robin_assign("pre_sales")
         source_branch_id = source.get("branch_id")
+        matched_branch_id = source_branch_id
+        if not matched_branch_id and all_branches:
+            location_text = extract_location_text(std_payload, custom_payload)
+            if location_text:
+                matched_branch_id = match_branch_by_location(location_text, all_branches)
         lead = {
             "id": str(uuid.uuid4()),
             "name": (std_payload.get("name") or "").strip() or "Unknown",
@@ -331,8 +341,8 @@ async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Di
             # branch only ADDS the branch assignment, landing the lead in that branch's New
             # Appointment column too, without pulling it out of the usual Pre-Sales workflow.
             "stage": "New Leads",
-            "branch_id": source_branch_id,
-            "branch_stage": "New Appointment" if source_branch_id else None,
+            "branch_id": matched_branch_id,
+            "branch_stage": "New Appointment" if matched_branch_id else None,
             "notes": std_payload.get("notes", ""),
             "extra_fields": {**{k: v for k, v in std_payload.items() if k not in ("name", "email", "phone", "vertical", "notes")}, **custom_payload},
             "assigned_user_id": assigned["id"] if assigned else None,

@@ -10,7 +10,7 @@ import { toast } from "@/components/ui/sonner";
 import {
   mkDashboard, mkGetDistribution, mkPatchDistribution, mkRefreshDistribution,
   mkGetTeam, mkCreateTeamMember, mkAllLeads, mkAssignLead, mkDeleteLead, mkBulkDelete,
-  mkGetSources, mkCreateSource, mkUpdateSource, mkDeleteSource, mkSyncSource, mkBackfillSourceBranch,
+  mkGetSources, mkCreateSource, mkUpdateSource, mkDeleteSource, mkSyncSource, mkBackfillSourceBranch, mkAutoAssignByLocation,
   gsStatus, gsAuthUrl, gsDisconnect, gsPull,
 } from "@/lib/api";
 import { MaskedContact } from "@/components/MaskedContact";
@@ -118,6 +118,7 @@ const SourcesTab = ({ branches = [] }) => {
   const [syncRows, setSyncRows] = useState(`[\n  {"name":"Aarav Sharma","phone":"9000000001","email":"aarav@example.com","city":"Chennai","condition":"Lower back pain","age":34}\n]`);
   const [syncResult, setSyncResult] = useState(null);
   const [pullResult, setPullResult] = useState(null);
+  const [autoAssigning, setAutoAssigning] = useState(false);
 
   const load = useCallback(() => mkGetSources().then(setSources).catch((e) => console.warn("[load failed]", e?.message || e)), []);
   const loadGs = useCallback(() => gsStatus().then(setGs).catch((e) => console.warn("[gs status]", e?.message || e)), []);
@@ -170,6 +171,17 @@ const SourcesTab = ({ branches = [] }) => {
       else toast(`No new leads. ${res.skipped_duplicate || 0} duplicates, ${res.skipped_no_phone || 0} missing phone.`);
       load();
     } catch (e) { toast.error(e?.response?.data?.detail || "Pull failed"); }
+  };
+
+  const autoAssignAll = async () => {
+    setAutoAssigning(true);
+    try {
+      const res = await mkAutoAssignByLocation();
+      if (res.updated > 0) toast.success(`Matched ${res.updated} of ${res.scanned} unassigned leads to a branch by location`);
+      else toast(`Scanned ${res.scanned} unassigned leads — no confident branch match found.`);
+      load();
+    } catch (e) { toast.error(e?.response?.data?.detail || "Auto-assign failed"); }
+    setAutoAssigning(false);
   };
 
   const backfillNow = async (s) => {
@@ -265,9 +277,21 @@ const SourcesTab = ({ branches = [] }) => {
         </CardContent>
       </Card>
 
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-slate-600">Connect data feeds. Paste sheet headers to auto-detect column mappings.</p>
-        <Button onClick={() => setShowAdd(true)} data-testid="mk-add-source-btn"><Plus className="mr-1 h-4 w-4" />Add Source</Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={autoAssignAll}
+            disabled={autoAssigning}
+            className="border-violet-200 text-violet-700 hover:bg-violet-50"
+            data-testid="mk-auto-assign-all-btn"
+            title="Scan every unassigned lead across all sources and match its location answer to a branch"
+          >
+            {autoAssigning ? "Matching…" : "Auto-Assign Leads to Branches"}
+          </Button>
+          <Button onClick={() => setShowAdd(true)} data-testid="mk-add-source-btn"><Plus className="mr-1 h-4 w-4" />Add Source</Button>
+        </div>
       </div>
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
