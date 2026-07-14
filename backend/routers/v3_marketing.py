@@ -409,35 +409,6 @@ async def delete_source(source_id: str, _: V3UserOut = Depends(v3_require_roles(
     return {"message": "Source deleted"}
 
 
-@router.post("/sources/{source_id}/backfill-branch")
-async def backfill_source_branch(source_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
-    """Tagging a source with a branch only auto-assigns leads pulled AFTER the tag was added.
-    This sweeps in leads that were already imported earlier — from this source or any other
-    source pointing at the same underlying spreadsheet — and are still sitting unassigned."""
-    source = await v3_col("marketing_sources").find_one({"id": source_id}, {"_id": 0})
-    if not source:
-        raise HTTPException(status_code=404, detail="Source not found")
-    branch_id = source.get("branch_id")
-    if not branch_id:
-        raise HTTPException(status_code=400, detail="Tag this source with a branch first")
-    branch = await v3_col("branches").find_one({"id": branch_id}, {"_id": 0, "id": 1})
-    if not branch:
-        raise HTTPException(status_code=404, detail="This source's branch no longer exists")
-
-    sibling_ids = [source_id]
-    if source.get("spreadsheet_id"):
-        siblings = await v3_col("marketing_sources").find(
-            {"spreadsheet_id": source["spreadsheet_id"]}, {"_id": 0, "id": 1}
-        ).to_list(200)
-        sibling_ids = [s["id"] for s in siblings]
-
-    result = await v3_col("leads").update_many(
-        {"marketing_source_id": {"$in": sibling_ids}, "branch_id": None},
-        {"$set": {"branch_id": branch_id, "branch_stage": "New Appointment", "updated_at": now_iso()}},
-    )
-    return {"message": "Backfill complete", "updated": result.modified_count}
-
-
 @router.post("/sources/{source_id}/sync")
 async def sync_source(source_id: str, payload: MarketingSyncInput, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
     source = await v3_col("marketing_sources").find_one({"id": source_id}, {"_id": 0})
