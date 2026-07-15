@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Stethoscope, CalendarRange, Pill, Dumbbell, ShoppingCart, Activity, Plus, X, FlaskConical, Pencil, Trash2, ImagePlus, Wifi, MapPin, Clock, Eye } from "lucide-react";
+import { Stethoscope, CalendarRange, Pill, Dumbbell, ShoppingCart, Activity, Plus, X, FlaskConical, Pencil, Trash2, ImagePlus, Wifi, MapPin, Clock, Eye, History } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,6 +13,7 @@ export const TABS = [
   { key: "supplementary", label: "Supplementary", icon: FlaskConical },
   { key: "equipment", label: "Equipment", icon: Dumbbell },
   { key: "vending_machine", label: "Vending Machine", icon: ShoppingCart },
+  { key: "history", label: "History", icon: History },
 ];
 
 export const CONSULTATIONS_SUBTABS = [
