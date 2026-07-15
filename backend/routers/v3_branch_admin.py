@@ -25,6 +25,14 @@ async def _branch_stage_names() -> list:
     return names or V3_BRANCH_STAGES
 
 
+async def _consultation_stage_names() -> list:
+    """Live Consultation Stages as configured in Super Admin > Pipeline Stage Management,
+    falling back to the built-in defaults if none have been configured yet."""
+    rows = await v3_col("pipeline_stages").find({"type": "consultation"}, {"_id": 0, "name": 1}).sort("order", 1).to_list(200)
+    names = [r["name"] for r in rows]
+    return names or V3_CONSULTATION_STAGES
+
+
 @router.get("/branch-board/{branch_id}")
 async def v3_branch_board_new(branch_id: str, _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev"))):
     leads = await v3_col("leads").find({"branch_id": branch_id}, {"_id": 0}).sort("updated_at", -1).to_list(20000)
@@ -215,17 +223,19 @@ async def v3_consultations_board(branch_id: str, _: V3UserOut = Depends(v3_requi
     """Return all leads in the Consultations pipeline for a branch, grouped by consultation_stage."""
     query = {"branch_id": branch_id, "consultation_stage": {"$ne": None}}
     leads_docs = await v3_col("leads").find(query, {"_id": 0}).sort("updated_at", -1).to_list(2000)
+    stage_names = await _consultation_stage_names()
     stage_counts = {}
-    for stage in V3_CONSULTATION_STAGES:
+    for stage in stage_names:
         stage_counts[stage] = sum(1 for ld in leads_docs if ld.get("consultation_stage") == stage)
     lead_list = [V3LeadOut(**ld).model_dump() for ld in leads_docs]
-    return {"leads": lead_list, "stage_counts": stage_counts, "stages": V3_CONSULTATION_STAGES}
+    return {"leads": lead_list, "stage_counts": stage_counts, "stages": stage_names}
 
 
 @router.post("/leads/{lead_id}/move-consultation-stage", response_model=V3LeadOut)
 async def v3_move_consultation_stage(lead_id: str, payload: V3ConsultationStageInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio"))):
-    if payload.consultation_stage not in V3_CONSULTATION_STAGES:
-        raise HTTPException(status_code=400, detail=f"Invalid consultation_stage. Allowed: {V3_CONSULTATION_STAGES}")
+    stage_names = await _consultation_stage_names()
+    if payload.consultation_stage not in stage_names:
+        raise HTTPException(status_code=400, detail=f"Invalid consultation_stage. Allowed: {stage_names}")
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -239,6 +249,106 @@ async def v3_move_consultation_stage(lead_id: str, payload: V3ConsultationStageI
         "lead_id": lead_id,
         "action": "consultation_stage_moved",
         "details": f"Consultation: {previous} → {payload.consultation_stage}",
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": now_iso(),
+    })
+    updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    return V3LeadOut(**updated)
+
+
+class V3ConsultationFollowUpInput(BaseModel):
+    date: str  # YYYY-MM-DD
+    time: str  # HH:MM (24h)
+    remarks: Optional[str] = ""
+
+
+class V3ConsultationFollowUpRescheduleInput(BaseModel):
+    date: str
+    time: str
+    reason: Optional[str] = ""
+
+
+@router.post("/leads/{lead_id}/consultation-follow-up", response_model=V3LeadOut)
+async def v3_schedule_consultation_follow_up(lead_id: str, payload: V3ConsultationFollowUpInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio"))):
+    """Schedule a consultation follow-up. Appends to consultation_follow_ups[] and moves consultation_stage to 'Follow Up'."""
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    entry = {
+        "id": str(uuid.uuid4()),
+        "date": payload.date,
+        "time": payload.time,
+        "remarks": (payload.remarks or "").strip(),
+        "status": "active",
+        "created_by": user.full_name,
+        "created_at": now_iso(),
+    }
+    await v3_col("leads").update_one(
+        {"id": lead_id},
+        {"$push": {"consultation_follow_ups": entry}, "$set": {
+            "consultation_stage": "Follow Up",
+            "next_consultation_follow_up_at": f"{payload.date}T{payload.time}:00",
+            "updated_at": now_iso(),
+        }},
+    )
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": lead_id,
+        "action": "consultation_follow_up_scheduled",
+        "details": f"Consultation follow-up on {payload.date} at {payload.time} — {entry['remarks'] or 'no remarks'}",
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": now_iso(),
+    })
+    updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    return V3LeadOut(**updated)
+
+
+@router.post("/leads/{lead_id}/consultation-follow-up/{followup_id}/reschedule", response_model=V3LeadOut)
+async def v3_reschedule_consultation_follow_up(lead_id: str, followup_id: str, payload: V3ConsultationFollowUpRescheduleInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio"))):
+    """Mark an existing consultation follow-up as rescheduled (with a reason) and add a new active one in its place."""
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    follow_ups = lead.get("consultation_follow_ups") or []
+    old = next((f for f in follow_ups if f.get("id") == followup_id), None)
+    if not old:
+        raise HTTPException(status_code=404, detail="Follow-up not found")
+    reason = (payload.reason or "").strip()
+    for f in follow_ups:
+        if f.get("id") == followup_id:
+            f["status"] = "rescheduled"
+            f["reschedule_reason"] = reason
+    new_entry = {
+        "id": str(uuid.uuid4()),
+        "date": payload.date,
+        "time": payload.time,
+        "remarks": old.get("remarks", ""),
+        "status": "active",
+        "rescheduled_from": followup_id,
+        "created_by": user.full_name,
+        "created_at": now_iso(),
+    }
+    follow_ups.append(new_entry)
+    await v3_col("leads").update_one(
+        {"id": lead_id},
+        {"$set": {
+            "consultation_follow_ups": follow_ups,
+            "consultation_stage": "Follow Up",
+            "next_consultation_follow_up_at": f"{payload.date}T{payload.time}:00",
+            "updated_at": now_iso(),
+        }},
+    )
+    old_summary = f"{old.get('date')} at {old.get('time')}"
+    details = f"Consultation follow-up rescheduled from {old_summary} to {payload.date} at {payload.time}"
+    if reason:
+        details += f" — reason: {reason}"
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": lead_id,
+        "action": "consultation_follow_up_rescheduled",
+        "details": details,
         "created_by": user.full_name,
         "created_by_role": user.role,
         "created_at": now_iso(),

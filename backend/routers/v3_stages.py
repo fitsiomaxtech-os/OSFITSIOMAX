@@ -6,7 +6,7 @@ import uuid
 from database import v3_col
 from utils import now_iso
 from deps import v3_require_roles, v3_current_user
-from constants import V3_STAGES, V3_BRANCH_STAGES
+from constants import V3_STAGES, V3_BRANCH_STAGES, V3_CONSULTATION_STAGES
 from schemas.v3 import V3UserOut
 
 
@@ -16,12 +16,15 @@ router = APIRouter(prefix="/api/v3/stages")
 PRESALES_COLORS = ["#6366f1", "#ef4444", "#f97316", "#f59e0b", "#a855f7", "#22c55e", "#0ea5e9", "#64748b"]
 SALES_COLORS = ["#0ea5e9", "#06b6d4", "#14b8a6", "#22c55e", "#84cc16", "#eab308", "#f59e0b", "#f97316",
                 "#ef4444", "#ec4899", "#a855f7", "#6366f1"]
+CONSULTATION_COLORS = ["#3b82f6", "#f43f5e", "#f97316", "#8b5cf6", "#14b8a6", "#22c55e", "#64748b"]
+
+STAGE_TYPE_FIELD = {"pre_sales": "stage", "sales": "branch_stage", "consultation": "consultation_stage"}
 
 
 class StageCreate(BaseModel):
     name: str
     color: Optional[str] = "#64748b"
-    type: Literal["pre_sales", "sales"]
+    type: Literal["pre_sales", "sales", "consultation"]
     is_final: Optional[bool] = False
 
 
@@ -60,18 +63,28 @@ async def _ensure_seed() -> None:
             "is_final": name in ("Assigned Physio", "Cancelled"),
             "created_at": now_iso(),
         })
+    for idx, name in enumerate(V3_CONSULTATION_STAGES):
+        docs.append({
+            "id": str(uuid.uuid4()),
+            "name": name,
+            "color": CONSULTATION_COLORS[idx % len(CONSULTATION_COLORS)],
+            "type": "consultation",
+            "order": idx,
+            "is_final": name in ("Treatment Fee", "Cancel"),
+            "created_at": now_iso(),
+        })
     if docs:
         await v3_col("pipeline_stages").insert_many(docs)
 
 
 @router.get("")
-async def list_stages(type: Optional[Literal["pre_sales", "sales"]] = None, _: V3UserOut = Depends(v3_current_user)):
+async def list_stages(type: Optional[Literal["pre_sales", "sales", "consultation"]] = None, _: V3UserOut = Depends(v3_current_user)):
     await _ensure_seed()
     query = {"type": type} if type else {}
     rows = await v3_col("pipeline_stages").find(query, {"_id": 0}).sort([("type", 1), ("order", 1)]).to_list(500)
     counts = {}
     if type:
-        field = "stage" if type == "pre_sales" else "branch_stage"
+        field = STAGE_TYPE_FIELD[type]
         leads_pipeline = [{"$group": {"_id": f"${field}", "n": {"$sum": 1}}}]
         async for row in v3_col("leads").aggregate(leads_pipeline):
             counts[row["_id"]] = row["n"]
@@ -107,7 +120,7 @@ async def update_stage(stage_id: str, payload: StageUpdate, _: V3UserOut = Depen
     if "name" in updates:
         old = await v3_col("pipeline_stages").find_one({"id": stage_id}, {"_id": 0, "name": 1, "type": 1})
         if old and old["name"] != updates["name"]:
-            field = "stage" if old["type"] == "pre_sales" else "branch_stage"
+            field = STAGE_TYPE_FIELD[old["type"]]
             await v3_col("leads").update_many({field: old["name"]}, {"$set": {field: updates["name"]}})
     res = await v3_col("pipeline_stages").update_one({"id": stage_id}, {"$set": updates})
     if res.matched_count == 0:
@@ -120,7 +133,7 @@ async def delete_stage(stage_id: str, _: V3UserOut = Depends(v3_require_roles("s
     stage = await v3_col("pipeline_stages").find_one({"id": stage_id}, {"_id": 0})
     if not stage:
         raise HTTPException(status_code=404, detail="Stage not found")
-    field = "stage" if stage["type"] == "pre_sales" else "branch_stage"
+    field = STAGE_TYPE_FIELD[stage["type"]]
     in_use = await v3_col("leads").count_documents({field: stage["name"]})
     if in_use > 0:
         raise HTTPException(status_code=409, detail=f"Stage in use by {in_use} leads. Reassign first.")

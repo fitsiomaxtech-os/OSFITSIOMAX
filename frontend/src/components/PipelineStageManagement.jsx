@@ -11,15 +11,15 @@ const PALETTE = ["#6366f1", "#3b82f6", "#0ea5e9", "#06b6d4", "#14b8a6", "#22c55e
 export const PipelineStageManagement = ({ onBack }) => {
   const [type, setType] = useState("pre_sales");
   const [stages, setStages] = useState([]);
-  const [counts, setCounts] = useState({ pre_sales: 0, sales: 0 });
+  const [counts, setCounts] = useState({ pre_sales: 0, sales: 0, consultation: 0 });
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ name: "", color: "#6366f1", is_final: false });
 
   const load = useCallback(async () => {
-    const [pre, sale] = await Promise.all([stagesList("pre_sales"), stagesList("sales")]);
-    setCounts({ pre_sales: pre.length, sales: sale.length });
-    setStages(type === "pre_sales" ? pre : sale);
+    const [pre, sale, consult] = await Promise.all([stagesList("pre_sales"), stagesList("sales"), stagesList("consultation")]);
+    setCounts({ pre_sales: pre.length, sales: sale.length, consultation: consult.length });
+    setStages(type === "pre_sales" ? pre : type === "sales" ? sale : consult);
   }, [type]);
 
   useEffect(() => { load(); }, [load]);
@@ -65,24 +65,26 @@ export const PipelineStageManagement = ({ onBack }) => {
           <Button variant="ghost" size="sm" onClick={onBack} data-testid="stages-back-btn"><ArrowLeft className="h-4 w-4 mr-1" />Settings</Button>
           <div>
             <h2 className="text-2xl font-bold text-slate-900">Pipeline Stage Management</h2>
-            <p className="text-sm text-slate-500">Add, edit, reorder, and delete stages for Pre-Sales & Branch pipelines.</p>
+            <p className="text-sm text-slate-500">Add, edit, reorder, and delete stages for Pre-Sales, Branch, and Consultation pipelines.</p>
           </div>
         </div>
         <Button onClick={() => { setEditing(null); setForm({ name: "", color: PALETTE[Math.floor(Math.random() * PALETTE.length)], is_final: false }); setShowAdd(true); }} className="bg-orange-500 hover:bg-orange-600" data-testid="stages-add-btn"><Plus className="h-4 w-4 mr-1" />Add Stage</Button>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 sm:grid-cols-3">
         <div className="rounded-xl border-l-4 border-indigo-500 bg-white p-4 shadow-sm" data-testid="stages-kpi-presales"><p className="text-xs text-slate-500">Pre-Sales Stages</p><p className="text-3xl font-bold text-indigo-600">{counts.pre_sales}</p></div>
         <div className="rounded-xl border-l-4 border-green-500 bg-white p-4 shadow-sm" data-testid="stages-kpi-sales"><p className="text-xs text-slate-500">Branch Stages</p><p className="text-3xl font-bold text-green-600">{counts.sales}</p></div>
+        <div className="rounded-xl border-l-4 border-orange-500 bg-white p-4 shadow-sm" data-testid="stages-kpi-consultation"><p className="text-xs text-slate-500">Consultation Stages</p><p className="text-3xl font-bold text-orange-600">{counts.consultation}</p></div>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 rounded-lg bg-slate-100 p-1">
+      <div className="grid grid-cols-3 gap-2 rounded-lg bg-slate-100 p-1">
         <button onClick={() => setType("pre_sales")} className={`rounded-md py-2 text-sm font-semibold ${type === "pre_sales" ? "bg-white text-indigo-600 shadow" : "text-slate-500"}`} data-testid="stages-tab-presales">Pre-Sales ({counts.pre_sales})</button>
         <button onClick={() => setType("sales")} className={`rounded-md py-2 text-sm font-semibold ${type === "sales" ? "bg-white text-green-600 shadow" : "text-slate-500"}`} data-testid="stages-tab-sales">Branch Stages ({counts.sales})</button>
+        <button onClick={() => setType("consultation")} className={`rounded-md py-2 text-sm font-semibold ${type === "consultation" ? "bg-white text-orange-600 shadow" : "text-slate-500"}`} data-testid="stages-tab-consultation">Consultation ({counts.consultation})</button>
       </div>
 
       <Card data-testid="stages-list-card">
-        <CardHeader><CardTitle className="text-base">{type === "pre_sales" ? "Pre-Sales" : "Branch"} Pipeline Stages</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-base">{type === "pre_sales" ? "Pre-Sales" : type === "sales" ? "Branch" : "Consultation"} Pipeline Stages</CardTitle></CardHeader>
         <CardContent className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-left text-xs text-slate-500"><tr><th className="py-2">Order</th><th>Color</th><th>Stage Name</th><th>Leads</th><th>Final</th><th>Actions</th></tr></thead>

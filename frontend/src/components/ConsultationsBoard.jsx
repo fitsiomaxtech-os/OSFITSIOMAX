@@ -1,42 +1,29 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Calendar, MapPin, CheckCircle2, Package as PackageIcon, RefreshCw, XCircle, Search, Phone, User, Stethoscope, ShoppingBag, ClipboardList, Lock, Pencil, Dumbbell, X } from "lucide-react";
+import { Calendar, CheckCircle2, RefreshCw, XCircle, Search, Phone, Stethoscope, ShoppingBag, ClipboardList, Lock, Pencil, Dumbbell, X, Bell } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
+import { StageTabBar } from "@/components/ui/stage-tab";
 import {
   getConsultationsBoard, moveConsultationStage, listStoreItems, sellStoreItem,
   assignPackage, collectPackagePayment, savePhysioDiagnosis, unlockPhysioDiagnosis,
-  saveTreatmentSummary, unlockTreatmentSummary,
+  saveTreatmentSummary, unlockTreatmentSummary, stagesList,
+  scheduleConsultationFollowUp, rescheduleConsultationFollowUp,
 } from "@/lib/api";
 
 const PAYMENT_MODES = ["cash", "upi", "card", "bank_transfer"];
 
-const STAGES = [
-  "New Appointment",
-  "Clinic Visit",
-  "Package Chosen",
-  "Follow Up",
-  "Completed",
-  "Cancelled",
-];
-
-const STAGE_META = {
-  "New Appointment":  { hex: "#3b82f6", icon: Calendar },
-  "Clinic Visit":     { hex: "#8b5cf6", icon: MapPin },
-  "Package Chosen":   { hex: "#14b8a6", icon: PackageIcon },
-  "Follow Up":        { hex: "#f97316", icon: RefreshCw },
-  "Completed":        { hex: "#22c55e", icon: CheckCircle2 },
-  "Cancelled":        { hex: "#f43f5e", icon: XCircle },
-};
-
 export const ConsultationsBoard = ({ branchId, viewerRole }) => {
   const isConsultant = viewerRole === "head_physio";
   const [board, setBoard] = useState({ leads: [], stage_counts: {} });
+  const [stages, setStages] = useState([]); // dynamic Consultation Stages, from Super Admin > Pipeline Stage Management
   const [stageFilter, setStageFilter] = useState(null);
   const [search, setSearch] = useState("");
   const [selectedLead, setSelectedLead] = useState(null);
   const [storeItems, setStoreItems] = useState([]);
+  const [followUpDraft, setFollowUpDraft] = useState(null); // { date, time, remarks } | null
+  const [rescheduleDraft, setRescheduleDraft] = useState(null); // { followupId, date, time, reason } | null
   const [consultPick, setConsultPick] = useState({ item_id: "", mode: "offline", paid: "", payment_mode: "cash" });
   const [collectDraft, setCollectDraft] = useState({ amount: "", payment_mode: "cash" });
   const [selling, setSelling] = useState(false);
@@ -100,7 +87,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
 
   useEffect(() => {
     listStoreItems().then(setStoreItems).catch(() => setStoreItems([]));
+    stagesList("consultation").then(setStages).catch(() => setStages([]));
   }, []);
+
+  const stageColor = useCallback(
+    (name) => stages.find((s) => s.name === name)?.color || "#64748b",
+    [stages],
+  );
 
   useEffect(() => {
     setConsultPick({ item_id: "", mode: "offline", paid: "", payment_mode: "cash" });
@@ -110,6 +103,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
     setTreatmentDraft(selectedLead?.treatment_summary || "");
     setTreatmentEditing(!selectedLead?.treatment_summary);
     setShowSessionModal(false);
+    setFollowUpDraft(null);
+    setRescheduleDraft(null);
   }, [selectedLead?.id]);
 
   const consultationItems = storeItems.filter((i) => i.item_type !== "session");
@@ -125,7 +120,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
       setBoard((b) => {
         const leads = (b.leads || []).map((l) => l.id === lead.id ? { ...l, consultation_stage: updated.consultation_stage } : l);
         const stage_counts = {};
-        STAGES.forEach((s) => { stage_counts[s] = leads.filter((l) => l.consultation_stage === s).length; });
+        stages.forEach((s) => { stage_counts[s.name] = leads.filter((l) => l.consultation_stage === s.name).length; });
         return { ...b, leads, stage_counts };
       });
     } catch (err) {
@@ -137,7 +132,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
     setBoard((b) => {
       const leads = (b.leads || []).map((l) => l.id === updatedLead.id ? updatedLead : l);
       const stage_counts = {};
-      STAGES.forEach((s) => { stage_counts[s] = leads.filter((l) => l.consultation_stage === s).length; });
+      stages.forEach((s) => { stage_counts[s.name] = leads.filter((l) => l.consultation_stage === s.name).length; });
       return { ...b, leads, stage_counts };
     });
     setSelectedLead(updatedLead);
@@ -258,6 +253,16 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
 
   return (
     <div className="space-y-3" data-testid="consultations-board">
+      {/* Stage Head Bar — Pre-Sales / Branch Leads style sticky segmented tabs */}
+      <StageTabBar
+        stages={stages}
+        stageFilter={stageFilter}
+        setStageFilter={setStageFilter}
+        counts={board.stage_counts}
+        totalCount={(board.leads || []).length}
+        testid="cons-metric"
+      />
+
       {/* Search */}
       <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2">
         <Search className="h-4 w-4 text-slate-400" />
@@ -287,7 +292,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
             </thead>
             <tbody>
               {filtered.map((l) => {
-                const meta = STAGE_META[l.consultation_stage] || { hex: "#64748b", icon: User };
+                const hex = stageColor(l.consultation_stage);
                 return (
                   <tr key={l.id} onClick={() => setSelectedLead(l)} className="cursor-pointer border-t border-slate-100 hover:bg-slate-50" data-testid={`cons-row-${l.id}`}>
                     <td className="px-4 py-3 font-medium text-slate-800">{l.name || "—"}</td>
@@ -295,7 +300,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                     <td className="px-4 py-3">
                       <span
                         className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold"
-                        style={{ background: `${meta.hex}14`, color: meta.hex, border: `1px solid ${meta.hex}33` }}
+                        style={{ background: `${hex}14`, color: hex, border: `1px solid ${hex}33` }}
                       >
                         {l.consultation_stage || "—"}
                       </span>
@@ -425,28 +430,71 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
               <div>
                 <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-600">Move to Stage</p>
                 <div className="grid grid-cols-2 gap-1.5">
-                  {STAGES.map((s) => {
-                    const meta = STAGE_META[s];
-                    const active = selectedLead.consultation_stage === s;
+                  {stages.map((s) => {
+                    const active = selectedLead.consultation_stage === s.name;
+                    const hex = s.color || "#64748b";
                     return (
                       <button
-                        key={s}
-                        onClick={() => moveStage(selectedLead, s)}
+                        key={s.id}
+                        onClick={() => {
+                          if (s.name === "Follow Up") {
+                            const today = new Date();
+                            const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
+                            setFollowUpDraft({ date: tomorrow.toISOString().slice(0, 10), time: "10:00", remarks: "" });
+                            return;
+                          }
+                          moveStage(selectedLead, s.name);
+                        }}
                         disabled={active}
                         className="flex items-center justify-between rounded-lg border px-3 py-2 text-xs font-semibold transition disabled:opacity-100"
                         style={
                           active
-                            ? { background: meta.hex, color: "white", borderColor: meta.hex }
-                            : { background: `${meta.hex}10`, color: meta.hex, borderColor: `${meta.hex}33` }
+                            ? { background: hex, color: "white", borderColor: hex }
+                            : { background: `${hex}10`, color: hex, borderColor: `${hex}33` }
                         }
-                        data-testid={`cons-move-${s}`}
+                        data-testid={`cons-move-${s.name}`}
                       >
-                        <span>{s}</span>
+                        <span>{s.name}</span>
                         {active && <CheckCircle2 className="h-3 w-3" />}
                       </button>
                     );
                   })}
                 </div>
+
+                {(selectedLead.consultation_follow_ups || []).length > 0 && (
+                  <div className="mt-2 space-y-1.5" data-testid="cons-followups-list">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Follow-up History</p>
+                    {selectedLead.consultation_follow_ups.slice().reverse().map((f) => {
+                      const isActive = f.status !== "rescheduled";
+                      return (
+                        <div
+                          key={f.id}
+                          className={`flex items-start justify-between gap-3 rounded-lg border p-2.5 text-xs ${isActive ? "border-orange-200 bg-orange-50/60" : "border-slate-200 bg-slate-50 text-slate-400"}`}
+                          data-testid={`cons-followup-row-${f.id}`}
+                        >
+                          <div>
+                            <p className={`font-semibold ${isActive ? "text-orange-700" : "text-slate-400 line-through"}`}>{f.date} at {f.time}</p>
+                            {f.remarks && <p className="mt-0.5 text-slate-600">{f.remarks}</p>}
+                            {f.status === "rescheduled" && f.reschedule_reason && (
+                              <p className="mt-0.5 italic text-slate-400">Rescheduled: {f.reschedule_reason}</p>
+                            )}
+                          </div>
+                          {isActive && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 shrink-0 text-[11px]"
+                              onClick={() => setRescheduleDraft({ followupId: f.id, date: f.date, time: f.time, reason: "" })}
+                              data-testid={`cons-followup-reschedule-${f.id}`}
+                            >
+                              Reschedule
+                            </Button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
 
@@ -607,6 +655,148 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                   >
                     {selling ? "Submitting..." : "Submit"}
                   </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Schedule Follow-Up popup */}
+            {followUpDraft && (
+              <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-4" data-testid="cons-followup-modal">
+                <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
+                  <div className="flex items-center justify-between bg-gradient-to-r from-amber-500 to-orange-500 px-5 py-4 text-white">
+                    <div className="flex items-center gap-2">
+                      <Bell className="h-5 w-5" />
+                      <p className="text-base font-semibold">Schedule Follow-Up</p>
+                    </div>
+                    <button onClick={() => setFollowUpDraft(null)} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="cons-followup-close">
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                  <div className="space-y-4 p-5">
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-slate-600">Date *</label>
+                      <Input
+                        type="date"
+                        value={followUpDraft.date}
+                        min={new Date().toISOString().slice(0, 10)}
+                        onChange={(e) => setFollowUpDraft({ ...followUpDraft, date: e.target.value })}
+                        data-testid="cons-followup-date"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-slate-600">Time *</label>
+                      <Input
+                        type="time"
+                        value={followUpDraft.time}
+                        onChange={(e) => setFollowUpDraft({ ...followUpDraft, time: e.target.value })}
+                        data-testid="cons-followup-time"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-slate-600">Remarks</label>
+                      <textarea
+                        rows={3}
+                        className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-amber-400 focus:outline-none focus:ring-1 focus:ring-amber-400"
+                        placeholder="What to discuss in the next follow-up..."
+                        value={followUpDraft.remarks}
+                        onChange={(e) => setFollowUpDraft({ ...followUpDraft, remarks: e.target.value })}
+                        data-testid="cons-followup-remarks"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/40 px-5 py-3">
+                    <Button variant="outline" onClick={() => setFollowUpDraft(null)} data-testid="cons-followup-cancel">Cancel</Button>
+                    <Button
+                      className="bg-amber-500 text-white hover:bg-amber-600"
+                      onClick={async () => {
+                        if (!followUpDraft.date || !followUpDraft.time) {
+                          toast.error("Date and time are required");
+                          return;
+                        }
+                        try {
+                          const updated = await scheduleConsultationFollowUp(selectedLead.id, followUpDraft);
+                          applyUpdatedLead(updated);
+                          setFollowUpDraft(null);
+                          toast.success(`Follow-up scheduled for ${followUpDraft.date} at ${followUpDraft.time}`);
+                        } catch (e) { toast.error(e?.response?.data?.detail || "Failed to schedule"); }
+                      }}
+                      data-testid="cons-followup-save"
+                    >
+                      <CheckCircle2 className="mr-1 h-4 w-4" /> Save & Move to Follow Up
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Reschedule Follow-Up popup */}
+            {rescheduleDraft && (
+              <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-4" data-testid="cons-reschedule-modal">
+                <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
+                  <div className="flex items-center justify-between bg-gradient-to-r from-amber-500 to-orange-500 px-5 py-4 text-white">
+                    <div className="flex items-center gap-2">
+                      <Bell className="h-5 w-5" />
+                      <p className="text-base font-semibold">Reschedule Follow-Up</p>
+                    </div>
+                    <button onClick={() => setRescheduleDraft(null)} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="cons-reschedule-close">
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                  <div className="space-y-4 p-5">
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-slate-600">New Date *</label>
+                      <Input
+                        type="date"
+                        value={rescheduleDraft.date}
+                        min={new Date().toISOString().slice(0, 10)}
+                        onChange={(e) => setRescheduleDraft({ ...rescheduleDraft, date: e.target.value })}
+                        data-testid="cons-reschedule-date"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-slate-600">New Time *</label>
+                      <Input
+                        type="time"
+                        value={rescheduleDraft.time}
+                        onChange={(e) => setRescheduleDraft({ ...rescheduleDraft, time: e.target.value })}
+                        data-testid="cons-reschedule-time"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-slate-600">Reason for Reschedule *</label>
+                      <textarea
+                        rows={3}
+                        className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-amber-400 focus:outline-none focus:ring-1 focus:ring-amber-400"
+                        placeholder="Why is this being rescheduled..."
+                        value={rescheduleDraft.reason}
+                        onChange={(e) => setRescheduleDraft({ ...rescheduleDraft, reason: e.target.value })}
+                        data-testid="cons-reschedule-reason"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/40 px-5 py-3">
+                    <Button variant="outline" onClick={() => setRescheduleDraft(null)} data-testid="cons-reschedule-cancel">Cancel</Button>
+                    <Button
+                      className="bg-amber-500 text-white hover:bg-amber-600"
+                      onClick={async () => {
+                        if (!rescheduleDraft.date || !rescheduleDraft.time || !rescheduleDraft.reason.trim()) {
+                          toast.error("Date, time and reason are required");
+                          return;
+                        }
+                        try {
+                          const updated = await rescheduleConsultationFollowUp(selectedLead.id, rescheduleDraft.followupId, {
+                            date: rescheduleDraft.date, time: rescheduleDraft.time, reason: rescheduleDraft.reason,
+                          });
+                          applyUpdatedLead(updated);
+                          setRescheduleDraft(null);
+                          toast.success(`Follow-up rescheduled to ${rescheduleDraft.date} at ${rescheduleDraft.time}`);
+                        } catch (e) { toast.error(e?.response?.data?.detail || "Failed to reschedule"); }
+                      }}
+                      data-testid="cons-reschedule-save"
+                    >
+                      <CheckCircle2 className="mr-1 h-4 w-4" /> Reschedule
+                    </Button>
+                  </div>
                 </div>
               </div>
             )}

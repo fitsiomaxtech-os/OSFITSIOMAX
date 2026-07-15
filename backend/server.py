@@ -5,7 +5,7 @@ import os
 import logging
 
 from database import client
-from seed import ensure_v1_seed_data, v2_seed, v3_seed, migrate_branch_stages, deactivate_legacy_demo_admin, sync_head_physio_doctors
+from seed import ensure_v1_seed_data, v2_seed, v3_seed, migrate_branch_stages, migrate_consultation_stages, deactivate_legacy_demo_admin, sync_head_physio_doctors
 from routers.v3_google_sheets import start_auto_sync_scheduler
 from routers import v1, v2, v3_auth, v3_config, v3_leads, v3_branch_admin, v3_appointments, v3_sheets, v3_dashboard, v3_head_physio, v3_finance, v3_head_physio_board, v3_physio_board, v3_session_assign, v3_patient_view, v3_marketing, v3_stages, v3_hr, v3_lead_fields, v3_branch_mgmt, v3_google_sheets, v3_packages, v3_public_super_admin, v3_password_reset, v3_store
 
@@ -57,6 +57,7 @@ async def startup_seed_data():
     await v3_seed()
     await deactivate_legacy_demo_admin()
     await migrate_branch_stages()
+    await migrate_consultation_stages()
     await sync_head_physio_doctors()
     start_auto_sync_scheduler()
 

@@ -2,7 +2,7 @@ import uuid
 from database import db, v2_col, v3_col
 from utils import now_iso
 from security import hash_password
-from constants import V3_VERTICALS, V3_BRANCH_STAGES, V3_STAGES
+from constants import V3_VERTICALS, V3_BRANCH_STAGES, V3_STAGES, V3_CONSULTATION_STAGES
 
 
 # Maps deprecated branch_stage labels (legacy 8-stage flow) to the new flow.
@@ -91,6 +91,47 @@ async def migrate_branch_stages() -> None:
                 "type": "pre_sales",
                 "order": idx,
                 "is_final": name == "Appointment",
+                "created_at": now_iso(),
+            })
+        if docs:
+            await v3_col("pipeline_stages").insert_many(docs)
+
+
+# Maps deprecated consultation_stage labels (legacy 6-stage flow) to the new 7-stage flow.
+# Idempotent: runs every startup; only touches leads with a legacy value.
+_LEGACY_CONSULTATION_STAGE_MAP = {
+    "Clinic Visit": "Consultation Visit",
+    "Package Chosen": "Treatment Fee",
+    "Completed": "Treatment Fee",
+    "Cancelled": "Cancel",
+}
+
+
+async def migrate_consultation_stages() -> None:
+    """Map legacy consultation_stage values to the new flow and (re)seed pipeline_stages
+    of type=consultation. Safe to re-run."""
+    for old, new in _LEGACY_CONSULTATION_STAGE_MAP.items():
+        await v3_col("leads").update_many(
+            {"consultation_stage": old},
+            {"$set": {"consultation_stage": new, "updated_at": now_iso()}},
+        )
+    legacy = await v3_col("pipeline_stages").find(
+        {"type": "consultation", "name": {"$in": list(_LEGACY_CONSULTATION_STAGE_MAP.keys())}},
+        {"_id": 0, "id": 1},
+    ).to_list(50)
+    existing_count = await v3_col("pipeline_stages").count_documents({"type": "consultation"})
+    if legacy or existing_count == 0:
+        await v3_col("pipeline_stages").delete_many({"type": "consultation"})
+        CONSULTATION_COLORS = ["#3b82f6", "#f43f5e", "#f97316", "#8b5cf6", "#14b8a6", "#22c55e", "#64748b"]
+        docs = []
+        for idx, name in enumerate(V3_CONSULTATION_STAGES):
+            docs.append({
+                "id": str(uuid.uuid4()),
+                "name": name,
+                "color": CONSULTATION_COLORS[idx % len(CONSULTATION_COLORS)],
+                "type": "consultation",
+                "order": idx,
+                "is_final": name in ("Treatment Fee", "Cancel"),
                 "created_at": now_iso(),
             })
         if docs:

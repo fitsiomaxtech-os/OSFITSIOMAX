@@ -27,6 +27,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
+import { StageTabBar } from "@/components/ui/stage-tab";
 import {
   addLeadRemark,
   assignPhysio,
@@ -188,33 +189,14 @@ export const BranchAdminBoard = ({ branchId }) => {
           </div>
 
           {/* Stage Head Bar — Pre-Sales style sticky segmented tabs */}
-          <div className="sticky top-[88px] z-10 -mx-1 rounded-xl border border-slate-200 bg-white/95 p-1 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/80" data-testid="branch-metrics">
-            <div className="flex flex-nowrap gap-1">
-              <BranchStageTab
-                label="All Stages"
-                count={totalLeads}
-                active={stageFilter === null}
-                onClick={() => setStageFilter(null)}
-                color="#0ea5e9"
-                testid="branch-metric-total"
-              />
-              {stages.map((s) => {
-                const stage = s.name;
-                const isActive = stageFilter === stage;
-                return (
-                  <BranchStageTab
-                    key={s.id}
-                    label={stage}
-                    count={boardData.stage_counts?.[stage] || 0}
-                    active={isActive}
-                    onClick={() => setStageFilter(isActive ? null : stage)}
-                    color={s.color || "#64748b"}
-                    testid={`branch-metric-${stage}`}
-                  />
-                );
-              })}
-            </div>
-          </div>
+          <StageTabBar
+            stages={stages}
+            stageFilter={stageFilter}
+            setStageFilter={setStageFilter}
+            counts={boardData.stage_counts}
+            totalCount={totalLeads}
+            testid="branch-metric"
+          />
 
           {/* Toolbar */}
           <div className="flex items-center gap-3" data-testid="branch-toolbar">
@@ -326,26 +308,6 @@ export const BranchAdminBoard = ({ branchId }) => {
         <div className="fixed bottom-4 right-4 rounded-md bg-slate-900 px-3 py-2 text-sm text-white">Loading...</div>
       )}
     </div>
-  );
-};
-
-const BranchStageTab = ({ label, count, active, onClick, color, testid }) => {
-  const tint = color || "#0ea5e9";
-  return (
-    <button
-      onClick={onClick}
-      data-testid={testid}
-      type="button"
-      className="relative flex min-w-0 flex-1 flex-col items-center justify-center rounded-lg px-3 py-2.5 text-center transition-all hover:shadow-sm"
-      style={
-        active
-          ? { background: tint, color: "#ffffff", boxShadow: `0 2px 8px ${tint}40` }
-          : { background: `${tint}14`, color: tint, border: `1px solid ${tint}33` }
-      }
-    >
-      <span className="text-[11px] font-semibold uppercase tracking-wider leading-tight">{label}</span>
-      <span className="mt-0.5 text-lg font-bold leading-none">{count}</span>
-    </button>
   );
 };
 

@@ -31,9 +31,10 @@ V3_BRANCH_STAGES = [
 
 V3_CONSULTATION_STAGES = [
     "New Appointment",
-    "Clinic Visit",
-    "Package Chosen",
+    "RNR",
     "Follow Up",
-    "Completed",
-    "Cancelled",
+    "Consultation Visit",
+    "Consultation Fee",
+    "Treatment Fee",
+    "Cancel",
 ]

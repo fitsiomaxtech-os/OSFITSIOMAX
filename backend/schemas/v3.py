@@ -215,6 +215,8 @@ class V3LeadOut(BaseModel):
     rnr_last_attempt_at: Optional[str] = None
     follow_ups: Optional[List[Dict[str, Any]]] = []
     next_follow_up_at: Optional[str] = None
+    consultation_follow_ups: Optional[List[Dict[str, Any]]] = []
+    next_consultation_follow_up_at: Optional[str] = None
     appointment_mode: Optional[str] = None  # "offline" | "online"
     appointment_department: Optional[str] = None  # "physio" | "fitness" — chosen when scheduling the appointment
     appointment_date: Optional[str] = None
