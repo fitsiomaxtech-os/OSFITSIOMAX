@@ -612,10 +612,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                     const item = sessionItems.find((i) => i.id === sessionDraft.item_id);
                     if (!item) return null;
                     const baseSessions = sessionDraft.mode === "online" ? item.sessions_online : item.sessions_offline;
-                    const basePrice = sessionDraft.mode === "online" ? item.price_online : item.price_offline;
-                    const perSession = baseSessions ? basePrice / baseSessions : 0;
-                    const sessionsNum = parseInt(sessionDraft.sessions, 10) || 0;
-                    const total = Math.round(perSession * sessionsNum);
                     return (
                       <>
                         <div className="flex gap-1.5">
@@ -642,7 +638,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                             data-testid="cons-session-count-input"
                           />
                         </div>
-                        <p className="text-xs text-violet-700">Rs.{perSession.toFixed(0)}/session · <span className="font-semibold">Total Rs.{total}</span></p>
                       </>
                     );
                   })()}
