@@ -114,7 +114,7 @@ export const BranchAdminBoard = ({ branchId }) => {
   };
 
   const VIEW_TABS = [
-    { key: "pipeline", label: "Appointment Lead", icon: LayoutDashboard },
+    { key: "pipeline", label: "Branch Leads", icon: LayoutDashboard },
     { key: "consultations", label: "Consultations", icon: Stethoscope },
     { key: "sessions", label: "Treatment Sessions", icon: CalendarRange },
     { key: "rehab", label: "Rehab", icon: Activity },
@@ -183,7 +183,7 @@ export const BranchAdminBoard = ({ branchId }) => {
       ) : (
         <>
           <div data-testid="branch-pipeline-header">
-            <h2 className="text-2xl font-bold text-slate-900">Appointment Lead</h2>
+            <h2 className="text-2xl font-bold text-slate-900">Branch Leads</h2>
             <p className="text-sm text-slate-500">Track patients from first appointment through to their stage in your branch.</p>
           </div>
 
