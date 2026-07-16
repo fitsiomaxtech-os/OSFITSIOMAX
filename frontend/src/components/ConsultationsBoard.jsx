@@ -513,7 +513,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
             {!isConsultant && (
               <div>
                 <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-600">Move to Stage</p>
-                <div className="flex flex-col gap-1.5">
+                <div className="flex flex-wrap gap-1.5">
                   {stages.map((s) => {
                     const active = selectedLead.consultation_stage === s.name;
                     const hex = s.color || "#64748b";
