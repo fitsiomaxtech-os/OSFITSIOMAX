@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { StageTabBar } from "@/components/ui/stage-tab";
 import {
-  getConsultationsBoard, moveConsultationStage, listStoreItems, sellStoreItem,
+  getConsultationsBoard, moveConsultationStage, moveHeadConsultationStage, listStoreItems, sellStoreItem,
   assignPackage, collectPackagePayment, savePhysioDiagnosis, unlockPhysioDiagnosis,
   saveTreatmentSummary, unlockTreatmentSummary, stagesList, getDoctors,
   assignConsultationPhysio,
@@ -17,6 +17,9 @@ const PAYMENT_MODES = ["cash", "upi", "card", "bank_transfer"];
 
 export const ConsultationsBoard = ({ branchId, viewerRole }) => {
   const isConsultant = viewerRole === "head_physio";
+  // Head Physio tracks progress on their own independent pipeline (head_consultation_stage),
+  // fully separate from Branch's own consultation_stage pipeline.
+  const stageField = isConsultant ? "head_consultation_stage" : "consultation_stage";
   const [board, setBoard] = useState({ leads: [], stage_counts: {} });
   const [stages, setStages] = useState([]); // dynamic Consultation Stages, from Super Admin > Pipeline Stage Management
   const [stageFilter, setStageFilter] = useState(null);
@@ -84,18 +87,26 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
 
   const filtered = useMemo(() => {
     let rows = board.leads || [];
-    if (stageFilter) rows = rows.filter((l) => l.consultation_stage === stageFilter);
+    if (stageFilter) rows = rows.filter((l) => l[stageField] === stageFilter);
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       rows = rows.filter((l) => `${l.name || ""} ${l.phone || ""}`.toLowerCase().includes(q));
     }
     return rows;
-  }, [board.leads, stageFilter, search]);
+  }, [board.leads, stageFilter, search, stageField]);
+
+  // Stage counts for the head bar — derived client-side from the current lead list so they
+  // always match whichever pipeline (branch vs. head physio) is active for this viewer.
+  const derivedStageCounts = useMemo(() => {
+    const counts = {};
+    stages.forEach((s) => { counts[s.name] = (board.leads || []).filter((l) => l[stageField] === s.name).length; });
+    return counts;
+  }, [board.leads, stages, stageField]);
 
   useEffect(() => {
     listStoreItems().then(setStoreItems).catch(() => setStoreItems([]));
-    stagesList("consultation").then(setStages).catch(() => setStages([]));
-  }, []);
+    stagesList(isConsultant ? "head_consultation" : "consultation").then(setStages).catch(() => setStages([]));
+  }, [isConsultant]);
 
   const stageColor = useCallback(
     (name) => stages.find((s) => s.name === name)?.color || "#64748b",
@@ -125,26 +136,27 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
       const updated = await moveConsultationStage(lead.id, next);
       toast.success(`${lead.name || "Lead"} moved → ${next}`);
       setSelectedLead(null);
-      // Optimistic update
-      setBoard((b) => {
-        const leads = (b.leads || []).map((l) => l.id === lead.id ? { ...l, consultation_stage: updated.consultation_stage } : l);
-        const stage_counts = {};
-        stages.forEach((s) => { stage_counts[s.name] = leads.filter((l) => l.consultation_stage === s.name).length; });
-        return { ...b, leads, stage_counts };
-      });
+      setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === lead.id ? { ...l, consultation_stage: updated.consultation_stage } : l) }));
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Move failed");
     }
   };
 
   const applyUpdatedLead = (updatedLead) => {
-    setBoard((b) => {
-      const leads = (b.leads || []).map((l) => l.id === updatedLead.id ? updatedLead : l);
-      const stage_counts = {};
-      stages.forEach((s) => { stage_counts[s.name] = leads.filter((l) => l.consultation_stage === s.name).length; });
-      return { ...b, leads, stage_counts };
-    });
+    setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === updatedLead.id ? updatedLead : l) }));
     setSelectedLead(updatedLead);
+  };
+
+  // ---- Head Physio's own consultation pipeline (independent from Branch's) ----
+  const moveHeadStage = async (lead, next) => {
+    if (next === lead.head_consultation_stage) return;
+    try {
+      const res = await moveHeadConsultationStage(lead.id, next);
+      toast.success(`Moved → ${next}`);
+      applyUpdatedLead(res.lead);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Move failed");
+    }
   };
 
   const sellConsultation = async () => {
@@ -292,7 +304,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
         stages={stages}
         stageFilter={stageFilter}
         setStageFilter={setStageFilter}
-        counts={board.stage_counts}
+        counts={derivedStageCounts}
         totalCount={(board.leads || []).length}
         testid="cons-metric"
       />
@@ -318,7 +330,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
               <tr>
                 <th className="px-4 py-2 text-left">Patient</th>
                 <th className="px-4 py-2 text-left">Phone</th>
-                <th className="px-4 py-2 text-left">Consultation Stage</th>
+                <th className="px-4 py-2 text-left">{isConsultant ? "Head Consultation Stage" : "Consultation Stage"}</th>
                 <th className="px-4 py-2 text-left">Assigned Expert</th>
                 <th className="px-4 py-2 text-left">Appointment</th>
                 <th className="px-4 py-2 text-left">Updated</th>
@@ -326,7 +338,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
             </thead>
             <tbody>
               {filtered.map((l) => {
-                const hex = stageColor(l.consultation_stage);
+                const hex = stageColor(l[stageField]);
                 return (
                   <tr key={l.id} onClick={() => setSelectedLead(l)} className="cursor-pointer border-t border-slate-100 hover:bg-slate-50" data-testid={`cons-row-${l.id}`}>
                     <td className="px-4 py-3 font-medium text-slate-800">{l.name || "—"}</td>
@@ -336,7 +348,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                         className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold"
                         style={{ background: `${hex}14`, color: hex, border: `1px solid ${hex}33` }}
                       >
-                        {l.consultation_stage || "—"}
+                        {l[stageField] || "—"}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-slate-600">{l.assigned_physio_name || "—"}</td>
@@ -460,10 +472,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
               </div>
             </div>
 
-            {/* Consultation Visit — doctor-only, gated to the appointment date */}
+            {/* Consultation Visit — doctor-only, gated to the appointment date. Tracked on the
+                Head Physio's own independent pipeline (head_consultation_stage). */}
             {isConsultant && (() => {
-              const stage = selectedLead.consultation_stage || "New Appointment";
-              const visitDone = !["New Appointment", "RNR", "Follow Up"].includes(stage);
+              const stage = selectedLead.head_consultation_stage || "New Appointment";
+              const visitDone = stage !== "New Appointment";
               const isAppointmentToday = selectedLead.appointment_date === new Date().toISOString().slice(0, 10);
               return (
                 <div className="rounded-lg border border-sky-200 bg-sky-50 p-3" data-testid="cons-visit-panel">
@@ -485,7 +498,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                         size="sm"
                         className="mt-2 w-full bg-sky-600 hover:bg-sky-700 text-xs"
                         disabled={!isAppointmentToday}
-                        onClick={() => moveStage(selectedLead, "Consultation Visit")}
+                        onClick={() => moveHeadStage(selectedLead, "Consultation Visit")}
                         data-testid="cons-visit-btn"
                       >
                         Mark Consultation Visit
@@ -498,8 +511,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
 
             {/* Consultation Pack — doctor chooses a treatment package once the visit is marked (no price shown) */}
             {isConsultant && (() => {
-              const stage = selectedLead.consultation_stage || "New Appointment";
-              const visitDone = !["New Appointment", "RNR", "Follow Up"].includes(stage);
+              const stage = selectedLead.head_consultation_stage || "New Appointment";
+              const visitDone = stage !== "New Appointment";
               if (!visitDone) return null;
               const packDone = !!selectedLead.package_id;
               return (
@@ -529,8 +542,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
 
             {/* Physio Assign — doctor picks an available physio to deliver the package */}
             {isConsultant && selectedLead.package_id && (() => {
-              const stage = selectedLead.consultation_stage || "New Appointment";
-              const physioAssignDone = ["Physio Assign", "Consultation Fee", "Treatment Fee"].includes(stage);
+              const stage = selectedLead.head_consultation_stage || "New Appointment";
+              const physioAssignDone = stage === "Physio Assign";
               return (
                 <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3" data-testid="cons-physio-assign-panel">
                   <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-emerald-700">
@@ -625,7 +638,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                   {stages.map((s, idx) => {
                     const active = selectedLead.consultation_stage === s.name;
                     const hex = s.color || "#64748b";
-                    const doctorOnly = s.name === "Consultation Visit" && viewerRole === "branch_admin";
                     return (
                       <Fragment key={s.id}>
                         <button
@@ -638,21 +650,17 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                             }
                             moveStage(selectedLead, s.name);
                           }}
-                          disabled={active || doctorOnly}
-                          title={doctorOnly ? "Only the consulting doctor can mark Consultation Visit, on the appointment date" : undefined}
+                          disabled={active}
                           className="flex flex-1 basis-32 items-center justify-center gap-1 rounded-lg border px-2 py-2 text-center text-[11px] font-semibold leading-tight transition disabled:opacity-100"
                           style={
                             active
                               ? { background: hex, color: "white", borderColor: hex }
-                              : doctorOnly
-                                ? { background: "#f1f5f9", color: "#94a3b8", borderColor: "#e2e8f0" }
-                                : { background: `${hex}10`, color: hex, borderColor: `${hex}33` }
+                              : { background: `${hex}10`, color: hex, borderColor: `${hex}33` }
                           }
                           data-testid={`cons-move-${s.name}`}
                         >
                           <span className="whitespace-nowrap">{s.name}</span>
                           {active && <CheckCircle2 className="h-3 w-3 shrink-0" />}
-                          {doctorOnly && <Lock className="h-3 w-3 shrink-0" />}
                         </button>
                         {idx < stages.length - 1 && (
                           <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-300" />

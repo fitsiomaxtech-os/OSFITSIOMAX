@@ -6,7 +6,7 @@ import uuid
 from database import v3_col
 from utils import now_iso
 from deps import v3_require_roles, v3_current_user
-from constants import V3_STAGES, V3_BRANCH_STAGES, V3_CONSULTATION_STAGES
+from constants import V3_STAGES, V3_BRANCH_STAGES, V3_CONSULTATION_STAGES, V3_HEAD_CONSULTATION_STAGES
 from schemas.v3 import V3UserOut
 
 
@@ -17,14 +17,20 @@ PRESALES_COLORS = ["#6366f1", "#ef4444", "#f97316", "#f59e0b", "#a855f7", "#22c5
 SALES_COLORS = ["#0ea5e9", "#06b6d4", "#14b8a6", "#22c55e", "#84cc16", "#eab308", "#f59e0b", "#f97316",
                 "#ef4444", "#ec4899", "#a855f7", "#6366f1"]
 CONSULTATION_COLORS = ["#3b82f6", "#f43f5e", "#f97316", "#8b5cf6", "#14b8a6", "#22c55e", "#64748b"]
+HEAD_CONSULTATION_COLORS = ["#3b82f6", "#0ea5e9", "#8b5cf6", "#a855f7"]
 
-STAGE_TYPE_FIELD = {"pre_sales": "stage", "sales": "branch_stage", "consultation": "consultation_stage"}
+STAGE_TYPE_FIELD = {
+    "pre_sales": "stage",
+    "sales": "branch_stage",
+    "consultation": "consultation_stage",
+    "head_consultation": "head_consultation_stage",
+}
 
 
 class StageCreate(BaseModel):
     name: str
     color: Optional[str] = "#64748b"
-    type: Literal["pre_sales", "sales", "consultation"]
+    type: Literal["pre_sales", "sales", "consultation", "head_consultation"]
     is_final: Optional[bool] = False
 
 
@@ -73,12 +79,22 @@ async def _ensure_seed() -> None:
             "is_final": name in ("Treatment Fee", "Cancel"),
             "created_at": now_iso(),
         })
+    for idx, name in enumerate(V3_HEAD_CONSULTATION_STAGES):
+        docs.append({
+            "id": str(uuid.uuid4()),
+            "name": name,
+            "color": HEAD_CONSULTATION_COLORS[idx % len(HEAD_CONSULTATION_COLORS)],
+            "type": "head_consultation",
+            "order": idx,
+            "is_final": name in ("Physio Assign",),
+            "created_at": now_iso(),
+        })
     if docs:
         await v3_col("pipeline_stages").insert_many(docs)
 
 
 @router.get("")
-async def list_stages(type: Optional[Literal["pre_sales", "sales", "consultation"]] = None, _: V3UserOut = Depends(v3_current_user)):
+async def list_stages(type: Optional[Literal["pre_sales", "sales", "consultation", "head_consultation"]] = None, _: V3UserOut = Depends(v3_current_user)):
     await _ensure_seed()
     query = {"type": type} if type else {}
     rows = await v3_col("pipeline_stages").find(query, {"_id": 0}).sort([("type", 1), ("order", 1)]).to_list(500)

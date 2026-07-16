@@ -40,3 +40,12 @@ V3_CONSULTATION_STAGES = [
     "Treatment Fee",
     "Cancel",
 ]
+
+# Standalone Head Physio consultation pipeline — fully independent from the
+# Branch's V3_CONSULTATION_STAGES above (separate lead field, separate stage type).
+V3_HEAD_CONSULTATION_STAGES = [
+    "New Appointment",
+    "Consultation Visit",
+    "Consultation Pack",
+    "Physio Assign",
+]

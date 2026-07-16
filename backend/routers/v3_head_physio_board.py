@@ -1,14 +1,26 @@
 from fastapi import APIRouter, HTTPException, Depends
 from typing import Optional
 from pydantic import BaseModel
+from datetime import date as dt_date
 import uuid
 
 from database import v3_col
 from utils import now_iso
 from deps import v3_current_user, v3_require_roles
+from constants import V3_HEAD_CONSULTATION_STAGES
 from schemas.v3 import V3UserOut, V3PackageRecommendInput, V3HeadPhysioReviewInput, V3LeadOut
 
 router = APIRouter(prefix="/api/v3")
+
+
+async def _head_consultation_stage_names() -> list:
+    """Live Head Consultation stages as configured in Super Admin > Pipeline Stage
+    Management, falling back to the built-in defaults if none have been configured yet."""
+    rows = await v3_col("pipeline_stages").find(
+        {"type": "head_consultation"}, {"_id": 0, "name": 1}
+    ).sort("order", 1).to_list(50)
+    names = [r["name"] for r in rows]
+    return names or V3_HEAD_CONSULTATION_STAGES
 
 
 async def _resolve_hp_doctor(user: V3UserOut) -> Optional[dict]:
@@ -200,6 +212,50 @@ class V3ConsultationPhysioAssignInput(BaseModel):
     physio_id: str
 
 
+class V3HeadConsultationStageMoveInput(BaseModel):
+    head_consultation_stage: str
+
+
+@router.post("/leads/{lead_id}/move-head-consultation-stage", response_model=dict)
+async def hp_move_head_consultation_stage(
+    lead_id: str,
+    payload: V3HeadConsultationStageMoveInput,
+    user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin")),
+):
+    """Move a lead through the Head Physio's own consultation pipeline
+    (head_consultation_stage) — fully independent from Branch's consultation_stage."""
+    stage_names = await _head_consultation_stage_names()
+    if payload.head_consultation_stage not in stage_names:
+        raise HTTPException(status_code=400, detail=f"Invalid head_consultation_stage. Allowed: {stage_names}")
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    if payload.head_consultation_stage == "Consultation Visit" and user.role != "super_admin":
+        if lead.get("appointment_date") != dt_date.today().isoformat():
+            raise HTTPException(
+                status_code=400,
+                detail="Consultation Visit can only be marked on the patient's scheduled appointment date.",
+            )
+
+    previous = lead.get("head_consultation_stage") or "—"
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": {
+        "head_consultation_stage": payload.head_consultation_stage,
+        "updated_at": now_iso(),
+    }})
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": lead_id,
+        "action": "head_consultation_stage_moved",
+        "details": f"Head Consultation: {previous} → {payload.head_consultation_stage}",
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": now_iso(),
+    })
+    updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    return {"message": "Stage moved", "lead": V3LeadOut(**updated).model_dump()}
+
+
 @router.post("/leads/{lead_id}/assign-consultation-physio")
 async def hp_assign_consultation_physio(
     lead_id: str,
@@ -207,7 +263,7 @@ async def hp_assign_consultation_physio(
     user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin")),
 ):
     """Consultant picks the available physio who will deliver the assigned package's
-    treatment sessions, moving the lead into the 'Physio Assign' consultation stage."""
+    treatment sessions, moving the lead into the 'Physio Assign' head consultation stage."""
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -220,7 +276,7 @@ async def hp_assign_consultation_physio(
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {
         "assigned_physio_id": physio["id"],
         "assigned_physio_name": physio["full_name"],
-        "consultation_stage": "Physio Assign",
+        "head_consultation_stage": "Physio Assign",
         "updated_at": now_iso(),
     }})
     await v3_col("lead_activity").insert_one({

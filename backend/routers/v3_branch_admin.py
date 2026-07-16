@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime, date as dt_date, timedelta
+from datetime import datetime, timedelta
 from calendar import monthrange
 import uuid
 
@@ -239,18 +239,6 @@ async def v3_move_consultation_stage(lead_id: str, payload: V3ConsultationStageI
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-
-    if payload.consultation_stage == "Consultation Visit" and user.role != "super_admin":
-        if user.role != "head_physio":
-            raise HTTPException(
-                status_code=403,
-                detail="Only the consulting doctor can move a patient to Consultation Visit.",
-            )
-        if lead.get("appointment_date") != dt_date.today().isoformat():
-            raise HTTPException(
-                status_code=400,
-                detail="Consultation Visit can only be marked on the patient's scheduled appointment date.",
-            )
 
     previous = lead.get("consultation_stage") or "—"
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {

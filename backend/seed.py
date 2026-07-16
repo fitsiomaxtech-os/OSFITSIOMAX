@@ -2,7 +2,7 @@ import uuid
 from database import db, v2_col, v3_col
 from utils import now_iso
 from security import hash_password
-from constants import V3_VERTICALS, V3_BRANCH_STAGES, V3_STAGES, V3_CONSULTATION_STAGES
+from constants import V3_VERTICALS, V3_BRANCH_STAGES, V3_STAGES, V3_CONSULTATION_STAGES, V3_HEAD_CONSULTATION_STAGES
 
 
 # Maps deprecated branch_stage labels (legacy 8-stage flow) to the new flow.
@@ -169,6 +169,29 @@ async def migrate_consultation_stages() -> None:
             "is_final": False,
             "created_at": now_iso(),
         } for idx, (name, color) in enumerate(new_stage_specs)]
+        await v3_col("pipeline_stages").insert_many(docs)
+
+
+async def migrate_head_consultation_stages() -> None:
+    """Seed the standalone Head Physio consultation pipeline (type=head_consultation,
+    lead field=head_consultation_stage) — fully independent from Branch's own
+    consultation_stage pipeline. Safe to re-run; only seeds once."""
+    existing_count = await v3_col("pipeline_stages").count_documents({"type": "head_consultation"})
+    if existing_count > 0:
+        return
+    HEAD_CONSULTATION_COLORS = ["#3b82f6", "#0ea5e9", "#8b5cf6", "#a855f7"]
+    docs = []
+    for idx, name in enumerate(V3_HEAD_CONSULTATION_STAGES):
+        docs.append({
+            "id": str(uuid.uuid4()),
+            "name": name,
+            "color": HEAD_CONSULTATION_COLORS[idx % len(HEAD_CONSULTATION_COLORS)],
+            "type": "head_consultation",
+            "order": idx,
+            "is_final": name in ("Physio Assign",),
+            "created_at": now_iso(),
+        })
+    if docs:
         await v3_col("pipeline_stages").insert_many(docs)
 
 

@@ -174,6 +174,7 @@ class V3LeadOut(BaseModel):
     stage: str
     branch_stage: Optional[str] = None
     consultation_stage: Optional[str] = None
+    head_consultation_stage: Optional[str] = None  # Head Physio's own pipeline, independent from consultation_stage
     branch_id: Optional[str] = None
     notes: Optional[str] = ""
     extra_fields: Dict[str, Any]
@@ -338,6 +339,10 @@ class V3BranchStageInput(BaseModel):
 
 class V3ConsultationStageInput(BaseModel):
     consultation_stage: str
+
+
+class V3HeadConsultationStageInput(BaseModel):
+    head_consultation_stage: str
 
 
 class V3CollectFeeInput(BaseModel):
