@@ -137,6 +137,40 @@ async def migrate_consultation_stages() -> None:
         if docs:
             await v3_col("pipeline_stages").insert_many(docs)
 
+    # Additive: make sure newer consultation stages (added after the initial seed) exist too,
+    # without disturbing any Super Admin edits (color/order/rename) made to the existing ones.
+    existing_names = set(await v3_col("pipeline_stages").find(
+        {"type": "consultation"}, {"_id": 0, "name": 1}
+    ).distinct("name"))
+    new_stage_specs = [(name, color) for name, color in
+                        [("Consultation Pack", "#0ea5e9"), ("Physio Assign", "#a855f7")]
+                        if name not in existing_names]
+    if new_stage_specs:
+        anchor = await v3_col("pipeline_stages").find_one(
+            {"type": "consultation", "name": "Consultation Visit"}, {"_id": 0, "order": 1}
+        )
+        if anchor is not None:
+            await v3_col("pipeline_stages").update_many(
+                {"type": "consultation", "order": {"$gt": anchor["order"]}},
+                {"$inc": {"order": len(new_stage_specs)}},
+            )
+            base_order = anchor["order"] + 1
+        else:
+            last = await v3_col("pipeline_stages").find(
+                {"type": "consultation"}, {"_id": 0, "order": 1}
+            ).sort("order", -1).limit(1).to_list(1)
+            base_order = (last[0]["order"] + 1) if last else 0
+        docs = [{
+            "id": str(uuid.uuid4()),
+            "name": name,
+            "color": color,
+            "type": "consultation",
+            "order": base_order + idx,
+            "is_final": False,
+            "created_at": now_iso(),
+        } for idx, (name, color) in enumerate(new_stage_specs)]
+        await v3_col("pipeline_stages").insert_many(docs)
+
 
 async def deactivate_legacy_demo_admin() -> None:
     """Disable the old demo super_admin account (admin@fitsiomax.com / admin123).

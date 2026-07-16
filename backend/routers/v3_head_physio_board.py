@@ -1,11 +1,12 @@
 from fastapi import APIRouter, HTTPException, Depends
 from typing import Optional
+from pydantic import BaseModel
 import uuid
 
 from database import v3_col
 from utils import now_iso
 from deps import v3_current_user, v3_require_roles
-from schemas.v3 import V3UserOut, V3PackageRecommendInput, V3HeadPhysioReviewInput
+from schemas.v3 import V3UserOut, V3PackageRecommendInput, V3HeadPhysioReviewInput, V3LeadOut
 
 router = APIRouter(prefix="/api/v3")
 
@@ -193,3 +194,43 @@ async def hp_weekly_review(
         {"lead_id": lead_id, "week_number": week_number}, {"_id": 0}
     )
     return updated
+
+
+class V3ConsultationPhysioAssignInput(BaseModel):
+    physio_id: str
+
+
+@router.post("/leads/{lead_id}/assign-consultation-physio")
+async def hp_assign_consultation_physio(
+    lead_id: str,
+    payload: V3ConsultationPhysioAssignInput,
+    user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin")),
+):
+    """Consultant picks the available physio who will deliver the assigned package's
+    treatment sessions, moving the lead into the 'Physio Assign' consultation stage."""
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    physio = await v3_col("doctors").find_one(
+        {"id": payload.physio_id, "profile_type": "physio"}, {"_id": 0}
+    )
+    if not physio:
+        raise HTTPException(status_code=404, detail="Physio not found")
+
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": {
+        "assigned_physio_id": physio["id"],
+        "assigned_physio_name": physio["full_name"],
+        "consultation_stage": "Physio Assign",
+        "updated_at": now_iso(),
+    }})
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": lead_id,
+        "action": "consultation_physio_assigned",
+        "details": f"Assigned {physio['full_name']} to deliver treatment sessions",
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": now_iso(),
+    })
+    updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    return {"message": "Physio assigned", "lead": V3LeadOut(**updated).model_dump()}

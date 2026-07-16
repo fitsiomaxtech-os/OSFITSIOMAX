@@ -201,7 +201,7 @@ async def assign_package(lead_id: str, payload: V3AssignPackageInput, user: V3Us
         "package_mode": payload.mode,
         "package_paid": None,
         "package_payment_mode": None,
-        "consultation_stage": "Package Chosen",
+        "consultation_stage": "Consultation Pack",
         "updated_at": _now(),
     }})
     await v3_col("lead_activity").insert_one({

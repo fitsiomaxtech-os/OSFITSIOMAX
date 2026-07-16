@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-import { Calendar, CheckCircle2, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ShoppingBag, ClipboardList, Lock, Pencil, Dumbbell, X, Bell } from "lucide-react";
+import { Calendar, CheckCircle2, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ShoppingBag, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,7 +8,8 @@ import { StageTabBar } from "@/components/ui/stage-tab";
 import {
   getConsultationsBoard, moveConsultationStage, listStoreItems, sellStoreItem,
   assignPackage, collectPackagePayment, savePhysioDiagnosis, unlockPhysioDiagnosis,
-  saveTreatmentSummary, unlockTreatmentSummary, stagesList,
+  saveTreatmentSummary, unlockTreatmentSummary, stagesList, getDoctors,
+  assignConsultationPhysio,
   scheduleConsultationFollowUp, rescheduleConsultationFollowUp,
 } from "@/lib/api";
 
@@ -42,6 +43,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
   // Session package assignment popup (Head Physio only)
   const [showSessionModal, setShowSessionModal] = useState(false);
   const [sessionDraft, setSessionDraft] = useState({ item_id: "", mode: "offline", sessions: "" });
+
+  // Physio Assign popup (Head Physio only) — pick an available Jr. Physio to deliver the package
+  const [showPhysioModal, setShowPhysioModal] = useState(false);
+  const [physioOptions, setPhysioOptions] = useState([]);
+  const [physioPick, setPhysioPick] = useState("");
+  const [assigningPhysio, setAssigningPhysio] = useState(false);
 
   useEffect(() => {
     if (!branchId) return;
@@ -103,6 +110,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
     setTreatmentDraft(selectedLead?.treatment_summary || "");
     setTreatmentEditing(!selectedLead?.treatment_summary);
     setShowSessionModal(false);
+    setShowPhysioModal(false);
+    setPhysioPick("");
     setFollowUpDraft(null);
     setRescheduleDraft(null);
   }, [selectedLead?.id]);
@@ -249,6 +258,31 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
       toast.error(err?.response?.data?.detail || "Failed to assign package");
     }
     setSelling(false);
+  };
+
+  // ---- Physio Assign (Head Physio) ----
+  const openPhysioModal = async () => {
+    setShowPhysioModal(true);
+    try {
+      const rows = await getDoctors({ branch_id: branchId });
+      setPhysioOptions((rows || []).filter((d) => d.profile_type === "physio"));
+    } catch {
+      setPhysioOptions([]);
+    }
+  };
+
+  const submitPhysioAssign = async () => {
+    if (!physioPick) { toast.error("Choose a physio"); return; }
+    setAssigningPhysio(true);
+    try {
+      const res = await assignConsultationPhysio(selectedLead.id, physioPick);
+      toast.success("Physio assigned for treatment");
+      setShowPhysioModal(false);
+      applyUpdatedLead(res.lead);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to assign physio");
+    }
+    setAssigningPhysio(false);
   };
 
   return (
@@ -462,21 +496,24 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
               );
             })()}
 
-            {/* Sell from Fitsiomax Store */}
-            <div className="space-y-3">
-              <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-violet-700">
-                <ShoppingBag className="h-3.5 w-3.5" /> Sell from Fitsiomax Store
-              </p>
-
-              {isConsultant ? (
-                <div className="rounded-lg border border-violet-200 bg-violet-50 p-3" data-testid="cons-session-trigger">
-                  {selectedLead.package_id ? (
+            {/* Consultation Pack — doctor chooses a treatment package once the visit is marked (no price shown) */}
+            {isConsultant && (() => {
+              const stage = selectedLead.consultation_stage || "New Appointment";
+              const visitDone = !["New Appointment", "RNR", "Follow Up"].includes(stage);
+              if (!visitDone) return null;
+              const packDone = !!selectedLead.package_id;
+              return (
+                <div className="rounded-lg border border-violet-200 bg-violet-50 p-3" data-testid="cons-pack-panel">
+                  <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-violet-700">
+                    <Dumbbell className="h-3.5 w-3.5" /> Consultation Pack
+                  </p>
+                  {packDone ? (
                     <div className="space-y-1 text-xs text-violet-700">
                       <p className="font-semibold">{selectedLead.package_name} · {selectedLead.package_sessions} sessions ({selectedLead.package_mode})</p>
-                      <p>Rs.{selectedLead.package_price} total — {selectedLead.package_paid ? "collected by branch admin" : "awaiting branch admin collection"}</p>
+                      <p className="text-violet-500">Package chosen for this patient.</p>
                     </div>
                   ) : (
-                    <p className="mb-2 text-xs text-violet-500">No session package assigned yet.</p>
+                    <p className="mb-2 text-xs text-violet-500">Choose a treatment package for this patient.</p>
                   )}
                   <Button
                     size="sm"
@@ -484,67 +521,102 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                     onClick={openSessionModal}
                     data-testid="cons-session-btn"
                   >
-                    <Dumbbell className="mr-1 h-3.5 w-3.5" /> {selectedLead.package_id ? "Change Session Package" : "Session"}
+                    <Dumbbell className="mr-1 h-3.5 w-3.5" /> {packDone ? "Change Package" : "Choose Package"}
                   </Button>
                 </div>
-              ) : (
-                <>
-                  <StoreSellSection
-                    title="Consultations"
-                    items={consultationItems}
-                    pick={consultPick}
-                    setPick={setConsultPick}
-                    onSell={sellConsultation}
-                    selling={selling}
-                    testPrefix="cons-store-consult"
-                    buttonLabel="Record Consultation Payment"
-                    showPaymentMode
-                  />
+              );
+            })()}
 
-                  {selectedLead.package_id && (
-                    <div className="rounded-lg border border-teal-200 bg-teal-50 p-3" data-testid="cons-treatment-collect">
-                      <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-teal-700">Treatment · Recommended by Doctor</p>
-                      <p className="text-xs text-teal-800">{selectedLead.package_name} — {selectedLead.package_sessions} sessions ({selectedLead.package_mode})</p>
-                      <p className="mt-0.5 text-sm font-semibold text-teal-900">Total: Rs.{selectedLead.package_price}</p>
-                      {selectedLead.package_paid ? (
-                        <p className="mt-2 text-xs font-semibold text-emerald-700">Rs.{selectedLead.package_paid} collected via {selectedLead.package_payment_mode || "—"}</p>
-                      ) : (
-                        <div className="mt-2 grid grid-cols-3 gap-2">
-                          <select
-                            value={collectDraft.payment_mode}
-                            onChange={(e) => setCollectDraft({ ...collectDraft, payment_mode: e.target.value })}
-                            className="h-9 rounded-md border border-teal-200 px-2 text-xs capitalize"
-                            data-testid="cons-collect-mode"
-                          >
-                            {PAYMENT_MODES.map((m) => <option key={m} value={m}>{m.replace("_", " ")}</option>)}
-                          </select>
-                          <Input
-                            type="number"
-                            min="0"
-                            value={collectDraft.amount}
-                            onChange={(e) => setCollectDraft({ ...collectDraft, amount: e.target.value })}
-                            placeholder={`Amount (default Rs.${selectedLead.package_price})`}
-                            className="col-span-2 h-9"
-                            data-testid="cons-collect-amount"
-                          />
-                        </div>
-                      )}
-                      {!selectedLead.package_paid && (
-                        <Button
-                          size="sm"
-                          className="mt-2 w-full bg-teal-600 hover:bg-teal-700 text-xs"
-                          onClick={collectPayment}
-                          disabled={selling}
-                          data-testid="cons-collect-btn"
-                        >
-                          {selling ? "Collecting..." : "Collect Payment"}
-                        </Button>
-                      )}
-                    </div>
+            {/* Physio Assign — doctor picks an available physio to deliver the package */}
+            {isConsultant && selectedLead.package_id && (() => {
+              const stage = selectedLead.consultation_stage || "New Appointment";
+              const physioAssignDone = ["Physio Assign", "Consultation Fee", "Treatment Fee"].includes(stage);
+              return (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3" data-testid="cons-physio-assign-panel">
+                  <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-emerald-700">
+                    <Users className="h-3.5 w-3.5" /> Physio Assign
+                  </p>
+                  {physioAssignDone ? (
+                    <p className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700">
+                      <CheckCircle2 className="h-3.5 w-3.5" /> {selectedLead.assigned_physio_name || "Physio"} assigned for treatment
+                    </p>
+                  ) : (
+                    <p className="mb-2 text-xs text-emerald-700">Assign an available physio to deliver this patient's sessions.</p>
                   )}
-                </>
-              )}
-            </div>
+                  <Button
+                    size="sm"
+                    className="mt-2 w-full bg-emerald-600 hover:bg-emerald-700 text-xs"
+                    onClick={openPhysioModal}
+                    data-testid="cons-physio-assign-btn"
+                  >
+                    <Users className="mr-1 h-3.5 w-3.5" /> {physioAssignDone ? "Change Physio" : "Assign Physio"}
+                  </Button>
+                </div>
+              );
+            })()}
+
+            {/* Sell from Fitsiomax Store — branch admin fee collection; doctor uses the cards above instead */}
+            {!isConsultant && (
+              <div className="space-y-3">
+                <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-violet-700">
+                  <ShoppingBag className="h-3.5 w-3.5" /> Sell from Fitsiomax Store
+                </p>
+
+                <StoreSellSection
+                  title="Consultations"
+                  items={consultationItems}
+                  pick={consultPick}
+                  setPick={setConsultPick}
+                  onSell={sellConsultation}
+                  selling={selling}
+                  testPrefix="cons-store-consult"
+                  buttonLabel="Record Consultation Payment"
+                  showPaymentMode
+                />
+
+                {selectedLead.package_id && (
+                  <div className="rounded-lg border border-teal-200 bg-teal-50 p-3" data-testid="cons-treatment-collect">
+                    <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-teal-700">Treatment · Recommended by Doctor</p>
+                    <p className="text-xs text-teal-800">{selectedLead.package_name} — {selectedLead.package_sessions} sessions ({selectedLead.package_mode})</p>
+                    <p className="mt-0.5 text-sm font-semibold text-teal-900">Total: Rs.{selectedLead.package_price}</p>
+                    {selectedLead.package_paid ? (
+                      <p className="mt-2 text-xs font-semibold text-emerald-700">Rs.{selectedLead.package_paid} collected via {selectedLead.package_payment_mode || "—"}</p>
+                    ) : (
+                      <div className="mt-2 grid grid-cols-3 gap-2">
+                        <select
+                          value={collectDraft.payment_mode}
+                          onChange={(e) => setCollectDraft({ ...collectDraft, payment_mode: e.target.value })}
+                          className="h-9 rounded-md border border-teal-200 px-2 text-xs capitalize"
+                          data-testid="cons-collect-mode"
+                        >
+                          {PAYMENT_MODES.map((m) => <option key={m} value={m}>{m.replace("_", " ")}</option>)}
+                        </select>
+                        <Input
+                          type="number"
+                          min="0"
+                          value={collectDraft.amount}
+                          onChange={(e) => setCollectDraft({ ...collectDraft, amount: e.target.value })}
+                          placeholder={`Amount (default Rs.${selectedLead.package_price})`}
+                          className="col-span-2 h-9"
+                          data-testid="cons-collect-amount"
+                        />
+                      </div>
+                    )}
+                    {!selectedLead.package_paid && (
+                      <Button
+                        size="sm"
+                        className="mt-2 w-full bg-teal-600 hover:bg-teal-700 text-xs"
+                        onClick={collectPayment}
+                        disabled={selling}
+                        data-testid="cons-collect-btn"
+                      >
+                        {selling ? "Collecting..." : "Collect Payment"}
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             {!isConsultant && (
               <div>
@@ -694,6 +766,49 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                     data-testid="cons-session-submit"
                   >
                     {selling ? "Submitting..." : "Submit"}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Physio Assign popup (Head Physio) */}
+            {showPhysioModal && (
+              <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" data-testid="cons-physio-modal">
+                <div className="w-full max-w-sm space-y-3 rounded-xl bg-white p-4 shadow-2xl">
+                  <div className="flex items-center justify-between">
+                    <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-800"><Users className="h-4 w-4 text-emerald-600" /> Assign Physio</p>
+                    <button onClick={() => setShowPhysioModal(false)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-physio-close"><X className="h-4 w-4" /></button>
+                  </div>
+                  <p className="text-[11px] text-slate-500">Available physios in this branch</p>
+
+                  {physioOptions.length === 0 ? (
+                    <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-4 text-center text-xs text-slate-400">No physios found for this branch yet.</p>
+                  ) : (
+                    <div className="max-h-56 space-y-1.5 overflow-y-auto">
+                      {physioOptions.map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => setPhysioPick(p.id)}
+                          className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-xs font-semibold transition ${
+                            physioPick === p.id ? "border-emerald-500 bg-emerald-50 text-emerald-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                          }`}
+                          data-testid={`cons-physio-option-${p.id}`}
+                        >
+                          <span>{p.full_name}{p.specialization ? ` · ${p.specialization}` : ""}</span>
+                          {physioPick === p.id && <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  <Button
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-xs"
+                    onClick={submitPhysioAssign}
+                    disabled={assigningPhysio || !physioPick}
+                    data-testid="cons-physio-submit"
+                  >
+                    {assigningPhysio ? "Assigning..." : "Assign"}
                   </Button>
                 </div>
               </div>
