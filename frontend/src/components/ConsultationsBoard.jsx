@@ -538,7 +538,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                           }
                           data-testid={`cons-move-${s.name}`}
                         >
-                          <span className="w-full truncate">{s.name}</span>
+                          <span className="w-full whitespace-normal break-words">{s.name}</span>
                           {active && <CheckCircle2 className="h-3 w-3 shrink-0" />}
                         </button>
                         {idx < stages.length - 1 && (
