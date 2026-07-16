@@ -426,6 +426,42 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
               </div>
             </div>
 
+            {/* Consultation Visit — doctor-only, gated to the appointment date */}
+            {isConsultant && (() => {
+              const stage = selectedLead.consultation_stage || "New Appointment";
+              const visitDone = !["New Appointment", "RNR", "Follow Up"].includes(stage);
+              const isAppointmentToday = selectedLead.appointment_date === new Date().toISOString().slice(0, 10);
+              return (
+                <div className="rounded-lg border border-sky-200 bg-sky-50 p-3" data-testid="cons-visit-panel">
+                  <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-sky-700">
+                    <Calendar className="h-3.5 w-3.5" /> Consultation Visit
+                  </p>
+                  {visitDone ? (
+                    <p className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700">
+                      <CheckCircle2 className="h-3.5 w-3.5" /> Marked — patient visited for consultation
+                    </p>
+                  ) : (
+                    <>
+                      <p className="text-xs text-sky-700">
+                        {isAppointmentToday
+                          ? "Patient's appointment is today. Mark them once the consultation visit is complete."
+                          : `Available on the appointment date${selectedLead.appointment_date ? ` (${selectedLead.appointment_date})` : ""}.`}
+                      </p>
+                      <Button
+                        size="sm"
+                        className="mt-2 w-full bg-sky-600 hover:bg-sky-700 text-xs"
+                        disabled={!isAppointmentToday}
+                        onClick={() => moveStage(selectedLead, "Consultation Visit")}
+                        data-testid="cons-visit-btn"
+                      >
+                        Mark Consultation Visit
+                      </Button>
+                    </>
+                  )}
+                </div>
+              );
+            })()}
+
             {/* Sell from Fitsiomax Store */}
             <div className="space-y-3">
               <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-violet-700">
@@ -517,6 +553,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                   {stages.map((s, idx) => {
                     const active = selectedLead.consultation_stage === s.name;
                     const hex = s.color || "#64748b";
+                    const doctorOnly = s.name === "Consultation Visit" && viewerRole === "branch_admin";
                     return (
                       <Fragment key={s.id}>
                         <button
@@ -529,17 +566,21 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                             }
                             moveStage(selectedLead, s.name);
                           }}
-                          disabled={active}
+                          disabled={active || doctorOnly}
+                          title={doctorOnly ? "Only the consulting doctor can mark Consultation Visit, on the appointment date" : undefined}
                           className="flex flex-1 basis-32 items-center justify-center gap-1 rounded-lg border px-2 py-2 text-center text-[11px] font-semibold leading-tight transition disabled:opacity-100"
                           style={
                             active
                               ? { background: hex, color: "white", borderColor: hex }
-                              : { background: `${hex}10`, color: hex, borderColor: `${hex}33` }
+                              : doctorOnly
+                                ? { background: "#f1f5f9", color: "#94a3b8", borderColor: "#e2e8f0" }
+                                : { background: `${hex}10`, color: hex, borderColor: `${hex}33` }
                           }
                           data-testid={`cons-move-${s.name}`}
                         >
                           <span className="whitespace-nowrap">{s.name}</span>
                           {active && <CheckCircle2 className="h-3 w-3 shrink-0" />}
+                          {doctorOnly && <Lock className="h-3 w-3 shrink-0" />}
                         </button>
                         {idx < stages.length - 1 && (
                           <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-300" />
