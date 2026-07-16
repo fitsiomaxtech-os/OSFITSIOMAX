@@ -426,78 +426,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
               </div>
             </div>
 
-            {!isConsultant && (
-              <div>
-                <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-600">Move to Stage</p>
-                <div className="grid grid-cols-2 gap-1.5">
-                  {stages.map((s) => {
-                    const active = selectedLead.consultation_stage === s.name;
-                    const hex = s.color || "#64748b";
-                    return (
-                      <button
-                        key={s.id}
-                        onClick={() => {
-                          if (s.name === "Follow Up") {
-                            const today = new Date();
-                            const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
-                            setFollowUpDraft({ date: tomorrow.toISOString().slice(0, 10), time: "10:00", remarks: "" });
-                            return;
-                          }
-                          moveStage(selectedLead, s.name);
-                        }}
-                        disabled={active}
-                        className="flex items-center justify-between rounded-lg border px-3 py-2 text-xs font-semibold transition disabled:opacity-100"
-                        style={
-                          active
-                            ? { background: hex, color: "white", borderColor: hex }
-                            : { background: `${hex}10`, color: hex, borderColor: `${hex}33` }
-                        }
-                        data-testid={`cons-move-${s.name}`}
-                      >
-                        <span>{s.name}</span>
-                        {active && <CheckCircle2 className="h-3 w-3" />}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {(selectedLead.consultation_follow_ups || []).length > 0 && (
-                  <div className="mt-2 space-y-1.5" data-testid="cons-followups-list">
-                    <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Follow-up History</p>
-                    {selectedLead.consultation_follow_ups.slice().reverse().map((f) => {
-                      const isActive = f.status !== "rescheduled";
-                      return (
-                        <div
-                          key={f.id}
-                          className={`flex items-start justify-between gap-3 rounded-lg border p-2.5 text-xs ${isActive ? "border-orange-200 bg-orange-50/60" : "border-slate-200 bg-slate-50 text-slate-400"}`}
-                          data-testid={`cons-followup-row-${f.id}`}
-                        >
-                          <div>
-                            <p className={`font-semibold ${isActive ? "text-orange-700" : "text-slate-400 line-through"}`}>{f.date} at {f.time}</p>
-                            {f.remarks && <p className="mt-0.5 text-slate-600">{f.remarks}</p>}
-                            {f.status === "rescheduled" && f.reschedule_reason && (
-                              <p className="mt-0.5 italic text-slate-400">Rescheduled: {f.reschedule_reason}</p>
-                            )}
-                          </div>
-                          {isActive && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-7 shrink-0 text-[11px]"
-                              onClick={() => setRescheduleDraft({ followupId: f.id, date: f.date, time: f.time, reason: "" })}
-                              data-testid={`cons-followup-reschedule-${f.id}`}
-                            >
-                              Reschedule
-                            </Button>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
-
             {/* Sell from Fitsiomax Store */}
             <div className="space-y-3">
               <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-violet-700">
@@ -581,6 +509,78 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                 </>
               )}
             </div>
+
+            {!isConsultant && (
+              <div>
+                <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-600">Move to Stage</p>
+                <div className="flex flex-col gap-1.5">
+                  {stages.map((s) => {
+                    const active = selectedLead.consultation_stage === s.name;
+                    const hex = s.color || "#64748b";
+                    return (
+                      <button
+                        key={s.id}
+                        onClick={() => {
+                          if (s.name === "Follow Up") {
+                            const today = new Date();
+                            const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
+                            setFollowUpDraft({ date: tomorrow.toISOString().slice(0, 10), time: "10:00", remarks: "" });
+                            return;
+                          }
+                          moveStage(selectedLead, s.name);
+                        }}
+                        disabled={active}
+                        className="flex items-center justify-between rounded-lg border px-3 py-2 text-xs font-semibold transition disabled:opacity-100"
+                        style={
+                          active
+                            ? { background: hex, color: "white", borderColor: hex }
+                            : { background: `${hex}10`, color: hex, borderColor: `${hex}33` }
+                        }
+                        data-testid={`cons-move-${s.name}`}
+                      >
+                        <span>{s.name}</span>
+                        {active && <CheckCircle2 className="h-3 w-3" />}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {(selectedLead.consultation_follow_ups || []).length > 0 && (
+                  <div className="mt-2 space-y-1.5" data-testid="cons-followups-list">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Follow-up History</p>
+                    {selectedLead.consultation_follow_ups.slice().reverse().map((f) => {
+                      const isActive = f.status !== "rescheduled";
+                      return (
+                        <div
+                          key={f.id}
+                          className={`flex items-start justify-between gap-3 rounded-lg border p-2.5 text-xs ${isActive ? "border-orange-200 bg-orange-50/60" : "border-slate-200 bg-slate-50 text-slate-400"}`}
+                          data-testid={`cons-followup-row-${f.id}`}
+                        >
+                          <div>
+                            <p className={`font-semibold ${isActive ? "text-orange-700" : "text-slate-400 line-through"}`}>{f.date} at {f.time}</p>
+                            {f.remarks && <p className="mt-0.5 text-slate-600">{f.remarks}</p>}
+                            {f.status === "rescheduled" && f.reschedule_reason && (
+                              <p className="mt-0.5 italic text-slate-400">Rescheduled: {f.reschedule_reason}</p>
+                            )}
+                          </div>
+                          {isActive && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 shrink-0 text-[11px]"
+                              onClick={() => setRescheduleDraft({ followupId: f.id, date: f.date, time: f.time, reason: "" })}
+                              data-testid={`cons-followup-reschedule-${f.id}`}
+                            >
+                              Reschedule
+                            </Button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Session package assignment popup (Head Physio) */}
             {showSessionModal && (
