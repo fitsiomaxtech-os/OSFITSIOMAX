@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Calendar, CheckCircle2, RefreshCw, XCircle, Search, Phone, Stethoscope, ShoppingBag, ClipboardList, Lock, Pencil, Dumbbell, X, Bell } from "lucide-react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Calendar, CheckCircle2, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ShoppingBag, ClipboardList, Lock, Pencil, Dumbbell, X, Bell } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -513,34 +513,38 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
             {!isConsultant && (
               <div>
                 <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-600">Move to Stage</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {stages.map((s) => {
+                <div className="flex flex-nowrap items-center gap-1">
+                  {stages.map((s, idx) => {
                     const active = selectedLead.consultation_stage === s.name;
                     const hex = s.color || "#64748b";
                     return (
-                      <button
-                        key={s.id}
-                        onClick={() => {
-                          if (s.name === "Follow Up") {
-                            const today = new Date();
-                            const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
-                            setFollowUpDraft({ date: tomorrow.toISOString().slice(0, 10), time: "10:00", remarks: "" });
-                            return;
+                      <Fragment key={s.id}>
+                        <button
+                          onClick={() => {
+                            if (s.name === "Follow Up") {
+                              const today = new Date();
+                              const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
+                              setFollowUpDraft({ date: tomorrow.toISOString().slice(0, 10), time: "10:00", remarks: "" });
+                              return;
+                            }
+                            moveStage(selectedLead, s.name);
+                          }}
+                          disabled={active}
+                          className="flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg border px-1.5 py-2 text-center text-[11px] font-semibold leading-tight transition disabled:opacity-100"
+                          style={
+                            active
+                              ? { background: hex, color: "white", borderColor: hex }
+                              : { background: `${hex}10`, color: hex, borderColor: `${hex}33` }
                           }
-                          moveStage(selectedLead, s.name);
-                        }}
-                        disabled={active}
-                        className="flex items-center justify-between rounded-lg border px-3 py-2 text-xs font-semibold transition disabled:opacity-100"
-                        style={
-                          active
-                            ? { background: hex, color: "white", borderColor: hex }
-                            : { background: `${hex}10`, color: hex, borderColor: `${hex}33` }
-                        }
-                        data-testid={`cons-move-${s.name}`}
-                      >
-                        <span>{s.name}</span>
-                        {active && <CheckCircle2 className="h-3 w-3" />}
-                      </button>
+                          data-testid={`cons-move-${s.name}`}
+                        >
+                          <span className="w-full truncate">{s.name}</span>
+                          {active && <CheckCircle2 className="h-3 w-3 shrink-0" />}
+                        </button>
+                        {idx < stages.length - 1 && (
+                          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-300" />
+                        )}
+                      </Fragment>
                     );
                   })}
                 </div>
