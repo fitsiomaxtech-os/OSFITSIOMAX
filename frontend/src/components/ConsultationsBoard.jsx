@@ -324,7 +324,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
       {/* Detail / move-stage dialog */}
       {selectedLead && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 sm:p-4" data-testid="cons-detail-dialog">
-          <div className="w-full h-full sm:h-auto sm:max-w-3xl sm:max-h-[90vh] overflow-y-auto space-y-4 bg-white p-6 shadow-2xl sm:rounded-xl">
+          <div className="w-full h-full sm:h-auto sm:w-[92vw] sm:max-w-6xl sm:max-h-[92vh] overflow-y-auto space-y-4 bg-white p-6 shadow-2xl sm:rounded-xl">
             <div className="flex items-start justify-between">
               <div>
                 <h3 className="text-base font-semibold text-slate-900" data-testid="cons-detail-title">{selectedLead.name || "Lead"}</h3>
