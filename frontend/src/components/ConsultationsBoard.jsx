@@ -323,8 +323,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
 
       {/* Detail / move-stage dialog */}
       {selectedLead && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" data-testid="cons-detail-dialog">
-          <div className="w-full max-w-3xl max-h-[90vh] overflow-y-auto space-y-4 rounded-xl bg-white p-6 shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 sm:p-4" data-testid="cons-detail-dialog">
+          <div className="w-full h-full sm:h-auto sm:max-w-3xl sm:max-h-[90vh] overflow-y-auto space-y-4 bg-white p-6 shadow-2xl sm:rounded-xl">
             <div className="flex items-start justify-between">
               <div>
                 <h3 className="text-base font-semibold text-slate-900" data-testid="cons-detail-title">{selectedLead.name || "Lead"}</h3>
@@ -513,44 +513,40 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
             {!isConsultant && (
               <div>
                 <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-600">Move to Stage</p>
-                <div className="space-y-1.5">
-                  {[stages.slice(0, Math.ceil(stages.length / 2)), stages.slice(Math.ceil(stages.length / 2))].map((row, rowIdx) => (
-                    <div key={rowIdx} className="flex flex-nowrap items-center gap-1">
-                      {row.map((s, idx) => {
-                        const active = selectedLead.consultation_stage === s.name;
-                        const hex = s.color || "#64748b";
-                        return (
-                          <Fragment key={s.id}>
-                            <button
-                              onClick={() => {
-                                if (s.name === "Follow Up") {
-                                  const today = new Date();
-                                  const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
-                                  setFollowUpDraft({ date: tomorrow.toISOString().slice(0, 10), time: "10:00", remarks: "" });
-                                  return;
-                                }
-                                moveStage(selectedLead, s.name);
-                              }}
-                              disabled={active}
-                              className="flex min-w-0 flex-1 items-center justify-center gap-1 rounded-lg border px-1.5 py-2 text-center text-[11px] font-semibold leading-tight transition disabled:opacity-100"
-                              style={
-                                active
-                                  ? { background: hex, color: "white", borderColor: hex }
-                                  : { background: `${hex}10`, color: hex, borderColor: `${hex}33` }
-                              }
-                              data-testid={`cons-move-${s.name}`}
-                            >
-                              <span className="whitespace-nowrap">{s.name}</span>
-                              {active && <CheckCircle2 className="h-3 w-3 shrink-0" />}
-                            </button>
-                            {idx < row.length - 1 && (
-                              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-300" />
-                            )}
-                          </Fragment>
-                        );
-                      })}
-                    </div>
-                  ))}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {stages.map((s, idx) => {
+                    const active = selectedLead.consultation_stage === s.name;
+                    const hex = s.color || "#64748b";
+                    return (
+                      <Fragment key={s.id}>
+                        <button
+                          onClick={() => {
+                            if (s.name === "Follow Up") {
+                              const today = new Date();
+                              const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
+                              setFollowUpDraft({ date: tomorrow.toISOString().slice(0, 10), time: "10:00", remarks: "" });
+                              return;
+                            }
+                            moveStage(selectedLead, s.name);
+                          }}
+                          disabled={active}
+                          className="flex flex-1 basis-32 items-center justify-center gap-1 rounded-lg border px-2 py-2 text-center text-[11px] font-semibold leading-tight transition disabled:opacity-100"
+                          style={
+                            active
+                              ? { background: hex, color: "white", borderColor: hex }
+                              : { background: `${hex}10`, color: hex, borderColor: `${hex}33` }
+                          }
+                          data-testid={`cons-move-${s.name}`}
+                        >
+                          <span className="whitespace-nowrap">{s.name}</span>
+                          {active && <CheckCircle2 className="h-3 w-3 shrink-0" />}
+                        </button>
+                        {idx < stages.length - 1 && (
+                          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-300" />
+                        )}
+                      </Fragment>
+                    );
+                  })}
                 </div>
 
                 {(selectedLead.consultation_follow_ups || []).length > 0 && (
