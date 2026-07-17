@@ -15,9 +15,6 @@ import {
   RefreshCw,
   LayoutDashboard,
   FileText,
-  Wifi,
-  MapPin,
-  Clock,
   CalendarRange,
   ShoppingCart,
   ClipboardList,
@@ -32,16 +29,12 @@ import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { StageTabBar } from "@/components/ui/stage-tab";
 import {
   addLeadRemark,
-  assignPhysio,
   scheduleBranchAppointment,
-  collectFee,
   getBranchBoard,
-  getDoctors,
   getAvailableExperts,
   getLeadActivity,
   getLeadRemarks,
   moveBranchStage,
-  listStoreItems,
   stagesList,
   scheduleFollowUp,
   rescheduleFollowUp,
@@ -51,7 +44,7 @@ import { ConsultationsBoard } from "@/components/ConsultationsBoard";
 import { FinanceBoard } from "@/components/FinanceBoard";
 import { BranchSessionsPanel, FitsiomaxStorePanel } from "@/components/BranchStoreBoard";
 import { SmartBookingPicker } from "@/components/SmartBookingPicker";
-import { DURATION_OPTIONS, PlaceholderPanel } from "@/components/PackagesBoard";
+import { PlaceholderPanel } from "@/components/PackagesBoard";
 
 export const BranchAdminBoard = ({ branchId }) => {
   const [boardData, setBoardData] = useState({ leads: [], stage_counts: {} });
@@ -319,81 +312,6 @@ export const BranchAdminBoard = ({ branchId }) => {
   );
 };
 
-/* ─── Consultations & Sessions list (inside lead popup) ─── */
-const LeadPackageRow = ({ item, isSession, onBook }) => (
-  <div className="flex items-center justify-between gap-3 px-3 py-2.5" data-testid={`lead-package-row-${item.id}`}>
-    <div className="min-w-0 flex-1">
-      <p className="truncate text-sm font-semibold text-slate-800">{item.name}</p>
-      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
-        <span className="inline-flex items-center gap-1 font-semibold text-emerald-700">
-          <Wifi className="h-3 w-3" />Online ₹{item.price_online ?? 0}{isSession ? ` × ${item.sessions_online ?? 0}` : ""}
-        </span>
-        <span className="inline-flex items-center gap-1 font-semibold text-amber-700">
-          <MapPin className="h-3 w-3" />Offline ₹{item.price_offline ?? 0}{isSession ? ` × ${item.sessions_offline ?? 0}` : ""}
-        </span>
-        {!isSession && item.duration_minutes && (
-          <span className="inline-flex items-center gap-1 text-slate-500">
-            <Clock className="h-3 w-3" />
-            {DURATION_OPTIONS.find((d) => d.minutes === item.duration_minutes)?.label || `${item.duration_minutes} mins`}
-          </span>
-        )}
-      </div>
-    </div>
-    <Button size="sm" onClick={() => onBook(item)} className="shrink-0 bg-emerald-600 text-white hover:bg-emerald-700" data-testid={`lead-package-book-${item.id}`}>
-      Book
-    </Button>
-  </div>
-);
-
-const LeadPackagesTab = () => {
-  const [consultations, setConsultations] = useState([]);
-  const [sessions, setSessions] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    Promise.all([
-      listStoreItems("physiotherapy", "consultation").catch(() => []),
-      listStoreItems("physiotherapy", "session").catch(() => []),
-    ]).then(([c, s]) => {
-      setConsultations(c);
-      setSessions(s);
-      setLoading(false);
-    });
-  }, []);
-
-  const handleBook = (item) => toast.info(`Booking "${item.name}" — coming soon`);
-
-  if (loading) {
-    return <p className="py-6 text-center text-sm text-slate-400">Loading packages...</p>;
-  }
-
-  return (
-    <div className="space-y-4" data-testid="branch-lead-packages-tab">
-      <div>
-        <p className="mb-2 text-xs font-bold uppercase tracking-wider text-sky-700">Consultations</p>
-        {consultations.length === 0 ? (
-          <p className="rounded-lg border border-slate-200 bg-white py-4 text-center text-xs text-slate-400">No consultations available.</p>
-        ) : (
-          <div className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white" data-testid="lead-consultations-list">
-            {consultations.map((it) => <LeadPackageRow key={it.id} item={it} isSession={false} onBook={handleBook} />)}
-          </div>
-        )}
-      </div>
-
-      <div>
-        <p className="mb-2 text-xs font-bold uppercase tracking-wider text-emerald-700">Sessions</p>
-        {sessions.length === 0 ? (
-          <p className="rounded-lg border border-slate-200 bg-white py-4 text-center text-xs text-slate-400">No session packages available.</p>
-        ) : (
-          <div className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white" data-testid="lead-sessions-list">
-            {sessions.map((it) => <LeadPackageRow key={it.id} item={it} isSession onBook={handleBook} />)}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
 /* ─── Branch Lead Detail Modal ─── */
 function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate }) {
   const [activeTab, setActiveTab] = useState("overview");
@@ -401,13 +319,6 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate }) {
   const [newRemark, setNewRemark] = useState("");
   const [activityLog, setActivityLog] = useState([]);
 
-  // Fee collection
-  const [feeAmount, setFeeAmount] = useState("");
-  const [packageWeeks, setPackageWeeks] = useState("8");
-  const [packageAmount, setPackageAmount] = useState("");
-
-  // Jr. Physio assignment
-  const [allDoctors, setAllDoctors] = useState([]);
   const [apptDraft, setApptDraft] = useState(null); // { appointment_date, appointment_time, physio_id, notes, final_stage } | null
   const [apptExperts, setApptExperts] = useState({ experts: [], available_count: 0, busy_count: 0, loading: false });
 
@@ -442,25 +353,16 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate }) {
     if (!apptDraft || !apptDraft.appointment_date || !apptDraft.appointment_time || !branchId) return;
     fetchAvailableExperts(branchId, apptDraft.appointment_date, apptDraft.appointment_time);
   }, [apptDraft?.appointment_date, apptDraft?.appointment_time, branchId, fetchAvailableExperts]);
-  const [selectedPhysioId, setSelectedPhysioId] = useState("");
 
   useEffect(() => {
     if (activeTab === "history") { loadRemarks(); loadActivity(); }
   }, [activeTab, lead.id]);
-
-  useEffect(() => {
-    loadDoctors();
-  }, [branchId]);
 
   const loadRemarks = async () => {
     try { setRemarks(await getLeadRemarks(lead.id)); } catch { /* silent */ }
   };
   const loadActivity = async () => {
     try { setActivityLog(await getLeadActivity(lead.id)); } catch { /* silent */ }
-  };
-  const loadDoctors = async () => {
-    if (!branchId) return;
-    try { const d = await getDoctors({ branch_id: branchId }); setAllDoctors(d); } catch { /* silent */ }
   };
 
   const moveStage = async (stage) => {
@@ -470,42 +372,6 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate }) {
       await onUpdate();
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Move failed");
-    }
-  };
-
-  const collectConsultationFee = async () => {
-    if (!feeAmount || Number(feeAmount) <= 0) { toast.error("Enter valid amount"); return; }
-    try {
-      await collectFee(lead.id, { fee_type: "consultation", amount: Number(feeAmount) });
-      setFeeAmount("");
-      toast.success("Consultation fee collected");
-      await onUpdate();
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || "Failed");
-    }
-  };
-
-  const collectPackageFee = async () => {
-    if (!packageAmount || Number(packageAmount) <= 0) { toast.error("Enter valid amount"); return; }
-    try {
-      await collectFee(lead.id, { fee_type: "package", amount: Number(packageAmount), package_weeks: Number(packageWeeks) });
-      setPackageAmount("");
-      toast.success("Package fee collected");
-      await onUpdate();
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || "Failed");
-    }
-  };
-
-  const assignPhysioNow = async () => {
-    if (!selectedPhysioId) { toast.error("Select a Jr. Physio"); return; }
-    try {
-      await assignPhysio(lead.id, { physio_id: selectedPhysioId });
-      toast.success("Jr. Physio assigned!");
-      setSelectedPhysioId("");
-      await onUpdate();
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || "Assignment failed");
     }
   };
 
@@ -810,69 +676,8 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate }) {
           )}
 
           {activeTab === "portfolio" && (
-            <div className="space-y-4" data-testid="branch-lead-portfolio">
-              {/* Consultation Fee */}
-              <div className="rounded-lg border border-teal-200 bg-teal-50/30 p-4" data-testid="branch-action-consultation-fee">
-                <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-teal-700"><CreditCard className="h-3.5 w-3.5" /> Consultation Fee</p>
-                {lead.consultation_fee ? (
-                  <p className="text-sm font-medium text-teal-800">Collected: Rs.{lead.consultation_fee}</p>
-                ) : (
-                  <div className="flex gap-2">
-                    <Input type="number" value={feeAmount} onChange={(e) => setFeeAmount(e.target.value)} placeholder="Amount (Rs.)" className="w-40" data-testid="branch-consultation-fee-input" />
-                    <Button size="sm" onClick={collectConsultationFee} className="bg-teal-600 text-white hover:bg-teal-700" data-testid="branch-consultation-fee-btn">Collect</Button>
-                  </div>
-                )}
-              </div>
-
-              {/* Package Payment */}
-              <div className="rounded-lg border border-emerald-200 bg-emerald-50/30 p-4" data-testid="branch-action-package">
-                <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-emerald-700"><CreditCard className="h-3.5 w-3.5" /> Package Payment</p>
-                {lead.package_amount ? (
-                  <p className="text-sm font-medium text-emerald-800">Paid: Rs.{lead.package_amount} ({lead.package_weeks || 8} weeks)</p>
-                ) : (
-                  <div className="flex flex-wrap gap-2">
-                    <Input type="number" value={packageAmount} onChange={(e) => setPackageAmount(e.target.value)} placeholder="Amount (Rs.)" className="w-32" data-testid="branch-package-amount-input" />
-                    <Input type="number" value={packageWeeks} onChange={(e) => setPackageWeeks(e.target.value)} placeholder="Weeks" className="w-20" data-testid="branch-package-weeks-input" />
-                    <Button size="sm" onClick={collectPackageFee} className="bg-emerald-600 text-white hover:bg-emerald-700" data-testid="branch-package-pay-btn">Collect Package</Button>
-                  </div>
-                )}
-              </div>
-
-              {/* Jr. Physio Assignment */}
-              <div className="rounded-lg border border-sky-200 bg-sky-50/30 p-4" data-testid="branch-action-assign-physio">
-                <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-sky-700"><UserPlus className="h-3.5 w-3.5" /> Assign Jr. Physio</p>
-                {lead.assigned_physio_name ? (
-                  <p className="text-sm font-medium text-sky-800">Assigned: {lead.assigned_physio_name}</p>
-                ) : (
-                  <div className="space-y-1.5">
-                    {allDoctors.filter((d) => d.profile_type === "physio").length === 0 ? (
-                      <p className="text-xs text-slate-400">No Jr. Physios in this branch</p>
-                    ) : (
-                      allDoctors.filter((d) => d.profile_type === "physio").map((doc) => (
-                        <button key={doc.id} type="button" onClick={() => setSelectedPhysioId(doc.id)}
-                          className={`flex w-full items-center gap-3 rounded-md border p-2.5 text-left ${selectedPhysioId === doc.id ? "border-sky-400 bg-sky-50" : "border-slate-200 bg-white hover:bg-slate-50"}`}
-                          data-testid={`branch-physio-${doc.id}`}>
-                          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-sky-100 text-xs font-bold text-sky-700">
-                            {doc.full_name?.charAt(0) || "P"}
-                          </div>
-                          <div>
-                            <p className="text-sm font-medium text-slate-800">{doc.full_name}</p>
-                            <p className="text-[10px] text-slate-400">{doc.specialization || "Jr. Physiotherapist"}</p>
-                          </div>
-                        </button>
-                      ))
-                    )}
-                    {allDoctors.filter((d) => d.profile_type === "physio").length > 0 && (
-                      <Button size="sm" onClick={assignPhysioNow} disabled={!selectedPhysioId} className="bg-sky-600 text-white hover:bg-sky-700" data-testid="branch-assign-physio-btn">Assign Jr. Physio</Button>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              <div className="border-t border-slate-200 pt-4">
-                <p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Available Consultations & Sessions</p>
-                <LeadPackagesTab />
-              </div>
+            <div className="flex min-h-[200px] items-center justify-center" data-testid="branch-lead-portfolio">
+              <p className="text-sm text-slate-400">Portfolio — coming soon</p>
             </div>
           )}
         </div>
