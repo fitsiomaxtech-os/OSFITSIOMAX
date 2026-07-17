@@ -277,6 +277,11 @@ async def update_user_account(user_id: str, payload: UserAccountUpdate, _: V3Use
     res = await v3_col("users").update_one({"id": user_id}, {"$set": updates})
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="User not found")
+    if "full_name" in updates:
+        # The `doctors` collection (used by the Experts picker, calendars, etc.) keeps its own
+        # denormalized copy of full_name — keep it in sync so a rename doesn't leave stale names
+        # showing up anywhere the user is linked as an expert.
+        await v3_col("doctors").update_many({"user_id": user_id}, {"$set": {"full_name": updates["full_name"]}})
     user = await v3_col("users").find_one({"id": user_id}, {"_id": 0, "password": 0})
     return user
 
