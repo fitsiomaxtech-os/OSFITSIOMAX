@@ -1,19 +1,17 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-import { Calendar, CheckCircle2, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ShoppingBag, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell } from "lucide-react";
+import { Calendar, CheckCircle2, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { StageTabBar } from "@/components/ui/stage-tab";
 import {
-  getConsultationsBoard, moveConsultationStage, moveHeadConsultationStage, listStoreItems, sellStoreItem,
-  assignPackage, collectPackagePayment, savePhysioDiagnosis, unlockPhysioDiagnosis,
+  getConsultationsBoard, moveConsultationStage, moveHeadConsultationStage, listStoreItems,
+  assignPackage, savePhysioDiagnosis, unlockPhysioDiagnosis,
   saveTreatmentSummary, unlockTreatmentSummary, stagesList, getDoctors,
   assignConsultationPhysio,
   scheduleConsultationFollowUp, rescheduleConsultationFollowUp,
 } from "@/lib/api";
-
-const PAYMENT_MODES = ["cash", "upi", "card", "bank_transfer"];
 
 // These 3 Branch Consultation stage names are mirrored (read-only) from the Head
 // Physio's own independent pipeline — Branch Admin can see them but not click them.
@@ -29,11 +27,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
   const [stageFilter, setStageFilter] = useState(null);
   const [search, setSearch] = useState("");
   const [selectedLead, setSelectedLead] = useState(null);
+  const [detailTab, setDetailTab] = useState("overview");
   const [storeItems, setStoreItems] = useState([]);
   const [followUpDraft, setFollowUpDraft] = useState(null); // { date, time, remarks } | null
   const [rescheduleDraft, setRescheduleDraft] = useState(null); // { followupId, date, time, reason } | null
-  const [consultPick, setConsultPick] = useState({ item_id: "", mode: "offline", paid: "", payment_mode: "cash" });
-  const [collectDraft, setCollectDraft] = useState({ amount: "", payment_mode: "cash" });
   const [selling, setSelling] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -131,7 +128,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
     setRescheduleDraft(null);
   }, [selectedLead?.id]);
 
-  const consultationItems = storeItems.filter((i) => i.item_type !== "session");
   const sessionItems = storeItems.filter((i) => i.item_type === "session");
 
   const moveStage = async (lead, next) => {
@@ -161,40 +157,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Move failed");
     }
-  };
-
-  const sellConsultation = async () => {
-    if (!consultPick.item_id) { toast.error("Choose an item"); return; }
-    setSelling(true);
-    try {
-      const res = await sellStoreItem(selectedLead.id, {
-        item_id: consultPick.item_id,
-        mode: consultPick.mode,
-        paid_amount: consultPick.paid ? parseFloat(consultPick.paid) : null,
-        payment_mode: consultPick.payment_mode,
-      });
-      toast.success("Consultation payment recorded");
-      setConsultPick({ item_id: "", mode: "offline", paid: "", payment_mode: "cash" });
-      applyUpdatedLead(res.lead);
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || "Failed to record payment");
-    }
-    setSelling(false);
-  };
-
-  const collectPayment = async () => {
-    const amount = collectDraft.amount !== "" ? parseFloat(collectDraft.amount) : selectedLead.package_price;
-    if (amount == null || Number.isNaN(amount)) { toast.error("Enter an amount"); return; }
-    setSelling(true);
-    try {
-      const res = await collectPackagePayment(selectedLead.id, amount, collectDraft.payment_mode);
-      toast.success("Payment collected");
-      setCollectDraft({ amount: "", payment_mode: "cash" });
-      applyUpdatedLead(res.lead);
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || "Failed to collect payment");
-    }
-    setSelling(false);
   };
 
   // ---- Head Physio's diagnosis report (separate from Pre-Sales' read-only diagnosis) ----
@@ -344,7 +306,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
               {filtered.map((l) => {
                 const hex = stageColor(l[stageField]);
                 return (
-                  <tr key={l.id} onClick={() => setSelectedLead(l)} className="cursor-pointer border-t border-slate-100 hover:bg-slate-50" data-testid={`cons-row-${l.id}`}>
+                  <tr key={l.id} onClick={() => { setSelectedLead(l); setDetailTab("overview"); }} className="cursor-pointer border-t border-slate-100 hover:bg-slate-50" data-testid={`cons-row-${l.id}`}>
                     <td className="px-4 py-3 font-medium text-slate-800">{l.name || "—"}</td>
                     <td className="px-4 py-3 text-slate-600">{l.phone || "—"}</td>
                     <td className="px-4 py-3">
@@ -401,6 +363,26 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
               <button onClick={() => setSelectedLead(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-detail-close"><XCircle className="h-4 w-4" /></button>
             </div>
 
+            {/* Sub tabs */}
+            <div className="flex flex-wrap gap-1.5 border-b border-slate-100 pb-3" data-testid="cons-detail-tabs">
+              {[
+                { key: "overview", label: "Overview" },
+                { key: "followup", label: "Follow-up History" },
+                { key: "profile", label: "Lead Profile" },
+              ].map((t) => (
+                <button
+                  key={t.key}
+                  onClick={() => setDetailTab(t.key)}
+                  className={`rounded-full px-3.5 py-1 text-xs font-semibold transition-all ${detailTab === t.key ? "bg-sky-600 text-white shadow-sm" : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"}`}
+                  data-testid={`cons-detail-tab-${t.key}`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            {detailTab === "overview" && (
+            <>
             {/* Pre-Sales Diagnosis — read-only reference, mini card */}
             {selectedLead.diagnosis && (
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3" data-testid="cons-presales-diagnosis">
@@ -456,25 +438,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                 testPrefix="cons-treatment-summary"
               />
             )}
-
-            {/* Payment Summary */}
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3" data-testid="cons-payment-summary">
-              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-600">Payment Summary</p>
-              <div className="space-y-1.5 text-xs text-slate-700">
-                <div className="flex items-center justify-between">
-                  <span>Consultation{selectedLead.consultation_item_name ? ` · ${selectedLead.consultation_item_name}` : ""}{selectedLead.consultation_mode ? ` (${selectedLead.consultation_mode})` : ""}</span>
-                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${selectedLead.consultation_fee ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-500"}`}>
-                    {selectedLead.consultation_fee ? `₹${selectedLead.consultation_fee} Paid` : "Not paid"}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span>Sessions{selectedLead.package_name ? ` · ${selectedLead.package_name}` : ""}{selectedLead.package_sessions ? ` · ${selectedLead.package_sessions} sessions` : ""}{selectedLead.package_mode ? ` (${selectedLead.package_mode})` : ""}</span>
-                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${selectedLead.package_paid ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-500"}`}>
-                    {selectedLead.package_paid ? `₹${selectedLead.package_paid} Paid` : "Not sold yet"}
-                  </span>
-                </div>
-              </div>
-            </div>
 
             {/* Move to Stage — Head Physio's own pipeline, same pill-stepper format as Branch's.
                 Consultation Visit is appointment-day gated; Consultation Pack opens the package
@@ -550,69 +513,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
               );
             })()}
 
-            {/* Sell from Fitsiomax Store — branch admin fee collection; doctor uses the stepper above instead */}
-            {!isConsultant && (
-              <div className="space-y-3">
-                <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-violet-700">
-                  <ShoppingBag className="h-3.5 w-3.5" /> Sell from Fitsiomax Store
-                </p>
-
-                <StoreSellSection
-                  title="Consultations"
-                  items={consultationItems}
-                  pick={consultPick}
-                  setPick={setConsultPick}
-                  onSell={sellConsultation}
-                  selling={selling}
-                  testPrefix="cons-store-consult"
-                  buttonLabel="Record Consultation Payment"
-                  showPaymentMode
-                />
-
-                {selectedLead.package_id && (
-                  <div className="rounded-lg border border-teal-200 bg-teal-50 p-3" data-testid="cons-treatment-collect">
-                    <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-teal-700">Treatment · Recommended by Doctor</p>
-                    <p className="text-xs text-teal-800">{selectedLead.package_name} — {selectedLead.package_sessions} sessions ({selectedLead.package_mode})</p>
-                    <p className="mt-0.5 text-sm font-semibold text-teal-900">Total: Rs.{selectedLead.package_price}</p>
-                    {selectedLead.package_paid ? (
-                      <p className="mt-2 text-xs font-semibold text-emerald-700">Rs.{selectedLead.package_paid} collected via {selectedLead.package_payment_mode || "—"}</p>
-                    ) : (
-                      <div className="mt-2 grid grid-cols-3 gap-2">
-                        <select
-                          value={collectDraft.payment_mode}
-                          onChange={(e) => setCollectDraft({ ...collectDraft, payment_mode: e.target.value })}
-                          className="h-9 rounded-md border border-teal-200 px-2 text-xs capitalize"
-                          data-testid="cons-collect-mode"
-                        >
-                          {PAYMENT_MODES.map((m) => <option key={m} value={m}>{m.replace("_", " ")}</option>)}
-                        </select>
-                        <Input
-                          type="number"
-                          min="0"
-                          value={collectDraft.amount}
-                          onChange={(e) => setCollectDraft({ ...collectDraft, amount: e.target.value })}
-                          placeholder={`Amount (default Rs.${selectedLead.package_price})`}
-                          className="col-span-2 h-9"
-                          data-testid="cons-collect-amount"
-                        />
-                      </div>
-                    )}
-                    {!selectedLead.package_paid && (
-                      <Button
-                        size="sm"
-                        className="mt-2 w-full bg-teal-600 hover:bg-teal-700 text-xs"
-                        onClick={collectPayment}
-                        disabled={selling}
-                        data-testid="cons-collect-btn"
-                      >
-                        {selling ? "Collecting..." : "Collect Payment"}
-                      </Button>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-
             {!isConsultant && (
               <div>
                 <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-600">Move to Stage</p>
@@ -657,41 +557,72 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                     );
                   })}
                 </div>
+              </div>
+            )}
+            </>
+            )}
 
-                {(selectedLead.consultation_follow_ups || []).length > 0 && (
-                  <div className="mt-2 space-y-1.5" data-testid="cons-followups-list">
-                    <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Follow-up History</p>
-                    {selectedLead.consultation_follow_ups.slice().reverse().map((f) => {
-                      const isActive = f.status !== "rescheduled";
-                      return (
-                        <div
-                          key={f.id}
-                          className={`flex items-start justify-between gap-3 rounded-lg border p-2.5 text-xs ${isActive ? "border-orange-200 bg-orange-50/60" : "border-slate-200 bg-slate-50 text-slate-400"}`}
-                          data-testid={`cons-followup-row-${f.id}`}
-                        >
-                          <div>
-                            <p className={`font-semibold ${isActive ? "text-orange-700" : "text-slate-400 line-through"}`}>{f.date} at {f.time}</p>
-                            {f.remarks && <p className="mt-0.5 text-slate-600">{f.remarks}</p>}
-                            {f.status === "rescheduled" && f.reschedule_reason && (
-                              <p className="mt-0.5 italic text-slate-400">Rescheduled: {f.reschedule_reason}</p>
-                            )}
-                          </div>
-                          {isActive && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-7 shrink-0 text-[11px]"
-                              onClick={() => setRescheduleDraft({ followupId: f.id, date: f.date, time: f.time, reason: "" })}
-                              data-testid={`cons-followup-reschedule-${f.id}`}
-                            >
-                              Reschedule
-                            </Button>
+            {detailTab === "followup" && (
+              <div className="space-y-1.5" data-testid="cons-followups-list">
+                {(selectedLead.consultation_follow_ups || []).length === 0 ? (
+                  <p className="py-6 text-center text-sm text-slate-400">No follow-ups scheduled yet.</p>
+                ) : (
+                  selectedLead.consultation_follow_ups.slice().reverse().map((f) => {
+                    const isActive = f.status !== "rescheduled";
+                    return (
+                      <div
+                        key={f.id}
+                        className={`flex items-start justify-between gap-3 rounded-lg border p-2.5 text-xs ${isActive ? "border-orange-200 bg-orange-50/60" : "border-slate-200 bg-slate-50 text-slate-400"}`}
+                        data-testid={`cons-followup-row-${f.id}`}
+                      >
+                        <div>
+                          <p className={`font-semibold ${isActive ? "text-orange-700" : "text-slate-400 line-through"}`}>{f.date} at {f.time}</p>
+                          {f.remarks && <p className="mt-0.5 text-slate-600">{f.remarks}</p>}
+                          {f.status === "rescheduled" && f.reschedule_reason && (
+                            <p className="mt-0.5 italic text-slate-400">Rescheduled: {f.reschedule_reason}</p>
                           )}
                         </div>
-                      );
-                    })}
-                  </div>
+                        {isActive && !isConsultant && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 shrink-0 text-[11px]"
+                            onClick={() => setRescheduleDraft({ followupId: f.id, date: f.date, time: f.time, reason: "" })}
+                            data-testid={`cons-followup-reschedule-${f.id}`}
+                          >
+                            Reschedule
+                          </Button>
+                        )}
+                      </div>
+                    );
+                  })
                 )}
+              </div>
+            )}
+
+            {detailTab === "profile" && (
+              <div className="space-y-3" data-testid="cons-lead-profile">
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-600">Contact</p>
+                  <div className="space-y-1.5 text-xs text-slate-700">
+                    <div className="flex items-center justify-between"><span className="text-slate-500">Phone</span><span className="font-medium">{selectedLead.phone || "—"}</span></div>
+                    <div className="flex items-center justify-between"><span className="text-slate-500">Alternative Phone</span><span className="font-medium">{selectedLead.alternative_phone || "—"}</span></div>
+                    <div className="flex items-center justify-between"><span className="text-slate-500">Email</span><span className="font-medium">{selectedLead.email || "—"}</span></div>
+                    <div className="flex items-center justify-between"><span className="text-slate-500">Address</span><span className="font-medium">{selectedLead.address || "—"}</span></div>
+                    <div className="flex items-center justify-between"><span className="text-slate-500">City / State</span><span className="font-medium">{[selectedLead.city, selectedLead.state].filter(Boolean).join(", ") || "—"}</span></div>
+                  </div>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-600">Profile</p>
+                  <div className="space-y-1.5 text-xs text-slate-700">
+                    <div className="flex items-center justify-between"><span className="text-slate-500">Age</span><span className="font-medium">{selectedLead.age ?? "—"}</span></div>
+                    <div className="flex items-center justify-between"><span className="text-slate-500">Gender</span><span className="font-medium">{selectedLead.gender || "—"}</span></div>
+                    <div className="flex items-center justify-between"><span className="text-slate-500">Occupation</span><span className="font-medium">{selectedLead.occupation || "—"}</span></div>
+                    <div className="flex items-center justify-between"><span className="text-slate-500">Department</span><span className="font-medium">{selectedLead.department || "—"}</span></div>
+                    <div className="flex items-center justify-between"><span className="text-slate-500">Condition</span><span className="font-medium">{selectedLead.condition || "—"}</span></div>
+                    <div className="flex items-center justify-between"><span className="text-slate-500">Months of Pain</span><span className="font-medium">{selectedLead.months_of_pain ?? "—"}</span></div>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -957,85 +888,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
     </div>
   );
 };
-
-function StoreSellSection({ title, items, pick, setPick, onSell, selling, testPrefix, buttonLabel, showPaymentMode }) {
-  const selectedItem = items.find((i) => i.id === pick.item_id);
-  const price = selectedItem ? (pick.mode === "online" ? selectedItem.price_online : selectedItem.price_offline) : null;
-  const sessions = selectedItem?.item_type === "session"
-    ? (pick.mode === "online" ? selectedItem.sessions_online : selectedItem.sessions_offline)
-    : null;
-
-  return (
-    <div className="rounded-lg border border-violet-200 bg-violet-50 p-3" data-testid={testPrefix}>
-      <p className="mb-1.5 text-[11px] font-semibold text-violet-700">{title}</p>
-      {items.length === 0 ? (
-        <p className="text-xs text-violet-400">No {title.toLowerCase()} items in the store yet.</p>
-      ) : (
-        <>
-          <div className="grid grid-cols-3 gap-2">
-            <select
-              value={pick.item_id}
-              onChange={(e) => setPick({ ...pick, item_id: e.target.value })}
-              className="col-span-2 h-9 rounded-md border border-violet-200 px-2 text-xs"
-              data-testid={`${testPrefix}-select`}
-            >
-              <option value="">-- choose --</option>
-              {items.map((i) => (
-                <option key={i.id} value={i.id}>{i.name}</option>
-              ))}
-            </select>
-            <select
-              value={pick.mode}
-              onChange={(e) => setPick({ ...pick, mode: e.target.value })}
-              className="h-9 rounded-md border border-violet-200 px-2 text-xs"
-              data-testid={`${testPrefix}-mode`}
-            >
-              <option value="offline">Offline</option>
-              <option value="online">Online</option>
-            </select>
-          </div>
-
-          {selectedItem && (
-            <p className="mt-1.5 text-[11px] text-violet-600">
-              ₹{price}{sessions ? ` · ${sessions} sessions` : ""}
-            </p>
-          )}
-
-          <div className={showPaymentMode ? "mt-2 grid grid-cols-3 gap-2" : "mt-2"}>
-            {showPaymentMode && (
-              <select
-                value={pick.payment_mode}
-                onChange={(e) => setPick({ ...pick, payment_mode: e.target.value })}
-                className="h-9 rounded-md border border-violet-200 px-2 text-xs capitalize"
-                data-testid={`${testPrefix}-payment-mode`}
-              >
-                {PAYMENT_MODES.map((m) => <option key={m} value={m}>{m.replace("_", " ")}</option>)}
-              </select>
-            )}
-            <Input
-              type="number"
-              min="0"
-              value={pick.paid}
-              onChange={(e) => setPick({ ...pick, paid: e.target.value })}
-              placeholder={price != null ? `Paid (default ₹${price})` : "Paid"}
-              className={showPaymentMode ? "col-span-2 h-9" : "h-9"}
-              data-testid={`${testPrefix}-paid`}
-            />
-          </div>
-          <Button
-            size="sm"
-            className="mt-2 w-full bg-violet-600 hover:bg-violet-700 text-xs"
-            onClick={onSell}
-            disabled={selling || !pick.item_id}
-            data-testid={`${testPrefix}-sell`}
-          >
-            {selling ? "Saving..." : buttonLabel}
-          </Button>
-        </>
-      )}
-    </div>
-  );
-}
 
 /**
  * A text box that starts editable, then locks (read-only) once saved.
