@@ -90,9 +90,11 @@ class V3BranchUpdate(BaseModel):
 
 class V3DoctorCreate(BaseModel):
     full_name: str
-    profile_type: Literal["head_physio", "physio"]
+    profile_type: Literal["head_physio", "physio", "doctor"]
     branch_id: Optional[str] = None
     specialization: Optional[str] = ""
+    employee_id: Optional[str] = None
+    joining_date: Optional[str] = None
 
 
 class V3DoctorSlotsInput(BaseModel):
@@ -107,6 +109,8 @@ class V3DoctorOut(BaseModel):
     profile_type: str
     branch_id: str
     specialization: Optional[str] = ""
+    employee_id: Optional[str] = None
+    joining_date: Optional[str] = None
     slots: List[str]
     created_at: str
 

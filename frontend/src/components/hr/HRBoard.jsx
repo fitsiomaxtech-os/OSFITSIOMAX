@@ -7,7 +7,7 @@ import { toast } from "@/components/ui/sonner";
 import {
   hrDashboard, hrEmployees, hrCreateEmployee, hrUpdateEmployee, hrDeleteEmployee,
   hrUsers, hrCreateUser, hrResetPassword, hrDeactivateUser, hrActivateUser, hrDeleteUserPermanent, hrUpdateUserRole, hrMeta,
-  getBranches, getDoctors, createDoctor, addDoctorSlots,
+  getBranches, getDoctors, createDoctor, addDoctorSlots, requestExpertVerification, verifyAndCreateExpert,
 } from "@/lib/api";
 
 const TABS = [
@@ -559,50 +559,107 @@ const Select = ({ value, onChange, options = [], testid }) => (
 );
 
 // ---------- Fitsiomax Experts (moved from Super Admin Master View) ----------
+const blankExpertForm = { full_name: "", profile_type: "physio", branch_id: "", employee_id: "", specialization: "", joining_date: "", slot: "" };
+
 const FitsiomaxExpertsTab = () => {
   const [doctors, setDoctors] = useState([]);
   const [branches, setBranches] = useState([]);
-  const [doctorForm, setDoctorForm] = useState({ full_name: "", profile_type: "physio", branch_id: "", specialization: "" });
+  const [employees, setEmployees] = useState([]);
+  const [form, setForm] = useState(blankExpertForm);
+  const [saving, setSaving] = useState(false);
+  const [otpStep, setOtpStep] = useState(null); // { requestId } | null
+  const [otp, setOtp] = useState("");
+
   const [slotDoctorId, setSlotDoctorId] = useState("");
   const [slotTime, setSlotTime] = useState("");
-  const [saving, setSaving] = useState(false);
 
   const reloadList = async () => {
     try {
-      const [docs, brs] = await Promise.all([getDoctors(), getBranches()]);
+      const [docs, brs, emps] = await Promise.all([getDoctors(), getBranches(), hrEmployees({ status: "active" })]);
       setDoctors(docs || []);
       setBranches(brs || []);
+      setEmployees(emps || []);
     } catch (err) {
       toast.error("Failed to load Fitsiomax Experts");
     }
   };
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const [docs, brs] = await Promise.all([getDoctors(), getBranches()]);
-        setDoctors(docs || []);
-        setBranches(brs || []);
-      } catch (err) {
-        toast.error("Failed to load Fitsiomax Experts");
-      }
-    })();
-  }, []);
+  useEffect(() => { reloadList(); }, []);
 
-  const createDoctorNow = async (event) => {
+  const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+
+  const pickEmployee = (id) => {
+    const emp = employees.find((e) => e.id === id);
+    setForm((p) => ({ ...p, employee_id: id, full_name: p.full_name || emp?.full_name || "" }));
+  };
+
+  const resetForm = () => { setForm(blankExpertForm); setOtpStep(null); setOtp(""); };
+
+  const finishWithSlot = async (doctorId) => {
+    if (!form.slot) return;
+    try { await addDoctorSlots(doctorId, { slots: [form.slot] }); }
+    catch { toast.error("Expert created, but the initial slot failed to save — add it below instead"); }
+  };
+
+  const submitCreate = async (event) => {
     event.preventDefault();
-    if (!doctorForm.full_name.trim()) {
-      toast.error("Enter a name");
+    if (!form.full_name.trim()) { toast.error("Enter a name"); return; }
+    if (!form.branch_id) { toast.error("Choose a branch"); return; }
+
+    if (form.profile_type === "head_physio") {
+      if (!form.employee_id) { toast.error("Head Physio must be linked to an existing employee (needed to send the OTP)"); return; }
+      try {
+        setSaving(true);
+        const res = await requestExpertVerification({
+          full_name: form.full_name,
+          branch_id: form.branch_id,
+          employee_id: form.employee_id,
+          specialization: form.specialization,
+          joining_date: form.joining_date || null,
+        });
+        setOtpStep({ requestId: res.request_id });
+        toast.success(res.message || "OTP sent");
+      } catch (err) {
+        toast.error(err?.response?.data?.detail || "Failed to send OTP");
+      } finally {
+        setSaving(false);
+      }
       return;
     }
+
     try {
       setSaving(true);
-      await createDoctor({ ...doctorForm, branch_id: doctorForm.branch_id || null });
-      setDoctorForm({ full_name: "", profile_type: "physio", branch_id: "", specialization: "" });
+      const created = await createDoctor({
+        full_name: form.full_name,
+        profile_type: form.profile_type,
+        branch_id: form.branch_id,
+        specialization: form.specialization,
+        employee_id: form.employee_id || null,
+        joining_date: form.joining_date || null,
+      });
+      await finishWithSlot(created.id);
+      resetForm();
       await reloadList();
       toast.success("Fitsiomax Expert created");
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed to create");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const submitOtp = async (event) => {
+    event.preventDefault();
+    if (!otp.trim()) { toast.error("Enter the OTP"); return; }
+    try {
+      setSaving(true);
+      const created = await verifyAndCreateExpert(otpStep.requestId, otp.trim());
+      await finishWithSlot(created.id);
+      resetForm();
+      await reloadList();
+      toast.success("Head Physio verified and created");
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Invalid OTP");
     } finally {
       setSaving(false);
     }
@@ -631,66 +688,86 @@ const FitsiomaxExpertsTab = () => {
       <CardHeader>
         <CardTitle className="text-base">Fitsiomax Experts</CardTitle>
       </CardHeader>
-      <CardContent>
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500" data-testid="hr-experts-add-heading">Add Fitsiomax Expert</p>
-        <form className="grid gap-2 md:grid-cols-2" onSubmit={createDoctorNow} data-testid="hr-experts-create-form">
-          <Input
-            value={doctorForm.full_name}
-            onChange={(e) => setDoctorForm((p) => ({ ...p, full_name: e.target.value }))}
-            placeholder="Fitsiomax Expert name"
-            data-testid="hr-experts-name-input"
-          />
-          <select
-            value={doctorForm.profile_type}
-            onChange={(e) => setDoctorForm((p) => ({ ...p, profile_type: e.target.value }))}
-            className="h-9 rounded-md border border-slate-200 px-3 text-sm"
-            data-testid="hr-experts-profile-select"
-          >
-            <option value="head_physio">Head Physio</option>
-            <option value="physio">Physio</option>
-          </select>
-          <select
-            value={doctorForm.branch_id}
-            onChange={(e) => setDoctorForm((p) => ({ ...p, branch_id: e.target.value }))}
-            className="h-9 rounded-md border border-slate-200 px-3 text-sm"
-            data-testid="hr-experts-branch-select"
-          >
-            <option value="">Branch</option>
-            {branches.map((branch) => (
-              <option key={branch.id} value={branch.id}>{branch.branch_name}</option>
-            ))}
-          </select>
-          <Input
-            value={doctorForm.specialization}
-            onChange={(e) => setDoctorForm((p) => ({ ...p, specialization: e.target.value }))}
-            placeholder="Specialization"
-            data-testid="hr-experts-specialization-input"
-          />
-          <div className="md:col-span-2">
-            <Button type="submit" disabled={saving} data-testid="hr-experts-create-submit">Create Fitsiomax Expert</Button>
+      <CardContent className="space-y-5">
+        {!otpStep ? (
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500" data-testid="hr-experts-add-heading">Create Physio / Head Physio / Doctor</p>
+            <form className="grid gap-2 md:grid-cols-3" onSubmit={submitCreate} data-testid="hr-experts-create-form">
+              <Field label="Name *">
+                <Input value={form.full_name} onChange={(e) => set("full_name", e.target.value)} placeholder="Expert name" data-testid="hr-experts-name-input" />
+              </Field>
+              <Field label="Type *">
+                <select value={form.profile_type} onChange={(e) => set("profile_type", e.target.value)} className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm" data-testid="hr-experts-profile-select">
+                  <option value="physio">Physio</option>
+                  <option value="head_physio">Head Physio (requires OTP)</option>
+                  <option value="doctor">Doctor</option>
+                </select>
+              </Field>
+              <Field label="Branch *">
+                <select value={form.branch_id} onChange={(e) => set("branch_id", e.target.value)} className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm" data-testid="hr-experts-branch-select">
+                  <option value="">Select branch...</option>
+                  {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.branch_name}</option>)}
+                </select>
+              </Field>
+              <Field label={`Assign Fitsiomax Expert${form.profile_type === "head_physio" ? " *" : " (optional)"}`} className="md:col-span-2">
+                <select value={form.employee_id} onChange={(e) => pickEmployee(e.target.value)} className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm" data-testid="hr-experts-employee-select">
+                  <option value="">Link to an existing employee...</option>
+                  {employees.map((e) => <option key={e.id} value={e.id}>{e.employee_code ? `${e.employee_code} — ` : ""}{e.full_name}{e.email ? ` (${e.email})` : ""}</option>)}
+                </select>
+              </Field>
+              <Field label="Joining Date">
+                <Input type="date" value={form.joining_date} onChange={(e) => set("joining_date", e.target.value)} data-testid="hr-experts-joining-input" />
+              </Field>
+              <Field label="Specialization" className="md:col-span-2">
+                <Input value={form.specialization} onChange={(e) => set("specialization", e.target.value)} placeholder="e.g. Sports Physiotherapy" data-testid="hr-experts-specialization-input" />
+              </Field>
+              <Field label="Initial Slot (optional)">
+                <Input type="datetime-local" value={form.slot} onChange={(e) => set("slot", e.target.value)} data-testid="hr-experts-initial-slot-input" />
+              </Field>
+              <div className="md:col-span-3">
+                <Button type="submit" disabled={saving} data-testid="hr-experts-create-submit">
+                  {form.profile_type === "head_physio" ? "Send OTP & Continue" : "Create Fitsiomax Expert"}
+                </Button>
+              </div>
+            </form>
           </div>
-        </form>
+        ) : (
+          <div className="rounded-lg border border-sky-200 bg-sky-50 p-4" data-testid="hr-experts-otp-panel">
+            <p className="mb-1 flex items-center gap-1.5 text-sm font-semibold text-sky-700"><KeyRound className="h-4 w-4" /> Verify OTP for {form.full_name}</p>
+            <p className="mb-3 text-xs text-sky-600">Enter the OTP emailed to the linked employee to finish creating this Head Physio.</p>
+            <form className="flex flex-wrap items-end gap-2" onSubmit={submitOtp} data-testid="hr-experts-otp-form">
+              <Field label="OTP">
+                <Input value={otp} onChange={(e) => setOtp(e.target.value)} placeholder="6-digit code" maxLength={6} data-testid="hr-experts-otp-input" />
+              </Field>
+              <Button type="submit" disabled={saving} className="bg-sky-600 hover:bg-sky-700" data-testid="hr-experts-otp-submit">Verify &amp; Create</Button>
+              <Button type="button" variant="outline" onClick={resetForm} data-testid="hr-experts-otp-cancel">Cancel</Button>
+            </form>
+          </div>
+        )}
 
-        <form className="mt-3 grid gap-2 md:grid-cols-3" onSubmit={addSlotNow} data-testid="hr-experts-slot-form">
-          <select
-            value={slotDoctorId}
-            onChange={(e) => setSlotDoctorId(e.target.value)}
-            className="h-9 rounded-md border border-slate-200 px-3 text-sm"
-            data-testid="hr-experts-slot-doctor-select"
-          >
-            <option value="">Assign Fitsiomax Expert</option>
-            {doctors.map((doctor) => (
-              <option key={doctor.id} value={doctor.id}>{doctor.full_name}</option>
-            ))}
-          </select>
-          <Input
-            type="datetime-local"
-            value={slotTime}
-            onChange={(e) => setSlotTime(e.target.value)}
-            data-testid="hr-experts-slot-time-input"
-          />
-          <Button type="submit" variant="outline" disabled={saving} data-testid="hr-experts-slot-submit">Add Slot</Button>
-        </form>
+        <div>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Add Availability Slot to an Existing Expert</p>
+          <form className="grid gap-2 md:grid-cols-3" onSubmit={addSlotNow} data-testid="hr-experts-slot-form">
+            <select
+              value={slotDoctorId}
+              onChange={(e) => setSlotDoctorId(e.target.value)}
+              className="h-9 rounded-md border border-slate-200 px-3 text-sm"
+              data-testid="hr-experts-slot-doctor-select"
+            >
+              <option value="">Select expert...</option>
+              {doctors.map((doctor) => (
+                <option key={doctor.id} value={doctor.id}>{doctor.full_name}</option>
+              ))}
+            </select>
+            <Input
+              type="datetime-local"
+              value={slotTime}
+              onChange={(e) => setSlotTime(e.target.value)}
+              data-testid="hr-experts-slot-time-input"
+            />
+            <Button type="submit" variant="outline" disabled={saving} data-testid="hr-experts-slot-submit">Add Slot</Button>
+          </form>
+        </div>
       </CardContent>
     </Card>
   );

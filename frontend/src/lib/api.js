@@ -83,6 +83,8 @@ export const getDoctors = async (params) => (await api.get("/doctors", { params 
 export const createDoctor = async (payload) => (await api.post("/doctors", payload)).data;
 export const addDoctorSlots = async (doctorId, payload) => (await api.post(`/doctors/${doctorId}/slots`, payload)).data;
 export const getAvailableDoctors = async (params) => (await api.get("/doctors/available", { params })).data;
+export const requestExpertVerification = async (payload) => (await api.post("/doctors/request-verification", payload)).data;
+export const verifyAndCreateExpert = async (requestId, otp) => (await api.post("/doctors/verify-and-create", { request_id: requestId, otp })).data;
 
 export const getLeads = async (params) => (await api.get("/leads", { params })).data;
 export const createManualLead = async (payload) => (await api.post("/leads/manual", payload)).data;
