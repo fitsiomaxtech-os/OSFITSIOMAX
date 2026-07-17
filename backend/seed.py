@@ -57,20 +57,18 @@ async def migrate_branch_stages() -> None:
             {"stage": old},
             {"$set": {"stage": new, "updated_at": now_iso()}},
         )
-    # When pre-sales stage = "Appointment" and branch_stage is empty, push to the live first
-    # branch stage so it appears in Branch Admin's New Lead column.
-    await v3_col("leads").update_many(
-        {"stage": "Appointment", "$or": [{"branch_stage": None}, {"branch_stage": ""}, {"branch_stage": {"$exists": False}}]},
-        {"$set": {"branch_stage": first_branch_stage, "updated_at": now_iso()}},
-    )
-    # Backfill orphaned leads: any lead in the branch pipeline whose branch_stage no longer
-    # matches a currently valid "sales" stage name (e.g. still stuck on a dead literal from
-    # before a rename) gets moved back onto the live first stage instead of staying invisible
-    # in every stage pill while still being counted in the branch's total.
+    # Backfill orphaned leads: the Branch board's own total is every lead with a branch_id
+    # assigned (regardless of the pre-sales "stage" field), so any such lead whose branch_stage
+    # is empty or doesn't match a currently valid "sales" stage name (e.g. still stuck on a dead
+    # literal from before a rename) gets moved onto the live first stage — otherwise it's counted
+    # in "All Stages" but invisible in every individual stage pill.
     valid_branch_stages = set(await v3_col("pipeline_stages").distinct("name", {"type": "sales"}))
     if valid_branch_stages:
+        # $nin against names only (not None/"") is deliberate: a missing/None/empty branch_stage
+        # is never "in" that list of real names either, so it's naturally caught by this same
+        # filter and doesn't need a separate query.
         await v3_col("leads").update_many(
-            {"stage": "Appointment", "branch_stage": {"$nin": list(valid_branch_stages) + [None, ""]}},
+            {"branch_id": {"$ne": None}, "branch_stage": {"$nin": list(valid_branch_stages)}},
             {"$set": {"branch_stage": first_branch_stage, "updated_at": now_iso()}},
         )
     # Re-seed pipeline_stages of type=sales with the new names if any legacy entries exist.
