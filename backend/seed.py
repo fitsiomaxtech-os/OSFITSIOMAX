@@ -3,6 +3,7 @@ from database import db, v2_col, v3_col
 from utils import now_iso
 from security import hash_password
 from constants import V3_VERTICALS, V3_BRANCH_STAGES, V3_STAGES, V3_CONSULTATION_STAGES, V3_HEAD_CONSULTATION_STAGES
+from stage_utils import get_first_stage_name
 
 
 # Maps deprecated branch_stage labels (legacy 8-stage flow) to the new flow.
@@ -33,8 +34,17 @@ _LEGACY_PRESALES_STAGE_MAP = {
 
 async def migrate_branch_stages() -> None:
     """Map legacy branch_stage and pre-sales stage values to new flows. Safe to re-run."""
+    # Resolve the live first "sales" stage name once — Super Admin may have renamed it via
+    # Pipeline Stage Management (e.g. "New Appointment" -> "New Leads"), and every legacy
+    # mapping below that used to hardcode the literal "New Appointment" must land on whatever
+    # that stage is actually called now, or the leads become invisible orphans on the board.
+    first_branch_stage = await get_first_stage_name("sales", "New Appointment")
+    legacy_branch_stage_map = {
+        old: (first_branch_stage if new == "New Appointment" else new)
+        for old, new in _LEGACY_BRANCH_STAGE_MAP.items()
+    }
     # Branch stage migration
-    for old, new in _LEGACY_BRANCH_STAGE_MAP.items():
+    for old, new in legacy_branch_stage_map.items():
         await v3_col("leads").update_many(
             {"branch_stage": old},
             {"$set": {"branch_stage": new, "updated_at": now_iso()}},
@@ -47,12 +57,22 @@ async def migrate_branch_stages() -> None:
             {"stage": old},
             {"$set": {"stage": new, "updated_at": now_iso()}},
         )
-    # When pre-sales stage = "Appointment" and branch_stage is empty, push to "New Appointment" so
-    # it appears in Branch Admin's New Appointment column.
+    # When pre-sales stage = "Appointment" and branch_stage is empty, push to the live first
+    # branch stage so it appears in Branch Admin's New Lead column.
     await v3_col("leads").update_many(
         {"stage": "Appointment", "$or": [{"branch_stage": None}, {"branch_stage": ""}, {"branch_stage": {"$exists": False}}]},
-        {"$set": {"branch_stage": "New Appointment", "updated_at": now_iso()}},
+        {"$set": {"branch_stage": first_branch_stage, "updated_at": now_iso()}},
     )
+    # Backfill orphaned leads: any lead in the branch pipeline whose branch_stage no longer
+    # matches a currently valid "sales" stage name (e.g. still stuck on a dead literal from
+    # before a rename) gets moved back onto the live first stage instead of staying invisible
+    # in every stage pill while still being counted in the branch's total.
+    valid_branch_stages = set(await v3_col("pipeline_stages").distinct("name", {"type": "sales"}))
+    if valid_branch_stages:
+        await v3_col("leads").update_many(
+            {"stage": "Appointment", "branch_stage": {"$nin": list(valid_branch_stages) + [None, ""]}},
+            {"$set": {"branch_stage": first_branch_stage, "updated_at": now_iso()}},
+        )
     # Re-seed pipeline_stages of type=sales with the new names if any legacy entries exist.
     legacy_sales = await v3_col("pipeline_stages").find(
         {"type": "sales", "name": {"$in": list(_LEGACY_BRANCH_STAGE_MAP.keys())}},

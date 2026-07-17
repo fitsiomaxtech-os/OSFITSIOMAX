@@ -10,6 +10,7 @@ from deps import v3_require_roles, v3_current_user
 from constants import V3_STAGES
 from security import hash_password
 from schemas.v3 import V3UserOut
+from stage_utils import get_first_stage_name
 from pydantic import BaseModel
 from typing import Literal
 
@@ -431,6 +432,7 @@ async def sync_source(source_id: str, payload: MarketingSyncInput, _: V3UserOut 
     skipped_no_phone = 0
     skipped_duplicate = 0
     sample_errors: List[str] = []
+    first_branch_stage = await get_first_stage_name("sales", "New Appointment")
 
     for idx, row in enumerate(payload.rows):
         phone_raw = str(row.get(phone_key, "") or "").strip()
@@ -475,7 +477,7 @@ async def sync_source(source_id: str, payload: MarketingSyncInput, _: V3UserOut 
             # Appointment column too, without pulling it out of the usual Pre-Sales workflow.
             "stage": "New Leads",
             "branch_id": source_branch_id,
-            "branch_stage": "New Appointment" if source_branch_id else None,
+            "branch_stage": first_branch_stage if source_branch_id else None,
             "notes": std_payload.get("notes", ""),
             "extra_fields": {**{k: v for k, v in std_payload.items() if k not in ("name", "email", "phone", "vertical", "notes")}, **custom_payload},
             "assigned_user_id": assigned["id"] if assigned else None,

@@ -8,7 +8,7 @@ import uuid
 from database import v3_col
 from utils import now_iso
 from deps import v3_require_roles
-from constants import V3_BRANCH_STAGES, V3_CONSULTATION_STAGES
+from constants import V3_BRANCH_STAGES, V3_CONSULTATION_STAGES, V3_HEAD_CONSULTATION_STAGES
 from schemas.v3 import (
     V3UserOut, V3LeadOut,
     V3BranchStageInput, V3CollectFeeInput, V3AssignPhysioInput, V3ConsultationStageInput,
@@ -31,6 +31,14 @@ async def _consultation_stage_names() -> list:
     rows = await v3_col("pipeline_stages").find({"type": "consultation"}, {"_id": 0, "name": 1}).sort("order", 1).to_list(200)
     names = [r["name"] for r in rows]
     return names or V3_CONSULTATION_STAGES
+
+
+async def _head_consultation_stage_names() -> list:
+    """Live Head Consultation Stages as configured in Super Admin > Pipeline Stage Management,
+    falling back to the built-in defaults if none have been configured yet."""
+    rows = await v3_col("pipeline_stages").find({"type": "head_consultation"}, {"_id": 0, "name": 1}).sort("order", 1).to_list(200)
+    names = [r["name"] for r in rows]
+    return names or V3_HEAD_CONSULTATION_STAGES
 
 
 @router.get("/branch-board/{branch_id}")
@@ -101,11 +109,12 @@ async def v3_assign_physio(lead_id: str, payload: V3AssignPhysioInput, user: V3U
     physio = await v3_col("doctors").find_one({"id": payload.physio_id}, {"_id": 0})
     if not physio:
         raise HTTPException(status_code=404, detail="Physio not found")
+    consultation_stage = lead.get("consultation_stage") or (await _consultation_stage_names())[0]
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {
         "assigned_physio_id": payload.physio_id,
         "assigned_physio_name": physio["full_name"],
         "branch_stage": "Appointment Date & Time",
-        "consultation_stage": lead.get("consultation_stage") or "New Appointment",
+        "consultation_stage": consultation_stage,
         "updated_at": now_iso(),
     }})
     activity = {
@@ -153,7 +162,7 @@ async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointm
     }
     # When the appointment is booked (not cancelled), seed the Consultations pipeline
     if payload.final_stage == "Appointment Date & Time":
-        updates["consultation_stage"] = lead.get("consultation_stage") or "New Appointment"
+        updates["consultation_stage"] = lead.get("consultation_stage") or (await _consultation_stage_names())[0]
     if payload.notes and payload.notes.strip():
         existing_notes = (lead.get("notes") or "").strip()
         appended = f"[Appt {payload.appointment_date} {payload.appointment_time}] {payload.notes.strip()}"
@@ -303,7 +312,7 @@ async def v3_schedule_consultation_follow_up(lead_id: str, payload: V3Consultati
         "updated_at": now_iso(),
     }
     if not lead.get("head_consultation_stage"):
-        set_fields["head_consultation_stage"] = "New Appointment"
+        set_fields["head_consultation_stage"] = (await _head_consultation_stage_names())[0]
     await v3_col("leads").update_one(
         {"id": lead_id},
         {"$push": {"consultation_follow_ups": entry}, "$set": set_fields},
@@ -357,7 +366,7 @@ async def v3_reschedule_consultation_follow_up(lead_id: str, followup_id: str, p
         "updated_at": now_iso(),
     }
     if not lead.get("head_consultation_stage"):
-        set_fields["head_consultation_stage"] = "New Appointment"
+        set_fields["head_consultation_stage"] = (await _head_consultation_stage_names())[0]
     await v3_col("leads").update_one(
         {"id": lead_id},
         {"$set": set_fields},

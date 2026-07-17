@@ -4,6 +4,7 @@ from typing import Optional
 from database import v3_col
 from deps import v3_require_roles
 from schemas.v3 import V3UserOut
+from stage_utils import get_first_stage_name
 
 router = APIRouter(prefix="/api/v3")
 
@@ -32,7 +33,8 @@ async def get_branch_finance(
     total_package = sum(l.get("package_paid", 0) for l in package_leads)
 
     all_branch_leads = await v3_col("leads").find(base_query, {"_id": 0}).to_list(2000)
-    leads_with_no_fee = [l for l in all_branch_leads if (l.get("consultation_fee") or 0) == 0 and l.get("branch_stage") not in (None, "New Appointment")]
+    first_branch_stage = await get_first_stage_name("sales", "New Appointment")
+    leads_with_no_fee = [l for l in all_branch_leads if (l.get("consultation_fee") or 0) == 0 and l.get("branch_stage") not in (None, first_branch_stage)]
     pending_count = len(leads_with_no_fee)
 
     summary = {

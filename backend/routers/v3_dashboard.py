@@ -169,6 +169,7 @@ async def v3_master_control(
         return out
 
     total_leads = await leads.count_documents(merged())
+    first_branch_stage = (await _stage_names("sales", V3_BRANCH_STAGES))[0]
 
     # Patient journey counts (label → count) — 8 pills
     journey = {
@@ -176,7 +177,7 @@ async def v3_master_control(
         "RNR": await leads.count_documents(merged({"stage": "RNR"})),
         "Follow Up": await leads.count_documents(merged({"stage": "Follow Up"})),
         "Appointment": await leads.count_documents(merged({"stage": "Appointment"})),
-        "New Appointment": await leads.count_documents(merged({"branch_stage": "New Appointment"})),
+        "New Appointment": await leads.count_documents(merged({"branch_stage": first_branch_stage})),
         "Portfolio": await leads.count_documents(merged({"branch_stage": "Portfolio"})),
         "Appointment Date & Time": await leads.count_documents(merged({"branch_stage": "Appointment Date & Time"})),
         "Patient": await leads.count_documents(merged({"branch_stage": "Appointment Date & Time", "appointment_date": {"$ne": None}})),
@@ -194,7 +195,7 @@ async def v3_master_control(
     # Today's Priority Queue
     todays_follow_ups = await leads.count_documents(merged({"stage": "Follow Up", "follow_up_date": today_iso}))
     appointments_today = await leads.count_documents(merged({"appointment_date": today_iso}))
-    new_appointments = await leads.count_documents(merged({"branch_stage": "New Appointment"}))
+    new_appointments = await leads.count_documents(merged({"branch_stage": first_branch_stage}))
     pending_branch_actions = attention["date_time_pending"] + attention["branch_pending"]
     today_queue = {
         "todays_follow_ups": todays_follow_ups,

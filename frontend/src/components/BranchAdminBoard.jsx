@@ -104,10 +104,11 @@ export const BranchAdminBoard = ({ branchId }) => {
     return list;
   }, [boardData.leads, searchQuery, dateFilter]);
 
-  // "All Stages" is a total of the named stage buckets only — not an independent raw count.
-  // Using boardData.leads.length here could drift from the sum whenever a lead's branch_stage
-  // doesn't match any currently configured stage name (e.g. a stale/legacy value).
-  const totalLeads = Object.values(boardData.stage_counts || {}).reduce((sum, n) => sum + (n || 0), 0);
+  // "All Stages" is just the total lead count for this branch — every lead the branch has,
+  // regardless of which stage it currently sits in. (The backend now always stamps a lead's
+  // branch_stage with a currently-valid stage name, so this naturally stays in sync with the
+  // sum of the individual stage pills too.)
+  const totalLeads = boardData.leads.length;
 
   const handleStageUpdate = async () => {
     const data = await loadBoard();
