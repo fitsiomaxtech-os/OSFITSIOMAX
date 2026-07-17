@@ -4,7 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
-import { uploadStoreImage, createStoreItem, updateStoreItem, deleteStoreItem, listStoreItems } from "@/lib/api";
+import { uploadStoreImage, createStoreItem, updateStoreItem, deleteStoreItem, listStoreItems, getStoreHistory } from "@/lib/api";
 
 export const TABS = [
   { key: "consultations", label: "Consultations", icon: Stethoscope },
@@ -701,6 +701,79 @@ const ConsultationsPanel = () => {
   );
 };
 
+const HISTORY_ACTION_LABELS = {
+  consultation_paid: "Consultation Sold",
+  package_sold: "Package Sold",
+  package_assigned: "Package Assigned",
+  package_payment_collected: "Package Payment Collected",
+  fee_collected: "Fee Collected",
+};
+
+const HistoryPanel = () => {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  const load = () => {
+    setLoading(true);
+    getStoreHistory(200)
+      .then((res) => setRows(res.history || []))
+      .catch(() => setRows([]))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => { load(); }, []);
+
+  return (
+    <div className="space-y-3" data-testid="packages-panel-history">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-slate-500">{rows.length} transaction{rows.length === 1 ? "" : "s"}</p>
+        <Button size="sm" variant="outline" onClick={load} data-testid="history-refresh-btn">Refresh</Button>
+      </div>
+
+      {rows.length === 0 ? (
+        <Card>
+          <CardContent className="p-8 text-center text-sm text-slate-400">
+            {loading ? "Loading..." : "No store transactions yet."}
+          </CardContent>
+        </Card>
+      ) : (
+        <Card className="overflow-hidden border-slate-200">
+          <CardContent className="overflow-x-auto p-0">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                <tr>
+                  <th className="px-4 py-2 text-left">Date</th>
+                  <th className="px-4 py-2 text-left">Patient</th>
+                  <th className="px-4 py-2 text-left">Branch</th>
+                  <th className="px-4 py-2 text-left">Action</th>
+                  <th className="px-4 py-2 text-left">Details</th>
+                  <th className="px-4 py-2 text-left">By</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.id} className="border-t border-slate-100" data-testid={`history-row-${r.id}`}>
+                    <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-500">{(r.created_at || "").replace("T", " ").slice(0, 16)}</td>
+                    <td className="px-4 py-3 font-medium text-slate-800">{r.patient_name || "—"}</td>
+                    <td className="px-4 py-3 text-slate-600">{r.branch_name || "—"}</td>
+                    <td className="whitespace-nowrap px-4 py-3">
+                      <span className="inline-flex items-center rounded-full bg-violet-50 px-2 py-0.5 text-xs font-semibold text-violet-700">
+                        {HISTORY_ACTION_LABELS[r.action] || r.action}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-xs text-slate-600">{r.details || "—"}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-500">{r.created_by || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+};
+
 export const PackagesBoard = () => {
   const [tab, setTab] = useState("consultations");
 
@@ -730,7 +803,8 @@ export const PackagesBoard = () => {
 
       {tab === "consultations" && <ConsultationsPanel />}
       {tab === "sessions" && <SessionsPanel />}
-      {tab !== "consultations" && tab !== "sessions" && TABS.map((t) => tab === t.key && (
+      {tab === "history" && <HistoryPanel />}
+      {tab !== "consultations" && tab !== "sessions" && tab !== "history" && TABS.map((t) => tab === t.key && (
         <PlaceholderPanel key={t.key} label={t.label} testid={`packages-panel-${t.key}`} />
       ))}
     </div>

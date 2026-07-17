@@ -143,3 +143,51 @@ async def delete_store_item(item_id: str, _: V3UserOut = Depends(v3_require_role
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Item not found")
     return {"message": "Item deleted"}
+
+
+# Every lead_activity action that represents money changing hands for a Fitsio Store item —
+# a consultation, session package, or its collection — as opposed to unrelated activity like
+# stage moves or diagnosis notes.
+STORE_HISTORY_ACTIONS = [
+    "consultation_paid",
+    "package_sold",
+    "package_assigned",
+    "package_payment_collected",
+    "fee_collected",
+]
+
+
+@router.get("/history")
+async def store_history(
+    limit: int = 200,
+    _: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin", "head_physio")),
+):
+    """Chronological listing of Fitsio Store sales/collections across the whole system —
+    consultations sold, session packages assigned/collected — for the Super Admin
+    FITSIO STORE > History tab."""
+    rows = await v3_col("lead_activity").find(
+        {"action": {"$in": STORE_HISTORY_ACTIONS}}, {"_id": 0}
+    ).sort("created_at", -1).to_list(max(1, min(limit, 500)))
+
+    lead_ids = list({r["lead_id"] for r in rows if r.get("lead_id")})
+    leads = await v3_col("leads").find(
+        {"id": {"$in": lead_ids}}, {"_id": 0, "id": 1, "name": 1, "phone": 1, "branch_id": 1}
+    ).to_list(1000)
+    lead_map = {l["id"]: l for l in leads}
+
+    branch_ids = list({l["branch_id"] for l in leads if l.get("branch_id")})
+    branches = await v3_col("branches").find(
+        {"id": {"$in": branch_ids}}, {"_id": 0, "id": 1, "branch_name": 1}
+    ).to_list(500)
+    branch_map = {b["id"]: b.get("branch_name", "") for b in branches}
+
+    history = []
+    for r in rows:
+        lead = lead_map.get(r.get("lead_id"), {})
+        history.append({
+            **r,
+            "patient_name": lead.get("name", "Unknown"),
+            "patient_phone": lead.get("phone", ""),
+            "branch_name": branch_map.get(lead.get("branch_id"), ""),
+        })
+    return {"history": history}
