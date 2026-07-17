@@ -444,8 +444,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
             {isConsultant && (() => {
               const currentName = selectedLead.head_consultation_stage || "New Appointment";
               const currentIdx = stages.findIndex((x) => x.name === currentName);
-              const isAppointmentToday = selectedLead.appointment_date === new Date().toISOString().slice(0, 10);
-              const packDone = !!selectedLead.package_id;
               const physioAssignIdx = stages.findIndex((x) => x.name === "Physio Assign");
               return (
                 <div>
@@ -455,15 +453,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                       const active = idx === currentIdx;
                       const passed = currentIdx >= 0 && idx < currentIdx;
                       const hex = s.color || "#64748b";
-                      let blockedReason = null;
-                      if (s.name === "Consultation Visit" && !isAppointmentToday) {
-                        blockedReason = `Only on the appointment date${selectedLead.appointment_date ? ` (${selectedLead.appointment_date})` : ""}`;
-                      } else if (s.name === "Consultation Pack" && currentIdx < 1) {
-                        blockedReason = "Mark Consultation Visit first";
-                      } else if (s.name === "Physio Assign" && !packDone) {
-                        blockedReason = "Choose a Consultation Pack first";
-                      }
-                      const isDisabled = active || passed || s.name === "New Appointment" || !!blockedReason;
+                      const isDisabled = active || passed || s.name === "New Appointment";
                       return (
                         <Fragment key={s.id}>
                           <button
@@ -474,20 +464,16 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                               if (s.name === "Physio Assign") { openPhysioModal(); return; }
                             }}
                             disabled={isDisabled}
-                            title={blockedReason || undefined}
                             className="flex flex-1 basis-32 items-center justify-center gap-1 rounded-lg border px-2 py-2 text-center text-[11px] font-semibold leading-tight transition disabled:opacity-100"
                             style={
                               active
                                 ? { background: hex, color: "white", borderColor: hex }
-                                : blockedReason
-                                  ? { background: "#f8fafc", color: "#94a3b8", borderColor: "#e2e8f0" }
-                                  : { background: `${hex}10`, color: hex, borderColor: `${hex}33` }
+                                : { background: `${hex}10`, color: hex, borderColor: `${hex}33` }
                             }
                             data-testid={`cons-head-move-${s.name}`}
                           >
                             <span className="whitespace-nowrap">{s.name}</span>
                             {(active || passed) && <CheckCircle2 className="h-3 w-3 shrink-0" />}
-                            {!active && !passed && blockedReason && <Lock className="h-3 w-3 shrink-0" />}
                           </button>
                           {idx < stages.length - 1 && (
                             <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-300" />
