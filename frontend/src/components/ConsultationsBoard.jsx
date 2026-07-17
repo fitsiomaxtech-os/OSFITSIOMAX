@@ -514,40 +514,45 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
             {!isConsultant && (
               <div>
                 <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-600">Move to Stage</p>
-                <div className="grid grid-cols-5 gap-1.5">
-                  {stages.map((s) => {
+                <div className="grid grid-cols-5 gap-x-4 gap-y-2">
+                  {stages.map((s, idx) => {
                     const active = selectedLead.consultation_stage === s.name;
                     const hex = s.color || "#64748b";
                     const viewOnly = MIRRORED_HEAD_STAGE_NAMES.includes(s.name) && viewerRole === "branch_admin";
+                    const showArrow = idx < stages.length - 1 && (idx + 1) % 5 !== 0;
                     return (
-                      <button
-                        key={s.id}
-                        onClick={() => {
-                          if (viewOnly) return;
-                          if (s.name === "Follow Up") {
-                            const today = new Date();
-                            const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
-                            setFollowUpDraft({ date: tomorrow.toISOString().slice(0, 10), time: "10:00", remarks: "" });
-                            return;
+                      <div key={s.id} className="relative">
+                        <button
+                          onClick={() => {
+                            if (viewOnly) return;
+                            if (s.name === "Follow Up") {
+                              const today = new Date();
+                              const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
+                              setFollowUpDraft({ date: tomorrow.toISOString().slice(0, 10), time: "10:00", remarks: "" });
+                              return;
+                            }
+                            moveStage(selectedLead, s.name);
+                          }}
+                          disabled={active || viewOnly}
+                          title={viewOnly ? "Set by the Head Physio's own pipeline — view only here" : undefined}
+                          className="flex w-full items-center justify-center gap-1 rounded-lg border px-2 py-2 text-center text-[11px] font-semibold leading-tight transition disabled:opacity-100"
+                          style={
+                            active
+                              ? { background: hex, color: "white", borderColor: hex }
+                              : viewOnly
+                                ? { background: "#f8fafc", color: "#94a3b8", borderColor: "#e2e8f0" }
+                                : { background: `${hex}10`, color: hex, borderColor: `${hex}33` }
                           }
-                          moveStage(selectedLead, s.name);
-                        }}
-                        disabled={active || viewOnly}
-                        title={viewOnly ? "Set by the Head Physio's own pipeline — view only here" : undefined}
-                        className="flex items-center justify-center gap-1 rounded-lg border px-2 py-2 text-center text-[11px] font-semibold leading-tight transition disabled:opacity-100"
-                        style={
-                          active
-                            ? { background: hex, color: "white", borderColor: hex }
-                            : viewOnly
-                              ? { background: "#f8fafc", color: "#94a3b8", borderColor: "#e2e8f0" }
-                              : { background: `${hex}10`, color: hex, borderColor: `${hex}33` }
-                        }
-                        data-testid={`cons-move-${s.name}`}
-                      >
-                        <span className="whitespace-nowrap">{s.name}</span>
-                        {active && <CheckCircle2 className="h-3 w-3 shrink-0" />}
-                        {viewOnly && !active && <Lock className="h-3 w-3 shrink-0" />}
-                      </button>
+                          data-testid={`cons-move-${s.name}`}
+                        >
+                          <span className="whitespace-nowrap">{s.name}</span>
+                          {active && <CheckCircle2 className="h-3 w-3 shrink-0" />}
+                          {viewOnly && !active && <Lock className="h-3 w-3 shrink-0" />}
+                        </button>
+                        {showArrow && (
+                          <ChevronRight className="absolute -right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-300" />
+                        )}
+                      </div>
                     );
                   })}
                 </div>
