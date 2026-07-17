@@ -216,16 +216,18 @@ async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointm
 async def v3_available_experts(
     branch_id: str,
     date: str,
-    time: str,
+    time: Optional[str] = None,
     _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio")),
 ):
-    """Return only branch experts who have NO consultation booked at the given date+time.
+    """Return only branch experts who have NO consultation booked at the given date (optionally
+    narrowed to an exact time).
 
-    A physio is considered booked when another lead in this branch has the same
-    appointment_date + appointment_time and is not in a final-cancelled state.
+    A physio is considered booked when another lead in this branch has the same appointment_date
+    (and, if `time` is given, the same appointment_time too) and is not in a final-cancelled state.
+    Omitting `time` checks availability for the whole day, not one specific slot.
     """
-    if not date or not time:
-        raise HTTPException(status_code=400, detail="date and time are required")
+    if not date:
+        raise HTTPException(status_code=400, detail="date is required")
     # All experts at this branch
     branch_experts = await v3_col("doctors").find(
         {"branch_id": branch_id}, {"_id": 0}
@@ -237,10 +239,11 @@ async def v3_available_experts(
     # Find leads already taking those slots
     busy_lead_query = {
         "appointment_date": date,
-        "appointment_time": time,
         "assigned_physio_id": {"$ne": None},
         "branch_stage": {"$ne": "Cancelled"},
     }
+    if time:
+        busy_lead_query["appointment_time"] = time
     busy_leads = await v3_col("leads").find(busy_lead_query, {"_id": 0, "assigned_physio_id": 1}).to_list(500)
     busy_ids = {ld["assigned_physio_id"] for ld in busy_leads if ld.get("assigned_physio_id")}
 

@@ -43,7 +43,6 @@ import { HeadPhysioCalendar } from "@/components/HeadPhysioCalendar";
 import { ConsultationsBoard } from "@/components/ConsultationsBoard";
 import { FinanceBoard } from "@/components/FinanceBoard";
 import { BranchSessionsPanel, FitsiomaxStorePanel } from "@/components/BranchStoreBoard";
-import { SmartBookingPicker } from "@/components/SmartBookingPicker";
 import { PlaceholderPanel } from "@/components/PackagesBoard";
 
 export const BranchAdminBoard = ({ branchId }) => {
@@ -332,11 +331,11 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate }) {
   const [followUpMoveDraft, setFollowUpMoveDraft] = useState(null); // { date, time, remarks } | null
   const [followUpMoveBusy, setFollowUpMoveBusy] = useState(false);
 
-  const fetchAvailableExperts = useCallback(async (branch, dateStr, timeStr) => {
-    if (!branch || !dateStr || !timeStr) return;
+  const fetchAvailableExperts = useCallback(async (branch, dateStr) => {
+    if (!branch || !dateStr) return;
     setApptExperts((p) => ({ ...p, loading: true }));
     try {
-      const res = await getAvailableExperts(branch, dateStr, timeStr);
+      const res = await getAvailableExperts(branch, dateStr);
       setApptExperts({
         experts: res.experts || [],
         available_count: res.available_count || 0,
@@ -354,9 +353,9 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate }) {
   }, []);
 
   useEffect(() => {
-    if (!apptDraft || !apptDraft.appointment_date || !apptDraft.appointment_time || !branchId) return;
-    fetchAvailableExperts(branchId, apptDraft.appointment_date, apptDraft.appointment_time);
-  }, [apptDraft?.appointment_date, apptDraft?.appointment_time, branchId, fetchAvailableExperts]);
+    if (!apptDraft || !apptDraft.appointment_date || !branchId) return;
+    fetchAvailableExperts(branchId, apptDraft.appointment_date);
+  }, [apptDraft?.appointment_date, branchId, fetchAvailableExperts]);
 
   useEffect(() => {
     if (activeTab === "history") { loadRemarks(); loadActivity(); }
@@ -709,7 +708,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate }) {
       {/* Appointment Date & Time Popup */}
       {apptDraft && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) setApptDraft(null); }} data-testid="branch-appt-modal">
-          <div className="w-full max-w-4xl overflow-hidden rounded-2xl bg-white shadow-2xl max-h-[90vh] overflow-y-auto">
+          <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between bg-gradient-to-r from-teal-500 to-cyan-600 px-5 py-4 text-white">
               <div className="flex items-center gap-2">
                 <Calendar className="h-5 w-5" />
@@ -720,15 +719,43 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate }) {
               </button>
             </div>
             <div className="space-y-4 p-5">
-              <SmartBookingPicker
-                branchId={branchId}
-                value={{
-                  appointment_date: apptDraft.appointment_date,
-                  appointment_time: apptDraft.appointment_time,
-                  physio_id: apptDraft.physio_id,
-                }}
-                onChange={(v) => setApptDraft({ ...apptDraft, ...v })}
-              />
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-600">Date *</label>
+                <Input type="date" value={apptDraft.appointment_date} min={new Date().toISOString().slice(0, 10)} onChange={(e) => setApptDraft({ ...apptDraft, appointment_date: e.target.value })} data-testid="branch-appt-date" />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-600">Time *</label>
+                <Input type="time" value={apptDraft.appointment_time} onChange={(e) => setApptDraft({ ...apptDraft, appointment_time: e.target.value })} data-testid="branch-appt-time" />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-600">Experts *</label>
+                <p className="mb-1.5 text-[11px] text-slate-400">Showing experts available on this date.</p>
+                {apptExperts.loading ? (
+                  <p className="text-xs text-slate-400">Checking availability...</p>
+                ) : apptExperts.experts.length === 0 ? (
+                  <p className="text-xs text-slate-400">No experts available on this date.</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {apptExperts.experts.map((doc) => (
+                      <button
+                        key={doc.id}
+                        type="button"
+                        onClick={() => setApptDraft({ ...apptDraft, physio_id: doc.id })}
+                        className={`flex w-full items-center gap-3 rounded-md border p-2.5 text-left ${apptDraft.physio_id === doc.id ? "border-teal-400 bg-teal-50" : "border-slate-200 bg-white hover:bg-slate-50"}`}
+                        data-testid={`branch-appt-expert-${doc.id}`}
+                      >
+                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-teal-100 text-xs font-bold text-teal-700">
+                          {doc.full_name?.charAt(0) || "E"}
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-slate-800">{doc.full_name}</p>
+                          <p className="text-[10px] text-slate-400">{doc.specialization || doc.profile_type || "Expert"}</p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600">Notes</label>
                 <textarea
@@ -740,18 +767,15 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate }) {
                   data-testid="branch-appt-notes"
                 />
               </div>
-              <div>
-                <label className="mb-1 block text-xs font-semibold text-slate-600">Move to *</label>
-                <select
-                  value={apptDraft.final_stage}
-                  onChange={(e) => setApptDraft({ ...apptDraft, final_stage: e.target.value })}
-                  className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm focus:border-teal-400 focus:outline-none focus:ring-1 focus:ring-teal-400"
-                  data-testid="branch-appt-final-stage"
-                >
-                  <option value="Appointment Date & Time">Appointment Date & Time</option>
-                  <option value="Cancelled">Cancelled</option>
-                </select>
-              </div>
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={apptDraft.final_stage === "Cancelled"}
+                  onChange={(e) => setApptDraft({ ...apptDraft, final_stage: e.target.checked ? "Cancelled" : "Appointment Date & Time" })}
+                  data-testid="branch-appt-cancel-toggle"
+                />
+                Cancelled
+              </label>
             </div>
             <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/40 px-5 py-3">
               <Button variant="outline" onClick={() => setApptDraft(null)} data-testid="branch-appt-cancel">Cancel</Button>
@@ -759,7 +783,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate }) {
                 className="bg-teal-600 text-white hover:bg-teal-700"
                 onClick={async () => {
                   if (!apptDraft.appointment_date || !apptDraft.appointment_time) { toast.error("Date and time are required"); return; }
-                  if (!apptDraft.physio_id) { toast.error("Please select a physio"); return; }
+                  if (!apptDraft.physio_id) { toast.error("Please select an expert"); return; }
                   try {
                     await scheduleBranchAppointment(lead.id, apptDraft);
                     toast.success(`Appointment ${apptDraft.appointment_date} ${apptDraft.appointment_time} → ${apptDraft.final_stage}`);
@@ -770,7 +794,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate }) {
                 }}
                 data-testid="branch-appt-save"
               >
-                Save & Move
+                Confirm
               </Button>
             </div>
           </div>
