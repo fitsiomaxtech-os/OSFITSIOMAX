@@ -12,6 +12,7 @@ from constants import V3_BRANCH_STAGES, V3_CONSULTATION_STAGES, V3_HEAD_CONSULTA
 from schemas.v3 import (
     V3UserOut, V3LeadOut,
     V3BranchStageInput, V3CollectFeeInput, V3AssignPhysioInput, V3ConsultationStageInput,
+    V3PortfolioScheduleInput,
 )
 
 router = APIRouter(prefix="/api/v3")
@@ -70,6 +71,35 @@ async def v3_move_branch_stage(lead_id: str, payload: V3BranchStageInput, user: 
         "created_at": now_iso(),
     }
     await v3_col("lead_activity").insert_one(activity.copy())
+    updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    return V3LeadOut(**updated)
+
+
+@router.post("/leads/{lead_id}/schedule-portfolio", response_model=V3LeadOut)
+async def v3_schedule_portfolio(lead_id: str, payload: V3PortfolioScheduleInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
+    """Move a lead to the 'Portfolio' branch stage with a Date + Time attached."""
+    if "Portfolio" not in await _branch_stage_names():
+        raise HTTPException(status_code=400, detail="'Portfolio' is not a configured branch stage")
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    old_stage = lead.get("branch_stage", "Unknown")
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": {
+        "branch_stage": "Portfolio",
+        "portfolio_date": payload.portfolio_date,
+        "portfolio_time": payload.portfolio_time,
+        "portfolio_datetime": f"{payload.portfolio_date}T{payload.portfolio_time}:00",
+        "updated_at": now_iso(),
+    }})
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": lead_id,
+        "action": "portfolio_scheduled",
+        "details": f"Branch stage: '{old_stage}' -> 'Portfolio' · {payload.portfolio_date} at {payload.portfolio_time}",
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": now_iso(),
+    })
     updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     return V3LeadOut(**updated)
 
@@ -265,6 +295,101 @@ async def v3_move_consultation_stage(lead_id: str, payload: V3ConsultationStageI
         "lead_id": lead_id,
         "action": "consultation_stage_moved",
         "details": f"Consultation: {previous} → {payload.consultation_stage}",
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": now_iso(),
+    })
+    updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    return V3LeadOut(**updated)
+
+
+class V3BranchFollowUpInput(BaseModel):
+    date: str  # YYYY-MM-DD
+    time: str  # HH:MM (24h)
+    remarks: Optional[str] = ""
+
+
+class V3BranchFollowUpRescheduleInput(BaseModel):
+    date: str
+    time: str
+    reason: Optional[str] = ""
+
+
+@router.post("/leads/{lead_id}/branch-follow-up", response_model=V3LeadOut)
+async def v3_schedule_branch_follow_up(lead_id: str, payload: V3BranchFollowUpInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
+    """Schedule a Branch Leads follow-up. Appends to follow_ups[] and moves branch_stage to 'Follow Up'.
+
+    Distinct from Pre-Sales' /leads/{id}/follow-up, which instead moves the pre-sales `stage`
+    field — Branch Admin's own pipeline is tracked via `branch_stage`, so it needs its own
+    endpoint rather than overloading the pre-sales one."""
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    entry = {
+        "id": str(uuid.uuid4()),
+        "date": payload.date,
+        "time": payload.time,
+        "remarks": (payload.remarks or "").strip(),
+        "status": "active",
+        "created_by": user.full_name,
+        "created_at": now_iso(),
+    }
+    await v3_col("leads").update_one(
+        {"id": lead_id},
+        {"$push": {"follow_ups": entry}, "$set": {"branch_stage": "Follow Up", "next_follow_up_at": f"{payload.date}T{payload.time}:00", "updated_at": now_iso()}},
+    )
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": lead_id,
+        "action": "branch_follow_up_scheduled",
+        "details": f"Branch follow-up on {payload.date} at {payload.time} — {entry['remarks'] or 'no remarks'}",
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": now_iso(),
+    })
+    updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    return V3LeadOut(**updated)
+
+
+@router.post("/leads/{lead_id}/branch-follow-up/{followup_id}/reschedule", response_model=V3LeadOut)
+async def v3_reschedule_branch_follow_up(lead_id: str, followup_id: str, payload: V3BranchFollowUpRescheduleInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
+    """Mark an existing branch follow-up as rescheduled (with a reason) and add a new active one in its place."""
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    follow_ups = lead.get("follow_ups") or []
+    old = next((f for f in follow_ups if f.get("id") == followup_id), None)
+    if not old:
+        raise HTTPException(status_code=404, detail="Follow-up not found")
+    reason = (payload.reason or "").strip()
+    for f in follow_ups:
+        if f.get("id") == followup_id:
+            f["status"] = "rescheduled"
+            f["reschedule_reason"] = reason
+    new_entry = {
+        "id": str(uuid.uuid4()),
+        "date": payload.date,
+        "time": payload.time,
+        "remarks": old.get("remarks", ""),
+        "status": "active",
+        "rescheduled_from": followup_id,
+        "created_by": user.full_name,
+        "created_at": now_iso(),
+    }
+    follow_ups.append(new_entry)
+    await v3_col("leads").update_one(
+        {"id": lead_id},
+        {"$set": {"follow_ups": follow_ups, "branch_stage": "Follow Up", "next_follow_up_at": f"{payload.date}T{payload.time}:00", "updated_at": now_iso()}},
+    )
+    old_summary = f"{old.get('date')} at {old.get('time')}"
+    details = f"Branch follow-up rescheduled from {old_summary} to {payload.date} at {payload.time}"
+    if reason:
+        details += f" — reason: {reason}"
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": lead_id,
+        "action": "branch_follow_up_rescheduled",
+        "details": details,
         "created_by": user.full_name,
         "created_by_role": user.role,
         "created_at": now_iso(),

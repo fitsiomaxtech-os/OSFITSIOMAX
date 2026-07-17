@@ -227,6 +227,9 @@ class V3LeadOut(BaseModel):
     appointment_date: Optional[str] = None
     appointment_time: Optional[str] = None
     appointment_datetime: Optional[str] = None
+    portfolio_date: Optional[str] = None
+    portfolio_time: Optional[str] = None
+    portfolio_datetime: Optional[str] = None
     created_at: str
     updated_at: str
 
@@ -339,6 +342,11 @@ class V3MoveStageInput(BaseModel):
 
 class V3BranchStageInput(BaseModel):
     branch_stage: str
+
+
+class V3PortfolioScheduleInput(BaseModel):
+    portfolio_date: str  # YYYY-MM-DD
+    portfolio_time: str  # HH:MM (24h)
 
 
 class V3ConsultationStageInput(BaseModel):

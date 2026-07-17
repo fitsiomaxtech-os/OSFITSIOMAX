@@ -35,9 +35,10 @@ import {
   getLeadActivity,
   getLeadRemarks,
   moveBranchStage,
+  schedulePortfolio,
   stagesList,
-  scheduleFollowUp,
-  rescheduleFollowUp,
+  scheduleBranchFollowUp,
+  rescheduleBranchFollowUp,
 } from "@/lib/api";
 import { HeadPhysioCalendar } from "@/components/HeadPhysioCalendar";
 import { ConsultationsBoard } from "@/components/ConsultationsBoard";
@@ -328,6 +329,12 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate }) {
   const [rescheduleDraft, setRescheduleDraft] = useState(null); // { followupId, date, time, reason } | null
   const [followUpBusy, setFollowUpBusy] = useState(false);
 
+  // "Move to Stage" popups for Portfolio / Follow Up (mirrors Appointment Date & Time's popup pattern)
+  const [portfolioDraft, setPortfolioDraft] = useState(null); // { portfolio_date, portfolio_time } | null
+  const [portfolioBusy, setPortfolioBusy] = useState(false);
+  const [followUpMoveDraft, setFollowUpMoveDraft] = useState(null); // { date, time, remarks } | null
+  const [followUpMoveBusy, setFollowUpMoveBusy] = useState(false);
+
   const fetchAvailableExperts = useCallback(async (branch, dateStr, timeStr) => {
     if (!branch || !dateStr || !timeStr) return;
     setApptExperts((p) => ({ ...p, loading: true }));
@@ -391,7 +398,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate }) {
     if (!followUpForm.date || !followUpForm.time) { toast.error("Date and time are required"); return; }
     try {
       setFollowUpBusy(true);
-      await scheduleFollowUp(lead.id, followUpForm);
+      await scheduleBranchFollowUp(lead.id, followUpForm);
       toast.success("Follow-up scheduled");
       setFollowUpForm({ date: tomorrowIso(), time: "10:00", remarks: "" });
       await onUpdate();
@@ -406,7 +413,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate }) {
     if (!rescheduleDraft?.date || !rescheduleDraft?.time) { toast.error("Date and time are required"); return; }
     try {
       setFollowUpBusy(true);
-      await rescheduleFollowUp(lead.id, rescheduleDraft.followupId, {
+      await rescheduleBranchFollowUp(lead.id, rescheduleDraft.followupId, {
         date: rescheduleDraft.date,
         time: rescheduleDraft.time,
         reason: rescheduleDraft.reason,
@@ -418,6 +425,36 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate }) {
       toast.error(err?.response?.data?.detail || "Failed to reschedule");
     } finally {
       setFollowUpBusy(false);
+    }
+  };
+
+  const submitPortfolioSchedule = async () => {
+    if (!portfolioDraft?.portfolio_date || !portfolioDraft?.portfolio_time) { toast.error("Date and time are required"); return; }
+    try {
+      setPortfolioBusy(true);
+      await schedulePortfolio(lead.id, portfolioDraft);
+      toast.success("Moved to Portfolio");
+      setPortfolioDraft(null);
+      await onUpdate();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to schedule");
+    } finally {
+      setPortfolioBusy(false);
+    }
+  };
+
+  const submitFollowUpMove = async () => {
+    if (!followUpMoveDraft?.date || !followUpMoveDraft?.time) { toast.error("Date and time are required"); return; }
+    try {
+      setFollowUpMoveBusy(true);
+      await scheduleBranchFollowUp(lead.id, followUpMoveDraft);
+      toast.success("Moved to Follow Up");
+      setFollowUpMoveDraft(null);
+      await onUpdate();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to schedule");
+    } finally {
+      setFollowUpMoveBusy(false);
     }
   };
 
@@ -543,6 +580,17 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate }) {
                           notes: "",
                           final_stage: "Appointment Date & Time",
                         });
+                        return;
+                      }
+                      if (stage === "Portfolio") {
+                        setPortfolioDraft({
+                          portfolio_date: lead.portfolio_date || tomorrowIso(),
+                          portfolio_time: lead.portfolio_time || "10:00",
+                        });
+                        return;
+                      }
+                      if (stage === "Follow Up") {
+                        setFollowUpMoveDraft({ date: tomorrowIso(), time: "10:00", remarks: "" });
                         return;
                       }
                       moveStage(stage);
@@ -749,6 +797,79 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate }) {
               >
                 Save & Move
               </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Portfolio Date & Time Popup */}
+      {portfolioDraft && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) setPortfolioDraft(null); }} data-testid="branch-portfolio-modal">
+          <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between bg-gradient-to-r from-emerald-500 to-teal-600 px-5 py-4 text-white">
+              <div className="flex items-center gap-2">
+                <Calendar className="h-5 w-5" />
+                <p className="text-base font-semibold">Portfolio — Date & Time</p>
+              </div>
+              <button onClick={() => setPortfolioDraft(null)} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="branch-portfolio-close">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="space-y-4 p-5">
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-600">Date *</label>
+                <Input type="date" value={portfolioDraft.portfolio_date} min={new Date().toISOString().slice(0, 10)} onChange={(e) => setPortfolioDraft({ ...portfolioDraft, portfolio_date: e.target.value })} data-testid="branch-portfolio-date" />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-600">Time *</label>
+                <Input type="time" value={portfolioDraft.portfolio_time} onChange={(e) => setPortfolioDraft({ ...portfolioDraft, portfolio_time: e.target.value })} data-testid="branch-portfolio-time" />
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/40 px-5 py-3">
+              <Button variant="outline" onClick={() => setPortfolioDraft(null)} data-testid="branch-portfolio-cancel">Cancel</Button>
+              <Button className="bg-emerald-600 text-white hover:bg-emerald-700" onClick={submitPortfolioSchedule} disabled={portfolioBusy} data-testid="branch-portfolio-save">Save & Move</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Follow Up Date & Time Popup (triggered from Move to Stage) */}
+      {followUpMoveDraft && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) setFollowUpMoveDraft(null); }} data-testid="branch-followup-move-modal">
+          <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between bg-gradient-to-r from-amber-500 to-orange-500 px-5 py-4 text-white">
+              <div className="flex items-center gap-2">
+                <Bell className="h-5 w-5" />
+                <p className="text-base font-semibold">Follow Up — Date & Time</p>
+              </div>
+              <button onClick={() => setFollowUpMoveDraft(null)} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="branch-followup-move-close">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="space-y-4 p-5">
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-600">Date *</label>
+                <Input type="date" value={followUpMoveDraft.date} min={new Date().toISOString().slice(0, 10)} onChange={(e) => setFollowUpMoveDraft({ ...followUpMoveDraft, date: e.target.value })} data-testid="branch-followup-move-date" />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-600">Time *</label>
+                <Input type="time" value={followUpMoveDraft.time} onChange={(e) => setFollowUpMoveDraft({ ...followUpMoveDraft, time: e.target.value })} data-testid="branch-followup-move-time" />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-600">Remarks</label>
+                <textarea
+                  rows={3}
+                  className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-amber-400 focus:outline-none focus:ring-1 focus:ring-amber-400"
+                  placeholder="Optional remarks..."
+                  value={followUpMoveDraft.remarks}
+                  onChange={(e) => setFollowUpMoveDraft({ ...followUpMoveDraft, remarks: e.target.value })}
+                  data-testid="branch-followup-move-remarks"
+                />
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/40 px-5 py-3">
+              <Button variant="outline" onClick={() => setFollowUpMoveDraft(null)} data-testid="branch-followup-move-cancel">Cancel</Button>
+              <Button className="bg-amber-600 text-white hover:bg-amber-700" onClick={submitFollowUpMove} disabled={followUpMoveBusy} data-testid="branch-followup-move-save">Save & Move</Button>
             </div>
           </div>
         </div>
