@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Users, ShieldCheck, BarChart3, Plus, Pencil, Trash2, Eye, KeyRound, X, UserPlus, Stethoscope, MoreVertical, CheckCircle2, XCircle, AlertOctagon, Lock } from "lucide-react";
+import { Users, ShieldCheck, BarChart3, Plus, Pencil, Trash2, Eye, KeyRound, X, UserPlus, Stethoscope, MoreVertical, CheckCircle2, XCircle, AlertOctagon } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,23 +40,11 @@ export const HRBoard = () => {
       </div>
       {tab === "dashboard" && <DashboardTab />}
       {tab === "employees" && <EmployeesTab meta={meta} />}
-      {tab === "experts" && <LockedTab label="Fitsiomax Experts" />}
+      {tab === "experts" && <FitsiomaxExpertsTab />}
       {tab === "roles" && <RolesTab meta={meta} />}
     </div>
   );
 };
-
-// Tab is kept visible in the nav but its content is locked — access disabled per request.
-// FitsiomaxExpertsTab (defined below) is left intact/unused so it can be re-enabled later.
-const LockedTab = ({ label }) => (
-  <Card className="border-slate-200 bg-white" data-testid="hr-experts-locked">
-    <CardContent className="flex flex-col items-center gap-2 p-12 text-center">
-      <Lock className="h-8 w-8 text-slate-300" />
-      <p className="text-sm font-semibold text-slate-500">{label} is locked</p>
-      <p className="text-xs text-slate-400">Access to this section is currently disabled.</p>
-    </CardContent>
-  </Card>
-);
 
 // ---------- Dashboard ----------
 
@@ -635,11 +623,8 @@ const Select = ({ value, onChange, options = [], testid }) => (
 );
 
 // ---------- Fitsiomax Experts (moved from Super Admin Master View) ----------
-// Tab content is locked (see LockedTab above) — kept defined but unrendered so it can be
-// re-enabled later without rebuilding it.
 const blankExpertForm = { full_name: "", profile_type: "physio", branch_id: "", employee_id: "", specialization: "", joining_date: "", slot: "" };
 
-// eslint-disable-next-line no-unused-vars
 const FitsiomaxExpertsTab = () => {
   const [doctors, setDoctors] = useState([]);
   const [branches, setBranches] = useState([]);
