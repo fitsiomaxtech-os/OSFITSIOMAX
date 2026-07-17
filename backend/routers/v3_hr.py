@@ -183,6 +183,13 @@ async def update_employee(emp_id: str, payload: EmployeeUpdate, _: V3UserOut = D
     res = await v3_col("employees").update_one({"id": emp_id}, {"$set": updates})
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Employee not found")
+    if "full_name" in updates:
+        # Cascade the rename to any linked User account, and from there to their doctors
+        # record too — full_name is denormalized across employees/users/doctors.
+        linked_user_ids = await v3_col("users").distinct("id", {"employee_id": emp_id})
+        if linked_user_ids:
+            await v3_col("users").update_many({"employee_id": emp_id}, {"$set": {"full_name": updates["full_name"]}})
+            await v3_col("doctors").update_many({"user_id": {"$in": linked_user_ids}}, {"$set": {"full_name": updates["full_name"]}})
     return await v3_col("employees").find_one({"id": emp_id}, {"_id": 0})
 
 
@@ -277,12 +284,13 @@ async def update_user_account(user_id: str, payload: UserAccountUpdate, _: V3Use
     res = await v3_col("users").update_one({"id": user_id}, {"$set": updates})
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="User not found")
-    if "full_name" in updates:
-        # The `doctors` collection (used by the Experts picker, calendars, etc.) keeps its own
-        # denormalized copy of full_name — keep it in sync so a rename doesn't leave stale names
-        # showing up anywhere the user is linked as an expert.
-        await v3_col("doctors").update_many({"user_id": user_id}, {"$set": {"full_name": updates["full_name"]}})
     user = await v3_col("users").find_one({"id": user_id}, {"_id": 0, "password": 0})
+    if "full_name" in updates:
+        # Both `doctors` (Experts picker, calendars) and `employees` keep their own denormalized
+        # copy of full_name — keep them in sync so a rename doesn't leave stale names elsewhere.
+        await v3_col("doctors").update_many({"user_id": user_id}, {"$set": {"full_name": updates["full_name"]}})
+        if user and user.get("employee_id"):
+            await v3_col("employees").update_one({"id": user["employee_id"]}, {"$set": {"full_name": updates["full_name"], "updated_at": now_iso()}})
     return user
 
 
