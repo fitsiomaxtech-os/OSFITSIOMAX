@@ -202,6 +202,7 @@ async def assign_package(lead_id: str, payload: V3AssignPackageInput, user: V3Us
         "package_paid": None,
         "package_payment_mode": None,
         "head_consultation_stage": "Consultation Pack",
+        "consultation_stage": "Consultation Pack",  # mirrored onto Branch's view-only stage
         "updated_at": _now(),
     }})
     await v3_col("lead_activity").insert_one({

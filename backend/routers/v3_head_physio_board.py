@@ -239,10 +239,15 @@ async def hp_move_head_consultation_stage(
             )
 
     previous = lead.get("head_consultation_stage") or "—"
-    await v3_col("leads").update_one({"id": lead_id}, {"$set": {
+    updates = {
         "head_consultation_stage": payload.head_consultation_stage,
         "updated_at": now_iso(),
-    }})
+    }
+    # Mirror onto Branch's own consultation_stage (view-only there) so Branch Admin
+    # can see the doctor's real progress without being able to trigger it themselves.
+    if payload.head_consultation_stage in ("Consultation Visit", "Consultation Pack", "Physio Assign"):
+        updates["consultation_stage"] = payload.head_consultation_stage
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": updates})
     await v3_col("lead_activity").insert_one({
         "id": str(uuid.uuid4()),
         "lead_id": lead_id,
@@ -277,6 +282,7 @@ async def hp_assign_consultation_physio(
         "assigned_physio_id": physio["id"],
         "assigned_physio_name": physio["full_name"],
         "head_consultation_stage": "Physio Assign",
+        "consultation_stage": "Physio Assign",  # mirrored onto Branch's view-only stage
         "updated_at": now_iso(),
     }})
     await v3_col("lead_activity").insert_one({

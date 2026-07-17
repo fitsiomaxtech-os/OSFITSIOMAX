@@ -236,6 +236,12 @@ async def v3_move_consultation_stage(lead_id: str, payload: V3ConsultationStageI
     stage_names = await _consultation_stage_names()
     if payload.consultation_stage not in stage_names:
         raise HTTPException(status_code=400, detail=f"Invalid consultation_stage. Allowed: {stage_names}")
+    if payload.consultation_stage in ("Consultation Visit", "Consultation Pack", "Physio Assign") and user.role == "branch_admin":
+        raise HTTPException(
+            status_code=403,
+            detail="This stage is set by the Head Physio's own consultation pipeline — Branch Admin can only view it here.",
+        )
+
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -285,13 +291,22 @@ async def v3_schedule_consultation_follow_up(lead_id: str, payload: V3Consultati
         "created_by": user.full_name,
         "created_at": now_iso(),
     }
+    # The confirmed Follow-Up date/time IS the patient's consultation appointment —
+    # hand off to the Head Physio's own pipeline, seeding it only the first time so a
+    # later reschedule never regresses progress the doctor has already made.
+    set_fields = {
+        "consultation_stage": "Follow Up",
+        "next_consultation_follow_up_at": f"{payload.date}T{payload.time}:00",
+        "appointment_date": payload.date,
+        "appointment_time": payload.time,
+        "appointment_datetime": f"{payload.date}T{payload.time}:00",
+        "updated_at": now_iso(),
+    }
+    if not lead.get("head_consultation_stage"):
+        set_fields["head_consultation_stage"] = "New Appointment"
     await v3_col("leads").update_one(
         {"id": lead_id},
-        {"$push": {"consultation_follow_ups": entry}, "$set": {
-            "consultation_stage": "Follow Up",
-            "next_consultation_follow_up_at": f"{payload.date}T{payload.time}:00",
-            "updated_at": now_iso(),
-        }},
+        {"$push": {"consultation_follow_ups": entry}, "$set": set_fields},
     )
     await v3_col("lead_activity").insert_one({
         "id": str(uuid.uuid4()),
@@ -332,14 +347,20 @@ async def v3_reschedule_consultation_follow_up(lead_id: str, followup_id: str, p
         "created_at": now_iso(),
     }
     follow_ups.append(new_entry)
+    set_fields = {
+        "consultation_follow_ups": follow_ups,
+        "consultation_stage": "Follow Up",
+        "next_consultation_follow_up_at": f"{payload.date}T{payload.time}:00",
+        "appointment_date": payload.date,
+        "appointment_time": payload.time,
+        "appointment_datetime": f"{payload.date}T{payload.time}:00",
+        "updated_at": now_iso(),
+    }
+    if not lead.get("head_consultation_stage"):
+        set_fields["head_consultation_stage"] = "New Appointment"
     await v3_col("leads").update_one(
         {"id": lead_id},
-        {"$set": {
-            "consultation_follow_ups": follow_ups,
-            "consultation_stage": "Follow Up",
-            "next_consultation_follow_up_at": f"{payload.date}T{payload.time}:00",
-            "updated_at": now_iso(),
-        }},
+        {"$set": set_fields},
     )
     old_summary = f"{old.get('date')} at {old.get('time')}"
     details = f"Consultation follow-up rescheduled from {old_summary} to {payload.date} at {payload.time}"

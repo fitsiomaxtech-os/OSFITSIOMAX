@@ -15,6 +15,10 @@ import {
 
 const PAYMENT_MODES = ["cash", "upi", "card", "bank_transfer"];
 
+// These 3 Branch Consultation stage names are mirrored (read-only) from the Head
+// Physio's own independent pipeline — Branch Admin can see them but not click them.
+const MIRRORED_HEAD_STAGE_NAMES = ["Consultation Visit", "Consultation Pack", "Physio Assign"];
+
 export const ConsultationsBoard = ({ branchId, viewerRole }) => {
   const isConsultant = viewerRole === "head_physio";
   // Head Physio tracks progress on their own independent pipeline (head_consultation_stage),
@@ -472,103 +476,81 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
               </div>
             </div>
 
-            {/* Consultation Visit — doctor-only, gated to the appointment date. Tracked on the
-                Head Physio's own independent pipeline (head_consultation_stage). */}
+            {/* Move to Stage — Head Physio's own pipeline, same pill-stepper format as Branch's.
+                Consultation Visit is appointment-day gated; Consultation Pack opens the package
+                picker; Physio Assign opens the physio picker — same underlying actions as before,
+                just triggered from the stepper instead of separate cards. */}
             {isConsultant && (() => {
-              const stage = selectedLead.head_consultation_stage || "New Appointment";
-              const visitDone = stage !== "New Appointment";
+              const currentName = selectedLead.head_consultation_stage || "New Appointment";
+              const currentIdx = stages.findIndex((x) => x.name === currentName);
               const isAppointmentToday = selectedLead.appointment_date === new Date().toISOString().slice(0, 10);
-              return (
-                <div className="rounded-lg border border-sky-200 bg-sky-50 p-3" data-testid="cons-visit-panel">
-                  <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-sky-700">
-                    <Calendar className="h-3.5 w-3.5" /> Consultation Visit
-                  </p>
-                  {visitDone ? (
-                    <p className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700">
-                      <CheckCircle2 className="h-3.5 w-3.5" /> Marked — patient visited for consultation
-                    </p>
-                  ) : (
-                    <>
-                      <p className="text-xs text-sky-700">
-                        {isAppointmentToday
-                          ? "Patient's appointment is today. Mark them once the consultation visit is complete."
-                          : `Available on the appointment date${selectedLead.appointment_date ? ` (${selectedLead.appointment_date})` : ""}.`}
-                      </p>
-                      <Button
-                        size="sm"
-                        className="mt-2 w-full bg-sky-600 hover:bg-sky-700 text-xs"
-                        disabled={!isAppointmentToday}
-                        onClick={() => moveHeadStage(selectedLead, "Consultation Visit")}
-                        data-testid="cons-visit-btn"
-                      >
-                        Mark Consultation Visit
-                      </Button>
-                    </>
-                  )}
-                </div>
-              );
-            })()}
-
-            {/* Consultation Pack — doctor chooses a treatment package once the visit is marked (no price shown) */}
-            {isConsultant && (() => {
-              const stage = selectedLead.head_consultation_stage || "New Appointment";
-              const visitDone = stage !== "New Appointment";
-              if (!visitDone) return null;
               const packDone = !!selectedLead.package_id;
+              const physioAssignIdx = stages.findIndex((x) => x.name === "Physio Assign");
               return (
-                <div className="rounded-lg border border-violet-200 bg-violet-50 p-3" data-testid="cons-pack-panel">
-                  <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-violet-700">
-                    <Dumbbell className="h-3.5 w-3.5" /> Consultation Pack
-                  </p>
-                  {packDone ? (
-                    <div className="space-y-1 text-xs text-violet-700">
-                      <p className="font-semibold">{selectedLead.package_name} · {selectedLead.package_sessions} sessions ({selectedLead.package_mode})</p>
-                      <p className="text-violet-500">Package chosen for this patient.</p>
-                    </div>
-                  ) : (
-                    <p className="mb-2 text-xs text-violet-500">Choose a treatment package for this patient.</p>
-                  )}
-                  <Button
-                    size="sm"
-                    className="mt-2 w-full bg-violet-600 hover:bg-violet-700 text-xs"
-                    onClick={openSessionModal}
-                    data-testid="cons-session-btn"
-                  >
-                    <Dumbbell className="mr-1 h-3.5 w-3.5" /> {packDone ? "Change Package" : "Choose Package"}
-                  </Button>
-                </div>
-              );
-            })()}
+                <div>
+                  <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-600">Move to Stage</p>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {stages.map((s, idx) => {
+                      const active = idx === currentIdx;
+                      const passed = currentIdx >= 0 && idx < currentIdx;
+                      const hex = s.color || "#64748b";
+                      let blockedReason = null;
+                      if (s.name === "Consultation Visit" && !isAppointmentToday) {
+                        blockedReason = `Only on the appointment date${selectedLead.appointment_date ? ` (${selectedLead.appointment_date})` : ""}`;
+                      } else if (s.name === "Consultation Pack" && currentIdx < 1) {
+                        blockedReason = "Mark Consultation Visit first";
+                      } else if (s.name === "Physio Assign" && !packDone) {
+                        blockedReason = "Choose a Consultation Pack first";
+                      }
+                      const isDisabled = active || passed || s.name === "New Appointment" || !!blockedReason;
+                      return (
+                        <Fragment key={s.id}>
+                          <button
+                            onClick={() => {
+                              if (isDisabled) return;
+                              if (s.name === "Consultation Visit") { moveHeadStage(selectedLead, "Consultation Visit"); return; }
+                              if (s.name === "Consultation Pack") { openSessionModal(); return; }
+                              if (s.name === "Physio Assign") { openPhysioModal(); return; }
+                            }}
+                            disabled={isDisabled}
+                            title={blockedReason || undefined}
+                            className="flex flex-1 basis-32 items-center justify-center gap-1 rounded-lg border px-2 py-2 text-center text-[11px] font-semibold leading-tight transition disabled:opacity-100"
+                            style={
+                              active
+                                ? { background: hex, color: "white", borderColor: hex }
+                                : blockedReason
+                                  ? { background: "#f8fafc", color: "#94a3b8", borderColor: "#e2e8f0" }
+                                  : { background: `${hex}10`, color: hex, borderColor: `${hex}33` }
+                            }
+                            data-testid={`cons-head-move-${s.name}`}
+                          >
+                            <span className="whitespace-nowrap">{s.name}</span>
+                            {(active || passed) && <CheckCircle2 className="h-3 w-3 shrink-0" />}
+                            {!active && !passed && blockedReason && <Lock className="h-3 w-3 shrink-0" />}
+                          </button>
+                          {idx < stages.length - 1 && (
+                            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-300" />
+                          )}
+                        </Fragment>
+                      );
+                    })}
+                  </div>
 
-            {/* Physio Assign — doctor picks an available physio to deliver the package */}
-            {isConsultant && selectedLead.package_id && (() => {
-              const stage = selectedLead.head_consultation_stage || "New Appointment";
-              const physioAssignDone = stage === "Physio Assign";
-              return (
-                <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3" data-testid="cons-physio-assign-panel">
-                  <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-emerald-700">
-                    <Users className="h-3.5 w-3.5" /> Physio Assign
-                  </p>
-                  {physioAssignDone ? (
-                    <p className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700">
-                      <CheckCircle2 className="h-3.5 w-3.5" /> {selectedLead.assigned_physio_name || "Physio"} assigned for treatment
+                  {selectedLead.package_id && (
+                    <p className="mt-2 text-xs text-slate-500">
+                      Pack: <span className="font-semibold text-slate-700">{selectedLead.package_name}</span> · {selectedLead.package_sessions} sessions ({selectedLead.package_mode})
                     </p>
-                  ) : (
-                    <p className="mb-2 text-xs text-emerald-700">Assign an available physio to deliver this patient's sessions.</p>
                   )}
-                  <Button
-                    size="sm"
-                    className="mt-2 w-full bg-emerald-600 hover:bg-emerald-700 text-xs"
-                    onClick={openPhysioModal}
-                    data-testid="cons-physio-assign-btn"
-                  >
-                    <Users className="mr-1 h-3.5 w-3.5" /> {physioAssignDone ? "Change Physio" : "Assign Physio"}
-                  </Button>
+                  {selectedLead.assigned_physio_name && physioAssignIdx >= 0 && currentIdx >= physioAssignIdx && (
+                    <p className="mt-1 text-xs text-slate-500">
+                      Physio: <span className="font-semibold text-slate-700">{selectedLead.assigned_physio_name}</span>
+                    </p>
+                  )}
                 </div>
               );
             })()}
 
-            {/* Sell from Fitsiomax Store — branch admin fee collection; doctor uses the cards above instead */}
+            {/* Sell from Fitsiomax Store — branch admin fee collection; doctor uses the stepper above instead */}
             {!isConsultant && (
               <div className="space-y-3">
                 <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-violet-700">
@@ -638,10 +620,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                   {stages.map((s, idx) => {
                     const active = selectedLead.consultation_stage === s.name;
                     const hex = s.color || "#64748b";
+                    const viewOnly = MIRRORED_HEAD_STAGE_NAMES.includes(s.name) && viewerRole === "branch_admin";
                     return (
                       <Fragment key={s.id}>
                         <button
                           onClick={() => {
+                            if (viewOnly) return;
                             if (s.name === "Follow Up") {
                               const today = new Date();
                               const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
@@ -650,17 +634,21 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                             }
                             moveStage(selectedLead, s.name);
                           }}
-                          disabled={active}
+                          disabled={active || viewOnly}
+                          title={viewOnly ? "Set by the Head Physio's own pipeline — view only here" : undefined}
                           className="flex flex-1 basis-32 items-center justify-center gap-1 rounded-lg border px-2 py-2 text-center text-[11px] font-semibold leading-tight transition disabled:opacity-100"
                           style={
                             active
                               ? { background: hex, color: "white", borderColor: hex }
-                              : { background: `${hex}10`, color: hex, borderColor: `${hex}33` }
+                              : viewOnly
+                                ? { background: "#f8fafc", color: "#94a3b8", borderColor: "#e2e8f0" }
+                                : { background: `${hex}10`, color: hex, borderColor: `${hex}33` }
                           }
                           data-testid={`cons-move-${s.name}`}
                         >
                           <span className="whitespace-nowrap">{s.name}</span>
                           {active && <CheckCircle2 className="h-3 w-3 shrink-0" />}
+                          {viewOnly && !active && <Lock className="h-3 w-3 shrink-0" />}
                         </button>
                         {idx < stages.length - 1 && (
                           <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-300" />
