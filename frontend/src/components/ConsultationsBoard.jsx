@@ -115,8 +115,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
   );
 
   useEffect(() => {
-    setConsultPick({ item_id: "", mode: "offline", paid: "", payment_mode: "cash" });
-    setCollectDraft({ amount: "", payment_mode: "cash" });
     setPhysioDiagDraft(selectedLead?.physio_diagnosis_report || "");
     setPhysioDiagEditing(!selectedLead?.physio_diagnosis_report);
     setTreatmentDraft(selectedLead?.treatment_summary || "");
