@@ -252,6 +252,7 @@ export const hrUsers = async (params = {}) => {
   return (await api.get(`/hr/users${q.toString() ? `?${q.toString()}` : ""}`)).data;
 };
 export const hrCreateUser = async (payload) => (await api.post("/hr/users", payload)).data;
+export const hrUpdateUser = async (id, payload) => (await api.patch(`/hr/users/${id}`, payload)).data;
 export const hrUpdateUserRole = async (id, role) => (await api.patch(`/hr/users/${id}/role?role=${role}`)).data;
 export const hrResetPassword = async (id, password) => (await api.patch(`/hr/users/${id}/reset-password?password=${encodeURIComponent(password)}`)).data;
 export const hrDeactivateUser = async (id) => (await api.delete(`/hr/users/${id}`)).data;

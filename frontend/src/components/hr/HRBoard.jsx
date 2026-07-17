@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import {
   hrDashboard, hrEmployees, hrCreateEmployee, hrUpdateEmployee, hrDeleteEmployee,
-  hrUsers, hrCreateUser, hrResetPassword, hrDeactivateUser, hrActivateUser, hrDeleteUserPermanent, hrUpdateUserRole, hrMeta,
+  hrUsers, hrCreateUser, hrUpdateUser, hrResetPassword, hrDeactivateUser, hrActivateUser, hrDeleteUserPermanent, hrUpdateUserRole, hrMeta,
   getBranches, getDoctors, createDoctor, addDoctorSlots, requestExpertVerification, verifyAndCreateExpert,
 } from "@/lib/api";
 
@@ -371,10 +371,37 @@ const RolesTab = ({ meta }) => {
 };
 
 const UserActionsModal = ({ user, onClose, onDone }) => {
-  const [mode, setMode] = useState(null); // null | "password" | "delete"
+  const [mode, setMode] = useState(null); // null | "edit" | "password" | "delete"
   const [pwd, setPwd] = useState("");
   const [confirmPwd, setConfirmPwd] = useState("");
   const [busy, setBusy] = useState(false);
+  const [branches, setBranches] = useState([]);
+  const [employees, setEmployees] = useState([]);
+  const [editForm, setEditForm] = useState({
+    full_name: user.full_name || "",
+    email: user.email || "",
+    branch_id: user.branch_id || "",
+    employee_id: user.employee_id || "",
+    mobile_number: user.mobile_number || "",
+    aadhar_number: user.aadhar_number || "",
+  });
+
+  useEffect(() => {
+    if (mode !== "edit") return;
+    getBranches().then(setBranches).catch(() => {});
+    hrEmployees({ status: "active" }).then(setEmployees).catch(() => {});
+  }, [mode]);
+
+  const submitEdit = async () => {
+    if (!editForm.full_name.trim() || !editForm.email.trim()) { toast.error("Name and email are required"); return; }
+    try {
+      setBusy(true);
+      await hrUpdateUser(user.id, editForm);
+      toast.success(`${editForm.full_name} updated`);
+      onDone();
+    } catch (e) { toast.error(e?.response?.data?.detail || "Failed to update user"); }
+    finally { setBusy(false); }
+  };
 
   const submitPwd = async () => {
     if (pwd.length < 6) { toast.error("Password must be at least 6 characters"); return; }
@@ -423,6 +450,18 @@ const UserActionsModal = ({ user, onClose, onDone }) => {
 
         {!mode && (
           <div className="grid gap-2">
+            <button
+              onClick={() => setMode("edit")}
+              className="flex items-center gap-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2.5 text-left hover:bg-sky-100"
+              data-testid="hr-actions-edit"
+            >
+              <Pencil className="h-4 w-4 text-sky-600" />
+              <div>
+                <p className="text-sm font-semibold text-sky-700">Edit</p>
+                <p className="text-[11px] text-sky-600">Update this user's details.</p>
+              </div>
+            </button>
+
             <button
               onClick={() => setMode("password")}
               className="flex items-center gap-3 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2.5 text-left hover:bg-orange-100"
@@ -474,6 +513,31 @@ const UserActionsModal = ({ user, onClose, onDone }) => {
                 <p className="text-[11px] text-rose-600">Cannot be undone — user record is removed completely.</p>
               </div>
             </button>
+          </div>
+        )}
+
+        {mode === "edit" && (
+          <div className="space-y-3" data-testid="hr-actions-edit-form">
+            <Field label="Name"><Input placeholder="Full name" value={editForm.full_name} onChange={(e) => setEditForm({ ...editForm, full_name: e.target.value })} data-testid="hr-actions-edit-name" /></Field>
+            <Field label="Email"><Input placeholder="user@company.com" value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} data-testid="hr-actions-edit-email" /></Field>
+            <Field label="Branch">
+              <select className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm" value={editForm.branch_id} onChange={(e) => setEditForm({ ...editForm, branch_id: e.target.value })} data-testid="hr-actions-edit-branch">
+                <option value="">No branch</option>
+                {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
+              </select>
+            </Field>
+            <Field label="Linked Employee">
+              <select className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm" value={editForm.employee_id} onChange={(e) => setEditForm({ ...editForm, employee_id: e.target.value })} data-testid="hr-actions-edit-employee">
+                <option value="">Not linked</option>
+                {employees.map((e) => <option key={e.id} value={e.id}>{e.employee_code} — {e.full_name} ({e.designation || "—"})</option>)}
+              </select>
+            </Field>
+            <Field label="Mobile Number"><Input placeholder="Mobile number" value={editForm.mobile_number} onChange={(e) => setEditForm({ ...editForm, mobile_number: e.target.value })} data-testid="hr-actions-edit-mobile" /></Field>
+            <Field label="Aadhar Number"><Input placeholder="Aadhar number" value={editForm.aadhar_number} onChange={(e) => setEditForm({ ...editForm, aadhar_number: e.target.value })} data-testid="hr-actions-edit-aadhar" /></Field>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setMode(null)} className="flex-1" data-testid="hr-actions-edit-back">Back</Button>
+              <Button onClick={submitEdit} disabled={busy} className="flex-1 bg-sky-600 hover:bg-sky-700" data-testid="hr-actions-edit-save">Save Changes</Button>
+            </div>
           </div>
         )}
 

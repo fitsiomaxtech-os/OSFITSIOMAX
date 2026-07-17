@@ -92,6 +92,15 @@ class UserAccountCreate(BaseModel):
         return "physio" if v == "consultant" else v
 
 
+class UserAccountUpdate(BaseModel):
+    full_name: Optional[str] = None
+    email: Optional[str] = None
+    employee_id: Optional[str] = None
+    branch_id: Optional[str] = None
+    mobile_number: Optional[str] = None
+    aadhar_number: Optional[str] = None
+
+
 async def _next_emp_code() -> str:
     last = await v3_col("employees").find({"employee_code": {"$regex": "^EMP[0-9]+$"}}, {"_id": 0, "employee_code": 1}).sort("employee_code", -1).limit(1).to_list(1)
     if last:
@@ -250,6 +259,26 @@ async def create_user_account(payload: UserAccountCreate, _: V3UserOut = Depends
         })
     safe = {k: v for k, v in user.items() if k != "password"}
     return safe
+
+
+@router.patch("/users/{user_id}")
+async def update_user_account(user_id: str, payload: UserAccountUpdate, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    updates = {k: v for k, v in payload.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No updates provided")
+    if "email" in updates:
+        existing = await v3_col("users").find_one({"email": updates["email"], "id": {"$ne": user_id}}, {"_id": 0, "id": 1})
+        if existing:
+            raise HTTPException(status_code=409, detail="Email already in use")
+    if updates.get("employee_id"):
+        emp = await v3_col("employees").find_one({"id": updates["employee_id"]}, {"_id": 0, "id": 1})
+        if not emp:
+            raise HTTPException(status_code=404, detail="Linked employee not found")
+    res = await v3_col("users").update_one({"id": user_id}, {"$set": updates})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    user = await v3_col("users").find_one({"id": user_id}, {"_id": 0, "password": 0})
+    return user
 
 
 @router.patch("/users/{user_id}/role")
