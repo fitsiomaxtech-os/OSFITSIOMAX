@@ -97,7 +97,7 @@ async def sell_package(lead_id: str, payload: SellPackageInput, user: V3UserOut 
         "package_weeks": pkg["weeks"],
         "package_price": pkg["price"],
         "package_paid": paid,
-        "consultation_stage": "Package Chosen",
+        "consultation_stage": "Treatment Fee",
         "updated_at": _now(),
     }})
     await v3_col("lead_activity").insert_one({
@@ -151,7 +151,7 @@ async def sell_store_item(lead_id: str, payload: V3SellStoreItemInput, user: V3U
         "consultation_item_name": item["name"],
         "consultation_mode": payload.mode,
         "consultation_payment_mode": payload.payment_mode,
-        "consultation_stage": "Clinic Visit",
+        "consultation_stage": "Consultation Visit",
         "updated_at": _now(),
     }})
     await v3_col("lead_activity").insert_one({

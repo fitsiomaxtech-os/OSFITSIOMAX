@@ -189,6 +189,18 @@ async def migrate_consultation_stages() -> None:
         } for idx, (name, color) in enumerate(new_stage_specs)]
         await v3_col("pipeline_stages").insert_many(docs)
 
+    # Backfill orphaned leads: any lead with a consultation_stage set that no longer matches a
+    # currently valid stage name (e.g. still stuck on a legacy/dead literal, or Super Admin
+    # renamed the first stage) gets moved onto the live first stage — otherwise it's counted in
+    # "All Stages" but invisible in every individual stage pill.
+    valid_consultation_stages = set(await v3_col("pipeline_stages").distinct("name", {"type": "consultation"}))
+    if valid_consultation_stages:
+        first_consultation_stage = await get_first_stage_name("consultation", "New Appointment")
+        await v3_col("leads").update_many(
+            {"consultation_stage": {"$ne": None, "$nin": list(valid_consultation_stages)}},
+            {"$set": {"consultation_stage": first_consultation_stage, "updated_at": now_iso()}},
+        )
+
 
 async def migrate_head_consultation_stages() -> None:
     """Seed the standalone Head Physio consultation pipeline (type=head_consultation,
