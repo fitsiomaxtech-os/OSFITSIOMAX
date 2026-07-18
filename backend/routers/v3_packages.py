@@ -195,22 +195,28 @@ async def assign_package(lead_id: str, payload: V3AssignPackageInput, user: V3Us
             price = round(per_session_rate * sessions, 2)
         else:
             price = base_price
+        duration_minutes = None
         detail_suffix = f" · {sessions} sessions"
     else:
         sessions = None
         price = base_price
-        detail_suffix = f" · {item.get('duration_minutes', '?')} min"
+        duration_minutes = item.get("duration_minutes")
+        detail_suffix = f" · {duration_minutes or '?'} min"
 
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {
         "package_id": item["id"],
         "package_name": item["name"],
         "package_price": price,
         "package_sessions": sessions,
+        "package_duration_minutes": duration_minutes,
         "package_mode": payload.mode,
         "package_paid": None,
         "package_payment_mode": None,
         "head_consultation_stage": "Consultation Pack",
-        "consultation_stage": "Consultation Pack",  # mirrored onto Branch's view-only stage
+        # Branch's own board skips straight to Consultation Fee — that's the stage
+        # Branch Admin actually needs to act on (collect payment); Consultation Pack
+        # itself is just informational there.
+        "consultation_stage": "Consultation Fee",
         "updated_at": _now(),
     }})
     await v3_col("lead_activity").insert_one({
@@ -228,7 +234,8 @@ async def assign_package(lead_id: str, payload: V3AssignPackageInput, user: V3Us
 
 @router.post("/leads/{lead_id}/collect-package-payment", response_model=dict)
 async def collect_package_payment(lead_id: str, payload: V3CollectPackagePaymentInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
-    """Branch admin collects payment for a session package the consultant already assigned."""
+    """Branch admin collects payment for the package the consultant already assigned,
+    at the Consultation Fee stage — moves on to Treatment Fee once collected."""
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -238,6 +245,7 @@ async def collect_package_payment(lead_id: str, payload: V3CollectPackagePayment
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {
         "package_paid": payload.paid_amount,
         "package_payment_mode": payload.payment_mode,
+        "consultation_stage": "Treatment Fee",
         "updated_at": _now(),
     }})
     await v3_col("lead_activity").insert_one({

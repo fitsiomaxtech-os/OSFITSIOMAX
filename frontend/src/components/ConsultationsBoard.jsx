@@ -7,7 +7,7 @@ import { toast } from "@/components/ui/sonner";
 import { StageTabBar } from "@/components/ui/stage-tab";
 import {
   getConsultationsBoard, moveConsultationStage, moveHeadConsultationStage, listStoreItems,
-  assignPackage, savePhysioDiagnosis, unlockPhysioDiagnosis,
+  assignPackage, collectPackagePayment, savePhysioDiagnosis, unlockPhysioDiagnosis,
   saveTreatmentSummary, unlockTreatmentSummary, stagesList, getDoctors,
   assignConsultationPhysio,
   scheduleConsultationFollowUp, rescheduleConsultationFollowUp,
@@ -47,6 +47,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
   // Session package assignment popup (Head Physio only)
   const [showSessionModal, setShowSessionModal] = useState(false);
   const [sessionDraft, setSessionDraft] = useState({ item_id: "", mode: "offline" });
+
+  // Collect Fee popup (Branch Admin only) — at the Consultation Fee stage
+  const [collectFeeDraft, setCollectFeeDraft] = useState(null); // { paid_amount, payment_mode } | null
+  const [collectingFee, setCollectingFee] = useState(false);
 
   // Physio Assign popup (Head Physio only) — pick an available Jr. Physio to deliver the package
   const [showPhysioModal, setShowPhysioModal] = useState(false);
@@ -124,6 +128,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
     setPhysioPick("");
     setFollowUpDraft(null);
     setRescheduleDraft(null);
+    setCollectFeeDraft(null);
   }, [selectedLead?.id]);
 
   const sessionItems = storeItems.filter((i) => i.item_type === "consultation");
@@ -230,6 +235,32 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
       toast.error(err?.response?.data?.detail || "Failed to assign package");
     }
     setSelling(false);
+  };
+
+  // ---- Collect Fee (Branch Admin) — at the Consultation Fee stage ----
+  const openCollectFeeDraft = () => {
+    setCollectFeeDraft({
+      paid_amount: selectedLead.package_price != null ? String(selectedLead.package_price) : "",
+      payment_mode: "cash",
+    });
+  };
+
+  const submitCollectFee = async () => {
+    const amount = parseFloat(collectFeeDraft.paid_amount);
+    if (!amount || amount <= 0) { toast.error("Enter a valid amount"); return; }
+    setCollectingFee(true);
+    try {
+      const res = await collectPackagePayment(selectedLead.id, {
+        paid_amount: amount,
+        payment_mode: collectFeeDraft.payment_mode,
+      });
+      toast.success("Fee collected");
+      setCollectFeeDraft(null);
+      applyUpdatedLead(res.lead);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to collect fee");
+    }
+    setCollectingFee(false);
   };
 
   // ---- Physio Assign (Head Physio) ----
@@ -481,7 +512,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
 
                   {selectedLead.package_id && (
                     <p className="mt-2 text-xs text-slate-500">
-                      Pack: <span className="font-semibold text-slate-700">{selectedLead.package_name}</span> · {selectedLead.package_sessions} sessions ({selectedLead.package_mode})
+                      Pack: <span className="font-semibold text-slate-700">{selectedLead.package_name}</span>
+                      {selectedLead.package_duration_minutes
+                        ? ` · ${selectedLead.package_duration_minutes} min`
+                        : selectedLead.package_sessions
+                          ? ` · ${selectedLead.package_sessions} sessions`
+                          : ""}
+                      {" "}({selectedLead.package_mode})
                     </p>
                   )}
                   {selectedLead.assigned_physio_name && physioAssignIdx >= 0 && currentIdx >= physioAssignIdx && (
@@ -513,10 +550,14 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                               setFollowUpDraft({ date: tomorrow.toISOString().slice(0, 10), time: "10:00", remarks: "" });
                               return;
                             }
+                            if (s.name === "Consultation Fee") {
+                              openCollectFeeDraft();
+                              return;
+                            }
                             moveStage(selectedLead, s.name);
                           }}
-                          disabled={active || viewOnly}
-                          title={viewOnly ? "Set by the Head Physio's own pipeline — view only here" : undefined}
+                          disabled={(active && s.name !== "Consultation Fee") || viewOnly}
+                          title={viewOnly ? "Set by the Head Physio's own pipeline — view only here" : s.name === "Consultation Fee" && !selectedLead.package_paid ? "Click to collect the fee" : undefined}
                           className="flex w-full items-center justify-center gap-1 rounded-lg border px-2 py-2 text-center text-[11px] font-semibold leading-tight transition disabled:opacity-100"
                           style={
                             active
@@ -638,6 +679,55 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                     data-testid="cons-session-submit"
                   >
                     {selling ? "Submitting..." : "Submit"}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Collect Fee popup (Branch Admin) — Consultation Fee stage */}
+            {collectFeeDraft && (
+              <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" data-testid="cons-collect-fee-modal">
+                <div className="w-full max-w-sm space-y-3 rounded-xl bg-white p-4 shadow-2xl">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-semibold text-slate-800">Collect Consultation Fee</p>
+                    <button onClick={() => setCollectFeeDraft(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-collect-fee-close"><X className="h-4 w-4" /></button>
+                  </div>
+                  {selectedLead.package_name && (
+                    <p className="text-[11px] text-slate-500">
+                      Package: <span className="font-semibold text-slate-700">{selectedLead.package_name}</span>
+                    </p>
+                  )}
+                  <div>
+                    <label className="mb-1 block text-[11px] font-medium text-slate-500">Amount (₹)</label>
+                    <Input
+                      type="number"
+                      min="0"
+                      value={collectFeeDraft.paid_amount}
+                      onChange={(e) => setCollectFeeDraft({ ...collectFeeDraft, paid_amount: e.target.value })}
+                      className="h-9"
+                      data-testid="cons-collect-fee-amount"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[11px] font-medium text-slate-500">Payment Mode</label>
+                    <select
+                      value={collectFeeDraft.payment_mode}
+                      onChange={(e) => setCollectFeeDraft({ ...collectFeeDraft, payment_mode: e.target.value })}
+                      className="h-9 w-full rounded-md border border-slate-200 px-2 text-xs"
+                      data-testid="cons-collect-fee-mode"
+                    >
+                      <option value="cash">Cash</option>
+                      <option value="upi">UPI</option>
+                      <option value="card">Card</option>
+                    </select>
+                  </div>
+                  <Button
+                    className="w-full bg-sky-600 hover:bg-sky-700 text-xs"
+                    onClick={submitCollectFee}
+                    disabled={collectingFee || !collectFeeDraft.paid_amount}
+                    data-testid="cons-collect-fee-submit"
+                  >
+                    {collectingFee ? "Collecting..." : "Confirm & Move to Treatment Fee"}
                   </Button>
                 </div>
               </div>

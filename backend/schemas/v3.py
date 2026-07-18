@@ -193,6 +193,7 @@ class V3LeadOut(BaseModel):
     package_paid: Optional[float] = None
     package_payment_mode: Optional[str] = None  # "cash" | "upi" | "card" | ...
     package_sessions: Optional[int] = None
+    package_duration_minutes: Optional[int] = None  # consultation-type packages only — no session count
     package_mode: Optional[str] = None
     diagnosis: Optional[str] = None  # Pre-Sales' basic diagnosis — read-only reference for the Head Physio
     physio_diagnosis_report: Optional[str] = None  # Head Physio's own diagnosis report

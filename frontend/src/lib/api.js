@@ -296,7 +296,7 @@ export const getStoreHistory = async (limit) => (await api.get("/store/history",
 export const saveLeadDiagnosis = async (leadId, diagnosis) => (await api.post(`/leads/${leadId}/diagnosis`, { diagnosis })).data;
 export const sellStoreItem = async (leadId, payload) => (await api.post(`/leads/${leadId}/sell-store-item`, payload)).data;
 export const assignPackage = async (leadId, payload) => (await api.post(`/leads/${leadId}/assign-package`, payload)).data;
-export const collectPackagePayment = async (leadId, paidAmount, paymentMode = "cash") => (await api.post(`/leads/${leadId}/collect-package-payment`, { paid_amount: paidAmount, payment_mode: paymentMode })).data;
+export const collectPackagePayment = async (leadId, payload) => (await api.post(`/leads/${leadId}/collect-package-payment`, payload)).data;
 export const assignConsultationPhysio = async (leadId, physioId) => (await api.post(`/leads/${leadId}/assign-consultation-physio`, { physio_id: physioId })).data;
 
 export const savePhysioDiagnosis = async (leadId, report, locked = false) => (await api.post(`/leads/${leadId}/physio-diagnosis`, { report, locked })).data;
