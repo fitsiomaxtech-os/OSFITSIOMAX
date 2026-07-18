@@ -12,6 +12,7 @@ import {
 import { BranchDetailPage } from "@/components/branch/BranchDetailPage";
 import { BranchFormDialogV2 } from "@/components/branch/BranchFormDialogV2";
 import { BranchAdminBoard } from "@/components/BranchAdminBoard";
+import { HeadPhysioBoard } from "@/components/HeadPhysioBoard";
 
 const TABS = [
   { key: "creation", label: "Creation & Manager", icon: Users },
@@ -20,7 +21,7 @@ const TABS = [
   { key: "branch_control", label: "Branch Control", icon: LayoutDashboard },
 ];
 
-export const BranchManagementBoard = () => {
+export const BranchManagementBoard = ({ actingUser } = {}) => {
   const [tab, setTab] = useState("creation");
   const [drilledBranchId, setDrilledBranchId] = useState(null);
 
@@ -48,16 +49,17 @@ export const BranchManagementBoard = () => {
       {tab === "creation" && <CreationTab onDrillIn={setDrilledBranchId} />}
       {tab === "service_type" && <ServiceTypeTab />}
       {tab === "performance" && <PerformanceTab onDrillIn={setDrilledBranchId} />}
-      {tab === "branch_control" && <BranchControlTab />}
+      {tab === "branch_control" && <BranchControlTab actingUser={actingUser} />}
     </div>
   );
 };
 
 // ---------- Branch Control (Super Admin driving a Branch Admin's own board) ----------
 
-const BranchControlTab = () => {
+const BranchControlTab = ({ actingUser }) => {
   const [branches, setBranches] = useState([]);
   const [selectedId, setSelectedId] = useState("");
+  const [viewAs, setViewAs] = useState("branch_admin"); // "branch_admin" | "head_physio"
 
   useEffect(() => { bmList().then(setBranches).catch(() => {}); }, []);
 
@@ -80,14 +82,32 @@ const BranchControlTab = () => {
           <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
         </div>
         {selected && <span className="text-xs text-slate-400">{selected.admin_name ? `Managed by ${selected.admin_name}` : "No admin assigned"}</span>}
+
+        <div className="ml-auto flex gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1">
+          {[{ key: "branch_admin", label: "Branch Admin View" }, { key: "head_physio", label: "Head Physio View" }].map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setViewAs(t.key)}
+              className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
+                viewAs === t.key ? "bg-white text-sky-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
+              }`}
+              data-testid={`bm-branch-control-viewas-${t.key}`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {selectedId ? (
-        <BranchAdminBoard key={selectedId} branchId={selectedId} />
-      ) : (
+      {!selectedId ? (
         <div className="rounded-lg border border-dashed border-slate-200 p-10 text-center text-sm text-slate-400" data-testid="bm-branch-control-empty">
-          Pick a branch above to open its full Branch Admin dashboard — Branch Leads, Consultations, Treatment Sessions, Rehab, Finance and Fitsiomax Store — with full control, same as the Branch Admin sees it.
+          Pick a branch above to open its full dashboard — Branch Admin view (Branch Leads, Consultations, Treatment Sessions, Rehab, Finance, Fitsiomax Store) or Head Physio view (their own Consultations pipeline, Review, Rehab, Calendar) — with full control, same as they'd see it.
         </div>
+      ) : viewAs === "head_physio" ? (
+        <HeadPhysioBoard key={`${selectedId}-hp`} branchId={selectedId} user={actingUser} />
+      ) : (
+        <BranchAdminBoard key={`${selectedId}-ba`} branchId={selectedId} />
       )}
     </div>
   );

@@ -22,24 +22,29 @@ async def _head_consultation_stage_names() -> list:
     return names or V3_HEAD_CONSULTATION_STAGES
 
 
-async def _resolve_hp_doctor(user: V3UserOut) -> Optional[dict]:
-    """Find the doctors record for the logged-in head physio/consultant, scoped to their own user_id."""
+async def _resolve_hp_doctor(user: V3UserOut, branch_id: Optional[str] = None) -> Optional[dict]:
+    """Find the doctors record for the logged-in head physio/consultant, scoped to their own
+    user_id. Super Admin driving a specific branch's board (e.g. from Branch Management >
+    Branch Control) can pass that branch's id to resolve its head physio instead."""
     doctor = await v3_col("doctors").find_one(
         {"user_id": user.id, "profile_type": "head_physio"},
         {"_id": 0},
     )
-    if not doctor:
+    if doctor:
+        return doctor
+    effective_branch = branch_id if (user.role == "super_admin" and branch_id) else user.branch_id
+    if effective_branch:
         doctor = await v3_col("doctors").find_one(
-            {"branch_id": user.branch_id, "profile_type": "head_physio"},
+            {"branch_id": effective_branch, "profile_type": "head_physio"},
             {"_id": 0},
         )
     return doctor
 
 
 @router.get("/head-physio/my-calendar")
-async def hp_my_calendar(user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin"))):
+async def hp_my_calendar(branch_id: Optional[str] = None, user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin"))):
     """Read-only view of the logged-in consultant's own booked slots (branch admin manages slot availability)."""
-    doctor = await _resolve_hp_doctor(user)
+    doctor = await _resolve_hp_doctor(user, branch_id)
     if not doctor:
         return {"slots": [], "slot_details": [], "booked": {}}
 
@@ -60,8 +65,8 @@ async def hp_my_calendar(user: V3UserOut = Depends(v3_require_roles("head_physio
 
 
 @router.get("/head-physio/my-patients")
-async def hp_my_patients(user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin"))):
-    doctor = await _resolve_hp_doctor(user)
+async def hp_my_patients(branch_id: Optional[str] = None, user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin"))):
+    doctor = await _resolve_hp_doctor(user, branch_id)
     if not doctor:
         return {"patients": []}
 
@@ -109,7 +114,7 @@ async def hp_recommend_package(
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
-    doctor = await _resolve_hp_doctor(user)
+    doctor = await _resolve_hp_doctor(user, lead.get("branch_id"))
 
     total_sessions = payload.recommended_weeks * payload.sessions_per_week
 

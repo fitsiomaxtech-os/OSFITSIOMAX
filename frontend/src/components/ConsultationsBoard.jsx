@@ -60,7 +60,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
     (async () => {
       try {
         setLoading(true);
-        const res = await getConsultationsBoard(branchId);
+        const res = await getConsultationsBoard(branchId, isConsultant ? "head_consultation" : undefined);
         if (!cancelled) setBoard(res);
       } catch (err) {
         console.error("Consultations board load error:", err);
@@ -76,7 +76,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
     if (!branchId) return;
     try {
       setLoading(true);
-      const res = await getConsultationsBoard(branchId);
+      const res = await getConsultationsBoard(branchId, isConsultant ? "head_consultation" : undefined);
       setBoard(res);
     } catch (err) {
       console.error("Consultations board load error:", err);

@@ -138,7 +138,7 @@ export const rescheduleBranchFollowUp = async (leadId, followupId, payload) => (
 export const collectFee = async (leadId, payload) => (await api.post(`/leads/${leadId}/collect-fee`, payload)).data;
 export const assignPhysio = async (leadId, payload) => (await api.post(`/leads/${leadId}/assign-physio`, payload)).data;
 export const scheduleBranchAppointment = async (leadId, payload) => (await api.post(`/leads/${leadId}/schedule-branch-appointment`, payload)).data;
-export const getConsultationsBoard = async (branchId) => (await api.get(`/branch-admin/consultations/${branchId}/board`)).data;
+export const getConsultationsBoard = async (branchId, pipeline) => (await api.get(`/branch-admin/consultations/${branchId}/board`, { params: pipeline ? { pipeline } : {} })).data;
 export const getAvailableExperts = async (branchId, date, time) => (await api.get(`/branch-admin/available-experts/${branchId}`, { params: time ? { date, time } : { date } })).data;
 export const getCalendarAvailability = async (branchId, month) => (await api.get(`/branch-admin/calendar-availability/${branchId}`, { params: { month } })).data;
 export const getDaySlots = async (branchId, date) => (await api.get(`/branch-admin/day-slots/${branchId}`, { params: { date } })).data;
@@ -167,8 +167,8 @@ export const getBranchFinance = async (params = {}) => {
   return (await api.get(`/branch/finance?${query.toString()}`)).data;
 };
 
-export const getHPMyCalendar = async () => (await api.get("/head-physio/my-calendar")).data;
-export const getHPMyPatients = async () => (await api.get("/head-physio/my-patients")).data;
+export const getHPMyCalendar = async (branchId) => (await api.get("/head-physio/my-calendar", { params: branchId ? { branch_id: branchId } : {} })).data;
+export const getHPMyPatients = async (branchId) => (await api.get("/head-physio/my-patients", { params: branchId ? { branch_id: branchId } : {} })).data;
 export const hpRecommendPackage = async (payload) => (await api.post("/head-physio/recommend-package", payload)).data;
 export const hpGetSessions = async (leadId) => (await api.get(`/head-physio/sessions/${leadId}`)).data;
 export const hpGetAssessments = async (leadId) => (await api.get(`/head-physio/weekly-assessments/${leadId}`)).data;

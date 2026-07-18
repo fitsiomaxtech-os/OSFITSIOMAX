@@ -49,11 +49,11 @@ export const HeadPhysioBoard = ({ branchId, user }) => {
   const loadPatients = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await getHPMyPatients();
+      const data = await getHPMyPatients(branchId);
       setPatients(data.patients || []);
     } catch { /* silent */ }
     setLoading(false);
-  }, []);
+  }, [branchId]);
 
   useEffect(() => { loadPatients(); }, [loadPatients]);
 
@@ -99,7 +99,7 @@ export const HeadPhysioBoard = ({ branchId, user }) => {
         />
       )}
 
-      {activeTab === "calendar" && <MyCalendarTab />}
+      {activeTab === "calendar" && <MyCalendarTab branchId={branchId} />}
 
       {activeTab === "profile" && <MyProfileTab user={user} />}
 
@@ -132,15 +132,15 @@ export const HeadPhysioBoard = ({ branchId, user }) => {
   );
 };
 
-function MyCalendarTab() {
+function MyCalendarTab({ branchId }) {
   const [data, setData] = useState({ slots: [], booked: {} });
   const [loading, setLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
-    try { setData(await getHPMyCalendar()); } catch { /* silent */ }
+    try { setData(await getHPMyCalendar(branchId)); } catch { /* silent */ }
     setLoading(false);
-  }, []);
+  }, [branchId]);
 
   useEffect(() => { load(); }, [load]);
 

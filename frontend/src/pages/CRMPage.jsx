@@ -679,7 +679,7 @@ export const CRMPage = ({ auth, onLogout }) => {
         )}
 
         {showSuperAdminBoard && superAdminView === "branches" && (
-          <BranchManagementBoard />
+          <BranchManagementBoard actingUser={auth.user} />
         )}
 
         {showSuperAdminBoard && superAdminView === "packages" && (

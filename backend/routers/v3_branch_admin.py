@@ -263,16 +263,19 @@ async def v3_available_experts(
 
 
 @router.get("/branch-admin/consultations/{branch_id}/board")
-async def v3_consultations_board(branch_id: str, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio"))):
+async def v3_consultations_board(branch_id: str, pipeline: Optional[str] = None, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio"))):
     """Return leads in the Consultations pipeline for a branch, grouped by the caller's own
     pipeline field. Head Physio has a fully independent pipeline (head_consultation_stage) from
     Branch Admin's own (consultation_stage) — filtering by the wrong field would show a Head
     Physio every branch lead that has merely entered the Branch's pipeline, not just the ones
-    actually handed off to them, inflating "All Stages" beyond the sum of their own stage pills."""
-    field = "head_consultation_stage" if user.role == "head_physio" else "consultation_stage"
+    actually handed off to them, inflating "All Stages" beyond the sum of their own stage pills.
+    Super Admin driving a branch's Head Physio board (Branch Management > Branch Control) can
+    pass pipeline=head_consultation to see it the same way that branch's head physio would."""
+    is_hp = user.role == "head_physio" or (user.role == "super_admin" and pipeline == "head_consultation")
+    field = "head_consultation_stage" if is_hp else "consultation_stage"
     query = {"branch_id": branch_id, field: {"$ne": None}}
     leads_docs = await v3_col("leads").find(query, {"_id": 0}).sort("updated_at", -1).to_list(2000)
-    stage_names = await _head_consultation_stage_names() if user.role == "head_physio" else await _consultation_stage_names()
+    stage_names = await _head_consultation_stage_names() if is_hp else await _consultation_stage_names()
     stage_counts = {}
     for stage in stage_names:
         stage_counts[stage] = sum(1 for ld in leads_docs if ld.get(field) == stage)
