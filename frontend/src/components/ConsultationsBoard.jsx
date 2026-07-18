@@ -364,7 +364,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
       {/* Detail / move-stage dialog */}
       {selectedLead && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 sm:p-4" data-testid="cons-detail-dialog">
-          <div className="w-full h-full sm:h-auto sm:w-[92vw] sm:max-w-6xl sm:max-h-[92vh] overflow-y-auto space-y-4 bg-white p-6 shadow-2xl sm:rounded-xl">
+          <div className="w-full h-full sm:h-auto sm:w-[92vw] sm:max-w-3xl sm:max-h-[85vh] overflow-y-auto space-y-3 bg-white p-4 shadow-2xl sm:rounded-xl">
             <div className="flex items-start justify-between">
               <div>
                 <h3 className="text-base font-semibold text-slate-900" data-testid="cons-detail-title">{selectedLead.name || "Lead"}</h3>
@@ -440,7 +440,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                     onSaveDraft={() => savePhysioDiag(false)}
                     onEdit={() => setPhysioDiagEditing(true)}
                     onUnlock={unlockPhysioDiag}
-                    rows={5}
+                    rows={3}
                     placeholder="Write the full diagnosis report..."
                     testPrefix="cons-physio-diagnosis"
                   />
@@ -462,7 +462,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                     onSaveDraft={() => saveTreatment(false)}
                     onEdit={() => setTreatmentEditing(true)}
                     onUnlock={unlockTreatment}
-                    rows={4}
+                    rows={3}
                     placeholder="What treatment should be given to the patient..."
                     testPrefix="cons-treatment-summary"
                   />
