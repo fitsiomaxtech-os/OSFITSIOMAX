@@ -295,12 +295,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
     const mode = selectedLead.appointment_mode || "offline";
     const auto = treatmentPackageItems.length === 1 ? treatmentPackageItems[0] : null;
     const baseSessions = auto ? (mode === "online" ? auto.sessions_online : auto.sessions_offline) : "";
-    const basePrice = auto ? (mode === "online" ? auto.price_online : auto.price_offline) : "";
+    const perSessionRate = auto ? (mode === "online" ? auto.price_online : auto.price_offline) : "";
+    const totalPrice = perSessionRate && baseSessions ? perSessionRate * baseSessions : "";
     setTreatmentFeeDraft({
       item_id: auto?.id || "",
       mode,
       sessions: baseSessions ? String(baseSessions) : "",
-      paid_amount: basePrice ? String(basePrice) : "",
+      paid_amount: totalPrice ? String(totalPrice) : "",
       payment_mode: "cash",
     });
   };
@@ -820,12 +821,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                         const item = treatmentPackageItems.find((i) => i.id === e.target.value);
                         const isOnline = treatmentFeeDraft.mode === "online";
                         const base = item ? (isOnline ? item.sessions_online : item.sessions_offline) : "";
-                        const basePrice = item ? (isOnline ? item.price_online : item.price_offline) : "";
+                        const perSessionRate = item ? (isOnline ? item.price_online : item.price_offline) : "";
+                        const totalPrice = perSessionRate && base ? perSessionRate * base : "";
                         setTreatmentFeeDraft({
                           ...treatmentFeeDraft,
                           item_id: e.target.value,
                           sessions: base ? String(base) : "",
-                          paid_amount: basePrice ? String(basePrice) : "",
+                          paid_amount: totalPrice ? String(totalPrice) : "",
                         });
                       }}
                       className="h-9 w-full rounded-md border border-slate-200 px-2 text-xs"
