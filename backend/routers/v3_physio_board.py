@@ -16,14 +16,20 @@ router = APIRouter(prefix="/api/v3")
 
 
 async def _resolve_doctor(user: V3UserOut) -> Optional[dict]:
-    """Find the doctors record for the logged-in physio/consultant, scoped to their own user_id."""
+    """Find the doctors record for the logged-in physio. Doctors created via Jr. Physio
+    signup are linked directly by user_id; doctors created via Fitsiomax Experts are only
+    linked to an employee record, so fall back to the users.employee_id -> doctors.employee_id
+    chain to resolve those."""
     doctor = await v3_col("doctors").find_one(
         {"user_id": user.id, "profile_type": "physio"},
         {"_id": 0},
     )
-    if not doctor:
+    if doctor:
+        return doctor
+    raw_user = await v3_col("users").find_one({"id": user.id}, {"_id": 0, "employee_id": 1})
+    if raw_user and raw_user.get("employee_id"):
         doctor = await v3_col("doctors").find_one(
-            {"branch_id": user.branch_id, "profile_type": "physio", "user_id": {"$exists": True}},
+            {"employee_id": raw_user["employee_id"], "profile_type": "physio"},
             {"_id": 0},
         )
     return doctor
