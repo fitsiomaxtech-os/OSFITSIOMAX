@@ -234,7 +234,7 @@ async def assign_package(lead_id: str, payload: V3AssignPackageInput, user: V3Us
 
 
 CONSULTATION_FEE_PAYMENT_MODES = {"cash", "upi", "card"}
-TREATMENT_FEE_PAYMENT_MODES = {"cash", "gpay", "phonepe", "applepay", "upi", "emi", "cheque", "partial"}
+TREATMENT_FEE_PAYMENT_MODES = {"cash", "upi", "card", "cheque", "emi", "partial"}
 
 
 @router.post("/leads/{lead_id}/collect-package-payment", response_model=dict)

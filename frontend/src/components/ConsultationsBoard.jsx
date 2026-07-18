@@ -20,12 +20,10 @@ const CONSULTATION_FEE_PAYMENT_MODES = [
 ];
 const TREATMENT_FEE_PAYMENT_MODES = [
   { value: "cash", label: "Cash" },
-  { value: "gpay", label: "GPay" },
-  { value: "phonepe", label: "PhonePe" },
-  { value: "applepay", label: "Apple Pay" },
   { value: "upi", label: "UPI" },
-  { value: "emi", label: "EMI" },
+  { value: "card", label: "Card" },
   { value: "cheque", label: "Cheque" },
+  { value: "emi", label: "EMI" },
   { value: "partial", label: "Partial Payment" },
 ];
 
