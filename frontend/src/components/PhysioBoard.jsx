@@ -474,7 +474,7 @@ function PatientsTab() {
 
   useEffect(() => { load(); }, [load]);
 
-  const isCompleted = (p) => p.total_sessions > 0 && p.remaining_sessions === 0;
+  const isCompleted = (p) => p.physio_stage === "Complete";
   const ongoingCount = patients.filter((p) => !isCompleted(p)).length;
   const completedCount = patients.filter(isCompleted).length;
   const visiblePatients = patients.filter((p) => (historyTab === "completed" ? isCompleted(p) : !isCompleted(p)));

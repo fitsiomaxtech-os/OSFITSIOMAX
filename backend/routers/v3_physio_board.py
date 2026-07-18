@@ -141,29 +141,35 @@ async def physio_calendar(
 
 @router.get("/physio/patients")
 async def physio_patients(user: V3UserOut = Depends(v3_require_roles("physio", "super_admin"))):
+    """Every lead ever assigned to this physio — not just ones with generated treatment
+    sessions — so newly assigned/consulted patients show up here right away, with session
+    stats layered on once a package is assigned and sessions exist."""
     doctor = await _resolve_doctor(user)
 
     if not doctor:
         return {"patients": []}
 
-    sessions = await v3_col("sessions").find(
-        {"physio_id": doctor["id"]}, {"_id": 0}
-    ).sort("slot_time", 1).to_list(2000)
+    leads = await v3_col("leads").find(
+        {"assigned_physio_id": doctor["id"]}, {"_id": 0}
+    ).sort("updated_at", -1).to_list(500)
 
-    lead_ids = list({s["lead_id"] for s in sessions})
-    leads = await v3_col("leads").find({"id": {"$in": lead_ids}}, {"_id": 0}).to_list(500)
-    lead_map = {l["id"]: l for l in leads}
+    lead_ids = [l["id"] for l in leads]
+    sessions = await v3_col("sessions").find(
+        {"physio_id": doctor["id"], "lead_id": {"$in": lead_ids}}, {"_id": 0}
+    ).sort("slot_time", 1).to_list(2000)
+    sessions_by_lead: dict = {}
+    for s in sessions:
+        sessions_by_lead.setdefault(s["lead_id"], []).append(s)
 
     patients = []
-    for lead_id in lead_ids:
-        lead = lead_map.get(lead_id, {})
-        patient_sessions = [s for s in sessions if s["lead_id"] == lead_id]
+    for lead in leads:
+        patient_sessions = sessions_by_lead.get(lead["id"], [])
         completed = sum(1 for s in patient_sessions if s["status"] == "completed")
         total = len(patient_sessions)
         next_session = next((s for s in patient_sessions if s["status"] == "upcoming"), None)
 
         patients.append({
-            "lead_id": lead_id,
+            "lead_id": lead["id"],
             "lead_name": lead.get("name", "Unknown"),
             "phone": lead.get("phone", ""),
             "total_sessions": total,
@@ -171,6 +177,7 @@ async def physio_patients(user: V3UserOut = Depends(v3_require_roles("physio", "
             "remaining_sessions": total - completed,
             "next_session": next_session,
             "package_weeks": lead.get("package_weeks"),
+            "physio_stage": lead.get("physio_stage"),
         })
 
     return {"patients": patients}
