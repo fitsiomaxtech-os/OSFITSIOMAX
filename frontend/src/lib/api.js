@@ -174,14 +174,14 @@ export const hpGetSessions = async (leadId) => (await api.get(`/head-physio/sess
 export const hpGetAssessments = async (leadId) => (await api.get(`/head-physio/weekly-assessments/${leadId}`)).data;
 export const hpWeeklyReview = async (leadId, week, payload) => (await api.post(`/head-physio/weekly-review/${leadId}/${week}`, payload)).data;
 
-export const physioConsultations = async () => (await api.get("/physio/consultations")).data;
-export const physioCompleteConsultation = async (leadId) => (await api.post(`/physio/leads/${leadId}/complete-consultation`)).data;
-export const physioToday = async () => (await api.get("/physio/today")).data;
-export const physioCalendar = async (month, year) => (await api.get(`/physio/calendar?month=${month}&year=${year}`)).data;
-export const physioPatients = async () => (await api.get("/physio/patients")).data;
+export const physioConsultations = async (physioId) => (await api.get("/physio/consultations", { params: physioId ? { physio_id: physioId } : {} })).data;
+export const physioCompleteConsultation = async (leadId, physioId) => (await api.post(`/physio/leads/${leadId}/complete-consultation`, null, { params: physioId ? { physio_id: physioId } : {} })).data;
+export const physioToday = async (physioId) => (await api.get("/physio/today", { params: physioId ? { physio_id: physioId } : {} })).data;
+export const physioCalendar = async (month, year, physioId) => (await api.get("/physio/calendar", { params: { month, year, ...(physioId ? { physio_id: physioId } : {}) } })).data;
+export const physioPatients = async (physioId) => (await api.get("/physio/patients", { params: physioId ? { physio_id: physioId } : {} })).data;
 export const physioSessions = async (leadId) => (await api.get(`/physio/sessions/${leadId}`)).data;
 export const physioCompleteSession = async (sessionId, payload) => (await api.post(`/physio/sessions/${sessionId}/complete`, payload)).data;
-export const physioWeeklyAssessment = async (leadId, week, payload) => (await api.post(`/physio/weekly-assessment/${leadId}/${week}`, payload)).data;
+export const physioWeeklyAssessment = async (leadId, week, payload, physioId) => (await api.post(`/physio/weekly-assessment/${leadId}/${week}`, payload, { params: physioId ? { physio_id: physioId } : {} })).data;
 
 export const getBranchRecommendations = async () => (await api.get("/branch/package-recommendations")).data;
 export const assignSessions = async (payload) => (await api.post("/branch/assign-sessions", payload)).data;

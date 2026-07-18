@@ -33,7 +33,7 @@ const TABS = [
   { key: "patients", label: "Patients History", icon: Users },
 ];
 
-export const PhysioBoard = () => {
+export const PhysioBoard = ({ physioId } = {}) => {
   const [activeTab, setActiveTab] = useState("consultations");
 
   return (
@@ -59,15 +59,15 @@ export const PhysioBoard = () => {
         })}
       </div>
 
-      {activeTab === "consultations" && <ConsultationsTab />}
-      {activeTab === "today" && <TodayTab />}
-      {activeTab === "calendar" && <CalendarTab />}
-      {activeTab === "patients" && <PatientsTab />}
+      {activeTab === "consultations" && <ConsultationsTab physioId={physioId} />}
+      {activeTab === "today" && <TodayTab physioId={physioId} />}
+      {activeTab === "calendar" && <CalendarTab physioId={physioId} />}
+      {activeTab === "patients" && <PatientsTab physioId={physioId} />}
     </div>
   );
 };
 
-function ConsultationsTab() {
+function ConsultationsTab({ physioId }) {
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedLead, setSelectedLead] = useState(null);
@@ -75,11 +75,11 @@ function ConsultationsTab() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await physioConsultations();
+      const data = await physioConsultations(physioId);
       setLeads(data.leads || []);
     } catch { /* silent */ }
     setLoading(false);
-  }, []);
+  }, [physioId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -138,6 +138,7 @@ function ConsultationsTab() {
       {selectedLead && (
         <ConsultationDetailModal
           lead={selectedLead}
+          physioId={physioId}
           onClose={() => setSelectedLead(null)}
           onDone={(updated) => { setSelectedLead(null); setLeads((prev) => prev.map((l) => (l.id === updated.id ? updated : l))); }}
         />
@@ -146,14 +147,14 @@ function ConsultationsTab() {
   );
 }
 
-function ConsultationDetailModal({ lead, onClose, onDone }) {
+function ConsultationDetailModal({ lead, physioId, onClose, onDone }) {
   const [submitting, setSubmitting] = useState(false);
   const isComplete = lead.physio_stage === "Complete";
 
   const markComplete = async () => {
     setSubmitting(true);
     try {
-      const updated = await physioCompleteConsultation(lead.id);
+      const updated = await physioCompleteConsultation(lead.id, physioId);
       toast.success("Marked complete");
       onDone(updated);
     } catch (err) {
@@ -236,16 +237,16 @@ function ConsultationDetailModal({ lead, onClose, onDone }) {
   );
 }
 
-function TodayTab() {
+function TodayTab({ physioId }) {
   const [data, setData] = useState({ sessions: [], new_assigned: [], date: "" });
   const [loading, setLoading] = useState(false);
   const [completeModal, setCompleteModal] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
-    try { setData(await physioToday()); } catch { /* silent */ }
+    try { setData(await physioToday(physioId)); } catch { /* silent */ }
     setLoading(false);
-  }, []);
+  }, [physioId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -338,15 +339,15 @@ function TodayTab() {
   );
 }
 
-function CalendarTab() {
+function CalendarTab({ physioId }) {
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth() + 1);
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
   const [data, setData] = useState({ sessions: [] });
   const [selectedDate, setSelectedDate] = useState(null);
 
   const load = useCallback(async () => {
-    try { setData(await physioCalendar(currentMonth, currentYear)); } catch { /* silent */ }
-  }, [currentMonth, currentYear]);
+    try { setData(await physioCalendar(currentMonth, currentYear, physioId)); } catch { /* silent */ }
+  }, [currentMonth, currentYear, physioId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -457,7 +458,7 @@ function CalendarTab() {
   );
 }
 
-function PatientsTab() {
+function PatientsTab({ physioId }) {
   const [patients, setPatients] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState(null);
@@ -466,11 +467,11 @@ function PatientsTab() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await physioPatients();
+      const data = await physioPatients(physioId);
       setPatients(data.patients || []);
     } catch { /* silent */ }
     setLoading(false);
-  }, []);
+  }, [physioId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -547,6 +548,7 @@ function PatientsTab() {
       {selectedPatient && (
         <PatientDetailModal
           patient={selectedPatient}
+          physioId={physioId}
           onClose={() => setSelectedPatient(null)}
           onRefresh={load}
         />
@@ -555,7 +557,7 @@ function PatientsTab() {
   );
 }
 
-function PatientDetailModal({ patient, onClose, onRefresh }) {
+function PatientDetailModal({ patient, physioId, onClose, onRefresh }) {
   const [sessions, setSessions] = useState([]);
   const [assessments, setAssessments] = useState([]);
   const [detailTab, setDetailTab] = useState("sessions");
@@ -674,6 +676,7 @@ function PatientDetailModal({ patient, onClose, onRefresh }) {
           <WeeklyAssessmentModal
             leadId={patient.lead_id}
             week={assessmentWeek}
+            physioId={physioId}
             onClose={() => setAssessmentWeek(null)}
             onDone={() => { setAssessmentWeek(null); load(); }}
           />
@@ -722,7 +725,7 @@ function CompleteSessionModal({ session, onClose, onDone }) {
   );
 }
 
-function WeeklyAssessmentModal({ leadId, week, onClose, onDone }) {
+function WeeklyAssessmentModal({ leadId, week, physioId, onClose, onDone }) {
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -730,7 +733,7 @@ function WeeklyAssessmentModal({ leadId, week, onClose, onDone }) {
     if (!notes.trim()) { toast.error("Please add notes"); return; }
     setSubmitting(true);
     try {
-      await physioWeeklyAssessment(leadId, week, { jr_physio_notes: notes });
+      await physioWeeklyAssessment(leadId, week, { jr_physio_notes: notes }, physioId);
       toast.success("Assessment submitted");
       onDone();
     } catch (err) {

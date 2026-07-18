@@ -7,12 +7,13 @@ import { toast } from "@/components/ui/sonner";
 import {
   bmList, bmCreateWithExistingAdmin, bmReassignAdmin, bmPerformance, bmPerformanceSummary,
   updateBranch, deleteBranch, hrBranchAdminCandidates,
-  getVerticals, createVertical,
+  getVerticals, createVertical, getDoctors,
 } from "@/lib/api";
 import { BranchDetailPage } from "@/components/branch/BranchDetailPage";
 import { BranchFormDialogV2 } from "@/components/branch/BranchFormDialogV2";
 import { BranchAdminBoard } from "@/components/BranchAdminBoard";
 import { HeadPhysioBoard } from "@/components/HeadPhysioBoard";
+import { PhysioBoard } from "@/components/PhysioBoard";
 
 const TABS = [
   { key: "creation", label: "Creation & Manager", icon: Users },
@@ -59,9 +60,19 @@ export const BranchManagementBoard = ({ actingUser } = {}) => {
 const BranchControlTab = ({ actingUser }) => {
   const [branches, setBranches] = useState([]);
   const [selectedId, setSelectedId] = useState("");
-  const [viewAs, setViewAs] = useState("branch_admin"); // "branch_admin" | "head_physio"
+  const [viewAs, setViewAs] = useState("branch_admin"); // "branch_admin" | "head_physio" | "physio"
+  const [physios, setPhysios] = useState([]);
+  const [selectedPhysioId, setSelectedPhysioId] = useState("");
 
   useEffect(() => { bmList().then(setBranches).catch(() => {}); }, []);
+
+  useEffect(() => {
+    setSelectedPhysioId("");
+    if (!selectedId || viewAs !== "physio") { setPhysios([]); return; }
+    getDoctors({ branch_id: selectedId })
+      .then((rows) => setPhysios((rows || []).filter((d) => d.profile_type === "physio")))
+      .catch(() => setPhysios([]));
+  }, [selectedId, viewAs]);
 
   const selected = branches.find((b) => b.id === selectedId);
 
@@ -84,7 +95,7 @@ const BranchControlTab = ({ actingUser }) => {
         {selected && <span className="text-xs text-slate-400">{selected.admin_name ? `Managed by ${selected.admin_name}` : "No admin assigned"}</span>}
 
         <div className="ml-auto flex gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1">
-          {[{ key: "branch_admin", label: "Branch Admin View" }, { key: "head_physio", label: "Head Physio View" }].map((t) => (
+          {[{ key: "branch_admin", label: "Branch Admin View" }, { key: "head_physio", label: "Head Physio View" }, { key: "physio", label: "Physio View" }].map((t) => (
             <button
               key={t.key}
               type="button"
@@ -98,14 +109,38 @@ const BranchControlTab = ({ actingUser }) => {
             </button>
           ))}
         </div>
+
+        {viewAs === "physio" && selectedId && (
+          <div className="relative">
+            <select
+              value={selectedPhysioId}
+              onChange={(e) => setSelectedPhysioId(e.target.value)}
+              className="h-9 min-w-[220px] appearance-none rounded-md border border-slate-200 bg-white px-3 pr-8 text-sm"
+              data-testid="bm-branch-control-physio-select"
+            >
+              <option value="">— Select a physio —</option>
+              {physios.map((p) => <option key={p.id} value={p.id}>{p.full_name}</option>)}
+              {physios.length === 0 && <option value="" disabled>No physios in this branch yet</option>}
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          </div>
+        )}
       </div>
 
       {!selectedId ? (
         <div className="rounded-lg border border-dashed border-slate-200 p-10 text-center text-sm text-slate-400" data-testid="bm-branch-control-empty">
-          Pick a branch above to open its full dashboard — Branch Admin view (Branch Leads, Consultations, Treatment Sessions, Rehab, Finance, Fitsiomax Store) or Head Physio view (their own Consultations pipeline, Review, Rehab, Calendar) — with full control, same as they'd see it.
+          Pick a branch above to open its full dashboard — Branch Admin view (Branch Leads, Consultations, Treatment Sessions, Rehab, Finance, Fitsiomax Store), Head Physio view (their own Consultations pipeline, Review, Rehab, Calendar), or Physio view (Consultations, Today, Full Calendar, Patients History for one physio) — with full control, same as they'd see it.
         </div>
       ) : viewAs === "head_physio" ? (
         <HeadPhysioBoard key={`${selectedId}-hp`} branchId={selectedId} user={actingUser} />
+      ) : viewAs === "physio" ? (
+        selectedPhysioId ? (
+          <PhysioBoard key={`${selectedPhysioId}-ph`} physioId={selectedPhysioId} />
+        ) : (
+          <div className="rounded-lg border border-dashed border-slate-200 p-10 text-center text-sm text-slate-400" data-testid="bm-branch-control-physio-empty">
+            Pick a physio above to open their dashboard.
+          </div>
+        )
       ) : (
         <BranchAdminBoard key={`${selectedId}-ba`} branchId={selectedId} />
       )}

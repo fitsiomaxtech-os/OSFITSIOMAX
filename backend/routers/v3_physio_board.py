@@ -15,11 +15,17 @@ from schemas.v3 import (
 router = APIRouter(prefix="/api/v3")
 
 
-async def _resolve_doctor(user: V3UserOut) -> Optional[dict]:
+async def _resolve_doctor(user: V3UserOut, physio_id: Optional[str] = None) -> Optional[dict]:
     """Find the doctors record for the logged-in physio. Doctors created via Jr. Physio
     signup are linked directly by user_id; doctors created via Fitsiomax Experts are only
     linked to an employee record, so fall back to the users.employee_id -> doctors.employee_id
-    chain to resolve those."""
+    chain to resolve those. Super Admin driving a specific physio's board (Branch Management >
+    Branch Control) can pass that physio's doctor id to resolve directly instead — a branch can
+    have several physios, so branch_id alone isn't enough to disambiguate."""
+    if physio_id and user.role == "super_admin":
+        doctor = await v3_col("doctors").find_one({"id": physio_id, "profile_type": "physio"}, {"_id": 0})
+        if doctor:
+            return doctor
     doctor = await v3_col("doctors").find_one(
         {"user_id": user.id, "profile_type": "physio"},
         {"_id": 0},
@@ -83,8 +89,8 @@ async def create_jr_physio(payload: V3CreateJrPhysioInput, user: V3UserOut = Dep
 
 
 @router.get("/physio/today")
-async def physio_today(user: V3UserOut = Depends(v3_require_roles("physio", "super_admin"))):
-    doctor = await _resolve_doctor(user)
+async def physio_today(physio_id: Optional[str] = None, user: V3UserOut = Depends(v3_require_roles("physio", "super_admin"))):
+    doctor = await _resolve_doctor(user, physio_id)
 
     if not doctor:
         return {"sessions": [], "new_assigned": [], "date": datetime.now(timezone.utc).date().isoformat()}
@@ -113,9 +119,10 @@ async def physio_today(user: V3UserOut = Depends(v3_require_roles("physio", "sup
 async def physio_calendar(
     month: Optional[int] = None,
     year: Optional[int] = None,
+    physio_id: Optional[str] = None,
     user: V3UserOut = Depends(v3_require_roles("physio", "super_admin")),
 ):
-    doctor = await _resolve_doctor(user)
+    doctor = await _resolve_doctor(user, physio_id)
 
     if not doctor:
         return {"sessions": [], "slots": [], "slot_details": []}
@@ -140,11 +147,11 @@ async def physio_calendar(
 
 
 @router.get("/physio/patients")
-async def physio_patients(user: V3UserOut = Depends(v3_require_roles("physio", "super_admin"))):
+async def physio_patients(physio_id: Optional[str] = None, user: V3UserOut = Depends(v3_require_roles("physio", "super_admin"))):
     """Every lead ever assigned to this physio — not just ones with generated treatment
     sessions — so newly assigned/consulted patients show up here right away, with session
     stats layered on once a package is assigned and sessions exist."""
-    doctor = await _resolve_doctor(user)
+    doctor = await _resolve_doctor(user, physio_id)
 
     if not doctor:
         return {"patients": []}
@@ -184,9 +191,9 @@ async def physio_patients(user: V3UserOut = Depends(v3_require_roles("physio", "
 
 
 @router.get("/physio/consultations")
-async def physio_consultations(user: V3UserOut = Depends(v3_require_roles("physio", "super_admin"))):
+async def physio_consultations(physio_id: Optional[str] = None, user: V3UserOut = Depends(v3_require_roles("physio", "super_admin"))):
     """Leads/appointments assigned to this consultant by a branch manager (pre-package consultation pipeline)."""
-    doctor = await _resolve_doctor(user)
+    doctor = await _resolve_doctor(user, physio_id)
     if not doctor:
         return {"leads": []}
 
@@ -203,9 +210,9 @@ async def physio_consultations(user: V3UserOut = Depends(v3_require_roles("physi
 
 
 @router.post("/physio/leads/{lead_id}/complete-consultation")
-async def physio_complete_consultation(lead_id: str, user: V3UserOut = Depends(v3_require_roles("physio", "super_admin"))):
+async def physio_complete_consultation(lead_id: str, physio_id: Optional[str] = None, user: V3UserOut = Depends(v3_require_roles("physio", "super_admin"))):
     """Physio marks their initial consultation review of an assigned lead as finished."""
-    doctor = await _resolve_doctor(user)
+    doctor = await _resolve_doctor(user, physio_id)
     if not doctor:
         raise HTTPException(status_code=404, detail="No physio profile found for this user")
 
@@ -287,6 +294,7 @@ async def physio_weekly_assessment(
     lead_id: str,
     week_number: int,
     payload: V3JrPhysioWeeklyInput,
+    physio_id: Optional[str] = None,
     user: V3UserOut = Depends(v3_require_roles("physio", "super_admin")),
 ):
     existing = await v3_col("weekly_assessments").find_one(
@@ -304,15 +312,12 @@ async def physio_weekly_assessment(
             }},
         )
     else:
-        doctor = await v3_col("doctors").find_one(
-            {"branch_id": user.branch_id, "profile_type": "physio"},
-            {"_id": 0},
-        )
+        doctor = await _resolve_doctor(user, physio_id)
         rec = await v3_col("package_recommendations").find_one({"lead_id": lead_id}, {"_id": 0})
         await v3_col("weekly_assessments").insert_one({
             "id": str(uuid.uuid4()),
             "lead_id": lead_id,
-            "branch_id": user.branch_id,
+            "branch_id": (doctor.get("branch_id") if doctor else None) or user.branch_id,
             "physio_id": doctor["id"] if doctor else "",
             "head_physio_id": rec.get("head_physio_id", "") if rec else "",
             "week_number": week_number,
