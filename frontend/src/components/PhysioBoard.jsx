@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
 import {
   physioConsultations,
+  physioCompleteConsultation,
   physioToday,
   physioCalendar,
   physioPatients,
@@ -29,7 +30,7 @@ const TABS = [
   { key: "consultations", label: "Consultations", icon: ClipboardList },
   { key: "today", label: "Today", icon: Clock },
   { key: "calendar", label: "Full Calendar", icon: CalendarDays },
-  { key: "patients", label: "Patients", icon: Users },
+  { key: "patients", label: "Patients History", icon: Users },
 ];
 
 export const PhysioBoard = () => {
@@ -69,6 +70,7 @@ export const PhysioBoard = () => {
 function ConsultationsTab() {
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [selectedLead, setSelectedLead] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -102,31 +104,140 @@ function ConsultationsTab() {
       ) : (
         <div className="space-y-2">
           {leads.map((l) => (
-            <div key={l.id} className="rounded-xl border border-slate-200 bg-white p-4" data-testid={`consultation-lead-${l.id}`}>
+            <button
+              type="button"
+              key={l.id}
+              onClick={() => setSelectedLead(l)}
+              className="w-full rounded-xl border border-slate-200 bg-white p-4 text-left transition hover:border-sky-200 hover:shadow-sm"
+              data-testid={`consultation-lead-${l.id}`}
+            >
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-semibold text-slate-800">{l.name}</p>
                   <p className="text-[10px] text-slate-400">{l.phone}</p>
                 </div>
-                {l.consultation_stage && (
-                  <span className="rounded-full bg-sky-100 px-2.5 py-1 text-[10px] font-semibold text-sky-700">{l.consultation_stage}</span>
-                )}
+                <div className="flex items-center gap-1.5">
+                  {l.physio_stage === "Complete" && (
+                    <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-semibold text-emerald-700">Complete</span>
+                  )}
+                  {l.consultation_stage && (
+                    <span className="rounded-full bg-sky-100 px-2.5 py-1 text-[10px] font-semibold text-sky-700">{l.consultation_stage}</span>
+                  )}
+                </div>
               </div>
               <div className="mt-2 flex items-center gap-1.5 text-xs text-slate-600">
                 <Calendar className="h-3.5 w-3.5 text-slate-400" /> {formatDateTime(l)}
               </div>
               {l.condition && <p className="text-[10px] text-slate-400 mt-1">Condition: {l.condition}</p>}
               {l.notes && <p className="text-[10px] text-slate-500 mt-1 whitespace-pre-wrap">{l.notes}</p>}
-            </div>
+            </button>
           ))}
         </div>
+      )}
+
+      {selectedLead && (
+        <ConsultationDetailModal
+          lead={selectedLead}
+          onClose={() => setSelectedLead(null)}
+          onDone={(updated) => { setSelectedLead(null); setLeads((prev) => prev.map((l) => (l.id === updated.id ? updated : l))); }}
+        />
       )}
     </div>
   );
 }
 
+function ConsultationDetailModal({ lead, onClose, onDone }) {
+  const [submitting, setSubmitting] = useState(false);
+  const isComplete = lead.physio_stage === "Complete";
+
+  const markComplete = async () => {
+    setSubmitting(true);
+    try {
+      const updated = await physioCompleteConsultation(lead.id);
+      toast.success("Marked complete");
+      onDone(updated);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to mark complete");
+    }
+    setSubmitting(false);
+  };
+
+  const Row = ({ label, value }) => (
+    !value ? null : (
+      <div>
+        <p className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">{label}</p>
+        <p className="text-xs text-slate-700">{value}</p>
+      </div>
+    )
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="w-full max-w-2xl rounded-xl bg-white shadow-2xl max-h-[85vh] flex flex-col" data-testid="physio-consultation-detail-modal">
+        <div className="flex items-center justify-between border-b p-5">
+          <div>
+            <h3 className="text-base font-semibold text-slate-800">{lead.name}</h3>
+            <p className="text-[10px] text-slate-400">{lead.phone}{lead.email ? ` · ${lead.email}` : ""}</p>
+          </div>
+          <button type="button" onClick={onClose} className="p-1 rounded hover:bg-slate-100"><X className="h-5 w-5 text-slate-400" /></button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5 space-y-5">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+            <Row label="Alternative Phone" value={lead.alternative_phone} />
+            <Row label="Address" value={lead.address} />
+            <Row label="City / State" value={[lead.city, lead.state].filter(Boolean).join(", ")} />
+            <Row label="Age" value={lead.age} />
+            <Row label="Gender" value={lead.gender} />
+            <Row label="Occupation" value={lead.occupation} />
+            <Row label="Condition" value={lead.condition} />
+            <Row label="Months of Pain" value={lead.months_of_pain} />
+            <Row label="Appointment" value={lead.appointment_date ? `${lead.appointment_date}${lead.appointment_time ? ` · ${lead.appointment_time}` : ""}` : null} />
+          </div>
+
+          {lead.diagnosis && (
+            <div className="rounded-lg border border-slate-200 p-3">
+              <p className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-slate-400">Pre-Sales Diagnosis</p>
+              <p className="text-xs text-slate-700 whitespace-pre-wrap">{lead.diagnosis}</p>
+            </div>
+          )}
+          {lead.physio_diagnosis_report && (
+            <div className="rounded-lg border border-sky-200 bg-sky-50 p-3">
+              <p className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-sky-500">Diagnosis Report</p>
+              <p className="text-xs text-sky-900 whitespace-pre-wrap">{lead.physio_diagnosis_report}</p>
+            </div>
+          )}
+          {lead.treatment_summary && (
+            <div className="rounded-lg border border-violet-200 bg-violet-50 p-3">
+              <p className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-violet-500">Treatment Summary</p>
+              <p className="text-xs text-violet-900 whitespace-pre-wrap">{lead.treatment_summary}</p>
+            </div>
+          )}
+
+          <div>
+            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-600">Move to Stage</p>
+            <button
+              type="button"
+              onClick={markComplete}
+              disabled={isComplete || submitting}
+              className={`flex items-center gap-1.5 rounded-lg border px-4 py-2 text-xs font-semibold transition ${
+                isComplete
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                  : "border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100"
+              }`}
+              data-testid="physio-consultation-complete"
+            >
+              <Check className="h-3.5 w-3.5" /> {isComplete ? "Complete" : submitting ? "Marking..." : "Mark Complete"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TodayTab() {
-  const [data, setData] = useState({ sessions: [], date: "" });
+  const [data, setData] = useState({ sessions: [], new_assigned: [], date: "" });
   const [loading, setLoading] = useState(false);
   const [completeModal, setCompleteModal] = useState(null);
 
@@ -146,6 +257,30 @@ function TodayTab() {
 
   return (
     <div data-testid="physio-today-tab">
+      {(data.new_assigned || []).length > 0 && (
+        <div className="mb-6">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-slate-700">Newly Assigned Today</h3>
+            <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-[10px] font-semibold text-amber-700">{data.new_assigned.length} new</span>
+          </div>
+          <div className="space-y-2">
+            {data.new_assigned.map((l) => (
+              <div key={l.id} className="rounded-xl border border-amber-200 bg-amber-50/50 p-4" data-testid={`today-new-assigned-${l.id}`}>
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-semibold text-slate-800">{l.name}</p>
+                  <span className="text-[10px] text-slate-400">{l.phone}</span>
+                </div>
+                <div className="mt-1 flex flex-wrap gap-x-3 text-[10px] text-slate-500">
+                  {l.age && <span>Age: {l.age}</span>}
+                  {l.gender && <span>{l.gender}</span>}
+                  {l.condition && <span>Condition: {l.condition}</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-sm font-semibold text-slate-700">
           Today's Sessions — {new Date().toLocaleDateString("en-IN", { weekday: "long", month: "long", day: "numeric" })}
@@ -326,6 +461,7 @@ function PatientsTab() {
   const [patients, setPatients] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState(null);
+  const [historyTab, setHistoryTab] = useState("ongoing");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -338,16 +474,37 @@ function PatientsTab() {
 
   useEffect(() => { load(); }, [load]);
 
+  const isCompleted = (p) => p.total_sessions > 0 && p.remaining_sessions === 0;
+  const ongoingCount = patients.filter((p) => !isCompleted(p)).length;
+  const completedCount = patients.filter(isCompleted).length;
+  const visiblePatients = patients.filter((p) => (historyTab === "completed" ? isCompleted(p) : !isCompleted(p)));
+
   return (
     <div data-testid="physio-patients-tab">
-      {patients.length === 0 && !loading ? (
+      <div className="mb-4 flex gap-1 rounded-lg border border-slate-200 bg-white p-1 w-fit">
+        {[{ key: "ongoing", label: "Ongoing", count: ongoingCount }, { key: "completed", label: "Completed", count: completedCount }].map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            onClick={() => setHistoryTab(t.key)}
+            className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
+              historyTab === t.key ? "bg-sky-100 text-sky-700" : "text-slate-500 hover:bg-slate-50"
+            }`}
+            data-testid={`physio-history-subtab-${t.key}`}
+          >
+            {t.label} <span className="text-[10px] text-slate-400">({t.count})</span>
+          </button>
+        ))}
+      </div>
+
+      {visiblePatients.length === 0 && !loading ? (
         <div className="text-center py-16">
           <Users className="h-10 w-10 text-slate-200 mx-auto mb-3" />
-          <p className="text-sm text-slate-400">No patients assigned yet</p>
+          <p className="text-sm text-slate-400">{historyTab === "completed" ? "No completed patients yet" : "No patients assigned yet"}</p>
         </div>
       ) : (
         <div className="space-y-3">
-          {patients.map((p) => (
+          {visiblePatients.map((p) => (
             <div key={p.lead_id} className="rounded-xl border border-slate-200 bg-white p-4 hover:shadow-sm transition-shadow" data-testid={`physio-patient-${p.lead_id}`}>
               <div className="flex items-center gap-4">
                 <div className="flex h-10 w-10 items-center justify-center rounded-full bg-sky-50 text-sm font-bold text-sky-700">

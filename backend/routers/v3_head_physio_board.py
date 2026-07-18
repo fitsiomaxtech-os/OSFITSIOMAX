@@ -273,6 +273,7 @@ async def hp_assign_consultation_physio(
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {
         "assigned_physio_id": physio["id"],
         "assigned_physio_name": physio["full_name"],
+        "physio_assigned_at": now_iso(),
         "head_consultation_stage": "Physio Assign",
         "consultation_stage": "Physio Assign",  # mirrored onto Branch's view-only stage
         "updated_at": now_iso(),

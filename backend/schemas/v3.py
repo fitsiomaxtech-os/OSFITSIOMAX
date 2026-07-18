@@ -202,6 +202,8 @@ class V3LeadOut(BaseModel):
     consultation_payment_mode: Optional[str] = None  # "cash" | "upi" | "card" | ...
     assigned_physio_id: Optional[str] = None
     assigned_physio_name: Optional[str] = None
+    physio_assigned_at: Optional[str] = None
+    physio_stage: Optional[str] = None  # None = "Assigned" (active), "Complete" = physio's consultation review finished
     location: Optional[str] = None
     expected_consultation_date: Optional[str] = None
     months_of_pain: Optional[int] = None

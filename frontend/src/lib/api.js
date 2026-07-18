@@ -174,6 +174,7 @@ export const hpGetAssessments = async (leadId) => (await api.get(`/head-physio/w
 export const hpWeeklyReview = async (leadId, week, payload) => (await api.post(`/head-physio/weekly-review/${leadId}/${week}`, payload)).data;
 
 export const physioConsultations = async () => (await api.get("/physio/consultations")).data;
+export const physioCompleteConsultation = async (leadId) => (await api.post(`/physio/leads/${leadId}/complete-consultation`)).data;
 export const physioToday = async () => (await api.get("/physio/today")).data;
 export const physioCalendar = async (month, year) => (await api.get(`/physio/calendar?month=${month}&year=${year}`)).data;
 export const physioPatients = async () => (await api.get("/physio/patients")).data;

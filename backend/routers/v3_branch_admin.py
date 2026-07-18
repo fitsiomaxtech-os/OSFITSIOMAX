@@ -143,6 +143,7 @@ async def v3_assign_physio(lead_id: str, payload: V3AssignPhysioInput, user: V3U
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {
         "assigned_physio_id": payload.physio_id,
         "assigned_physio_name": physio["full_name"],
+        "physio_assigned_at": now_iso(),
         "branch_stage": "Appointment Date & Time",
         "consultation_stage": consultation_stage,
         "updated_at": now_iso(),
@@ -187,6 +188,7 @@ async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointm
         "appointment_datetime": f"{payload.appointment_date}T{payload.appointment_time}:00",
         "assigned_physio_id": payload.physio_id,
         "assigned_physio_name": physio["full_name"],
+        "physio_assigned_at": now_iso(),
         "branch_stage": payload.final_stage,
         "updated_at": now_iso(),
     }

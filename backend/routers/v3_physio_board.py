@@ -81,7 +81,7 @@ async def physio_today(user: V3UserOut = Depends(v3_require_roles("physio", "sup
     doctor = await _resolve_doctor(user)
 
     if not doctor:
-        return {"sessions": [], "date": datetime.now(timezone.utc).date().isoformat()}
+        return {"sessions": [], "new_assigned": [], "date": datetime.now(timezone.utc).date().isoformat()}
 
     today = datetime.now(timezone.utc).date().isoformat()
     sessions = await v3_col("sessions").find(
@@ -89,7 +89,18 @@ async def physio_today(user: V3UserOut = Depends(v3_require_roles("physio", "sup
         {"_id": 0},
     ).sort("slot_time", 1).to_list(100)
 
-    return {"sessions": sessions, "date": today, "doctor_id": doctor["id"], "doctor_name": doctor["full_name"]}
+    new_assigned = await v3_col("leads").find(
+        {"assigned_physio_id": doctor["id"], "physio_assigned_at": {"$regex": f"^{today}"}},
+        {"_id": 0},
+    ).sort("physio_assigned_at", -1).to_list(200)
+
+    return {
+        "sessions": sessions,
+        "new_assigned": [V3LeadOut(**ld).model_dump() for ld in new_assigned],
+        "date": today,
+        "doctor_id": doctor["id"],
+        "doctor_name": doctor["full_name"],
+    }
 
 
 @router.get("/physio/calendar")
@@ -176,6 +187,36 @@ async def physio_consultations(user: V3UserOut = Depends(v3_require_roles("physi
         "doctor_id": doctor["id"],
         "doctor_name": doctor["full_name"],
     }
+
+
+@router.post("/physio/leads/{lead_id}/complete-consultation")
+async def physio_complete_consultation(lead_id: str, user: V3UserOut = Depends(v3_require_roles("physio", "super_admin"))):
+    """Physio marks their initial consultation review of an assigned lead as finished."""
+    doctor = await _resolve_doctor(user)
+    if not doctor:
+        raise HTTPException(status_code=404, detail="No physio profile found for this user")
+
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    if lead.get("assigned_physio_id") != doctor["id"]:
+        raise HTTPException(status_code=403, detail="This lead is not assigned to you")
+
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": {
+        "physio_stage": "Complete",
+        "updated_at": now_iso(),
+    }})
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": lead_id,
+        "action": "physio_consultation_completed",
+        "details": f"Consultation marked complete by {user.full_name}",
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": now_iso(),
+    })
+    updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    return V3LeadOut(**updated).model_dump()
 
 
 @router.get("/physio/sessions/{lead_id}")
