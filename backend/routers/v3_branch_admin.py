@@ -288,7 +288,7 @@ async def v3_move_consultation_stage(lead_id: str, payload: V3ConsultationStageI
     stage_names = await _consultation_stage_names()
     if payload.consultation_stage not in stage_names:
         raise HTTPException(status_code=400, detail=f"Invalid consultation_stage. Allowed: {stage_names}")
-    if payload.consultation_stage in ("Consultation Visit", "Consultation Pack", "Physio Assign") and user.role == "branch_admin":
+    if payload.consultation_stage in ("Consultation Visit", "Physio Assign") and user.role == "branch_admin":
         raise HTTPException(
             status_code=403,
             detail="This stage is set by the Head Physio's own consultation pipeline — Branch Admin can only view it here.",

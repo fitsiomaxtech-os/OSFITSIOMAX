@@ -295,11 +295,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
     const mode = selectedLead.appointment_mode || "offline";
     const auto = treatmentPackageItems.length === 1 ? treatmentPackageItems[0] : null;
     const baseSessions = auto ? (mode === "online" ? auto.sessions_online : auto.sessions_offline) : "";
+    const basePrice = auto ? (mode === "online" ? auto.price_online : auto.price_offline) : "";
     setTreatmentFeeDraft({
       item_id: auto?.id || "",
       mode,
       sessions: baseSessions ? String(baseSessions) : "",
-      paid_amount: "",
+      paid_amount: basePrice ? String(basePrice) : "",
       payment_mode: "cash",
     });
   };
@@ -817,8 +818,15 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                       value={treatmentFeeDraft.item_id}
                       onChange={(e) => {
                         const item = treatmentPackageItems.find((i) => i.id === e.target.value);
-                        const base = item ? (treatmentFeeDraft.mode === "online" ? item.sessions_online : item.sessions_offline) : "";
-                        setTreatmentFeeDraft({ ...treatmentFeeDraft, item_id: e.target.value, sessions: base ? String(base) : "" });
+                        const isOnline = treatmentFeeDraft.mode === "online";
+                        const base = item ? (isOnline ? item.sessions_online : item.sessions_offline) : "";
+                        const basePrice = item ? (isOnline ? item.price_online : item.price_offline) : "";
+                        setTreatmentFeeDraft({
+                          ...treatmentFeeDraft,
+                          item_id: e.target.value,
+                          sessions: base ? String(base) : "",
+                          paid_amount: basePrice ? String(basePrice) : "",
+                        });
                       }}
                       className="h-9 w-full rounded-md border border-slate-200 px-2 text-xs"
                       data-testid="cons-treatment-fee-item-select"

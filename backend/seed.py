@@ -155,13 +155,25 @@ async def migrate_consultation_stages() -> None:
         if docs:
             await v3_col("pipeline_stages").insert_many(docs)
 
+    # Retire Consultation Pack as a separate stage on Branch's own consultation pipeline —
+    # the flow now connects directly Consultation Visit -> Consultation Fee. Backfill any
+    # lead still sitting on it first (to Consultation Fee, the natural next stage), so
+    # nothing goes orphaned once the stage doc is removed. Unconditional/safe to re-run
+    # (not gated behind an existence check beyond the deletion itself, so a lead that ends
+    # up on this dead value later — e.g. via a stale client — still gets corrected).
+    await v3_col("leads").update_many(
+        {"consultation_stage": "Consultation Pack"},
+        {"$set": {"consultation_stage": "Consultation Fee", "updated_at": now_iso()}},
+    )
+    await v3_col("pipeline_stages").delete_many({"type": "consultation", "name": "Consultation Pack"})
+
     # Additive: make sure newer consultation stages (added after the initial seed) exist too,
     # without disturbing any Super Admin edits (color/order/rename) made to the existing ones.
     existing_names = set(await v3_col("pipeline_stages").find(
         {"type": "consultation"}, {"_id": 0, "name": 1}
     ).distinct("name"))
     new_stage_specs = [(name, color) for name, color in
-                        [("Consultation Pack", "#0ea5e9"), ("Physio Assign", "#a855f7")]
+                        [("Physio Assign", "#a855f7")]
                         if name not in existing_names]
     if new_stage_specs:
         anchor = await v3_col("pipeline_stages").find_one(

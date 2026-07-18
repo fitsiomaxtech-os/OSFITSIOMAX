@@ -199,7 +199,7 @@ class V3LeadOut(BaseModel):
     package_mode: Optional[str] = None
     # The Session package (FITSIO STORE > Sessions) chosen separately at the Treatment
     # Fee stage — distinct from package_* above, which is the Consultation package Head
-    # Physio chooses at Consultation Pack.
+    # Physio chooses inline during Consultation Visit.
     session_package_id: Optional[str] = None
     session_package_name: Optional[str] = None
     session_package_price: Optional[float] = None
