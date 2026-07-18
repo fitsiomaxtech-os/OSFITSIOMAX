@@ -421,50 +421,53 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
               </div>
             )}
 
-            {/* Head Physio's own diagnosis report — bigger box, lock/edit */}
-            {(isConsultant || selectedLead.physio_diagnosis_report) && (
-              <LockableTextBox
-                icon={Stethoscope}
-                label="Diagnosis Report"
-                accent="sky"
-                value={physioDiagDraft}
-                onChange={setPhysioDiagDraft}
-                editing={physioDiagEditing}
-                locked={!!selectedLead.physio_diagnosis_locked}
-                savedText={selectedLead.physio_diagnosis_report}
-                saving={savingPhysioDiag}
-                canEdit={isConsultant}
-                onSave={() => savePhysioDiag(true)}
-                onSaveDraft={() => savePhysioDiag(false)}
-                onEdit={() => setPhysioDiagEditing(true)}
-                onUnlock={unlockPhysioDiag}
-                rows={5}
-                placeholder="Write the full diagnosis report..."
-                testPrefix="cons-physio-diagnosis"
-              />
-            )}
+            {/* Diagnosis Report + Treatment Summary — side by side */}
+            {((isConsultant || selectedLead.physio_diagnosis_report) || (isConsultant || selectedLead.treatment_summary)) && (
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                {(isConsultant || selectedLead.physio_diagnosis_report) && (
+                  <LockableTextBox
+                    icon={Stethoscope}
+                    label="Diagnosis Report"
+                    accent="sky"
+                    value={physioDiagDraft}
+                    onChange={setPhysioDiagDraft}
+                    editing={physioDiagEditing}
+                    locked={!!selectedLead.physio_diagnosis_locked}
+                    savedText={selectedLead.physio_diagnosis_report}
+                    saving={savingPhysioDiag}
+                    canEdit={isConsultant}
+                    onSave={() => savePhysioDiag(true)}
+                    onSaveDraft={() => savePhysioDiag(false)}
+                    onEdit={() => setPhysioDiagEditing(true)}
+                    onUnlock={unlockPhysioDiag}
+                    rows={5}
+                    placeholder="Write the full diagnosis report..."
+                    testPrefix="cons-physio-diagnosis"
+                  />
+                )}
 
-            {/* Treatment Summary — what treatment to give the patient */}
-            {(isConsultant || selectedLead.treatment_summary) && (
-              <LockableTextBox
-                icon={ClipboardList}
-                label="Treatment Summary"
-                accent="indigo"
-                value={treatmentDraft}
-                onChange={setTreatmentDraft}
-                editing={treatmentEditing}
-                locked={!!selectedLead.treatment_summary_locked}
-                savedText={selectedLead.treatment_summary}
-                saving={savingTreatment}
-                canEdit={isConsultant}
-                onSave={() => saveTreatment(true)}
-                onSaveDraft={() => saveTreatment(false)}
-                onEdit={() => setTreatmentEditing(true)}
-                onUnlock={unlockTreatment}
-                rows={4}
-                placeholder="What treatment should be given to the patient..."
-                testPrefix="cons-treatment-summary"
-              />
+                {(isConsultant || selectedLead.treatment_summary) && (
+                  <LockableTextBox
+                    icon={ClipboardList}
+                    label="Treatment Summary"
+                    accent="indigo"
+                    value={treatmentDraft}
+                    onChange={setTreatmentDraft}
+                    editing={treatmentEditing}
+                    locked={!!selectedLead.treatment_summary_locked}
+                    savedText={selectedLead.treatment_summary}
+                    saving={savingTreatment}
+                    canEdit={isConsultant}
+                    onSave={() => saveTreatment(true)}
+                    onSaveDraft={() => saveTreatment(false)}
+                    onEdit={() => setTreatmentEditing(true)}
+                    onUnlock={unlockTreatment}
+                    rows={4}
+                    placeholder="What treatment should be given to the patient..."
+                    testPrefix="cons-treatment-summary"
+                  />
+                )}
+              </div>
             )}
 
             {/* Consultation Package — an inline part of the popup, not a stage move.
