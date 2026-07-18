@@ -149,7 +149,7 @@ async def migrate_consultation_stages() -> None:
                 "color": CONSULTATION_COLORS[idx % len(CONSULTATION_COLORS)],
                 "type": "consultation",
                 "order": idx,
-                "is_final": name in ("Treatment Fee", "Cancel"),
+                "is_final": name in ("Physio Assign", "Cancel"),
                 "created_at": now_iso(),
             })
         if docs:
@@ -188,6 +188,27 @@ async def migrate_consultation_stages() -> None:
             "created_at": now_iso(),
         } for idx, (name, color) in enumerate(new_stage_specs)]
         await v3_col("pipeline_stages").insert_many(docs)
+
+    # Reorder: Physio Assign now happens after fee collection (Consultation Fee, then
+    # Treatment Fee), not before — a physio shouldn't be assigned to deliver sessions
+    # until payment is settled. Only re-order if it's still positioned before Treatment
+    # Fee, so a Super Admin who deliberately moved it elsewhere isn't fought on restart.
+    physio_assign = await v3_col("pipeline_stages").find_one(
+        {"type": "consultation", "name": "Physio Assign"}, {"_id": 0, "order": 1}
+    )
+    treatment_fee = await v3_col("pipeline_stages").find_one(
+        {"type": "consultation", "name": "Treatment Fee"}, {"_id": 0, "order": 1}
+    )
+    if physio_assign and treatment_fee and physio_assign["order"] < treatment_fee["order"]:
+        old_order, new_order = physio_assign["order"], treatment_fee["order"]
+        await v3_col("pipeline_stages").update_many(
+            {"type": "consultation", "order": {"$gt": old_order, "$lte": new_order}},
+            {"$inc": {"order": -1}},
+        )
+        await v3_col("pipeline_stages").update_one(
+            {"type": "consultation", "name": "Physio Assign"},
+            {"$set": {"order": new_order, "is_final": True}},
+        )
 
     # Backfill orphaned leads: any lead with a consultation_stage set that no longer matches a
     # currently valid stage name (e.g. still stuck on a legacy/dead literal, or Super Admin
