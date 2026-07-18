@@ -169,29 +169,37 @@ async def sell_store_item(lead_id: str, payload: V3SellStoreItemInput, user: V3U
 
 @router.post("/leads/{lead_id}/assign-package", response_model=dict)
 async def assign_package(lead_id: str, payload: V3AssignPackageInput, user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin"))):
-    """Consultant assigns a session package to the patient. The item's preset
-    session count (e.g. 7 for a 1-week package) is the default, but the
-    consultant can override it (e.g. 14 for 2 weeks) — price scales
-    proportionally from the item's per-session rate. No payment is collected
-    here — branch admin collects it separately via collect-package-payment."""
+    """Consultant assigns a package to the patient at the Consultation Pack stage.
+    Session items (e.g. 7 sessions for 1 week) default to their preset count, which
+    the consultant can override — price scales proportionally from the per-session
+    rate. Consultation items (a single-visit item, e.g. "Initial Consultation — 30
+    min") carry no session count, so they're assigned as-is with a flat price and
+    package_sessions left unset. No payment is collected here — branch admin
+    collects it separately via collect-package-payment."""
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     item = await v3_col("store_items").find_one({"id": payload.item_id}, {"_id": 0})
     if not item:
         raise HTTPException(status_code=404, detail="Store item not found")
-    if item.get("item_type") != "session":
-        raise HTTPException(status_code=400, detail="Only session items can be assigned")
+    if item.get("item_type") not in ("session", "consultation"):
+        raise HTTPException(status_code=400, detail="Only session or consultation items can be assigned")
 
     base_price = item.get("price_online") if payload.mode == "online" else item.get("price_offline")
-    base_sessions = item.get("sessions_online") if payload.mode == "online" else item.get("sessions_offline")
 
-    sessions = payload.sessions_override if payload.sessions_override and payload.sessions_override > 0 else base_sessions
-    if base_sessions and base_price is not None:
-        per_session_rate = base_price / base_sessions
-        price = round(per_session_rate * sessions, 2)
+    if item.get("item_type") == "session":
+        base_sessions = item.get("sessions_online") if payload.mode == "online" else item.get("sessions_offline")
+        sessions = payload.sessions_override if payload.sessions_override and payload.sessions_override > 0 else base_sessions
+        if base_sessions and base_price is not None:
+            per_session_rate = base_price / base_sessions
+            price = round(per_session_rate * sessions, 2)
+        else:
+            price = base_price
+        detail_suffix = f" · {sessions} sessions"
     else:
+        sessions = None
         price = base_price
+        detail_suffix = f" · {item.get('duration_minutes', '?')} min"
 
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {
         "package_id": item["id"],
@@ -209,7 +217,7 @@ async def assign_package(lead_id: str, payload: V3AssignPackageInput, user: V3Us
         "id": str(uuid.uuid4()),
         "lead_id": lead_id,
         "action": "package_assigned",
-        "details": f"Assigned session package '{item['name']}' ({payload.mode}) · {sessions} sessions · Rs.{price} — awaiting payment collection",
+        "details": f"Assigned package '{item['name']}' ({payload.mode}){detail_suffix} · Rs.{price} — awaiting payment collection",
         "created_by": user.full_name,
         "created_by_role": user.role,
         "created_at": _now(),

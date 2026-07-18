@@ -46,7 +46,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
 
   // Session package assignment popup (Head Physio only)
   const [showSessionModal, setShowSessionModal] = useState(false);
-  const [sessionDraft, setSessionDraft] = useState({ item_id: "", mode: "offline", sessions: "" });
+  const [sessionDraft, setSessionDraft] = useState({ item_id: "", mode: "offline" });
 
   // Physio Assign popup (Head Physio only) — pick an available Jr. Physio to deliver the package
   const [showPhysioModal, setShowPhysioModal] = useState(false);
@@ -126,7 +126,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
     setRescheduleDraft(null);
   }, [selectedLead?.id]);
 
-  const sessionItems = storeItems.filter((i) => i.item_type === "session");
+  const sessionItems = storeItems.filter((i) => i.item_type === "consultation");
 
   const moveStage = async (lead, next) => {
     if (next === lead.consultation_stage) return;
@@ -207,25 +207,21 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
     }
   };
 
-  // ---- Session package assignment (Head Physio) ----
+  // ---- Consultation package assignment (Head Physio) ----
   const openSessionModal = () => {
     const mode = selectedLead.appointment_mode || "offline";
     const auto = sessionItems.length === 1 ? sessionItems[0] : null;
-    const baseSessions = auto ? (mode === "online" ? auto.sessions_online : auto.sessions_offline) : "";
-    setSessionDraft({ item_id: auto?.id || "", mode, sessions: baseSessions ? String(baseSessions) : "" });
+    setSessionDraft({ item_id: auto?.id || "", mode });
     setShowSessionModal(true);
   };
 
   const submitSession = async () => {
     if (!sessionDraft.item_id) { toast.error("Choose a consultation package"); return; }
-    const sessionsNum = parseInt(sessionDraft.sessions, 10);
-    if (!sessionsNum || sessionsNum < 1) { toast.error("Enter a valid session count"); return; }
     setSelling(true);
     try {
       const res = await assignPackage(selectedLead.id, {
         item_id: sessionDraft.item_id,
         mode: sessionDraft.mode,
-        sessions_override: sessionsNum,
       });
       toast.success("Consultation package assigned to patient");
       setShowSessionModal(false);
@@ -611,7 +607,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
               </div>
             )}
 
-            {/* Session package assignment popup (Head Physio) */}
+            {/* Consultation package assignment popup (Head Physio) */}
             {showSessionModal && (
               <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" data-testid="cons-session-modal">
                 <div className="w-full max-w-sm space-y-3 rounded-xl bg-white p-4 shadow-2xl">
@@ -625,51 +621,15 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
 
                   <select
                     value={sessionDraft.item_id}
-                    onChange={(e) => {
-                      const item = sessionItems.find((i) => i.id === e.target.value);
-                      const base = item ? (sessionDraft.mode === "online" ? item.sessions_online : item.sessions_offline) : "";
-                      setSessionDraft({ ...sessionDraft, item_id: e.target.value, sessions: base ? String(base) : "" });
-                    }}
+                    onChange={(e) => setSessionDraft({ ...sessionDraft, item_id: e.target.value })}
                     className="h-9 w-full rounded-md border border-slate-200 px-2 text-xs"
                     data-testid="cons-session-item-select"
                   >
                     <option value="">-- choose a consultation package --</option>
-                    {sessionItems.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+                    {sessionItems.map((i) => (
+                      <option key={i.id} value={i.id}>{i.name} — {i.duration_minutes ? `${i.duration_minutes} min` : "duration n/a"}</option>
+                    ))}
                   </select>
-
-                  {(() => {
-                    const item = sessionItems.find((i) => i.id === sessionDraft.item_id);
-                    if (!item) return null;
-                    const baseSessions = sessionDraft.mode === "online" ? item.sessions_online : item.sessions_offline;
-                    return (
-                      <>
-                        <div className="flex gap-1.5">
-                          {[1, 2].map((weeks) => (
-                            <button
-                              key={weeks}
-                              type="button"
-                              onClick={() => setSessionDraft({ ...sessionDraft, sessions: String((baseSessions || 0) * weeks) })}
-                              className="flex-1 rounded-md border border-violet-200 bg-violet-50 py-1.5 text-[11px] font-semibold text-violet-700 hover:bg-violet-100"
-                              data-testid={`cons-session-week-${weeks}`}
-                            >
-                              {weeks} week{weeks > 1 ? "s" : ""} · {(baseSessions || 0) * weeks} sessions
-                            </button>
-                          ))}
-                        </div>
-                        <div>
-                          <label className="mb-1 block text-[11px] font-medium text-slate-500">Sessions</label>
-                          <Input
-                            type="number"
-                            min="1"
-                            value={sessionDraft.sessions}
-                            onChange={(e) => setSessionDraft({ ...sessionDraft, sessions: e.target.value })}
-                            className="h-9"
-                            data-testid="cons-session-count-input"
-                          />
-                        </div>
-                      </>
-                    );
-                  })()}
 
                   <Button
                     className="w-full bg-violet-600 hover:bg-violet-700 text-xs"
