@@ -301,22 +301,78 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
       sessions: baseSessions ? String(baseSessions) : "",
       paid_amount: totalPrice ? String(totalPrice) : "",
       payment_mode: "cash",
+      card_number: "",
+      card_holder_name: "",
+      bank_name: "",
+      cheque_number: "",
+      emi_monthly_date: "",
+      emi_tenure_months: "",
+      partial_first_amount: "",
+      partial_second_amount: "",
+      partial_second_due_date: "",
     });
   };
+
+  // EMI/Partial derived figures — computed from the Amount field, never stored directly
+  // in state, so they can't drift out of sync with it.
+  const treatmentFeeTotal = parseFloat(treatmentFeeDraft?.paid_amount) || 0;
+  const emiFirstPayment = Math.round(treatmentFeeTotal * 0.1 * 100) / 100;
+  const emiBalance = Math.round((treatmentFeeTotal - emiFirstPayment) * 100) / 100;
+  const emiTenureNum = parseInt(treatmentFeeDraft?.emi_tenure_months, 10) || 0;
+  const emiMonthlyAmount = emiTenureNum > 0 ? Math.round((emiBalance / emiTenureNum) * 100) / 100 : 0;
+  const partialFirstNum = parseFloat(treatmentFeeDraft?.partial_first_amount) || 0;
+  const partialSecondNum = parseFloat(treatmentFeeDraft?.partial_second_amount) || 0;
+  const partialMismatch = Math.abs(partialFirstNum + partialSecondNum - treatmentFeeTotal) > 0.01;
 
   const submitTreatmentFee = async () => {
     if (!treatmentFeeDraft.item_id) { toast.error("Choose a session package"); return; }
     const amount = parseFloat(treatmentFeeDraft.paid_amount);
     if (!amount || amount <= 0) { toast.error("Enter a valid amount"); return; }
+    const mode = treatmentFeeDraft.payment_mode;
+    const payload = {
+      item_id: treatmentFeeDraft.item_id,
+      mode: treatmentFeeDraft.mode,
+      sessions_override: treatmentFeeDraft.sessions ? parseInt(treatmentFeeDraft.sessions, 10) : undefined,
+      paid_amount: amount,
+      payment_mode: mode,
+    };
+    if (mode === "card") {
+      if (!treatmentFeeDraft.card_number.trim() || !treatmentFeeDraft.card_holder_name.trim()) {
+        toast.error("Card Number and Card Holder Name are required");
+        return;
+      }
+      payload.card_number = treatmentFeeDraft.card_number.trim();
+      payload.card_holder_name = treatmentFeeDraft.card_holder_name.trim();
+    } else if (mode === "cheque") {
+      if (!treatmentFeeDraft.bank_name.trim() || !treatmentFeeDraft.cheque_number.trim()) {
+        toast.error("Bank Name and Cheque Number are required");
+        return;
+      }
+      payload.bank_name = treatmentFeeDraft.bank_name.trim();
+      payload.cheque_number = treatmentFeeDraft.cheque_number.trim();
+    } else if (mode === "emi") {
+      if (!treatmentFeeDraft.emi_monthly_date || !treatmentFeeDraft.emi_tenure_months) {
+        toast.error("Monthly Collection Date and Tenure are required");
+        return;
+      }
+      payload.emi_monthly_date = parseInt(treatmentFeeDraft.emi_monthly_date, 10);
+      payload.emi_tenure_months = parseInt(treatmentFeeDraft.emi_tenure_months, 10);
+    } else if (mode === "partial") {
+      if (!treatmentFeeDraft.partial_first_amount || !treatmentFeeDraft.partial_second_amount || !treatmentFeeDraft.partial_second_due_date) {
+        toast.error("First Payment, Second Payment and Second Payment Due Date are required");
+        return;
+      }
+      if (partialMismatch) {
+        toast.error("First Payment + Second Payment must equal the Total Amount");
+        return;
+      }
+      payload.partial_first_amount = partialFirstNum;
+      payload.partial_second_amount = partialSecondNum;
+      payload.partial_second_due_date = treatmentFeeDraft.partial_second_due_date;
+    }
     setCollectingTreatmentFee(true);
     try {
-      const res = await collectTreatmentFee(selectedLead.id, {
-        item_id: treatmentFeeDraft.item_id,
-        mode: treatmentFeeDraft.mode,
-        sessions_override: treatmentFeeDraft.sessions ? parseInt(treatmentFeeDraft.sessions, 10) : undefined,
-        paid_amount: amount,
-        payment_mode: treatmentFeeDraft.payment_mode,
-      });
+      const res = await collectTreatmentFee(selectedLead.id, payload);
       toast.success("Treatment fee collected");
       setTreatmentFeeDraft(null);
       applyUpdatedLead(res.lead);
@@ -874,10 +930,144 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                       ))}
                     </select>
                   </div>
+
+                  {treatmentFeeDraft.payment_mode === "card" && (
+                    <>
+                      <div>
+                        <label className="mb-1 block text-[11px] font-medium text-slate-500">Card Number</label>
+                        <Input
+                          value={treatmentFeeDraft.card_number}
+                          onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, card_number: e.target.value })}
+                          className="h-9"
+                          data-testid="cons-treatment-fee-card-number"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-[11px] font-medium text-slate-500">Card Holder Name</label>
+                        <Input
+                          value={treatmentFeeDraft.card_holder_name}
+                          onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, card_holder_name: e.target.value })}
+                          className="h-9"
+                          data-testid="cons-treatment-fee-card-holder"
+                        />
+                      </div>
+                    </>
+                  )}
+
+                  {treatmentFeeDraft.payment_mode === "cheque" && (
+                    <>
+                      <div>
+                        <label className="mb-1 block text-[11px] font-medium text-slate-500">Bank Name</label>
+                        <Input
+                          value={treatmentFeeDraft.bank_name}
+                          onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, bank_name: e.target.value })}
+                          className="h-9"
+                          data-testid="cons-treatment-fee-bank-name"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-[11px] font-medium text-slate-500">Cheque Number</label>
+                        <Input
+                          value={treatmentFeeDraft.cheque_number}
+                          onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, cheque_number: e.target.value })}
+                          className="h-9"
+                          data-testid="cons-treatment-fee-cheque-number"
+                        />
+                      </div>
+                    </>
+                  )}
+
+                  {treatmentFeeDraft.payment_mode === "emi" && (
+                    <>
+                      <div className="rounded-md bg-slate-50 p-2 text-[11px] text-slate-600" data-testid="cons-treatment-fee-emi-first-payment">
+                        First (Head) Payment — 10% of ₹{treatmentFeeTotal || 0}: <span className="font-bold text-slate-800">₹{emiFirstPayment}</span>
+                        <br />Balance to split: <span className="font-bold text-slate-800">₹{emiBalance}</span>
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-[11px] font-medium text-slate-500">Monthly Collection Date (day of month)</label>
+                        <Input
+                          type="number"
+                          min="1"
+                          max="31"
+                          value={treatmentFeeDraft.emi_monthly_date}
+                          onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, emi_monthly_date: e.target.value })}
+                          className="h-9"
+                          data-testid="cons-treatment-fee-emi-date"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-[11px] font-medium text-slate-500">Tenure (No. of months)</label>
+                        <Input
+                          type="number"
+                          min="1"
+                          value={treatmentFeeDraft.emi_tenure_months}
+                          onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, emi_tenure_months: e.target.value })}
+                          className="h-9"
+                          data-testid="cons-treatment-fee-emi-tenure"
+                        />
+                      </div>
+                      {emiTenureNum > 0 && (
+                        <div className="rounded-md bg-sky-50 p-2 text-[11px] text-sky-700" data-testid="cons-treatment-fee-emi-monthly-amount">
+                          Monthly EMI Amount: <span className="font-bold">₹{emiMonthlyAmount}</span>
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {treatmentFeeDraft.payment_mode === "partial" && (
+                    <>
+                      <div>
+                        <label className="mb-1 block text-[11px] font-medium text-slate-500">First Payment Amount</label>
+                        <Input
+                          type="number"
+                          min="0"
+                          value={treatmentFeeDraft.partial_first_amount}
+                          onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, partial_first_amount: e.target.value })}
+                          className="h-9"
+                          data-testid="cons-treatment-fee-partial-first"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-[11px] font-medium text-slate-500">Second Payment Amount</label>
+                        <Input
+                          type="number"
+                          min="0"
+                          value={treatmentFeeDraft.partial_second_amount}
+                          onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, partial_second_amount: e.target.value })}
+                          className="h-9"
+                          data-testid="cons-treatment-fee-partial-second"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-[11px] font-medium text-slate-500">Second Payment Due Date</label>
+                        <Input
+                          type="date"
+                          value={treatmentFeeDraft.partial_second_due_date}
+                          onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, partial_second_due_date: e.target.value })}
+                          className="h-9"
+                          data-testid="cons-treatment-fee-partial-due-date"
+                        />
+                      </div>
+                      {(partialFirstNum > 0 || partialSecondNum > 0) && partialMismatch && (
+                        <p className="text-[11px] text-rose-600" data-testid="cons-treatment-fee-partial-mismatch">
+                          First + Second (₹{Math.round((partialFirstNum + partialSecondNum) * 100) / 100}) must equal the Total Amount (₹{treatmentFeeTotal})
+                        </p>
+                      )}
+                    </>
+                  )}
+
                   <Button
                     className="w-full bg-sky-600 hover:bg-sky-700 text-xs"
                     onClick={submitTreatmentFee}
-                    disabled={collectingTreatmentFee || !treatmentFeeDraft.paid_amount || !treatmentFeeDraft.item_id}
+                    disabled={
+                      collectingTreatmentFee ||
+                      !treatmentFeeDraft.paid_amount ||
+                      !treatmentFeeDraft.item_id ||
+                      (treatmentFeeDraft.payment_mode === "card" && (!treatmentFeeDraft.card_number.trim() || !treatmentFeeDraft.card_holder_name.trim())) ||
+                      (treatmentFeeDraft.payment_mode === "cheque" && (!treatmentFeeDraft.bank_name.trim() || !treatmentFeeDraft.cheque_number.trim())) ||
+                      (treatmentFeeDraft.payment_mode === "emi" && (!treatmentFeeDraft.emi_monthly_date || !treatmentFeeDraft.emi_tenure_months)) ||
+                      (treatmentFeeDraft.payment_mode === "partial" && (!treatmentFeeDraft.partial_first_amount || !treatmentFeeDraft.partial_second_amount || !treatmentFeeDraft.partial_second_due_date || partialMismatch))
+                    }
                     data-testid="cons-treatment-fee-submit"
                   >
                     {collectingTreatmentFee ? "Collecting..." : "Confirm & Move to Physio Assign"}

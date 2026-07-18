@@ -194,6 +194,7 @@ class V3LeadOut(BaseModel):
     package_payment_mode: Optional[str] = None  # "cash" | "upi" | "card"
     treatment_fee_paid: Optional[float] = None  # the Treatment Fee payment — any payment method
     treatment_fee_payment_mode: Optional[str] = None  # "cash" | "upi" | "card" | "cheque" | "emi" | "partial"
+    treatment_fee_payment_details: Optional[dict] = None  # mode-specific fields (card last 4, cheque no., EMI/Partial schedule)
     package_sessions: Optional[int] = None
     package_duration_minutes: Optional[int] = None  # consultation-type packages only — no session count
     package_mode: Optional[str] = None
@@ -284,8 +285,21 @@ class V3CollectTreatmentFeeInput(BaseModel):
     item_id: str  # Session package (FITSIO STORE > Sessions) chosen at this stage
     mode: Literal["online", "offline"]
     sessions_override: Optional[int] = None
-    paid_amount: float
+    paid_amount: float  # "Total Amount" for card/cash/upi; also the EMI/Partial total to split
     payment_mode: str
+    # Card — only the last 4 digits are ever persisted; the full number is never stored.
+    card_number: Optional[str] = None
+    card_holder_name: Optional[str] = None
+    # Cheque
+    bank_name: Optional[str] = None
+    cheque_number: Optional[str] = None
+    # EMI — first_payment/monthly_amount are recomputed server-side, never trusted from the client
+    emi_monthly_date: Optional[int] = None
+    emi_tenure_months: Optional[int] = None
+    # Partial Payment
+    partial_first_amount: Optional[float] = None
+    partial_second_amount: Optional[float] = None
+    partial_second_due_date: Optional[str] = None
 
 
 class V3AssignBranchInput(BaseModel):

@@ -287,6 +287,51 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
     if item.get("item_type") != "session":
         raise HTTPException(status_code=400, detail="Only Session packages can be chosen here")
 
+    # Mode-specific required fields + a structured payment_details record for the
+    # receipt/activity log. Card number is never persisted beyond its last 4 digits.
+    payment_details = {}
+    detail_suffix = ""
+    if payload.payment_mode == "card":
+        if not payload.card_number or not payload.card_number.strip() or not payload.card_holder_name or not payload.card_holder_name.strip():
+            raise HTTPException(status_code=400, detail="Card Number and Card Holder Name are required")
+        last4 = "".join(ch for ch in payload.card_number if ch.isdigit())[-4:]
+        payment_details = {"card_last4": last4, "card_holder_name": payload.card_holder_name.strip()}
+        detail_suffix = f" · Card ****{last4}, {payload.card_holder_name.strip()}"
+    elif payload.payment_mode == "cheque":
+        if not payload.bank_name or not payload.bank_name.strip() or not payload.cheque_number or not payload.cheque_number.strip():
+            raise HTTPException(status_code=400, detail="Bank Name and Cheque Number are required")
+        payment_details = {
+            "bank_name": payload.bank_name.strip(),
+            "cheque_number": payload.cheque_number.strip(),
+            "amount": payload.paid_amount,
+        }
+        detail_suffix = f" · Cheque #{payload.cheque_number.strip()}, {payload.bank_name.strip()}"
+    elif payload.payment_mode == "emi":
+        if not payload.emi_monthly_date or not (1 <= payload.emi_monthly_date <= 31) or not payload.emi_tenure_months or payload.emi_tenure_months <= 0:
+            raise HTTPException(status_code=400, detail="Monthly Collection Date (1-31) and Tenure (months) are required")
+        first_payment = round(payload.paid_amount * 0.1, 2)
+        balance = round(payload.paid_amount - first_payment, 2)
+        monthly_amount = round(balance / payload.emi_tenure_months, 2)
+        payment_details = {
+            "total_amount": payload.paid_amount,
+            "first_payment": first_payment,
+            "monthly_collection_date": payload.emi_monthly_date,
+            "tenure_months": payload.emi_tenure_months,
+            "monthly_emi_amount": monthly_amount,
+        }
+        detail_suffix = f" · First Payment Rs.{first_payment}, then Rs.{monthly_amount}/mo x {payload.emi_tenure_months} (due day {payload.emi_monthly_date})"
+    elif payload.payment_mode == "partial":
+        if payload.partial_first_amount is None or payload.partial_second_amount is None or not payload.partial_second_due_date:
+            raise HTTPException(status_code=400, detail="First Payment, Second Payment and Second Payment Due Date are required")
+        if round(payload.partial_first_amount + payload.partial_second_amount, 2) != round(payload.paid_amount, 2):
+            raise HTTPException(status_code=400, detail="First Payment + Second Payment must equal the Total Amount")
+        payment_details = {
+            "first_payment_amount": payload.partial_first_amount,
+            "second_payment_amount": payload.partial_second_amount,
+            "second_payment_due_date": payload.partial_second_due_date,
+        }
+        detail_suffix = f" · First Rs.{payload.partial_first_amount} now, Second Rs.{payload.partial_second_amount} due {payload.partial_second_due_date}"
+
     base_price = item.get("price_online") if payload.mode == "online" else item.get("price_offline")
     base_sessions = item.get("sessions_online") if payload.mode == "online" else item.get("sessions_offline")
     sessions = payload.sessions_override if payload.sessions_override and payload.sessions_override > 0 else base_sessions
@@ -299,6 +344,7 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
         "session_package_mode": payload.mode,
         "treatment_fee_paid": payload.paid_amount,
         "treatment_fee_payment_mode": payload.payment_mode,
+        "treatment_fee_payment_details": payment_details or None,
         "consultation_stage": "Physio Assign",
         "updated_at": _now(),
     }})
@@ -306,7 +352,7 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
         "id": str(uuid.uuid4()),
         "lead_id": lead_id,
         "action": "treatment_fee_collected",
-        "details": f"Chose session package '{item['name']}' ({sessions} sessions) · Collected Treatment Fee Rs.{payload.paid_amount} via {payload.payment_mode}",
+        "details": f"Chose session package '{item['name']}' ({sessions} sessions) · Collected Treatment Fee Rs.{payload.paid_amount} via {payload.payment_mode}{detail_suffix}",
         "created_by": user.full_name,
         "created_by_role": user.role,
         "created_at": _now(),
