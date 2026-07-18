@@ -217,7 +217,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
   };
 
   const submitSession = async () => {
-    if (!sessionDraft.item_id) { toast.error("Choose a session package"); return; }
+    if (!sessionDraft.item_id) { toast.error("Choose a consultation package"); return; }
     const sessionsNum = parseInt(sessionDraft.sessions, 10);
     if (!sessionsNum || sessionsNum < 1) { toast.error("Enter a valid session count"); return; }
     setSelling(true);
@@ -227,7 +227,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
         mode: sessionDraft.mode,
         sessions_override: sessionsNum,
       });
-      toast.success("Session package assigned to patient");
+      toast.success("Consultation package assigned to patient");
       setShowSessionModal(false);
       applyUpdatedLead(res.lead);
     } catch (err) {
@@ -616,7 +616,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
               <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" data-testid="cons-session-modal">
                 <div className="w-full max-w-sm space-y-3 rounded-xl bg-white p-4 shadow-2xl">
                   <div className="flex items-center justify-between">
-                    <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-800"><Dumbbell className="h-4 w-4 text-violet-600" /> Assign Session Package</p>
+                    <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-800"><Dumbbell className="h-4 w-4 text-violet-600" /> Assign Consultation Package</p>
                     <button onClick={() => setShowSessionModal(false)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-session-close"><X className="h-4 w-4" /></button>
                   </div>
                   <p className="text-[11px] text-slate-500">
@@ -633,7 +633,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                     className="h-9 w-full rounded-md border border-slate-200 px-2 text-xs"
                     data-testid="cons-session-item-select"
                   >
-                    <option value="">-- choose a package --</option>
+                    <option value="">-- choose a consultation package --</option>
                     {sessionItems.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
                   </select>
 
