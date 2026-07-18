@@ -638,14 +638,22 @@ const FitsiomaxExpertsTab = () => {
   const [slotTime, setSlotTime] = useState("");
 
   const reloadList = async () => {
-    try {
-      const [docs, brs, emps] = await Promise.all([getDoctors(), getBranches(), hrEmployees({ status: "active" })]);
-      setDoctors(docs || []);
-      setBranches(brs || []);
-      setEmployees(emps || []);
-    } catch (err) {
-      toast.error("Failed to load Fitsiomax Experts");
-    }
+    const [docsRes, brsRes, empsRes] = await Promise.allSettled([
+      getDoctors(), getBranches(), hrEmployees({ status: "active" }),
+    ]);
+    if (docsRes.status === "fulfilled") setDoctors(docsRes.value || []);
+    else console.error("[Fitsiomax Experts] getDoctors failed:", docsRes.reason);
+    if (brsRes.status === "fulfilled") setBranches(brsRes.value || []);
+    else console.error("[Fitsiomax Experts] getBranches failed:", brsRes.reason);
+    if (empsRes.status === "fulfilled") setEmployees(empsRes.value || []);
+    else console.error("[Fitsiomax Experts] hrEmployees failed:", empsRes.reason);
+
+    const failed = [
+      docsRes.status === "rejected" && "experts",
+      brsRes.status === "rejected" && "branches",
+      empsRes.status === "rejected" && "employees",
+    ].filter(Boolean);
+    if (failed.length) toast.error(`Failed to load: ${failed.join(", ")}`);
   };
 
   useEffect(() => { reloadList(); }, []);
@@ -774,10 +782,17 @@ const FitsiomaxExpertsTab = () => {
                 </select>
               </Field>
               <Field label={`Assign Fitsiomax Expert${form.profile_type === "head_physio" ? " *" : " (optional)"}`} className="md:col-span-2">
-                <select value={form.employee_id} onChange={(e) => pickEmployee(e.target.value)} className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm" data-testid="hr-experts-employee-select">
-                  <option value="">Link to an existing employee...</option>
-                  {employees.map((e) => <option key={e.id} value={e.id}>{e.employee_code ? `${e.employee_code} — ` : ""}{e.full_name}{e.email ? ` (${e.email})` : ""}</option>)}
-                </select>
+                <div className="flex gap-2">
+                  <select value={form.employee_id} onChange={(e) => pickEmployee(e.target.value)} className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm" data-testid="hr-experts-employee-select">
+                    <option value="">Link to an existing employee...</option>
+                    {employees.map((e) => <option key={e.id} value={e.id}>{e.employee_code ? `${e.employee_code} — ` : ""}{e.full_name}{e.email ? ` (${e.email})` : ""}</option>)}
+                  </select>
+                  {form.employee_id && (
+                    <Button type="button" variant="outline" onClick={() => set("employee_id", "")} data-testid="hr-experts-employee-unlink">
+                      Unlink
+                    </Button>
+                  )}
+                </div>
               </Field>
               <Field label="Joining Date">
                 <Input type="date" value={form.joining_date} onChange={(e) => set("joining_date", e.target.value)} data-testid="hr-experts-joining-input" />
@@ -811,7 +826,7 @@ const FitsiomaxExpertsTab = () => {
 
         <div>
           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Add Availability Slot to an Existing Expert</p>
-          <form className="grid gap-2 md:grid-cols-3" onSubmit={addSlotNow} data-testid="hr-experts-slot-form">
+          <form className="flex flex-col gap-2" onSubmit={addSlotNow} data-testid="hr-experts-slot-form">
             <select
               value={slotDoctorId}
               onChange={(e) => setSlotDoctorId(e.target.value)}
