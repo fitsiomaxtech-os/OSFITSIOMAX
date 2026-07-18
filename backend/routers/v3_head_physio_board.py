@@ -242,7 +242,7 @@ async def hp_move_head_consultation_stage(
     }
     # Mirror onto Branch's own consultation_stage (view-only there) so Branch Admin
     # can see the doctor's real progress without being able to trigger it themselves.
-    if payload.head_consultation_stage in ("Consultation Visit", "Consultation Pack", "Physio Assign"):
+    if payload.head_consultation_stage == "Consultation Visit":
         updates["consultation_stage"] = payload.head_consultation_stage
     await v3_col("leads").update_one({"id": lead_id}, {"$set": updates})
     await v3_col("lead_activity").insert_one({
@@ -262,10 +262,11 @@ async def hp_move_head_consultation_stage(
 async def hp_assign_consultation_physio(
     lead_id: str,
     payload: V3ConsultationPhysioAssignInput,
-    user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
 ):
-    """Consultant picks the available physio who will deliver the assigned package's
-    treatment sessions, moving the lead into the 'Physio Assign' head consultation stage."""
+    """Branch Admin picks the physio who will deliver the assigned package's
+    treatment sessions, moving the lead into Branch's own 'Physio Assign' stage —
+    the last step in the Consultations pipeline, after fees are collected."""
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -279,8 +280,7 @@ async def hp_assign_consultation_physio(
         "assigned_physio_id": physio["id"],
         "assigned_physio_name": physio["full_name"],
         "physio_assigned_at": now_iso(),
-        "head_consultation_stage": "Physio Assign",
-        "consultation_stage": "Physio Assign",  # mirrored onto Branch's view-only stage
+        "consultation_stage": "Physio Assign",
         "updated_at": now_iso(),
     }})
     await v3_col("lead_activity").insert_one({

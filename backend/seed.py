@@ -226,24 +226,39 @@ async def migrate_consultation_stages() -> None:
 async def migrate_head_consultation_stages() -> None:
     """Seed the standalone Head Physio consultation pipeline (type=head_consultation,
     lead field=head_consultation_stage) — fully independent from Branch's own
-    consultation_stage pipeline. Safe to re-run; only seeds once."""
+    consultation_stage pipeline. Safe to re-run."""
     existing_count = await v3_col("pipeline_stages").count_documents({"type": "head_consultation"})
-    if existing_count > 0:
-        return
-    HEAD_CONSULTATION_COLORS = ["#3b82f6", "#0ea5e9", "#8b5cf6", "#a855f7"]
-    docs = []
-    for idx, name in enumerate(V3_HEAD_CONSULTATION_STAGES):
-        docs.append({
-            "id": str(uuid.uuid4()),
-            "name": name,
-            "color": HEAD_CONSULTATION_COLORS[idx % len(HEAD_CONSULTATION_COLORS)],
-            "type": "head_consultation",
-            "order": idx,
-            "is_final": name in ("Physio Assign",),
-            "created_at": now_iso(),
-        })
-    if docs:
-        await v3_col("pipeline_stages").insert_many(docs)
+    if existing_count == 0:
+        HEAD_CONSULTATION_COLORS = ["#3b82f6", "#0ea5e9", "#8b5cf6", "#a855f7"]
+        docs = []
+        for idx, name in enumerate(V3_HEAD_CONSULTATION_STAGES):
+            docs.append({
+                "id": str(uuid.uuid4()),
+                "name": name,
+                "color": HEAD_CONSULTATION_COLORS[idx % len(HEAD_CONSULTATION_COLORS)],
+                "type": "head_consultation",
+                "order": idx,
+                "is_final": name in ("Consultation Visit",),
+                "created_at": now_iso(),
+            })
+        if docs:
+            await v3_col("pipeline_stages").insert_many(docs)
+
+    # Retire Consultation Pack / Physio Assign as separate stages on Head Physio's own
+    # pipeline — package selection is now an inline part of the lead popup (not a stage
+    # move), and physio assignment moved entirely to Branch Admin's board (after
+    # Treatment Fee). Backfill any lead still sitting on one of these first, so nothing
+    # goes orphaned once the stage itself is removed.
+    retired_names = ["Consultation Pack", "Physio Assign"]
+    retired = await v3_col("pipeline_stages").find(
+        {"type": "head_consultation", "name": {"$in": retired_names}}, {"_id": 0, "id": 1}
+    ).to_list(10)
+    if retired:
+        await v3_col("leads").update_many(
+            {"head_consultation_stage": {"$in": retired_names}},
+            {"$set": {"head_consultation_stage": "Consultation Visit", "updated_at": now_iso()}},
+        )
+        await v3_col("pipeline_stages").delete_many({"type": "head_consultation", "name": {"$in": retired_names}})
 
 
 async def deactivate_legacy_demo_admin() -> None:

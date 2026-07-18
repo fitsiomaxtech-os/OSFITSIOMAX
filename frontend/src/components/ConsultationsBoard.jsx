@@ -13,9 +13,11 @@ import {
   scheduleConsultationFollowUp, rescheduleConsultationFollowUp,
 } from "@/lib/api";
 
-// These 3 Branch Consultation stage names are mirrored (read-only) from the Head
-// Physio's own independent pipeline — Branch Admin can see them but not click them.
-const MIRRORED_HEAD_STAGE_NAMES = ["Consultation Visit", "Consultation Pack", "Physio Assign"];
+// This Branch Consultation stage name is mirrored (read-only) from the Head Physio's
+// own independent pipeline — Branch Admin can see it but not click it. Consultation
+// Pack is chosen inline in Head Physio's own popup (not a stage move) and Physio
+// Assign is Branch Admin's own actionable stage now, so neither is mirrored/locked.
+const MIRRORED_HEAD_STAGE_NAMES = ["Consultation Visit"];
 
 export const ConsultationsBoard = ({ branchId, viewerRole }) => {
   const isConsultant = viewerRole === "head_physio";
@@ -44,7 +46,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
   const [treatmentEditing, setTreatmentEditing] = useState(false);
   const [savingTreatment, setSavingTreatment] = useState(false);
 
-  // Session package assignment popup (Head Physio only)
+  // Consultation package picker (Head Physio only) — an inline section in the popup,
+  // not a separate modal. showSessionModal just toggles picker vs. summary view.
   const [showSessionModal, setShowSessionModal] = useState(false);
   const [sessionDraft, setSessionDraft] = useState({ item_id: "", mode: "offline" });
 
@@ -52,7 +55,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
   const [collectFeeDraft, setCollectFeeDraft] = useState(null); // { paid_amount, payment_mode } | null
   const [collectingFee, setCollectingFee] = useState(false);
 
-  // Physio Assign popup (Head Physio only) — pick an available Jr. Physio to deliver the package
+  // Physio Assign popup (Branch Admin only) — pick an available Jr. Physio to deliver the package
   const [showPhysioModal, setShowPhysioModal] = useState(false);
   const [physioOptions, setPhysioOptions] = useState([]);
   const [physioPick, setPhysioPick] = useState("");
@@ -263,7 +266,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
     setCollectingFee(false);
   };
 
-  // ---- Physio Assign (Head Physio) ----
+  // ---- Physio Assign (Branch Admin) — after fees are collected ----
   const openPhysioModal = async () => {
     setShowPhysioModal(true);
     try {
@@ -464,14 +467,59 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
               />
             )}
 
-            {/* Move to Stage — Head Physio's own pipeline, same pill-stepper format as Branch's.
-                Consultation Visit is appointment-day gated; Consultation Pack opens the package
-                picker; Physio Assign opens the physio picker — same underlying actions as before,
-                just triggered from the stepper instead of separate cards. */}
+            {/* Consultation Package — an inline part of the popup, not a stage move.
+                Shows the assigned package (name + duration, never price) once chosen,
+                with a Change button; otherwise shows the picker directly. */}
+            {isConsultant && (
+              <div className="rounded-lg border border-violet-200 bg-violet-50 p-3" data-testid="cons-package-section">
+                <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-violet-700">
+                  <Dumbbell className="h-3.5 w-3.5" /> Consultation Package
+                </p>
+                {selectedLead.package_id && !showSessionModal ? (
+                  <>
+                    <p className="text-xs text-slate-700">
+                      <span className="font-semibold">{selectedLead.package_name}</span>
+                      {selectedLead.package_duration_minutes ? ` · ${selectedLead.package_duration_minutes} min` : ""}
+                      {" "}({selectedLead.package_mode})
+                    </p>
+                    <Button size="sm" variant="outline" className="mt-2 text-xs" onClick={openSessionModal} data-testid="cons-package-change">
+                      <Pencil className="mr-1 h-3 w-3" /> Change
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <select
+                      value={sessionDraft.item_id}
+                      onChange={(e) => setSessionDraft({ ...sessionDraft, item_id: e.target.value })}
+                      className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-xs"
+                      data-testid="cons-session-item-select"
+                    >
+                      <option value="">-- choose a consultation package --</option>
+                      {sessionItems.map((i) => (
+                        <option key={i.id} value={i.id}>{i.name} — {i.duration_minutes ? `${i.duration_minutes} min` : "duration n/a"}</option>
+                      ))}
+                    </select>
+                    <div className="mt-2 flex gap-2">
+                      <Button size="sm" className="bg-violet-600 hover:bg-violet-700 text-xs" onClick={submitSession} disabled={selling || !sessionDraft.item_id} data-testid="cons-session-submit">
+                        {selling ? "Saving..." : "Save"}
+                      </Button>
+                      {selectedLead.package_id && (
+                        <Button size="sm" variant="outline" className="text-xs" onClick={() => setShowSessionModal(false)} data-testid="cons-package-cancel">
+                          Cancel
+                        </Button>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Move to Stage — Head Physio's own pipeline (New Appointment, Consultation
+                Visit). Package choice happens above; physio assignment now lives on
+                Branch Admin's own board, after fees are collected. */}
             {isConsultant && (() => {
               const currentName = selectedLead.head_consultation_stage || "New Appointment";
               const currentIdx = stages.findIndex((x) => x.name === currentName);
-              const physioAssignIdx = stages.findIndex((x) => x.name === "Physio Assign");
               return (
                 <div>
                   <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-600">Move to Stage</p>
@@ -486,9 +534,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                           <button
                             onClick={() => {
                               if (isDisabled) return;
-                              if (s.name === "Consultation Visit") { moveHeadStage(selectedLead, "Consultation Visit"); return; }
-                              if (s.name === "Consultation Pack") { openSessionModal(); return; }
-                              if (s.name === "Physio Assign") { openPhysioModal(); return; }
+                              moveHeadStage(selectedLead, s.name);
                             }}
                             disabled={isDisabled}
                             className="flex flex-1 basis-32 items-center justify-center gap-1 rounded-lg border px-2 py-2 text-center text-[11px] font-semibold leading-tight transition disabled:opacity-100"
@@ -510,19 +556,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                     })}
                   </div>
 
-                  {selectedLead.package_id && (
+                  {selectedLead.assigned_physio_name && (
                     <p className="mt-2 text-xs text-slate-500">
-                      Pack: <span className="font-semibold text-slate-700">{selectedLead.package_name}</span>
-                      {selectedLead.package_duration_minutes
-                        ? ` · ${selectedLead.package_duration_minutes} min`
-                        : selectedLead.package_sessions
-                          ? ` · ${selectedLead.package_sessions} sessions`
-                          : ""}
-                      {" "}({selectedLead.package_mode})
-                    </p>
-                  )}
-                  {selectedLead.assigned_physio_name && physioAssignIdx >= 0 && currentIdx >= physioAssignIdx && (
-                    <p className="mt-1 text-xs text-slate-500">
                       Physio: <span className="font-semibold text-slate-700">{selectedLead.assigned_physio_name}</span>
                     </p>
                   )}
@@ -554,9 +589,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                               openCollectFeeDraft();
                               return;
                             }
+                            if (s.name === "Physio Assign") {
+                              openPhysioModal();
+                              return;
+                            }
                             moveStage(selectedLead, s.name);
                           }}
-                          disabled={(active && s.name !== "Consultation Fee") || viewOnly}
+                          disabled={(active && s.name !== "Consultation Fee" && s.name !== "Physio Assign") || viewOnly}
                           title={viewOnly ? "Set by the Head Physio's own pipeline — view only here" : s.name === "Consultation Fee" && !selectedLead.package_paid ? "Click to collect the fee" : undefined}
                           className="flex w-full items-center justify-center gap-1 rounded-lg border px-2 py-2 text-center text-[11px] font-semibold leading-tight transition disabled:opacity-100"
                           style={
@@ -648,42 +687,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
               </div>
             )}
 
-            {/* Consultation package assignment popup (Head Physio) */}
-            {showSessionModal && (
-              <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" data-testid="cons-session-modal">
-                <div className="w-full max-w-sm space-y-3 rounded-xl bg-white p-4 shadow-2xl">
-                  <div className="flex items-center justify-between">
-                    <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-800"><Dumbbell className="h-4 w-4 text-violet-600" /> Choose the Consultation Package</p>
-                    <button onClick={() => setShowSessionModal(false)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-session-close"><X className="h-4 w-4" /></button>
-                  </div>
-                  <p className="text-[11px] text-slate-500">
-                    {selectedLead.appointment_department === "physio" ? "Physiotherapy" : "Fitness"} · {selectedLead.appointment_mode || "offline"} (selected)
-                  </p>
-
-                  <select
-                    value={sessionDraft.item_id}
-                    onChange={(e) => setSessionDraft({ ...sessionDraft, item_id: e.target.value })}
-                    className="h-9 w-full rounded-md border border-slate-200 px-2 text-xs"
-                    data-testid="cons-session-item-select"
-                  >
-                    <option value="">-- choose a consultation package --</option>
-                    {sessionItems.map((i) => (
-                      <option key={i.id} value={i.id}>{i.name} — {i.duration_minutes ? `${i.duration_minutes} min` : "duration n/a"}</option>
-                    ))}
-                  </select>
-
-                  <Button
-                    className="w-full bg-violet-600 hover:bg-violet-700 text-xs"
-                    onClick={submitSession}
-                    disabled={selling || !sessionDraft.item_id}
-                    data-testid="cons-session-submit"
-                  >
-                    {selling ? "Submitting..." : "Submit"}
-                  </Button>
-                </div>
-              </div>
-            )}
-
             {/* Collect Fee popup (Branch Admin) — Consultation Fee stage */}
             {collectFeeDraft && (
               <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" data-testid="cons-collect-fee-modal">
@@ -733,7 +736,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
               </div>
             )}
 
-            {/* Physio Assign popup (Head Physio) */}
+            {/* Physio Assign popup (Branch Admin) — after fees are collected */}
             {showPhysioModal && (
               <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" data-testid="cons-physio-modal">
                 <div className="w-full max-w-sm space-y-3 rounded-xl bg-white p-4 shadow-2xl">

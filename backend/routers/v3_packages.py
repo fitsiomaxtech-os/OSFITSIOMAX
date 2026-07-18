@@ -169,8 +169,9 @@ async def sell_store_item(lead_id: str, payload: V3SellStoreItemInput, user: V3U
 
 @router.post("/leads/{lead_id}/assign-package", response_model=dict)
 async def assign_package(lead_id: str, payload: V3AssignPackageInput, user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin"))):
-    """Consultant assigns a package to the patient at the Consultation Pack stage.
-    Session items (e.g. 7 sessions for 1 week) default to their preset count, which
+    """Consultant assigns a package to the patient — an inline choice in the lead
+    popup, not a pipeline stage move. Session items (e.g. 7 sessions for 1 week)
+    default to their preset count, which
     the consultant can override — price scales proportionally from the per-session
     rate. Consultation items (a single-visit item, e.g. "Initial Consultation — 30
     min") carry no session count, so they're assigned as-is with a flat price and
@@ -212,10 +213,10 @@ async def assign_package(lead_id: str, payload: V3AssignPackageInput, user: V3Us
         "package_mode": payload.mode,
         "package_paid": None,
         "package_payment_mode": None,
-        "head_consultation_stage": "Consultation Pack",
-        # Branch's own board skips straight to Consultation Fee — that's the stage
-        # Branch Admin actually needs to act on (collect payment); Consultation Pack
-        # itself is just informational there.
+        # Package choice is an inline part of the Head Physio's lead popup, not a stage
+        # move — head_consultation_stage stays wherever it already is. Branch's own
+        # board skips straight to Consultation Fee, the stage Branch Admin actually
+        # needs to act on (collect payment).
         "consultation_stage": "Consultation Fee",
         "updated_at": _now(),
     }})
