@@ -260,6 +260,27 @@ async def migrate_head_consultation_stages() -> None:
         )
         await v3_col("pipeline_stages").delete_many({"type": "head_consultation", "name": {"$in": retired_names}})
 
+    # Correction (unconditional, safe to re-run): the backfill above only touched
+    # head_consultation_stage, so any lead it moved to Consultation Visit could be left
+    # showing an earlier Branch stage (e.g. still "New Appointment") even though the
+    # doctor's own board says they're already at Consultation Visit or beyond. Advance
+    # Branch's own consultation_stage to match for any lead that's behind — but never
+    # regress one that's already further along (or cancelled) on Branch's side.
+    branch_stage_order = [
+        r["name"] for r in await v3_col("pipeline_stages").find(
+            {"type": "consultation"}, {"_id": 0, "name": 1}
+        ).sort("order", 1).to_list(50)
+    ]
+    if "Consultation Visit" in branch_stage_order:
+        behind_stages = branch_stage_order[:branch_stage_order.index("Consultation Visit")]
+        await v3_col("leads").update_many(
+            {
+                "head_consultation_stage": "Consultation Visit",
+                "consultation_stage": {"$in": behind_stages + [None]},
+            },
+            {"$set": {"consultation_stage": "Consultation Visit", "updated_at": now_iso()}},
+        )
+
 
 async def deactivate_legacy_demo_admin() -> None:
     """Disable the old demo super_admin account (admin@fitsiomax.com / admin123).
