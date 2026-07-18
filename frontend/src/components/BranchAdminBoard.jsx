@@ -12,7 +12,6 @@ import {
   UserPlus,
   X,
   Activity,
-  RefreshCw,
   LayoutDashboard,
   FileText,
   CalendarRange,
@@ -223,9 +222,6 @@ export const BranchAdminBoard = ({ branchId }) => {
                 <button type="button" onClick={() => setStageFilter(null)} className="text-sky-600 hover:underline" data-testid="branch-stage-filter-clear">Clear</button>
               </div>
             )}
-            <Button size="sm" variant="outline" onClick={loadBoard} data-testid="branch-refresh-btn">
-              <RefreshCw className="mr-1 h-4 w-4" /> Refresh
-            </Button>
           </div>
 
           {/* List View (table) */}
