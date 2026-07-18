@@ -258,10 +258,10 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved }) => {
       };
       if (isEdit) {
         await updateStoreItem(item.id, payload);
-        toast.success("Consultation package updated");
+        toast.success("Session package updated");
       } else {
         await createStoreItem(payload);
-        toast.success("Consultation package created");
+        toast.success("Session package created");
       }
       onSaved();
       onClose();
@@ -276,7 +276,7 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved }) => {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} data-testid="session-create-modal">
       <div className="flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
         <div className="flex shrink-0 items-center justify-between bg-gradient-to-r from-sky-500 to-indigo-600 px-5 py-3 text-white">
-          <p className="text-base font-semibold">{isEdit ? "Edit Consultation Package" : "Add Consultation Package"}</p>
+          <p className="text-base font-semibold">{isEdit ? "Edit Session Package" : "Add Session Package"}</p>
           <button onClick={onClose} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="session-create-close">
             <X className="h-4 w-4" />
           </button>
@@ -480,7 +480,7 @@ const SessionsPhysiotherapyPanel = () => {
     if (!window.confirm(`Permanently delete "${it.name}"? This cannot be undone.`)) return;
     try {
       await deleteStoreItem(it.id);
-      toast.success("Consultation package deleted permanently");
+      toast.success("Session package deleted permanently");
       loadItems();
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed to delete");
@@ -498,7 +498,7 @@ const SessionsPhysiotherapyPanel = () => {
       {items.length === 0 ? (
         <Card>
           <CardContent className="p-8 text-center text-sm text-slate-400">
-            No consultation packages yet. Click Create to add one.
+            No session packages yet. Click Create to add one.
           </CardContent>
         </Card>
       ) : (

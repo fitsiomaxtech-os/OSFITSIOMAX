@@ -156,6 +156,9 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
   }, [selectedLead?.id]);
 
   const sessionItems = storeItems.filter((i) => i.item_type === "consultation");
+  // Session packages (weeks/session-count items) — chosen separately at the Treatment
+  // Fee stage, distinct from the Consultation package Head Physio chooses above.
+  const treatmentPackageItems = storeItems.filter((i) => i.item_type === "session");
 
   const moveStage = async (lead, next) => {
     if (next === lead.consultation_stage) return;
@@ -289,15 +292,28 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
 
   // ---- Collect Treatment Fee (Branch Admin) — at the Treatment Fee stage ----
   const openTreatmentFeeDraft = () => {
-    setTreatmentFeeDraft({ paid_amount: "", payment_mode: "cash" });
+    const mode = selectedLead.appointment_mode || "offline";
+    const auto = treatmentPackageItems.length === 1 ? treatmentPackageItems[0] : null;
+    const baseSessions = auto ? (mode === "online" ? auto.sessions_online : auto.sessions_offline) : "";
+    setTreatmentFeeDraft({
+      item_id: auto?.id || "",
+      mode,
+      sessions: baseSessions ? String(baseSessions) : "",
+      paid_amount: "",
+      payment_mode: "cash",
+    });
   };
 
   const submitTreatmentFee = async () => {
+    if (!treatmentFeeDraft.item_id) { toast.error("Choose a session package"); return; }
     const amount = parseFloat(treatmentFeeDraft.paid_amount);
     if (!amount || amount <= 0) { toast.error("Enter a valid amount"); return; }
     setCollectingTreatmentFee(true);
     try {
       const res = await collectTreatmentFee(selectedLead.id, {
+        item_id: treatmentFeeDraft.item_id,
+        mode: treatmentFeeDraft.mode,
+        sessions_override: treatmentFeeDraft.sessions ? parseInt(treatmentFeeDraft.sessions, 10) : undefined,
         paid_amount: amount,
         payment_mode: treatmentFeeDraft.payment_mode,
       });
@@ -781,7 +797,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                     disabled={collectingFee || !collectFeeDraft.paid_amount}
                     data-testid="cons-collect-fee-submit"
                   >
-                    {collectingFee ? "Collecting..." : "Confirm & Move to Treatment Fee"}
+                    {collectingFee ? "Collecting..." : "Confirm & Move to Consultation Fee"}
                   </Button>
                 </div>
               </div>
@@ -795,6 +811,37 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                     <p className="text-sm font-semibold text-slate-800">Collect Treatment Fee</p>
                     <button onClick={() => setTreatmentFeeDraft(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-treatment-fee-close"><X className="h-4 w-4" /></button>
                   </div>
+                  <div>
+                    <label className="mb-1 block text-[11px] font-medium text-slate-500">Session Package</label>
+                    <select
+                      value={treatmentFeeDraft.item_id}
+                      onChange={(e) => {
+                        const item = treatmentPackageItems.find((i) => i.id === e.target.value);
+                        const base = item ? (treatmentFeeDraft.mode === "online" ? item.sessions_online : item.sessions_offline) : "";
+                        setTreatmentFeeDraft({ ...treatmentFeeDraft, item_id: e.target.value, sessions: base ? String(base) : "" });
+                      }}
+                      className="h-9 w-full rounded-md border border-slate-200 px-2 text-xs"
+                      data-testid="cons-treatment-fee-item-select"
+                    >
+                      <option value="">-- choose a session package --</option>
+                      {treatmentPackageItems.map((i) => (
+                        <option key={i.id} value={i.id}>{i.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  {treatmentFeeDraft.item_id && (
+                    <div>
+                      <label className="mb-1 block text-[11px] font-medium text-slate-500">Sessions</label>
+                      <Input
+                        type="number"
+                        min="1"
+                        value={treatmentFeeDraft.sessions}
+                        onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, sessions: e.target.value })}
+                        className="h-9"
+                        data-testid="cons-treatment-fee-sessions"
+                      />
+                    </div>
+                  )}
                   <div>
                     <label className="mb-1 block text-[11px] font-medium text-slate-500">Amount (₹)</label>
                     <Input
@@ -822,7 +869,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                   <Button
                     className="w-full bg-sky-600 hover:bg-sky-700 text-xs"
                     onClick={submitTreatmentFee}
-                    disabled={collectingTreatmentFee || !treatmentFeeDraft.paid_amount}
+                    disabled={collectingTreatmentFee || !treatmentFeeDraft.paid_amount || !treatmentFeeDraft.item_id}
                     data-testid="cons-treatment-fee-submit"
                   >
                     {collectingTreatmentFee ? "Collecting..." : "Confirm & Move to Physio Assign"}

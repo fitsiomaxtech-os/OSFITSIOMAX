@@ -10,7 +10,7 @@ from database import v3_col
 from deps import v3_require_roles
 from schemas.v3 import (
     V3UserOut, V3LeadOut, V3DiagnosisInput, V3SellStoreItemInput,
-    V3AssignPackageInput, V3CollectPackagePaymentInput,
+    V3AssignPackageInput, V3CollectPackagePaymentInput, V3CollectTreatmentFeeInput,
     V3PhysioDiagnosisInput, V3TreatmentSummaryInput,
 )
 
@@ -240,7 +240,8 @@ TREATMENT_FEE_PAYMENT_MODES = {"cash", "gpay", "phonepe", "applepay", "upi", "em
 @router.post("/leads/{lead_id}/collect-package-payment", response_model=dict)
 async def collect_package_payment(lead_id: str, payload: V3CollectPackagePaymentInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
     """Branch admin collects the Consultation Fee for the package the consultant
-    already assigned — Cash/UPI/Card only. Moves on to Treatment Fee once collected."""
+    already assigned — Cash/UPI/Card only. Lands on Consultation Fee itself (not
+    Treatment Fee) — that's the next stage, reached separately."""
     if payload.payment_mode not in CONSULTATION_FEE_PAYMENT_MODES:
         raise HTTPException(status_code=400, detail=f"Consultation Fee only accepts: {sorted(CONSULTATION_FEE_PAYMENT_MODES)}")
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
@@ -252,7 +253,7 @@ async def collect_package_payment(lead_id: str, payload: V3CollectPackagePayment
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {
         "package_paid": payload.paid_amount,
         "package_payment_mode": payload.payment_mode,
-        "consultation_stage": "Treatment Fee",
+        "consultation_stage": "Consultation Fee",
         "updated_at": _now(),
     }})
     await v3_col("lead_activity").insert_one({
@@ -269,17 +270,33 @@ async def collect_package_payment(lead_id: str, payload: V3CollectPackagePayment
 
 
 @router.post("/leads/{lead_id}/collect-treatment-fee", response_model=dict)
-async def collect_treatment_fee(lead_id: str, payload: V3CollectPackagePaymentInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
-    """Branch admin collects the Treatment Fee, at the Treatment Fee stage — any
-    payment method is allowed here, including EMI/Cheque/Partial. Moves on to
-    Physio Assign once collected."""
+async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
+    """Branch admin chooses the Session package (FITSIO STORE > Sessions — distinct
+    from the Consultation package Head Physio chose earlier) and collects the
+    Treatment Fee in the same step, at the Treatment Fee stage — any payment method
+    is allowed here, including EMI/Cheque/Partial. Moves on to Physio Assign once
+    collected."""
     if payload.payment_mode not in TREATMENT_FEE_PAYMENT_MODES:
         raise HTTPException(status_code=400, detail=f"Treatment Fee only accepts: {sorted(TREATMENT_FEE_PAYMENT_MODES)}")
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
+    item = await v3_col("store_items").find_one({"id": payload.item_id}, {"_id": 0})
+    if not item:
+        raise HTTPException(status_code=404, detail="Session package not found")
+    if item.get("item_type") != "session":
+        raise HTTPException(status_code=400, detail="Only Session packages can be chosen here")
+
+    base_price = item.get("price_online") if payload.mode == "online" else item.get("price_offline")
+    base_sessions = item.get("sessions_online") if payload.mode == "online" else item.get("sessions_offline")
+    sessions = payload.sessions_override if payload.sessions_override and payload.sessions_override > 0 else base_sessions
 
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {
+        "session_package_id": item["id"],
+        "session_package_name": item["name"],
+        "session_package_price": base_price,
+        "session_package_sessions": sessions,
+        "session_package_mode": payload.mode,
         "treatment_fee_paid": payload.paid_amount,
         "treatment_fee_payment_mode": payload.payment_mode,
         "consultation_stage": "Physio Assign",
@@ -289,7 +306,7 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectPackagePaymentIn
         "id": str(uuid.uuid4()),
         "lead_id": lead_id,
         "action": "treatment_fee_collected",
-        "details": f"Collected Treatment Fee Rs.{payload.paid_amount} via {payload.payment_mode}",
+        "details": f"Chose session package '{item['name']}' ({sessions} sessions) · Collected Treatment Fee Rs.{payload.paid_amount} via {payload.payment_mode}",
         "created_by": user.full_name,
         "created_by_role": user.role,
         "created_at": _now(),

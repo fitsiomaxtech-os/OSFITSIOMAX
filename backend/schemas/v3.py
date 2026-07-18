@@ -197,6 +197,14 @@ class V3LeadOut(BaseModel):
     package_sessions: Optional[int] = None
     package_duration_minutes: Optional[int] = None  # consultation-type packages only — no session count
     package_mode: Optional[str] = None
+    # The Session package (FITSIO STORE > Sessions) chosen separately at the Treatment
+    # Fee stage — distinct from package_* above, which is the Consultation package Head
+    # Physio chooses at Consultation Pack.
+    session_package_id: Optional[str] = None
+    session_package_name: Optional[str] = None
+    session_package_price: Optional[float] = None
+    session_package_sessions: Optional[int] = None
+    session_package_mode: Optional[str] = None
     diagnosis: Optional[str] = None  # Pre-Sales' basic diagnosis — read-only reference for the Head Physio
     physio_diagnosis_report: Optional[str] = None  # Head Physio's own diagnosis report
     physio_diagnosis_locked: Optional[bool] = False
@@ -270,6 +278,14 @@ class V3AssignPackageInput(BaseModel):
 class V3CollectPackagePaymentInput(BaseModel):
     paid_amount: float
     payment_mode: str = "cash"
+
+
+class V3CollectTreatmentFeeInput(BaseModel):
+    item_id: str  # Session package (FITSIO STORE > Sessions) chosen at this stage
+    mode: Literal["online", "offline"]
+    sessions_override: Optional[int] = None
+    paid_amount: float
+    payment_mode: str
 
 
 class V3AssignBranchInput(BaseModel):

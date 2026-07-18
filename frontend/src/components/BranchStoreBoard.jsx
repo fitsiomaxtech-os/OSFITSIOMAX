@@ -154,7 +154,7 @@ export const BranchSessionsPanel = () => {
         <BranchItemsPanel
           category="physiotherapy"
           itemType="session"
-          emptyLabel="No consultation packages available yet."
+          emptyLabel="No session packages available yet."
           testidPrefix="branch-session"
         />
       )}
