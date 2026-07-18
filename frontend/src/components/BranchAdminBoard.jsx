@@ -178,7 +178,7 @@ export const BranchAdminBoard = ({ branchId }) => {
       ) : activeView === "rehab" ? (
         <PlaceholderPanel label="Rehab" testid="branch-rehab-panel" />
       ) : activeView === "finance" ? (
-        <FinanceBoard />
+        <FinanceBoard branchId={branchId} />
       ) : activeView === "store" ? (
         <FitsiomaxStorePanel />
       ) : (

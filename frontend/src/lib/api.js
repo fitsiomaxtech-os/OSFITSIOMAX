@@ -163,6 +163,7 @@ export const getBranchFinance = async (params = {}) => {
   if (params.start_date) query.set("start_date", params.start_date);
   if (params.end_date) query.set("end_date", params.end_date);
   if (params.search) query.set("search", params.search);
+  if (params.branch_id) query.set("branch_id", params.branch_id);
   return (await api.get(`/branch/finance?${query.toString()}`)).data;
 };
 

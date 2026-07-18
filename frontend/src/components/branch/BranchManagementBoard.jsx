@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Plus, Pencil, Trash2, X, Users, MapPin, Phone, Mail, TrendingUp, BarChart3, RefreshCw, Layers } from "lucide-react";
+import { Plus, Pencil, Trash2, X, Users, MapPin, Phone, Mail, TrendingUp, BarChart3, RefreshCw, Layers, LayoutDashboard, ChevronDown } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,11 +11,13 @@ import {
 } from "@/lib/api";
 import { BranchDetailPage } from "@/components/branch/BranchDetailPage";
 import { BranchFormDialogV2 } from "@/components/branch/BranchFormDialogV2";
+import { BranchAdminBoard } from "@/components/BranchAdminBoard";
 
 const TABS = [
   { key: "creation", label: "Creation & Manager", icon: Users },
   { key: "service_type", label: "Service Type", icon: Layers },
   { key: "performance", label: "Performance", icon: TrendingUp },
+  { key: "branch_control", label: "Branch Control", icon: LayoutDashboard },
 ];
 
 export const BranchManagementBoard = () => {
@@ -46,6 +48,47 @@ export const BranchManagementBoard = () => {
       {tab === "creation" && <CreationTab onDrillIn={setDrilledBranchId} />}
       {tab === "service_type" && <ServiceTypeTab />}
       {tab === "performance" && <PerformanceTab onDrillIn={setDrilledBranchId} />}
+      {tab === "branch_control" && <BranchControlTab />}
+    </div>
+  );
+};
+
+// ---------- Branch Control (Super Admin driving a Branch Admin's own board) ----------
+
+const BranchControlTab = () => {
+  const [branches, setBranches] = useState([]);
+  const [selectedId, setSelectedId] = useState("");
+
+  useEffect(() => { bmList().then(setBranches).catch(() => {}); }, []);
+
+  const selected = branches.find((b) => b.id === selectedId);
+
+  return (
+    <div className="space-y-4" data-testid="bm-branch-control-tab">
+      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white p-3">
+        <label className="text-xs font-medium text-slate-600">Viewing branch:</label>
+        <div className="relative">
+          <select
+            value={selectedId}
+            onChange={(e) => setSelectedId(e.target.value)}
+            className="h-9 min-w-[240px] appearance-none rounded-md border border-slate-200 bg-white px-3 pr-8 text-sm"
+            data-testid="bm-branch-control-select"
+          >
+            <option value="">— Select a branch —</option>
+            {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
+          </select>
+          <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+        </div>
+        {selected && <span className="text-xs text-slate-400">{selected.admin_name ? `Managed by ${selected.admin_name}` : "No admin assigned"}</span>}
+      </div>
+
+      {selectedId ? (
+        <BranchAdminBoard key={selectedId} branchId={selectedId} />
+      ) : (
+        <div className="rounded-lg border border-dashed border-slate-200 p-10 text-center text-sm text-slate-400" data-testid="bm-branch-control-empty">
+          Pick a branch above to open its full Branch Admin dashboard — Branch Leads, Consultations, Treatment Sessions, Rehab, Finance and Fitsiomax Store — with full control, same as the Branch Admin sees it.
+        </div>
+      )}
     </div>
   );
 };

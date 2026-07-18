@@ -15,9 +15,12 @@ async def get_branch_finance(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     search: Optional[str] = None,
+    branch_id: Optional[str] = None,
     user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
 ):
-    branch_id = user.branch_id
+    # Super Admin can view any branch's finance (e.g. from Branch Management > Branch
+    # Control); everyone else is locked to their own branch regardless of what's passed.
+    branch_id = branch_id if (user.role == "super_admin" and branch_id) else user.branch_id
     if not branch_id:
         return {"summary": {}, "transactions": []}
 
