@@ -233,10 +233,16 @@ async def assign_package(lead_id: str, payload: V3AssignPackageInput, user: V3Us
     return {"message": "Package assigned", "lead": V3LeadOut(**updated).model_dump()}
 
 
+CONSULTATION_FEE_PAYMENT_MODES = {"cash", "upi", "card"}
+TREATMENT_FEE_PAYMENT_MODES = {"cash", "gpay", "phonepe", "applepay", "upi", "emi", "cheque", "partial"}
+
+
 @router.post("/leads/{lead_id}/collect-package-payment", response_model=dict)
 async def collect_package_payment(lead_id: str, payload: V3CollectPackagePaymentInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
-    """Branch admin collects payment for the package the consultant already assigned,
-    at the Consultation Fee stage — moves on to Treatment Fee once collected."""
+    """Branch admin collects the Consultation Fee for the package the consultant
+    already assigned — Cash/UPI/Card only. Moves on to Treatment Fee once collected."""
+    if payload.payment_mode not in CONSULTATION_FEE_PAYMENT_MODES:
+        raise HTTPException(status_code=400, detail=f"Consultation Fee only accepts: {sorted(CONSULTATION_FEE_PAYMENT_MODES)}")
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -253,7 +259,37 @@ async def collect_package_payment(lead_id: str, payload: V3CollectPackagePayment
         "id": str(uuid.uuid4()),
         "lead_id": lead_id,
         "action": "package_payment_collected",
-        "details": f"Collected Rs.{payload.paid_amount} for package '{lead.get('package_name')}' via {payload.payment_mode}",
+        "details": f"Collected Consultation Fee Rs.{payload.paid_amount} for package '{lead.get('package_name')}' via {payload.payment_mode}",
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": _now(),
+    })
+    updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    return {"message": "Payment collected", "lead": V3LeadOut(**updated).model_dump()}
+
+
+@router.post("/leads/{lead_id}/collect-treatment-fee", response_model=dict)
+async def collect_treatment_fee(lead_id: str, payload: V3CollectPackagePaymentInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
+    """Branch admin collects the Treatment Fee, at the Treatment Fee stage — any
+    payment method is allowed here, including EMI/Cheque/Partial. Moves on to
+    Physio Assign once collected."""
+    if payload.payment_mode not in TREATMENT_FEE_PAYMENT_MODES:
+        raise HTTPException(status_code=400, detail=f"Treatment Fee only accepts: {sorted(TREATMENT_FEE_PAYMENT_MODES)}")
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": {
+        "treatment_fee_paid": payload.paid_amount,
+        "treatment_fee_payment_mode": payload.payment_mode,
+        "consultation_stage": "Physio Assign",
+        "updated_at": _now(),
+    }})
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": lead_id,
+        "action": "treatment_fee_collected",
+        "details": f"Collected Treatment Fee Rs.{payload.paid_amount} via {payload.payment_mode}",
         "created_by": user.full_name,
         "created_by_role": user.role,
         "created_at": _now(),

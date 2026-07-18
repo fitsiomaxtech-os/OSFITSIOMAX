@@ -190,8 +190,10 @@ class V3LeadOut(BaseModel):
     package_id: Optional[str] = None
     package_name: Optional[str] = None
     package_price: Optional[float] = None
-    package_paid: Optional[float] = None
-    package_payment_mode: Optional[str] = None  # "cash" | "upi" | "card" | ...
+    package_paid: Optional[float] = None  # the Consultation Fee payment — Cash/UPI/Card only
+    package_payment_mode: Optional[str] = None  # "cash" | "upi" | "card"
+    treatment_fee_paid: Optional[float] = None  # the Treatment Fee payment — any payment method
+    treatment_fee_payment_mode: Optional[str] = None  # "cash" | "gpay" | "phonepe" | "applepay" | "upi" | "emi" | "cheque" | "partial"
     package_sessions: Optional[int] = None
     package_duration_minutes: Optional[int] = None  # consultation-type packages only — no session count
     package_mode: Optional[str] = None

@@ -7,11 +7,27 @@ import { toast } from "@/components/ui/sonner";
 import { StageTabBar } from "@/components/ui/stage-tab";
 import {
   getConsultationsBoard, moveConsultationStage, moveHeadConsultationStage, listStoreItems,
-  assignPackage, collectPackagePayment, savePhysioDiagnosis, unlockPhysioDiagnosis,
+  assignPackage, collectPackagePayment, collectTreatmentFee, savePhysioDiagnosis, unlockPhysioDiagnosis,
   saveTreatmentSummary, unlockTreatmentSummary, stagesList, getDoctors,
   assignConsultationPhysio,
   scheduleConsultationFollowUp, rescheduleConsultationFollowUp,
 } from "@/lib/api";
+
+const CONSULTATION_FEE_PAYMENT_MODES = [
+  { value: "cash", label: "Cash" },
+  { value: "upi", label: "UPI" },
+  { value: "card", label: "Card" },
+];
+const TREATMENT_FEE_PAYMENT_MODES = [
+  { value: "cash", label: "Cash" },
+  { value: "gpay", label: "GPay" },
+  { value: "phonepe", label: "PhonePe" },
+  { value: "applepay", label: "Apple Pay" },
+  { value: "upi", label: "UPI" },
+  { value: "emi", label: "EMI" },
+  { value: "cheque", label: "Cheque" },
+  { value: "partial", label: "Partial Payment" },
+];
 
 // This Branch Consultation stage name is mirrored (read-only) from the Head Physio's
 // own independent pipeline — Branch Admin can see it but not click it. Consultation
@@ -51,9 +67,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
   const [showSessionModal, setShowSessionModal] = useState(false);
   const [sessionDraft, setSessionDraft] = useState({ item_id: "", mode: "offline" });
 
-  // Collect Fee popup (Branch Admin only) — at the Consultation Fee stage
+  // Collect Fee popup (Branch Admin only) — at the Consultation Fee stage, Cash/UPI/Card only
   const [collectFeeDraft, setCollectFeeDraft] = useState(null); // { paid_amount, payment_mode } | null
   const [collectingFee, setCollectingFee] = useState(false);
+
+  // Collect Treatment Fee popup (Branch Admin only) — at the Treatment Fee stage, any payment method
+  const [treatmentFeeDraft, setTreatmentFeeDraft] = useState(null); // { paid_amount, payment_mode } | null
+  const [collectingTreatmentFee, setCollectingTreatmentFee] = useState(false);
 
   // Physio Assign popup (Branch Admin only) — pick an available Jr. Physio to deliver the package
   const [showPhysioModal, setShowPhysioModal] = useState(false);
@@ -132,6 +152,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
     setFollowUpDraft(null);
     setRescheduleDraft(null);
     setCollectFeeDraft(null);
+    setTreatmentFeeDraft(null);
   }, [selectedLead?.id]);
 
   const sessionItems = storeItems.filter((i) => i.item_type === "consultation");
@@ -264,6 +285,29 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
       toast.error(err?.response?.data?.detail || "Failed to collect fee");
     }
     setCollectingFee(false);
+  };
+
+  // ---- Collect Treatment Fee (Branch Admin) — at the Treatment Fee stage ----
+  const openTreatmentFeeDraft = () => {
+    setTreatmentFeeDraft({ paid_amount: "", payment_mode: "cash" });
+  };
+
+  const submitTreatmentFee = async () => {
+    const amount = parseFloat(treatmentFeeDraft.paid_amount);
+    if (!amount || amount <= 0) { toast.error("Enter a valid amount"); return; }
+    setCollectingTreatmentFee(true);
+    try {
+      const res = await collectTreatmentFee(selectedLead.id, {
+        paid_amount: amount,
+        payment_mode: treatmentFeeDraft.payment_mode,
+      });
+      toast.success("Treatment fee collected");
+      setTreatmentFeeDraft(null);
+      applyUpdatedLead(res.lead);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to collect treatment fee");
+    }
+    setCollectingTreatmentFee(false);
   };
 
   // ---- Physio Assign (Branch Admin) — after fees are collected ----
@@ -592,14 +636,18 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                               openCollectFeeDraft();
                               return;
                             }
+                            if (s.name === "Treatment Fee") {
+                              openTreatmentFeeDraft();
+                              return;
+                            }
                             if (s.name === "Physio Assign") {
                               openPhysioModal();
                               return;
                             }
                             moveStage(selectedLead, s.name);
                           }}
-                          disabled={(active && s.name !== "Consultation Fee" && s.name !== "Physio Assign") || viewOnly}
-                          title={viewOnly ? "Set by the Head Physio's own pipeline — view only here" : s.name === "Consultation Fee" && !selectedLead.package_paid ? "Click to collect the fee" : undefined}
+                          disabled={(active && s.name !== "Consultation Fee" && s.name !== "Treatment Fee" && s.name !== "Physio Assign") || viewOnly}
+                          title={viewOnly ? "Set by the Head Physio's own pipeline — view only here" : s.name === "Consultation Fee" && !selectedLead.package_paid ? "Click to collect the fee" : s.name === "Treatment Fee" && !selectedLead.treatment_fee_paid ? "Click to collect the treatment fee" : undefined}
                           className="flex w-full items-center justify-center gap-1 rounded-lg border px-2 py-2 text-center text-[11px] font-semibold leading-tight transition disabled:opacity-100"
                           style={
                             active
@@ -722,9 +770,9 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                       className="h-9 w-full rounded-md border border-slate-200 px-2 text-xs"
                       data-testid="cons-collect-fee-mode"
                     >
-                      <option value="cash">Cash</option>
-                      <option value="upi">UPI</option>
-                      <option value="card">Card</option>
+                      {CONSULTATION_FEE_PAYMENT_MODES.map((m) => (
+                        <option key={m.value} value={m.value}>{m.label}</option>
+                      ))}
                     </select>
                   </div>
                   <Button
@@ -734,6 +782,50 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                     data-testid="cons-collect-fee-submit"
                   >
                     {collectingFee ? "Collecting..." : "Confirm & Move to Treatment Fee"}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Collect Treatment Fee popup (Branch Admin) — Treatment Fee stage, any payment method */}
+            {treatmentFeeDraft && (
+              <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" data-testid="cons-treatment-fee-modal">
+                <div className="w-full max-w-sm space-y-3 rounded-xl bg-white p-4 shadow-2xl">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-semibold text-slate-800">Collect Treatment Fee</p>
+                    <button onClick={() => setTreatmentFeeDraft(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-treatment-fee-close"><X className="h-4 w-4" /></button>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[11px] font-medium text-slate-500">Amount (₹)</label>
+                    <Input
+                      type="number"
+                      min="0"
+                      value={treatmentFeeDraft.paid_amount}
+                      onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, paid_amount: e.target.value })}
+                      className="h-9"
+                      data-testid="cons-treatment-fee-amount"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[11px] font-medium text-slate-500">Payment Mode</label>
+                    <select
+                      value={treatmentFeeDraft.payment_mode}
+                      onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, payment_mode: e.target.value })}
+                      className="h-9 w-full rounded-md border border-slate-200 px-2 text-xs"
+                      data-testid="cons-treatment-fee-mode"
+                    >
+                      {TREATMENT_FEE_PAYMENT_MODES.map((m) => (
+                        <option key={m.value} value={m.value}>{m.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <Button
+                    className="w-full bg-sky-600 hover:bg-sky-700 text-xs"
+                    onClick={submitTreatmentFee}
+                    disabled={collectingTreatmentFee || !treatmentFeeDraft.paid_amount}
+                    data-testid="cons-treatment-fee-submit"
+                  >
+                    {collectingTreatmentFee ? "Collecting..." : "Confirm & Move to Physio Assign"}
                   </Button>
                 </div>
               </div>

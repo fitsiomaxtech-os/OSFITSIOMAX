@@ -219,6 +219,7 @@ export const stagesCreate = async (payload) => (await api.post("/stages", payloa
 export const stagesUpdate = async (id, payload) => (await api.patch(`/stages/${id}`, payload)).data;
 export const stagesDelete = async (id) => (await api.delete(`/stages/${id}`)).data;
 export const stagesReorder = async (items) => (await api.post("/stages/reorder", { items })).data;
+export const resetAllLeads = async () => (await api.post("/admin/reset-all-leads", null, { params: { confirm: true } })).data;
 
 // HR
 export const hrDashboard = async () => (await api.get("/hr/dashboard")).data;
@@ -297,6 +298,7 @@ export const saveLeadDiagnosis = async (leadId, diagnosis) => (await api.post(`/
 export const sellStoreItem = async (leadId, payload) => (await api.post(`/leads/${leadId}/sell-store-item`, payload)).data;
 export const assignPackage = async (leadId, payload) => (await api.post(`/leads/${leadId}/assign-package`, payload)).data;
 export const collectPackagePayment = async (leadId, payload) => (await api.post(`/leads/${leadId}/collect-package-payment`, payload)).data;
+export const collectTreatmentFee = async (leadId, payload) => (await api.post(`/leads/${leadId}/collect-treatment-fee`, payload)).data;
 export const assignConsultationPhysio = async (leadId, physioId) => (await api.post(`/leads/${leadId}/assign-consultation-physio`, { physio_id: physioId })).data;
 
 export const savePhysioDiagnosis = async (leadId, report, locked = false) => (await api.post(`/leads/${leadId}/physio-diagnosis`, { report, locked })).data;
