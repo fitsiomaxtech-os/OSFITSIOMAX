@@ -193,11 +193,16 @@ class AutoSyncToggle(BaseModel):
 
 
 @router.get("/auto-sync/sources")
-async def auto_sync_sources(_: V3UserOut = Depends(v3_require_roles("super_admin", "pre_sales", "business_dev", "marketing_head"))):
-    """Lightweight list of Google Sheets sources with their auto-sync settings + status."""
+async def auto_sync_sources(user: V3UserOut = Depends(v3_require_roles("super_admin", "pre_sales", "business_dev", "marketing_head", "branch_admin"))):
+    """Lightweight list of Google Sheets sources with their auto-sync settings + status.
+    Branch Admin only ever sees sources tagged with their own branch — a source with no
+    branch (or another branch's) isn't theirs to pull."""
     connected = await v3_col("google_sheets_tokens").find_one({"id": TOKEN_DOC_ID}, {"_id": 0, "refresh_token": 1})
+    query = {"source_type": "google_sheets", "is_active": True}
+    if user.role == "branch_admin":
+        query["branch_id"] = user.branch_id
     sources = await v3_col("marketing_sources").find(
-        {"source_type": "google_sheets", "is_active": True},
+        query,
         {"_id": 0},
     ).sort("created_at", -1).to_list(200)
     # Strip out heavy fields we don't need
@@ -375,7 +380,13 @@ async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Di
 
 
 @router.post("/pull/{source_id}")
-async def pull_source(source_id: str, range_: str = Query("A1:Z10000"), _: V3UserOut = Depends(v3_require_roles("super_admin", "pre_sales"))):
+async def pull_source(source_id: str, range_: str = Query("A1:Z10000"), user: V3UserOut = Depends(v3_require_roles("super_admin", "pre_sales", "branch_admin"))):
+    if user.role == "branch_admin":
+        source = await v3_col("marketing_sources").find_one({"id": source_id}, {"_id": 0, "branch_id": 1})
+        if not source:
+            raise HTTPException(status_code=404, detail="Source not found")
+        if not source.get("branch_id") or source["branch_id"] != user.branch_id:
+            raise HTTPException(status_code=403, detail="This sheet source isn't assigned to your branch")
     result = await _internal_pull_source(source_id, range_)
     if result.get("error"):
         err = result["error"]

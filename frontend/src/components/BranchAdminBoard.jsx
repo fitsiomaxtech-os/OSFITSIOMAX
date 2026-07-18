@@ -43,6 +43,7 @@ import { HeadPhysioCalendar } from "@/components/HeadPhysioCalendar";
 import { ConsultationsBoard } from "@/components/ConsultationsBoard";
 import { FinanceBoard } from "@/components/FinanceBoard";
 import { BranchSessionsPanel, FitsiomaxStorePanel } from "@/components/BranchStoreBoard";
+import { PullFromSheetButton } from "@/components/PullFromSheetButton";
 import { PlaceholderPanel } from "@/components/PackagesBoard";
 
 export const BranchAdminBoard = ({ branchId }) => {
@@ -205,6 +206,11 @@ export const BranchAdminBoard = ({ branchId }) => {
               <Input className="pl-9" placeholder="Search patients..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} data-testid="branch-search" />
             </div>
             <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="branch-date-filter" />
+            <PullFromSheetButton
+              onPulled={loadBoard}
+              notConnectedHint="Google Sheets isn't connected yet — ask your Super Admin to connect it."
+              noSourcesHint="No Google Sheet is linked to this branch yet — ask your Super Admin to tag one to this branch in Marketing Board → Lead Sources."
+            />
             {stageFilter && (
               <div className="flex items-center gap-2 text-xs text-slate-600" data-testid="branch-stage-filter-indicator">
                 <span>Showing:</span>

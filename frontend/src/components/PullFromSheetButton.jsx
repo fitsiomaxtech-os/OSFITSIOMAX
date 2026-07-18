@@ -6,12 +6,15 @@ import { gsAutoSyncSources, gsPull } from "@/lib/api";
 
 /**
  * PullFromSheetButton
- * Manually pulls latest leads from ALL connected Google Sheet sources using the
- * same backend function as the "Pull from Sheet" button in Source Connection.
+ * Manually pulls latest leads from connected Google Sheet sources (server-side
+ * scoped to the caller — Branch Admin only ever sees/pulls sources tagged with
+ * their own branch) using the same backend function as the "Pull from Sheet"
+ * button in Source Connection.
  * Props:
  *  - onPulled: () => void  — called after a successful pull, used to refresh leads list
+ *  - notConnectedHint / noSourcesHint: optional override text for the empty-state toasts
  */
-export const PullFromSheetButton = ({ onPulled }) => {
+export const PullFromSheetButton = ({ onPulled, notConnectedHint, noSourcesHint }) => {
   const [busy, setBusy] = useState(false);
 
   const pullAll = async () => {
@@ -19,12 +22,12 @@ export const PullFromSheetButton = ({ onPulled }) => {
     try {
       const status = await gsAutoSyncSources();
       if (!status.connected) {
-        toast.error("Google Sheets not connected. Connect from Marketing Board → Lead Sources first.");
+        toast.error(notConnectedHint || "Google Sheets not connected. Connect from Marketing Board → Lead Sources first.");
         return;
       }
       const sources = (status.sources || []).filter((s) => s.spreadsheet_id);
       if (sources.length === 0) {
-        toast.error("No Google Sheet sources configured yet.");
+        toast.error(noSourcesHint || "No Google Sheet sources configured yet.");
         return;
       }
       let totalImported = 0;
