@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { StageTabBar } from "@/components/ui/stage-tab";
+import { DateFilterPopover } from "@/components/DateFilterPopover";
 import {
   getConsultationsBoard, moveConsultationStage, moveHeadConsultationStage, listStoreItems,
   assignPackage, collectPackagePayment, collectTreatmentFee, savePhysioDiagnosis, unlockPhysioDiagnosis,
@@ -42,6 +43,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
   const [board, setBoard] = useState({ leads: [], stage_counts: {} });
   const [stages, setStages] = useState([]); // dynamic Consultation Stages, from Super Admin > Pipeline Stage Management
   const [stageFilter, setStageFilter] = useState(null);
+  const [dateFilter, setDateFilter] = useState(null); // { from, to, label, key } | null — filters by appointment date
   const [search, setSearch] = useState("");
   const [selectedLead, setSelectedLead] = useState(null);
   const [detailTab, setDetailTab] = useState("overview");
@@ -119,12 +121,24 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
   const filtered = useMemo(() => {
     let rows = board.leads || [];
     if (stageFilter) rows = rows.filter((l) => l[stageField] === stageFilter);
+    if (dateFilter) {
+      const from = dateFilter.from?.getTime();
+      const to = dateFilter.to?.getTime();
+      rows = rows.filter((l) => {
+        if (!l.appointment_date) return false;
+        const ts = new Date(`${l.appointment_date}T00:00:00`).getTime();
+        if (!ts) return false;
+        if (from && ts < from) return false;
+        if (to && ts > to) return false;
+        return true;
+      });
+    }
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       rows = rows.filter((l) => `${l.name || ""} ${l.phone || ""}`.toLowerCase().includes(q));
     }
     return rows;
-  }, [board.leads, stageFilter, search, stageField]);
+  }, [board.leads, stageFilter, dateFilter, search, stageField]);
 
   // Stage counts for the head bar — derived client-side from the current lead list so they
   // always match whichever pipeline (branch vs. head physio) is active for this viewer.
@@ -462,6 +476,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
           className="h-8 border-0 p-0 focus-visible:ring-0"
           data-testid="cons-search"
         />
+        <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="cons-date-filter" />
         <Button
           onClick={load}
           disabled={loading}
