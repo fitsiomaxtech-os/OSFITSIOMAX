@@ -81,23 +81,16 @@ export const DateFilterPopover = ({ value, onChange, testid = "date-filter" }) =
   const isActive = !!value;
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <div className="inline-flex items-center">
+      <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
           variant="outline"
-          className={`h-10 ${isActive ? "border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100" : ""}`}
+          className={`h-10 ${isActive ? "rounded-r-none border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100" : ""}`}
           data-testid={`${testid}-btn`}
         >
           <CalendarIcon className="mr-2 h-4 w-4" />
           {activeLabel}
-          {isActive && (
-            <X
-              role="button"
-              className="ml-2 h-3.5 w-3.5 rounded-full hover:bg-sky-200"
-              onClick={(e) => { e.stopPropagation(); clear(); }}
-              data-testid={`${testid}-clear-x`}
-            />
-          )}
         </Button>
       </PopoverTrigger>
       <PopoverContent className="relative w-auto p-0" align="start" data-testid={`${testid}-panel`}>
@@ -171,6 +164,19 @@ export const DateFilterPopover = ({ value, onChange, testid = "date-filter" }) =
           )}
         </div>
       </PopoverContent>
-    </Popover>
+      </Popover>
+      {isActive && (
+        <button
+          type="button"
+          onClick={clear}
+          className="flex h-10 items-center rounded-r-md border border-l-0 border-sky-300 bg-sky-50 px-2 text-sky-700 hover:bg-sky-100"
+          title="Clear date filter"
+          aria-label="Clear date filter"
+          data-testid={`${testid}-clear-x`}
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </div>
   );
 };
