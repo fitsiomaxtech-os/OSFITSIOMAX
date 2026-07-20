@@ -231,21 +231,36 @@ export const BranchAdminBoard = ({ branchId }) => {
             <table className="w-full table-fixed divide-y divide-slate-200 text-sm">
               <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                 <tr>
-                  <th className="w-[22%] px-4 py-3">Patient</th>
-                  <th className="w-[14%] px-4 py-3">Phone</th>
-                  <th className="w-[22%] px-4 py-3">Email</th>
-                  <th className="w-[16%] px-4 py-3">Stage</th>
-                  <th className="w-[16%] px-4 py-3">Assigned Physio</th>
-                  <th className="w-[10%] px-4 py-3 text-right">Updated</th>
+                  {/* New Leads haven't had a physio assigned yet, so that column is dropped
+                      only for this stage filter — every other view keeps it. */}
+                  {stageFilter === "New Leads" ? (
+                    <>
+                      <th className="w-[26%] px-4 py-3">Patient</th>
+                      <th className="w-[16%] px-4 py-3">Phone</th>
+                      <th className="w-[26%] px-4 py-3">Email</th>
+                      <th className="w-[20%] px-4 py-3">Stage</th>
+                      <th className="w-[12%] px-4 py-3 text-right">Updated</th>
+                    </>
+                  ) : (
+                    <>
+                      <th className="w-[22%] px-4 py-3">Patient</th>
+                      <th className="w-[14%] px-4 py-3">Phone</th>
+                      <th className="w-[22%] px-4 py-3">Email</th>
+                      <th className="w-[16%] px-4 py-3">Stage</th>
+                      <th className="w-[16%] px-4 py-3">Assigned Physio</th>
+                      <th className="w-[10%] px-4 py-3 text-right">Updated</th>
+                    </>
+                  )}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {(() => {
                   const visible = (stageFilter ? filteredLeads.filter((l) => l.branch_stage === stageFilter) : filteredLeads);
+                  const showAssignedPhysio = stageFilter !== "New Leads";
                   if (visible.length === 0) {
                     return (
                       <tr>
-                        <td colSpan={6} className="px-4 py-10 text-center text-sm text-slate-400" data-testid="branch-list-empty">
+                        <td colSpan={showAssignedPhysio ? 6 : 5} className="px-4 py-10 text-center text-sm text-slate-400" data-testid="branch-list-empty">
                           No patients {stageFilter ? `in stage "${stageFilter}"` : "yet"}.
                         </td>
                       </tr>
@@ -278,7 +293,9 @@ export const BranchAdminBoard = ({ branchId }) => {
                             {lead.branch_stage || "—"}
                           </span>
                         </td>
-                        <td className="truncate px-4 py-3 text-slate-600" title={lead.assigned_physio_name}>{lead.assigned_physio_name || <span className="text-slate-400">—</span>}</td>
+                        {showAssignedPhysio && (
+                          <td className="truncate px-4 py-3 text-slate-600" title={lead.assigned_physio_name}>{lead.assigned_physio_name || <span className="text-slate-400">—</span>}</td>
+                        )}
                         <td className="px-4 py-3 text-right text-xs text-slate-400">{(lead.updated_at || "").slice(0, 10)}</td>
                       </tr>
                     );
