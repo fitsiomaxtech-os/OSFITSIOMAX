@@ -11,6 +11,7 @@ import {
   saveTreatmentSummary, unlockTreatmentSummary, stagesList, getDoctors,
   assignConsultationPhysio,
   scheduleConsultationFollowUp, rescheduleConsultationFollowUp,
+  getLeadRemarks, getLeadActivity,
 } from "@/lib/api";
 
 const CONSULTATION_FEE_PAYMENT_MODES = [
@@ -44,6 +45,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
   const [search, setSearch] = useState("");
   const [selectedLead, setSelectedLead] = useState(null);
   const [detailTab, setDetailTab] = useState("overview");
+  const [timelineRemarks, setTimelineRemarks] = useState([]);
+  const [timelineActivity, setTimelineActivity] = useState([]);
   const [storeItems, setStoreItems] = useState([]);
   const [followUpDraft, setFollowUpDraft] = useState(null); // { date, time, remarks } | null
   const [rescheduleDraft, setRescheduleDraft] = useState(null); // { followupId, date, time, reason } | null
@@ -154,6 +157,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
     setCollectFeeDraft(null);
     setTreatmentFeeDraft(null);
   }, [selectedLead?.id]);
+
+  useEffect(() => {
+    if (!selectedLead?.id || detailTab !== "timeline") return;
+    getLeadRemarks(selectedLead.id).then(setTimelineRemarks).catch(() => setTimelineRemarks([]));
+    getLeadActivity(selectedLead.id).then(setTimelineActivity).catch(() => setTimelineActivity([]));
+  }, [selectedLead?.id, detailTab]);
 
   const sessionItems = storeItems.filter((i) => i.item_type === "consultation");
   // Session packages (weeks/session-count items) — chosen separately at the Treatment
@@ -535,8 +544,9 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
             <div className="flex flex-wrap gap-1.5 border-b border-slate-100 pb-3" data-testid="cons-detail-tabs">
               {[
                 { key: "overview", label: "Overview" },
-                { key: "followup", label: "Follow-up History" },
-                { key: "profile", label: "Lead Profile" },
+                { key: "followup", label: "Follow up" },
+                { key: "timeline", label: "Timeline" },
+                { key: "profile", label: "Profile" },
               ].map((t) => (
                 <button
                   key={t.key}
@@ -803,6 +813,31 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                     );
                   })
                 )}
+              </div>
+            )}
+
+            {detailTab === "timeline" && (
+              <div className="space-y-3" data-testid="cons-lead-timeline">
+                {(() => {
+                  const events = [
+                    ...timelineRemarks.map((r) => ({ ...r, _kind: "remark" })),
+                    ...timelineActivity.map((a) => ({ ...a, _kind: "activity" })),
+                  ].sort((x, y) => new Date(x.created_at) - new Date(y.created_at));
+                  if (events.length === 0) return <p className="py-8 text-center text-sm text-slate-400">No timeline events yet</p>;
+                  return (
+                    <ol className="ml-3 space-y-4 border-l-2 border-slate-200 py-1 pl-6">
+                      {events.map((h) => (
+                        <li key={`${h._kind}-${h.id}`} className="relative" data-testid={`cons-timeline-${h._kind}-${h.id}`}>
+                          <span className={`absolute -left-[27px] top-1 h-3 w-3 rounded-full border-2 border-white ${h._kind === "remark" ? "bg-amber-400" : "bg-sky-500"}`} />
+                          <div className={`rounded-lg border p-3 ${h._kind === "remark" ? "border-amber-100 bg-amber-50/50" : "border-slate-100 bg-slate-50"}`}>
+                            <p className="text-sm text-slate-700">{h._kind === "remark" ? h.text : h.details}</p>
+                            <p className="mt-1 text-[10px] text-slate-400">{h.created_by} · {h.created_at?.slice(0, 16).replace("T", " ")}</p>
+                          </div>
+                        </li>
+                      ))}
+                    </ol>
+                  );
+                })()}
               </div>
             )}
 
