@@ -477,16 +477,16 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
       {/* Table */}
       <Card className="overflow-hidden border-slate-200">
         <CardContent className="p-0">
-          <table className="w-full text-sm">
+          <table className="w-full table-fixed text-sm">
             <thead className="bg-slate-50 text-xs uppercase text-slate-500">
               <tr>
-                <th className="px-4 py-2 text-left">Patient</th>
-                <th className="px-4 py-2 text-left">Phone</th>
-                <th className="px-4 py-2 text-left">Email</th>
-                <th className="px-4 py-2 text-left">{isConsultant ? "Head Consultation Stage" : "Consultation Stage"}</th>
-                <th className="px-4 py-2 text-left">Assigned Expert</th>
-                <th className="px-4 py-2 text-left">Appointment</th>
-                <th className="px-4 py-2 text-left">Updated</th>
+                <th className="w-[18%] px-4 py-2 text-left">Patient</th>
+                <th className="w-[13%] px-4 py-2 text-left">Phone</th>
+                <th className="w-[20%] px-4 py-2 text-left">Email</th>
+                <th className="w-[15%] px-4 py-2 text-left">{isConsultant ? "Head Consultation Stage" : "Consultation Stage"}</th>
+                <th className="w-[15%] px-4 py-2 text-left">Assigned Expert</th>
+                <th className="w-[11%] px-4 py-2 text-left">Appointment</th>
+                <th className="w-[8%] px-4 py-2 text-left">Updated</th>
               </tr>
             </thead>
             <tbody>
@@ -494,9 +494,9 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                 const hex = stageColor(l[stageField]);
                 return (
                   <tr key={l.id} onClick={() => { setSelectedLead(l); setDetailTab("overview"); }} className="cursor-pointer border-t border-slate-100 hover:bg-slate-50" data-testid={`cons-row-${l.id}`}>
-                    <td className="px-4 py-3 font-medium text-slate-800">{l.name || "—"}</td>
-                    <td className="px-4 py-3 text-slate-600">{l.phone || "—"}</td>
-                    <td className="px-4 py-3 text-slate-600">{l.email || "—"}</td>
+                    <td className="truncate px-4 py-3 font-medium text-slate-800" title={l.name}>{l.name || "—"}</td>
+                    <td className="truncate px-4 py-3 text-slate-600" title={l.phone}>{l.phone || "—"}</td>
+                    <td className="truncate px-4 py-3 text-slate-600" title={l.email}>{l.email || "—"}</td>
                     <td className="px-4 py-3">
                       <span
                         className="inline-flex items-center gap-1 rounded-[5px] px-2 py-0.5 text-xs font-semibold"
@@ -505,7 +505,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                         {l[stageField] || "—"}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-slate-600">{l.assigned_physio_name || "—"}</td>
+                    <td className="truncate px-4 py-3 text-slate-600" title={l.assigned_physio_name}>{l.assigned_physio_name || "—"}</td>
                     <td className="px-4 py-3 text-xs text-slate-500">{l.appointment_date ? `${l.appointment_date} ${l.appointment_time || ""}` : "—"}</td>
                     <td className="px-4 py-3 text-xs text-slate-400">{(l.updated_at || "").slice(0, 10)}</td>
                   </tr>
