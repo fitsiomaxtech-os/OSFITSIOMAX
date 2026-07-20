@@ -226,16 +226,16 @@ export const BranchAdminBoard = ({ branchId }) => {
 
           {/* List View (table) */}
           <div className="rounded-lg border border-slate-200 bg-white" data-testid="branch-list">
-            <table className="min-w-full divide-y divide-slate-200 text-sm">
+            <table className="min-w-full table-fixed divide-y divide-slate-200 text-sm">
               <thead className="sticky top-[89px] z-10 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                 <tr>
-                  <th className="px-4 py-3">Patient</th>
-                  <th className="px-4 py-3">Phone</th>
-                  <th className="px-4 py-3">Email</th>
-                  <th className="px-4 py-3">Stage</th>
-                  <th className="px-4 py-3">Assigned Physio</th>
-                  <th className="px-4 py-3 text-right">Fee / Package</th>
-                  <th className="px-4 py-3 text-right">Updated</th>
+                  <th className="w-[20%] px-4 py-3">Patient</th>
+                  <th className="w-[13%] px-4 py-3">Phone</th>
+                  <th className="w-[20%] px-4 py-3">Email</th>
+                  <th className="w-[15%] px-4 py-3">Stage</th>
+                  <th className="w-[14%] px-4 py-3">Assigned Physio</th>
+                  <th className="w-[10%] px-4 py-3 text-right">Fee / Package</th>
+                  <th className="w-[8%] px-4 py-3 text-right">Updated</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -264,11 +264,11 @@ export const BranchAdminBoard = ({ branchId }) => {
                             <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-violet-100 text-xs font-bold text-violet-700">
                               {lead.name?.charAt(0)?.toUpperCase() || "?"}
                             </div>
-                            <span className="font-medium text-slate-800">{lead.name}</span>
+                            <span className="truncate font-medium text-slate-800" title={lead.name}>{lead.name}</span>
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-slate-600">{lead.phone || "—"}</td>
-                        <td className="px-4 py-3 text-slate-600">{lead.email || "—"}</td>
+                        <td className="truncate px-4 py-3 text-slate-600" title={lead.phone}>{lead.phone || "—"}</td>
+                        <td className="truncate px-4 py-3 text-slate-600" title={lead.email}>{lead.email || "—"}</td>
                         <td className="px-4 py-3">
                           <span
                             className="inline-flex items-center rounded-[5px] border px-2.5 py-0.5 text-xs font-medium"
@@ -277,7 +277,7 @@ export const BranchAdminBoard = ({ branchId }) => {
                             {lead.branch_stage || "—"}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-slate-600">{lead.assigned_physio_name || <span className="text-slate-400">—</span>}</td>
+                        <td className="truncate px-4 py-3 text-slate-600" title={lead.assigned_physio_name}>{lead.assigned_physio_name || <span className="text-slate-400">—</span>}</td>
                         <td className="px-4 py-3 text-right">
                           {(lead.consultation_fee || lead.package_amount) ? (
                             <div className="flex flex-wrap justify-end gap-1">
