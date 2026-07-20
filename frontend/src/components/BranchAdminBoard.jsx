@@ -78,6 +78,11 @@ export const BranchAdminBoard = ({ branchId }) => {
     [stages],
   );
 
+  // The entry stage of Branch's own pipeline ("New Leads" by default, but Super Admin can
+  // rename it) — read structurally off position 0 rather than hardcoding the label, since
+  // Pipeline Stage Management lets it be renamed at any time.
+  const firstStageName = stages[0]?.name;
+
   const filteredLeads = useMemo(() => {
     let list = boardData.leads;
     if (dateFilter) {
@@ -233,7 +238,7 @@ export const BranchAdminBoard = ({ branchId }) => {
                 <tr>
                   {/* New Leads haven't had a physio assigned yet, so that column is dropped
                       only for this stage filter — every other view keeps it. */}
-                  {stageFilter === "New Leads" ? (
+                  {stageFilter === firstStageName ? (
                     <>
                       <th className="w-[26%] px-4 py-3">Patient</th>
                       <th className="w-[16%] px-4 py-3">Phone</th>
@@ -256,7 +261,7 @@ export const BranchAdminBoard = ({ branchId }) => {
               <tbody className="divide-y divide-slate-100">
                 {(() => {
                   const visible = (stageFilter ? filteredLeads.filter((l) => l.branch_stage === stageFilter) : filteredLeads);
-                  const showAssignedPhysio = stageFilter !== "New Leads";
+                  const showAssignedPhysio = stageFilter !== firstStageName;
                   if (visible.length === 0) {
                     return (
                       <tr>
