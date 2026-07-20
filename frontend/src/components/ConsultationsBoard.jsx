@@ -455,7 +455,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                     <td className="px-4 py-3 text-slate-600">{l.phone || "—"}</td>
                     <td className="px-4 py-3">
                       <span
-                        className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold"
+                        className="inline-flex items-center gap-1 rounded-[5px] px-2 py-0.5 text-xs font-semibold"
                         style={{ background: `${hex}14`, color: hex, border: `1px solid ${hex}33` }}
                       >
                         {l[stageField] || "—"}
