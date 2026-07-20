@@ -468,7 +468,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved })
               <div>
                 <p className="text-base font-semibold leading-tight" data-testid="branch-lead-name">{lead.name}</p>
                 <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                  <span className="rounded-full bg-white/95 px-2.5 py-0.5 text-[11px] font-semibold text-slate-700" data-testid="branch-lead-stage">
+                  <span className="rounded-[5px] bg-white/95 px-2.5 py-0.5 text-[11px] font-semibold text-slate-700" data-testid="branch-lead-stage">
                     {lead.branch_stage || "No Stage"}
                   </span>
                   {lead.consultation_fee && <span className="rounded-full bg-teal-100/95 px-2 py-0.5 text-[10px] font-semibold text-teal-800">Fee Rs.{lead.consultation_fee}</span>}
@@ -488,7 +488,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved })
             <button
               key={t.key}
               onClick={() => setActiveTab(t.key)}
-              className={`rounded-full px-3.5 py-1 text-xs font-semibold capitalize transition-all ${activeTab === t.key ? `${t.color} text-white shadow-sm` : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"}`}
+              className={`rounded-[5px] px-3.5 py-1 text-xs font-semibold capitalize transition-all ${activeTab === t.key ? `${t.color} text-white shadow-sm` : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"}`}
               data-testid={`branch-lead-tab-${t.key}`}
             >
               {t.label}
