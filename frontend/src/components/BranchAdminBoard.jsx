@@ -381,7 +381,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved })
   }, [apptDraft?.appointment_date, branchId, fetchAvailableExperts]);
 
   useEffect(() => {
-    if (activeTab === "history") { loadRemarks(); loadActivity(); }
+    if (activeTab === "history" || activeTab === "timeline") { loadRemarks(); loadActivity(); }
   }, [activeTab, lead.id]);
 
   const loadRemarks = async () => {
@@ -468,7 +468,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved })
     { key: "overview", label: "Overview", color: "bg-sky-500" },
     { key: "history", label: "History", color: "bg-violet-500" },
     { key: "follow-up", label: "Follow-Up", color: "bg-amber-500" },
-    { key: "portfolio", label: "Portfolio", color: "bg-emerald-500" },
+    { key: "timeline", label: "Timeline", color: "bg-emerald-500" },
   ];
 
   const avatarFirstChar = (lead.name?.trim()?.charAt(0) || "?").toUpperCase();
@@ -722,9 +722,28 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved })
             </div>
           )}
 
-          {activeTab === "portfolio" && (
-            <div className="flex min-h-[200px] items-center justify-center" data-testid="branch-lead-portfolio">
-              <p className="text-sm text-slate-400">Portfolio — coming soon</p>
+          {activeTab === "timeline" && (
+            <div className="space-y-3" data-testid="branch-lead-timeline">
+              {(() => {
+                const events = [
+                  ...remarks.map((r) => ({ ...r, _kind: "remark" })),
+                  ...activityLog.map((a) => ({ ...a, _kind: "activity" })),
+                ].sort((x, y) => new Date(x.created_at) - new Date(y.created_at));
+                if (events.length === 0) return <p className="py-8 text-center text-sm text-slate-400">No timeline events yet</p>;
+                return (
+                  <ol className="ml-3 space-y-4 border-l-2 border-slate-200 py-1 pl-6">
+                    {events.map((h) => (
+                      <li key={`${h._kind}-${h.id}`} className="relative" data-testid={`branch-timeline-${h._kind}-${h.id}`}>
+                        <span className={`absolute -left-[27px] top-1 h-3 w-3 rounded-full border-2 border-white ${h._kind === "remark" ? "bg-amber-400" : "bg-sky-500"}`} />
+                        <div className={`rounded-lg border p-3 ${h._kind === "remark" ? "border-amber-100 bg-amber-50/50" : "border-slate-100 bg-slate-50"}`}>
+                          <p className="text-sm text-slate-700">{h._kind === "remark" ? h.text : h.details}</p>
+                          <p className="mt-1 text-[10px] text-slate-400">{h.created_by} · {h.created_at?.slice(0, 16).replace("T", " ")}</p>
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                );
+              })()}
             </div>
           )}
         </div>
