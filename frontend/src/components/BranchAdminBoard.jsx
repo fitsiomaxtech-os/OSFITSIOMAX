@@ -808,7 +808,6 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate }) {
                     toast.success(`Appointment ${apptDraft.appointment_date} ${apptDraft.appointment_time} → ${apptDraft.final_stage}`);
                     setApptDraft(null);
                     await onUpdate();
-                    onClose && onClose();
                   } catch (e) { toast.error(e?.response?.data?.detail || "Failed to schedule"); }
                 }}
                 data-testid="branch-appt-save"
