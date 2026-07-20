@@ -462,7 +462,14 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
           className="h-8 border-0 p-0 focus-visible:ring-0"
           data-testid="cons-search"
         />
-        <Button variant="outline" size="sm" onClick={load} disabled={loading} data-testid="cons-refresh">
+        <Button
+          onClick={load}
+          disabled={loading}
+          title="Refresh"
+          aria-label="Refresh"
+          className="h-8 w-8 shrink-0 border-emerald-600 bg-emerald-600 p-0 text-white hover:bg-emerald-700"
+          data-testid="cons-refresh"
+        >
           <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
         </Button>
       </div>
