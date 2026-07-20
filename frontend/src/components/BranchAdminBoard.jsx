@@ -318,6 +318,10 @@ export const BranchAdminBoard = ({ branchId }) => {
           stages={stages}
           onClose={() => setSelectedLead(null)}
           onUpdate={handleStageUpdate}
+          onMoved={(stage) => {
+            setStageFilter(stage);
+            setSelectedLead(null);
+          }}
         />
       )}
         </>
@@ -331,7 +335,7 @@ export const BranchAdminBoard = ({ branchId }) => {
 };
 
 /* ─── Branch Lead Detail Modal ─── */
-function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate }) {
+function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved }) {
   const [activeTab, setActiveTab] = useState("overview");
   const [remarks, setRemarks] = useState([]);
   const [newRemark, setNewRemark] = useState("");
@@ -389,9 +393,10 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate }) {
 
   const moveStage = async (stage) => {
     try {
-      const updated = await moveBranchStage(lead.id, { branch_stage: stage });
+      await moveBranchStage(lead.id, { branch_stage: stage });
       toast.success(`Moved to ${stage}`);
       await onUpdate();
+      onMoved && onMoved(stage);
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Move failed");
     }
@@ -451,6 +456,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate }) {
       toast.success("Moved to Follow Up");
       setFollowUpMoveDraft(null);
       await onUpdate();
+      onMoved && onMoved("Follow Up");
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed to schedule");
     } finally {
@@ -808,6 +814,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate }) {
                     toast.success(`Appointment ${apptDraft.appointment_date} ${apptDraft.appointment_time} → ${apptDraft.final_stage}`);
                     setApptDraft(null);
                     await onUpdate();
+                    onMoved && onMoved(apptDraft.final_stage);
                   } catch (e) { toast.error(e?.response?.data?.detail || "Failed to schedule"); }
                 }}
                 data-testid="branch-appt-save"
