@@ -212,6 +212,7 @@ export const BranchAdminBoard = ({ branchId }) => {
               onPulled={loadBoard}
               notConnectedHint="Google Sheets isn't connected yet — ask your Super Admin to connect it."
               noSourcesHint="No Google Sheet is linked to this branch yet — ask your Super Admin to tag one to this branch in Marketing Board → Lead Sources."
+              iconOnly
             />
             {stageFilter && (
               <div className="flex items-center gap-2 text-xs text-slate-600" data-testid="branch-stage-filter-indicator">

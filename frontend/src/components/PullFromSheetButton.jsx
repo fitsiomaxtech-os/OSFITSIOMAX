@@ -13,8 +13,9 @@ import { gsAutoSyncSources, gsPull } from "@/lib/api";
  * Props:
  *  - onPulled: () => void  — called after a successful pull, used to refresh leads list
  *  - notConnectedHint / noSourcesHint: optional override text for the empty-state toasts
+ *  - iconOnly: renders just the spinning-refresh icon, no label — same action, more compact
  */
-export const PullFromSheetButton = ({ onPulled, notConnectedHint, noSourcesHint }) => {
+export const PullFromSheetButton = ({ onPulled, notConnectedHint, noSourcesHint, iconOnly }) => {
   const [busy, setBusy] = useState(false);
 
   const pullAll = async () => {
@@ -62,6 +63,21 @@ export const PullFromSheetButton = ({ onPulled, notConnectedHint, noSourcesHint 
     }
     setBusy(false);
   };
+
+  if (iconOnly) {
+    return (
+      <Button
+        onClick={pullAll}
+        disabled={busy}
+        title="Pull from Sheet"
+        aria-label="Pull from Sheet"
+        className="h-10 w-10 border-emerald-600 bg-emerald-600 p-0 text-white hover:bg-emerald-700"
+        data-testid="presales-pull-from-sheet-btn"
+      >
+        <RefreshCw className={`h-4 w-4 ${busy ? "animate-spin" : ""}`} />
+      </Button>
+    );
+  }
 
   return (
     <Button
