@@ -18,7 +18,6 @@ import {
   ShoppingCart,
   ClipboardList,
   Bell,
-  MessageSquare,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -27,7 +26,6 @@ import { toast } from "@/components/ui/sonner";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { StageTabBar } from "@/components/ui/stage-tab";
 import {
-  addLeadRemark,
   scheduleBranchAppointment,
   getBranchBoard,
   getAvailableExperts,
@@ -338,7 +336,6 @@ export const BranchAdminBoard = ({ branchId }) => {
 function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved }) {
   const [activeTab, setActiveTab] = useState("overview");
   const [remarks, setRemarks] = useState([]);
-  const [newRemark, setNewRemark] = useState("");
   const [activityLog, setActivityLog] = useState([]);
 
   const [apptDraft, setApptDraft] = useState(null); // { appointment_date, appointment_time, physio_id, notes, final_stage } | null
@@ -381,7 +378,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved })
   }, [apptDraft?.appointment_date, branchId, fetchAvailableExperts]);
 
   useEffect(() => {
-    if (activeTab === "history" || activeTab === "timeline") { loadRemarks(); loadActivity(); }
+    if (activeTab === "timeline") { loadRemarks(); loadActivity(); }
   }, [activeTab, lead.id]);
 
   const loadRemarks = async () => {
@@ -399,18 +396,6 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved })
       onMoved && onMoved(stage);
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Move failed");
-    }
-  };
-
-  const addRemarkNow = async () => {
-    if (!newRemark.trim()) return;
-    try {
-      await addLeadRemark(lead.id, { text: newRemark });
-      setNewRemark("");
-      toast.success("Remark added");
-      await loadRemarks();
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || "Failed");
     }
   };
 
@@ -466,7 +451,6 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved })
 
   const TABS = [
     { key: "overview", label: "Overview", color: "bg-sky-500" },
-    { key: "history", label: "History", color: "bg-violet-500" },
     { key: "follow-up", label: "Follow-Up", color: "bg-amber-500" },
     { key: "timeline", label: "Timeline", color: "bg-emerald-500" },
   ];
@@ -610,37 +594,6 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved })
                   })}
                 </div>
               </div>
-            </div>
-          )}
-
-          {activeTab === "history" && (
-            <div className="space-y-3" data-testid="branch-lead-history">
-              <div className="flex gap-2">
-                <Input value={newRemark} onChange={(e) => setNewRemark(e.target.value)} placeholder="Add a remark..." className="flex-1" data-testid="branch-remark-input" />
-                <Button size="sm" onClick={addRemarkNow} className="bg-sky-600 text-white hover:bg-sky-700" data-testid="branch-remark-submit">Add</Button>
-              </div>
-              {(() => {
-                const combined = [
-                  ...remarks.map((r) => ({ ...r, _kind: "remark" })),
-                  ...activityLog.map((a) => ({ ...a, _kind: "activity" })),
-                ].sort((x, y) => new Date(y.created_at) - new Date(x.created_at));
-                if (combined.length === 0) return <p className="py-4 text-center text-sm text-slate-400">No history yet</p>;
-                return combined.map((h) => (
-                  <div
-                    key={`${h._kind}-${h.id}`}
-                    className={`flex items-start gap-2 rounded-lg border p-3 ${h._kind === "remark" ? "border-amber-100 bg-amber-50/50" : "border-slate-100 bg-slate-50"}`}
-                    data-testid={`branch-history-${h._kind}-${h.id}`}
-                  >
-                    <div className={`mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full ${h._kind === "remark" ? "bg-amber-100" : "bg-sky-100"}`}>
-                      {h._kind === "remark" ? <MessageSquare className="h-3 w-3 text-amber-600" /> : <Activity className="h-3 w-3 text-sky-600" />}
-                    </div>
-                    <div>
-                      <p className="text-sm text-slate-700">{h._kind === "remark" ? h.text : h.details}</p>
-                      <p className="mt-1 text-[10px] text-slate-400">{h.created_by} · {h.created_at?.slice(0, 16).replace("T", " ")}</p>
-                    </div>
-                  </div>
-                ));
-              })()}
             </div>
           )}
 
