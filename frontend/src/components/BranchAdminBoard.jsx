@@ -225,9 +225,9 @@ export const BranchAdminBoard = ({ branchId }) => {
           </div>
 
           {/* List View (table) */}
-          <div className="overflow-hidden rounded-lg border border-slate-200 bg-white" data-testid="branch-list">
+          <div className="rounded-lg border border-slate-200 bg-white" data-testid="branch-list">
             <table className="min-w-full divide-y divide-slate-200 text-sm">
-              <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <thead className="sticky top-[89px] z-10 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                 <tr>
                   <th className="px-4 py-3">Patient</th>
                   <th className="px-4 py-3">Phone</th>
@@ -269,7 +269,7 @@ export const BranchAdminBoard = ({ branchId }) => {
                         <td className="px-4 py-3 text-slate-600">{lead.phone || "—"}</td>
                         <td className="px-4 py-3">
                           <span
-                            className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium"
+                            className="inline-flex items-center rounded-[5px] border px-2.5 py-0.5 text-xs font-medium"
                             style={rowStageHex ? { background: `${rowStageHex}14`, color: rowStageHex, border: `1px solid ${rowStageHex}33` } : { background: "#f1f5f9", color: "#475569", border: "1px solid #e2e8f0" }}
                           >
                             {lead.branch_stage || "—"}
