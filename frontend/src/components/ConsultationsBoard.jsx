@@ -482,6 +482,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
               <tr>
                 <th className="px-4 py-2 text-left">Patient</th>
                 <th className="px-4 py-2 text-left">Phone</th>
+                <th className="px-4 py-2 text-left">Email</th>
                 <th className="px-4 py-2 text-left">{isConsultant ? "Head Consultation Stage" : "Consultation Stage"}</th>
                 <th className="px-4 py-2 text-left">Assigned Expert</th>
                 <th className="px-4 py-2 text-left">Appointment</th>
@@ -495,6 +496,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                   <tr key={l.id} onClick={() => { setSelectedLead(l); setDetailTab("overview"); }} className="cursor-pointer border-t border-slate-100 hover:bg-slate-50" data-testid={`cons-row-${l.id}`}>
                     <td className="px-4 py-3 font-medium text-slate-800">{l.name || "—"}</td>
                     <td className="px-4 py-3 text-slate-600">{l.phone || "—"}</td>
+                    <td className="px-4 py-3 text-slate-600">{l.email || "—"}</td>
                     <td className="px-4 py-3">
                       <span
                         className="inline-flex items-center gap-1 rounded-[5px] px-2 py-0.5 text-xs font-semibold"
@@ -510,7 +512,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                 );
               })}
               {filtered.length === 0 && (
-                <tr><td colSpan="6" className="px-4 py-8 text-center text-sm text-slate-400">
+                <tr><td colSpan="7" className="px-4 py-8 text-center text-sm text-slate-400">
                   {loading ? "Loading…" : "No leads in consultations yet. Book an appointment with a Head Physio to populate this list."}
                 </td></tr>
               )}
