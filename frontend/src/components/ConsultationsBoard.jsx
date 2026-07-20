@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Calendar, CheckCircle2, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -54,11 +54,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
   const [physioDiagDraft, setPhysioDiagDraft] = useState("");
   const [physioDiagEditing, setPhysioDiagEditing] = useState(false);
   const [savingPhysioDiag, setSavingPhysioDiag] = useState(false);
+  const physioDiagDebounceRef = useRef(null);
 
   // Head Physio's treatment plan summary
   const [treatmentDraft, setTreatmentDraft] = useState("");
   const [treatmentEditing, setTreatmentEditing] = useState(false);
   const [savingTreatment, setSavingTreatment] = useState(false);
+  const treatmentDebounceRef = useRef(null);
 
   // Consultation package picker (Head Physio only) — an inline section in the popup,
   // not a separate modal. showSessionModal just toggles picker vs. summary view.
@@ -188,18 +190,30 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
   };
 
   // ---- Head Physio's diagnosis report (separate from Pre-Sales' read-only diagnosis) ----
-  const savePhysioDiag = async (lock) => {
-    if (!physioDiagDraft.trim()) { toast.error("Enter a diagnosis report"); return; }
+  // Auto-saves (debounced, silent — no toast) while typing; never re-locks a record, so
+  // once opened for editing it just keeps saving in place until "Done" is clicked.
+  const autoSavePhysioDiag = async (text) => {
+    if (!text.trim()) return;
     setSavingPhysioDiag(true);
     try {
-      const updated = await savePhysioDiagnosis(selectedLead.id, physioDiagDraft.trim(), lock);
+      const updated = await savePhysioDiagnosis(selectedLead.id, text.trim(), false);
       applyUpdatedLead(updated);
-      setPhysioDiagEditing(!lock);
-      toast.success(lock ? "Diagnosis report saved & locked" : "Diagnosis report saved");
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed to save diagnosis report");
     }
     setSavingPhysioDiag(false);
+  };
+
+  const handlePhysioDiagChange = (text) => {
+    setPhysioDiagDraft(text);
+    if (physioDiagDebounceRef.current) clearTimeout(physioDiagDebounceRef.current);
+    physioDiagDebounceRef.current = setTimeout(() => autoSavePhysioDiag(text), 800);
+  };
+
+  const finishPhysioDiagEdit = () => {
+    if (physioDiagDebounceRef.current) { clearTimeout(physioDiagDebounceRef.current); physioDiagDebounceRef.current = null; }
+    if (physioDiagDraft.trim()) autoSavePhysioDiag(physioDiagDraft);
+    setPhysioDiagEditing(false);
   };
 
   const unlockPhysioDiag = async () => {
@@ -213,18 +227,28 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
   };
 
   // ---- Head Physio's treatment summary ----
-  const saveTreatment = async (lock) => {
-    if (!treatmentDraft.trim()) { toast.error("Enter a treatment summary"); return; }
+  const autoSaveTreatment = async (text) => {
+    if (!text.trim()) return;
     setSavingTreatment(true);
     try {
-      const updated = await saveTreatmentSummary(selectedLead.id, treatmentDraft.trim(), lock);
+      const updated = await saveTreatmentSummary(selectedLead.id, text.trim(), false);
       applyUpdatedLead(updated);
-      setTreatmentEditing(!lock);
-      toast.success(lock ? "Treatment summary saved & locked" : "Treatment summary saved");
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed to save treatment summary");
     }
     setSavingTreatment(false);
+  };
+
+  const handleTreatmentChange = (text) => {
+    setTreatmentDraft(text);
+    if (treatmentDebounceRef.current) clearTimeout(treatmentDebounceRef.current);
+    treatmentDebounceRef.current = setTimeout(() => autoSaveTreatment(text), 800);
+  };
+
+  const finishTreatmentEdit = () => {
+    if (treatmentDebounceRef.current) { clearTimeout(treatmentDebounceRef.current); treatmentDebounceRef.current = null; }
+    if (treatmentDraft.trim()) autoSaveTreatment(treatmentDraft);
+    setTreatmentEditing(false);
   };
 
   const unlockTreatment = async () => {
@@ -546,14 +570,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                     label="Diagnosis Report"
                     accent="sky"
                     value={physioDiagDraft}
-                    onChange={setPhysioDiagDraft}
+                    onChange={handlePhysioDiagChange}
                     editing={physioDiagEditing}
                     locked={!!selectedLead.physio_diagnosis_locked}
                     savedText={selectedLead.physio_diagnosis_report}
                     saving={savingPhysioDiag}
                     canEdit={isConsultant}
-                    onSave={() => savePhysioDiag(true)}
-                    onSaveDraft={() => savePhysioDiag(false)}
+                    onDone={finishPhysioDiagEdit}
                     onEdit={() => setPhysioDiagEditing(true)}
                     onUnlock={unlockPhysioDiag}
                     rows={3}
@@ -568,14 +591,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                     label="Treatment Summary"
                     accent="indigo"
                     value={treatmentDraft}
-                    onChange={setTreatmentDraft}
+                    onChange={handleTreatmentChange}
                     editing={treatmentEditing}
                     locked={!!selectedLead.treatment_summary_locked}
                     savedText={selectedLead.treatment_summary}
                     saving={savingTreatment}
                     canEdit={isConsultant}
-                    onSave={() => saveTreatment(true)}
-                    onSaveDraft={() => saveTreatment(false)}
+                    onDone={finishTreatmentEdit}
                     onEdit={() => setTreatmentEditing(true)}
                     onUnlock={unlockTreatment}
                     rows={3}
@@ -1268,13 +1290,14 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
 };
 
 /**
- * A text box that starts editable, then locks (read-only) once saved.
- * A locked box can be reopened for editing via the Edit button, which calls
- * the backend unlock endpoint so the lock state persists across reloads.
+ * A text box that auto-saves (debounced, silent) while typing — "Done" just exits
+ * edit mode, it isn't a save action. Pre-existing records saved under the old
+ * Save & Lock flow may still carry a locked flag; the Edit button calls the
+ * backend unlock endpoint for those before reopening them for editing.
  */
 function LockableTextBox({
   icon: Icon, label, accent, value, onChange, editing, locked, savedText,
-  saving, canEdit, onSave, onSaveDraft, onEdit, onUnlock, rows, placeholder, testPrefix,
+  saving, canEdit, onDone, onEdit, onUnlock, rows, placeholder, testPrefix,
 }) {
   const colors = {
     sky: { border: "border-sky-200", bg: "bg-sky-50", text: "text-sky-700", btn: "bg-sky-600 hover:bg-sky-700" },
@@ -1302,12 +1325,14 @@ function LockableTextBox({
             className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-xs"
             data-testid={`${testPrefix}-input`}
           />
-          <div className="mt-2 flex gap-2">
-            <Button size="sm" className={`${colors.btn} text-xs`} onClick={onSave} disabled={saving} data-testid={`${testPrefix}-save-lock`}>
-              {saving ? "Saving..." : "Save & Lock"}
-            </Button>
-            <Button size="sm" variant="outline" className="text-xs" onClick={onSaveDraft} disabled={saving} data-testid={`${testPrefix}-save-draft`}>
-              Save
+          <div className="mt-2 flex items-center justify-between">
+            <span className="flex items-center gap-1 text-[11px] text-slate-400" data-testid={`${testPrefix}-autosave-status`}>
+              {saving ? "Saving..." : value.trim() ? (
+                <><CheckCircle2 className="h-3 w-3 text-emerald-500" /> Auto-saved</>
+              ) : null}
+            </span>
+            <Button size="sm" variant="outline" className="text-xs" onClick={onDone} data-testid={`${testPrefix}-done`}>
+              Done
             </Button>
           </div>
         </>
