@@ -9,8 +9,10 @@ import { Calendar } from "@/components/ui/calendar";
  * DateFilterPopover
  *
  * Controlled date filter with:
- *  - Left rail of quick presets (Today, Tomorrow, This Week, Next 7 Days, This Month, Last 30 Days, Clear, All Leads).
+ *  - Left rail of quick presets (Today, Yesterday, Last Month, This Month, Custom Range).
  *  - Right side: single-month calendar to pick an exact date.
+ *  - An exit (close) button top-right of the popup, and no explicit "All Leads" preset —
+ *    clearing back to the unfiltered default is done via the small x on the active chip.
  *
  * Props:
  *  - value: { type: "single" | "range" | null, from: Date|null, to: Date|null, label: string }
@@ -21,20 +23,18 @@ import { Calendar } from "@/components/ui/calendar";
 const startOfDay = (d) => { const n = new Date(d); n.setHours(0, 0, 0, 0); return n; };
 const endOfDay = (d) => { const n = new Date(d); n.setHours(23, 59, 59, 999); return n; };
 const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
-const startOfWeek = (d) => { const x = startOfDay(d); x.setDate(x.getDate() - x.getDay()); return x; };
-const endOfWeek = (d) => endOfDay(addDays(startOfWeek(d), 6));
 const startOfMonth = (d) => { const x = new Date(d.getFullYear(), d.getMonth(), 1); return startOfDay(x); };
 const endOfMonth = (d) => endOfDay(new Date(d.getFullYear(), d.getMonth() + 1, 0));
+const startOfPrevMonth = (d) => startOfMonth(new Date(d.getFullYear(), d.getMonth() - 1, 1));
+const endOfPrevMonth = (d) => endOfDay(new Date(d.getFullYear(), d.getMonth(), 0));
 
 const fmtShort = (d) => d ? d.toLocaleDateString(undefined, { day: "2-digit", month: "short" }) : "";
 
 const presets = (today) => ([
-  { key: "today",     label: "Today",        from: startOfDay(today),                    to: endOfDay(today) },
-  { key: "tomorrow",  label: "Tomorrow",     from: startOfDay(addDays(today, 1)),        to: endOfDay(addDays(today, 1)) },
-  { key: "this_week", label: "This Week",    from: startOfWeek(today),                   to: endOfWeek(today) },
-  { key: "next_7",    label: "Next 7 Days",  from: startOfDay(today),                    to: endOfDay(addDays(today, 6)) },
-  { key: "this_month",label: "This Month",   from: startOfMonth(today),                  to: endOfMonth(today) },
-  { key: "last_30",   label: "Last 30 Days", from: startOfDay(addDays(today, -29)),      to: endOfDay(today) },
+  { key: "today",      label: "Today",      from: startOfDay(today),           to: endOfDay(today) },
+  { key: "yesterday",  label: "Yesterday",  from: startOfDay(addDays(today, -1)), to: endOfDay(addDays(today, -1)) },
+  { key: "last_month", label: "Last Month", from: startOfPrevMonth(today),     to: endOfPrevMonth(today) },
+  { key: "this_month", label: "This Month", from: startOfMonth(today),         to: endOfMonth(today) },
 ]);
 
 const toInputValue = (d) => d ? new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10) : "";
@@ -77,8 +77,6 @@ export const DateFilterPopover = ({ value, onChange, testid = "date-filter" }) =
 
   const clear = () => { onChange(null); setShowRange(false); setOpen(false); };
 
-  const showAll = () => { onChange(null); setShowRange(false); setOpen(false); };
-
   const activeLabel = value?.label || "Date Filter";
   const isActive = !!value;
 
@@ -102,10 +100,20 @@ export const DateFilterPopover = ({ value, onChange, testid = "date-filter" }) =
           )}
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-auto p-0" align="start" data-testid={`${testid}-panel`}>
+      <PopoverContent className="relative w-auto p-0" align="start" data-testid={`${testid}-panel`}>
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          className="absolute right-2 top-2 z-10 rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+          title="Close"
+          aria-label="Close"
+          data-testid={`${testid}-exit`}
+        >
+          <X className="h-4 w-4" />
+        </button>
         <div className="flex">
           {/* Left rail */}
-          <div className="flex w-40 flex-col gap-0.5 border-r border-slate-200 bg-slate-50/40 p-2" data-testid={`${testid}-presets`}>
+          <div className="flex w-40 flex-col gap-0.5 border-r border-slate-200 bg-slate-50/40 p-2 pt-8" data-testid={`${testid}-presets`}>
             {list.map((p) => (
               <button
                 key={p.key}
@@ -125,28 +133,11 @@ export const DateFilterPopover = ({ value, onChange, testid = "date-filter" }) =
             >
               Custom Range
             </button>
-            <div className="my-1 border-t border-slate-200" />
-            <button
-              type="button"
-              onClick={clear}
-              className="w-full rounded-md px-3 py-2 text-left text-sm font-medium text-rose-600 transition-colors hover:bg-rose-50"
-              data-testid={`${testid}-preset-clear`}
-            >
-              Clear
-            </button>
-            <button
-              type="button"
-              onClick={showAll}
-              className="w-full rounded-md px-3 py-2 text-left text-sm text-slate-700 transition-colors hover:bg-slate-100"
-              data-testid={`${testid}-preset-all`}
-            >
-              All Leads
-            </button>
           </div>
 
           {/* Calendar or Custom Range */}
           {showRange ? (
-            <div className="w-64 space-y-3 p-4" data-testid={`${testid}-range-panel`}>
+            <div className="w-64 space-y-3 p-4 pt-8" data-testid={`${testid}-range-panel`}>
               <p className="text-sm font-semibold text-slate-700">Custom Range</p>
               <div className="space-y-2">
                 <div>
@@ -168,7 +159,7 @@ export const DateFilterPopover = ({ value, onChange, testid = "date-filter" }) =
               </Button>
             </div>
           ) : (
-            <div className="p-2">
+            <div className="p-2 pt-8">
               <Calendar
                 mode="single"
                 selected={value?.key === "exact" ? value.from : undefined}
