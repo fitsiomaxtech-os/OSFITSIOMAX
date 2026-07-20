@@ -231,6 +231,7 @@ export const BranchAdminBoard = ({ branchId }) => {
                 <tr>
                   <th className="px-4 py-3">Patient</th>
                   <th className="px-4 py-3">Phone</th>
+                  <th className="px-4 py-3">Email</th>
                   <th className="px-4 py-3">Stage</th>
                   <th className="px-4 py-3">Assigned Physio</th>
                   <th className="px-4 py-3 text-right">Fee / Package</th>
@@ -243,7 +244,7 @@ export const BranchAdminBoard = ({ branchId }) => {
                   if (visible.length === 0) {
                     return (
                       <tr>
-                        <td colSpan={6} className="px-4 py-10 text-center text-sm text-slate-400" data-testid="branch-list-empty">
+                        <td colSpan={7} className="px-4 py-10 text-center text-sm text-slate-400" data-testid="branch-list-empty">
                           No patients {stageFilter ? `in stage "${stageFilter}"` : "yet"}.
                         </td>
                       </tr>
@@ -267,6 +268,7 @@ export const BranchAdminBoard = ({ branchId }) => {
                           </div>
                         </td>
                         <td className="px-4 py-3 text-slate-600">{lead.phone || "—"}</td>
+                        <td className="px-4 py-3 text-slate-600">{lead.email || "—"}</td>
                         <td className="px-4 py-3">
                           <span
                             className="inline-flex items-center rounded-[5px] border px-2.5 py-0.5 text-xs font-medium"
