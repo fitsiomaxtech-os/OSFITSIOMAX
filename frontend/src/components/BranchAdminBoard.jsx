@@ -225,8 +225,8 @@ export const BranchAdminBoard = ({ branchId }) => {
           </div>
 
           {/* List View (table) */}
-          <div className="rounded-lg border border-slate-200 bg-white" data-testid="branch-list">
-            <table className="min-w-full table-fixed divide-y divide-slate-200 text-sm">
+          <div className="w-full rounded-lg border border-slate-200 bg-white" data-testid="branch-list">
+            <table className="w-full table-fixed divide-y divide-slate-200 text-sm">
               <thead className="sticky top-[89px] z-10 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                 <tr>
                   <th className="w-[24%] px-4 py-3">Patient</th>
