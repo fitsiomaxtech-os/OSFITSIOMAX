@@ -214,18 +214,6 @@ export const BranchAdminBoard = ({ branchId }) => {
               noSourcesHint="No Google Sheet is linked to this branch yet — ask your Super Admin to tag one to this branch in Marketing Board → Lead Sources."
               iconOnly
             />
-            {stageFilter && (
-              <div className="flex items-center gap-2 text-xs text-slate-600" data-testid="branch-stage-filter-indicator">
-                <span>Showing:</span>
-                <span
-                  className="rounded-full border px-2 py-0.5 font-medium"
-                  style={{ background: `${stageColor(stageFilter)}14`, color: stageColor(stageFilter), border: `1px solid ${stageColor(stageFilter)}33` }}
-                >
-                  {stageFilter}
-                </span>
-                <button type="button" onClick={() => setStageFilter(null)} className="text-sky-600 hover:underline" data-testid="branch-stage-filter-clear">Clear</button>
-              </div>
-            )}
           </div>
 
           {/* List View (table) — its own scroll region so the sticky header can use top-0
