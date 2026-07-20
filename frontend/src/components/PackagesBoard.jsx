@@ -848,7 +848,7 @@ const HISTORY_SUBTABS = [
   { key: "transactions", label: "Transactions History" },
   { key: "payments", label: "Payment History" },
   { key: "followups", label: "Follow Up History" },
-  { key: "logins", label: "Overall Login Tracker" },
+  { key: "logins", label: "Login Tracker" },
 ];
 
 const HistoryPanel = () => {

@@ -331,6 +331,43 @@ async def sync_head_physio_doctors() -> None:
         )
 
 
+async def backfill_login_history_from_sessions() -> None:
+    """login_history only started recording on /auth/login once that tracking was added,
+    so anyone already logged in at that point shows zero entries in the Super Admin
+    Login Tracker until they log in again. Backfill one entry per such user from their
+    current active session (sessions holds one row per user, its created_at is their
+    last real login time). Only touches users with zero login_history rows — once a
+    user has a real tracked login, this never overwrites or duplicates it. Safe to re-run."""
+    sessions = await v3_col("sessions").find({}, {"_id": 0}).to_list(2000)
+    if not sessions:
+        return
+    session_user_ids = list({s["user_id"] for s in sessions})
+    already_tracked = set(await v3_col("login_history").distinct("user_id", {"user_id": {"$in": session_user_ids}}))
+    to_backfill = [s for s in sessions if s["user_id"] not in already_tracked]
+    if not to_backfill:
+        return
+    users = await v3_col("users").find(
+        {"id": {"$in": [s["user_id"] for s in to_backfill]}}, {"_id": 0}
+    ).to_list(2000)
+    user_map = {u["id"]: u for u in users}
+    docs = []
+    for s in to_backfill:
+        user = user_map.get(s["user_id"])
+        if not user:
+            continue
+        docs.append({
+            "id": str(uuid.uuid4()),
+            "user_id": user["id"],
+            "user_name": user.get("full_name", ""),
+            "email": user.get("email", ""),
+            "role": user.get("role", ""),
+            "branch_id": user.get("branch_id"),
+            "created_at": s.get("created_at") or now_iso(),
+        })
+    if docs:
+        await v3_col("login_history").insert_many(docs)
+
+
 async def ensure_v1_seed_data() -> None:
     users_count = await db.users.count_documents({})
     if users_count == 0:
