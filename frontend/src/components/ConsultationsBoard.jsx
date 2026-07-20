@@ -528,7 +528,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                 )}
                 {isConsultant && (
                   <span
-                    className={`mt-1.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                    className={`mt-1.5 inline-flex items-center gap-1 rounded-[5px] px-2 py-0.5 text-[10px] font-semibold ${
                       selectedLead.consultation_fee ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
                     }`}
                     data-testid="cons-consultation-paid-badge"
@@ -688,7 +688,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                               moveHeadStage(selectedLead, s.name);
                             }}
                             disabled={isDisabled}
-                            className="flex flex-1 basis-32 items-center justify-center gap-1 rounded-lg border px-2 py-2 text-center text-[11px] font-semibold leading-tight transition disabled:opacity-100"
+                            className="flex flex-1 basis-32 items-center justify-center gap-1 rounded-[5px] border px-2 py-2 text-center text-[11px] font-semibold leading-tight transition disabled:opacity-100"
                             style={
                               active
                                 ? { background: hex, color: "white", borderColor: hex }
@@ -752,7 +752,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                           }}
                           disabled={(active && s.name !== "Consultation Fee" && s.name !== "Treatment Fee" && s.name !== "Physio Assign") || viewOnly}
                           title={viewOnly ? "Set by the Head Physio's own pipeline — view only here" : s.name === "Consultation Fee" && !selectedLead.package_paid ? "Click to collect the fee" : s.name === "Treatment Fee" && !selectedLead.treatment_fee_paid ? "Click to collect the treatment fee" : undefined}
-                          className="flex w-full items-center justify-center gap-1 rounded-lg border px-2 py-2 text-center text-[11px] font-semibold leading-tight transition disabled:opacity-100"
+                          className="flex w-full items-center justify-center gap-1 rounded-[5px] border px-2 py-2 text-center text-[11px] font-semibold leading-tight transition disabled:opacity-100"
                           style={
                             active
                               ? { background: hex, color: "white", borderColor: hex }
