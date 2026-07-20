@@ -293,6 +293,9 @@ export const listStoreItems = async (category, itemType) => {
 export const updateStoreItem = async (id, payload) => (await api.put(`/store/items/${id}`, payload)).data;
 export const deleteStoreItem = async (id) => (await api.delete(`/store/items/${id}`)).data;
 export const getStoreHistory = async (limit) => (await api.get("/store/history", { params: limit ? { limit } : {} })).data;
+export const getPaymentHistory = async (limit) => (await api.get("/store/payment-history", { params: limit ? { limit } : {} })).data;
+export const getFollowUpHistory = async (limit) => (await api.get("/store/follow-up-history", { params: limit ? { limit } : {} })).data;
+export const getLoginHistory = async (limit) => (await api.get("/store/login-history", { params: limit ? { limit } : {} })).data;
 
 export const saveLeadDiagnosis = async (leadId, diagnosis) => (await api.post(`/leads/${leadId}/diagnosis`, { diagnosis })).data;
 export const sellStoreItem = async (leadId, payload) => (await api.post(`/leads/${leadId}/sell-store-item`, payload)).data;

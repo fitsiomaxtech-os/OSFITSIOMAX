@@ -153,20 +153,36 @@ STORE_HISTORY_ACTIONS = [
     "package_sold",
     "package_assigned",
     "package_payment_collected",
+    "treatment_fee_collected",
     "fee_collected",
 ]
 
+# Subset of the above that represents money actually collected — excludes package_assigned,
+# which is just the Head Physio's inline package choice with no payment yet.
+PAYMENT_HISTORY_ACTIONS = [
+    "consultation_paid",
+    "package_sold",
+    "package_payment_collected",
+    "treatment_fee_collected",
+    "fee_collected",
+]
 
-@router.get("/history")
-async def store_history(
-    limit: int = 200,
-    _: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin", "head_physio")),
-):
-    """Chronological listing of Fitsio Store sales/collections across the whole system —
-    consultations sold, session packages assigned/collected — for the Super Admin
-    FITSIO STORE > History tab."""
+# Every follow-up scheduled/rescheduled across Pre-Sales, Branch Leads, and Consultations.
+FOLLOW_UP_HISTORY_ACTIONS = [
+    "follow_up_scheduled",
+    "follow_up_rescheduled",
+    "branch_follow_up_scheduled",
+    "branch_follow_up_rescheduled",
+    "consultation_follow_up_scheduled",
+    "consultation_follow_up_rescheduled",
+]
+
+
+async def _lead_activity_history(actions: list, limit: int) -> dict:
+    """Shared lookup: lead_activity rows enriched with patient/branch names — backs all
+    of the Super Admin FITSIO STORE > History sub-tabs that read off a lead's timeline."""
     rows = await v3_col("lead_activity").find(
-        {"action": {"$in": STORE_HISTORY_ACTIONS}}, {"_id": 0}
+        {"action": {"$in": actions}}, {"_id": 0}
     ).sort("created_at", -1).to_list(max(1, min(limit, 500)))
 
     lead_ids = list({r["lead_id"] for r in rows if r.get("lead_id")})
@@ -191,3 +207,53 @@ async def store_history(
             "branch_name": branch_map.get(lead.get("branch_id"), ""),
         })
     return {"history": history}
+
+
+@router.get("/history")
+async def store_history(
+    limit: int = 200,
+    _: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin", "head_physio")),
+):
+    """Chronological listing of Fitsio Store sales/collections across the whole system —
+    consultations sold, session packages assigned/collected — for the Super Admin
+    FITSIO STORE > History > Transactions History sub-tab."""
+    return await _lead_activity_history(STORE_HISTORY_ACTIONS, limit)
+
+
+@router.get("/payment-history")
+async def payment_history(
+    limit: int = 200,
+    _: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin", "head_physio")),
+):
+    """Money actually collected (excludes package assignment, which has no payment yet) —
+    Super Admin FITSIO STORE > History > Payment History sub-tab."""
+    return await _lead_activity_history(PAYMENT_HISTORY_ACTIONS, limit)
+
+
+@router.get("/follow-up-history")
+async def follow_up_history(
+    limit: int = 200,
+    _: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin", "head_physio")),
+):
+    """Every follow-up scheduled/rescheduled across Pre-Sales, Branch Leads, and
+    Consultations — Super Admin FITSIO STORE > History > Follow Up History sub-tab."""
+    return await _lead_activity_history(FOLLOW_UP_HISTORY_ACTIONS, limit)
+
+
+@router.get("/login-history")
+async def login_history(
+    limit: int = 200,
+    _: V3UserOut = Depends(v3_require_roles("super_admin")),
+):
+    """Every successful login across the OS — Super Admin FITSIO STORE > History >
+    Overall Login Tracker sub-tab. Super Admin only: user activity, not store data."""
+    rows = await v3_col("login_history").find({}, {"_id": 0}).sort("created_at", -1).to_list(max(1, min(limit, 500)))
+
+    branch_ids = list({r["branch_id"] for r in rows if r.get("branch_id")})
+    branches = await v3_col("branches").find(
+        {"id": {"$in": branch_ids}}, {"_id": 0, "id": 1, "branch_name": 1}
+    ).to_list(500)
+    branch_map = {b["id"]: b.get("branch_name", "") for b in branches}
+    for r in rows:
+        r["branch_name"] = branch_map.get(r.get("branch_id"), "")
+    return {"history": rows}

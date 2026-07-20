@@ -4,7 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
-import { uploadStoreImage, createStoreItem, updateStoreItem, deleteStoreItem, listStoreItems, getStoreHistory } from "@/lib/api";
+import { uploadStoreImage, createStoreItem, updateStoreItem, deleteStoreItem, listStoreItems, getStoreHistory, getPaymentHistory, getFollowUpHistory, getLoginHistory } from "@/lib/api";
 
 export const TABS = [
   { key: "consultations", label: "Consultations", icon: Stethoscope },
@@ -705,35 +705,42 @@ const HISTORY_ACTION_LABELS = {
   consultation_paid: "Consultation Sold",
   package_sold: "Package Sold",
   package_assigned: "Package Assigned",
-  package_payment_collected: "Package Payment Collected",
+  package_payment_collected: "Consultation Fee Collected",
+  treatment_fee_collected: "Treatment Fee Collected",
   fee_collected: "Fee Collected",
+  follow_up_scheduled: "Follow-Up Scheduled · Pre-Sales",
+  follow_up_rescheduled: "Follow-Up Rescheduled · Pre-Sales",
+  branch_follow_up_scheduled: "Follow-Up Scheduled · Branch",
+  branch_follow_up_rescheduled: "Follow-Up Rescheduled · Branch",
+  consultation_follow_up_scheduled: "Follow-Up Scheduled · Consultation",
+  consultation_follow_up_rescheduled: "Follow-Up Rescheduled · Consultation",
 };
 
-const HistoryPanel = () => {
+const ActivityHistoryTable = ({ fetchFn, emptyLabel, testidPrefix }) => {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
 
   const load = () => {
     setLoading(true);
-    getStoreHistory(200)
+    fetchFn(200)
       .then((res) => setRows(res.history || []))
       .catch(() => setRows([]))
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [fetchFn]);
 
   return (
-    <div className="space-y-3" data-testid="packages-panel-history">
+    <div className="space-y-3" data-testid={`${testidPrefix}-panel`}>
       <div className="flex items-center justify-between">
-        <p className="text-sm text-slate-500">{rows.length} transaction{rows.length === 1 ? "" : "s"}</p>
-        <Button size="sm" variant="outline" onClick={load} data-testid="history-refresh-btn">Refresh</Button>
+        <p className="text-sm text-slate-500">{rows.length} entr{rows.length === 1 ? "y" : "ies"}</p>
+        <Button size="sm" variant="outline" onClick={load} data-testid={`${testidPrefix}-refresh-btn`}>Refresh</Button>
       </div>
 
       {rows.length === 0 ? (
         <Card>
           <CardContent className="p-8 text-center text-sm text-slate-400">
-            {loading ? "Loading..." : "No store transactions yet."}
+            {loading ? "Loading..." : emptyLabel}
           </CardContent>
         </Card>
       ) : (
@@ -752,7 +759,7 @@ const HistoryPanel = () => {
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.id} className="border-t border-slate-100" data-testid={`history-row-${r.id}`}>
+                  <tr key={r.id} className="border-t border-slate-100" data-testid={`${testidPrefix}-row-${r.id}`}>
                     <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-500">{(r.created_at || "").replace("T", " ").slice(0, 16)}</td>
                     <td className="px-4 py-3 font-medium text-slate-800">{r.patient_name || "—"}</td>
                     <td className="px-4 py-3 text-slate-600">{r.branch_name || "—"}</td>
@@ -770,6 +777,106 @@ const HistoryPanel = () => {
           </CardContent>
         </Card>
       )}
+    </div>
+  );
+};
+
+const LoginHistoryTable = () => {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  const load = () => {
+    setLoading(true);
+    getLoginHistory(200)
+      .then((res) => setRows(res.history || []))
+      .catch(() => setRows([]))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => { load(); }, []);
+
+  return (
+    <div className="space-y-3" data-testid="login-history-panel">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-slate-500">{rows.length} login{rows.length === 1 ? "" : "s"}</p>
+        <Button size="sm" variant="outline" onClick={load} data-testid="login-history-refresh-btn">Refresh</Button>
+      </div>
+
+      {rows.length === 0 ? (
+        <Card>
+          <CardContent className="p-8 text-center text-sm text-slate-400">
+            {loading ? "Loading..." : "No logins recorded yet."}
+          </CardContent>
+        </Card>
+      ) : (
+        <Card className="overflow-hidden border-slate-200">
+          <CardContent className="overflow-x-auto p-0">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                <tr>
+                  <th className="px-4 py-2 text-left">Date &amp; Time</th>
+                  <th className="px-4 py-2 text-left">User</th>
+                  <th className="px-4 py-2 text-left">Role</th>
+                  <th className="px-4 py-2 text-left">Branch</th>
+                  <th className="px-4 py-2 text-left">Email</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.id} className="border-t border-slate-100" data-testid={`login-history-row-${r.id}`}>
+                    <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-500">{(r.created_at || "").replace("T", " ").slice(0, 16)}</td>
+                    <td className="px-4 py-3 font-medium text-slate-800">{r.user_name || "—"}</td>
+                    <td className="whitespace-nowrap px-4 py-3">
+                      <span className="inline-flex items-center rounded-full bg-sky-50 px-2 py-0.5 text-xs font-semibold capitalize text-sky-700">
+                        {(r.role || "—").replace(/_/g, " ")}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">{r.branch_name || "—"}</td>
+                    <td className="px-4 py-3 text-xs text-slate-500">{r.email || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+};
+
+const HISTORY_SUBTABS = [
+  { key: "transactions", label: "Transactions History" },
+  { key: "payments", label: "Payment History" },
+  { key: "followups", label: "Follow Up History" },
+  { key: "logins", label: "Overall Login Tracker" },
+];
+
+const HistoryPanel = () => {
+  const [sub, setSub] = useState("transactions");
+  return (
+    <div className="space-y-3" data-testid="packages-panel-history">
+      <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="history-subtabs">
+        {HISTORY_SUBTABS.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setSub(t.key)}
+            data-testid={`history-subtab-${t.key}`}
+            className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${sub === t.key ? "bg-sky-50 text-sky-600" : "text-slate-600 hover:bg-slate-50"}`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      {sub === "transactions" && (
+        <ActivityHistoryTable fetchFn={getStoreHistory} emptyLabel="No store transactions yet." testidPrefix="txn-history" />
+      )}
+      {sub === "payments" && (
+        <ActivityHistoryTable fetchFn={getPaymentHistory} emptyLabel="No payments collected yet." testidPrefix="payment-history" />
+      )}
+      {sub === "followups" && (
+        <ActivityHistoryTable fetchFn={getFollowUpHistory} emptyLabel="No follow-ups scheduled yet." testidPrefix="followup-history" />
+      )}
+      {sub === "logins" && <LoginHistoryTable />}
     </div>
   );
 };

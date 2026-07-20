@@ -37,6 +37,15 @@ async def v3_login(payload: V3LoginRequest):
     token = str(uuid.uuid4())
     await v3_col("sessions").delete_many({"user_id": user["id"]})
     await v3_col("sessions").insert_one({"token": token, "user_id": user["id"], "created_at": now_iso()})
+    await v3_col("login_history").insert_one({
+        "id": str(uuid.uuid4()),
+        "user_id": user["id"],
+        "user_name": user.get("full_name", ""),
+        "email": user.get("email", ""),
+        "role": user.get("role", ""),
+        "branch_id": user.get("branch_id"),
+        "created_at": now_iso(),
+    })
     user_public = {k: v for k, v in user.items() if k != "password"}
     return V3LoginResponse(token=token, user=V3UserOut(**user_public))
 
