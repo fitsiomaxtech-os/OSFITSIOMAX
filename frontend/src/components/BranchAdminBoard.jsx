@@ -224,17 +224,19 @@ export const BranchAdminBoard = ({ branchId }) => {
             )}
           </div>
 
-          {/* List View (table) */}
-          <div className="w-full rounded-lg border border-slate-200 bg-white" data-testid="branch-list">
+          {/* List View (table) — its own scroll region so the sticky header can use top-0
+              instead of guessing the page header's pixel height, which was colliding with
+              the stat cards row as it scrolled past. */}
+          <div className="w-full max-h-[65vh] overflow-y-auto rounded-lg border border-slate-200 bg-white" data-testid="branch-list">
             <table className="w-full table-fixed divide-y divide-slate-200 text-sm">
-              <thead className="sticky top-[89px] z-10 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                 <tr>
-                  <th className="w-[24%] px-4 py-3">Patient</th>
-                  <th className="w-[15%] px-4 py-3">Phone</th>
-                  <th className="w-[23%] px-4 py-3">Email</th>
-                  <th className="w-[17%] px-4 py-3">Stage</th>
+                  <th className="w-[22%] px-4 py-3">Patient</th>
+                  <th className="w-[14%] px-4 py-3">Phone</th>
+                  <th className="w-[22%] px-4 py-3">Email</th>
+                  <th className="w-[16%] px-4 py-3">Stage</th>
                   <th className="w-[16%] px-4 py-3">Assigned Physio</th>
-                  <th className="w-[9%] px-4 py-3 text-right">Updated</th>
+                  <th className="w-[10%] px-4 py-3 text-right">Updated</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
