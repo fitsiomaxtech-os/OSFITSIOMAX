@@ -551,7 +551,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                 <button
                   key={t.key}
                   onClick={() => setDetailTab(t.key)}
-                  className={`rounded-full px-3.5 py-1 text-xs font-semibold transition-all ${detailTab === t.key ? "bg-sky-600 text-white shadow-sm" : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"}`}
+                  className={`rounded-[5px] px-3.5 py-1 text-xs font-semibold transition-all ${detailTab === t.key ? "bg-sky-600 text-white shadow-sm" : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"}`}
                   data-testid={`cons-detail-tab-${t.key}`}
                 >
                   {t.label}
