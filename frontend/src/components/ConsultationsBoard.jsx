@@ -206,7 +206,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
     try {
       const res = await moveHeadConsultationStage(lead.id, next);
       toast.success(`Moved → ${next}`);
-      applyUpdatedLead(res.lead);
+      // Close immediately, same as Branch's moveStage — don't leave the card open on
+      // the stale pre-move lead while the board list updates in the background.
+      setSelectedLead(null);
+      setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === res.lead.id ? res.lead : l) }));
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Move failed");
     }
