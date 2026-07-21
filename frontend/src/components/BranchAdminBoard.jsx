@@ -305,10 +305,7 @@ export const BranchAdminBoard = ({ branchId }) => {
           stages={stages}
           onClose={() => setSelectedLead(null)}
           onUpdate={handleStageUpdate}
-          onMoved={(stage) => {
-            setStageFilter(stage);
-            setSelectedLead(null);
-          }}
+          onMoved={() => setSelectedLead(null)}
         />
       )}
         </>
