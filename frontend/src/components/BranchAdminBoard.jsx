@@ -3,7 +3,6 @@ import {
   Calendar,
   Check,
   ChevronRight,
-  CreditCard,
   Phone,
   Mail,
   Search,
@@ -38,7 +37,6 @@ import {
 } from "@/lib/api";
 import { HeadPhysioCalendar } from "@/components/HeadPhysioCalendar";
 import { ConsultationsBoard } from "@/components/ConsultationsBoard";
-import { FinanceBoard } from "@/components/FinanceBoard";
 import { BranchSessionsPanel, FitsiomaxStorePanel } from "@/components/BranchStoreBoard";
 import { PullFromSheetButton } from "@/components/PullFromSheetButton";
 import { PlaceholderPanel } from "@/components/PackagesBoard";
@@ -122,7 +120,6 @@ export const BranchAdminBoard = ({ branchId }) => {
     { key: "consultations", label: "Consultations", icon: Stethoscope },
     { key: "sessions", label: "Treatment Sessions", icon: CalendarRange },
     { key: "rehab", label: "Rehab", icon: Activity },
-    { key: "finance", label: "Finance", icon: CreditCard },
     { key: "store", label: "Fitsiomax Store", icon: ShoppingCart },
   ];
 
@@ -180,8 +177,6 @@ export const BranchAdminBoard = ({ branchId }) => {
         <BranchSessionsPanel />
       ) : activeView === "rehab" ? (
         <PlaceholderPanel label="Rehab" testid="branch-rehab-panel" />
-      ) : activeView === "finance" ? (
-        <FinanceBoard branchId={branchId} />
       ) : activeView === "store" ? (
         <FitsiomaxStorePanel />
       ) : (
