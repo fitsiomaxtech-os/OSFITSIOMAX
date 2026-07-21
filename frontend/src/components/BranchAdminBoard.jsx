@@ -305,7 +305,13 @@ export const BranchAdminBoard = ({ branchId }) => {
           stages={stages}
           onClose={() => setSelectedLead(null)}
           onUpdate={handleStageUpdate}
-          onMoved={() => setSelectedLead(null)}
+          onMoved={() => {
+            // Close first, then refresh the list in the background via loadBoard directly
+            // (not handleStageUpdate) — that closure's stale selectedLead would otherwise
+            // re-open this same modal once the refresh resolves a couple seconds later.
+            setSelectedLead(null);
+            loadBoard();
+          }}
         />
       )}
         </>
@@ -378,8 +384,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved })
     try {
       await moveBranchStage(lead.id, { branch_stage: stage });
       toast.success(`Moved to ${stage}`);
-      await onUpdate();
-      onMoved && onMoved(stage);
+      onMoved && onMoved(stage); // closes immediately; parent refreshes the list itself
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Move failed");
     }
@@ -426,8 +431,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved })
       await scheduleBranchFollowUp(lead.id, followUpMoveDraft);
       toast.success("Moved to Follow Up");
       setFollowUpMoveDraft(null);
-      await onUpdate();
-      onMoved && onMoved("Follow Up");
+      onMoved && onMoved("Follow Up"); // closes immediately; parent refreshes the list itself
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed to schedule");
     } finally {
@@ -771,8 +775,7 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved })
                     await scheduleBranchAppointment(lead.id, apptDraft);
                     toast.success(`Appointment ${apptDraft.appointment_date} ${apptDraft.appointment_time} → ${apptDraft.final_stage}`);
                     setApptDraft(null);
-                    await onUpdate();
-                    onMoved && onMoved(apptDraft.final_stage);
+                    onMoved && onMoved(apptDraft.final_stage); // closes immediately; parent refreshes the list itself
                   } catch (e) { toast.error(e?.response?.data?.detail || "Failed to schedule"); }
                 }}
                 data-testid="branch-appt-save"
