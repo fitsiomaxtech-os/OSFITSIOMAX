@@ -45,6 +45,7 @@ export const FinanceBoard = ({ branchId } = {}) => {
   useEffect(() => { loadFinance(); }, [loadFinance]);
 
   const s = data.summary || {};
+  const showBranchColumn = (s.by_branch || []).length > 1;
 
   const formatCurrency = (val) => {
     const num = Number(val) || 0;
@@ -135,6 +136,37 @@ export const FinanceBoard = ({ branchId } = {}) => {
         })}
       </div>
 
+      {/* Revenue by Branch — only meaningful when viewing more than one branch at once */}
+      {(s.by_branch || []).length > 1 && (
+        <div className="rounded-xl border border-slate-200 bg-white overflow-hidden" data-testid="finance-by-branch-table">
+          <div className="border-b border-slate-100 bg-slate-50/80 px-4 py-2.5">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Revenue by Branch</p>
+          </div>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-100">
+                <th className="px-4 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Branch</th>
+                <th className="px-4 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-slate-400">Consultation</th>
+                <th className="px-4 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-slate-400">Package</th>
+                <th className="px-4 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-slate-400">Total</th>
+                <th className="px-4 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-slate-400">Patients</th>
+              </tr>
+            </thead>
+            <tbody>
+              {s.by_branch.map((b) => (
+                <tr key={b.branch_id} className="border-b border-slate-50 last:border-0" data-testid={`finance-by-branch-row-${b.branch_id}`}>
+                  <td className="px-4 py-2.5 font-medium text-slate-800">{b.branch_name || "Unknown"}</td>
+                  <td className="px-4 py-2.5 text-right text-slate-600">Rs.{(b.consultation_total || 0).toLocaleString("en-IN")}</td>
+                  <td className="px-4 py-2.5 text-right text-slate-600">Rs.{(b.package_total || 0).toLocaleString("en-IN")}</td>
+                  <td className="px-4 py-2.5 text-right font-semibold text-emerald-700">Rs.{(b.total_revenue || 0).toLocaleString("en-IN")}</td>
+                  <td className="px-4 py-2.5 text-right text-slate-500">{b.total_patients || 0}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       {/* Filters Bar */}
       <div className="flex items-center gap-3 flex-wrap" data-testid="finance-filters">
         <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-0.5">
@@ -193,6 +225,7 @@ export const FinanceBoard = ({ branchId } = {}) => {
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50/80">
                 <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Patient</th>
+                {showBranchColumn && <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Branch</th>}
                 <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Type</th>
                 <th className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-wider text-slate-400">Amount</th>
                 <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Details</th>
@@ -204,7 +237,7 @@ export const FinanceBoard = ({ branchId } = {}) => {
             <tbody>
               {data.transactions.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center">
+                  <td colSpan={showBranchColumn ? 8 : 7} className="px-4 py-12 text-center">
                     <BadgeIndianRupee className="h-8 w-8 text-slate-200 mx-auto mb-2" />
                     <p className="text-xs text-slate-400">
                       {loading ? "Loading transactions..." : "No transactions found"}
@@ -229,6 +262,9 @@ export const FinanceBoard = ({ branchId } = {}) => {
                         </div>
                       </div>
                     </td>
+                    {showBranchColumn && (
+                      <td className="px-4 py-3 text-xs text-slate-600">{tx.branch_name || "—"}</td>
+                    )}
                     <td className="px-4 py-3">
                       <span
                         className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${

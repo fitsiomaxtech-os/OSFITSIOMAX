@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
+  BadgeIndianRupee,
   Briefcase,
   Building2,
   CalendarDays,
@@ -57,6 +58,7 @@ import { PipelineStageManagement } from "@/components/PipelineStageManagement";
 import { HRBoard } from "@/components/hr/HRBoard";
 import { BranchManagementBoard } from "@/components/branch/BranchManagementBoard";
 import { PackagesBoard } from "@/components/PackagesBoard";
+import { FinanceBoard } from "@/components/FinanceBoard";
 
 const ROLE_META = {
   super_admin: { label: "Super Admin", icon: ShieldCheck },
@@ -65,6 +67,7 @@ const ROLE_META = {
   branch_admin: { label: "Branch Admin", icon: Building2 },
   head_physio: { label: "Head Physio", icon: Stethoscope },
   physio: { label: "Physio", icon: Activity },
+  accountant: { label: "Accountant", icon: BadgeIndianRupee },
 };
 
 const PIPELINE_STAGES = [
@@ -594,6 +597,7 @@ export const CRMPage = ({ auth, onLogout }) => {
   const showBranchBoard = role === "branch_admin";
   const showHeadPhysioBoard = role === "head_physio";
   const showPhysioBoard = role === "physio";
+  const showAccountantBoard = role === "accountant";
 
   const filteredAppointmentsForPhysioBoards = appointments;
 
@@ -723,6 +727,16 @@ export const CRMPage = ({ auth, onLogout }) => {
 
         {showPhysioBoard && (
           <PhysioBoard />
+        )}
+
+        {showAccountantBoard && (
+          <div className="space-y-4" data-testid="accountant-board-root">
+            <div>
+              <h2 className="text-2xl font-bold text-slate-900">Finance</h2>
+              <p className="text-sm text-slate-500">Fees collected across every branch.</p>
+            </div>
+            <FinanceBoard />
+          </div>
         )}
 
         {showSuperAdminBoard && superAdminView === "master" && (

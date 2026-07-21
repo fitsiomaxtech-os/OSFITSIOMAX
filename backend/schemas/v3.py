@@ -8,7 +8,7 @@ class V3UserOut(BaseModel):
     id: str
     full_name: str
     email: str
-    role: Literal["super_admin", "business_dev", "pre_sales", "branch_admin", "head_physio", "physio"]
+    role: Literal["super_admin", "business_dev", "pre_sales", "branch_admin", "head_physio", "physio", "marketing_head", "accountant"]
     branch_id: Optional[str] = None
     created_at: str
 

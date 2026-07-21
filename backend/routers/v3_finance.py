@@ -16,15 +16,17 @@ async def get_branch_finance(
     end_date: Optional[str] = None,
     search: Optional[str] = None,
     branch_id: Optional[str] = None,
-    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "accountant")),
 ):
-    # Super Admin can view any branch's finance (e.g. from Branch Management > Branch
-    # Control); everyone else is locked to their own branch regardless of what's passed.
-    branch_id = branch_id if (user.role == "super_admin" and branch_id) else user.branch_id
-    if not branch_id:
-        return {"summary": {}, "transactions": []}
+    # Branch Admin is always locked to their own branch. Super Admin and Accountant can
+    # optionally scope to one branch_id — or, if none is passed, see every branch
+    # aggregated together (Accountant's default view: all branches' finance at once).
+    if user.role == "branch_admin":
+        branch_id = user.branch_id
+        if not branch_id:
+            return {"summary": {}, "transactions": []}
 
-    base_query = {"branch_id": branch_id}
+    base_query = {"branch_id": branch_id} if branch_id else {}
 
     consultation_query = {**base_query, "consultation_fee": {"$gt": 0}}
     package_query = {**base_query, "package_paid": {"$gt": 0}}
@@ -40,6 +42,34 @@ async def get_branch_finance(
     leads_with_no_fee = [l for l in all_branch_leads if (l.get("consultation_fee") or 0) == 0 and l.get("branch_stage") not in (None, first_branch_stage)]
     pending_count = len(leads_with_no_fee)
 
+    # Per-branch breakdown — only meaningfully populated when viewing more than one
+    # branch at once (Accountant's default, or Super Admin leaving branch_id unset),
+    # but cheap to compute always since all_branch_leads is already in memory.
+    branch_ids = list({l["branch_id"] for l in all_branch_leads if l.get("branch_id")})
+    branch_docs = await v3_col("branches").find(
+        {"id": {"$in": branch_ids}}, {"_id": 0, "id": 1, "branch_name": 1}
+    ).to_list(500)
+    branch_name_map = {b["id"]: b.get("branch_name", "") for b in branch_docs}
+
+    by_branch_acc = {}
+    for l in all_branch_leads:
+        bid = l.get("branch_id")
+        if not bid:
+            continue
+        acc = by_branch_acc.setdefault(bid, {
+            "branch_id": bid,
+            "branch_name": branch_name_map.get(bid, "Unknown"),
+            "consultation_total": 0.0,
+            "package_total": 0.0,
+            "total_patients": 0,
+        })
+        acc["consultation_total"] += l.get("consultation_fee") or 0
+        acc["package_total"] += l.get("package_paid") or 0
+        acc["total_patients"] += 1
+    by_branch = sorted(by_branch_acc.values(), key=lambda r: -(r["consultation_total"] + r["package_total"]))
+    for r in by_branch:
+        r["total_revenue"] = r["consultation_total"] + r["package_total"]
+
     summary = {
         "total_revenue": total_consultation + total_package,
         "consultation_total": total_consultation,
@@ -48,6 +78,7 @@ async def get_branch_finance(
         "package_count": len(package_leads),
         "pending_count": pending_count,
         "total_patients": len(all_branch_leads),
+        "by_branch": by_branch,
     }
 
     activity_query = {"action": {"$in": ["consultation_paid", "package_payment_collected"]}}
@@ -111,6 +142,7 @@ async def get_branch_finance(
             "collected_by": act.get("created_by", ""),
             "collected_at": act.get("created_at", ""),
             "branch_stage": lead.get("branch_stage", ""),
+            "branch_name": branch_name_map.get(lead.get("branch_id"), ""),
         })
 
     return {"summary": summary, "transactions": transactions}
