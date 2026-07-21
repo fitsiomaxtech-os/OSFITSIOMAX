@@ -118,6 +118,7 @@ const SourcesTab = ({ branches = [] }) => {
   const [syncRows, setSyncRows] = useState(`[\n  {"name":"Aarav Sharma","phone":"9000000001","email":"aarav@example.com","city":"Chennai","condition":"Lower back pain","age":34}\n]`);
   const [syncResult, setSyncResult] = useState(null);
   const [pullResult, setPullResult] = useState(null);
+  const [pullingId, setPullingId] = useState(null);
 
   const load = useCallback(() => mkGetSources().then(setSources).catch((e) => console.warn("[load failed]", e?.message || e)), []);
   const loadGs = useCallback(() => gsStatus().then(setGs).catch((e) => console.warn("[gs status]", e?.message || e)), []);
@@ -163,6 +164,7 @@ const SourcesTab = ({ branches = [] }) => {
 
   const pullNow = async (s) => {
     setPullResult(null);
+    setPullingId(s.id);
     try {
       const res = await gsPull(s.id);
       setPullResult({ source: s, res });
@@ -170,6 +172,7 @@ const SourcesTab = ({ branches = [] }) => {
       else toast(`No new leads. ${res.skipped_duplicate || 0} duplicates, ${res.skipped_no_phone || 0} missing phone.`);
       load();
     } catch (e) { toast.error(e?.response?.data?.detail || "Pull failed"); }
+    setPullingId(null);
   };
 
   const submit = async () => {
@@ -287,7 +290,16 @@ const SourcesTab = ({ branches = [] }) => {
               <p>Mappings: <span className="font-semibold">{Object.keys(s.column_mapping || {}).length}</span> · Custom fields: {(s.custom_fields || []).length}</p>
               <div className="flex flex-wrap gap-2 pt-2">
                 {s.source_type === "google_sheets" && s.spreadsheet_id && gs.connected && (
-                  <Button size="sm" onClick={() => pullNow(s)} className="bg-emerald-600 hover:bg-emerald-700" data-testid={`gs-pull-${s.id}`}><RefreshCw className="mr-1 h-3 w-3" />Pull from Sheet</Button>
+                  <Button
+                    size="sm"
+                    onClick={() => pullNow(s)}
+                    disabled={pullingId === s.id}
+                    className="bg-emerald-600 hover:bg-emerald-700"
+                    data-testid={`gs-pull-${s.id}`}
+                  >
+                    <RefreshCw className={`mr-1 h-3 w-3 ${pullingId === s.id ? "animate-spin" : ""}`} />
+                    {pullingId === s.id ? "Pulling..." : "Pull from Sheet"}
+                  </Button>
                 )}
                 <Button size="sm" variant="outline" onClick={() => setShowSync(s)} data-testid={`mk-source-sync-${s.id}`}><RefreshCw className="mr-1 h-3 w-3" />Manual Sync (JSON)</Button>
                 <Button size="sm" variant="outline" onClick={() => setShowMap(s)} data-testid={`mk-source-map-${s.id}`}>Edit Mapping</Button>
