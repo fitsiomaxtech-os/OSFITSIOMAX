@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
+import { Check } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
-import { getBranches, getRevenueOverview } from "@/lib/api";
+import { toast } from "@/components/ui/sonner";
+import { getBranches, getRevenueOverview, markInstallmentPaid } from "@/lib/api";
 
 const SUB_TABS = [
   { key: "total_revenue", label: "Total Revenue" },
@@ -101,7 +103,7 @@ export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
       ) : subTab === "outstanding" ? (
         <OutstandingTable rows={outstanding} />
       ) : (
-        <ScheduleTable rows={schedule} />
+        <ScheduleTable rows={schedule} onChanged={load} />
       )}
     </div>
   );
@@ -183,38 +185,79 @@ const OutstandingTable = ({ rows }) => (
   </Card>
 );
 
-const ScheduleTable = ({ rows }) => (
-  <Card data-testid="accountant-manage-schedules">
-    <CardContent className="p-4">
-      <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Payment Schedules</p>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-slate-100 bg-slate-50/80">
-              <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Client</th>
-              <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Branch</th>
-              <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Installment</th>
-              <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Due Date</th>
-              <th className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-slate-400">Amount</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 ? (
-              <tr><td colSpan={5} className="px-3 py-8 text-center text-sm text-slate-400">No scheduled installments.</td></tr>
-            ) : rows.map((r) => (
-              <tr key={`${r.lead_id}-${r.installment_number}`} className="border-b border-slate-50" data-testid={`accountant-manage-schedule-${r.lead_id}-${r.installment_number}`}>
-                <td className="px-3 py-2 font-medium text-slate-800">{r.client_name}</td>
-                <td className="px-3 py-2 text-slate-600">{r.branch_name || "—"}</td>
-                <td className="px-3 py-2 text-slate-600">#{r.installment_number}</td>
-                <td className="px-3 py-2 text-slate-600">{r.due_date}</td>
-                <td className="px-3 py-2 text-right font-semibold text-sky-700">{fmt(r.amount)}</td>
+const STATUS_STYLES = {
+  paid: "bg-emerald-100 text-emerald-700 border-emerald-200",
+  pending: "bg-amber-100 text-amber-700 border-amber-200",
+  overdue: "bg-rose-100 text-rose-700 border-rose-200",
+};
+
+const ScheduleTable = ({ rows, onChanged }) => {
+  const [marking, setMarking] = useState(null);
+
+  const markPaid = async (row) => {
+    const key = `${row.lead_id}-${row.installment_number}`;
+    setMarking(key);
+    try {
+      await markInstallmentPaid(row.lead_id, row.installment_number);
+      toast.success(`Installment #${row.installment_number} for ${row.client_name} marked as paid`);
+      onChanged && onChanged();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Failed to mark as paid");
+    }
+    setMarking(null);
+  };
+
+  return (
+    <Card data-testid="accountant-manage-schedules">
+      <CardContent className="p-4">
+        <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Payment Schedules</p>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-100 bg-slate-50/80">
+                <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Client</th>
+                <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Consultation/Session</th>
+                <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Branch</th>
+                <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Installment</th>
+                <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Status</th>
+                <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Due Date</th>
+                <th className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-slate-400">Amount</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </CardContent>
-  </Card>
-);
+            </thead>
+            <tbody>
+              {rows.length === 0 ? (
+                <tr><td colSpan={7} className="px-3 py-8 text-center text-sm text-slate-400">No scheduled installments.</td></tr>
+              ) : rows.map((r) => {
+                const key = `${r.lead_id}-${r.installment_number}`;
+                return (
+                  <tr key={key} className="border-b border-slate-50" data-testid={`accountant-manage-schedule-${key}`}>
+                    <td className="px-3 py-2 font-medium text-slate-800">{r.client_name}</td>
+                    <td className="px-3 py-2 capitalize text-slate-600">{r.category}</td>
+                    <td className="px-3 py-2 text-slate-600">{r.branch_name || "—"}</td>
+                    <td className="px-3 py-2 text-slate-600">#{r.installment_number}</td>
+                    <td className="px-3 py-2">
+                      <button
+                        type="button"
+                        disabled={r.status !== "pending" && r.status !== "overdue"}
+                        onClick={() => markPaid(r)}
+                        title={r.status === "paid" ? "Already paid" : "Mark as paid"}
+                        className={`inline-flex items-center gap-1 rounded-[5px] border px-2 py-0.5 text-[10px] font-semibold capitalize transition ${STATUS_STYLES[r.status] || STATUS_STYLES.pending} ${r.status === "paid" ? "cursor-default" : "cursor-pointer hover:brightness-95"}`}
+                      >
+                        {r.status === "paid" && <Check className="h-3 w-3" />}
+                        {marking === key ? "Saving..." : r.status}
+                      </button>
+                    </td>
+                    <td className="px-3 py-2 text-slate-600">{r.due_date}</td>
+                    <td className="px-3 py-2 text-right font-semibold text-sky-700">{fmt(r.amount)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
 
 export default AccountantManageTab;

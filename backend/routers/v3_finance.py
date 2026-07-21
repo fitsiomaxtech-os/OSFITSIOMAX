@@ -1,4 +1,5 @@
 import re
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional
 
@@ -174,19 +175,25 @@ def _parse_payment_mode(details: str) -> str:
     return m.group(1).lower() if m else "unknown"
 
 
+def _installment_status(inst: dict, today: str) -> str:
+    if inst.get("paid"):
+        return "paid"
+    if inst.get("due_date") and inst["due_date"] < today:
+        return "overdue"
+    return "pending"
+
+
 def _lead_outstanding_balance(lead: dict) -> float:
     """Total still owed by this client across everything on their record: the gap
     between an assigned Consultation package's price and what was actually
     collected for it, plus — for a Partial Payment treatment fee — every
-    installment after the first (which is collected at booking time; the rest
-    are scheduled for later and haven't been received yet)."""
+    installment not yet marked paid."""
     balance = 0.0
     if lead.get("package_id"):
         balance += max((lead.get("package_price") or 0) - (lead.get("package_paid") or 0), 0)
     if lead.get("treatment_fee_payment_mode") == "partial":
         installments = (lead.get("treatment_fee_payment_details") or {}).get("installments") or []
-        if len(installments) > 1:
-            balance += sum(i.get("amount", 0) for i in installments[1:])
+        balance += sum(i.get("amount", 0) for i in installments if not i.get("paid"))
     return round(balance, 2)
 
 
@@ -289,8 +296,9 @@ async def revenue_overview(
     ])
 
     # Accountant Manage > Outstanding Amount — every client who still owes something,
-    # and > Payment Schedules — every Partial Payment installment still due (the
-    # first installment is collected at booking time, so it's excluded here).
+    # and > Payment Schedules — every Partial Payment installment (paid or not), so
+    # the accountant can see the whole schedule per client, not just what's due.
+    today = datetime.now(timezone.utc).date().isoformat()
     outstanding_clients = []
     payment_schedule = []
     for l in leads:
@@ -305,14 +313,16 @@ async def revenue_overview(
             })
         if l.get("treatment_fee_payment_mode") == "partial":
             installments = (l.get("treatment_fee_payment_details") or {}).get("installments") or []
-            for idx, inst in enumerate(installments[1:], start=2):
+            for idx, inst in enumerate(installments, start=1):
                 payment_schedule.append({
                     "lead_id": l["id"],
                     "client_name": l.get("name", "Unknown"),
                     "branch_name": branch_name_map.get(l.get("branch_id"), ""),
+                    "category": "session",  # Partial Payment only exists on Treatment Fee today
                     "installment_number": idx,
                     "amount": inst.get("amount", 0),
                     "due_date": inst.get("due_date", ""),
+                    "status": _installment_status(inst, today),
                 })
     outstanding_clients.sort(key=lambda r: -r["balance"])
     payment_schedule.sort(key=lambda r: r["due_date"])
@@ -387,3 +397,31 @@ async def client_transaction_history(
         "transactions": transactions,
         "timeline": activity,
     }
+
+
+@router.post("/finance/installment/{lead_id}/{installment_number}/mark-paid")
+async def mark_installment_paid(
+    lead_id: str,
+    installment_number: int,
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "accountant")),
+):
+    """Payment Schedules — mark one Partial Payment installment as collected.
+    installment_number is 1-based (matches what the Payment Schedules table shows)."""
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Client not found")
+    if user.role == "branch_admin" and lead.get("branch_id") != user.branch_id:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    details = lead.get("treatment_fee_payment_details") or {}
+    installments = details.get("installments") or []
+    idx = installment_number - 1
+    if idx < 0 or idx >= len(installments):
+        raise HTTPException(status_code=404, detail="Installment not found")
+
+    installments[idx]["paid"] = True
+    await v3_col("leads").update_one(
+        {"id": lead_id},
+        {"$set": {"treatment_fee_payment_details.installments": installments}},
+    )
+    return {"message": "Installment marked as paid", "balance": _lead_outstanding_balance({**lead, "treatment_fee_payment_details": details})}

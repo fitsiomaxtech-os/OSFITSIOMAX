@@ -316,7 +316,9 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
         if installments_total != round(payload.paid_amount, 2):
             raise HTTPException(status_code=400, detail="Installment amounts must add up to the Total Amount")
         payment_details = {
-            "installments": [{"amount": inst.amount, "due_date": inst.due_date} for inst in installments],
+            # The first installment is collected right now, as part of this same
+            # transaction — every later one starts unpaid, due on its own date.
+            "installments": [{"amount": inst.amount, "due_date": inst.due_date, "paid": i == 0} for i, inst in enumerate(installments)],
         }
         ordinals = ["First", "Second", "Third", "Fourth", "Fifth", "Sixth", "Seventh", "Eighth", "Ninth", "Tenth"]
         parts = [
