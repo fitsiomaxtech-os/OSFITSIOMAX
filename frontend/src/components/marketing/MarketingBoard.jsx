@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  BarChart3, FileSpreadsheet, Layers, Users,
+  FileSpreadsheet, Layers, Users,
   Plus, RefreshCw, Trash2, Link as LinkIcon, ArrowRightLeft, X, Pencil,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import {
-  mkDashboard, mkGetDistribution, mkPatchDistribution, mkRefreshDistribution,
+  mkGetDistribution, mkPatchDistribution, mkRefreshDistribution,
   mkGetTeam, mkCreateTeamMember, mkAllLeads, mkAssignLead, mkDeleteLead, mkBulkDelete,
   mkGetSources, mkCreateSource, mkUpdateSource, mkDeleteSource, mkSyncSource,
   gsStatus, gsAuthUrl, gsDisconnect, gsPull,
@@ -17,18 +17,10 @@ import { MaskedContact } from "@/components/MaskedContact";
 import { SourcePill } from "@/components/marketing/SourcePill";
 
 const SUB_TABS = [
-  { key: "overview", label: "Overview", icon: BarChart3 },
   { key: "lead_sources", label: "Lead Sources", icon: FileSpreadsheet },
   { key: "all_leads", label: "All Leads", icon: Layers },
   { key: "team", label: "Team & Distribution", icon: Users },
 ];
-
-const KPI = ({ label, value, accent, testid }) => (
-  <div className={`rounded-xl border ${accent} p-4`} data-testid={testid}>
-    <p className="text-xs font-medium text-slate-500">{label}</p>
-    <p className="mt-1 text-3xl font-bold text-slate-900">{value}</p>
-  </div>
-);
 
 const TabBtn = ({ active, label, Icon, onClick, testid }) => (
   <button
@@ -40,70 +32,6 @@ const TabBtn = ({ active, label, Icon, onClick, testid }) => (
     {label}
   </button>
 );
-
-// ============ Overview ============
-
-const OverviewTab = ({ branches }) => {
-  const [data, setData] = useState(null);
-  useEffect(() => {
-    mkDashboard().then(setData).catch(() => toast.error("Failed to load dashboard"));
-  }, []);
-  if (!data) return <p className="text-sm text-slate-500" data-testid="mk-overview-loading">Loading...</p>;
-  const k = data.kpis;
-  const maxBy = Math.max(...(data.by_source.map((r) => r.count) || [1]), 1);
-  return (
-    <div className="space-y-5" data-testid="mk-overview-tab">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <KPI label="Pre-Sales Leads" value={k.pre_sales_leads} accent="border-amber-200 bg-amber-50" testid="mk-kpi-presales" />
-        <KPI label="Sales Leads" value={k.sales_leads} accent="border-green-200 bg-green-50" testid="mk-kpi-sales" />
-        <KPI label="Active Sources" value={k.active_sources} accent="border-blue-200 bg-blue-50" testid="mk-kpi-sources" />
-        <KPI label="Conversion Rate" value={`${k.conversion_rate}%`} accent="border-purple-200 bg-purple-50" testid="mk-kpi-conversion" />
-      </div>
-
-      <Card data-testid="mk-by-source-card">
-        <CardHeader><CardTitle className="text-base">Leads by Source</CardTitle></CardHeader>
-        <CardContent className="space-y-2">
-          {data.by_source.length === 0 ? (
-            <p className="text-sm text-slate-500">No leads yet.</p>
-          ) : data.by_source.map((row) => (
-            <div key={row.source} className="flex items-center gap-2">
-              <div className="w-32 shrink-0"><SourcePill source={row.source} /></div>
-              <div className="h-3 flex-1 overflow-hidden rounded-full bg-slate-100">
-                <div className="h-full rounded-full bg-sky-500" style={{ width: `${(row.count / maxBy) * 100}%` }} />
-              </div>
-              <span className="w-10 text-right text-xs font-semibold text-slate-700">{row.count}</span>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
-
-      <Card data-testid="mk-recent-leads-card">
-        <CardHeader><CardTitle className="text-base">Recent Leads</CardTitle></CardHeader>
-        <CardContent>
-          <div className="overflow-auto">
-            <table className="min-w-full text-xs">
-              <thead className="bg-slate-50 text-left text-slate-500">
-                <tr><th className="px-3 py-2">Name</th><th className="px-3 py-2">Source</th><th className="px-3 py-2">Stage</th><th className="px-3 py-2">Assigned</th><th className="px-3 py-2">Branch</th><th className="px-3 py-2">Created</th></tr>
-              </thead>
-              <tbody>
-                {data.recent_leads.map((l) => (
-                  <tr key={l.id} className="border-t border-slate-100" data-testid={`mk-recent-row-${l.id}`}>
-                    <td className="px-3 py-2 font-medium text-slate-800">{l.name}</td>
-                    <td className="px-3 py-2"><SourcePill source={l.source_tab || l.source_type} /></td>
-                    <td className="px-3 py-2 text-slate-600">{l.stage}</td>
-                    <td className="px-3 py-2 text-slate-600">{l.assigned_user_name || "—"}</td>
-                    <td className="px-3 py-2 text-slate-500">{branches.find((b) => b.id === l.branch_id)?.branch_name || "—"}</td>
-                    <td className="px-3 py-2 text-slate-400">{(l.created_at || "").slice(0, 10)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-};
 
 // ============ Sources ============
 
@@ -759,12 +687,7 @@ const DialogShell = ({ title, onClose, children, testid }) => (
 // ============ Root ============
 
 export const MarketingBoard = ({ branches = [] }) => {
-  const [tab, setTab] = useState(() => {
-    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("sheets_connect")) {
-      return "lead_sources";
-    }
-    return "overview";
-  });
+  const [tab, setTab] = useState("lead_sources");
   const [team, setTeam] = useState({ pre_sales: [], sales: [] });
   const reloadTeam = useCallback(() => mkGetTeam().then(setTeam).catch((e) => console.warn("[load failed]", e?.message || e)), []);
   useEffect(() => { reloadTeam(); }, [reloadTeam]);
@@ -780,7 +703,6 @@ export const MarketingBoard = ({ branches = [] }) => {
           <TabBtn key={t.key} active={tab === t.key} label={t.label} Icon={t.icon} onClick={() => setTab(t.key)} testid={`mk-subtab-${t.key}`} />
         ))}
       </div>
-      {tab === "overview" && <OverviewTab branches={branches} />}
       {tab === "lead_sources" && <SourcesTab branches={branches} />}
       {tab === "all_leads" && <AllLeadsTab team={team} />}
       {tab === "team" && <TeamTab team={team} reloadTeam={reloadTeam} branches={branches} />}
