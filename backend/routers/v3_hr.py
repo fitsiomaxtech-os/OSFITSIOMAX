@@ -79,7 +79,7 @@ class UserAccountCreate(BaseModel):
     full_name: str
     email: str
     password: str
-    role: Literal["super_admin", "business_dev", "pre_sales", "branch_admin", "head_physio", "physio", "marketing_head"]
+    role: Literal["super_admin", "business_dev", "pre_sales", "branch_admin", "head_physio", "physio", "marketing_head", "accountant"]
     employee_id: Optional[str] = None
     branch_id: Optional[str] = None
     mobile_number: Optional[str] = None
