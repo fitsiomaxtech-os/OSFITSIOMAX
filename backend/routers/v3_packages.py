@@ -234,7 +234,7 @@ async def assign_package(lead_id: str, payload: V3AssignPackageInput, user: V3Us
 
 
 CONSULTATION_FEE_PAYMENT_MODES = {"cash", "upi", "card"}
-TREATMENT_FEE_PAYMENT_MODES = {"cash", "upi", "card", "cheque", "emi", "partial"}
+TREATMENT_FEE_PAYMENT_MODES = {"cash", "upi", "card", "cheque", "partial"}
 
 
 @router.post("/leads/{lead_id}/collect-package-payment", response_model=dict)
@@ -274,7 +274,7 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
     """Branch admin chooses the Session package (FITSIO STORE > Sessions — distinct
     from the Consultation package Head Physio chose earlier) and collects the
     Treatment Fee in the same step, at the Treatment Fee stage — any payment method
-    is allowed here, including EMI/Cheque/Partial. Moves on to Physio Assign once
+    is allowed here, including Cheque/Partial. Moves on to Physio Assign once
     collected."""
     if payload.payment_mode not in TREATMENT_FEE_PAYMENT_MODES:
         raise HTTPException(status_code=400, detail=f"Treatment Fee only accepts: {sorted(TREATMENT_FEE_PAYMENT_MODES)}")
@@ -306,31 +306,24 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
             "amount": payload.paid_amount,
         }
         detail_suffix = f" · Cheque #{payload.cheque_number.strip()}, {payload.bank_name.strip()}"
-    elif payload.payment_mode == "emi":
-        if not payload.emi_monthly_date or not (1 <= payload.emi_monthly_date <= 31) or not payload.emi_tenure_months or payload.emi_tenure_months <= 0:
-            raise HTTPException(status_code=400, detail="Monthly Collection Date (1-31) and Tenure (months) are required")
-        first_payment = round(payload.paid_amount * 0.1, 2)
-        balance = round(payload.paid_amount - first_payment, 2)
-        monthly_amount = round(balance / payload.emi_tenure_months, 2)
-        payment_details = {
-            "total_amount": payload.paid_amount,
-            "first_payment": first_payment,
-            "monthly_collection_date": payload.emi_monthly_date,
-            "tenure_months": payload.emi_tenure_months,
-            "monthly_emi_amount": monthly_amount,
-        }
-        detail_suffix = f" · First Payment Rs.{first_payment}, then Rs.{monthly_amount}/mo x {payload.emi_tenure_months} (due day {payload.emi_monthly_date})"
     elif payload.payment_mode == "partial":
-        if payload.partial_first_amount is None or payload.partial_second_amount is None or not payload.partial_second_due_date:
-            raise HTTPException(status_code=400, detail="First Payment, Second Payment and Second Payment Due Date are required")
-        if round(payload.partial_first_amount + payload.partial_second_amount, 2) != round(payload.paid_amount, 2):
-            raise HTTPException(status_code=400, detail="First Payment + Second Payment must equal the Total Amount")
+        installments = payload.partial_installments or []
+        if len(installments) < 2:
+            raise HTTPException(status_code=400, detail="At least two installments are required for Partial Payment")
+        if any(inst.amount <= 0 or not inst.due_date for inst in installments):
+            raise HTTPException(status_code=400, detail="Every installment needs an amount and a due date")
+        installments_total = round(sum(inst.amount for inst in installments), 2)
+        if installments_total != round(payload.paid_amount, 2):
+            raise HTTPException(status_code=400, detail="Installment amounts must add up to the Total Amount")
         payment_details = {
-            "first_payment_amount": payload.partial_first_amount,
-            "second_payment_amount": payload.partial_second_amount,
-            "second_payment_due_date": payload.partial_second_due_date,
+            "installments": [{"amount": inst.amount, "due_date": inst.due_date} for inst in installments],
         }
-        detail_suffix = f" · First Rs.{payload.partial_first_amount} now, Second Rs.{payload.partial_second_amount} due {payload.partial_second_due_date}"
+        ordinals = ["First", "Second", "Third", "Fourth", "Fifth", "Sixth", "Seventh", "Eighth", "Ninth", "Tenth"]
+        parts = [
+            f"{ordinals[i] if i < len(ordinals) else f'#{i + 1}'} Rs.{inst.amount} due {inst.due_date}"
+            for i, inst in enumerate(installments)
+        ]
+        detail_suffix = f" · {', '.join(parts)}"
 
     base_price = item.get("price_online") if payload.mode == "online" else item.get("price_offline")
     base_sessions = item.get("sessions_online") if payload.mode == "online" else item.get("sessions_offline")

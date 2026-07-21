@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Calendar, CheckCircle2, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell } from "lucide-react";
+import { Calendar, CheckCircle2, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,9 +25,10 @@ const TREATMENT_FEE_PAYMENT_MODES = [
   { value: "upi", label: "UPI" },
   { value: "card", label: "Card" },
   { value: "cheque", label: "Cheque" },
-  { value: "emi", label: "EMI" },
   { value: "partial", label: "Partial Payment" },
 ];
+const PARTIAL_ORDINALS = ["First", "Second", "Third", "Fourth", "Fifth", "Sixth", "Seventh", "Eighth", "Ninth", "Tenth"];
+const partialInstallmentLabel = (idx) => `${PARTIAL_ORDINALS[idx] || `#${idx + 1}`} Payment`;
 
 // This Branch Consultation stage name is mirrored (read-only) from the Head Physio's
 // own independent pipeline — Branch Admin can see it but not click it. Consultation
@@ -358,24 +359,17 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
       card_holder_name: "",
       bank_name: "",
       cheque_number: "",
-      emi_monthly_date: "",
-      emi_tenure_months: "",
-      partial_first_amount: "",
-      partial_second_amount: "",
-      partial_second_due_date: "",
+      partial_installments: [{ amount: "", due_date: "" }, { amount: "", due_date: "" }],
     });
   };
 
-  // EMI/Partial derived figures — computed from the Amount field, never stored directly
-  // in state, so they can't drift out of sync with it.
+  // Partial Payment derived figures — computed from the Amount field and the
+  // installment list, never stored directly in state, so they can't drift out of sync.
   const treatmentFeeTotal = parseFloat(treatmentFeeDraft?.paid_amount) || 0;
-  const emiFirstPayment = Math.round(treatmentFeeTotal * 0.1 * 100) / 100;
-  const emiBalance = Math.round((treatmentFeeTotal - emiFirstPayment) * 100) / 100;
-  const emiTenureNum = parseInt(treatmentFeeDraft?.emi_tenure_months, 10) || 0;
-  const emiMonthlyAmount = emiTenureNum > 0 ? Math.round((emiBalance / emiTenureNum) * 100) / 100 : 0;
-  const partialFirstNum = parseFloat(treatmentFeeDraft?.partial_first_amount) || 0;
-  const partialSecondNum = parseFloat(treatmentFeeDraft?.partial_second_amount) || 0;
-  const partialMismatch = Math.abs(partialFirstNum + partialSecondNum - treatmentFeeTotal) > 0.01;
+  const partialInstallments = treatmentFeeDraft?.partial_installments || [];
+  const partialInstallmentsTotal = Math.round(partialInstallments.reduce((sum, i) => sum + (parseFloat(i.amount) || 0), 0) * 100) / 100;
+  const partialMismatch = Math.abs(partialInstallmentsTotal - treatmentFeeTotal) > 0.01;
+  const partialAllFilled = partialInstallments.length >= 2 && partialInstallments.every((i) => parseFloat(i.amount) > 0 && i.due_date);
 
   const submitTreatmentFee = async () => {
     if (!treatmentFeeDraft.item_id) { toast.error("Choose a session package"); return; }
@@ -403,25 +397,19 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
       }
       payload.bank_name = treatmentFeeDraft.bank_name.trim();
       payload.cheque_number = treatmentFeeDraft.cheque_number.trim();
-    } else if (mode === "emi") {
-      if (!treatmentFeeDraft.emi_monthly_date || !treatmentFeeDraft.emi_tenure_months) {
-        toast.error("Monthly Collection Date and Tenure are required");
-        return;
-      }
-      payload.emi_monthly_date = parseInt(treatmentFeeDraft.emi_monthly_date, 10);
-      payload.emi_tenure_months = parseInt(treatmentFeeDraft.emi_tenure_months, 10);
     } else if (mode === "partial") {
-      if (!treatmentFeeDraft.partial_first_amount || !treatmentFeeDraft.partial_second_amount || !treatmentFeeDraft.partial_second_due_date) {
-        toast.error("First Payment, Second Payment and Second Payment Due Date are required");
+      if (!partialAllFilled) {
+        toast.error("Every installment needs an amount and a due date");
         return;
       }
       if (partialMismatch) {
-        toast.error("First Payment + Second Payment must equal the Total Amount");
+        toast.error("Installment amounts must add up to the Total Amount");
         return;
       }
-      payload.partial_first_amount = partialFirstNum;
-      payload.partial_second_amount = partialSecondNum;
-      payload.partial_second_due_date = treatmentFeeDraft.partial_second_due_date;
+      payload.partial_installments = partialInstallments.map((i) => ({
+        amount: parseFloat(i.amount),
+        due_date: i.due_date,
+      }));
     }
     setCollectingTreatmentFee(true);
     try {
@@ -1070,83 +1058,74 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                     </>
                   )}
 
-                  {treatmentFeeDraft.payment_mode === "emi" && (
-                    <>
-                      <div className="rounded-md bg-slate-50 p-2 text-[11px] text-slate-600" data-testid="cons-treatment-fee-emi-first-payment">
-                        First (Head) Payment — 10% of ₹{treatmentFeeTotal || 0}: <span className="font-bold text-slate-800">₹{emiFirstPayment}</span>
-                        <br />Balance to split: <span className="font-bold text-slate-800">₹{emiBalance}</span>
-                      </div>
-                      <div>
-                        <label className="mb-1 block text-[11px] font-medium text-slate-500">Monthly Collection Date (day of month)</label>
-                        <Input
-                          type="number"
-                          min="1"
-                          max="31"
-                          value={treatmentFeeDraft.emi_monthly_date}
-                          onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, emi_monthly_date: e.target.value })}
-                          className="h-9"
-                          data-testid="cons-treatment-fee-emi-date"
-                        />
-                      </div>
-                      <div>
-                        <label className="mb-1 block text-[11px] font-medium text-slate-500">Tenure (No. of months)</label>
-                        <Input
-                          type="number"
-                          min="1"
-                          value={treatmentFeeDraft.emi_tenure_months}
-                          onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, emi_tenure_months: e.target.value })}
-                          className="h-9"
-                          data-testid="cons-treatment-fee-emi-tenure"
-                        />
-                      </div>
-                      {emiTenureNum > 0 && (
-                        <div className="rounded-md bg-sky-50 p-2 text-[11px] text-sky-700" data-testid="cons-treatment-fee-emi-monthly-amount">
-                          Monthly EMI Amount: <span className="font-bold">₹{emiMonthlyAmount}</span>
-                        </div>
-                      )}
-                    </>
-                  )}
-
                   {treatmentFeeDraft.payment_mode === "partial" && (
-                    <>
-                      <div>
-                        <label className="mb-1 block text-[11px] font-medium text-slate-500">First Payment Amount</label>
-                        <Input
-                          type="number"
-                          min="0"
-                          value={treatmentFeeDraft.partial_first_amount}
-                          onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, partial_first_amount: e.target.value })}
-                          className="h-9"
-                          data-testid="cons-treatment-fee-partial-first"
-                        />
+                    <div className="space-y-2 rounded-md border border-slate-200 p-2">
+                      <div className="flex items-center justify-between">
+                        <p className="text-[11px] font-semibold text-slate-600">Payment Schedule</p>
+                        <button
+                          type="button"
+                          onClick={() => setTreatmentFeeDraft({
+                            ...treatmentFeeDraft,
+                            partial_installments: [...partialInstallments, { amount: "", due_date: "" }],
+                          })}
+                          className="flex items-center gap-1 text-[11px] font-semibold text-sky-600 hover:text-sky-700"
+                          data-testid="cons-treatment-fee-partial-add"
+                        >
+                          <Plus className="h-3.5 w-3.5" /> Add Payment
+                        </button>
                       </div>
-                      <div>
-                        <label className="mb-1 block text-[11px] font-medium text-slate-500">Second Payment Amount</label>
-                        <Input
-                          type="number"
-                          min="0"
-                          value={treatmentFeeDraft.partial_second_amount}
-                          onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, partial_second_amount: e.target.value })}
-                          className="h-9"
-                          data-testid="cons-treatment-fee-partial-second"
-                        />
-                      </div>
-                      <div>
-                        <label className="mb-1 block text-[11px] font-medium text-slate-500">Second Payment Due Date</label>
-                        <Input
-                          type="date"
-                          value={treatmentFeeDraft.partial_second_due_date}
-                          onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, partial_second_due_date: e.target.value })}
-                          className="h-9"
-                          data-testid="cons-treatment-fee-partial-due-date"
-                        />
-                      </div>
-                      {(partialFirstNum > 0 || partialSecondNum > 0) && partialMismatch && (
+                      {partialInstallments.map((inst, idx) => (
+                        <div key={idx} className="flex items-end gap-1.5" data-testid={`cons-treatment-fee-partial-row-${idx}`}>
+                          <div className="flex-1">
+                            <label className="mb-1 block text-[11px] font-medium text-slate-500">{partialInstallmentLabel(idx)} Amount *</label>
+                            <Input
+                              type="number"
+                              min="0"
+                              value={inst.amount}
+                              onChange={(e) => {
+                                const next = [...partialInstallments];
+                                next[idx] = { ...next[idx], amount: e.target.value };
+                                setTreatmentFeeDraft({ ...treatmentFeeDraft, partial_installments: next });
+                              }}
+                              className="h-9"
+                              data-testid={`cons-treatment-fee-partial-amount-${idx}`}
+                            />
+                          </div>
+                          <div className="flex-1">
+                            <label className="mb-1 block text-[11px] font-medium text-slate-500">Due Date *</label>
+                            <Input
+                              type="date"
+                              value={inst.due_date}
+                              onChange={(e) => {
+                                const next = [...partialInstallments];
+                                next[idx] = { ...next[idx], due_date: e.target.value };
+                                setTreatmentFeeDraft({ ...treatmentFeeDraft, partial_installments: next });
+                              }}
+                              className="h-9"
+                              data-testid={`cons-treatment-fee-partial-date-${idx}`}
+                            />
+                          </div>
+                          {partialInstallments.length > 2 && (
+                            <button
+                              type="button"
+                              onClick={() => setTreatmentFeeDraft({
+                                ...treatmentFeeDraft,
+                                partial_installments: partialInstallments.filter((_, i) => i !== idx),
+                              })}
+                              className="mb-1.5 rounded p-1.5 text-rose-400 hover:bg-rose-50 hover:text-rose-600"
+                              data-testid={`cons-treatment-fee-partial-remove-${idx}`}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                      {partialInstallmentsTotal > 0 && partialMismatch && (
                         <p className="text-[11px] text-rose-600" data-testid="cons-treatment-fee-partial-mismatch">
-                          First + Second (₹{Math.round((partialFirstNum + partialSecondNum) * 100) / 100}) must equal the Total Amount (₹{treatmentFeeTotal})
+                          Installments total (₹{partialInstallmentsTotal}) must equal the Total Amount (₹{treatmentFeeTotal})
                         </p>
                       )}
-                    </>
+                    </div>
                   )}
 
                   <Button
@@ -1158,8 +1137,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                       !treatmentFeeDraft.item_id ||
                       (treatmentFeeDraft.payment_mode === "card" && (!treatmentFeeDraft.card_number.trim() || !treatmentFeeDraft.card_holder_name.trim())) ||
                       (treatmentFeeDraft.payment_mode === "cheque" && (!treatmentFeeDraft.bank_name.trim() || !treatmentFeeDraft.cheque_number.trim())) ||
-                      (treatmentFeeDraft.payment_mode === "emi" && (!treatmentFeeDraft.emi_monthly_date || !treatmentFeeDraft.emi_tenure_months)) ||
-                      (treatmentFeeDraft.payment_mode === "partial" && (!treatmentFeeDraft.partial_first_amount || !treatmentFeeDraft.partial_second_amount || !treatmentFeeDraft.partial_second_due_date || partialMismatch))
+                      (treatmentFeeDraft.payment_mode === "partial" && (!partialAllFilled || partialMismatch))
                     }
                     data-testid="cons-treatment-fee-submit"
                   >
