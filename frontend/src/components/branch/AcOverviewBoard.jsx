@@ -3,8 +3,8 @@ import { CalendarDays } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { getRevenueOverview, getBranches } from "@/lib/api";
 import {
-  ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
-  BarChart, Bar, Legend,
+  ResponsiveContainer, XAxis, YAxis, CartesianGrid, Tooltip,
+  BarChart, Bar, Legend, PieChart, Pie, Cell,
 } from "recharts";
 
 const DATE_PRESETS = [
@@ -164,9 +164,14 @@ const TotalRevenueTab = ({ data, loading, fmt }) => {
 
   const b = data.breakdown || {};
   const byBranch = data.by_branch || [];
-  const trend = data.trend || [];
   const paymentModes = Object.entries(data.payment_modes || {}).sort((a, z) => z[1] - a[1]);
   const modeTotal = paymentModes.reduce((s, [, v]) => s + v, 0) || 1;
+
+  const revenueSplit = [
+    { name: "Consultation", value: Number(b.consultation_revenue) || 0, color: CATEGORY_COLORS.consultation },
+    { name: "Session", value: Number(b.session_revenue) || 0, color: CATEGORY_COLORS.session },
+  ];
+  const revenueSplitTotal = revenueSplit.reduce((s, d) => s + d.value, 0);
 
   return (
     <div className="space-y-4" data-testid="ac-total-revenue-tab">
@@ -184,24 +189,40 @@ const TotalRevenueTab = ({ data, loading, fmt }) => {
         </div>
       </div>
 
-      {/* Trend chart */}
+      {/* Revenue split donut */}
       <Card>
         <CardContent className="p-4">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Revenue Trend</p>
-          {trend.length === 0 ? (
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Revenue by Category</p>
+          {revenueSplitTotal === 0 ? (
             <p className="py-8 text-center text-sm text-slate-400">No transactions in this range.</p>
           ) : (
-            <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={trend}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                <XAxis dataKey="date" tick={{ fontSize: 10 }} />
-                <YAxis tick={{ fontSize: 10 }} />
-                <Tooltip formatter={(v) => fmt(v)} />
-                <Legend wrapperStyle={{ fontSize: 11 }} />
-                <Line type="monotone" dataKey="consultation" stroke={CATEGORY_COLORS.consultation} strokeWidth={2} dot={false} name="Consultation" />
-                <Line type="monotone" dataKey="session" stroke={CATEGORY_COLORS.session} strokeWidth={2} dot={false} name="Session" />
-              </LineChart>
-            </ResponsiveContainer>
+            <div className="relative">
+              <ResponsiveContainer width="100%" height={240}>
+                <PieChart>
+                  <Pie
+                    data={revenueSplit}
+                    dataKey="value"
+                    nameKey="name"
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={70}
+                    outerRadius={100}
+                    paddingAngle={2}
+                    stroke="none"
+                  >
+                    {revenueSplit.map((entry) => (
+                      <Cell key={entry.name} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(v) => fmt(v)} />
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center pb-6">
+                <p className="text-[10px] uppercase tracking-wide text-slate-400">Total</p>
+                <p className="text-lg font-bold text-slate-800">{fmt(revenueSplitTotal)}</p>
+              </div>
+            </div>
           )}
         </CardContent>
       </Card>
