@@ -331,7 +331,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
       });
       toast.success("Fee collected");
       setCollectFeeDraft(null);
-      applyUpdatedLead(res.lead);
+      // Close the lead card instantly, same as a plain stage move — don't leave it
+      // open on the stale pre-payment lead while the board list updates in the background.
+      setSelectedLead(null);
+      setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === res.lead.id ? res.lead : l) }));
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed to collect fee");
     }
@@ -425,7 +428,9 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
       const res = await collectTreatmentFee(selectedLead.id, payload);
       toast.success("Treatment fee collected");
       setTreatmentFeeDraft(null);
-      applyUpdatedLead(res.lead);
+      // Close the lead card instantly, same as a plain stage move.
+      setSelectedLead(null);
+      setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === res.lead.id ? res.lead : l) }));
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed to collect treatment fee");
     }
@@ -450,7 +455,9 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
       const res = await assignConsultationPhysio(selectedLead.id, physioPick);
       toast.success("Physio assigned for treatment");
       setShowPhysioModal(false);
-      applyUpdatedLead(res.lead);
+      // Close the lead card instantly, same as a plain stage move.
+      setSelectedLead(null);
+      setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === res.lead.id ? res.lead : l) }));
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed to assign physio");
     }
@@ -1261,8 +1268,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                         }
                         try {
                           const updated = await scheduleConsultationFollowUp(selectedLead.id, followUpDraft);
-                          applyUpdatedLead(updated);
                           setFollowUpDraft(null);
+                          // Close the lead card instantly, same as a plain stage move.
+                          setSelectedLead(null);
+                          setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === updated.id ? updated : l) }));
                           toast.success(`Follow-up scheduled for ${followUpDraft.date} at ${followUpDraft.time}`);
                         } catch (e) { toast.error(e?.response?.data?.detail || "Failed to schedule"); }
                       }}
