@@ -1,13 +1,11 @@
 import re
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
-from typing import List, Optional
+from typing import Optional
 
 from database import v3_col
 from deps import v3_require_roles
 from schemas.v3 import V3UserOut
 from stage_utils import get_first_stage_name
-from routers.v3_packages import CONSULTATION_FEE_PAYMENT_MODES, TREATMENT_FEE_PAYMENT_MODES
 
 router = APIRouter(prefix="/api/v3")
 
@@ -197,11 +195,14 @@ async def revenue_overview(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     branch_id: Optional[str] = None,
-    _: V3UserOut = Depends(v3_require_roles("super_admin", "accountant")),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "branch_admin")),
 ):
-    """AC Overview > Total Revenue — date-range + branch scoped, built from the
-    lead_activity payment trail (the only place these collections carry a real
-    timestamp) rather than summing lead fields, which have no date dimension."""
+    """AC Overview > Total Revenue, and Accountant Manage (Super Admin's per-branch
+    view and Branch Admin's own read-only tab) — date-range + branch scoped, built
+    from the lead_activity payment trail (the only place these collections carry a
+    real timestamp) rather than summing lead fields, which have no date dimension."""
+    if user.role == "branch_admin":
+        branch_id = user.branch_id
     lead_query = {"branch_id": branch_id} if branch_id else {}
     leads = await v3_col("leads").find(lead_query, {"_id": 0}).to_list(20000)
     lead_ids = [l["id"] for l in leads]
@@ -287,6 +288,35 @@ async def revenue_overview(
         and l.get("branch_stage") not in (None, first_branch_stage)
     ])
 
+    # Accountant Manage > Outstanding Amount — every client who still owes something,
+    # and > Payment Schedules — every Partial Payment installment still due (the
+    # first installment is collected at booking time, so it's excluded here).
+    outstanding_clients = []
+    payment_schedule = []
+    for l in leads:
+        balance = lead_balance_map.get(l["id"], 0.0)
+        if balance > 0:
+            outstanding_clients.append({
+                "lead_id": l["id"],
+                "client_name": l.get("name", "Unknown"),
+                "phone": l.get("phone", ""),
+                "branch_name": branch_name_map.get(l.get("branch_id"), ""),
+                "balance": balance,
+            })
+        if l.get("treatment_fee_payment_mode") == "partial":
+            installments = (l.get("treatment_fee_payment_details") or {}).get("installments") or []
+            for idx, inst in enumerate(installments[1:], start=2):
+                payment_schedule.append({
+                    "lead_id": l["id"],
+                    "client_name": l.get("name", "Unknown"),
+                    "branch_name": branch_name_map.get(l.get("branch_id"), ""),
+                    "installment_number": idx,
+                    "amount": inst.get("amount", 0),
+                    "due_date": inst.get("due_date", ""),
+                })
+    outstanding_clients.sort(key=lambda r: -r["balance"])
+    payment_schedule.sort(key=lambda r: r["due_date"])
+
     return {
         "kpis": {
             "total_collected": total_collected,
@@ -304,19 +334,23 @@ async def revenue_overview(
         "by_branch": by_branch,
         "payment_modes": payment_modes,
         "transactions": sorted(transactions, key=lambda t: t["date"], reverse=True)[:500],
+        "outstanding_clients": outstanding_clients,
+        "payment_schedule": payment_schedule,
     }
 
 
 @router.get("/finance/client/{lead_id}")
 async def client_transaction_history(
     lead_id: str,
-    _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "accountant")),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "accountant")),
 ):
     """Transactions History > eye icon — one client's full profile, every payment
     they've made, their current outstanding balance, and their complete activity
     timeline (stage moves, follow-ups, diagnosis notes — not just payments)."""
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
+        raise HTTPException(status_code=404, detail="Client not found")
+    if user.role == "branch_admin" and lead.get("branch_id") != user.branch_id:
         raise HTTPException(status_code=404, detail="Client not found")
 
     branch_name = ""
@@ -353,47 +387,3 @@ async def client_transaction_history(
         "transactions": transactions,
         "timeline": activity,
     }
-
-
-# ---------- Accountant Manage > branch-by-branch payment mode settings ----------
-# Every branch accepts every payment mode by default (matches pre-existing behavior);
-# Super Admin can narrow either list down per branch. Stored directly on the branch
-# document since it's simple per-branch config, not its own growing collection.
-
-class V3BranchFinanceSettingsInput(BaseModel):
-    consultation_fee_payment_modes: List[str]
-    treatment_fee_payment_modes: List[str]
-
-
-@router.get("/branch-finance-settings/{branch_id}")
-async def get_branch_finance_settings(branch_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin"))):
-    branch = await v3_col("branches").find_one({"id": branch_id}, {"_id": 0})
-    if not branch:
-        raise HTTPException(status_code=404, detail="Branch not found")
-    return {
-        "branch_id": branch_id,
-        "branch_name": branch.get("branch_name", ""),
-        "consultation_fee_payment_modes": branch.get("consultation_fee_payment_modes") or sorted(CONSULTATION_FEE_PAYMENT_MODES),
-        "treatment_fee_payment_modes": branch.get("treatment_fee_payment_modes") or sorted(TREATMENT_FEE_PAYMENT_MODES),
-    }
-
-
-@router.put("/branch-finance-settings/{branch_id}")
-async def update_branch_finance_settings(
-    branch_id: str,
-    payload: V3BranchFinanceSettingsInput,
-    _: V3UserOut = Depends(v3_require_roles("super_admin")),
-):
-    if not await v3_col("branches").find_one({"id": branch_id}, {"_id": 0}):
-        raise HTTPException(status_code=404, detail="Branch not found")
-    consult_modes = [m for m in payload.consultation_fee_payment_modes if m in CONSULTATION_FEE_PAYMENT_MODES]
-    treatment_modes = [m for m in payload.treatment_fee_payment_modes if m in TREATMENT_FEE_PAYMENT_MODES]
-    if not consult_modes:
-        raise HTTPException(status_code=400, detail="At least one Consultation Fee payment mode must stay enabled")
-    if not treatment_modes:
-        raise HTTPException(status_code=400, detail="At least one Treatment Fee payment mode must stay enabled")
-    await v3_col("branches").update_one({"id": branch_id}, {"$set": {
-        "consultation_fee_payment_modes": consult_modes,
-        "treatment_fee_payment_modes": treatment_modes,
-    }})
-    return await get_branch_finance_settings(branch_id)

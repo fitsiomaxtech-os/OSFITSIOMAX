@@ -123,7 +123,7 @@ export const BranchAdminBoard = ({ branchId }) => {
     { key: "sessions", label: "Treatment Sessions", icon: CalendarRange },
     { key: "rehab", label: "Rehab", icon: Activity },
     { key: "store", label: "Fitsiomax Store", icon: ShoppingCart },
-    { key: "accountant_mgmt", label: "Branch Accountant Management", icon: BadgeIndianRupee },
+    { key: "accountant_mgmt", label: "Accountant Manage", icon: BadgeIndianRupee },
   ];
 
   return (
@@ -183,7 +183,7 @@ export const BranchAdminBoard = ({ branchId }) => {
       ) : activeView === "store" ? (
         <FitsiomaxStorePanel />
       ) : activeView === "accountant_mgmt" ? (
-        <AccountantManageTab branchId={branchId} readOnly />
+        <AccountantManageTab branchId={branchId} />
       ) : (
         <>
           <div data-testid="branch-pipeline-header">
