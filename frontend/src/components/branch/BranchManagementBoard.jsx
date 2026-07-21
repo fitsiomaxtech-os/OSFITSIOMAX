@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Plus, Pencil, Trash2, X, Users, MapPin, Phone, Mail, TrendingUp, BarChart3, RefreshCw, Layers, LayoutDashboard, ChevronDown } from "lucide-react";
+import { Plus, Pencil, Trash2, X, Users, MapPin, Phone, Mail, TrendingUp, BarChart3, RefreshCw, Layers, LayoutDashboard, ChevronDown, BadgeIndianRupee } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,12 +14,14 @@ import { BranchFormDialogV2 } from "@/components/branch/BranchFormDialogV2";
 import { BranchAdminBoard } from "@/components/BranchAdminBoard";
 import { HeadPhysioBoard } from "@/components/HeadPhysioBoard";
 import { PhysioBoard } from "@/components/PhysioBoard";
+import { AcOverviewBoard } from "@/components/branch/AcOverviewBoard";
 
 const TABS = [
   { key: "creation", label: "Creation & Manager", icon: Users },
   { key: "service_type", label: "Service Type", icon: Layers },
   { key: "performance", label: "Performance", icon: TrendingUp },
   { key: "branch_control", label: "Branch Control", icon: LayoutDashboard },
+  { key: "ac_overview", label: "AC Overview", icon: BadgeIndianRupee },
 ];
 
 export const BranchManagementBoard = ({ actingUser } = {}) => {
@@ -51,6 +53,7 @@ export const BranchManagementBoard = ({ actingUser } = {}) => {
       {tab === "service_type" && <ServiceTypeTab />}
       {tab === "performance" && <PerformanceTab onDrillIn={setDrilledBranchId} />}
       {tab === "branch_control" && <BranchControlTab actingUser={actingUser} />}
+      {tab === "ac_overview" && <AcOverviewBoard />}
     </div>
   );
 };
