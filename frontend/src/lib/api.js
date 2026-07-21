@@ -171,6 +171,7 @@ export const getRevenueOverview = async (params = {}) => (await api.get("/financ
 
 export const getBranchFinanceSettings = async (branchId) => (await api.get(`/branch-finance-settings/${branchId}`)).data;
 export const updateBranchFinanceSettings = async (branchId, payload) => (await api.put(`/branch-finance-settings/${branchId}`, payload)).data;
+export const getClientTransactionHistory = async (leadId) => (await api.get(`/finance/client/${leadId}`)).data;
 
 export const getHPMyCalendar = async (branchId) => (await api.get("/head-physio/my-calendar", { params: branchId ? { branch_id: branchId } : {} })).data;
 export const getHPMyPatients = async (branchId) => (await api.get("/head-physio/my-patients", { params: branchId ? { branch_id: branchId } : {} })).data;

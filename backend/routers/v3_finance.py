@@ -176,6 +176,22 @@ def _parse_payment_mode(details: str) -> str:
     return m.group(1).lower() if m else "unknown"
 
 
+def _lead_outstanding_balance(lead: dict) -> float:
+    """Total still owed by this client across everything on their record: the gap
+    between an assigned Consultation package's price and what was actually
+    collected for it, plus — for a Partial Payment treatment fee — every
+    installment after the first (which is collected at booking time; the rest
+    are scheduled for later and haven't been received yet)."""
+    balance = 0.0
+    if lead.get("package_id"):
+        balance += max((lead.get("package_price") or 0) - (lead.get("package_paid") or 0), 0)
+    if lead.get("treatment_fee_payment_mode") == "partial":
+        installments = (lead.get("treatment_fee_payment_details") or {}).get("installments") or []
+        if len(installments) > 1:
+            balance += sum(i.get("amount", 0) for i in installments[1:])
+    return round(balance, 2)
+
+
 @router.get("/finance/revenue-overview")
 async def revenue_overview(
     start_date: Optional[str] = None,
@@ -190,6 +206,8 @@ async def revenue_overview(
     leads = await v3_col("leads").find(lead_query, {"_id": 0}).to_list(20000)
     lead_ids = [l["id"] for l in leads]
     lead_branch_map = {l["id"]: l.get("branch_id") for l in leads}
+    lead_name_map = {l["id"]: l.get("name", "Unknown") for l in leads}
+    lead_balance_map = {l["id"]: _lead_outstanding_balance(l) for l in leads}
 
     branch_docs = await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1}).to_list(500)
     branch_name_map = {b["id"]: b.get("branch_name", "") for b in branch_docs}
@@ -248,6 +266,10 @@ async def revenue_overview(
             "tax": 0.0,
             "net": amount,
             "collected_by": act.get("created_by", ""),
+            "lead_id": act.get("lead_id", ""),
+            "client_name": lead_name_map.get(act.get("lead_id"), "Unknown"),
+            "payment_mode": mode,
+            "client_balance": lead_balance_map.get(act.get("lead_id"), 0.0),
         })
 
     total_collected = consultation_total + session_total
@@ -282,6 +304,54 @@ async def revenue_overview(
         "by_branch": by_branch,
         "payment_modes": payment_modes,
         "transactions": sorted(transactions, key=lambda t: t["date"], reverse=True)[:500],
+    }
+
+
+@router.get("/finance/client/{lead_id}")
+async def client_transaction_history(
+    lead_id: str,
+    _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "accountant")),
+):
+    """Transactions History > eye icon — one client's full profile, every payment
+    they've made, their current outstanding balance, and their complete activity
+    timeline (stage moves, follow-ups, diagnosis notes — not just payments)."""
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    branch_name = ""
+    if lead.get("branch_id"):
+        branch = await v3_col("branches").find_one({"id": lead["branch_id"]}, {"_id": 0, "branch_name": 1})
+        branch_name = (branch or {}).get("branch_name", "")
+
+    activity = await v3_col("lead_activity").find({"lead_id": lead_id}, {"_id": 0}).sort("created_at", -1).to_list(500)
+
+    transactions = []
+    for act in activity:
+        if act.get("action") not in REVENUE_ACTIONS:
+            continue
+        details = act.get("details", "")
+        transactions.append({
+            "id": act.get("id", ""),
+            "date": act.get("created_at", ""),
+            "source": _revenue_category(act.get("action", "")),
+            "amount": _parse_rs_amount(details),
+            "payment_mode": _parse_payment_mode(details),
+            "details": details,
+            "collected_by": act.get("created_by", ""),
+        })
+
+    return {
+        "client": {
+            "id": lead["id"],
+            "name": lead.get("name", "Unknown"),
+            "phone": lead.get("phone", ""),
+            "email": lead.get("email", ""),
+            "branch_name": branch_name,
+        },
+        "balance": _lead_outstanding_balance(lead),
+        "transactions": transactions,
+        "timeline": activity,
     }
 
 
