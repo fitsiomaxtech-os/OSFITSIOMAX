@@ -11,6 +11,7 @@ from utils import now_iso, now_utc, normalize_slot_time
 from security import hash_password
 from email_utils import send_email
 from deps import v3_current_user, v3_require_roles
+from stage_utils import get_first_stage_name
 from schemas.v3 import (
     V3UserOut, V3VerticalCreate, V3VerticalOut,
     V3BranchCreate, V3BranchOut, V3BranchUpdate,
@@ -296,3 +297,84 @@ async def v3_available_doctors(branch_id: str, slot_time: str, _: V3UserOut = De
     booked_ids = {item["doctor_id"] for item in booked}
     available = [d for d in doctors if slot_key in d.get("slots", []) and d["id"] not in booked_ids]
     return {"available_doctors": available}
+
+
+@router.post("/admin/reset-all-leads")
+async def v3_reset_all_leads(confirm: bool = False, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    """Testing utility: resets every lead's pipeline progress back to a fresh,
+    unassigned state at Pre-Sales' first stage — the lead record itself (name,
+    phone, contact info, source) is kept as-is. Also clears everything tied to
+    leads that only makes sense mid-pipeline: sessions, weekly assessments,
+    package recommendations, appointments, patient view tokens, and activity
+    history. Irreversible — requires confirm=true. Super Admin only."""
+    if not confirm:
+        raise HTTPException(status_code=400, detail="Pass confirm=true to proceed — this cannot be undone.")
+
+    first_stage = await get_first_stage_name("pre_sales", "New Leads")
+    reset_fields = {
+        "stage": first_stage,
+        "branch_id": None,
+        "branch_stage": None,
+        "consultation_stage": None,
+        "head_consultation_stage": None,
+        "physio_stage": None,
+        "consultation_fee": None,
+        "consultation_item_name": None,
+        "consultation_mode": None,
+        "consultation_payment_mode": None,
+        "package_amount": None,
+        "package_weeks": None,
+        "package_id": None,
+        "package_name": None,
+        "package_price": None,
+        "package_paid": None,
+        "package_payment_mode": None,
+        "package_sessions": None,
+        "package_duration_minutes": None,
+        "package_mode": None,
+        "diagnosis": None,
+        "physio_diagnosis_report": None,
+        "physio_diagnosis_locked": False,
+        "treatment_summary": None,
+        "treatment_summary_locked": False,
+        "assigned_physio_id": None,
+        "assigned_physio_name": None,
+        "physio_assigned_at": None,
+        "assigned_user_id": None,
+        "assigned_user_name": None,
+        "rnr_attempts": 0,
+        "rnr_last_attempt_at": None,
+        "follow_ups": [],
+        "next_follow_up_at": None,
+        "consultation_follow_ups": [],
+        "next_consultation_follow_up_at": None,
+        "appointment_mode": None,
+        "appointment_department": None,
+        "appointment_date": None,
+        "appointment_time": None,
+        "appointment_datetime": None,
+        "portfolio_date": None,
+        "portfolio_time": None,
+        "portfolio_datetime": None,
+        "expected_consultation_date": None,
+        "updated_at": now_iso(),
+    }
+    leads_result = await v3_col("leads").update_many({}, {"$set": reset_fields})
+
+    sessions_deleted = (await v3_col("sessions").delete_many({})).deleted_count
+    assessments_deleted = (await v3_col("weekly_assessments").delete_many({})).deleted_count
+    recs_deleted = (await v3_col("package_recommendations").delete_many({})).deleted_count
+    appts_deleted = (await v3_col("appointments").delete_many({})).deleted_count
+    tokens_deleted = (await v3_col("patient_tokens").delete_many({})).deleted_count
+    activity_deleted = (await v3_col("lead_activity").delete_many({})).deleted_count
+
+    return {
+        "message": "All leads reset to a fresh state",
+        "leads_reset": leads_result.modified_count,
+        "sessions_deleted": sessions_deleted,
+        "weekly_assessments_deleted": assessments_deleted,
+        "package_recommendations_deleted": recs_deleted,
+        "appointments_deleted": appts_deleted,
+        "patient_tokens_deleted": tokens_deleted,
+        "lead_activity_deleted": activity_deleted,
+    }

@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { Plus, Pencil, Trash2, ArrowLeft, Flag, GripVertical } from "lucide-react";
+import { Plus, Pencil, Trash2, ArrowLeft, Flag, GripVertical, AlertTriangle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
-import { stagesList, stagesCreate, stagesUpdate, stagesDelete, stagesReorder } from "@/lib/api";
+import { stagesList, stagesCreate, stagesUpdate, stagesDelete, stagesReorder, resetAllLeads } from "@/lib/api";
 
 const PALETTE = ["#6366f1", "#3b82f6", "#0ea5e9", "#06b6d4", "#14b8a6", "#22c55e", "#84cc16", "#eab308", "#f59e0b", "#f97316", "#ef4444", "#ec4899", "#a855f7", "#64748b"];
 
@@ -15,6 +15,7 @@ export const PipelineStageManagement = ({ onBack }) => {
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ name: "", color: "#6366f1", is_final: false });
+  const [resetting, setResetting] = useState(false);
 
   const load = useCallback(async () => {
     const [pre, sale, consult, headConsult] = await Promise.all([
@@ -58,6 +59,32 @@ export const PipelineStageManagement = ({ onBack }) => {
     items.forEach((x, i) => { x.order = i; });
     await stagesReorder(items);
     load();
+  };
+
+  const handleResetAllLeads = async () => {
+    const step1 = window.confirm(
+      "Reset EVERY lead in the whole OS back to a fresh, unassigned New Leads state?\n\n" +
+      "This keeps each lead's name/phone/contact info, but clears their stage, branch, " +
+      "consultation, physio assignment, packages, fees, and follow-ups — and permanently " +
+      "deletes all sessions, weekly assessments, package recommendations, appointments, " +
+      "patient view links, and activity history.\n\nThis cannot be undone."
+    );
+    if (!step1) return;
+    const step2 = window.confirm("Are you absolutely sure? Type OK to confirm this final, irreversible reset.");
+    if (!step2) return;
+    setResetting(true);
+    try {
+      const res = await resetAllLeads();
+      toast.success(
+        `Reset ${res.leads_reset} leads. Deleted ${res.sessions_deleted} sessions, ` +
+        `${res.weekly_assessments_deleted} assessments, ${res.appointments_deleted} appointments, ` +
+        `${res.lead_activity_deleted} activity entries.`
+      );
+      load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Reset failed");
+    }
+    setResetting(false);
   };
 
   return (
@@ -116,6 +143,34 @@ export const PipelineStageManagement = ({ onBack }) => {
               {stages.length === 0 && <tr><td colSpan="6" className="py-6 text-center text-slate-400">No stages yet.</td></tr>}
             </tbody>
           </table>
+        </CardContent>
+      </Card>
+
+      <Card className="border-red-200" data-testid="danger-zone-card">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base text-red-700">
+            <AlertTriangle className="h-4 w-4" /> Danger Zone
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+            <p className="text-sm font-semibold text-red-800">Reset all leads to a fresh state</p>
+            <p className="mt-1 text-xs text-red-700">
+              For testing only. Keeps every lead's name, phone and contact info, but resets stage,
+              branch, consultation, physio assignment, packages and fees back to New Leads —
+              and permanently deletes all sessions, weekly assessments, package recommendations,
+              appointments, patient view links, and activity history. Cannot be undone.
+            </p>
+            <Button
+              variant="outline"
+              className="mt-3 border-red-300 text-red-700 hover:bg-red-100"
+              onClick={handleResetAllLeads}
+              disabled={resetting}
+              data-testid="reset-all-leads-btn"
+            >
+              <Trash2 className="mr-1 h-4 w-4" /> {resetting ? "Resetting..." : "Reset All Leads"}
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
