@@ -17,6 +17,7 @@ import {
   ShoppingCart,
   ClipboardList,
   Bell,
+  BadgeIndianRupee,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -40,6 +41,7 @@ import { ConsultationsBoard } from "@/components/ConsultationsBoard";
 import { BranchSessionsPanel, FitsiomaxStorePanel } from "@/components/BranchStoreBoard";
 import { PullFromSheetButton } from "@/components/PullFromSheetButton";
 import { PlaceholderPanel } from "@/components/PackagesBoard";
+import { AccountantManageTab } from "@/components/branch/AccountantManageTab";
 
 export const BranchAdminBoard = ({ branchId }) => {
   const [boardData, setBoardData] = useState({ leads: [], stage_counts: {} });
@@ -121,6 +123,7 @@ export const BranchAdminBoard = ({ branchId }) => {
     { key: "sessions", label: "Treatment Sessions", icon: CalendarRange },
     { key: "rehab", label: "Rehab", icon: Activity },
     { key: "store", label: "Fitsiomax Store", icon: ShoppingCart },
+    { key: "accountant_mgmt", label: "Branch Accountant Management", icon: BadgeIndianRupee },
   ];
 
   return (
@@ -179,6 +182,8 @@ export const BranchAdminBoard = ({ branchId }) => {
         <PlaceholderPanel label="Rehab" testid="branch-rehab-panel" />
       ) : activeView === "store" ? (
         <FitsiomaxStorePanel />
+      ) : activeView === "accountant_mgmt" ? (
+        <AccountantManageTab branchId={branchId} readOnly />
       ) : (
         <>
           <div data-testid="branch-pipeline-header">

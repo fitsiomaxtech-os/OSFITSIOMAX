@@ -14,14 +14,14 @@ import { BranchFormDialogV2 } from "@/components/branch/BranchFormDialogV2";
 import { BranchAdminBoard } from "@/components/BranchAdminBoard";
 import { HeadPhysioBoard } from "@/components/HeadPhysioBoard";
 import { PhysioBoard } from "@/components/PhysioBoard";
-import { AcOverviewBoard } from "@/components/branch/AcOverviewBoard";
+import { AccountantManagementBoard } from "@/components/branch/AccountantManagementBoard";
 
 const TABS = [
   { key: "creation", label: "Creation & Manager", icon: Users },
   { key: "service_type", label: "Service Type", icon: Layers },
   { key: "performance", label: "Performance", icon: TrendingUp },
   { key: "branch_control", label: "Branch Control", icon: LayoutDashboard },
-  { key: "ac_overview", label: "AC Overview", icon: BadgeIndianRupee },
+  { key: "ac_overview", label: "Accountant Management", icon: BadgeIndianRupee },
 ];
 
 export const BranchManagementBoard = ({ actingUser } = {}) => {
@@ -53,7 +53,7 @@ export const BranchManagementBoard = ({ actingUser } = {}) => {
       {tab === "service_type" && <ServiceTypeTab />}
       {tab === "performance" && <PerformanceTab onDrillIn={setDrilledBranchId} />}
       {tab === "branch_control" && <BranchControlTab actingUser={actingUser} />}
-      {tab === "ac_overview" && <AcOverviewBoard />}
+      {tab === "ac_overview" && <AccountantManagementBoard />}
     </div>
   );
 };

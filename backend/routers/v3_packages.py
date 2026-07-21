@@ -237,18 +237,33 @@ CONSULTATION_FEE_PAYMENT_MODES = {"cash", "upi", "card"}
 TREATMENT_FEE_PAYMENT_MODES = {"cash", "upi", "card", "cheque", "partial"}
 
 
+async def _allowed_payment_modes(branch_id: Optional[str], field: str, master_set: set) -> set:
+    """Every branch accepts every mode in the master set by default; Super Admin can
+    narrow it per branch via Accountant Manage (Branch Management > Accountant
+    Management). Falls back to the master set if the branch has no override or
+    branch_id is missing."""
+    if not branch_id:
+        return master_set
+    branch = await v3_col("branches").find_one({"id": branch_id}, {"_id": 0, field: 1})
+    override = branch.get(field) if branch else None
+    return set(override) if override else master_set
+
+
 @router.post("/leads/{lead_id}/collect-package-payment", response_model=dict)
 async def collect_package_payment(lead_id: str, payload: V3CollectPackagePaymentInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
     """Branch admin collects the Consultation Fee for the package the consultant
-    already assigned — Cash/UPI/Card only. Lands on Consultation Fee itself (not
-    Treatment Fee) — that's the next stage, reached separately."""
-    if payload.payment_mode not in CONSULTATION_FEE_PAYMENT_MODES:
-        raise HTTPException(status_code=400, detail=f"Consultation Fee only accepts: {sorted(CONSULTATION_FEE_PAYMENT_MODES)}")
+    already assigned — Cash/UPI/Card only, further narrowed by whichever modes
+    Super Admin has enabled for this branch in Accountant Manage. Lands on
+    Consultation Fee itself (not Treatment Fee) — that's the next stage, reached
+    separately."""
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     if not lead.get("package_id"):
         raise HTTPException(status_code=400, detail="No package assigned yet")
+    allowed_modes = await _allowed_payment_modes(lead.get("branch_id"), "consultation_fee_payment_modes", CONSULTATION_FEE_PAYMENT_MODES)
+    if payload.payment_mode not in allowed_modes:
+        raise HTTPException(status_code=400, detail=f"Consultation Fee only accepts: {sorted(allowed_modes)}")
 
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {
         "package_paid": payload.paid_amount,
@@ -274,13 +289,15 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
     """Branch admin chooses the Session package (FITSIO STORE > Sessions — distinct
     from the Consultation package Head Physio chose earlier) and collects the
     Treatment Fee in the same step, at the Treatment Fee stage — any payment method
-    is allowed here, including Cheque/Partial. Moves on to Physio Assign once
-    collected."""
-    if payload.payment_mode not in TREATMENT_FEE_PAYMENT_MODES:
-        raise HTTPException(status_code=400, detail=f"Treatment Fee only accepts: {sorted(TREATMENT_FEE_PAYMENT_MODES)}")
+    is allowed here, including Cheque/Partial, further narrowed by whichever modes
+    Super Admin has enabled for this branch in Accountant Manage. Moves on to
+    Physio Assign once collected."""
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
+    allowed_modes = await _allowed_payment_modes(lead.get("branch_id"), "treatment_fee_payment_modes", TREATMENT_FEE_PAYMENT_MODES)
+    if payload.payment_mode not in allowed_modes:
+        raise HTTPException(status_code=400, detail=f"Treatment Fee only accepts: {sorted(allowed_modes)}")
     item = await v3_col("store_items").find_one({"id": payload.item_id}, {"_id": 0})
     if not item:
         raise HTTPException(status_code=404, detail="Session package not found")

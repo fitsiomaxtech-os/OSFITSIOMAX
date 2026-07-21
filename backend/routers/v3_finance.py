@@ -1,11 +1,13 @@
 import re
-from fastapi import APIRouter, Depends
-from typing import Optional
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from typing import List, Optional
 
 from database import v3_col
 from deps import v3_require_roles
 from schemas.v3 import V3UserOut
 from stage_utils import get_first_stage_name
+from routers.v3_packages import CONSULTATION_FEE_PAYMENT_MODES, TREATMENT_FEE_PAYMENT_MODES
 
 router = APIRouter(prefix="/api/v3")
 
@@ -281,3 +283,47 @@ async def revenue_overview(
         "payment_modes": payment_modes,
         "transactions": sorted(transactions, key=lambda t: t["date"], reverse=True)[:500],
     }
+
+
+# ---------- Accountant Manage > branch-by-branch payment mode settings ----------
+# Every branch accepts every payment mode by default (matches pre-existing behavior);
+# Super Admin can narrow either list down per branch. Stored directly on the branch
+# document since it's simple per-branch config, not its own growing collection.
+
+class V3BranchFinanceSettingsInput(BaseModel):
+    consultation_fee_payment_modes: List[str]
+    treatment_fee_payment_modes: List[str]
+
+
+@router.get("/branch-finance-settings/{branch_id}")
+async def get_branch_finance_settings(branch_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin"))):
+    branch = await v3_col("branches").find_one({"id": branch_id}, {"_id": 0})
+    if not branch:
+        raise HTTPException(status_code=404, detail="Branch not found")
+    return {
+        "branch_id": branch_id,
+        "branch_name": branch.get("branch_name", ""),
+        "consultation_fee_payment_modes": branch.get("consultation_fee_payment_modes") or sorted(CONSULTATION_FEE_PAYMENT_MODES),
+        "treatment_fee_payment_modes": branch.get("treatment_fee_payment_modes") or sorted(TREATMENT_FEE_PAYMENT_MODES),
+    }
+
+
+@router.put("/branch-finance-settings/{branch_id}")
+async def update_branch_finance_settings(
+    branch_id: str,
+    payload: V3BranchFinanceSettingsInput,
+    _: V3UserOut = Depends(v3_require_roles("super_admin")),
+):
+    if not await v3_col("branches").find_one({"id": branch_id}, {"_id": 0}):
+        raise HTTPException(status_code=404, detail="Branch not found")
+    consult_modes = [m for m in payload.consultation_fee_payment_modes if m in CONSULTATION_FEE_PAYMENT_MODES]
+    treatment_modes = [m for m in payload.treatment_fee_payment_modes if m in TREATMENT_FEE_PAYMENT_MODES]
+    if not consult_modes:
+        raise HTTPException(status_code=400, detail="At least one Consultation Fee payment mode must stay enabled")
+    if not treatment_modes:
+        raise HTTPException(status_code=400, detail="At least one Treatment Fee payment mode must stay enabled")
+    await v3_col("branches").update_one({"id": branch_id}, {"$set": {
+        "consultation_fee_payment_modes": consult_modes,
+        "treatment_fee_payment_modes": treatment_modes,
+    }})
+    return await get_branch_finance_settings(branch_id)
