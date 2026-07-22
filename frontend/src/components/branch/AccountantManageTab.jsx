@@ -141,6 +141,7 @@ export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
             <RevenueDetailTable
               title={REVENUE_VIEWS.find((v) => v.key === revenueView)?.label}
               rows={revenueView === "collected" ? transactions : transactions.filter((t) => t.source === revenueView)}
+              onView={setViewingLeadId}
             />
           )}
         </div>
@@ -172,7 +173,7 @@ const KpiCard = ({ label, value, color, active, onClick }) => (
   </button>
 );
 
-const RevenueDetailTable = ({ title, rows }) => (
+const RevenueDetailTable = ({ title, rows, onView }) => (
   <Card data-testid="accountant-manage-revenue-detail">
     <CardContent className="p-4">
       <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</p>
@@ -180,19 +181,20 @@ const RevenueDetailTable = ({ title, rows }) => (
         <table className="w-full table-fixed border-separate border-spacing-x-0 border-spacing-y-2 text-sm">
           <thead>
             <tr>
-              <th className="w-[6%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">S.No</th>
-              <th className="w-[18%] px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Client</th>
-              <th className="w-[14%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Consultation/Session</th>
-              <th className="w-[14%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Phone</th>
-              <th className="w-[13%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Paid Amount</th>
-              <th className="w-[12%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Payment Mode</th>
-              <th className="w-[11%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Date</th>
-              <th className="w-[12%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Branch</th>
+              <th className="w-[5%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">S.No</th>
+              <th className="w-[16%] px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Client</th>
+              <th className="w-[13%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Consultation/Session</th>
+              <th className="w-[13%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Phone</th>
+              <th className="w-[12%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Paid Amount</th>
+              <th className="w-[11%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Payment Mode</th>
+              <th className="w-[10%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Date</th>
+              <th className="w-[11%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Branch</th>
+              <th className="w-[9%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">View</th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
-              <tr><td colSpan={8} className="px-3 py-8 text-center text-sm text-slate-400">No transactions yet.</td></tr>
+              <tr><td colSpan={9} className="px-3 py-8 text-center text-sm text-slate-400">No transactions yet.</td></tr>
             ) : rows.map((tx, i) => (
               <tr key={tx.id} data-testid={`revenue-detail-row-${tx.id}`}>
                 <td className="rounded-l-[5px] border-y border-l border-slate-200 bg-white px-3 py-2 text-center text-slate-400">{i + 1}</td>
@@ -202,7 +204,17 @@ const RevenueDetailTable = ({ title, rows }) => (
                 <td className="border-y border-slate-200 bg-white px-3 py-2 text-center font-semibold text-emerald-600">{fmt(tx.gross)}</td>
                 <td className="border-y border-slate-200 bg-white px-3 py-2 text-center"><PaymentModeBadge mode={tx.payment_mode} /></td>
                 <td className="border-y border-slate-200 bg-white px-3 py-2 text-center text-slate-600">{(tx.date || "").slice(0, 10)}</td>
-                <td className="rounded-r-[5px] border-y border-r border-slate-200 bg-white px-3 py-2 text-center text-slate-600">{tx.branch_name || "—"}</td>
+                <td className="border-y border-slate-200 bg-white px-3 py-2 text-center text-slate-600">{tx.branch_name || "—"}</td>
+                <td className="rounded-r-[5px] border-y border-r border-slate-200 bg-white px-3 py-2 text-center">
+                  <button
+                    type="button"
+                    onClick={() => onView && onView(tx.lead_id)}
+                    className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-sky-600"
+                    data-testid={`revenue-detail-view-${tx.id}`}
+                  >
+                    <Eye className="h-4 w-4" />
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>

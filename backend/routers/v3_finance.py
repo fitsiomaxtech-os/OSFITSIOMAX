@@ -422,6 +422,9 @@ async def client_transaction_history(
             "collected_by": act.get("created_by", ""),
         })
 
+    balance = _lead_outstanding_balance(lead)
+    installments = (lead.get("treatment_fee_payment_details") or {}).get("installments") or []
+
     return {
         "client": {
             "id": lead["id"],
@@ -430,7 +433,17 @@ async def client_transaction_history(
             "email": lead.get("email", ""),
             "branch_name": branch_name,
         },
-        "balance": _lead_outstanding_balance(lead),
+        "balance": balance,
+        "status": "done" if balance <= 0 else "processing",
+        "payment_details": {
+            "consultation_fee_total": lead.get("package_price"),
+            "consultation_fee_paid": lead.get("package_paid"),
+            "consultation_payment_mode": lead.get("package_payment_mode"),
+            "treatment_fee_paid": lead.get("treatment_fee_paid"),
+            "treatment_payment_mode": lead.get("treatment_fee_payment_mode"),
+            "installments_total": len(installments) if installments else None,
+            "installments_paid": len([i for i in installments if i.get("paid")]) if installments else None,
+        },
         "transactions": transactions,
         "timeline": activity,
     }
