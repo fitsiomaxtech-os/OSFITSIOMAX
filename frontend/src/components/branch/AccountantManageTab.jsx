@@ -15,6 +15,20 @@ const SUB_TABS = [
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 
+const PAYMENT_MODE_STYLES = {
+  cash: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  upi: "bg-sky-50 text-sky-700 border-sky-200",
+  card: "bg-violet-50 text-violet-700 border-violet-200",
+  cheque: "bg-amber-50 text-amber-700 border-amber-200",
+  partial: "bg-orange-50 text-orange-700 border-orange-200",
+};
+
+const PaymentModeBadge = ({ mode }) => (
+  <span className={`inline-flex items-center rounded-[5px] border px-2 py-0.5 text-[10px] font-semibold capitalize ${PAYMENT_MODE_STYLES[mode] || "bg-slate-50 text-slate-600 border-slate-200"}`}>
+    {mode || "—"}
+  </span>
+);
+
 /**
  * Accountant Manage — Super Admin's Branch Management > Accountant Management >
  * Accountant Manage, and the same view reused read-only-by-nature (it's all
@@ -148,7 +162,7 @@ const CollectionsTable = ({ title, total, rows, testid, onView }) => (
               <tr key={tx.id} data-testid={`collections-row-${tx.id}`}>
                 <td className="rounded-l-[5px] border-y border-l border-slate-200 bg-white px-3 py-2 font-medium text-slate-800">{tx.client_name || "Unknown"}</td>
                 <td className="border-y border-slate-200 bg-white px-3 py-2 text-slate-600">{tx.branch_name || "—"}</td>
-                <td className="border-y border-slate-200 bg-white px-3 py-2 text-xs capitalize text-slate-500">{tx.payment_mode}</td>
+                <td className="border-y border-slate-200 bg-white px-3 py-2"><PaymentModeBadge mode={tx.payment_mode} /></td>
                 <td className="border-y border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-rose-600">{tx.payment_due_date || "—"}</td>
                 <td className="border-y border-slate-200 bg-white px-3 py-2 text-right font-semibold text-rose-600">{tx.payment_due_amount > 0 ? fmt(tx.payment_due_amount) : "—"}</td>
                 <td className="border-y border-slate-200 bg-white px-3 py-2 text-right font-semibold text-emerald-600">{tx.payment_paid_amount > 0 ? fmt(tx.payment_paid_amount) : "—"}</td>
