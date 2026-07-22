@@ -20,7 +20,6 @@ const REVENUE_VIEWS = [
   { key: "collected", label: "Total Collected", color: "#059669" },
   { key: "consultation", label: "Consultation Revenue", color: "#0284c7" },
   { key: "session", label: "Session Revenue", color: "#7c3aed" },
-  { key: "pending", label: "Pending Collection", color: "#d97706" },
 ];
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
@@ -76,7 +75,6 @@ export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
   const transactions = data?.transactions || [];
   const outstanding = data?.outstanding_clients || [];
   const schedule = data?.payment_schedule || [];
-  const pendingLeads = data?.pending_leads || [];
 
   return (
     <div className="space-y-4" data-testid="accountant-manage-tab">
@@ -119,7 +117,7 @@ export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
         <p className="py-10 text-center text-sm text-slate-400">Loading...</p>
       ) : subTab === "total_revenue" ? (
         <div className="space-y-4" data-testid="accountant-manage-total-revenue">
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
             <KpiCard
               label="Total Collected" value={fmt(k.total_collected)} color="#059669"
               active={revenueView === "collected"} onClick={() => setRevenueView("collected")}
@@ -132,21 +130,13 @@ export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
               label="Session Revenue" value={fmt(b.session_revenue)} color="#7c3aed"
               active={revenueView === "session"} onClick={() => setRevenueView("session")}
             />
-            <KpiCard
-              label="Pending Collection" value={k.pending_count || 0} color="#d97706"
-              active={revenueView === "pending"} onClick={() => setRevenueView("pending")}
-            />
           </div>
 
-          {revenueView === "pending" ? (
-            <PendingCollectionTable rows={pendingLeads} />
-          ) : (
-            <RevenueDetailTable
-              title={REVENUE_VIEWS.find((v) => v.key === revenueView)?.label}
-              rows={revenueView === "collected" ? transactions : transactions.filter((t) => t.source === revenueView)}
-              onView={setViewingLeadId}
-            />
-          )}
+          <RevenueDetailTable
+            title={REVENUE_VIEWS.find((v) => v.key === revenueView)?.label}
+            rows={revenueView === "collected" ? transactions : transactions.filter((t) => t.source === revenueView)}
+            onView={setViewingLeadId}
+          />
         </div>
       ) : subTab === "consultation" ? (
         <ConsultationCollectionsBoard rows={transactions.filter((t) => t.source === "consultation")} onView={setViewingLeadId} />
@@ -218,40 +208,6 @@ const RevenueDetailTable = ({ title, rows, onView }) => (
                     <Eye className="h-4 w-4" />
                   </button>
                 </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </CardContent>
-  </Card>
-);
-
-const PendingCollectionTable = ({ rows }) => (
-  <Card data-testid="accountant-manage-pending-collection">
-    <CardContent className="p-4">
-      <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Pending Collection</p>
-      <div className="overflow-x-auto">
-        <table className="w-full table-fixed border-separate border-spacing-x-0 border-spacing-y-2 text-sm">
-          <thead>
-            <tr>
-              <th className="w-[8%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">S.No</th>
-              <th className="w-[28%] px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Client</th>
-              <th className="w-[20%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Phone</th>
-              <th className="w-[22%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Branch</th>
-              <th className="w-[22%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Stage</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 ? (
-              <tr><td colSpan={5} className="px-3 py-8 text-center text-sm text-slate-400">No pending clients.</td></tr>
-            ) : rows.map((r, i) => (
-              <tr key={r.lead_id} data-testid={`pending-collection-row-${r.lead_id}`}>
-                <td className="rounded-l-[5px] border-y border-l border-slate-200 bg-white px-3 py-2 text-center text-slate-400">{i + 1}</td>
-                <td className="border-y border-slate-200 bg-white px-3 py-2 font-medium text-slate-800">{r.client_name}</td>
-                <td className="border-y border-slate-200 bg-white px-3 py-2 text-center text-slate-600">{r.phone || "—"}</td>
-                <td className="border-y border-slate-200 bg-white px-3 py-2 text-center text-slate-600">{r.branch_name || "—"}</td>
-                <td className="rounded-r-[5px] border-y border-r border-slate-200 bg-white px-3 py-2 text-center text-slate-600">{r.stage}</td>
               </tr>
             ))}
           </tbody>
