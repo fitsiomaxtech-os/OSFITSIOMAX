@@ -128,9 +128,9 @@ const CollectionsTable = ({ title, total, rows, testid, onView }) => (
         <p className="text-lg font-bold text-slate-800">{total}</p>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full border-separate border-spacing-x-0 border-spacing-y-2 text-sm">
           <thead>
-            <tr className="border-b border-slate-100 bg-slate-50/80">
+            <tr>
               <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Client</th>
               <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Branch</th>
               <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Date</th>
@@ -143,11 +143,11 @@ const CollectionsTable = ({ title, total, rows, testid, onView }) => (
             {rows.length === 0 ? (
               <tr><td colSpan={6} className="px-3 py-8 text-center text-sm text-slate-400">No transactions yet.</td></tr>
             ) : rows.map((tx) => (
-              <tr key={tx.id} className="border-b border-slate-50" data-testid={`collections-row-${tx.id}`}>
-                <td className="px-3 py-2 font-medium text-slate-800">{tx.client_name || "Unknown"}</td>
-                <td className="px-3 py-2 text-slate-600">{tx.branch_name || "—"}</td>
-                <td className="px-3 py-2 text-xs text-slate-500">{(tx.date || "").slice(0, 16).replace("T", " ")}</td>
-                <td className="px-3 py-2">
+              <tr key={tx.id} data-testid={`collections-row-${tx.id}`}>
+                <td className="rounded-l-[5px] border-y border-l border-slate-200 bg-white px-3 py-2 font-medium text-slate-800">{tx.client_name || "Unknown"}</td>
+                <td className="border-y border-slate-200 bg-white px-3 py-2 text-slate-600">{tx.branch_name || "—"}</td>
+                <td className="border-y border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">{(tx.date || "").slice(0, 16).replace("T", " ")}</td>
+                <td className="border-y border-slate-200 bg-white px-3 py-2">
                   <p className="text-xs capitalize text-slate-500">{tx.payment_mode}</p>
                   {tx.payment_paid_amount > 0 && (
                     <p className="text-[10px] font-semibold text-emerald-600">Paid {fmt(tx.payment_paid_amount)}</p>
@@ -159,8 +159,8 @@ const CollectionsTable = ({ title, total, rows, testid, onView }) => (
                     <p className="text-[10px] font-semibold text-amber-600">Upcoming {tx.payment_upcoming_date} · {fmt(tx.payment_upcoming_amount)}</p>
                   )}
                 </td>
-                <td className="px-3 py-2 text-right font-semibold text-emerald-700">{fmt(tx.gross)}</td>
-                <td className="px-3 py-2 text-center">
+                <td className="border-y border-slate-200 bg-white px-3 py-2 text-right font-semibold text-emerald-700">{fmt(tx.gross)}</td>
+                <td className="rounded-r-[5px] border-y border-r border-slate-200 bg-white px-3 py-2 text-center">
                   <button
                     type="button"
                     onClick={() => onView && onView(tx.lead_id)}
