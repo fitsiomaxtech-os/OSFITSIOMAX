@@ -65,8 +65,6 @@ export const ConsultationCollectionsBoard = ({ rows, onView }) => {
     return { todayTotal, monthTotal, cash, card, upi, outstanding };
   }, [rows, today, monthPrefix]);
 
-  const filteredTotal = useMemo(() => filtered.reduce((s, r) => s + r.gross, 0), [filtered]);
-
   return (
     <div className="space-y-4" data-testid="consultation-collections-board">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
@@ -112,20 +110,22 @@ export const ConsultationCollectionsBoard = ({ rows, onView }) => {
             <table className="w-full table-fixed border-separate border-spacing-x-0 border-spacing-y-2 text-sm">
               <thead>
                 <tr>
-                  <th className="w-[22%] px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Client</th>
-                  <th className="w-[16%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Branch</th>
-                  <th className="w-[16%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Payment Mode</th>
-                  <th className="w-[16%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Amount</th>
-                  <th className="w-[16%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Status</th>
-                  <th className="w-[14%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">View</th>
+                  <th className="w-[5%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">S.No</th>
+                  <th className="w-[19%] px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Client</th>
+                  <th className="w-[15%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Branch</th>
+                  <th className="w-[15%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Payment Mode</th>
+                  <th className="w-[15%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Amount</th>
+                  <th className="w-[15%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Status</th>
+                  <th className="w-[16%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">View</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.length === 0 ? (
-                  <tr><td colSpan={6} className="px-3 py-8 text-center text-sm text-slate-400">No transactions yet.</td></tr>
-                ) : filtered.map((tx) => (
+                  <tr><td colSpan={7} className="px-3 py-8 text-center text-sm text-slate-400">No transactions yet.</td></tr>
+                ) : filtered.map((tx, i) => (
                   <tr key={tx.id} data-testid={`collections-row-${tx.id}`}>
-                    <td className="rounded-l-[5px] border-y border-l border-slate-200 bg-white px-3 py-2 font-medium text-slate-800">{tx.client_name || "Unknown"}</td>
+                    <td className="rounded-l-[5px] border-y border-l border-slate-200 bg-white px-3 py-2 text-center text-slate-400">{i + 1}</td>
+                    <td className="border-y border-slate-200 bg-white px-3 py-2 font-medium text-slate-800">{tx.client_name || "Unknown"}</td>
                     <td className="border-y border-slate-200 bg-white px-3 py-2 text-center text-slate-600">{tx.branch_name || "—"}</td>
                     <td className="border-y border-slate-200 bg-white px-3 py-2 text-center"><PaymentModeBadge mode={tx.payment_mode} /></td>
                     <td className="border-y border-slate-200 bg-white px-3 py-2 text-center font-semibold text-slate-800">{fmt(tx.gross)}</td>
@@ -143,15 +143,6 @@ export const ConsultationCollectionsBoard = ({ rows, onView }) => {
                   </tr>
                 ))}
               </tbody>
-              {filtered.length > 0 && (
-                <tfoot>
-                  <tr>
-                    <td colSpan={3} className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">Total Collection</td>
-                    <td className="px-3 py-2 text-center text-sm font-bold text-slate-800">{fmt(filteredTotal)}</td>
-                    <td colSpan={2}></td>
-                  </tr>
-                </tfoot>
-              )}
             </table>
           </div>
         </CardContent>
