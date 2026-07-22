@@ -197,6 +197,19 @@ def _lead_outstanding_balance(lead: dict) -> float:
     return round(balance, 2)
 
 
+def _lead_next_due(lead: dict) -> Optional[dict]:
+    """For a Partial Payment treatment fee — the nearest unpaid installment's due
+    date, or "paid" once every installment is settled. Colors the Payment Mode
+    cell in Collections tables (red = still due, green = paid)."""
+    if lead.get("treatment_fee_payment_mode") != "partial":
+        return None
+    installments = (lead.get("treatment_fee_payment_details") or {}).get("installments") or []
+    unpaid = [i for i in installments if not i.get("paid")]
+    if not unpaid:
+        return {"status": "paid", "due_date": None}
+    return {"status": "due", "due_date": min(i.get("due_date", "") for i in unpaid)}
+
+
 @router.get("/finance/revenue-overview")
 async def revenue_overview(
     start_date: Optional[str] = None,
@@ -216,6 +229,7 @@ async def revenue_overview(
     lead_branch_map = {l["id"]: l.get("branch_id") for l in leads}
     lead_name_map = {l["id"]: l.get("name", "Unknown") for l in leads}
     lead_balance_map = {l["id"]: _lead_outstanding_balance(l) for l in leads}
+    lead_next_due_map = {l["id"]: _lead_next_due(l) for l in leads}
 
     branch_docs = await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1}).to_list(500)
     branch_name_map = {b["id"]: b.get("branch_name", "") for b in branch_docs}
@@ -264,6 +278,7 @@ async def revenue_overview(
 
         payment_modes[mode] = payment_modes.get(mode, 0.0) + amount
 
+        next_due = lead_next_due_map.get(act.get("lead_id"))
         transactions.append({
             "id": act.get("id", ""),
             "date": act.get("created_at", ""),
@@ -278,6 +293,8 @@ async def revenue_overview(
             "client_name": lead_name_map.get(act.get("lead_id"), "Unknown"),
             "payment_mode": mode,
             "client_balance": lead_balance_map.get(act.get("lead_id"), 0.0),
+            "payment_status": next_due["status"] if next_due else None,
+            "payment_due_date": next_due["due_date"] if next_due else None,
         })
 
     total_collected = consultation_total + session_total

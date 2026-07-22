@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { Check } from "lucide-react";
+import { Check, Eye } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "@/components/ui/sonner";
 import { getBranches, getRevenueOverview, markInstallmentPaid } from "@/lib/api";
+import { ClientHistoryModal } from "@/components/branch/ClientHistoryModal";
 
 const SUB_TABS = [
   { key: "total_revenue", label: "Total Revenue" },
@@ -28,6 +29,7 @@ export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
   const [subTab, setSubTab] = useState("total_revenue");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [viewingLeadId, setViewingLeadId] = useState(null);
 
   useEffect(() => {
     if (fixedBranchId) return;
@@ -97,14 +99,16 @@ export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
           <KpiCard label="Pending Collection" value={k.pending_count || 0} color="#d97706" />
         </div>
       ) : subTab === "consultation" ? (
-        <CollectionsTable title="Consultation Collections" total={fmt(b.consultation_revenue)} rows={transactions.filter((t) => t.source === "consultation")} testid="accountant-manage-consultation" />
+        <CollectionsTable title="Consultation Collections" total={fmt(b.consultation_revenue)} rows={transactions.filter((t) => t.source === "consultation")} testid="accountant-manage-consultation" onView={setViewingLeadId} />
       ) : subTab === "session" ? (
-        <CollectionsTable title="Session Collections" total={fmt(b.session_revenue)} rows={transactions.filter((t) => t.source === "session")} testid="accountant-manage-session" />
+        <CollectionsTable title="Session Collections" total={fmt(b.session_revenue)} rows={transactions.filter((t) => t.source === "session")} testid="accountant-manage-session" onView={setViewingLeadId} />
       ) : subTab === "outstanding" ? (
         <OutstandingTable rows={outstanding} />
       ) : (
         <ScheduleTable rows={schedule} onChanged={load} />
       )}
+
+      {viewingLeadId && <ClientHistoryModal leadId={viewingLeadId} onClose={() => setViewingLeadId(null)} />}
     </div>
   );
 };
@@ -116,7 +120,7 @@ const KpiCard = ({ label, value, color }) => (
   </div>
 );
 
-const CollectionsTable = ({ title, total, rows, testid }) => (
+const CollectionsTable = ({ title, total, rows, testid, onView }) => (
   <Card data-testid={testid}>
     <CardContent className="p-4">
       <div className="mb-3 flex items-center justify-between">
@@ -132,18 +136,36 @@ const CollectionsTable = ({ title, total, rows, testid }) => (
               <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Date</th>
               <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Payment Mode</th>
               <th className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-slate-400">Amount</th>
+              <th className="px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">View</th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
-              <tr><td colSpan={5} className="px-3 py-8 text-center text-sm text-slate-400">No transactions yet.</td></tr>
+              <tr><td colSpan={6} className="px-3 py-8 text-center text-sm text-slate-400">No transactions yet.</td></tr>
             ) : rows.map((tx) => (
-              <tr key={tx.id} className="border-b border-slate-50">
+              <tr key={tx.id} className="border-b border-slate-50" data-testid={`collections-row-${tx.id}`}>
                 <td className="px-3 py-2 font-medium text-slate-800">{tx.client_name || "Unknown"}</td>
                 <td className="px-3 py-2 text-slate-600">{tx.branch_name || "—"}</td>
                 <td className="px-3 py-2 text-xs text-slate-500">{(tx.date || "").slice(0, 16).replace("T", " ")}</td>
-                <td className="px-3 py-2 text-xs capitalize text-slate-500">{tx.payment_mode}</td>
+                <td className="px-3 py-2">
+                  <p className="text-xs capitalize text-slate-500">{tx.payment_mode}</p>
+                  {tx.payment_due_date && (
+                    <p className={`text-[10px] font-semibold ${tx.payment_status === "paid" ? "text-emerald-600" : "text-rose-600"}`}>
+                      {tx.payment_status === "paid" ? "Paid" : `Due ${tx.payment_due_date}`}
+                    </p>
+                  )}
+                </td>
                 <td className="px-3 py-2 text-right font-semibold text-emerald-700">{fmt(tx.gross)}</td>
+                <td className="px-3 py-2 text-center">
+                  <button
+                    type="button"
+                    onClick={() => onView && onView(tx.lead_id)}
+                    className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-sky-600"
+                    data-testid={`collections-view-${tx.id}`}
+                  >
+                    <Eye className="h-4 w-4" />
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
