@@ -145,22 +145,24 @@ const CollectionsTable = ({ title, total, rows, testid, onView }) => (
         <table className="w-full table-fixed border-separate border-spacing-x-0 border-spacing-y-2 text-sm">
           <thead>
             <tr>
-              <th className="w-[18%] px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Client</th>
-              <th className="w-[12%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Branch</th>
-              <th className="w-[12%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Payment Mode</th>
-              <th className="w-[12%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Due Date</th>
-              <th className="w-[12%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Due Amount</th>
-              <th className="w-[12%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Paid Amount</th>
-              <th className="w-[12%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Amount</th>
-              <th className="w-[10%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">View</th>
+              <th className="w-[5%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">S.No</th>
+              <th className="w-[17%] px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Client</th>
+              <th className="w-[11%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Branch</th>
+              <th className="w-[11%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Payment Mode</th>
+              <th className="w-[11%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Due Date</th>
+              <th className="w-[11%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Due Amount</th>
+              <th className="w-[11%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Paid Amount</th>
+              <th className="w-[11%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Amount</th>
+              <th className="w-[12%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">View</th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
-              <tr><td colSpan={8} className="px-3 py-8 text-center text-sm text-slate-400">No transactions yet.</td></tr>
-            ) : rows.map((tx) => (
+              <tr><td colSpan={9} className="px-3 py-8 text-center text-sm text-slate-400">No transactions yet.</td></tr>
+            ) : rows.map((tx, i) => (
               <tr key={tx.id} data-testid={`collections-row-${tx.id}`}>
-                <td className="rounded-l-[5px] border-y border-l border-slate-200 bg-white px-3 py-2 font-medium text-slate-800">{tx.client_name || "Unknown"}</td>
+                <td className="rounded-l-[5px] border-y border-l border-slate-200 bg-white px-3 py-2 text-center text-slate-400">{i + 1}</td>
+                <td className="border-y border-slate-200 bg-white px-3 py-2 font-medium text-slate-800">{tx.client_name || "Unknown"}</td>
                 <td className="border-y border-slate-200 bg-white px-3 py-2 text-center text-slate-600">{tx.branch_name || "—"}</td>
                 <td className="border-y border-slate-200 bg-white px-3 py-2 text-center"><PaymentModeBadge mode={tx.payment_mode} /></td>
                 <td className="border-y border-slate-200 bg-white px-3 py-2 text-center text-xs font-semibold text-rose-600">{tx.payment_due_date || "—"}</td>
@@ -194,6 +196,7 @@ const OutstandingTable = ({ rows }) => (
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-slate-100 bg-slate-50/80">
+              <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">S.No</th>
               <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Client</th>
               <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Phone</th>
               <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Branch</th>
@@ -202,9 +205,10 @@ const OutstandingTable = ({ rows }) => (
           </thead>
           <tbody>
             {rows.length === 0 ? (
-              <tr><td colSpan={4} className="px-3 py-8 text-center text-sm text-slate-400">No outstanding balances.</td></tr>
-            ) : rows.map((r) => (
+              <tr><td colSpan={5} className="px-3 py-8 text-center text-sm text-slate-400">No outstanding balances.</td></tr>
+            ) : rows.map((r, i) => (
               <tr key={r.lead_id} className="border-b border-slate-50" data-testid={`accountant-manage-outstanding-${r.lead_id}`}>
+                <td className="px-3 py-2 text-slate-400">{i + 1}</td>
                 <td className="px-3 py-2 font-medium text-slate-800">{r.client_name}</td>
                 <td className="px-3 py-2 text-slate-600">{r.phone || "—"}</td>
                 <td className="px-3 py-2 text-slate-600">{r.branch_name || "—"}</td>
@@ -248,6 +252,7 @@ const ScheduleTable = ({ rows, onChanged }) => {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50/80">
+                <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">S.No</th>
                 <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Client</th>
                 <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Consultation/Session</th>
                 <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Branch</th>
@@ -259,11 +264,12 @@ const ScheduleTable = ({ rows, onChanged }) => {
             </thead>
             <tbody>
               {rows.length === 0 ? (
-                <tr><td colSpan={7} className="px-3 py-8 text-center text-sm text-slate-400">No scheduled installments.</td></tr>
-              ) : rows.map((r) => {
+                <tr><td colSpan={8} className="px-3 py-8 text-center text-sm text-slate-400">No scheduled installments.</td></tr>
+              ) : rows.map((r, i) => {
                 const key = `${r.lead_id}-${r.installment_number}`;
                 return (
                   <tr key={key} className="border-b border-slate-50" data-testid={`accountant-manage-schedule-${key}`}>
+                    <td className="px-3 py-2 text-slate-400">{i + 1}</td>
                     <td className="px-3 py-2 font-medium text-slate-800">{r.client_name}</td>
                     <td className="px-3 py-2 capitalize text-slate-600">{r.category}</td>
                     <td className="px-3 py-2 text-slate-600">{r.branch_name || "—"}</td>
