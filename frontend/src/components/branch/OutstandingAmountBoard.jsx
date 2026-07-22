@@ -196,11 +196,11 @@ export const OutstandingAmountBoard = ({ rows, onView, onChanged }) => {
   }), [rows, search, status, month, minAmount, maxAmount]);
 
   const totals = useMemo(() => {
-    const totalOutstanding = rows.reduce((s, r) => s + r.balance, 0);
-    const overdue = rows.filter((r) => r.status === "overdue").reduce((s, r) => s + r.balance, 0);
-    const dueToday = rows.filter((r) => r.due_date === today).reduce((s, r) => s + r.balance, 0);
-    return { totalOutstanding, overdue, dueToday, pendingClients: rows.length };
-  }, [rows, today]);
+    const totalOutstanding = filtered.reduce((s, r) => s + r.balance, 0);
+    const overdue = filtered.filter((r) => r.status === "overdue").reduce((s, r) => s + r.balance, 0);
+    const dueToday = filtered.filter((r) => r.due_date === today).reduce((s, r) => s + r.balance, 0);
+    return { totalOutstanding, overdue, dueToday, pendingClients: filtered.length };
+  }, [filtered, today]);
 
   const footer = useMemo(() => filtered.reduce((acc, r) => ({
     total_bill: acc.total_bill + (r.total_bill || 0),
