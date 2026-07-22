@@ -173,7 +173,7 @@ const ExpandedHistory = ({ leadId }) => {
 export const OutstandingAmountBoard = ({ rows, onView, onChanged }) => {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
-  const [month, setMonth] = useState(() => new Date().getMonth());
+  const [month, setMonth] = useState("all");
   const [minAmount, setMinAmount] = useState("");
   const [maxAmount, setMaxAmount] = useState("");
   const [expanded, setExpanded] = useState(null);
