@@ -1,12 +1,34 @@
 import { useEffect, useState } from "react";
-import { X, Phone, Mail, MapPin } from "lucide-react";
-import { getClientTransactionHistory } from "@/lib/api";
+import { X, Phone, Mail, MapPin, Printer, FileText, MessageCircle, Wallet } from "lucide-react";
+import { toast } from "@/components/ui/sonner";
+import { getClientTransactionHistory, markInstallmentPaid } from "@/lib/api";
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 
 const STATUS_STYLES = {
   done: "bg-emerald-50 text-emerald-700 border-emerald-200",
   processing: "bg-amber-50 text-amber-700 border-amber-200",
+};
+
+const downloadInvoice = (client, data) => {
+  const lines = [
+    `Invoice — ${client.name}`,
+    client.phone ? `Phone: ${client.phone}` : "",
+    client.email ? `Email: ${client.email}` : "",
+    client.branch_name ? `Branch: ${client.branch_name}` : "",
+    "",
+    "Date,Type,Payment Mode,Amount",
+    ...(data.transactions || []).map((tx) => `${(tx.date || "").slice(0, 10)},${tx.source},${tx.payment_mode},${tx.amount}`),
+    "",
+    `Outstanding Balance,,,${data.balance}`,
+  ].filter(Boolean).join("\n");
+  const blob = new Blob([lines], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `invoice-${client.name.replace(/\s+/g, "-").toLowerCase()}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
 };
 
 /**
@@ -16,24 +38,48 @@ const STATUS_STYLES = {
  * Two sub-tabs: Overview (client + payment details + completed status) and
  * Timeline (the client's overall activity feed).
  */
-export const ClientHistoryModal = ({ leadId, onClose }) => {
+export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("overview");
+  const [recording, setRecording] = useState(false);
 
-  useEffect(() => {
+  const load = () => {
     setLoading(true);
     getClientTransactionHistory(leadId)
       .then(setData)
       .catch(() => setData(null))
       .finally(() => setLoading(false));
-  }, [leadId]);
+  };
+
+  useEffect(() => { load(); }, [leadId]);
 
   const client = data?.client;
   const pd = data?.payment_details || {};
   const transactions = data?.transactions || [];
   const timeline = data?.timeline || [];
   const status = data?.status || "processing";
+
+  const sendReminder = () => {
+    if (!client?.phone) return;
+    const digits = client.phone.replace(/[^0-9]/g, "");
+    const msg = encodeURIComponent(`Hi ${client.name}, this is a reminder that you have an outstanding balance of ${fmt(data.balance)}. Kindly clear it at your earliest convenience.`);
+    window.open(`https://wa.me/${digits}?text=${msg}`, "_blank");
+  };
+
+  const recordPayment = async () => {
+    if (!pd.next_installment_number) return;
+    setRecording(true);
+    try {
+      await markInstallmentPaid(leadId, pd.next_installment_number);
+      toast.success(`Payment recorded for ${client.name}`);
+      load();
+      onChanged && onChanged();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Failed to record payment");
+    }
+    setRecording(false);
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" data-testid="client-history-modal">
@@ -94,8 +140,9 @@ export const ClientHistoryModal = ({ leadId, onClose }) => {
                     {pd.consultation_payment_mode && <p className="mt-0.5 capitalize text-slate-400">{pd.consultation_payment_mode}</p>}
                   </div>
                   <div className="rounded-lg border border-slate-100 p-3">
-                    <p className="font-semibold text-slate-600">Treatment Fee</p>
-                    <p className="mt-1 text-slate-700">{pd.treatment_fee_paid != null ? fmt(pd.treatment_fee_paid) : "—"}</p>
+                    <p className="font-semibold text-slate-600">{pd.session_package_label && pd.session_package_label !== "—" ? `Session Package (${pd.session_package_label})` : "Treatment Fee"}</p>
+                    <p className="mt-1 text-slate-700">{pd.treatment_fee_paid != null ? fmt(pd.treatment_fee_paid) : "—"} {pd.session_total > 0 && `/ ${fmt(pd.session_total)}`}</p>
+                    {pd.session_due > 0 && <p className="mt-0.5 font-medium text-amber-600">Due: {fmt(pd.session_due)}</p>}
                     {pd.treatment_payment_mode && <p className="mt-0.5 capitalize text-slate-400">{pd.treatment_payment_mode}</p>}
                     {pd.installments_total != null && (
                       <p className="mt-0.5 text-slate-400">{pd.installments_paid}/{pd.installments_total} installments paid</p>
@@ -118,6 +165,28 @@ export const ClientHistoryModal = ({ leadId, onClose }) => {
                       <p className="font-semibold text-emerald-700">{fmt(tx.amount)}</p>
                     </div>
                   ))}
+                </div>
+              </div>
+
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Quick Actions</p>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <button type="button" onClick={() => window.print()} className="flex items-center justify-center gap-1.5 rounded-md border border-slate-200 px-2 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50" data-testid="client-history-print">
+                    <Printer className="h-3.5 w-3.5" /> Print Receipt
+                  </button>
+                  <button type="button" onClick={() => downloadInvoice(client, data)} className="flex items-center justify-center gap-1.5 rounded-md border border-slate-200 px-2 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50" data-testid="client-history-invoice">
+                    <FileText className="h-3.5 w-3.5" /> Download Invoice
+                  </button>
+                  <button type="button" onClick={sendReminder} disabled={!client?.phone} className="flex items-center justify-center gap-1.5 rounded-md border border-slate-200 px-2 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40" data-testid="client-history-reminder">
+                    <MessageCircle className="h-3.5 w-3.5" /> Send Reminder
+                  </button>
+                  <button
+                    type="button" onClick={recordPayment} disabled={!pd.next_installment_number || recording}
+                    className="flex items-center justify-center gap-1.5 rounded-md border border-slate-200 px-2 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    data-testid="client-history-record-payment"
+                  >
+                    <Wallet className="h-3.5 w-3.5" /> {recording ? "Saving..." : "Record Payment"}
+                  </button>
                 </div>
               </div>
             </>

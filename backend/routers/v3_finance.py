@@ -260,6 +260,46 @@ def _lead_outstanding_detail(lead: dict, today: str) -> dict:
     }
 
 
+def _lead_session_summary(lead: dict) -> dict:
+    """Session Collections — the Treatment Fee / session package side only (not
+    the Consultation package): its label, total fee, what's been paid, what's
+    still due, and a paid/partial/pending status badge."""
+    sessions = lead.get("session_package_sessions") or lead.get("package_sessions")
+    package_name = lead.get("session_package_name") or lead.get("package_name")
+    label = f"{sessions} Sessions" if sessions else (package_name or "—")
+
+    total = 0.0
+    paid = 0.0
+    next_installment_number = None
+    if lead.get("treatment_fee_payment_mode") == "partial":
+        installments = (lead.get("treatment_fee_payment_details") or {}).get("installments") or []
+        total = sum(i.get("amount", 0) for i in installments)
+        paid = sum(i.get("amount", 0) for i in installments if i.get("paid"))
+        unpaid = sorted((i for i in installments if not i.get("paid")), key=lambda i: i.get("due_date", ""))
+        if unpaid:
+            next_installment_number = installments.index(unpaid[0]) + 1
+    elif lead.get("treatment_fee_paid"):
+        total = lead.get("treatment_fee_paid") or 0
+        paid = total
+
+    due = round(max(total - paid, 0), 2)
+    if total > 0 and due <= 0:
+        status = "paid"
+    elif paid > 0:
+        status = "partial"
+    else:
+        status = "pending"
+
+    return {
+        "package_label": label,
+        "total": round(total, 2),
+        "paid": round(paid, 2),
+        "due": due,
+        "status": status,
+        "next_installment_number": next_installment_number,
+    }
+
+
 @router.get("/finance/revenue-overview")
 async def revenue_overview(
     start_date: Optional[str] = None,
@@ -282,6 +322,7 @@ async def revenue_overview(
     lead_phone_map = {l["id"]: l.get("phone", "") for l in leads}
     lead_balance_map = {l["id"]: _lead_outstanding_balance(l) for l in leads}
     lead_progress_map = {l["id"]: _lead_payment_progress(l) for l in leads}
+    lead_session_map = {l["id"]: _lead_session_summary(l) for l in leads}
 
     branch_docs = await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1}).to_list(500)
     branch_name_map = {b["id"]: b.get("branch_name", "") for b in branch_docs}
@@ -331,6 +372,7 @@ async def revenue_overview(
         payment_modes[mode] = payment_modes.get(mode, 0.0) + amount
 
         progress = lead_progress_map.get(act.get("lead_id"))
+        session = lead_session_map.get(act.get("lead_id")) or {}
         transactions.append({
             "id": act.get("id", ""),
             "date": act.get("created_at", ""),
@@ -349,6 +391,11 @@ async def revenue_overview(
             "payment_paid_amount": progress["paid_amount"] if progress else None,
             "payment_due_amount": progress["due_amount"] if progress else None,
             "payment_due_date": progress["due_date"] if progress else None,
+            "session_package_label": session.get("package_label"),
+            "session_total": session.get("total"),
+            "session_paid": session.get("paid"),
+            "session_due": session.get("due"),
+            "session_status": session.get("status"),
         })
 
     total_collected = consultation_total + session_total
@@ -481,6 +528,7 @@ async def client_transaction_history(
 
     balance = _lead_outstanding_balance(lead)
     installments = (lead.get("treatment_fee_payment_details") or {}).get("installments") or []
+    session = _lead_session_summary(lead)
 
     return {
         "client": {
@@ -500,6 +548,10 @@ async def client_transaction_history(
             "treatment_payment_mode": lead.get("treatment_fee_payment_mode"),
             "installments_total": len(installments) if installments else None,
             "installments_paid": len([i for i in installments if i.get("paid")]) if installments else None,
+            "session_package_label": session["package_label"],
+            "session_total": session["total"],
+            "session_due": session["due"],
+            "next_installment_number": session["next_installment_number"],
         },
         "transactions": transactions,
         "timeline": activity,
