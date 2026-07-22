@@ -178,9 +178,12 @@ def _parse_payment_mode(details: str) -> str:
 def _installment_status(inst: dict, today: str) -> str:
     if inst.get("paid"):
         return "paid"
-    if inst.get("due_date") and inst["due_date"] < today:
+    due = inst.get("due_date")
+    if due and due < today:
         return "overdue"
-    return "pending"
+    if due and due == today:
+        return "due_today"
+    return "upcoming"
 
 
 def _lead_outstanding_balance(lead: dict) -> float:
@@ -398,16 +401,21 @@ async def revenue_overview(
             })
         if l.get("treatment_fee_payment_mode") == "partial":
             installments = (l.get("treatment_fee_payment_details") or {}).get("installments") or []
+            installments_total = len(installments)
+            installments_paid = len([i for i in installments if i.get("paid")])
             for idx, inst in enumerate(installments, start=1):
                 payment_schedule.append({
                     "lead_id": l["id"],
                     "client_name": l.get("name", "Unknown"),
+                    "phone": l.get("phone", ""),
                     "branch_name": branch_name_map.get(l.get("branch_id"), ""),
                     "category": "session",  # Partial Payment only exists on Treatment Fee today
                     "installment_number": idx,
                     "amount": inst.get("amount", 0),
                     "due_date": inst.get("due_date", ""),
                     "status": _installment_status(inst, today),
+                    "installments_total": installments_total,
+                    "installments_paid": installments_paid,
                 })
     outstanding_clients.sort(key=lambda r: -r["balance"])
     payment_schedule.sort(key=lambda r: r["due_date"])
