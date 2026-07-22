@@ -197,17 +197,24 @@ def _lead_outstanding_balance(lead: dict) -> float:
     return round(balance, 2)
 
 
-def _lead_next_due(lead: dict) -> Optional[dict]:
-    """For a Partial Payment treatment fee — the nearest unpaid installment's due
-    date, or "paid" once every installment is settled. Colors the Payment Mode
-    cell in Collections tables (red = still due, green = paid)."""
+def _lead_payment_progress(lead: dict, today: str) -> Optional[dict]:
+    """For a Partial Payment treatment fee — the three-way split the Collections
+    tables' Payment Mode cell shows: what's already Paid, what's Due (unpaid,
+    due date already passed), and what's an Upcoming Payment (unpaid, not due
+    yet). Any one of the three can be zero/absent."""
     if lead.get("treatment_fee_payment_mode") != "partial":
         return None
     installments = (lead.get("treatment_fee_payment_details") or {}).get("installments") or []
-    unpaid = [i for i in installments if not i.get("paid")]
-    if not unpaid:
-        return {"status": "paid", "due_date": None}
-    return {"status": "due", "due_date": min(i.get("due_date", "") for i in unpaid)}
+    paid = [i for i in installments if i.get("paid")]
+    overdue = [i for i in installments if not i.get("paid") and i.get("due_date") and i["due_date"] < today]
+    upcoming = [i for i in installments if not i.get("paid") and not (i.get("due_date") and i["due_date"] < today)]
+    return {
+        "paid_amount": round(sum(i.get("amount", 0) for i in paid), 2),
+        "due_amount": round(sum(i.get("amount", 0) for i in overdue), 2),
+        "due_date": min((i["due_date"] for i in overdue), default=None),
+        "upcoming_amount": round(sum(i.get("amount", 0) for i in upcoming), 2),
+        "upcoming_date": min((i["due_date"] for i in upcoming), default=None),
+    }
 
 
 @router.get("/finance/revenue-overview")
@@ -223,13 +230,14 @@ async def revenue_overview(
     real timestamp) rather than summing lead fields, which have no date dimension."""
     if user.role == "branch_admin":
         branch_id = user.branch_id
+    today = datetime.now(timezone.utc).date().isoformat()
     lead_query = {"branch_id": branch_id} if branch_id else {}
     leads = await v3_col("leads").find(lead_query, {"_id": 0}).to_list(20000)
     lead_ids = [l["id"] for l in leads]
     lead_branch_map = {l["id"]: l.get("branch_id") for l in leads}
     lead_name_map = {l["id"]: l.get("name", "Unknown") for l in leads}
     lead_balance_map = {l["id"]: _lead_outstanding_balance(l) for l in leads}
-    lead_next_due_map = {l["id"]: _lead_next_due(l) for l in leads}
+    lead_progress_map = {l["id"]: _lead_payment_progress(l, today) for l in leads}
 
     branch_docs = await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1}).to_list(500)
     branch_name_map = {b["id"]: b.get("branch_name", "") for b in branch_docs}
@@ -278,7 +286,7 @@ async def revenue_overview(
 
         payment_modes[mode] = payment_modes.get(mode, 0.0) + amount
 
-        next_due = lead_next_due_map.get(act.get("lead_id"))
+        progress = lead_progress_map.get(act.get("lead_id"))
         transactions.append({
             "id": act.get("id", ""),
             "date": act.get("created_at", ""),
@@ -293,8 +301,11 @@ async def revenue_overview(
             "client_name": lead_name_map.get(act.get("lead_id"), "Unknown"),
             "payment_mode": mode,
             "client_balance": lead_balance_map.get(act.get("lead_id"), 0.0),
-            "payment_status": next_due["status"] if next_due else None,
-            "payment_due_date": next_due["due_date"] if next_due else None,
+            "payment_paid_amount": progress["paid_amount"] if progress else None,
+            "payment_due_amount": progress["due_amount"] if progress else None,
+            "payment_due_date": progress["due_date"] if progress else None,
+            "payment_upcoming_amount": progress["upcoming_amount"] if progress else None,
+            "payment_upcoming_date": progress["upcoming_date"] if progress else None,
         })
 
     total_collected = consultation_total + session_total
@@ -315,7 +326,6 @@ async def revenue_overview(
     # Accountant Manage > Outstanding Amount — every client who still owes something,
     # and > Payment Schedules — every Partial Payment installment (paid or not), so
     # the accountant can see the whole schedule per client, not just what's due.
-    today = datetime.now(timezone.utc).date().isoformat()
     outstanding_clients = []
     payment_schedule = []
     for l in leads:

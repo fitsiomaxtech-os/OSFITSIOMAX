@@ -149,10 +149,14 @@ const CollectionsTable = ({ title, total, rows, testid, onView }) => (
                 <td className="px-3 py-2 text-xs text-slate-500">{(tx.date || "").slice(0, 16).replace("T", " ")}</td>
                 <td className="px-3 py-2">
                   <p className="text-xs capitalize text-slate-500">{tx.payment_mode}</p>
-                  {tx.payment_due_date && (
-                    <p className={`text-[10px] font-semibold ${tx.payment_status === "paid" ? "text-emerald-600" : "text-rose-600"}`}>
-                      {tx.payment_status === "paid" ? "Paid" : `Due ${tx.payment_due_date}`}
-                    </p>
+                  {tx.payment_paid_amount > 0 && (
+                    <p className="text-[10px] font-semibold text-emerald-600">Paid {fmt(tx.payment_paid_amount)}</p>
+                  )}
+                  {tx.payment_due_amount > 0 && (
+                    <p className="text-[10px] font-semibold text-rose-600">Due {tx.payment_due_date} · {fmt(tx.payment_due_amount)}</p>
+                  )}
+                  {tx.payment_upcoming_amount > 0 && (
+                    <p className="text-[10px] font-semibold text-amber-600">Upcoming {tx.payment_upcoming_date} · {fmt(tx.payment_upcoming_amount)}</p>
                   )}
                 </td>
                 <td className="px-3 py-2 text-right font-semibold text-emerald-700">{fmt(tx.gross)}</td>
