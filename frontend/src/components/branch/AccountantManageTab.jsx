@@ -133,33 +133,26 @@ const CollectionsTable = ({ title, total, rows, testid, onView }) => (
             <tr>
               <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Client</th>
               <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Branch</th>
-              <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Date</th>
               <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Payment Mode</th>
+              <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Due Date</th>
+              <th className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-slate-400">Due Amount</th>
+              <th className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-slate-400">Paid Amount</th>
               <th className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-slate-400">Amount</th>
               <th className="px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">View</th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
-              <tr><td colSpan={6} className="px-3 py-8 text-center text-sm text-slate-400">No transactions yet.</td></tr>
+              <tr><td colSpan={8} className="px-3 py-8 text-center text-sm text-slate-400">No transactions yet.</td></tr>
             ) : rows.map((tx) => (
               <tr key={tx.id} data-testid={`collections-row-${tx.id}`}>
                 <td className="rounded-l-[5px] border-y border-l border-slate-200 bg-white px-3 py-2 font-medium text-slate-800">{tx.client_name || "Unknown"}</td>
                 <td className="border-y border-slate-200 bg-white px-3 py-2 text-slate-600">{tx.branch_name || "—"}</td>
-                <td className="border-y border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">{(tx.date || "").slice(0, 16).replace("T", " ")}</td>
-                <td className="border-y border-slate-200 bg-white px-3 py-2">
-                  <p className="text-xs capitalize text-slate-500">{tx.payment_mode}</p>
-                  {tx.payment_paid_amount > 0 && (
-                    <p className="text-[10px] font-semibold text-emerald-600">Paid {fmt(tx.payment_paid_amount)}</p>
-                  )}
-                  {tx.payment_due_amount > 0 && (
-                    <p className="text-[10px] font-semibold text-rose-600">Due {tx.payment_due_date} · {fmt(tx.payment_due_amount)}</p>
-                  )}
-                  {tx.payment_upcoming_amount > 0 && (
-                    <p className="text-[10px] font-semibold text-amber-600">Upcoming {tx.payment_upcoming_date} · {fmt(tx.payment_upcoming_amount)}</p>
-                  )}
-                </td>
-                <td className="border-y border-slate-200 bg-white px-3 py-2 text-right font-semibold text-emerald-700">{fmt(tx.gross)}</td>
+                <td className="border-y border-slate-200 bg-white px-3 py-2 text-xs capitalize text-slate-500">{tx.payment_mode}</td>
+                <td className="border-y border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-rose-600">{tx.payment_due_date || "—"}</td>
+                <td className="border-y border-slate-200 bg-white px-3 py-2 text-right font-semibold text-rose-600">{tx.payment_due_amount > 0 ? fmt(tx.payment_due_amount) : "—"}</td>
+                <td className="border-y border-slate-200 bg-white px-3 py-2 text-right font-semibold text-emerald-600">{tx.payment_paid_amount > 0 ? fmt(tx.payment_paid_amount) : "—"}</td>
+                <td className="border-y border-slate-200 bg-white px-3 py-2 text-right font-semibold text-slate-800">{fmt(tx.gross)}</td>
                 <td className="rounded-r-[5px] border-y border-r border-slate-200 bg-white px-3 py-2 text-center">
                   <button
                     type="button"

@@ -197,23 +197,21 @@ def _lead_outstanding_balance(lead: dict) -> float:
     return round(balance, 2)
 
 
-def _lead_payment_progress(lead: dict, today: str) -> Optional[dict]:
-    """For a Partial Payment treatment fee — the three-way split the Collections
-    tables' Payment Mode cell shows: what's already Paid, what's Due (unpaid,
-    due date already passed), and what's an Upcoming Payment (unpaid, not due
-    yet). Any one of the three can be zero/absent."""
+def _lead_payment_progress(lead: dict) -> Optional[dict]:
+    """For a Partial Payment treatment fee — what Collections tables' Due Date /
+    Due Amount / Paid Amount columns show: the next unpaid installment (its date
+    and amount, whether it's overdue or just upcoming), plus the total already
+    paid. None of the fields apply once every installment is settled."""
     if lead.get("treatment_fee_payment_mode") != "partial":
         return None
     installments = (lead.get("treatment_fee_payment_details") or {}).get("installments") or []
-    paid = [i for i in installments if i.get("paid")]
-    overdue = [i for i in installments if not i.get("paid") and i.get("due_date") and i["due_date"] < today]
-    upcoming = [i for i in installments if not i.get("paid") and not (i.get("due_date") and i["due_date"] < today)]
+    paid_amount = sum(i.get("amount", 0) for i in installments if i.get("paid"))
+    unpaid = sorted((i for i in installments if not i.get("paid")), key=lambda i: i.get("due_date", ""))
+    next_due = unpaid[0] if unpaid else None
     return {
-        "paid_amount": round(sum(i.get("amount", 0) for i in paid), 2),
-        "due_amount": round(sum(i.get("amount", 0) for i in overdue), 2),
-        "due_date": min((i["due_date"] for i in overdue), default=None),
-        "upcoming_amount": round(sum(i.get("amount", 0) for i in upcoming), 2),
-        "upcoming_date": min((i["due_date"] for i in upcoming), default=None),
+        "paid_amount": round(paid_amount, 2),
+        "due_date": next_due.get("due_date") if next_due else None,
+        "due_amount": round(next_due["amount"], 2) if next_due else None,
     }
 
 
@@ -237,7 +235,7 @@ async def revenue_overview(
     lead_branch_map = {l["id"]: l.get("branch_id") for l in leads}
     lead_name_map = {l["id"]: l.get("name", "Unknown") for l in leads}
     lead_balance_map = {l["id"]: _lead_outstanding_balance(l) for l in leads}
-    lead_progress_map = {l["id"]: _lead_payment_progress(l, today) for l in leads}
+    lead_progress_map = {l["id"]: _lead_payment_progress(l) for l in leads}
 
     branch_docs = await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1}).to_list(500)
     branch_name_map = {b["id"]: b.get("branch_name", "") for b in branch_docs}
@@ -304,8 +302,6 @@ async def revenue_overview(
             "payment_paid_amount": progress["paid_amount"] if progress else None,
             "payment_due_amount": progress["due_amount"] if progress else None,
             "payment_due_date": progress["due_date"] if progress else None,
-            "payment_upcoming_amount": progress["upcoming_amount"] if progress else None,
-            "payment_upcoming_date": progress["upcoming_date"] if progress else None,
         })
 
     total_collected = consultation_total + session_total
