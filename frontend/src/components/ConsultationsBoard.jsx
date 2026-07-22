@@ -695,15 +695,22 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
             {isConsultant && (() => {
               const currentName = selectedLead.head_consultation_stage || "New Appointment";
               const currentIdx = stages.findIndex((x) => x.name === currentName);
+              const packageMissing = !selectedLead.package_id;
               return (
                 <div>
                   <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-600">Move to Stage</p>
+                  {packageMissing && (
+                    <p className="mb-1.5 text-[11px] font-medium text-amber-600" data-testid="cons-package-required-hint">
+                      Select and save a Consultation Package above before moving forward.
+                    </p>
+                  )}
                   <div className="flex flex-wrap items-center gap-1.5">
                     {stages.map((s, idx) => {
                       const active = idx === currentIdx;
                       const passed = currentIdx >= 0 && idx < currentIdx;
                       const hex = s.color || "#64748b";
-                      const isDisabled = active || passed || s.name === "New Appointment";
+                      const needsPackage = idx > currentIdx && packageMissing;
+                      const isDisabled = active || passed || s.name === "New Appointment" || needsPackage;
                       return (
                         <Fragment key={s.id}>
                           <button
@@ -712,6 +719,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                               moveHeadStage(selectedLead, s.name);
                             }}
                             disabled={isDisabled}
+                            title={needsPackage ? "Select and save a Consultation Package first" : undefined}
                             className="flex flex-1 basis-32 items-center justify-center gap-1 rounded-[5px] border px-2 py-2 text-center text-[11px] font-semibold leading-tight transition disabled:opacity-100"
                             style={
                               active
