@@ -58,8 +58,19 @@ const MonthFilterBar = ({ month, setMonth }) => {
 
   const visible = MONTHS.slice(windowStart, windowStart + MONTHS_VISIBLE);
 
+  const allActive = String(month) === "all";
+
   return (
     <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-2" data-testid="outstanding-month-bar">
+      <button
+        type="button"
+        onClick={() => setMonth("all")}
+        className={`h-12 shrink-0 rounded-md border px-5 text-sm font-semibold transition ${allActive ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}
+        data-testid="outstanding-month-all"
+      >
+        All
+      </button>
+
       <button
         type="button"
         onClick={() => setWindowStart((s) => Math.max(s - 1, 0))}
@@ -79,7 +90,7 @@ const MonthFilterBar = ({ month, setMonth }) => {
             <button
               key={label}
               type="button"
-              onClick={() => setMonth(active ? "all" : idx)}
+              onClick={() => setMonth(idx)}
               className="h-12 flex-1 min-w-[100px] rounded-md border text-sm font-semibold transition"
               style={active
                 ? { backgroundColor: color, borderColor: color, color: "#fff" }
