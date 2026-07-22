@@ -7,6 +7,11 @@ import { getClientTransactionHistory, markInstallmentPaid } from "@/lib/api";
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
+const MONTHS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
 const STATUS_META = {
   overdue: { label: "Overdue", classes: "bg-rose-100 text-rose-700 border-rose-200" },
   due_soon: { label: "Due Soon", classes: "bg-amber-100 text-amber-700 border-amber-200" },
@@ -79,6 +84,7 @@ const ExpandedHistory = ({ leadId }) => {
 export const OutstandingAmountBoard = ({ rows, onView, onChanged }) => {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
+  const [month, setMonth] = useState("all");
   const [minAmount, setMinAmount] = useState("");
   const [maxAmount, setMaxAmount] = useState("");
   const [expanded, setExpanded] = useState(null);
@@ -92,10 +98,13 @@ export const OutstandingAmountBoard = ({ rows, onView, onChanged }) => {
       if (!(r.client_name || "").toLowerCase().includes(q) && !(r.phone || "").includes(q)) return false;
     }
     if (status !== "all" && r.status !== status) return false;
+    if (month !== "all") {
+      if (!r.due_date || Number(r.due_date.slice(5, 7)) - 1 !== Number(month)) return false;
+    }
     if (minAmount && r.balance < Number(minAmount)) return false;
     if (maxAmount && r.balance > Number(maxAmount)) return false;
     return true;
-  }), [rows, search, status, minAmount, maxAmount]);
+  }), [rows, search, status, month, minAmount, maxAmount]);
 
   const totals = useMemo(() => {
     const totalOutstanding = rows.reduce((s, r) => s + r.balance, 0);
@@ -165,6 +174,15 @@ export const OutstandingAmountBoard = ({ rows, onView, onChanged }) => {
             <option value="overdue">Overdue</option>
             <option value="due_soon">Due Soon</option>
             <option value="partial">Partial Paid</option>
+          </select>
+          <select
+            value={month}
+            onChange={(e) => setMonth(e.target.value)}
+            className="h-9 rounded-md border border-slate-200 px-2 text-sm"
+            data-testid="outstanding-month-filter"
+          >
+            <option value="all">All Months</option>
+            {MONTHS.map((m, idx) => <option key={m} value={idx}>{m}</option>)}
           </select>
           <input
             type="number" value={minAmount} onChange={(e) => setMinAmount(e.target.value)}
