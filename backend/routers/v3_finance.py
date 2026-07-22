@@ -1,5 +1,5 @@
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional
 
@@ -215,6 +215,48 @@ def _lead_payment_progress(lead: dict) -> Optional[dict]:
     }
 
 
+def _lead_outstanding_detail(lead: dict, today: str) -> dict:
+    """Outstanding Amount table — full bill/paid/balance picture per client, plus
+    the next due date (from the Partial Payment schedule, if any) and a status
+    badge: overdue (past due date), due_soon (due within 3 days), or partial
+    (owes money but nothing scheduled yet / due further out)."""
+    total_bill = lead.get("package_price") or 0
+    paid_amount = lead.get("package_paid") or 0
+    due_date = None
+    next_installment_number = None
+
+    if lead.get("treatment_fee_payment_mode") == "partial":
+        installments = (lead.get("treatment_fee_payment_details") or {}).get("installments") or []
+        total_bill += sum(i.get("amount", 0) for i in installments)
+        paid_amount += sum(i.get("amount", 0) for i in installments if i.get("paid"))
+        unpaid = sorted((i for i in installments if not i.get("paid")), key=lambda i: i.get("due_date", ""))
+        if unpaid:
+            due_date = unpaid[0].get("due_date")
+            next_installment_number = installments.index(unpaid[0]) + 1
+    elif lead.get("treatment_fee_paid"):
+        total_bill += lead.get("treatment_fee_paid") or 0
+        paid_amount += lead.get("treatment_fee_paid") or 0
+
+    balance = round(max(total_bill - paid_amount, 0), 2)
+    due_soon_cutoff = (datetime.fromisoformat(today).date() + timedelta(days=3)).isoformat()
+
+    if due_date and due_date < today:
+        status = "overdue"
+    elif due_date and due_date <= due_soon_cutoff:
+        status = "due_soon"
+    else:
+        status = "partial"
+
+    return {
+        "total_bill": round(total_bill, 2),
+        "paid_amount": round(paid_amount, 2),
+        "balance": balance,
+        "due_date": due_date,
+        "status": status,
+        "next_installment_number": next_installment_number,
+    }
+
+
 @router.get("/finance/revenue-overview")
 async def revenue_overview(
     start_date: Optional[str] = None,
@@ -340,12 +382,19 @@ async def revenue_overview(
     for l in leads:
         balance = lead_balance_map.get(l["id"], 0.0)
         if balance > 0:
+            detail = _lead_outstanding_detail(l, today)
             outstanding_clients.append({
                 "lead_id": l["id"],
                 "client_name": l.get("name", "Unknown"),
                 "phone": l.get("phone", ""),
+                "email": l.get("email", ""),
                 "branch_name": branch_name_map.get(l.get("branch_id"), ""),
-                "balance": balance,
+                "balance": detail["balance"],
+                "total_bill": detail["total_bill"],
+                "paid_amount": detail["paid_amount"],
+                "due_date": detail["due_date"],
+                "status": detail["status"],
+                "next_installment_number": detail["next_installment_number"],
             })
         if l.get("treatment_fee_payment_mode") == "partial":
             installments = (l.get("treatment_fee_payment_details") or {}).get("installments") or []

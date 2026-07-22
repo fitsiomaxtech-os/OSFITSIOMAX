@@ -4,6 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "@/components/ui/sonner";
 import { getBranches, getRevenueOverview, markInstallmentPaid } from "@/lib/api";
 import { ClientHistoryModal } from "@/components/branch/ClientHistoryModal";
+import { OutstandingAmountBoard } from "@/components/branch/OutstandingAmountBoard";
 
 const SUB_TABS = [
   { key: "total_revenue", label: "Total Revenue" },
@@ -150,7 +151,7 @@ export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
       ) : subTab === "session" ? (
         <CollectionsTable title="Session Collections" total={fmt(b.session_revenue)} rows={transactions.filter((t) => t.source === "session")} testid="accountant-manage-session" onView={setViewingLeadId} />
       ) : subTab === "outstanding" ? (
-        <OutstandingTable rows={outstanding} />
+        <OutstandingAmountBoard rows={outstanding} onView={setViewingLeadId} onChanged={load} />
       ) : (
         <ScheduleTable rows={schedule} onChanged={load} />
       )}
@@ -303,40 +304,6 @@ const CollectionsTable = ({ title, total, rows, testid, onView }) => (
                     <Eye className="h-4 w-4" />
                   </button>
                 </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </CardContent>
-  </Card>
-);
-
-const OutstandingTable = ({ rows }) => (
-  <Card data-testid="accountant-manage-outstanding">
-    <CardContent className="p-4">
-      <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Outstanding Amount</p>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-slate-100 bg-slate-50/80">
-              <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">S.No</th>
-              <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Client</th>
-              <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Phone</th>
-              <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Branch</th>
-              <th className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-slate-400">Balance</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 ? (
-              <tr><td colSpan={5} className="px-3 py-8 text-center text-sm text-slate-400">No outstanding balances.</td></tr>
-            ) : rows.map((r, i) => (
-              <tr key={r.lead_id} className="border-b border-slate-50" data-testid={`accountant-manage-outstanding-${r.lead_id}`}>
-                <td className="px-3 py-2 text-slate-400">{i + 1}</td>
-                <td className="px-3 py-2 font-medium text-slate-800">{r.client_name}</td>
-                <td className="px-3 py-2 text-slate-600">{r.phone || "—"}</td>
-                <td className="px-3 py-2 text-slate-600">{r.branch_name || "—"}</td>
-                <td className="px-3 py-2 text-right font-semibold text-amber-600">{fmt(r.balance)}</td>
               </tr>
             ))}
           </tbody>
