@@ -323,6 +323,10 @@ async def revenue_overview(
     lead_balance_map = {l["id"]: _lead_outstanding_balance(l) for l in leads}
     lead_progress_map = {l["id"]: _lead_payment_progress(l) for l in leads}
     lead_session_map = {l["id"]: _lead_session_summary(l) for l in leads}
+    lead_first_installment_map = {
+        l["id"]: ((l.get("treatment_fee_payment_details") or {}).get("installments") or [{}])[0].get("amount")
+        for l in leads if l.get("treatment_fee_payment_mode") == "partial"
+    }
 
     branch_docs = await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1}).to_list(500)
     branch_name_map = {b["id"]: b.get("branch_name", "") for b in branch_docs}
@@ -352,6 +356,14 @@ async def revenue_overview(
         amount = _parse_rs_amount(details)
         category = _revenue_category(act.get("action", ""))
         mode = _parse_payment_mode(details)
+        if category == "session" and mode == "partial":
+            # The activity log's Rs. figure is the Partial Payment schedule's total,
+            # not what was actually collected at that moment — only the first
+            # installment is ever collected here (later ones via mark-paid, which
+            # logs no new activity), so the real amount lives on the lead itself.
+            first_amount = lead_first_installment_map.get(act.get("lead_id"))
+            if first_amount is not None:
+                amount = first_amount
         day = (act.get("created_at") or "")[:10]
         bid = lead_branch_map.get(act.get("lead_id"))
         bname = branch_name_map.get(bid, "Unknown")
@@ -512,17 +524,30 @@ async def client_transaction_history(
     today = datetime.now(timezone.utc).date().isoformat()
     activity = await v3_col("lead_activity").find({"lead_id": lead_id}, {"_id": 0}).sort("created_at", -1).to_list(500)
 
+    first_installment_amount = None
+    if lead.get("treatment_fee_payment_mode") == "partial":
+        lead_installments = (lead.get("treatment_fee_payment_details") or {}).get("installments") or []
+        if lead_installments:
+            first_installment_amount = lead_installments[0].get("amount")
+
     transactions = []
     for act in activity:
         if act.get("action") not in REVENUE_ACTIONS:
             continue
         details = act.get("details", "")
+        category = _revenue_category(act.get("action", ""))
+        mode = _parse_payment_mode(details)
+        amount = _parse_rs_amount(details)
+        if category == "session" and mode == "partial" and first_installment_amount is not None:
+            # The logged Rs. figure is the Partial Payment schedule's total, not what
+            # was actually collected at that moment — see revenue_overview for detail.
+            amount = first_installment_amount
         transactions.append({
             "id": act.get("id", ""),
             "date": act.get("created_at", ""),
-            "source": _revenue_category(act.get("action", "")),
-            "amount": _parse_rs_amount(details),
-            "payment_mode": _parse_payment_mode(details),
+            "source": category,
+            "amount": amount,
+            "payment_mode": mode,
             "details": details,
             "collected_by": act.get("created_by", ""),
             "receipt_no": f"RCPT-{act.get('id', '')[-6:].upper()}" if act.get("id") else None,

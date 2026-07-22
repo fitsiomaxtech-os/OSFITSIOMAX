@@ -343,11 +343,15 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
         "consultation_stage": "Physio Assign",
         "updated_at": _now(),
     }})
+    # For Partial Payment, only the first installment is actually collected right
+    # now — the rest are just scheduled — so the log should say what was really
+    # received today, not the full schedule's total.
+    collected_now = installments[0].amount if payload.payment_mode == "partial" else payload.paid_amount
     await v3_col("lead_activity").insert_one({
         "id": str(uuid.uuid4()),
         "lead_id": lead_id,
         "action": "treatment_fee_collected",
-        "details": f"Chose session package '{item['name']}' ({sessions} sessions) · Collected Treatment Fee Rs.{payload.paid_amount} via {payload.payment_mode}{detail_suffix}",
+        "details": f"Chose session package '{item['name']}' ({sessions} sessions) · Collected Treatment Fee Rs.{collected_now} via {payload.payment_mode}{detail_suffix}",
         "created_by": user.full_name,
         "created_by_role": user.role,
         "created_at": _now(),
