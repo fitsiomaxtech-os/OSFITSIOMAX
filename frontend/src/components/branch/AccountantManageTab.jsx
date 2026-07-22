@@ -142,17 +142,17 @@ const CollectionsTable = ({ title, total, rows, testid, onView }) => (
         <p className="text-lg font-bold text-slate-800">{total}</p>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full border-separate border-spacing-x-0 border-spacing-y-2 text-sm">
+        <table className="w-full table-fixed border-separate border-spacing-x-0 border-spacing-y-2 text-sm">
           <thead>
             <tr>
-              <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Client</th>
-              <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Branch</th>
-              <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Payment Mode</th>
-              <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Due Date</th>
-              <th className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-slate-400">Due Amount</th>
-              <th className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-slate-400">Paid Amount</th>
-              <th className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-slate-400">Amount</th>
-              <th className="px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">View</th>
+              <th className="w-[18%] px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Client</th>
+              <th className="w-[12%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Branch</th>
+              <th className="w-[12%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Payment Mode</th>
+              <th className="w-[12%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Due Date</th>
+              <th className="w-[12%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Due Amount</th>
+              <th className="w-[12%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Paid Amount</th>
+              <th className="w-[12%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Amount</th>
+              <th className="w-[10%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">View</th>
             </tr>
           </thead>
           <tbody>
