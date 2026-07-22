@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { Eye, Wallet, MessageCircle, Mail, ChevronDown, ChevronRight, Printer, FileSpreadsheet } from "lucide-react";
+import { Eye, Wallet, MessageCircle, Mail, ChevronDown, ChevronRight, ChevronLeft, Printer, FileSpreadsheet } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "@/components/ui/sonner";
 import { getClientTransactionHistory, markInstallmentPaid } from "@/lib/api";
@@ -24,6 +24,59 @@ const StatusBadge = ({ status }) => {
     <span className={`inline-flex items-center rounded-[5px] border px-2 py-0.5 text-[10px] font-semibold ${meta.classes}`}>
       {meta.label}
     </span>
+  );
+};
+
+const MONTHS_VISIBLE = 5;
+
+const MonthFilterBar = ({ month, setMonth }) => {
+  const [windowStart, setWindowStart] = useState(() => {
+    const current = new Date().getMonth();
+    return Math.min(Math.max(current - 2, 0), MONTHS.length - MONTHS_VISIBLE);
+  });
+
+  const visible = MONTHS.slice(windowStart, windowStart + MONTHS_VISIBLE);
+
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-2" data-testid="outstanding-month-bar">
+      <button
+        type="button"
+        onClick={() => setWindowStart((s) => Math.max(s - 1, 0))}
+        disabled={windowStart === 0}
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-30"
+        data-testid="outstanding-month-prev"
+      >
+        <ChevronLeft className="h-4 w-4" />
+      </button>
+
+      <div className="flex flex-1 gap-2 overflow-x-auto">
+        {visible.map((label, i) => {
+          const idx = windowStart + i;
+          const active = String(month) === String(idx);
+          return (
+            <button
+              key={label}
+              type="button"
+              onClick={() => setMonth(active ? "all" : idx)}
+              className={`h-12 flex-1 min-w-[100px] rounded-md border text-sm font-medium transition ${active ? "border-sky-400 bg-sky-50 text-sky-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}
+              data-testid={`outstanding-month-${idx}`}
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
+
+      <button
+        type="button"
+        onClick={() => setWindowStart((s) => Math.min(s + 1, MONTHS.length - MONTHS_VISIBLE))}
+        disabled={windowStart >= MONTHS.length - MONTHS_VISIBLE}
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-30"
+        data-testid="outstanding-month-next"
+      >
+        <ChevronRight className="h-4 w-4" />
+      </button>
+    </div>
   );
 };
 
@@ -148,6 +201,8 @@ export const OutstandingAmountBoard = ({ rows, onView, onChanged }) => {
 
   return (
     <div className="space-y-4" data-testid="outstanding-amount-board">
+      <MonthFilterBar month={month} setMonth={setMonth} />
+
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <SummaryCard label="Total Outstanding" value={fmt(totals.totalOutstanding)} color="#d97706" />
         <SummaryCard label="Overdue Amount" value={fmt(totals.overdue)} color="#e11d48" />
@@ -174,15 +229,6 @@ export const OutstandingAmountBoard = ({ rows, onView, onChanged }) => {
             <option value="overdue">Overdue</option>
             <option value="due_soon">Due Soon</option>
             <option value="partial">Partial Paid</option>
-          </select>
-          <select
-            value={month}
-            onChange={(e) => setMonth(e.target.value)}
-            className="h-9 rounded-md border border-slate-200 px-2 text-sm"
-            data-testid="outstanding-month-filter"
-          >
-            <option value="all">All Months</option>
-            {MONTHS.map((m, idx) => <option key={m} value={idx}>{m}</option>)}
           </select>
           <input
             type="number" value={minAmount} onChange={(e) => setMinAmount(e.target.value)}
