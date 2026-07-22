@@ -12,6 +12,11 @@ const MONTHS = [
   "July", "August", "September", "October", "November", "December",
 ];
 
+const MONTH_COLORS = [
+  "#1E3A8A", "#EC4899", "#22C55E", "#38BDF8", "#FACC15", "#A78BFA",
+  "#FB7185", "#F97316", "#14B8A6", "#8B5CF6", "#92400E", "#DC2626",
+];
+
 const STATUS_META = {
   overdue: { label: "Overdue", classes: "bg-rose-100 text-rose-700 border-rose-200" },
   due_soon: { label: "Due Soon", classes: "bg-amber-100 text-amber-700 border-amber-200" },
@@ -28,12 +33,28 @@ const StatusBadge = ({ status }) => {
 };
 
 const MONTHS_VISIBLE = 5;
+const centeredStart = (idx) => Math.min(Math.max(idx - 2, 0), MONTHS.length - MONTHS_VISIBLE);
 
 const MonthFilterBar = ({ month, setMonth }) => {
-  const [windowStart, setWindowStart] = useState(() => {
-    const current = new Date().getMonth();
-    return Math.min(Math.max(current - 2, 0), MONTHS.length - MONTHS_VISIBLE);
-  });
+  const [windowStart, setWindowStart] = useState(() => centeredStart(new Date().getMonth()));
+
+  useEffect(() => {
+    let autoMonth = new Date().getMonth();
+    const interval = setInterval(() => {
+      const nowMonth = new Date().getMonth();
+      if (nowMonth !== autoMonth) {
+        setMonth((prev) => {
+          if (String(prev) === String(autoMonth)) {
+            setWindowStart(centeredStart(nowMonth));
+            return nowMonth;
+          }
+          return prev;
+        });
+        autoMonth = nowMonth;
+      }
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [setMonth]);
 
   const visible = MONTHS.slice(windowStart, windowStart + MONTHS_VISIBLE);
 
@@ -53,12 +74,16 @@ const MonthFilterBar = ({ month, setMonth }) => {
         {visible.map((label, i) => {
           const idx = windowStart + i;
           const active = String(month) === String(idx);
+          const color = MONTH_COLORS[idx];
           return (
             <button
               key={label}
               type="button"
               onClick={() => setMonth(active ? "all" : idx)}
-              className={`h-12 flex-1 min-w-[100px] rounded-md border text-sm font-medium transition ${active ? "border-sky-400 bg-sky-50 text-sky-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}
+              className="h-12 flex-1 min-w-[100px] rounded-md border text-sm font-semibold transition"
+              style={active
+                ? { backgroundColor: color, borderColor: color, color: "#fff" }
+                : { backgroundColor: `${color}14`, borderColor: `${color}55`, color }}
               data-testid={`outstanding-month-${idx}`}
             >
               {label}
@@ -137,7 +162,7 @@ const ExpandedHistory = ({ leadId }) => {
 export const OutstandingAmountBoard = ({ rows, onView, onChanged }) => {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
-  const [month, setMonth] = useState("all");
+  const [month, setMonth] = useState(() => new Date().getMonth());
   const [minAmount, setMinAmount] = useState("");
   const [maxAmount, setMaxAmount] = useState("");
   const [expanded, setExpanded] = useState(null);
