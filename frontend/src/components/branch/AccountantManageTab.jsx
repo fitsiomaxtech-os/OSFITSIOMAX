@@ -5,6 +5,7 @@ import { getBranches, getRevenueOverview } from "@/lib/api";
 import { ClientHistoryModal } from "@/components/branch/ClientHistoryModal";
 import { OutstandingAmountBoard } from "@/components/branch/OutstandingAmountBoard";
 import { PaymentSchedulesBoard } from "@/components/branch/PaymentSchedulesBoard";
+import { ConsultationCollectionsBoard } from "@/components/branch/ConsultationCollectionsBoard";
 
 const SUB_TABS = [
   { key: "total_revenue", label: "Total Revenue" },
@@ -147,7 +148,7 @@ export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
           )}
         </div>
       ) : subTab === "consultation" ? (
-        <CollectionsTable title="Consultation Collections" total={fmt(b.consultation_revenue)} rows={transactions.filter((t) => t.source === "consultation")} testid="accountant-manage-consultation" onView={setViewingLeadId} />
+        <ConsultationCollectionsBoard rows={transactions.filter((t) => t.source === "consultation")} onView={setViewingLeadId} />
       ) : subTab === "session" ? (
         <CollectionsTable title="Session Collections" total={fmt(b.session_revenue)} rows={transactions.filter((t) => t.source === "session")} testid="accountant-manage-session" onView={setViewingLeadId} />
       ) : subTab === "outstanding" ? (

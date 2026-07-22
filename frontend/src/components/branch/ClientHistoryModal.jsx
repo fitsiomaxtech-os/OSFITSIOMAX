@@ -43,8 +43,9 @@ export const ClientHistoryModal = ({ leadId, onClose }) => {
             <div className="flex items-center gap-2">
               <h3 className="text-base font-semibold text-slate-900" data-testid="client-history-name">{client?.name || "Loading..."}</h3>
               {client && (
-                <span className={`inline-flex items-center rounded-[5px] border px-2 py-0.5 text-[10px] font-semibold capitalize ${STATUS_STYLES[status]}`} data-testid="client-history-status">
-                  {status === "done" ? "Done" : "Processing"}
+                <span className={`inline-flex items-center gap-1 rounded-[5px] border px-2 py-0.5 text-[10px] font-semibold ${STATUS_STYLES[status]}`} data-testid="client-history-status">
+                  <span className={`h-1.5 w-1.5 rounded-full ${status === "done" ? "bg-emerald-500" : "bg-amber-500"}`} />
+                  {status === "done" ? "Completed" : "In Progress"}
                 </span>
               )}
             </div>
@@ -125,9 +126,12 @@ export const ClientHistoryModal = ({ leadId, onClose }) => {
               {timeline.length === 0 ? (
                 <p className="py-4 text-center text-xs text-slate-400">No activity yet.</p>
               ) : timeline.map((ev) => (
-                <div key={ev.id} className="rounded-lg bg-slate-50 px-3 py-2 text-xs" data-testid={`client-history-event-${ev.id}`}>
-                  <p className="text-slate-700">{ev.details}</p>
-                  <p className="mt-0.5 text-[10px] text-slate-400">{(ev.created_at || "").slice(0, 16).replace("T", " ")} · {ev.created_by}</p>
+                <div key={ev.id} className="flex items-start gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs" data-testid={`client-history-event-${ev.id}`}>
+                  <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
+                  <div>
+                    <p className="text-slate-700">{ev.details}</p>
+                    <p className="mt-0.5 text-[10px] text-slate-400">{(ev.created_at || "").slice(0, 16).replace("T", " ")} · {ev.created_by}</p>
+                  </div>
                 </div>
               ))}
             </div>
