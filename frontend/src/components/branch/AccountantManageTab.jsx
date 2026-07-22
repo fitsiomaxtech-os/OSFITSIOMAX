@@ -161,12 +161,12 @@ const CollectionsTable = ({ title, total, rows, testid, onView }) => (
             ) : rows.map((tx) => (
               <tr key={tx.id} data-testid={`collections-row-${tx.id}`}>
                 <td className="rounded-l-[5px] border-y border-l border-slate-200 bg-white px-3 py-2 font-medium text-slate-800">{tx.client_name || "Unknown"}</td>
-                <td className="border-y border-slate-200 bg-white px-3 py-2 text-slate-600">{tx.branch_name || "—"}</td>
-                <td className="border-y border-slate-200 bg-white px-3 py-2"><PaymentModeBadge mode={tx.payment_mode} /></td>
-                <td className="border-y border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-rose-600">{tx.payment_due_date || "—"}</td>
-                <td className="border-y border-slate-200 bg-white px-3 py-2 text-right font-semibold text-rose-600">{tx.payment_due_amount > 0 ? fmt(tx.payment_due_amount) : "—"}</td>
-                <td className="border-y border-slate-200 bg-white px-3 py-2 text-right font-semibold text-emerald-600">{tx.payment_paid_amount > 0 ? fmt(tx.payment_paid_amount) : "—"}</td>
-                <td className="border-y border-slate-200 bg-white px-3 py-2 text-right font-semibold text-slate-800">{fmt(tx.gross)}</td>
+                <td className="border-y border-slate-200 bg-white px-3 py-2 text-center text-slate-600">{tx.branch_name || "—"}</td>
+                <td className="border-y border-slate-200 bg-white px-3 py-2 text-center"><PaymentModeBadge mode={tx.payment_mode} /></td>
+                <td className="border-y border-slate-200 bg-white px-3 py-2 text-center text-xs font-semibold text-rose-600">{tx.payment_due_date || "—"}</td>
+                <td className="border-y border-slate-200 bg-white px-3 py-2 text-center font-semibold text-rose-600">{tx.payment_due_amount > 0 ? fmt(tx.payment_due_amount) : "—"}</td>
+                <td className="border-y border-slate-200 bg-white px-3 py-2 text-center font-semibold text-emerald-600">{tx.payment_paid_amount > 0 ? fmt(tx.payment_paid_amount) : "—"}</td>
+                <td className="border-y border-slate-200 bg-white px-3 py-2 text-center font-semibold text-slate-800">{fmt(tx.gross)}</td>
                 <td className="rounded-r-[5px] border-y border-r border-slate-200 bg-white px-3 py-2 text-center">
                   <button
                     type="button"
