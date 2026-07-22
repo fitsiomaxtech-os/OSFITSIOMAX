@@ -234,6 +234,7 @@ async def revenue_overview(
     lead_ids = [l["id"] for l in leads]
     lead_branch_map = {l["id"]: l.get("branch_id") for l in leads}
     lead_name_map = {l["id"]: l.get("name", "Unknown") for l in leads}
+    lead_phone_map = {l["id"]: l.get("phone", "") for l in leads}
     lead_balance_map = {l["id"]: _lead_outstanding_balance(l) for l in leads}
     lead_progress_map = {l["id"]: _lead_payment_progress(l) for l in leads}
 
@@ -297,6 +298,7 @@ async def revenue_overview(
             "collected_by": act.get("created_by", ""),
             "lead_id": act.get("lead_id", ""),
             "client_name": lead_name_map.get(act.get("lead_id"), "Unknown"),
+            "phone": lead_phone_map.get(act.get("lead_id"), ""),
             "payment_mode": mode,
             "client_balance": lead_balance_map.get(act.get("lead_id"), 0.0),
             "payment_paid_amount": progress["paid_amount"] if progress else None,
@@ -313,11 +315,22 @@ async def revenue_overview(
         r["total_revenue"] = r["consultation_total"] + r["session_total"]
 
     first_branch_stage = await get_first_stage_name("sales", "New Appointment")
-    pending_count = len([
+    pending_leads_raw = [
         l for l in leads
         if not (l.get("consultation_fee") or l.get("package_paid") or l.get("treatment_fee_paid"))
         and l.get("branch_stage") not in (None, first_branch_stage)
-    ])
+    ]
+    pending_count = len(pending_leads_raw)
+    pending_leads = [
+        {
+            "lead_id": l["id"],
+            "client_name": l.get("name", "Unknown"),
+            "phone": l.get("phone", ""),
+            "branch_name": branch_name_map.get(l.get("branch_id"), ""),
+            "stage": l.get("branch_stage") or "—",
+        }
+        for l in pending_leads_raw
+    ]
 
     # Accountant Manage > Outstanding Amount — every client who still owes something,
     # and > Payment Schedules — every Partial Payment installment (paid or not), so
@@ -369,6 +382,7 @@ async def revenue_overview(
         "transactions": sorted(transactions, key=lambda t: t["date"], reverse=True)[:500],
         "outstanding_clients": outstanding_clients,
         "payment_schedule": payment_schedule,
+        "pending_leads": pending_leads,
     }
 
 
