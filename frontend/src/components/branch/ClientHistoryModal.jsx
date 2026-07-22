@@ -22,7 +22,7 @@ const SCHEDULE_STATUS_META = {
   paid: { label: "Paid", classes: "bg-emerald-100 text-emerald-700 border-emerald-200" },
   overdue: { label: "Overdue", classes: "bg-rose-100 text-rose-700 border-rose-200" },
   due_today: { label: "Due", classes: "bg-amber-100 text-amber-700 border-amber-200" },
-  upcoming: { label: "Upcoming", classes: "bg-slate-100 text-slate-600 border-slate-200" },
+  upcoming: { label: "Upcoming", classes: "bg-orange-100 text-orange-700 border-orange-200" },
 };
 
 const Badge = ({ meta }) => (
@@ -31,8 +31,10 @@ const Badge = ({ meta }) => (
   </span>
 );
 
-const InfoBox = ({ children, className = "" }) => (
-  <div className={`rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-slate-700 ${className}`}>
+const INFO_BOX_NEUTRAL = "border-slate-200 bg-slate-50 text-slate-700";
+
+const InfoBox = ({ children, className = INFO_BOX_NEUTRAL }) => (
+  <div className={`rounded-md border px-2.5 py-1.5 ${className}`}>
     {children}
   </div>
 );
@@ -192,7 +194,7 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
                           Status: {pd.consultation_status === "paid" ? "Paid" : "Pending"}
                         </InfoBox>
                       )}
-                      {pd.consultation_payment_mode && <InfoBox className="capitalize text-slate-500">{pd.consultation_payment_mode}</InfoBox>}
+                      {pd.consultation_payment_mode && <InfoBox className={`${INFO_BOX_NEUTRAL} capitalize`}>{pd.consultation_payment_mode}</InfoBox>}
                     </div>
                   </div>
                   <div className="rounded-lg border border-slate-100 p-3">
@@ -200,10 +202,10 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
                     <div className="space-y-1.5">
                       <InfoBox>Total: {pd.session_total > 0 ? fmt(pd.session_total) : "—"}</InfoBox>
                       <InfoBox className="border-emerald-200 bg-emerald-50 font-medium text-emerald-700">Paid: {pd.session_paid != null ? fmt(pd.session_paid) : "—"}</InfoBox>
-                      <InfoBox className={pd.session_due > 0 ? "border-rose-200 bg-rose-50 font-medium text-rose-700" : "text-slate-500"}>Due: {pd.session_due > 0 ? fmt(pd.session_due) : "Rs.0"}</InfoBox>
-                      {pd.treatment_payment_mode && pd.treatment_payment_mode !== "partial" && <InfoBox className="capitalize text-slate-500">{pd.treatment_payment_mode}</InfoBox>}
+                      <InfoBox className={pd.session_due > 0 ? "border-rose-200 bg-rose-50 font-medium text-rose-700" : INFO_BOX_NEUTRAL}>Due: {pd.session_due > 0 ? fmt(pd.session_due) : "Rs.0"}</InfoBox>
+                      {pd.treatment_payment_mode && pd.treatment_payment_mode !== "partial" && <InfoBox className={`${INFO_BOX_NEUTRAL} capitalize`}>{pd.treatment_payment_mode}</InfoBox>}
                       {pd.installments_total != null && (
-                        <InfoBox className="text-slate-500">Installments: {pd.installments_paid}/{pd.installments_total} paid</InfoBox>
+                        <InfoBox className="border-orange-200 bg-orange-50 font-medium text-orange-700">Installments: {pd.installments_paid}/{pd.installments_total} paid</InfoBox>
                       )}
                     </div>
                   </div>
