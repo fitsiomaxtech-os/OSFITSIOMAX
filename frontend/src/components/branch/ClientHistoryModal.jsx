@@ -201,12 +201,7 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
                       <InfoBox>Total: {pd.session_total > 0 ? fmt(pd.session_total) : "—"}</InfoBox>
                       <InfoBox className="border-emerald-200 bg-emerald-50 font-medium text-emerald-700">Paid: {pd.session_paid != null ? fmt(pd.session_paid) : "—"}</InfoBox>
                       <InfoBox className={pd.session_due > 0 ? "border-rose-200 bg-rose-50 font-medium text-rose-700" : "text-slate-500"}>Due: {pd.session_due > 0 ? fmt(pd.session_due) : "Rs.0"}</InfoBox>
-                      {pd.session_status && (
-                        <InfoBox className={pd.session_status === "paid" ? "border-emerald-200 bg-emerald-50 font-medium text-emerald-700 capitalize" : pd.session_status === "partial" ? "border-sky-200 bg-sky-50 font-medium text-sky-700 capitalize" : "border-slate-200 bg-slate-50 font-medium text-slate-600 capitalize"}>
-                          {pd.session_status}
-                        </InfoBox>
-                      )}
-                      {pd.treatment_payment_mode && <InfoBox className="capitalize text-slate-500">{pd.treatment_payment_mode}</InfoBox>}
+                      {pd.treatment_payment_mode && pd.treatment_payment_mode !== "partial" && <InfoBox className="capitalize text-slate-500">{pd.treatment_payment_mode}</InfoBox>}
                       {pd.installments_total != null && (
                         <InfoBox className="text-slate-500">Installments: {pd.installments_paid}/{pd.installments_total} paid</InfoBox>
                       )}
