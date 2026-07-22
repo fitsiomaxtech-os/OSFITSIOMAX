@@ -292,8 +292,8 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
       <Card data-testid="presales-leads-card">
         <CardContent className="p-0">
           <div className="overflow-auto">
-            <table className="min-w-full text-sm">
-              <thead className="bg-slate-50 text-left text-xs text-slate-500">
+            <table className="min-w-full border-separate border-spacing-x-0 border-spacing-y-2 text-sm">
+              <thead className="text-left text-xs text-slate-500">
                 <tr><th className="px-4 py-2 w-12"></th><th className="px-3 py-2">LEAD</th><th className="px-3 py-2">CONTACT</th><th className="px-3 py-2">SOURCE</th><th className="px-3 py-2">STAGE</th><th className="px-3 py-2">{stageFilter === "Appointment" ? "BRANCH ADMIN STATUS" : "DEPARTMENT"}</th><th className="px-3 py-2">CREATED</th><th className="px-3 py-2">ACTIONS</th></tr>
               </thead>
               <tbody>
@@ -301,12 +301,12 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
                   const stg = stages.find((s) => s.name === l.stage);
                   const ac = avatarColor(l.name);
                   return (
-                    <tr key={l.id} onClick={() => setEditing(l)} className="cursor-pointer border-t border-slate-100 transition-colors hover:bg-slate-50" data-testid={`presales-lead-row-${l.id}`}>
-                      <td className="px-4 py-3"><span className={`inline-flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold ${ac.bg} ${ac.fg}`}>{initials(l.name)}</span></td>
-                      <td className="px-3 py-3 font-medium text-slate-800">{l.name}</td>
-                      <td className="px-3 py-3"><MaskedContact phone={l.phone} email={l.email} /></td>
-                      <td className="px-3 py-3"><SourcePill source={l.source_tab || l.source_type} /></td>
-                      <td className="px-3 py-3">
+                    <tr key={l.id} onClick={() => setEditing(l)} className="group cursor-pointer" data-testid={`presales-lead-row-${l.id}`}>
+                      <td className="rounded-l-[5px] border-y border-l border-slate-200 bg-white px-4 py-3 transition-colors group-hover:bg-slate-50"><span className={`inline-flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold ${ac.bg} ${ac.fg}`}>{initials(l.name)}</span></td>
+                      <td className="border-y border-slate-200 bg-white px-3 py-3 font-medium text-slate-800 transition-colors group-hover:bg-slate-50">{l.name}</td>
+                      <td className="border-y border-slate-200 bg-white px-3 py-3 transition-colors group-hover:bg-slate-50"><MaskedContact phone={l.phone} email={l.email} /></td>
+                      <td className="border-y border-slate-200 bg-white px-3 py-3 transition-colors group-hover:bg-slate-50"><SourcePill source={l.source_tab || l.source_type} /></td>
+                      <td className="border-y border-slate-200 bg-white px-3 py-3 transition-colors group-hover:bg-slate-50">
                         <div className="flex flex-col items-start gap-1">
                           <div className="flex items-center gap-1.5">
                             <span className="inline-flex h-6 items-center rounded border px-2 text-[10px] font-semibold" style={{ borderColor: stg?.color || "#cbd5e1", color: stg?.color || "#64748b" }}>{l.stage}</span>
@@ -335,7 +335,7 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
                           })()}
                         </div>
                       </td>
-                      <td className="px-3 py-3 text-xs">
+                      <td className="border-y border-slate-200 bg-white px-3 py-3 text-xs transition-colors group-hover:bg-slate-50">
                         {stageFilter === "Appointment" ? (() => {
                           const branchName = l.branch_id ? (branches.find((b) => b.id === l.branch_id)?.branch_name || branches.find((b) => b.id === l.branch_id)?.name) : (l.appointment_mode === "online" ? "Online Consultation" : "Unassigned");
                           const status = l.branch_stage || "Pending";
@@ -359,8 +359,8 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
                           );
                         })() : (l.department || "—")}
                       </td>
-                      <td className="px-3 py-3 text-xs text-slate-400">{(l.created_at || "").slice(0, 10)}</td>
-                      <td className="px-3 py-3">
+                      <td className="border-y border-slate-200 bg-white px-3 py-3 text-xs text-slate-400 transition-colors group-hover:bg-slate-50">{(l.created_at || "").slice(0, 10)}</td>
+                      <td className="rounded-r-[5px] border-y border-r border-slate-200 bg-white px-3 py-3 transition-colors group-hover:bg-slate-50">
                         <div className="flex items-center gap-1">
                           <button onClick={(e) => { e.stopPropagation(); setEditing(l); }} className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-sky-600" data-testid={`presales-lead-view-${l.id}`} title="View / Edit">
                             <Eye className="h-4 w-4" />
