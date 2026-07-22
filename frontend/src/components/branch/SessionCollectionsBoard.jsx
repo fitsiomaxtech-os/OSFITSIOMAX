@@ -38,11 +38,17 @@ const StatusBadge = ({ status }) => {
   );
 };
 
-const SummaryCard = ({ label, value, color }) => (
-  <div className="rounded-xl border bg-white p-4 shadow-sm" style={{ borderLeftColor: color, borderLeftWidth: 4 }}>
+const SummaryCard = ({ label, value, color, active, onClick }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className={`rounded-xl border bg-white p-4 text-left shadow-sm transition ${active ? "ring-2 ring-offset-1" : "hover:shadow-md"}`}
+    style={{ borderLeftColor: color, borderLeftWidth: 4, ...(active ? { boxShadow: `0 0 0 2px ${color}33` } : {}) }}
+    data-testid={`session-summary-${label.toLowerCase().replace(/\s+/g, "-")}`}
+  >
     <p className="text-xs text-slate-500">{label}</p>
     <p className="mt-1 text-2xl font-bold" style={{ color }}>{value}</p>
-  </div>
+  </button>
 );
 
 export const SessionCollectionsBoard = ({ rows, onView }) => {
@@ -52,11 +58,19 @@ export const SessionCollectionsBoard = ({ rows, onView }) => {
   const [status, setStatus] = useState("all");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
+  const [activeCard, setActiveCard] = useState(null);
 
   const today = todayIso();
   const monthPrefix = today.slice(0, 7);
 
   const branches = useMemo(() => [...new Set(rows.map((r) => r.branch_name).filter(Boolean))], [rows]);
+
+  const toggleCard = (key, { modeValue, statusValue } = {}) => {
+    const next = activeCard === key ? null : key;
+    setActiveCard(next);
+    if (modeValue) setMode(next ? modeValue : "all");
+    if (statusValue) setStatus(next ? statusValue : "all");
+  };
 
   const filtered = useMemo(() => rows.filter((r) => {
     if (search && !(r.client_name || "").toLowerCase().includes(search.toLowerCase())) return false;
@@ -66,8 +80,11 @@ export const SessionCollectionsBoard = ({ rows, onView }) => {
     const d = (r.date || "").slice(0, 10);
     if (fromDate && d < fromDate) return false;
     if (toDate && d > toDate) return false;
+    if (activeCard === "today" && d !== today) return false;
+    if (activeCard === "month" && d.slice(0, 7) !== monthPrefix) return false;
+    if (activeCard === "outstanding" && !(r.session_due > 0)) return false;
     return true;
-  }), [rows, search, branch, mode, status, fromDate, toDate]);
+  }), [rows, search, branch, mode, status, fromDate, toDate, activeCard, today, monthPrefix]);
 
   const totals = useMemo(() => {
     const todayTotal = rows.filter((r) => (r.date || "").slice(0, 10) === today).reduce((s, r) => s + r.gross, 0);
@@ -85,13 +102,13 @@ export const SessionCollectionsBoard = ({ rows, onView }) => {
   return (
     <div className="space-y-4" data-testid="session-collections-board">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-7">
-        <SummaryCard label="Today's Collection" value={fmt(totals.todayTotal)} color="#059669" />
-        <SummaryCard label="Monthly Collection" value={fmt(totals.monthTotal)} color="#0284c7" />
-        <SummaryCard label="Cash" value={fmt(totals.cash)} color="#16a34a" />
-        <SummaryCard label="Card" value={fmt(totals.card)} color="#7c3aed" />
-        <SummaryCard label="UPI" value={fmt(totals.upi)} color="#0ea5e9" />
-        <SummaryCard label="Partial Payments" value={fmt(totals.partial)} color="#ea580c" />
-        <SummaryCard label="Outstanding Amount" value={fmt(totals.outstanding)} color="#d97706" />
+        <SummaryCard label="Today's Collection" value={fmt(totals.todayTotal)} color="#059669" active={activeCard === "today"} onClick={() => toggleCard("today")} />
+        <SummaryCard label="Monthly Collection" value={fmt(totals.monthTotal)} color="#0284c7" active={activeCard === "month"} onClick={() => toggleCard("month")} />
+        <SummaryCard label="Cash" value={fmt(totals.cash)} color="#16a34a" active={activeCard === "cash"} onClick={() => toggleCard("cash", { modeValue: "cash" })} />
+        <SummaryCard label="Card" value={fmt(totals.card)} color="#7c3aed" active={activeCard === "card"} onClick={() => toggleCard("card", { modeValue: "card" })} />
+        <SummaryCard label="UPI" value={fmt(totals.upi)} color="#0ea5e9" active={activeCard === "upi"} onClick={() => toggleCard("upi", { modeValue: "upi" })} />
+        <SummaryCard label="Partial Payments" value={fmt(totals.partial)} color="#ea580c" active={activeCard === "partial"} onClick={() => toggleCard("partial", { statusValue: "partial" })} />
+        <SummaryCard label="Outstanding Amount" value={fmt(totals.outstanding)} color="#d97706" active={activeCard === "outstanding"} onClick={() => toggleCard("outstanding")} />
       </div>
 
       <Card>
@@ -107,7 +124,14 @@ export const SessionCollectionsBoard = ({ rows, onView }) => {
             <option value="all">All Branches</option>
             {branches.map((b) => <option key={b} value={b}>{b}</option>)}
           </select>
-          <select value={mode} onChange={(e) => setMode(e.target.value)} className="h-9 rounded-md border border-slate-200 px-2 text-sm" data-testid="session-collections-mode-filter">
+          <select
+            value={mode}
+            onChange={(e) => {
+              setMode(e.target.value);
+              setActiveCard(["cash", "card", "upi"].includes(e.target.value) ? e.target.value : null);
+            }}
+            className="h-9 rounded-md border border-slate-200 px-2 text-sm" data-testid="session-collections-mode-filter"
+          >
             <option value="all">All Payment Modes</option>
             <option value="cash">Cash</option>
             <option value="upi">UPI</option>
@@ -115,7 +139,14 @@ export const SessionCollectionsBoard = ({ rows, onView }) => {
             <option value="cheque">Cheque</option>
             <option value="partial">Partial</option>
           </select>
-          <select value={status} onChange={(e) => setStatus(e.target.value)} className="h-9 rounded-md border border-slate-200 px-2 text-sm" data-testid="session-collections-status-filter">
+          <select
+            value={status}
+            onChange={(e) => {
+              setStatus(e.target.value);
+              setActiveCard(e.target.value === "partial" ? "partial" : null);
+            }}
+            className="h-9 rounded-md border border-slate-200 px-2 text-sm" data-testid="session-collections-status-filter"
+          >
             <option value="all">All Statuses</option>
             <option value="paid">Paid</option>
             <option value="partial">Partial</option>
