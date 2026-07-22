@@ -5,6 +5,7 @@ import { getClientTransactionHistory, markInstallmentPaid } from "@/lib/api";
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 const fmtDate = (d) => (d ? (d.length > 10 ? d.slice(0, 16).replace("T", " ") : d) : "—");
+const formatMode = (mode) => (mode ? (mode === "upi" ? "UPI" : mode.charAt(0).toUpperCase() + mode.slice(1)) : "");
 
 const STATUS_STYLES = {
   done: "bg-emerald-50 text-emerald-700 border-emerald-200",
@@ -194,7 +195,7 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
                           Status: {pd.consultation_status === "paid" ? "Paid" : "Pending"}
                         </InfoBox>
                       )}
-                      {pd.consultation_payment_mode && <InfoBox className={`${INFO_BOX_NEUTRAL} capitalize`}>{pd.consultation_payment_mode}</InfoBox>}
+                      {pd.consultation_payment_mode && <InfoBox className={INFO_BOX_NEUTRAL}>{formatMode(pd.consultation_payment_mode)}</InfoBox>}
                     </div>
                   </div>
                   <div className="rounded-lg border border-slate-100 p-3">
@@ -203,7 +204,7 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
                       <InfoBox>Total: {pd.session_total > 0 ? fmt(pd.session_total) : "—"}</InfoBox>
                       <InfoBox className="border-emerald-200 bg-emerald-50 font-medium text-emerald-700">Paid: {pd.session_paid != null ? fmt(pd.session_paid) : "—"}</InfoBox>
                       <InfoBox className={pd.session_due > 0 ? "border-rose-200 bg-rose-50 font-medium text-rose-700" : INFO_BOX_NEUTRAL}>Due: {pd.session_due > 0 ? fmt(pd.session_due) : "Rs.0"}</InfoBox>
-                      {pd.treatment_payment_mode && pd.treatment_payment_mode !== "partial" && <InfoBox className={`${INFO_BOX_NEUTRAL} capitalize`}>{pd.treatment_payment_mode}</InfoBox>}
+                      {pd.treatment_payment_mode && pd.treatment_payment_mode !== "partial" && <InfoBox className={INFO_BOX_NEUTRAL}>{formatMode(pd.treatment_payment_mode)}</InfoBox>}
                       {pd.installments_total != null && (
                         <InfoBox className="border-orange-200 bg-orange-50 font-medium text-orange-700">Installments: {pd.installments_paid}/{pd.installments_total} paid</InfoBox>
                       )}
@@ -236,7 +237,7 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
                   ) : transactions.map((tx) => (
                     <div key={tx.id} className="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-2 text-xs" data-testid={`client-history-tx-${tx.id}`}>
                       <div>
-                        <p className="font-medium text-slate-700 capitalize">{tx.source} · <span className="capitalize text-slate-500">{tx.payment_mode}</span></p>
+                        <p className="font-medium text-slate-700 capitalize">{tx.source} · <span className="text-slate-500">{formatMode(tx.payment_mode)}</span></p>
                         <p className="text-[10px] text-slate-400">{fmtDate(tx.date)} {tx.receipt_no && `· ${tx.receipt_no}`}</p>
                       </div>
                       <div className="text-right">

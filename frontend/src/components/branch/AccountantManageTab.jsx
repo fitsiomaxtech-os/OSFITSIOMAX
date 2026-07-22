@@ -32,9 +32,11 @@ const PAYMENT_MODE_STYLES = {
   partial: "bg-orange-50 text-orange-700 border-orange-200",
 };
 
+const formatMode = (mode) => (mode ? (mode === "upi" ? "UPI" : mode.charAt(0).toUpperCase() + mode.slice(1)) : "—");
+
 const PaymentModeBadge = ({ mode }) => (
-  <span className={`inline-flex items-center rounded-[5px] border px-2 py-0.5 text-[10px] font-semibold capitalize ${PAYMENT_MODE_STYLES[mode] || "bg-slate-50 text-slate-600 border-slate-200"}`}>
-    {mode || "—"}
+  <span className={`inline-flex items-center rounded-[5px] border px-2 py-0.5 text-[10px] font-semibold ${PAYMENT_MODE_STYLES[mode] || "bg-slate-50 text-slate-600 border-slate-200"}`}>
+    {formatMode(mode)}
   </span>
 );
 

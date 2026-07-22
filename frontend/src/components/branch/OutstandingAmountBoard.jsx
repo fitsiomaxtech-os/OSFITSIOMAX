@@ -6,6 +6,7 @@ import { getClientTransactionHistory, markInstallmentPaid } from "@/lib/api";
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 const todayIso = () => new Date().toISOString().slice(0, 10);
+const formatMode = (mode) => (mode ? (mode === "upi" ? "UPI" : mode.charAt(0).toUpperCase() + mode.slice(1)) : "");
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -161,7 +162,7 @@ const ExpandedHistory = ({ leadId }) => {
     <div className="space-y-1.5 px-4 py-3">
       {transactions.map((tx) => (
         <div key={tx.id} className="flex items-center justify-between rounded-lg border border-slate-100 bg-white px-3 py-1.5 text-xs">
-          <span className="capitalize text-slate-600">{tx.source} · {tx.payment_mode}</span>
+          <span className="capitalize text-slate-600">{tx.source} · <span className="normal-case">{formatMode(tx.payment_mode)}</span></span>
           <span className="text-slate-400">{(tx.date || "").slice(0, 10)}</span>
           <span className="font-semibold text-emerald-600">{fmt(tx.amount)}</span>
         </div>
