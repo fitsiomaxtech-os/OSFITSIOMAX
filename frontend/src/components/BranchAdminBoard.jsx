@@ -121,9 +121,9 @@ export const BranchAdminBoard = ({ branchId }) => {
     { key: "pipeline", label: "Branch Leads", icon: LayoutDashboard },
     { key: "consultations", label: "Consultations", icon: Stethoscope },
     { key: "sessions", label: "Treatment Sessions", icon: CalendarRange },
+    { key: "accountant_mgmt", label: "Accountant Manage", icon: BadgeIndianRupee },
     { key: "rehab", label: "Rehab", icon: Activity },
     { key: "store", label: "Fitsiomax Store", icon: ShoppingCart },
-    { key: "accountant_mgmt", label: "Accountant Manage", icon: BadgeIndianRupee },
   ];
 
   return (
