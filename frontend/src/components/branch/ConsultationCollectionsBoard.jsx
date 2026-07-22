@@ -27,11 +27,17 @@ const StatusBadge = ({ paid }) => (
   </span>
 );
 
-const SummaryCard = ({ label, value, color }) => (
-  <div className="rounded-xl border bg-white p-4 shadow-sm" style={{ borderLeftColor: color, borderLeftWidth: 4 }}>
+const SummaryCard = ({ label, value, color, active, onClick }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className={`rounded-xl border bg-white p-4 text-left shadow-sm transition ${active ? "ring-2 ring-offset-1" : "hover:shadow-md"}`}
+    style={{ borderLeftColor: color, borderLeftWidth: 4, ...(active ? { boxShadow: `0 0 0 2px ${color}33` } : {}) }}
+    data-testid={`consultation-summary-${label.toLowerCase().replace(/\s+/g, "-")}`}
+  >
     <p className="text-xs text-slate-500">{label}</p>
     <p className="mt-1 text-2xl font-bold" style={{ color }}>{value}</p>
-  </div>
+  </button>
 );
 
 export const ConsultationCollectionsBoard = ({ rows, onView }) => {
@@ -39,19 +45,29 @@ export const ConsultationCollectionsBoard = ({ rows, onView }) => {
   const [branch, setBranch] = useState("all");
   const [mode, setMode] = useState("all");
   const [date, setDate] = useState("");
+  const [activeCard, setActiveCard] = useState(null);
 
   const today = todayIso();
   const monthPrefix = today.slice(0, 7);
 
   const branches = useMemo(() => [...new Set(rows.map((r) => r.branch_name).filter(Boolean))], [rows]);
 
+  const toggleCard = (key, modeValue) => {
+    const next = activeCard === key ? null : key;
+    setActiveCard(next);
+    if (modeValue) setMode(next ? modeValue : "all");
+  };
+
   const filtered = useMemo(() => rows.filter((r) => {
     if (search && !(r.client_name || "").toLowerCase().includes(search.toLowerCase())) return false;
     if (branch !== "all" && r.branch_name !== branch) return false;
     if (mode !== "all" && r.payment_mode !== mode) return false;
     if (date && (r.date || "").slice(0, 10) !== date) return false;
+    if (activeCard === "today" && (r.date || "").slice(0, 10) !== today) return false;
+    if (activeCard === "month" && (r.date || "").slice(0, 7) !== monthPrefix) return false;
+    if (activeCard === "outstanding" && !(r.client_balance > 0)) return false;
     return true;
-  }), [rows, search, branch, mode, date]);
+  }), [rows, search, branch, mode, date, activeCard, today, monthPrefix]);
 
   const totals = useMemo(() => {
     const uniqueBalances = new Map();
@@ -68,12 +84,12 @@ export const ConsultationCollectionsBoard = ({ rows, onView }) => {
   return (
     <div className="space-y-4" data-testid="consultation-collections-board">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
-        <SummaryCard label="Today's Collection" value={fmt(totals.todayTotal)} color="#059669" />
-        <SummaryCard label="This Month" value={fmt(totals.monthTotal)} color="#0284c7" />
-        <SummaryCard label="Cash" value={fmt(totals.cash)} color="#16a34a" />
-        <SummaryCard label="Card" value={fmt(totals.card)} color="#7c3aed" />
-        <SummaryCard label="UPI" value={fmt(totals.upi)} color="#0ea5e9" />
-        <SummaryCard label="Outstanding" value={fmt(totals.outstanding)} color="#d97706" />
+        <SummaryCard label="Today's Collection" value={fmt(totals.todayTotal)} color="#059669" active={activeCard === "today"} onClick={() => toggleCard("today")} />
+        <SummaryCard label="This Month" value={fmt(totals.monthTotal)} color="#0284c7" active={activeCard === "month"} onClick={() => toggleCard("month")} />
+        <SummaryCard label="Cash" value={fmt(totals.cash)} color="#16a34a" active={activeCard === "cash"} onClick={() => toggleCard("cash", "cash")} />
+        <SummaryCard label="Card" value={fmt(totals.card)} color="#7c3aed" active={activeCard === "card"} onClick={() => toggleCard("card", "card")} />
+        <SummaryCard label="UPI" value={fmt(totals.upi)} color="#0ea5e9" active={activeCard === "upi"} onClick={() => toggleCard("upi", "upi")} />
+        <SummaryCard label="Outstanding" value={fmt(totals.outstanding)} color="#d97706" active={activeCard === "outstanding"} onClick={() => toggleCard("outstanding")} />
       </div>
 
       <Card>
@@ -89,7 +105,13 @@ export const ConsultationCollectionsBoard = ({ rows, onView }) => {
             <option value="all">All Branches</option>
             {branches.map((b) => <option key={b} value={b}>{b}</option>)}
           </select>
-          <select value={mode} onChange={(e) => setMode(e.target.value)} className="h-9 rounded-md border border-slate-200 px-2 text-sm" data-testid="consultation-collections-mode-filter">
+          <select
+            value={mode}
+            onChange={(e) => {
+              setMode(e.target.value);
+              setActiveCard(["cash", "card", "upi"].includes(e.target.value) ? e.target.value : null);
+            }}
+            className="h-9 rounded-md border border-slate-200 px-2 text-sm" data-testid="consultation-collections-mode-filter">
             <option value="all">All Payment Modes</option>
             <option value="cash">Cash</option>
             <option value="upi">UPI</option>
