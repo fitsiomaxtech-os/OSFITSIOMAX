@@ -509,6 +509,7 @@ async def client_transaction_history(
         branch = await v3_col("branches").find_one({"id": lead["branch_id"]}, {"_id": 0, "branch_name": 1})
         branch_name = (branch or {}).get("branch_name", "")
 
+    today = datetime.now(timezone.utc).date().isoformat()
     activity = await v3_col("lead_activity").find({"lead_id": lead_id}, {"_id": 0}).sort("created_at", -1).to_list(500)
 
     transactions = []
@@ -524,11 +525,29 @@ async def client_transaction_history(
             "payment_mode": _parse_payment_mode(details),
             "details": details,
             "collected_by": act.get("created_by", ""),
+            "receipt_no": f"RCPT-{act.get('id', '')[-6:].upper()}" if act.get("id") else None,
         })
 
     balance = _lead_outstanding_balance(lead)
+    outstanding_detail = _lead_outstanding_detail(lead, today)
     installments = (lead.get("treatment_fee_payment_details") or {}).get("installments") or []
     session = _lead_session_summary(lead)
+
+    schedule = [
+        {
+            "installment_number": idx,
+            "amount": inst.get("amount", 0),
+            "due_date": inst.get("due_date", ""),
+            "status": _installment_status(inst, today),
+        }
+        for idx, inst in enumerate(installments, start=1)
+    ]
+
+    package_paid = lead.get("package_paid") or 0
+    package_price = lead.get("package_price") or 0
+    consultation_status = None
+    if lead.get("package_id"):
+        consultation_status = "paid" if package_paid >= package_price and package_price > 0 else "pending"
 
     return {
         "client": {
@@ -539,11 +558,15 @@ async def client_transaction_history(
             "branch_name": branch_name,
         },
         "balance": balance,
+        "balance_status": outstanding_detail["status"] if balance > 0 else "paid",
         "status": "done" if balance <= 0 else "processing",
+        "last_payment_date": transactions[0]["date"] if transactions else None,
+        "next_due_date": outstanding_detail["due_date"],
         "payment_details": {
             "consultation_fee_total": lead.get("package_price"),
             "consultation_fee_paid": lead.get("package_paid"),
             "consultation_payment_mode": lead.get("package_payment_mode"),
+            "consultation_status": consultation_status,
             "treatment_fee_paid": lead.get("treatment_fee_paid"),
             "treatment_payment_mode": lead.get("treatment_fee_payment_mode"),
             "installments_total": len(installments) if installments else None,
@@ -553,6 +576,7 @@ async def client_transaction_history(
             "session_due": session["due"],
             "next_installment_number": session["next_installment_number"],
         },
+        "schedule": schedule,
         "transactions": transactions,
         "timeline": activity,
     }
