@@ -550,9 +550,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
       {selectedLead && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 sm:p-4" data-testid="cons-detail-dialog">
           <div className="w-full h-full sm:h-auto sm:w-[92vw] sm:max-w-3xl sm:max-h-[85vh] overflow-y-auto space-y-3 bg-white p-4 shadow-2xl sm:rounded-xl">
-            <div className="relative flex flex-col gap-3 rounded-xl border border-slate-200 p-3 sm:flex-row sm:items-start sm:justify-between">
-              <button onClick={() => setSelectedLead(null)} className="absolute right-2 top-2 rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-detail-close"><XCircle className="h-4 w-4" /></button>
-              <div className="rounded-lg border border-slate-100 bg-slate-50/60 p-2.5 sm:flex-1">
+            <div className="flex items-start justify-between">
+              <div>
                 <h3 className="text-base font-semibold text-slate-900" data-testid="cons-detail-title">{selectedLead.name || "Lead"}</h3>
                 <p className="mt-0.5 flex items-center gap-2 text-xs text-slate-500">
                   <Phone className="h-3 w-3" /> {selectedLead.phone || "—"}
@@ -574,25 +573,26 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                   </span>
                 )}
               </div>
+              <button onClick={() => setSelectedLead(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-detail-close"><XCircle className="h-4 w-4" /></button>
+            </div>
 
-              {/* Sub tabs */}
-              <div className="flex flex-wrap gap-1.5 rounded-lg border border-slate-100 bg-slate-50/60 p-2.5 sm:max-w-[15rem] sm:justify-end" data-testid="cons-detail-tabs">
-                {[
-                  { key: "overview", label: "Overview" },
-                  { key: "followup", label: "Follow up" },
-                  { key: "timeline", label: "Timeline" },
-                  { key: "profile", label: "Profile" },
-                ].map((t) => (
-                  <button
-                    key={t.key}
-                    onClick={() => setDetailTab(t.key)}
-                    className={`rounded-[5px] px-3.5 py-1 text-xs font-semibold transition-all ${detailTab === t.key ? "bg-sky-600 text-white shadow-sm" : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"}`}
-                    data-testid={`cons-detail-tab-${t.key}`}
-                  >
-                    {t.label}
-                  </button>
-                ))}
-              </div>
+            {/* Sub tabs */}
+            <div className="flex flex-wrap gap-1.5 border-b border-slate-100 pb-3" data-testid="cons-detail-tabs">
+              {[
+                { key: "overview", label: "Overview" },
+                { key: "followup", label: "Follow up" },
+                { key: "timeline", label: "Timeline" },
+                { key: "profile", label: "Profile" },
+              ].map((t) => (
+                <button
+                  key={t.key}
+                  onClick={() => setDetailTab(t.key)}
+                  className={`rounded-[5px] px-3.5 py-1 text-xs font-semibold transition-all ${detailTab === t.key ? "bg-sky-600 text-white shadow-sm" : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"}`}
+                  data-testid={`cons-detail-tab-${t.key}`}
+                >
+                  {t.label}
+                </button>
+              ))}
             </div>
 
             {detailTab === "overview" && (
