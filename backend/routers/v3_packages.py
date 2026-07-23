@@ -39,7 +39,7 @@ class PackageOut(PackageIn):
 
 
 @router.get("/packages", response_model=List[PackageOut])
-async def list_packages(active_only: bool = False, _: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin", "head_physio", "pre_sales"))):
+async def list_packages(active_only: bool = False, _: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin", "head_physio"))):
     q = {"active": True} if active_only else {}
     docs = await v3_col("packages").find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
     return docs

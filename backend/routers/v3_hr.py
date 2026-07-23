@@ -14,7 +14,7 @@ router = APIRouter(prefix="/api/v3/hr")
 
 
 DEFAULT_DEPARTMENTS = ["Pre-Sales", "Branch", "HR", "Accounts", "Operations", "Marketing", "Experts"]
-DEFAULT_ROLES = ["super_admin", "business_dev", "pre_sales", "branch_admin", "head_physio", "physio", "marketing_head", "accountant"]
+DEFAULT_ROLES = ["super_admin", "business_dev", "branch_admin", "head_physio", "physio", "marketing_head", "accountant"]
 
 
 class EmployeeCreate(BaseModel):
@@ -79,7 +79,7 @@ class UserAccountCreate(BaseModel):
     full_name: str
     email: str
     password: str
-    role: Literal["super_admin", "business_dev", "pre_sales", "branch_admin", "head_physio", "physio", "marketing_head", "accountant"]
+    role: Literal["super_admin", "business_dev", "branch_admin", "head_physio", "physio", "marketing_head", "accountant"]
     employee_id: Optional[str] = None
     branch_id: Optional[str] = None
     mobile_number: Optional[str] = None

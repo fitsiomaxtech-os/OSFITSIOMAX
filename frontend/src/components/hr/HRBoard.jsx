@@ -287,7 +287,6 @@ const AddEmployeeModal = ({ employee, meta, onClose, onSaved }) => {
 const ROLE_META = {
   super_admin: { label: "SUPER ADMIN", classes: "border-purple-300 bg-purple-50 text-purple-700" },
   business_dev: { label: "BUSINESS DEV", classes: "border-indigo-300 bg-indigo-50 text-indigo-700" },
-  pre_sales: { label: "PRE SALES", classes: "border-sky-300 bg-sky-50 text-sky-700" },
   branch_admin: { label: "BRANCH ADMIN", classes: "border-emerald-300 bg-emerald-50 text-emerald-700" },
   head_physio: { label: "HEAD PHYSIO", classes: "border-amber-300 bg-amber-50 text-amber-700" },
   physio: { label: "PHYSIO", classes: "border-cyan-300 bg-cyan-50 text-cyan-700" },

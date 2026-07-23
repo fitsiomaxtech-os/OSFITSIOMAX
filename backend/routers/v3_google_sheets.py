@@ -185,7 +185,7 @@ async def list_spreadsheets(_: V3UserOut = Depends(v3_require_roles("super_admin
     )
 
 
-# ---------- Auto-sync settings (lightweight — accessible to pre_sales too) ----------
+# ---------- Auto-sync settings (lightweight) ----------
 
 class AutoSyncToggle(BaseModel):
     auto_sync_enabled: Optional[bool] = None
@@ -193,7 +193,7 @@ class AutoSyncToggle(BaseModel):
 
 
 @router.get("/auto-sync/sources")
-async def auto_sync_sources(user: V3UserOut = Depends(v3_require_roles("super_admin", "pre_sales", "business_dev", "marketing_head", "branch_admin"))):
+async def auto_sync_sources(user: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev", "marketing_head", "branch_admin"))):
     """Lightweight list of Google Sheets sources with their auto-sync settings + status.
     Branch Admin only ever sees sources tagged with their own branch — a source with no
     branch (or another branch's) isn't theirs to pull."""
@@ -215,7 +215,7 @@ async def auto_sync_sources(user: V3UserOut = Depends(v3_require_roles("super_ad
 
 
 @router.patch("/auto-sync/sources/{source_id}")
-async def auto_sync_toggle(source_id: str, payload: AutoSyncToggle, _: V3UserOut = Depends(v3_require_roles("super_admin", "pre_sales", "business_dev", "marketing_head"))):
+async def auto_sync_toggle(source_id: str, payload: AutoSyncToggle, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev", "marketing_head"))):
     updates = {k: v for k, v in payload.model_dump().items() if v is not None}
     if not updates:
         raise HTTPException(status_code=400, detail="Nothing to update")
@@ -380,7 +380,7 @@ async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Di
 
 
 @router.post("/pull/{source_id}")
-async def pull_source(source_id: str, range_: str = Query("A1:Z10000"), user: V3UserOut = Depends(v3_require_roles("super_admin", "pre_sales", "branch_admin"))):
+async def pull_source(source_id: str, range_: str = Query("A1:Z10000"), user: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin"))):
     if user.role == "branch_admin":
         source = await v3_col("marketing_sources").find_one({"id": source_id}, {"_id": 0, "branch_id": 1})
         if not source:
