@@ -107,11 +107,11 @@ class V3DoctorOut(BaseModel):
     id: str
     full_name: str
     profile_type: str
-    branch_id: str
+    branch_id: Optional[str] = None  # a head_physio user can exist before being assigned a branch
     specialization: Optional[str] = ""
     employee_id: Optional[str] = None
     joining_date: Optional[str] = None
-    slots: List[str]
+    slots: List[str] = []
     created_at: str
 
 

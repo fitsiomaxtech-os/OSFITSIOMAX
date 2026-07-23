@@ -156,7 +156,15 @@ async def v3_get_doctors(branch_id: Optional[str] = None, user: V3UserOut = Depe
     elif branch_id:
         query["branch_id"] = branch_id
     rows = await v3_col("doctors").find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
-    return [V3DoctorOut(**row) for row in rows]
+    out = []
+    for row in rows:
+        try:
+            out.append(V3DoctorOut(**row))
+        except Exception:
+            # One malformed legacy row (e.g. missing a field a later schema change added)
+            # shouldn't 500 the whole Experts list — skip it and keep going.
+            continue
+    return out
 
 
 @router.post("/doctors", response_model=V3DoctorOut)
