@@ -42,6 +42,7 @@ import { BranchSessionsPanel, FitsiomaxStorePanel } from "@/components/BranchSto
 import { PullFromSheetButton } from "@/components/PullFromSheetButton";
 import { PlaceholderPanel } from "@/components/PackagesBoard";
 import { AccountantManageTab } from "@/components/branch/AccountantManageTab";
+import { CreateLeadModal } from "@/components/CreateLeadModal";
 
 export const BranchAdminBoard = ({ branchId }) => {
   const [boardData, setBoardData] = useState({ leads: [], stage_counts: {} });
@@ -53,6 +54,7 @@ export const BranchAdminBoard = ({ branchId }) => {
   const [consultationsSubTab, setConsultationsSubTab] = useState("consultation");
   const [stageFilter, setStageFilter] = useState(null); // null = show all stages
   const [dateFilter, setDateFilter] = useState(null); // { from, to, label, key } | null
+  const [showCreateLead, setShowCreateLead] = useState(false);
 
   const loadBoard = useCallback(async () => {
     if (!branchId) return null;
@@ -186,9 +188,14 @@ export const BranchAdminBoard = ({ branchId }) => {
         <AccountantManageTab branchId={branchId} />
       ) : (
         <>
-          <div data-testid="branch-pipeline-header">
-            <h2 className="text-2xl font-bold text-slate-900">Branch Leads</h2>
-            <p className="text-sm text-slate-500">Track patients from first appointment through to their stage in your branch.</p>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between" data-testid="branch-pipeline-header">
+            <div>
+              <h2 className="text-2xl font-bold text-slate-900">Branch Leads</h2>
+              <p className="text-sm text-slate-500">Track patients from first appointment through to their stage in your branch.</p>
+            </div>
+            <Button onClick={() => setShowCreateLead(true)} className="bg-sky-600 hover:bg-sky-700" data-testid="branch-create-lead-btn">
+              <UserPlus className="h-4 w-4 mr-1.5" />Create Lead
+            </Button>
           </div>
 
           {/* Stage Head Bar — Pre-Sales style sticky segmented tabs */}
@@ -312,6 +319,14 @@ export const BranchAdminBoard = ({ branchId }) => {
             setSelectedLead(null);
             loadBoard();
           }}
+        />
+      )}
+
+      {showCreateLead && (
+        <CreateLeadModal
+          isSuperAdmin={false}
+          onClose={() => setShowCreateLead(false)}
+          onSaved={loadBoard}
         />
       )}
         </>
