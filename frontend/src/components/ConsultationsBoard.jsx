@@ -31,6 +31,9 @@ const TREATMENT_FEE_PAYMENT_MODES = [
 const PARTIAL_ORDINALS = ["First", "Second", "Third", "Fourth", "Fifth", "Sixth", "Seventh", "Eighth", "Ninth", "Tenth"];
 const partialInstallmentLabel = (idx) => `${PARTIAL_ORDINALS[idx] || `#${idx + 1}`} Payment`;
 
+// One distinct color per Treatment Package option (cycles if there are ever more than 5).
+const TREATMENT_PACKAGE_COLORS = ["#2563eb", "#059669", "#d97706", "#7c3aed", "#e11d48"];
+
 export const ConsultationsBoard = ({ branchId, viewerRole }) => {
   const isConsultant = viewerRole === "head_physio";
   // Head Physio tracks progress on their own independent pipeline (head_consultation_stage),
@@ -80,6 +83,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
   // Consultation + Treatment (+ Treatment Package, names only, no prices shown here).
   const [decisionDraft, setDecisionDraft] = useState({ decision: "consultation_only", item_id: "", mode: "offline", sessions: "" });
   const [savingDecision, setSavingDecision] = useState(false);
+  const [packageDropdownOpen, setPackageDropdownOpen] = useState(false);
+  const packageDropdownRef = useRef(null);
 
   // Mark Consultation Completed (Branch Admin only) — "Consultation Only" patients, at
   // the Consultation Fee Collected stage.
@@ -169,7 +174,19 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
     setCollectFeeDraft(null);
     setTreatmentFeeDraft(null);
     setDecisionDraft({ decision: "consultation_only", item_id: "", mode: "offline", sessions: "" });
+    setPackageDropdownOpen(false);
   }, [selectedLead?.id]);
+
+  useEffect(() => {
+    if (!packageDropdownOpen) return;
+    const onClickOutside = (e) => {
+      if (packageDropdownRef.current && !packageDropdownRef.current.contains(e.target)) {
+        setPackageDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, [packageDropdownOpen]);
 
   useEffect(() => {
     if (!selectedLead?.id || detailTab !== "timeline") return;
@@ -689,21 +706,36 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                   {isTreatment && (
                     <div className="mt-3">
                       <label className="mb-1 block text-[11px] font-medium text-slate-500">Treatment Package</label>
-                      <select
-                        value={decisionDraft.item_id}
-                        onChange={(e) => {
-                          const item = treatmentPackageItems.find((i) => i.id === e.target.value);
-                          const baseSessions = item ? (decisionDraft.mode === "online" ? item.sessions_online : item.sessions_offline) : null;
-                          setDecisionDraft((p) => ({ ...p, item_id: e.target.value, sessions: baseSessions ? String(baseSessions) : "" }));
-                        }}
-                        className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-xs"
-                        data-testid="cons-decision-package-select"
-                      >
-                        <option value="">-- choose a treatment package --</option>
-                        {treatmentPackageItems.map((i) => (
-                          <option key={i.id} value={i.id}>{i.name}</option>
-                        ))}
-                      </select>
+                      <div className="relative" ref={packageDropdownRef}>
+                        <button
+                          type="button"
+                          onClick={() => setPackageDropdownOpen((o) => !o)}
+                          className="flex h-9 w-full items-center justify-center rounded-md border border-slate-200 bg-white px-2 text-center text-xs font-medium text-slate-700 hover:bg-slate-50"
+                          data-testid="cons-decision-package-select"
+                        >
+                          {treatmentPackageItems.find((i) => i.id === decisionDraft.item_id)?.name || "-- choose a treatment package --"}
+                        </button>
+                        {packageDropdownOpen && (
+                          <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-md border border-slate-200 bg-white shadow-lg" data-testid="cons-decision-package-options">
+                            {treatmentPackageItems.map((i, idx) => (
+                              <button
+                                key={i.id}
+                                type="button"
+                                onClick={() => {
+                                  const baseSessions = decisionDraft.mode === "online" ? i.sessions_online : i.sessions_offline;
+                                  setDecisionDraft((p) => ({ ...p, item_id: i.id, sessions: baseSessions ? String(baseSessions) : "" }));
+                                  setPackageDropdownOpen(false);
+                                }}
+                                className="block w-full py-2 text-center text-xs font-semibold text-white transition-opacity hover:opacity-90"
+                                style={{ backgroundColor: TREATMENT_PACKAGE_COLORS[idx % TREATMENT_PACKAGE_COLORS.length] }}
+                                data-testid={`cons-decision-package-option-${i.id}`}
+                              >
+                                {i.name}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
 
                       {decisionDraft.item_id && (() => {
                         const item = treatmentPackageItems.find((i) => i.id === decisionDraft.item_id);
