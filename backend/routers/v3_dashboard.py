@@ -19,13 +19,50 @@ async def _stage_names(stage_type: str, fallback: list) -> list:
 
 
 @router.get("/dashboard/bd-summary")
-async def v3_bd_summary(_: V3UserOut = Depends(v3_require_roles("business_dev", "super_admin"))):
-    total_leads = await v3_col("leads").count_documents({})
+async def v3_bd_summary(
+    branch_id: Optional[str] = Query(None),
+    source_tab: Optional[str] = Query(None),
+    stage: Optional[str] = Query(None),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    _: V3UserOut = Depends(v3_require_roles("business_dev", "super_admin")),
+):
+    # Filter toolbar support — every lead-derived metric below respects these, so switching
+    # Branch/Lead Source/Status/Date Range re-scopes the whole dashboard, not just the table.
+    lead_match: dict = {}
+    if branch_id:
+        lead_match["branch_id"] = branch_id
+    if source_tab:
+        lead_match["source_tab"] = source_tab
+    if stage:
+        lead_match["stage"] = stage
+    if start_date or end_date:
+        created_range: dict = {}
+        if start_date:
+            created_range["$gte"] = start_date
+        if end_date:
+            created_range["$lte"] = end_date
+        lead_match["created_at"] = created_range
+
+    appt_match: dict = {}
+    if branch_id:
+        appt_match["branch_id"] = branch_id
+    if start_date or end_date:
+        appt_match["created_at"] = lead_match.get("created_at", {})
+
+    def lead_filter(extra: Optional[dict] = None) -> dict:
+        out = dict(lead_match)
+        if extra:
+            out.update(extra)
+        return out
+
+    total_leads = await v3_col("leads").count_documents(lead_filter())
     stage_counts = {}
-    for stage in await _stage_names("pre_sales", V3_STAGES):
-        stage_counts[stage] = await v3_col("leads").count_documents({"stage": stage})
+    for s in await _stage_names("pre_sales", V3_STAGES):
+        stage_counts[s] = await v3_col("leads").count_documents(lead_filter({"stage": s}))
 
     source_pipeline = [
+        {"$match": lead_match},
         {"$group": {"_id": {"$ifNull": ["$source_tab", "$source_type"]}, "count": {"$sum": 1}}},
         {"$sort": {"count": -1}},
     ]
@@ -33,7 +70,7 @@ async def v3_bd_summary(_: V3UserOut = Depends(v3_require_roles("business_dev", 
     source_counts = {item["_id"]: item["count"] for item in source_agg if item["_id"]}
 
     branch_pipeline = [
-        {"$match": {"branch_id": {"$ne": None}}},
+        {"$match": lead_filter({"branch_id": {"$ne": None}})},
         {"$group": {"_id": "$branch_id", "count": {"$sum": 1}}},
         {"$sort": {"count": -1}},
     ]
@@ -45,13 +82,67 @@ async def v3_bd_summary(_: V3UserOut = Depends(v3_require_roles("business_dev", 
         for item in branch_agg
     ]
 
-    total_appointments = await v3_col("appointments").count_documents({})
-    completed_appointments = await v3_col("appointments").count_documents({"status": "completed"})
+    total_appointments = await v3_col("appointments").count_documents(appt_match)
+    completed_appointments = await v3_col("appointments").count_documents({**appt_match, "status": "completed"})
     total_branches = await v3_col("branches").count_documents({})
     total_connections = await v3_col("sheet_connections").count_documents({})
 
-    recent_leads = await v3_col("leads").find({}, {"_id": 0}).sort("created_at", -1).to_list(10)
+    recent_leads = await v3_col("leads").find(lead_match, {"_id": 0}).sort("created_at", -1).to_list(10)
     recent_out = [V3LeadOut(**r) for r in recent_leads]
+
+    # Time-bucketed lead volume — real, computed straight off created_at, no invented figures.
+    now = datetime.now(timezone.utc)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_leads = await v3_col("leads").count_documents(lead_filter({"created_at": {"$gte": today_start.isoformat()}}))
+
+    week_start = today_start - timedelta(days=6)
+    prev_week_start = week_start - timedelta(days=7)
+    leads_this_week = await v3_col("leads").count_documents(lead_filter({"created_at": {"$gte": week_start.isoformat()}}))
+    leads_last_week = await v3_col("leads").count_documents(lead_filter({
+        "created_at": {"$gte": prev_week_start.isoformat(), "$lt": week_start.isoformat()}
+    }))
+
+    week_trend = []
+    for i in range(6, -1, -1):
+        day_start = today_start - timedelta(days=i)
+        day_end = day_start + timedelta(days=1)
+        count = await v3_col("leads").count_documents(lead_filter({
+            "created_at": {"$gte": day_start.isoformat(), "$lt": day_end.isoformat()}
+        }))
+        week_trend.append({"date": day_start.strftime("%Y-%m-%d"), "count": count})
+
+    month_trend = []
+    month_cursor = today_start.replace(day=1)
+    months = []
+    for _ in range(6):
+        months.append(month_cursor)
+        prev_month_end = month_cursor - timedelta(days=1)
+        month_cursor = prev_month_end.replace(day=1)
+    for month_start in reversed(months):
+        if month_start.month == 12:
+            next_month = month_start.replace(year=month_start.year + 1, month=1)
+        else:
+            next_month = month_start.replace(month=month_start.month + 1)
+        count = await v3_col("leads").count_documents(lead_filter({
+            "created_at": {"$gte": month_start.isoformat(), "$lt": next_month.isoformat()}
+        }))
+        month_trend.append({"month": month_start.strftime("%Y-%m"), "count": count})
+
+    # Revenue actually collected against leads (Consultation + Treatment Fee) — real ledger sum.
+    revenue_pipeline = [
+        {"$match": lead_match},
+        {"$group": {
+            "_id": None,
+            "total": {"$sum": {"$add": [
+                {"$ifNull": ["$package_paid", 0]},
+                {"$ifNull": ["$treatment_fee_paid", 0]},
+            ]}},
+        }},
+    ]
+    revenue_agg = await v3_col("leads").aggregate(revenue_pipeline).to_list(1)
+    revenue_generated = revenue_agg[0]["total"] if revenue_agg else 0
+
+    conversion_rate = round((completed_appointments / total_leads) * 100, 1) if total_leads else 0.0
 
     return {
         "total_leads": total_leads,
@@ -63,6 +154,14 @@ async def v3_bd_summary(_: V3UserOut = Depends(v3_require_roles("business_dev", 
         "total_branches": total_branches,
         "total_connections": total_connections,
         "recent_leads": [r.model_dump() for r in recent_out],
+        "today_leads": today_leads,
+        "leads_this_week": leads_this_week,
+        "leads_last_week": leads_last_week,
+        "week_trend": week_trend,
+        "month_trend": month_trend,
+        "revenue_generated": revenue_generated,
+        "conversion_rate": conversion_rate,
+        "applied_filters": {"branch_id": branch_id, "source_tab": source_tab, "stage": stage, "start_date": start_date, "end_date": end_date},
     }
 
 

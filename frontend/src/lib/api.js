@@ -118,7 +118,7 @@ export const getBranchBoardOld = async (branchId) => (await api.get(`/boards/bra
 export const getTeamMembers = async (params) => (await api.get("/team-members", { params })).data;
 export const addTeamMember = async (payload) => (await api.post("/team-members", payload)).data;
 
-export const getBdSummary = async () => (await api.get("/dashboard/bd-summary")).data;
+export const getBdSummary = async (params = {}) => (await api.get("/dashboard/bd-summary", { params })).data;
 export const getLeadSources = async () => (await api.get("/lead-sources")).data;
 
 export const getLeadRemarks = async (leadId) => (await api.get(`/leads/${leadId}/remarks`)).data;
