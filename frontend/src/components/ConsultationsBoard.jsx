@@ -550,8 +550,9 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
       {selectedLead && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 sm:p-4" data-testid="cons-detail-dialog">
           <div className="w-full h-full sm:h-auto sm:w-[92vw] sm:max-w-3xl sm:max-h-[85vh] overflow-y-auto space-y-3 bg-white p-4 shadow-2xl sm:rounded-xl">
-            <div className="flex items-start justify-between">
-              <div>
+            <div className="relative flex flex-col gap-3 rounded-xl border border-slate-200 p-3 sm:flex-row sm:items-start sm:justify-between">
+              <button onClick={() => setSelectedLead(null)} className="absolute right-2 top-2 rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-detail-close"><XCircle className="h-4 w-4" /></button>
+              <div className="rounded-lg border border-slate-100 bg-slate-50/60 p-2.5 sm:flex-1">
                 <h3 className="text-base font-semibold text-slate-900" data-testid="cons-detail-title">{selectedLead.name || "Lead"}</h3>
                 <p className="mt-0.5 flex items-center gap-2 text-xs text-slate-500">
                   <Phone className="h-3 w-3" /> {selectedLead.phone || "—"}
@@ -573,26 +574,25 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                   </span>
                 )}
               </div>
-              <button onClick={() => setSelectedLead(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-detail-close"><XCircle className="h-4 w-4" /></button>
-            </div>
 
-            {/* Sub tabs */}
-            <div className="flex flex-wrap gap-1.5 border-b border-slate-100 pb-3" data-testid="cons-detail-tabs">
-              {[
-                { key: "overview", label: "Overview" },
-                { key: "followup", label: "Follow up" },
-                { key: "timeline", label: "Timeline" },
-                { key: "profile", label: "Profile" },
-              ].map((t) => (
-                <button
-                  key={t.key}
-                  onClick={() => setDetailTab(t.key)}
-                  className={`rounded-[5px] px-3.5 py-1 text-xs font-semibold transition-all ${detailTab === t.key ? "bg-sky-600 text-white shadow-sm" : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"}`}
-                  data-testid={`cons-detail-tab-${t.key}`}
-                >
-                  {t.label}
-                </button>
-              ))}
+              {/* Sub tabs */}
+              <div className="flex flex-wrap gap-1.5 rounded-lg border border-slate-100 bg-slate-50/60 p-2.5 sm:max-w-[15rem] sm:justify-end" data-testid="cons-detail-tabs">
+                {[
+                  { key: "overview", label: "Overview" },
+                  { key: "followup", label: "Follow up" },
+                  { key: "timeline", label: "Timeline" },
+                  { key: "profile", label: "Profile" },
+                ].map((t) => (
+                  <button
+                    key={t.key}
+                    onClick={() => setDetailTab(t.key)}
+                    className={`rounded-[5px] px-3.5 py-1 text-xs font-semibold transition-all ${detailTab === t.key ? "bg-sky-600 text-white shadow-sm" : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"}`}
+                    data-testid={`cons-detail-tab-${t.key}`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
             </div>
 
             {detailTab === "overview" && (
@@ -732,6 +732,9 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                 );
               }
 
+              const isOnly = decisionDraft.decision === "consultation_only";
+              const isTreatment = decisionDraft.decision === "consultation_treatment";
+
               return (
                 <div className="rounded-lg border border-sky-200 bg-sky-50 p-3" data-testid="cons-decision-form">
                   <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-sky-700">
@@ -742,18 +745,28 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                       Write the Diagnosis Report and Treatment Summary above before Save & Move.
                     </p>
                   )}
-                  <div className="space-y-1.5">
-                    <label className="flex items-center gap-2 text-sm text-slate-700">
-                      <input type="radio" name="decision" checked={decisionDraft.decision === "consultation_only"} onChange={() => setDecisionDraft((p) => ({ ...p, decision: "consultation_only" }))} data-testid="cons-decision-only" />
-                      Consultation Only
-                    </label>
-                    <label className="flex items-center gap-2 text-sm text-slate-700">
-                      <input type="radio" name="decision" checked={decisionDraft.decision === "consultation_treatment"} onChange={() => setDecisionDraft((p) => ({ ...p, decision: "consultation_treatment" }))} data-testid="cons-decision-treatment" />
-                      Consultation + Treatment
-                    </label>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-5">
+                    <button
+                      type="button"
+                      onClick={() => setDecisionDraft((p) => ({ ...p, decision: "consultation_only" }))}
+                      className={`rounded-lg border-2 p-3 text-left transition sm:col-span-2 ${isOnly ? "border-sky-500 bg-white shadow-sm" : "border-slate-200 bg-white/60 hover:bg-white"}`}
+                      data-testid="cons-decision-only"
+                    >
+                      <p className="text-sm font-semibold text-slate-800">Consultation Only</p>
+                      <p className="mt-1 text-[11px] text-slate-500">No treatment sessions required.</p>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDecisionDraft((p) => ({ ...p, decision: "consultation_treatment" }))}
+                      className={`rounded-lg border-2 p-3 text-left transition sm:col-span-3 ${isTreatment ? "border-sky-500 bg-white shadow-sm" : "border-slate-200 bg-white/60 hover:bg-white"}`}
+                      data-testid="cons-decision-treatment"
+                    >
+                      <p className="text-sm font-semibold text-slate-800">Consultation + Treatment</p>
+                      <p className="mt-1 text-[11px] text-slate-500">Patient continues on to treatment sessions.</p>
+                    </button>
                   </div>
-                  {decisionDraft.decision === "consultation_treatment" && (
-                    <div className="mt-2">
+                  {isTreatment && (
+                    <div className="mt-3">
                       <label className="mb-1 block text-[11px] font-medium text-slate-500">Treatment Package</label>
                       <select
                         value={decisionDraft.item_id}
@@ -775,7 +788,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                     disabled={savingDecision || !canSave}
                     data-testid="cons-decision-save"
                   >
-                    {savingDecision ? "Saving..." : "Save & Move"}
+                    {savingDecision ? "Saving..." : isTreatment ? "Choose and Confirm & Select the Package" : "Choose and Confirm"}
                   </Button>
                 </div>
               );
