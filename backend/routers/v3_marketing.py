@@ -159,7 +159,7 @@ class BulkDelete(BaseModel):
 
 @router.get("/dashboard")
 async def marketing_dashboard(_: V3UserOut = Depends(v3_require_roles("super_admin"))):
-    pre_sales_count = await v3_col("leads").count_documents({"stage": {"$in": ["New Leads", "RNR", "Follow Up"]}})
+    pre_sales_count = await v3_col("leads").count_documents({"stage": {"$in": ["New Leads", "Follow Up"]}})
     sales_count = await v3_col("leads").count_documents({"stage": "Appointment"})
     completed_count = await v3_col("leads").count_documents({"branch_stage": "Assigned Physio"})
     total_pre_sales_ever = pre_sales_count + sales_count + completed_count
@@ -233,7 +233,7 @@ async def get_team_members(_: V3UserOut = Depends(v3_require_roles("super_admin"
             if tier == "sales":
                 lead_filter = {"assigned_user_id": u["id"], "stage": "Appointment"}
             else:
-                lead_filter = {"assigned_user_id": u["id"], "stage": {"$in": ["New Leads", "RNR", "Follow Up"]}}
+                lead_filter = {"assigned_user_id": u["id"], "stage": {"$in": ["New Leads", "Follow Up"]}}
             current_leads = await v3_col("leads").count_documents(lead_filter)
             total_assigned = await v3_col("leads").count_documents({"assigned_user_id": u["id"]})
             closed = await v3_col("leads").count_documents({"assigned_user_id": u["id"], "branch_stage": "Assigned Physio"})
@@ -290,7 +290,7 @@ async def all_leads(
 ):
     query: Dict[str, Any] = {}
     if stage_type == "pre_sales":
-        query["stage"] = {"$in": ["New Leads", "RNR", "Follow Up"]}
+        query["stage"] = {"$in": ["New Leads", "Follow Up"]}
     elif stage_type == "sales":
         query["stage"] = "Appointment"
     if source:

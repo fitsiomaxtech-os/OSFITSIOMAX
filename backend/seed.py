@@ -21,9 +21,11 @@ _LEGACY_BRANCH_STAGE_MAP = {
     "Branch": "Appointment Date & Time",
 }
 
-# Maps deprecated pre-sales stage labels → new 4-stage flow.
+# Maps deprecated pre-sales stage labels → new 3-stage flow (RNR retired — folded
+# into Follow Up).
 _LEGACY_PRESALES_STAGE_MAP = {
     "New Lead": "New Leads",
+    "RNR": "Follow Up",
     "Pre-sales Qualified": "Follow Up",
     "Assigned to Branch": "Appointment",
     "Branch Confirmed": "Appointment",
@@ -124,6 +126,7 @@ _LEGACY_CONSULTATION_STAGE_MAP = {
     "Cancelled": "Cancel",
     "Consultation Fee": "Consultation Fee Collected",
     "Treatment Fee": "Treatment Fee Collected",
+    "RNR": "Follow Up",
 }
 
 

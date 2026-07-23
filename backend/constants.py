@@ -16,7 +16,6 @@ V3_VERTICALS = [
 
 V3_STAGES = [
     "New Leads",
-    "RNR",
     "Follow Up",
     "Appointment",
 ]
@@ -31,7 +30,6 @@ V3_BRANCH_STAGES = [
 
 V3_CONSULTATION_STAGES = [
     "New Appointment",
-    "RNR",
     "Follow Up",
     "Consultation Visit",
     "Consultation Fee Collected",

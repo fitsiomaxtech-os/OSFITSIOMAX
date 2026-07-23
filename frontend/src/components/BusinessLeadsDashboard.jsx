@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  AlertTriangle,
   ArrowRight,
   BarChart3,
   Building2,
@@ -59,21 +58,18 @@ const TABS = [
 
 const PIPELINE_STAGES = [
   "New Leads",
-  "RNR",
   "Follow Up",
   "Appointment",
 ];
 
 const STAGE_COLOR = {
   "New Leads": "bg-blue-50 text-blue-700 border-blue-200",
-  "RNR": "bg-rose-50 text-rose-700 border-rose-200",
   "Follow Up": "bg-amber-50 text-amber-700 border-amber-200",
   "Appointment": "bg-emerald-50 text-emerald-700 border-emerald-200",
 };
 
 const STAGE_HEX = {
   "New Leads": "#2563eb",
-  "RNR": "#e11d48",
   "Follow Up": "#f59e0b",
   "Appointment": "#059669",
 };
@@ -677,14 +673,11 @@ function DashboardTab({
   };
 
   const followUp = summary.stage_counts?.["Follow Up"] || 0;
-  const rnr = summary.stage_counts?.["RNR"] || 0;
-  const rnrRate = summary.total_leads ? Math.round((rnr / summary.total_leads) * 100) : 0;
 
   const metrics = [
     { key: "total", label: "Total Leads", value: summary.total_leads, icon: Users, gradient: "bg-gradient-to-br from-sky-500 to-blue-600", trend: weekTrend, sparkline: weekTrendCounts },
     { key: "today", label: "Today's Leads", value: todayCount, icon: Sparkles, gradient: "bg-gradient-to-br from-cyan-500 to-sky-600", trend: todayTrend, sparkline: weekTrendCounts },
     { key: "followup", label: "Active Follow-ups", value: followUp, icon: Clock, gradient: "bg-gradient-to-br from-amber-500 to-orange-600" },
-    { key: "rnr", label: "Needs Attention (RNR)", value: rnr, icon: AlertTriangle, gradient: "bg-gradient-to-br from-rose-500 to-red-600" },
     { key: "appointments", label: "Appointments", value: summary.total_appointments, icon: CalendarCheck, gradient: "bg-gradient-to-br from-violet-500 to-purple-600" },
     { key: "converted", label: "Converted", value: summary.completed_appointments, icon: TrendingUp, gradient: "bg-gradient-to-br from-emerald-500 to-green-600" },
     { key: "revenue", label: "Revenue Generated", value: formatMoney(summary.revenue_generated), icon: IndianRupee, gradient: "bg-gradient-to-br from-teal-500 to-emerald-600" },
@@ -851,7 +844,7 @@ function DashboardTab({
             <CardHeader className="pb-2">
               <CardTitle className="text-base">Pipeline Health</CardTitle>
             </CardHeader>
-            <CardContent className="grid grid-cols-2 gap-3">
+            <CardContent className="grid grid-cols-3 gap-3">
               <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
                 <p className="text-xs text-slate-500">Conversion Rate</p>
                 <p className="text-lg font-bold text-emerald-600">{summary.conversion_rate}%</p>
@@ -859,10 +852,6 @@ function DashboardTab({
               <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
                 <p className="text-xs text-slate-500">Pending Follow-ups</p>
                 <p className="text-lg font-bold text-amber-600">{followUp}</p>
-              </div>
-              <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
-                <p className="text-xs text-slate-500">RNR Rate</p>
-                <p className="text-lg font-bold text-rose-600">{rnrRate}%</p>
               </div>
               <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
                 <p className="text-xs text-slate-500">Week-over-Week</p>
@@ -1196,7 +1185,7 @@ function LeadMasterTab({
                           Qualify
                         </Button>
                       )}
-                      {["New Leads", "RNR", "Follow Up"].includes(lead.stage) && (
+                      {["New Leads", "Follow Up"].includes(lead.stage) && (
                         <>
                           <select
                             value={assignBranchSelection[lead.id] || ""}

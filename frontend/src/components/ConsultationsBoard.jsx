@@ -207,11 +207,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
   };
 
   // ---- Backward stage move (Branch Admin/Head Physio) — plain stages only
-  // (New Appointment / RNR / Follow Up); the fee/physio/decision stages are only
+  // (New Appointment / Follow Up); the fee/physio/decision stages are only
   // ever reached through their own dedicated action, never a manual move. ----
   const earlierPlainStages = useMemo(() => {
     if (!selectedLead) return [];
-    const plain = ["New Appointment", "RNR", "Follow Up"];
+    const plain = ["New Appointment", "Follow Up"];
     const currentIdx = stages.findIndex((s) => s.name === selectedLead.consultation_stage);
     if (currentIdx < 0) return [];
     return stages
@@ -813,7 +813,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
             {!isConsultant && (() => {
               const stage = selectedLead.consultation_stage;
               const decision = selectedLead.consultation_decision;
-              const cancellable = ["New Appointment", "RNR", "Follow Up", "Consultation Visit", "Consultation Fee Collected", "Treatment Fee Collected"].includes(stage);
+              const cancellable = ["New Appointment", "Follow Up", "Consultation Visit", "Consultation Fee Collected", "Treatment Fee Collected"].includes(stage);
 
               const CancelButton = cancellable ? (
                 <Button
@@ -845,16 +845,14 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                 </div>
               ) : null;
 
-              if (stage === "New Appointment" || stage === "RNR") {
+              if (stage === "New Appointment") {
                 return (
-                  <div data-testid="cons-stage-panel-early">
-                    <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-600">Move to Stage</p>
+                  <div className="rounded-lg border border-blue-200 bg-blue-50 p-3" data-testid="cons-stage-panel-early">
+                    <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-blue-700">
+                      <Calendar className="h-3.5 w-3.5" /> Move to Stage
+                    </p>
+                    <p className="mb-2 text-xs text-slate-600">Schedule the Consultation Date & Time to send this patient to the Head Physio.</p>
                     <div className="flex flex-wrap gap-1.5">
-                      {stage === "New Appointment" && (
-                        <Button size="sm" variant="outline" className="text-xs" onClick={() => moveStage(selectedLead, "RNR")} data-testid="cons-move-rnr">
-                          Move to RNR
-                        </Button>
-                      )}
                       <Button
                         size="sm"
                         className="bg-amber-500 text-xs text-white hover:bg-amber-600"

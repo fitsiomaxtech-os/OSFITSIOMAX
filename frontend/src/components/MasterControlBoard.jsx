@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle, ArrowRight, BarChart3, Building2, Calendar, CheckCircle2, Clock,
-  Database, FileSpreadsheet, FileText, Flag, History, Link as LinkIcon, MapPin,
+  Database, FileSpreadsheet, FileText, History, Link as LinkIcon, MapPin,
   RefreshCw, Shield, ShieldCheck, ShieldAlert, UserCheck, UserPlus, Users,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,7 +15,6 @@ const REFRESH_MS = 30000;
 
 const JOURNEY_PILLS = [
   { label: "New Lead",                key: "New Lead",                color: "#22c55e", icon: UserPlus },
-  { label: "RNR",                     key: "RNR",                     color: "#ef4444", icon: Flag },
   { label: "Follow Up",               key: "Follow Up",               color: "#f59e0b", icon: Clock },
   { label: "Appointment",             key: "Appointment",             color: "#10b981", icon: Calendar },
   { label: "New Appointment",         key: "New Appointment",         color: "#3b82f6", icon: Calendar },
@@ -493,7 +492,7 @@ const QuickActionDialog = ({ actionKey, onClose, branches, doctors }) => {
   const targetOptions = useMemo(() => {
     if (actionKey === "move_stage" || actionKey === "override") {
       return [
-        { value: "New Leads", label: "New Leads" }, { value: "RNR", label: "RNR" }, { value: "Follow Up", label: "Follow Up" }, { value: "Appointment", label: "Appointment" },
+        { value: "New Leads", label: "New Leads" }, { value: "Follow Up", label: "Follow Up" }, { value: "Appointment", label: "Appointment" },
       ];
     }
     if (actionKey === "assign_branch") return branches.map((b) => ({ value: b.id, label: b.branch_name || b.name }));

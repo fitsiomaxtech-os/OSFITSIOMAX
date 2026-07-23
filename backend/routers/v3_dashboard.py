@@ -273,7 +273,6 @@ async def v3_master_control(
     # Patient journey counts (label → count) — 8 pills
     journey = {
         "New Lead": await leads.count_documents(merged({"stage": "New Leads"})),
-        "RNR": await leads.count_documents(merged({"stage": "RNR"})),
         "Follow Up": await leads.count_documents(merged({"stage": "Follow Up"})),
         "Appointment": await leads.count_documents(merged({"stage": "Appointment"})),
         "New Appointment": await leads.count_documents(merged({"branch_stage": first_branch_stage})),
@@ -342,7 +341,7 @@ async def v3_master_control(
     # Live Analytics — Lead Workflow split (filter-aware via journey counts)
     workflow = [
         {"name": "New", "value": journey["New Lead"]},
-        {"name": "In Review", "value": journey["Follow Up"] + journey["RNR"]},
+        {"name": "In Review", "value": journey["Follow Up"]},
         {"name": "Confirmed", "value": journey["Appointment"] + journey["New Appointment"] + journey["Portfolio"] + journey["Appointment Date & Time"]},
         {"name": "Archived", "value": await leads.count_documents(merged({"branch_stage": "Cancelled"}))},
     ]
