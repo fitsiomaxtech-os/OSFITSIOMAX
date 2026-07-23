@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Calendar, CheckCircle2, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2, Undo2, Ban, ClipboardCheck } from "lucide-react";
+import { Calendar, CheckCircle2, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2, Ban, ClipboardCheck } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -91,10 +91,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
   // the Consultation Fee Collected stage.
   const [completingConsultation, setCompletingConsultation] = useState(false);
 
-  // Backward stage move (Branch Admin/Head Physio) — requires an explicit confirm.
-  const [backwardTarget, setBackwardTarget] = useState("");
-  const [movingBackward, setMovingBackward] = useState(false);
-
   useEffect(() => {
     if (!branchId) return;
     let cancelled = false;
@@ -180,7 +176,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
     setCollectFeeDraft(null);
     setTreatmentFeeDraft(null);
     setDecisionDraft({ decision: "consultation_only", item_id: "", mode: "offline" });
-    setBackwardTarget("");
   }, [selectedLead?.id]);
 
   useEffect(() => {
@@ -194,39 +189,15 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
   // Fee stage, distinct from the Consultation package Head Physio chooses above.
   const treatmentPackageItems = storeItems.filter((i) => i.item_type === "session");
 
-  const moveStage = async (lead, next, confirmBackward = false) => {
+  const moveStage = async (lead, next) => {
     if (next === lead.consultation_stage) return;
     try {
-      const updated = await moveConsultationStage(lead.id, next, confirmBackward);
+      const updated = await moveConsultationStage(lead.id, next);
       toast.success(`${lead.name || "Lead"} moved → ${next}`);
       setSelectedLead(null);
       setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === lead.id ? { ...l, consultation_stage: updated.consultation_stage } : l) }));
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Move failed");
-    }
-  };
-
-  // ---- Backward stage move (Branch Admin/Head Physio) — plain stages only
-  // (New Appointment / Follow Up); the fee/physio/decision stages are only
-  // ever reached through their own dedicated action, never a manual move. ----
-  const earlierPlainStages = useMemo(() => {
-    if (!selectedLead) return [];
-    const plain = ["New Appointment", "Follow Up"];
-    const currentIdx = stages.findIndex((s) => s.name === selectedLead.consultation_stage);
-    if (currentIdx < 0) return [];
-    return stages
-      .filter((s, idx) => plain.includes(s.name) && idx < currentIdx)
-      .map((s) => s.name);
-  }, [selectedLead, stages]);
-
-  const submitBackwardMove = async () => {
-    if (!backwardTarget) return;
-    if (!window.confirm(`Move ${selectedLead.name || "this lead"} back to "${backwardTarget}"? Any collected fees or assignments stay on record.`)) return;
-    setMovingBackward(true);
-    try {
-      await moveStage(selectedLead, backwardTarget, true);
-    } finally {
-      setMovingBackward(false);
     }
   };
 
@@ -814,6 +785,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
               const stage = selectedLead.consultation_stage;
               const decision = selectedLead.consultation_decision;
               const cancellable = ["New Appointment", "Follow Up", "Consultation Visit", "Consultation Fee Collected", "Treatment Fee Collected"].includes(stage);
+              // Once a lead has moved forward past a stage, it can never come back —
+              // there's no manual "move backward" control anymore (see the backend's
+              // matching rejection in move-consultation-stage).
+              const activeFollowUp = (selectedLead.consultation_follow_ups || []).slice().reverse().find((f) => f.status !== "rescheduled");
 
               const CancelButton = cancellable ? (
                 <Button
@@ -827,189 +802,179 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                 </Button>
               ) : null;
 
-              const BackwardControl = earlierPlainStages.length > 0 ? (
-                <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-slate-100 pt-3">
-                  <Undo2 className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-                  <select
-                    value={backwardTarget}
-                    onChange={(e) => setBackwardTarget(e.target.value)}
-                    className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs"
-                    data-testid="cons-backward-select"
-                  >
-                    <option value="">Move back to...</option>
-                    {earlierPlainStages.map((s) => (<option key={s} value={s}>{s}</option>))}
-                  </select>
-                  <Button size="sm" variant="outline" className="h-8 text-xs" onClick={submitBackwardMove} disabled={!backwardTarget || movingBackward} data-testid="cons-backward-confirm">
-                    Confirm Move
-                  </Button>
-                </div>
-              ) : null;
-
-              if (stage === "New Appointment") {
-                return (
-                  <div className="rounded-lg border border-blue-200 bg-blue-50 p-3" data-testid="cons-stage-panel-early">
-                    <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-blue-700">
-                      <Calendar className="h-3.5 w-3.5" /> Move to Stage
-                    </p>
-                    <p className="mb-2 text-xs text-slate-600">Schedule the Consultation Date & Time to send this patient to the Head Physio.</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      <Button
-                        size="sm"
-                        className="bg-amber-500 text-xs text-white hover:bg-amber-600"
-                        onClick={() => setFollowUpDraft({ date: new Date(Date.now() + 86400000).toISOString().slice(0, 10), time: "10:00", remarks: "" })}
-                        data-testid="cons-move-followup"
-                      >
-                        Schedule Consultation & Move
-                      </Button>
-                      {CancelButton}
-                    </div>
-                    {BackwardControl}
-                  </div>
-                );
-              }
-
-              if (stage === "Follow Up") {
-                return (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3" data-testid="cons-stage-panel-followup">
-                    <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-amber-700">
-                      <Bell className="h-3.5 w-3.5" /> Schedule Consultation
-                    </p>
-                    <p className="mb-2 text-xs text-slate-600">Schedule the Consultation Date & Time, then confirm to send this patient to the Head Physio.</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      <Button
-                        size="sm"
-                        className="bg-amber-500 text-xs text-white hover:bg-amber-600"
-                        onClick={() => setFollowUpDraft({ date: selectedLead.appointment_date || new Date(Date.now() + 86400000).toISOString().slice(0, 10), time: selectedLead.appointment_time || "10:00", remarks: "" })}
-                        data-testid="cons-confirm-move-hp"
-                      >
-                        Confirm & Move
-                      </Button>
-                      {CancelButton}
-                    </div>
-                    {BackwardControl}
-                  </div>
-                );
-              }
-
-              if (stage === "Consultation Visit") {
-                const alreadyPaid = selectedLead.package_paid != null;
-                return (
-                  <div className="rounded-lg border border-sky-200 bg-sky-50 p-3" data-testid="cons-stage-panel-consultation-visit">
-                    <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-sky-700">
-                      <Stethoscope className="h-3.5 w-3.5" /> Consultation Fee
-                    </p>
-                    <div className="space-y-1.5 text-sm">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-slate-500">Consultation Fee</span>
-                        <span className="font-semibold text-slate-800">{selectedLead.package_price != null ? `Rs.${selectedLead.package_price}` : "—"}</span>
-                      </div>
-                      {alreadyPaid && (
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs text-slate-500">Already Paid Via</span>
-                          <span className="font-medium capitalize text-emerald-700">{selectedLead.package_payment_mode}</span>
-                        </div>
-                      )}
-                    </div>
-                    <Button size="sm" className="mt-3 bg-sky-600 text-xs hover:bg-sky-700" onClick={openCollectFeeDraft} data-testid="cons-open-collect-fee">
-                      {alreadyPaid ? "Update Payment" : "Collect Payment"}
-                    </Button>
-                    <div className="mt-2 flex flex-wrap gap-1.5">{CancelButton}</div>
-                    {BackwardControl}
-                  </div>
-                );
-              }
-
-              if (stage === "Consultation Fee Collected") {
-                if (decision === "consultation_only") {
+              const panel = (() => {
+                if (stage === "New Appointment") {
                   return (
-                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3" data-testid="cons-stage-panel-consultation-only">
-                      <p className="text-sm font-semibold text-emerald-800">Consultation Only — no treatment sessions</p>
-                      <p className="mt-1 text-xs text-slate-600">Consultation Fee collected. Mark this consultation as completed to close it out.</p>
-                      <Button size="sm" className="mt-3 bg-emerald-600 text-xs hover:bg-emerald-700" onClick={submitMarkCompleted} disabled={completingConsultation} data-testid="cons-mark-completed">
-                        {completingConsultation ? "Saving..." : "Mark Consultation Completed"}
+                    <div className="rounded-lg border border-blue-200 bg-blue-50 p-3" data-testid="cons-stage-panel-early">
+                      <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-blue-700">
+                        <Calendar className="h-3.5 w-3.5" /> Move to Stage
+                      </p>
+                      <p className="mb-2 text-xs text-slate-600">Schedule the Consultation Date & Time to send this patient to the Head Physio.</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        <Button
+                          size="sm"
+                          className="bg-amber-500 text-xs text-white hover:bg-amber-600"
+                          onClick={() => setFollowUpDraft({ date: new Date(Date.now() + 86400000).toISOString().slice(0, 10), time: "10:00", remarks: "" })}
+                          data-testid="cons-move-followup"
+                        >
+                          Schedule Consultation & Move
+                        </Button>
+                        {CancelButton}
+                      </div>
+                    </div>
+                  );
+                }
+
+                if (stage === "Follow Up") {
+                  return (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3" data-testid="cons-stage-panel-followup">
+                      <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-amber-700">
+                        <Bell className="h-3.5 w-3.5" /> Consultation Scheduled
+                      </p>
+                      <p className="mb-2 text-xs text-slate-600">
+                        {activeFollowUp ? `Scheduled for ${activeFollowUp.date} at ${activeFollowUp.time} — waiting on the Head Physio.` : "Waiting on the Head Physio."}
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        <Button
+                          size="sm"
+                          className="bg-amber-500 text-xs text-white hover:bg-amber-600"
+                          onClick={() => (activeFollowUp
+                            ? setRescheduleDraft({ followupId: activeFollowUp.id, date: activeFollowUp.date, time: activeFollowUp.time, reason: "" })
+                            : setFollowUpDraft({ date: new Date(Date.now() + 86400000).toISOString().slice(0, 10), time: "10:00", remarks: "" }))}
+                          data-testid="cons-reschedule-btn"
+                        >
+                          Reschedule
+                        </Button>
+                        {CancelButton}
+                      </div>
+                    </div>
+                  );
+                }
+
+                if (stage === "Consultation Visit") {
+                  const alreadyPaid = selectedLead.package_paid != null;
+                  return (
+                    <div className="rounded-lg border border-sky-200 bg-sky-50 p-3" data-testid="cons-stage-panel-consultation-visit">
+                      <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-sky-700">
+                        <Stethoscope className="h-3.5 w-3.5" /> Consultation Fee
+                      </p>
+                      <div className="space-y-1.5 text-sm">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-slate-500">Consultation Fee</span>
+                          <span className="font-semibold text-slate-800">{selectedLead.package_price != null ? `Rs.${selectedLead.package_price}` : "—"}</span>
+                        </div>
+                        {alreadyPaid && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs text-slate-500">Already Paid Via</span>
+                            <span className="font-medium capitalize text-emerald-700">{selectedLead.package_payment_mode}</span>
+                          </div>
+                        )}
+                      </div>
+                      <Button size="sm" className="mt-3 bg-sky-600 text-xs hover:bg-sky-700" onClick={openCollectFeeDraft} data-testid="cons-open-collect-fee">
+                        {alreadyPaid ? "Update Payment" : "Collect Payment"}
+                      </Button>
+                      <div className="mt-2 flex flex-wrap gap-1.5">{CancelButton}</div>
+                    </div>
+                  );
+                }
+
+                if (stage === "Consultation Fee Collected") {
+                  if (decision === "consultation_only") {
+                    return (
+                      <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3" data-testid="cons-stage-panel-consultation-only">
+                        <p className="text-sm font-semibold text-emerald-800">Consultation Only — no treatment sessions</p>
+                        <p className="mt-1 text-xs text-slate-600">Consultation Fee collected. Mark this consultation as completed to close it out.</p>
+                        <Button size="sm" className="mt-3 bg-emerald-600 text-xs hover:bg-emerald-700" onClick={submitMarkCompleted} disabled={completingConsultation} data-testid="cons-mark-completed">
+                          {completingConsultation ? "Saving..." : "Mark Consultation Completed"}
+                        </Button>
+                      </div>
+                    );
+                  }
+                  const alreadyPaid = selectedLead.treatment_fee_paid != null;
+                  return (
+                    <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3" data-testid="cons-stage-panel-treatment-fee">
+                      <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-indigo-700">
+                        <Dumbbell className="h-3.5 w-3.5" /> Treatment Fee
+                      </p>
+                      <div className="space-y-1.5 text-sm">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-slate-500">Treatment Package</span>
+                          <span className="font-semibold text-slate-800">
+                            {selectedLead.session_package_name || "—"}{selectedLead.session_package_sessions ? ` · ${selectedLead.session_package_sessions} sessions` : ""}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-slate-500">Treatment Fee</span>
+                          <span className="font-semibold text-slate-800">{selectedLead.session_package_price != null ? `Rs.${selectedLead.session_package_price}` : "—"}</span>
+                        </div>
+                        {alreadyPaid && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs text-slate-500">Already Paid Via</span>
+                            <span className="font-medium capitalize text-emerald-700">{selectedLead.treatment_fee_payment_mode}</span>
+                          </div>
+                        )}
+                      </div>
+                      <Button size="sm" className="mt-3 bg-indigo-600 text-xs hover:bg-indigo-700" onClick={openTreatmentFeeDraft} data-testid="cons-open-treatment-fee">
+                        {alreadyPaid ? "Update Payment" : "Collect Payment"}
+                      </Button>
+                      <div className="mt-2 flex flex-wrap gap-1.5">{CancelButton}</div>
+                    </div>
+                  );
+                }
+
+                if (stage === "Treatment Fee Collected") {
+                  return (
+                    <div className="rounded-lg border border-violet-200 bg-violet-50 p-3" data-testid="cons-stage-panel-physio-assign">
+                      <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-violet-700">
+                        <Users className="h-3.5 w-3.5" /> Physio Assign
+                      </p>
+                      <p className="text-xs text-slate-600">Treatment Fee collected. Choose the physiotherapist who will deliver the sessions.</p>
+                      <Button size="sm" className="mt-3 bg-violet-600 text-xs hover:bg-violet-700" onClick={openPhysioModal} data-testid="cons-open-physio-assign">
+                        Assign Physio
+                      </Button>
+                      <div className="mt-2 flex flex-wrap gap-1.5">{CancelButton}</div>
+                    </div>
+                  );
+                }
+
+                if (stage === "Physio Assign") {
+                  return (
+                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3" data-testid="cons-stage-panel-assigned">
+                      <p className="text-sm font-semibold text-emerald-800">Treatment sessions in progress</p>
+                      <p className="mt-1 text-xs text-slate-600">Assigned Physio: <span className="font-semibold text-slate-800">{selectedLead.assigned_physio_name || "—"}</span></p>
+                      <Button size="sm" variant="outline" className="mt-3 text-xs" onClick={openPhysioModal} data-testid="cons-reassign-physio">
+                        Reassign Physio
                       </Button>
                     </div>
                   );
                 }
-                const alreadyPaid = selectedLead.treatment_fee_paid != null;
-                return (
-                  <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3" data-testid="cons-stage-panel-treatment-fee">
-                    <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-indigo-700">
-                      <Dumbbell className="h-3.5 w-3.5" /> Treatment Fee
-                    </p>
-                    <div className="space-y-1.5 text-sm">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-slate-500">Treatment Package</span>
-                        <span className="font-semibold text-slate-800">
-                          {selectedLead.session_package_name || "—"}{selectedLead.session_package_sessions ? ` · ${selectedLead.session_package_sessions} sessions` : ""}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-slate-500">Treatment Fee</span>
-                        <span className="font-semibold text-slate-800">{selectedLead.session_package_price != null ? `Rs.${selectedLead.session_package_price}` : "—"}</span>
-                      </div>
-                      {alreadyPaid && (
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs text-slate-500">Already Paid Via</span>
-                          <span className="font-medium capitalize text-emerald-700">{selectedLead.treatment_fee_payment_mode}</span>
-                        </div>
-                      )}
+
+                if (stage === "Consultation Completed") {
+                  return (
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3" data-testid="cons-stage-panel-completed">
+                      <p className="text-sm font-semibold text-slate-700">Consultation completed</p>
+                      <p className="mt-1 text-xs text-slate-500">Consultation Only — no treatment sessions were required.</p>
                     </div>
-                    <Button size="sm" className="mt-3 bg-indigo-600 text-xs hover:bg-indigo-700" onClick={openTreatmentFeeDraft} data-testid="cons-open-treatment-fee">
-                      {alreadyPaid ? "Update Payment" : "Collect Payment"}
-                    </Button>
-                    <div className="mt-2 flex flex-wrap gap-1.5">{CancelButton}</div>
-                    {BackwardControl}
-                  </div>
-                );
-              }
+                  );
+                }
 
-              if (stage === "Treatment Fee Collected") {
-                return (
-                  <div className="rounded-lg border border-violet-200 bg-violet-50 p-3" data-testid="cons-stage-panel-physio-assign">
-                    <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-violet-700">
-                      <Users className="h-3.5 w-3.5" /> Physio Assign
-                    </p>
-                    <p className="text-xs text-slate-600">Treatment Fee collected. Choose the physiotherapist who will deliver the sessions.</p>
-                    <Button size="sm" className="mt-3 bg-violet-600 text-xs hover:bg-violet-700" onClick={openPhysioModal} data-testid="cons-open-physio-assign">
-                      Assign Physio
-                    </Button>
-                    <div className="mt-2 flex flex-wrap gap-1.5">{CancelButton}</div>
-                    {BackwardControl}
-                  </div>
-                );
-              }
+                if (stage === "Cancel") {
+                  return (
+                    <div className="rounded-lg border border-rose-200 bg-rose-50 p-3" data-testid="cons-stage-panel-cancelled">
+                      <p className="text-sm font-semibold text-rose-700">This consultation was cancelled.</p>
+                    </div>
+                  );
+                }
 
-              if (stage === "Physio Assign") {
-                return (
-                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3" data-testid="cons-stage-panel-assigned">
-                    <p className="text-sm font-semibold text-emerald-800">Treatment sessions in progress</p>
-                    <p className="mt-1 text-xs text-slate-600">Assigned Physio: <span className="font-semibold text-slate-800">{selectedLead.assigned_physio_name || "—"}</span></p>
-                    <Button size="sm" variant="outline" className="mt-3 text-xs" onClick={openPhysioModal} data-testid="cons-reassign-physio">
-                      Reassign Physio
-                    </Button>
-                  </div>
-                );
-              }
+                return null;
+              })();
 
-              if (stage === "Consultation Completed") {
-                return (
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3" data-testid="cons-stage-panel-completed">
-                    <p className="text-sm font-semibold text-slate-700">Consultation completed</p>
-                    <p className="mt-1 text-xs text-slate-500">Consultation Only — no treatment sessions were required.</p>
-                  </div>
-                );
-              }
-
-              if (stage === "Cancel") {
-                return (
-                  <div className="rounded-lg border border-rose-200 bg-rose-50 p-3" data-testid="cons-stage-panel-cancelled">
-                    <p className="text-sm font-semibold text-rose-700">This consultation was cancelled.</p>
-                  </div>
-                );
-              }
-
-              return null;
+              return (
+                <div className="space-y-3">
+                  <AllStagesStepper stages={stages} currentStage={stage} />
+                  {panel}
+                </div>
+              );
             })()}
             </>
             )}
@@ -1507,6 +1472,39 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
     </div>
   );
 };
+
+/** Read-only "All Stages" overview — every stage in order, current one highlighted,
+ * passed ones checked off. Purely informational; there is no way to click back to
+ * an earlier stage from here (moving backward isn't allowed once a lead has moved on). */
+function AllStagesStepper({ stages, currentStage }) {
+  const currentIdx = stages.findIndex((s) => s.name === currentStage);
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-slate-100 bg-slate-50/60 p-2.5" data-testid="cons-all-stages-stepper">
+      {stages.map((s, idx) => {
+        const hex = s.color || "#64748b";
+        const isCurrent = idx === currentIdx;
+        const isPassed = currentIdx >= 0 && idx < currentIdx;
+        return (
+          <span
+            key={s.id}
+            className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold"
+            style={
+              isCurrent
+                ? { background: hex, color: "#ffffff" }
+                : isPassed
+                  ? { background: `${hex}1f`, color: hex }
+                  : { background: "#f1f5f9", color: "#94a3b8" }
+            }
+            data-testid={`cons-all-stages-${s.name}`}
+          >
+            {isPassed && <CheckCircle2 className="h-3 w-3" />}
+            {s.name}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
 
 /**
  * A text box that auto-saves (debounced, silent) while typing — "Done" just exits

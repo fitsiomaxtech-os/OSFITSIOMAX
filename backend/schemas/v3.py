@@ -401,9 +401,6 @@ class V3PortfolioScheduleInput(BaseModel):
 
 class V3ConsultationStageInput(BaseModel):
     consultation_stage: str
-    # Moving to an earlier stage than the lead's current one requires this to be explicitly
-    # set — the frontend shows a confirmation dialog first, then resubmits with it true.
-    confirm_backward: bool = False
 
 
 class V3HeadConsultationStageInput(BaseModel):

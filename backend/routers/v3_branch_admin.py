@@ -310,15 +310,16 @@ async def v3_move_consultation_stage(lead_id: str, payload: V3ConsultationStageI
         raise HTTPException(status_code=404, detail="Lead not found")
 
     previous = lead.get("consultation_stage") or "—"
-    # Backward moves (to an earlier stage than the lead's current one) need an explicit
-    # confirmation flag — "Cancel" is a side-exit, not a reorder, so it's exempt.
+    # Backward moves (to an earlier stage than the lead's current one) are never
+    # allowed once a lead has moved forward — "Cancel" is a side-exit, not a
+    # reorder, so it's exempt.
     if previous in stage_names and payload.consultation_stage != "Cancel":
         prev_idx = stage_names.index(previous)
         next_idx = stage_names.index(payload.consultation_stage)
-        if next_idx < prev_idx and not payload.confirm_backward:
+        if next_idx < prev_idx:
             raise HTTPException(
-                status_code=409,
-                detail=f"Moving from '{previous}' back to '{payload.consultation_stage}' is a backward move and needs confirmation.",
+                status_code=403,
+                detail=f"'{previous}' has already moved forward — it can't be sent back to '{payload.consultation_stage}'.",
             )
 
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {
