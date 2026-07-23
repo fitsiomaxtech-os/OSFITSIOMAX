@@ -311,10 +311,13 @@ async def v3_available_doctors(branch_id: str, slot_time: str, _: V3UserOut = De
 async def v3_reset_all_leads(confirm: bool = False, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
     """Testing utility: resets every lead's pipeline progress back to a fresh,
     unassigned state at Pre-Sales' first stage — the lead record itself (name,
-    phone, contact info, source) is kept as-is. Also clears everything tied to
-    leads that only makes sense mid-pipeline: sessions, weekly assessments,
-    package recommendations, appointments, patient view tokens, and activity
-    history. Irreversible — requires confirm=true. Super Admin only."""
+    phone, contact info, source) is kept as-is. Clears both the Consultation
+    Package/fee and the Treatment Fee/Session Package/Partial Payment schedule,
+    so no stale balance or due date survives into Accountant Manage after a
+    reset. Also clears everything tied to leads that only makes sense
+    mid-pipeline: sessions, weekly assessments, package recommendations,
+    appointments, patient view tokens, and activity history. Irreversible —
+    requires confirm=true. Super Admin only."""
     if not confirm:
         raise HTTPException(status_code=400, detail="Pass confirm=true to proceed — this cannot be undone.")
 
@@ -340,6 +343,14 @@ async def v3_reset_all_leads(confirm: bool = False, _: V3UserOut = Depends(v3_re
         "package_sessions": None,
         "package_duration_minutes": None,
         "package_mode": None,
+        "treatment_fee_paid": None,
+        "treatment_fee_payment_mode": None,
+        "treatment_fee_payment_details": None,
+        "session_package_id": None,
+        "session_package_name": None,
+        "session_package_price": None,
+        "session_package_sessions": None,
+        "session_package_mode": None,
         "diagnosis": None,
         "physio_diagnosis_report": None,
         "physio_diagnosis_locked": False,
