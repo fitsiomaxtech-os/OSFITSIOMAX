@@ -299,6 +299,30 @@ async def migrate_head_consultation_stages() -> None:
         )
 
 
+SESSION_ITEM_RATE_PER_SESSION = 800
+
+
+async def normalize_session_item_prices() -> None:
+    """Enforce the fixed Rs.800/session rate across every FITSIO STORE Session item
+    (the week-based Treatment Packages, e.g. "01 Week" = 7 sessions, "05 week" = 35
+    sessions) — total price = sessions x 800, for both online and offline. Idempotent/
+    safe to re-run: only writes an item whose price doesn't already match."""
+    session_items = await v3_col("store_items").find({"item_type": "session"}, {"_id": 0}).to_list(500)
+    for item in session_items:
+        updates = {}
+        if item.get("sessions_offline"):
+            expected_offline = round(item["sessions_offline"] * SESSION_ITEM_RATE_PER_SESSION, 2)
+            if item.get("price_offline") != expected_offline:
+                updates["price_offline"] = expected_offline
+        if item.get("sessions_online"):
+            expected_online = round(item["sessions_online"] * SESSION_ITEM_RATE_PER_SESSION, 2)
+            if item.get("price_online") != expected_online:
+                updates["price_online"] = expected_online
+        if updates:
+            updates["updated_at"] = now_iso()
+            await v3_col("store_items").update_one({"id": item["id"]}, {"$set": updates})
+
+
 async def deactivate_legacy_demo_admin() -> None:
     """Disable the old demo super_admin account (admin@fitsiomax.com / admin123).
     Replaced by a real Super Admin login; kept as a record for audit, not deleted. Safe to re-run."""
