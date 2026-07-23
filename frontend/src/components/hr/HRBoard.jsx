@@ -284,6 +284,19 @@ const AddEmployeeModal = ({ employee, meta, onClose, onSaved }) => {
 
 // ---------- Roles & Credentials ----------
 
+const ROLE_META = {
+  super_admin: { label: "SUPER ADMIN", classes: "border-purple-300 bg-purple-50 text-purple-700" },
+  business_dev: { label: "BUSINESS DEV", classes: "border-indigo-300 bg-indigo-50 text-indigo-700" },
+  pre_sales: { label: "PRE SALES", classes: "border-sky-300 bg-sky-50 text-sky-700" },
+  branch_admin: { label: "BRANCH ADMIN", classes: "border-emerald-300 bg-emerald-50 text-emerald-700" },
+  head_physio: { label: "HEAD PHYSIO", classes: "border-amber-300 bg-amber-50 text-amber-700" },
+  physio: { label: "PHYSIO", classes: "border-cyan-300 bg-cyan-50 text-cyan-700" },
+  marketing_head: { label: "MARKETING HEAD", classes: "border-pink-300 bg-pink-50 text-pink-700" },
+  accountant: { label: "ACCOUNTANT", classes: "border-orange-300 bg-orange-50 text-orange-700" },
+};
+const roleLabel = (role) => ROLE_META[role]?.label || role.replace(/_/g, " ").toUpperCase();
+const roleClasses = (role) => ROLE_META[role]?.classes || "border-slate-200 bg-white text-slate-600";
+
 const RolesTab = ({ meta }) => {
   const [users, setUsers] = useState([]);
   const [search, setSearch] = useState("");
@@ -320,8 +333,13 @@ const RolesTab = ({ meta }) => {
                     <td className="px-3 py-2 font-medium text-slate-800">{u.full_name}</td>
                     <td className="px-3 py-2 text-slate-600">{u.email}</td>
                     <td className="px-3 py-2">
-                      <select value={u.role} onChange={(e) => changeRole(u, e.target.value)} className="h-7 rounded border border-slate-200 px-2 text-xs text-blue-600" data-testid={`hr-user-role-${u.id}`}>
-                        {meta.roles.map((r) => <option key={r} value={r}>{r}</option>)}
+                      <select
+                        value={u.role}
+                        onChange={(e) => changeRole(u, e.target.value)}
+                        className={`h-7 rounded border px-2 text-xs font-semibold ${roleClasses(u.role)}`}
+                        data-testid={`hr-user-role-${u.id}`}
+                      >
+                        {meta.roles.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
                       </select>
                     </td>
                     <td className="px-3 py-2 text-xs text-emerald-600">{u.linked_employee ? `${u.linked_employee.employee_code} - ${u.linked_employee.designation || u.linked_employee.full_name}` : "—"}</td>
