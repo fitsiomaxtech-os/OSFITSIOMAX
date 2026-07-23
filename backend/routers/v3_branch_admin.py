@@ -283,15 +283,26 @@ async def v3_consultations_board(branch_id: str, pipeline: Optional[str] = None,
     return {"leads": lead_list, "stage_counts": stage_counts, "stages": stage_names}
 
 
+# Stages reachable only through their own dedicated, validated action endpoint —
+# never through a plain manual move.
+_CONSULTATION_STAGE_GATED = {
+    "Consultation Visit",       # via consultation-decision (Head Physio's Save & Move)
+    "Consultation Fee Collected",  # via collect-package-payment
+    "Treatment Fee Collected",     # via collect-treatment-fee
+    "Physio Assign",               # via assign-consultation-physio
+    "Consultation Completed",      # via mark-consultation-completed
+}
+
+
 @router.post("/leads/{lead_id}/move-consultation-stage", response_model=V3LeadOut)
 async def v3_move_consultation_stage(lead_id: str, payload: V3ConsultationStageInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio"))):
     stage_names = await _consultation_stage_names()
     if payload.consultation_stage not in stage_names:
         raise HTTPException(status_code=400, detail=f"Invalid consultation_stage. Allowed: {stage_names}")
-    if payload.consultation_stage in ("Consultation Visit", "Physio Assign") and user.role == "branch_admin":
+    if payload.consultation_stage in _CONSULTATION_STAGE_GATED:
         raise HTTPException(
             status_code=403,
-            detail="This stage is set by the Head Physio's own consultation pipeline — Branch Admin can only view it here.",
+            detail=f"'{payload.consultation_stage}' can only be reached through its own action, not a manual stage move.",
         )
 
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
@@ -299,6 +310,17 @@ async def v3_move_consultation_stage(lead_id: str, payload: V3ConsultationStageI
         raise HTTPException(status_code=404, detail="Lead not found")
 
     previous = lead.get("consultation_stage") or "—"
+    # Backward moves (to an earlier stage than the lead's current one) need an explicit
+    # confirmation flag — "Cancel" is a side-exit, not a reorder, so it's exempt.
+    if previous in stage_names and payload.consultation_stage != "Cancel":
+        prev_idx = stage_names.index(previous)
+        next_idx = stage_names.index(payload.consultation_stage)
+        if next_idx < prev_idx and not payload.confirm_backward:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Moving from '{previous}' back to '{payload.consultation_stage}' is a backward move and needs confirmation.",
+            )
+
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {
         "consultation_stage": payload.consultation_stage,
         "updated_at": now_iso(),

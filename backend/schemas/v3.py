@@ -209,6 +209,7 @@ class V3LeadOut(BaseModel):
     session_package_price: Optional[float] = None
     session_package_sessions: Optional[int] = None
     session_package_mode: Optional[str] = None
+    consultation_decision: Optional[str] = None  # "consultation_only" | "consultation_treatment" — set by Head Physio at Save & Move
     diagnosis: Optional[str] = None  # Pre-Sales' basic diagnosis — read-only reference for the Head Physio
     physio_diagnosis_report: Optional[str] = None  # Head Physio's own diagnosis report
     physio_diagnosis_locked: Optional[bool] = False
@@ -280,7 +281,8 @@ class V3AssignPackageInput(BaseModel):
 
 
 class V3CollectPackagePaymentInput(BaseModel):
-    paid_amount: float
+    # The fee amount is never client-supplied — it's always the already-assigned
+    # package_price, read straight off the lead. Branch Admin can only pick the mode.
     payment_mode: str = "cash"
 
 
@@ -290,10 +292,9 @@ class V3PartialInstallment(BaseModel):
 
 
 class V3CollectTreatmentFeeInput(BaseModel):
-    item_id: str  # Session package (FITSIO STORE > Sessions) chosen at this stage
-    mode: Literal["online", "offline"]
-    sessions_override: Optional[int] = None
-    paid_amount: float  # "Total Amount" for card/cash/upi; also the Partial Payment total to split
+    # The Session/Treatment package and its price are locked in by the Head Physio's
+    # earlier consultation-decision — Branch Admin can't choose or change either one
+    # here, so neither item_id/mode/sessions_override nor paid_amount are accepted.
     payment_mode: str
     # Card — only the last 4 digits are ever persisted; the full number is never stored.
     card_number: Optional[str] = None
@@ -303,8 +304,17 @@ class V3CollectTreatmentFeeInput(BaseModel):
     cheque_number: Optional[str] = None
     # Partial Payment — an arbitrary-length installment schedule (some clients want 2
     # payments, others want 5 or 6); every installment needs its own amount and due
-    # date, and they must sum to paid_amount.
+    # date, and they must sum to the locked-in session_package_price.
     partial_installments: Optional[List[V3PartialInstallment]] = None
+
+
+class V3ConsultationDecisionInput(BaseModel):
+    decision: Literal["consultation_only", "consultation_treatment"]
+    # Required only when decision == "consultation_treatment" — the Treatment/Session
+    # package (FITSIO STORE > Sessions) the Head Physio is choosing on the patient's behalf.
+    item_id: Optional[str] = None
+    mode: Literal["online", "offline"] = "offline"
+    sessions_override: Optional[int] = None
 
 
 class V3AssignBranchInput(BaseModel):
@@ -391,6 +401,9 @@ class V3PortfolioScheduleInput(BaseModel):
 
 class V3ConsultationStageInput(BaseModel):
     consultation_stage: str
+    # Moving to an earlier stage than the lead's current one requires this to be explicitly
+    # set — the frontend shows a confirmation dialog first, then resubmits with it true.
+    confirm_backward: bool = False
 
 
 class V3HeadConsultationStageInput(BaseModel):

@@ -1,5 +1,5 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Calendar, CheckCircle2, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Calendar, CheckCircle2, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2, Undo2, Ban, ClipboardCheck } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,12 +7,13 @@ import { toast } from "@/components/ui/sonner";
 import { StageTabBar } from "@/components/ui/stage-tab";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import {
-  getConsultationsBoard, moveConsultationStage, moveHeadConsultationStage, listStoreItems,
+  getConsultationsBoard, moveConsultationStage, listStoreItems,
   assignPackage, collectPackagePayment, collectTreatmentFee, savePhysioDiagnosis, unlockPhysioDiagnosis,
   saveTreatmentSummary, unlockTreatmentSummary, stagesList, getDoctors,
   assignConsultationPhysio,
   scheduleConsultationFollowUp, rescheduleConsultationFollowUp,
   getLeadRemarks, getLeadActivity,
+  saveConsultationDecision, markConsultationCompleted,
 } from "@/lib/api";
 
 const CONSULTATION_FEE_PAYMENT_MODES = [
@@ -29,12 +30,6 @@ const TREATMENT_FEE_PAYMENT_MODES = [
 ];
 const PARTIAL_ORDINALS = ["First", "Second", "Third", "Fourth", "Fifth", "Sixth", "Seventh", "Eighth", "Ninth", "Tenth"];
 const partialInstallmentLabel = (idx) => `${PARTIAL_ORDINALS[idx] || `#${idx + 1}`} Payment`;
-
-// This Branch Consultation stage name is mirrored (read-only) from the Head Physio's
-// own independent pipeline — Branch Admin can see it but not click it. Consultation
-// Pack is chosen inline in Head Physio's own popup (not a stage move) and Physio
-// Assign is Branch Admin's own actionable stage now, so neither is mirrored/locked.
-const MIRRORED_HEAD_STAGE_NAMES = ["Consultation Visit"];
 
 export const ConsultationsBoard = ({ branchId, viewerRole }) => {
   const isConsultant = viewerRole === "head_physio";
@@ -86,6 +81,19 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
   const [physioOptions, setPhysioOptions] = useState([]);
   const [physioPick, setPhysioPick] = useState("");
   const [assigningPhysio, setAssigningPhysio] = useState(false);
+
+  // Consultation Decision (Head Physio only) — "Save & Move": Consultation Only vs
+  // Consultation + Treatment (+ Treatment Package, names only, no prices shown here).
+  const [decisionDraft, setDecisionDraft] = useState({ decision: "consultation_only", item_id: "", mode: "offline" });
+  const [savingDecision, setSavingDecision] = useState(false);
+
+  // Mark Consultation Completed (Branch Admin only) — "Consultation Only" patients, at
+  // the Consultation Fee Collected stage.
+  const [completingConsultation, setCompletingConsultation] = useState(false);
+
+  // Backward stage move (Branch Admin/Head Physio) — requires an explicit confirm.
+  const [backwardTarget, setBackwardTarget] = useState("");
+  const [movingBackward, setMovingBackward] = useState(false);
 
   useEffect(() => {
     if (!branchId) return;
@@ -171,6 +179,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
     setRescheduleDraft(null);
     setCollectFeeDraft(null);
     setTreatmentFeeDraft(null);
+    setDecisionDraft({ decision: "consultation_only", item_id: "", mode: "offline" });
+    setBackwardTarget("");
   }, [selectedLead?.id]);
 
   useEffect(() => {
@@ -184,10 +194,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
   // Fee stage, distinct from the Consultation package Head Physio chooses above.
   const treatmentPackageItems = storeItems.filter((i) => i.item_type === "session");
 
-  const moveStage = async (lead, next) => {
+  const moveStage = async (lead, next, confirmBackward = false) => {
     if (next === lead.consultation_stage) return;
     try {
-      const updated = await moveConsultationStage(lead.id, next);
+      const updated = await moveConsultationStage(lead.id, next, confirmBackward);
       toast.success(`${lead.name || "Lead"} moved → ${next}`);
       setSelectedLead(null);
       setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === lead.id ? { ...l, consultation_stage: updated.consultation_stage } : l) }));
@@ -196,24 +206,68 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
     }
   };
 
-  const applyUpdatedLead = (updatedLead) => {
-    setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === updatedLead.id ? updatedLead : l) }));
-    setSelectedLead(updatedLead);
+  // ---- Backward stage move (Branch Admin/Head Physio) — plain stages only
+  // (New Appointment / RNR / Follow Up); the fee/physio/decision stages are only
+  // ever reached through their own dedicated action, never a manual move. ----
+  const earlierPlainStages = useMemo(() => {
+    if (!selectedLead) return [];
+    const plain = ["New Appointment", "RNR", "Follow Up"];
+    const currentIdx = stages.findIndex((s) => s.name === selectedLead.consultation_stage);
+    if (currentIdx < 0) return [];
+    return stages
+      .filter((s, idx) => plain.includes(s.name) && idx < currentIdx)
+      .map((s) => s.name);
+  }, [selectedLead, stages]);
+
+  const submitBackwardMove = async () => {
+    if (!backwardTarget) return;
+    if (!window.confirm(`Move ${selectedLead.name || "this lead"} back to "${backwardTarget}"? Any collected fees or assignments stay on record.`)) return;
+    setMovingBackward(true);
+    try {
+      await moveStage(selectedLead, backwardTarget, true);
+    } finally {
+      setMovingBackward(false);
+    }
   };
 
-  // ---- Head Physio's own consultation pipeline (independent from Branch's) ----
-  const moveHeadStage = async (lead, next) => {
-    if (next === lead.head_consultation_stage) return;
+  // ---- Consultation Decision (Head Physio) — "Save & Move" ----
+  const submitConsultationDecision = async () => {
+    if (!(selectedLead.physio_diagnosis_report || "").trim()) { toast.error("Write the Diagnosis Report first"); return; }
+    if (!(selectedLead.treatment_summary || "").trim()) { toast.error("Write the Treatment Summary first"); return; }
+    if (decisionDraft.decision === "consultation_treatment" && !decisionDraft.item_id) { toast.error("Select a Treatment Package"); return; }
+    setSavingDecision(true);
     try {
-      const res = await moveHeadConsultationStage(lead.id, next);
-      toast.success(`Moved → ${next}`);
-      // Close immediately, same as Branch's moveStage — don't leave the card open on
-      // the stale pre-move lead while the board list updates in the background.
+      const res = await saveConsultationDecision(selectedLead.id, {
+        decision: decisionDraft.decision,
+        item_id: decisionDraft.decision === "consultation_treatment" ? decisionDraft.item_id : undefined,
+        mode: decisionDraft.mode,
+      });
+      toast.success("Saved & moved to Branch Admin");
       setSelectedLead(null);
       setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === res.lead.id ? res.lead : l) }));
     } catch (err) {
-      toast.error(err?.response?.data?.detail || "Move failed");
+      toast.error(err?.response?.data?.detail || "Failed to save");
     }
+    setSavingDecision(false);
+  };
+
+  // ---- Mark Consultation Completed (Branch Admin) — "Consultation Only" patients ----
+  const submitMarkCompleted = async () => {
+    setCompletingConsultation(true);
+    try {
+      const res = await markConsultationCompleted(selectedLead.id);
+      toast.success("Consultation marked completed");
+      setSelectedLead(null);
+      setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === res.lead.id ? res.lead : l) }));
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to mark completed");
+    }
+    setCompletingConsultation(false);
+  };
+
+  const applyUpdatedLead = (updatedLead) => {
+    setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === updatedLead.id ? updatedLead : l) }));
+    setSelectedLead(updatedLead);
   };
 
   // ---- Head Physio's diagnosis report (separate from Pre-Sales' read-only diagnosis) ----
@@ -314,23 +368,22 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
   };
 
   // ---- Collect Fee (Branch Admin) — at the Consultation Fee stage ----
+  // Consultation Fee is never editable here — it's whatever the Head Physio's
+  // package assignment already set (package_price), Branch Admin can only pick
+  // the payment mode and confirm.
   const openCollectFeeDraft = () => {
     setCollectFeeDraft({
-      paid_amount: selectedLead.package_price != null ? String(selectedLead.package_price) : "",
-      payment_mode: "cash",
+      payment_mode: selectedLead.package_payment_mode || "cash",
     });
   };
 
   const submitCollectFee = async () => {
-    const amount = parseFloat(collectFeeDraft.paid_amount);
-    if (!amount || amount <= 0) { toast.error("Enter a valid amount"); return; }
     setCollectingFee(true);
     try {
       const res = await collectPackagePayment(selectedLead.id, {
-        paid_amount: amount,
         payment_mode: collectFeeDraft.payment_mode,
       });
-      toast.success("Fee collected");
+      toast.success(selectedLead.package_paid != null ? "Payment updated" : "Fee collected");
       setCollectFeeDraft(null);
       // Close the lead card instantly, same as a plain stage move — don't leave it
       // open on the stale pre-payment lead while the board list updates in the background.
@@ -342,19 +395,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
     setCollectingFee(false);
   };
 
-  // ---- Collect Treatment Fee (Branch Admin) — at the Treatment Fee stage ----
+  // ---- Collect Treatment Fee (Branch Admin) — at the Consultation Fee Collected
+  // stage, for "Consultation + Treatment" patients only. The Treatment Package and
+  // its price are locked in from what the Head Physio already chose at Save & Move —
+  // neither is editable here.
   const openTreatmentFeeDraft = () => {
-    const mode = selectedLead.appointment_mode || "offline";
-    const auto = treatmentPackageItems.length === 1 ? treatmentPackageItems[0] : null;
-    const baseSessions = auto ? (mode === "online" ? auto.sessions_online : auto.sessions_offline) : "";
-    const perSessionRate = auto ? (mode === "online" ? auto.price_online : auto.price_offline) : "";
-    const totalPrice = perSessionRate && baseSessions ? perSessionRate * baseSessions : "";
     setTreatmentFeeDraft({
-      item_id: auto?.id || "",
-      mode,
-      sessions: baseSessions ? String(baseSessions) : "",
-      paid_amount: totalPrice ? String(totalPrice) : "",
-      payment_mode: "cash",
+      payment_mode: selectedLead.treatment_fee_payment_mode || "cash",
       card_number: "",
       card_holder_name: "",
       bank_name: "",
@@ -363,24 +410,17 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
     });
   };
 
-  // Partial Payment derived figures — computed from the Amount field and the
-  // installment list, never stored directly in state, so they can't drift out of sync.
-  const treatmentFeeTotal = parseFloat(treatmentFeeDraft?.paid_amount) || 0;
+  // Partial Payment derived figures — the total to split is the locked-in
+  // session_package_price, never a client-editable field.
+  const treatmentFeeTotal = selectedLead?.session_package_price || 0;
   const partialInstallments = treatmentFeeDraft?.partial_installments || [];
   const partialInstallmentsTotal = Math.round(partialInstallments.reduce((sum, i) => sum + (parseFloat(i.amount) || 0), 0) * 100) / 100;
   const partialMismatch = Math.abs(partialInstallmentsTotal - treatmentFeeTotal) > 0.01;
   const partialAllFilled = partialInstallments.length >= 2 && partialInstallments.every((i) => parseFloat(i.amount) > 0 && i.due_date);
 
   const submitTreatmentFee = async () => {
-    if (!treatmentFeeDraft.item_id) { toast.error("Choose a session package"); return; }
-    const amount = parseFloat(treatmentFeeDraft.paid_amount);
-    if (!amount || amount <= 0) { toast.error("Enter a valid amount"); return; }
     const mode = treatmentFeeDraft.payment_mode;
     const payload = {
-      item_id: treatmentFeeDraft.item_id,
-      mode: treatmentFeeDraft.mode,
-      sessions_override: treatmentFeeDraft.sessions ? parseInt(treatmentFeeDraft.sessions, 10) : undefined,
-      paid_amount: amount,
       payment_mode: mode,
     };
     if (mode === "card") {
@@ -428,6 +468,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
   // ---- Physio Assign (Branch Admin) — after fees are collected ----
   const openPhysioModal = async () => {
     setShowPhysioModal(true);
+    setPhysioPick(selectedLead.assigned_physio_id || "");
     try {
       const rows = await getDoctors({ branch_id: branchId });
       setPhysioOptions((rows || []).filter((d) => d.profile_type === "physio"));
@@ -689,124 +730,289 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
               </div>
             )}
 
-            {/* Move to Stage — Head Physio's own pipeline (New Appointment, Consultation
-                Visit). Package choice happens above; physio assignment now lives on
-                Branch Admin's own board, after fees are collected. */}
+            {/* Consultation Decision — Head Physio's own "Save & Move". Requires Diagnosis
+                Report + Treatment Summary to already be written. Package choice for
+                "Consultation Only" happens above (Consultation Package); the Treatment
+                Package (names only, no prices) is chosen here only for "Consultation +
+                Treatment". Physio assignment lives entirely on Branch Admin's own board,
+                after both fees are collected. */}
             {isConsultant && (() => {
-              const currentName = selectedLead.head_consultation_stage || "New Appointment";
-              const currentIdx = stages.findIndex((x) => x.name === currentName);
-              const packageMissing = !selectedLead.package_id;
-              return (
-                <div>
-                  <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-600">Move to Stage</p>
-                  {packageMissing && (
-                    <p className="mb-1.5 text-[11px] font-medium text-amber-600" data-testid="cons-package-required-hint">
-                      Select and save a Consultation Package above before moving forward.
-                    </p>
-                  )}
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {stages.map((s, idx) => {
-                      const active = idx === currentIdx;
-                      const passed = currentIdx >= 0 && idx < currentIdx;
-                      const hex = s.color || "#64748b";
-                      const needsPackage = idx > currentIdx && packageMissing;
-                      const isDisabled = active || passed || s.name === "New Appointment" || needsPackage;
-                      return (
-                        <Fragment key={s.id}>
-                          <button
-                            onClick={() => {
-                              if (isDisabled) return;
-                              moveHeadStage(selectedLead, s.name);
-                            }}
-                            disabled={isDisabled}
-                            title={needsPackage ? "Select and save a Consultation Package first" : undefined}
-                            className="flex flex-1 basis-32 items-center justify-center gap-1 rounded-[5px] border px-2 py-2 text-center text-[11px] font-semibold leading-tight transition disabled:opacity-100"
-                            style={
-                              active
-                                ? { background: hex, color: "white", borderColor: hex }
-                                : { background: `${hex}10`, color: hex, borderColor: `${hex}33` }
-                            }
-                            data-testid={`cons-head-move-${s.name}`}
-                          >
-                            <span className="whitespace-nowrap">{s.name}</span>
-                            {(active || passed) && <CheckCircle2 className="h-3 w-3 shrink-0" />}
-                          </button>
-                          {idx < stages.length - 1 && (
-                            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-300" />
-                          )}
-                        </Fragment>
-                      );
-                    })}
-                  </div>
+              const alreadyMoved = selectedLead.head_consultation_stage === "Consultation Visit";
+              const diagnosisReady = !!(selectedLead.physio_diagnosis_report || "").trim();
+              const summaryReady = !!(selectedLead.treatment_summary || "").trim();
+              const canSave = diagnosisReady && summaryReady && (decisionDraft.decision === "consultation_only" || decisionDraft.item_id);
 
-                  {selectedLead.assigned_physio_name && (
-                    <p className="mt-2 text-xs text-slate-500">
-                      Physio: <span className="font-semibold text-slate-700">{selectedLead.assigned_physio_name}</span>
+              if (alreadyMoved) {
+                return (
+                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3" data-testid="cons-decision-summary">
+                    <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-emerald-700">
+                      <ClipboardCheck className="h-3.5 w-3.5" /> Consultation Decision
+                    </p>
+                    <p className="text-sm font-semibold text-slate-800">
+                      {selectedLead.consultation_decision === "consultation_treatment" ? "Consultation + Treatment" : "Consultation Only"}
+                    </p>
+                    {selectedLead.consultation_decision === "consultation_treatment" && selectedLead.session_package_name && (
+                      <p className="mt-0.5 text-xs text-slate-600">
+                        Treatment Package: <span className="font-semibold">{selectedLead.session_package_name}</span>
+                      </p>
+                    )}
+                    <p className="mt-1.5 text-[11px] text-slate-500">Sent to Branch Admin — Consultation Visit.</p>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="rounded-lg border border-sky-200 bg-sky-50 p-3" data-testid="cons-decision-form">
+                  <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-sky-700">
+                    <ClipboardCheck className="h-3.5 w-3.5" /> Consultation Decision
+                  </p>
+                  {(!diagnosisReady || !summaryReady) && (
+                    <p className="mb-2 text-[11px] font-medium text-amber-600" data-testid="cons-decision-required-hint">
+                      Write the Diagnosis Report and Treatment Summary above before Save & Move.
                     </p>
                   )}
+                  <div className="space-y-1.5">
+                    <label className="flex items-center gap-2 text-sm text-slate-700">
+                      <input type="radio" name="decision" checked={decisionDraft.decision === "consultation_only"} onChange={() => setDecisionDraft((p) => ({ ...p, decision: "consultation_only" }))} data-testid="cons-decision-only" />
+                      Consultation Only
+                    </label>
+                    <label className="flex items-center gap-2 text-sm text-slate-700">
+                      <input type="radio" name="decision" checked={decisionDraft.decision === "consultation_treatment"} onChange={() => setDecisionDraft((p) => ({ ...p, decision: "consultation_treatment" }))} data-testid="cons-decision-treatment" />
+                      Consultation + Treatment
+                    </label>
+                  </div>
+                  {decisionDraft.decision === "consultation_treatment" && (
+                    <div className="mt-2">
+                      <label className="mb-1 block text-[11px] font-medium text-slate-500">Treatment Package</label>
+                      <select
+                        value={decisionDraft.item_id}
+                        onChange={(e) => setDecisionDraft((p) => ({ ...p, item_id: e.target.value }))}
+                        className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-xs"
+                        data-testid="cons-decision-package-select"
+                      >
+                        <option value="">-- choose a treatment package --</option>
+                        {treatmentPackageItems.map((i) => (
+                          <option key={i.id} value={i.id}>{i.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  <Button
+                    size="sm"
+                    className="mt-3 bg-sky-600 hover:bg-sky-700 text-xs"
+                    onClick={submitConsultationDecision}
+                    disabled={savingDecision || !canSave}
+                    data-testid="cons-decision-save"
+                  >
+                    {savingDecision ? "Saving..." : "Save & Move"}
+                  </Button>
                 </div>
               );
             })()}
 
-            {!isConsultant && (
-              <div>
-                <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-600">Move to Stage</p>
-                <div className="grid grid-cols-5 gap-x-4 gap-y-2">
-                  {stages.map((s, idx) => {
-                    const active = selectedLead.consultation_stage === s.name;
-                    const hex = s.color || "#64748b";
-                    const viewOnly = MIRRORED_HEAD_STAGE_NAMES.includes(s.name) && viewerRole === "branch_admin";
-                    const showArrow = idx < stages.length - 1 && (idx + 1) % 5 !== 0;
-                    return (
-                      <div key={s.id} className="relative">
-                        <button
-                          onClick={() => {
-                            if (viewOnly) return;
-                            if (s.name === "Follow Up") {
-                              const today = new Date();
-                              const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
-                              setFollowUpDraft({ date: tomorrow.toISOString().slice(0, 10), time: "10:00", remarks: "" });
-                              return;
-                            }
-                            if (s.name === "Consultation Fee") {
-                              openCollectFeeDraft();
-                              return;
-                            }
-                            if (s.name === "Treatment Fee") {
-                              openTreatmentFeeDraft();
-                              return;
-                            }
-                            if (s.name === "Physio Assign") {
-                              openPhysioModal();
-                              return;
-                            }
-                            moveStage(selectedLead, s.name);
-                          }}
-                          disabled={(active && s.name !== "Consultation Fee" && s.name !== "Treatment Fee" && s.name !== "Physio Assign") || viewOnly}
-                          title={viewOnly ? "Set by the Head Physio's own pipeline — view only here" : s.name === "Consultation Fee" && !selectedLead.package_paid ? "Click to collect the fee" : s.name === "Treatment Fee" && !selectedLead.treatment_fee_paid ? "Click to collect the treatment fee" : undefined}
-                          className="flex w-full items-center justify-center gap-1 rounded-[5px] border px-2 py-2 text-center text-[11px] font-semibold leading-tight transition disabled:opacity-100"
-                          style={
-                            active
-                              ? { background: hex, color: "white", borderColor: hex }
-                              : viewOnly
-                                ? { background: "#f8fafc", color: "#94a3b8", borderColor: "#e2e8f0" }
-                                : { background: `${hex}10`, color: hex, borderColor: `${hex}33` }
-                          }
-                          data-testid={`cons-move-${s.name}`}
-                        >
-                          <span className="whitespace-nowrap">{s.name}</span>
-                          {active && <CheckCircle2 className="h-3 w-3 shrink-0" />}
-                          {viewOnly && !active && <Lock className="h-3 w-3 shrink-0" />}
-                        </button>
-                        {showArrow && (
-                          <ChevronRight className="absolute -right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-300" />
-                        )}
-                      </div>
-                    );
-                  })}
+            {!isConsultant && (() => {
+              const stage = selectedLead.consultation_stage;
+              const decision = selectedLead.consultation_decision;
+              const cancellable = ["New Appointment", "RNR", "Follow Up", "Consultation Visit", "Consultation Fee Collected", "Treatment Fee Collected"].includes(stage);
+
+              const CancelButton = cancellable ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="border-rose-200 text-xs text-rose-600 hover:bg-rose-50"
+                  onClick={() => { if (window.confirm("Cancel this consultation?")) moveStage(selectedLead, "Cancel"); }}
+                  data-testid="cons-cancel-btn"
+                >
+                  <Ban className="mr-1 h-3.5 w-3.5" /> Cancel
+                </Button>
+              ) : null;
+
+              const BackwardControl = earlierPlainStages.length > 0 ? (
+                <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-slate-100 pt-3">
+                  <Undo2 className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                  <select
+                    value={backwardTarget}
+                    onChange={(e) => setBackwardTarget(e.target.value)}
+                    className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs"
+                    data-testid="cons-backward-select"
+                  >
+                    <option value="">Move back to...</option>
+                    {earlierPlainStages.map((s) => (<option key={s} value={s}>{s}</option>))}
+                  </select>
+                  <Button size="sm" variant="outline" className="h-8 text-xs" onClick={submitBackwardMove} disabled={!backwardTarget || movingBackward} data-testid="cons-backward-confirm">
+                    Confirm Move
+                  </Button>
                 </div>
-              </div>
-            )}
+              ) : null;
+
+              if (stage === "New Appointment" || stage === "RNR") {
+                return (
+                  <div data-testid="cons-stage-panel-early">
+                    <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-600">Move to Stage</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {stage === "New Appointment" && (
+                        <Button size="sm" variant="outline" className="text-xs" onClick={() => moveStage(selectedLead, "RNR")} data-testid="cons-move-rnr">
+                          Move to RNR
+                        </Button>
+                      )}
+                      <Button
+                        size="sm"
+                        className="bg-amber-500 text-xs text-white hover:bg-amber-600"
+                        onClick={() => setFollowUpDraft({ date: new Date(Date.now() + 86400000).toISOString().slice(0, 10), time: "10:00", remarks: "" })}
+                        data-testid="cons-move-followup"
+                      >
+                        Schedule Consultation & Move
+                      </Button>
+                      {CancelButton}
+                    </div>
+                    {BackwardControl}
+                  </div>
+                );
+              }
+
+              if (stage === "Follow Up") {
+                return (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3" data-testid="cons-stage-panel-followup">
+                    <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-amber-700">
+                      <Bell className="h-3.5 w-3.5" /> Schedule Consultation
+                    </p>
+                    <p className="mb-2 text-xs text-slate-600">Schedule the Consultation Date & Time, then confirm to send this patient to the Head Physio.</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      <Button
+                        size="sm"
+                        className="bg-amber-500 text-xs text-white hover:bg-amber-600"
+                        onClick={() => setFollowUpDraft({ date: selectedLead.appointment_date || new Date(Date.now() + 86400000).toISOString().slice(0, 10), time: selectedLead.appointment_time || "10:00", remarks: "" })}
+                        data-testid="cons-confirm-move-hp"
+                      >
+                        Confirm & Move
+                      </Button>
+                      {CancelButton}
+                    </div>
+                    {BackwardControl}
+                  </div>
+                );
+              }
+
+              if (stage === "Consultation Visit") {
+                const alreadyPaid = selectedLead.package_paid != null;
+                return (
+                  <div className="rounded-lg border border-sky-200 bg-sky-50 p-3" data-testid="cons-stage-panel-consultation-visit">
+                    <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-sky-700">
+                      <Stethoscope className="h-3.5 w-3.5" /> Consultation Fee
+                    </p>
+                    <div className="space-y-1.5 text-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-slate-500">Consultation Fee</span>
+                        <span className="font-semibold text-slate-800">{selectedLead.package_price != null ? `Rs.${selectedLead.package_price}` : "—"}</span>
+                      </div>
+                      {alreadyPaid && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-slate-500">Already Paid Via</span>
+                          <span className="font-medium capitalize text-emerald-700">{selectedLead.package_payment_mode}</span>
+                        </div>
+                      )}
+                    </div>
+                    <Button size="sm" className="mt-3 bg-sky-600 text-xs hover:bg-sky-700" onClick={openCollectFeeDraft} data-testid="cons-open-collect-fee">
+                      {alreadyPaid ? "Update Payment" : "Collect Payment"}
+                    </Button>
+                    <div className="mt-2 flex flex-wrap gap-1.5">{CancelButton}</div>
+                    {BackwardControl}
+                  </div>
+                );
+              }
+
+              if (stage === "Consultation Fee Collected") {
+                if (decision === "consultation_only") {
+                  return (
+                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3" data-testid="cons-stage-panel-consultation-only">
+                      <p className="text-sm font-semibold text-emerald-800">Consultation Only — no treatment sessions</p>
+                      <p className="mt-1 text-xs text-slate-600">Consultation Fee collected. Mark this consultation as completed to close it out.</p>
+                      <Button size="sm" className="mt-3 bg-emerald-600 text-xs hover:bg-emerald-700" onClick={submitMarkCompleted} disabled={completingConsultation} data-testid="cons-mark-completed">
+                        {completingConsultation ? "Saving..." : "Mark Consultation Completed"}
+                      </Button>
+                    </div>
+                  );
+                }
+                const alreadyPaid = selectedLead.treatment_fee_paid != null;
+                return (
+                  <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3" data-testid="cons-stage-panel-treatment-fee">
+                    <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-indigo-700">
+                      <Dumbbell className="h-3.5 w-3.5" /> Treatment Fee
+                    </p>
+                    <div className="space-y-1.5 text-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-slate-500">Treatment Package</span>
+                        <span className="font-semibold text-slate-800">
+                          {selectedLead.session_package_name || "—"}{selectedLead.session_package_sessions ? ` · ${selectedLead.session_package_sessions} sessions` : ""}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-slate-500">Treatment Fee</span>
+                        <span className="font-semibold text-slate-800">{selectedLead.session_package_price != null ? `Rs.${selectedLead.session_package_price}` : "—"}</span>
+                      </div>
+                      {alreadyPaid && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-slate-500">Already Paid Via</span>
+                          <span className="font-medium capitalize text-emerald-700">{selectedLead.treatment_fee_payment_mode}</span>
+                        </div>
+                      )}
+                    </div>
+                    <Button size="sm" className="mt-3 bg-indigo-600 text-xs hover:bg-indigo-700" onClick={openTreatmentFeeDraft} data-testid="cons-open-treatment-fee">
+                      {alreadyPaid ? "Update Payment" : "Collect Payment"}
+                    </Button>
+                    <div className="mt-2 flex flex-wrap gap-1.5">{CancelButton}</div>
+                    {BackwardControl}
+                  </div>
+                );
+              }
+
+              if (stage === "Treatment Fee Collected") {
+                return (
+                  <div className="rounded-lg border border-violet-200 bg-violet-50 p-3" data-testid="cons-stage-panel-physio-assign">
+                    <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-violet-700">
+                      <Users className="h-3.5 w-3.5" /> Physio Assign
+                    </p>
+                    <p className="text-xs text-slate-600">Treatment Fee collected. Choose the physiotherapist who will deliver the sessions.</p>
+                    <Button size="sm" className="mt-3 bg-violet-600 text-xs hover:bg-violet-700" onClick={openPhysioModal} data-testid="cons-open-physio-assign">
+                      Assign Physio
+                    </Button>
+                    <div className="mt-2 flex flex-wrap gap-1.5">{CancelButton}</div>
+                    {BackwardControl}
+                  </div>
+                );
+              }
+
+              if (stage === "Physio Assign") {
+                return (
+                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3" data-testid="cons-stage-panel-assigned">
+                    <p className="text-sm font-semibold text-emerald-800">Treatment sessions in progress</p>
+                    <p className="mt-1 text-xs text-slate-600">Assigned Physio: <span className="font-semibold text-slate-800">{selectedLead.assigned_physio_name || "—"}</span></p>
+                    <Button size="sm" variant="outline" className="mt-3 text-xs" onClick={openPhysioModal} data-testid="cons-reassign-physio">
+                      Reassign Physio
+                    </Button>
+                  </div>
+                );
+              }
+
+              if (stage === "Consultation Completed") {
+                return (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3" data-testid="cons-stage-panel-completed">
+                    <p className="text-sm font-semibold text-slate-700">Consultation completed</p>
+                    <p className="mt-1 text-xs text-slate-500">Consultation Only — no treatment sessions were required.</p>
+                  </div>
+                );
+              }
+
+              if (stage === "Cancel") {
+                return (
+                  <div className="rounded-lg border border-rose-200 bg-rose-50 p-3" data-testid="cons-stage-panel-cancelled">
+                    <p className="text-sm font-semibold text-rose-700">This consultation was cancelled.</p>
+                  </div>
+                );
+              }
+
+              return null;
+            })()}
             </>
             )}
 
@@ -904,7 +1110,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
               <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" data-testid="cons-collect-fee-modal">
                 <div className="w-full max-w-sm space-y-3 rounded-xl bg-white p-4 shadow-2xl">
                   <div className="flex items-center justify-between">
-                    <p className="text-sm font-semibold text-slate-800">Collect Consultation Fee</p>
+                    <p className="text-sm font-semibold text-slate-800">{selectedLead.package_paid != null ? "Update Consultation Fee Payment" : "Collect Consultation Fee"}</p>
                     <button onClick={() => setCollectFeeDraft(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-collect-fee-close"><X className="h-4 w-4" /></button>
                   </div>
                   {selectedLead.package_name && (
@@ -913,15 +1119,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                     </p>
                   )}
                   <div>
-                    <label className="mb-1 block text-[11px] font-medium text-slate-500">Amount (₹)</label>
-                    <Input
-                      type="number"
-                      min="0"
-                      value={collectFeeDraft.paid_amount}
-                      onChange={(e) => setCollectFeeDraft({ ...collectFeeDraft, paid_amount: e.target.value })}
-                      className="h-9"
-                      data-testid="cons-collect-fee-amount"
-                    />
+                    <label className="mb-1 block text-[11px] font-medium text-slate-500">Consultation Fee (₹)</label>
+                    <div className="flex h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-700" data-testid="cons-collect-fee-amount">
+                      {selectedLead.package_price != null ? `Rs.${selectedLead.package_price}` : "—"}
+                    </div>
                   </div>
                   <div>
                     <label className="mb-1 block text-[11px] font-medium text-slate-500">Payment Mode</label>
@@ -939,10 +1140,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                   <Button
                     className="w-full bg-sky-600 hover:bg-sky-700 text-xs"
                     onClick={submitCollectFee}
-                    disabled={collectingFee || !collectFeeDraft.paid_amount}
+                    disabled={collectingFee || selectedLead.package_price == null}
                     data-testid="cons-collect-fee-submit"
                   >
-                    {collectingFee ? "Collecting..." : "Confirm & Move to Consultation Fee"}
+                    {collectingFee ? "Saving..." : selectedLead.package_paid != null ? "Update Payment" : "Confirm & Move"}
                   </Button>
                 </div>
               </div>
@@ -953,58 +1154,20 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
               <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" data-testid="cons-treatment-fee-modal">
                 <div className="w-full max-w-sm space-y-3 rounded-xl bg-white p-4 shadow-2xl">
                   <div className="flex items-center justify-between">
-                    <p className="text-sm font-semibold text-slate-800">Collect Treatment Fee</p>
+                    <p className="text-sm font-semibold text-slate-800">{selectedLead.treatment_fee_paid != null ? "Update Treatment Fee Payment" : "Collect Treatment Fee"}</p>
                     <button onClick={() => setTreatmentFeeDraft(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-treatment-fee-close"><X className="h-4 w-4" /></button>
                   </div>
                   <div>
-                    <label className="mb-1 block text-[11px] font-medium text-slate-500">Session Package</label>
-                    <select
-                      value={treatmentFeeDraft.item_id}
-                      onChange={(e) => {
-                        const item = treatmentPackageItems.find((i) => i.id === e.target.value);
-                        const isOnline = treatmentFeeDraft.mode === "online";
-                        const base = item ? (isOnline ? item.sessions_online : item.sessions_offline) : "";
-                        const perSessionRate = item ? (isOnline ? item.price_online : item.price_offline) : "";
-                        const totalPrice = perSessionRate && base ? perSessionRate * base : "";
-                        setTreatmentFeeDraft({
-                          ...treatmentFeeDraft,
-                          item_id: e.target.value,
-                          sessions: base ? String(base) : "",
-                          paid_amount: totalPrice ? String(totalPrice) : "",
-                        });
-                      }}
-                      className="h-9 w-full rounded-md border border-slate-200 px-2 text-xs"
-                      data-testid="cons-treatment-fee-item-select"
-                    >
-                      <option value="">-- choose a session package --</option>
-                      {treatmentPackageItems.map((i) => (
-                        <option key={i.id} value={i.id}>{i.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                  {treatmentFeeDraft.item_id && (
-                    <div>
-                      <label className="mb-1 block text-[11px] font-medium text-slate-500">Sessions</label>
-                      <Input
-                        type="number"
-                        min="1"
-                        value={treatmentFeeDraft.sessions}
-                        onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, sessions: e.target.value })}
-                        className="h-9"
-                        data-testid="cons-treatment-fee-sessions"
-                      />
+                    <label className="mb-1 block text-[11px] font-medium text-slate-500">Treatment Package (chosen by Head Physio)</label>
+                    <div className="flex h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-700" data-testid="cons-treatment-fee-item-readonly">
+                      {selectedLead.session_package_name || "—"}{selectedLead.session_package_sessions ? ` · ${selectedLead.session_package_sessions} sessions` : ""}
                     </div>
-                  )}
+                  </div>
                   <div>
-                    <label className="mb-1 block text-[11px] font-medium text-slate-500">Amount (₹)</label>
-                    <Input
-                      type="number"
-                      min="0"
-                      value={treatmentFeeDraft.paid_amount}
-                      onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, paid_amount: e.target.value })}
-                      className="h-9"
-                      data-testid="cons-treatment-fee-amount"
-                    />
+                    <label className="mb-1 block text-[11px] font-medium text-slate-500">Treatment Fee (₹)</label>
+                    <div className="flex h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-700" data-testid="cons-treatment-fee-amount">
+                      {selectedLead.session_package_price != null ? `Rs.${selectedLead.session_package_price}` : "—"}
+                    </div>
                   </div>
                   <div>
                     <label className="mb-1 block text-[11px] font-medium text-slate-500">Payment Mode</label>
@@ -1141,15 +1304,14 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                     onClick={submitTreatmentFee}
                     disabled={
                       collectingTreatmentFee ||
-                      !treatmentFeeDraft.paid_amount ||
-                      !treatmentFeeDraft.item_id ||
+                      selectedLead.session_package_price == null ||
                       (treatmentFeeDraft.payment_mode === "card" && (!treatmentFeeDraft.card_number.trim() || !treatmentFeeDraft.card_holder_name.trim())) ||
                       (treatmentFeeDraft.payment_mode === "cheque" && (!treatmentFeeDraft.bank_name.trim() || !treatmentFeeDraft.cheque_number.trim())) ||
                       (treatmentFeeDraft.payment_mode === "partial" && (!partialAllFilled || partialMismatch))
                     }
                     data-testid="cons-treatment-fee-submit"
                   >
-                    {collectingTreatmentFee ? "Collecting..." : "Confirm & Move to Physio Assign"}
+                    {collectingTreatmentFee ? "Saving..." : selectedLead.treatment_fee_paid != null ? "Update Payment" : "Confirm & Move"}
                   </Button>
                 </div>
               </div>
@@ -1263,7 +1425,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                       }}
                       data-testid="cons-followup-save"
                     >
-                      <CheckCircle2 className="mr-1 h-4 w-4" /> Save & Move to Follow Up
+                      <CheckCircle2 className="mr-1 h-4 w-4" /> Confirm & Move
                     </Button>
                   </div>
                 </div>

@@ -148,7 +148,7 @@ export const createPackage = async (payload) => (await api.post("/packages", pay
 export const updatePackage = async (id, payload) => (await api.put(`/packages/${id}`, payload)).data;
 export const deletePackage = async (id) => (await api.delete(`/packages/${id}`)).data;
 export const sellPackage = async (leadId, payload) => (await api.post(`/leads/${leadId}/sell-package`, payload)).data;
-export const moveConsultationStage = async (leadId, consultation_stage) => (await api.post(`/leads/${leadId}/move-consultation-stage`, { consultation_stage })).data;
+export const moveConsultationStage = async (leadId, consultation_stage, confirmBackward = false) => (await api.post(`/leads/${leadId}/move-consultation-stage`, { consultation_stage, confirm_backward: confirmBackward })).data;
 export const moveHeadConsultationStage = async (leadId, head_consultation_stage) => (await api.post(`/leads/${leadId}/move-head-consultation-stage`, { head_consultation_stage })).data;
 export const scheduleConsultationFollowUp = async (leadId, payload) => (await api.post(`/leads/${leadId}/consultation-follow-up`, payload)).data;
 export const rescheduleConsultationFollowUp = async (leadId, followupId, payload) => (await api.post(`/leads/${leadId}/consultation-follow-up/${followupId}/reschedule`, payload)).data;
@@ -308,6 +308,8 @@ export const assignPackage = async (leadId, payload) => (await api.post(`/leads/
 export const collectPackagePayment = async (leadId, payload) => (await api.post(`/leads/${leadId}/collect-package-payment`, payload)).data;
 export const collectTreatmentFee = async (leadId, payload) => (await api.post(`/leads/${leadId}/collect-treatment-fee`, payload)).data;
 export const assignConsultationPhysio = async (leadId, physioId) => (await api.post(`/leads/${leadId}/assign-consultation-physio`, { physio_id: physioId })).data;
+export const saveConsultationDecision = async (leadId, payload) => (await api.post(`/leads/${leadId}/consultation-decision`, payload)).data;
+export const markConsultationCompleted = async (leadId) => (await api.post(`/leads/${leadId}/mark-consultation-completed`)).data;
 
 export const savePhysioDiagnosis = async (leadId, report, locked = false) => (await api.post(`/leads/${leadId}/physio-diagnosis`, { report, locked })).data;
 export const unlockPhysioDiagnosis = async (leadId) => (await api.put(`/leads/${leadId}/physio-diagnosis/unlock`)).data;

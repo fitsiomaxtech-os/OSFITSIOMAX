@@ -34,9 +34,10 @@ V3_CONSULTATION_STAGES = [
     "RNR",
     "Follow Up",
     "Consultation Visit",
-    "Consultation Fee",
-    "Treatment Fee",
+    "Consultation Fee Collected",
+    "Treatment Fee Collected",
     "Physio Assign",
+    "Consultation Completed",
     "Cancel",
 ]
 

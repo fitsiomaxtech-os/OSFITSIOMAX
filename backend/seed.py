@@ -119,9 +119,11 @@ async def migrate_branch_stages() -> None:
 # Idempotent: runs every startup; only touches leads with a legacy value.
 _LEGACY_CONSULTATION_STAGE_MAP = {
     "Clinic Visit": "Consultation Visit",
-    "Package Chosen": "Treatment Fee",
-    "Completed": "Treatment Fee",
+    "Package Chosen": "Treatment Fee Collected",
+    "Completed": "Treatment Fee Collected",
     "Cancelled": "Cancel",
+    "Consultation Fee": "Consultation Fee Collected",
+    "Treatment Fee": "Treatment Fee Collected",
 }
 
 
@@ -149,7 +151,7 @@ async def migrate_consultation_stages() -> None:
                 "color": CONSULTATION_COLORS[idx % len(CONSULTATION_COLORS)],
                 "type": "consultation",
                 "order": idx,
-                "is_final": name in ("Physio Assign", "Cancel"),
+                "is_final": name in ("Physio Assign", "Consultation Completed", "Cancel"),
                 "created_at": now_iso(),
             })
         if docs:
@@ -163,7 +165,7 @@ async def migrate_consultation_stages() -> None:
     # up on this dead value later — e.g. via a stale client — still gets corrected).
     await v3_col("leads").update_many(
         {"consultation_stage": "Consultation Pack"},
-        {"$set": {"consultation_stage": "Consultation Fee", "updated_at": now_iso()}},
+        {"$set": {"consultation_stage": "Consultation Fee Collected", "updated_at": now_iso()}},
     )
     await v3_col("pipeline_stages").delete_many({"type": "consultation", "name": "Consultation Pack"})
 
@@ -209,7 +211,7 @@ async def migrate_consultation_stages() -> None:
         {"type": "consultation", "name": "Physio Assign"}, {"_id": 0, "order": 1}
     )
     treatment_fee = await v3_col("pipeline_stages").find_one(
-        {"type": "consultation", "name": "Treatment Fee"}, {"_id": 0, "order": 1}
+        {"type": "consultation", "name": "Treatment Fee Collected"}, {"_id": 0, "order": 1}
     )
     if physio_assign and treatment_fee and physio_assign["order"] < treatment_fee["order"]:
         old_order, new_order = physio_assign["order"], treatment_fee["order"]

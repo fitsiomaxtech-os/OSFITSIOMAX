@@ -240,27 +240,34 @@ TREATMENT_FEE_PAYMENT_MODES = {"cash", "upi", "card", "cheque", "partial"}
 @router.post("/leads/{lead_id}/collect-package-payment", response_model=dict)
 async def collect_package_payment(lead_id: str, payload: V3CollectPackagePaymentInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
     """Branch admin collects the Consultation Fee for the package the consultant
-    already assigned — Cash/UPI/Card only. Lands on Consultation Fee itself (not
-    Treatment Fee) — that's the next stage, reached separately."""
+    already assigned — Cash/UPI/Card only. The amount is never client-supplied: it's
+    always the package_price the Head Physio's package assignment set, so Branch
+    Admin can confirm the payment mode but can never change the fee itself. Callable
+    while the lead is at 'Consultation Visit' (first collection) or already at
+    'Consultation Fee Collected' (correcting/updating a payment already on file)."""
     if payload.payment_mode not in CONSULTATION_FEE_PAYMENT_MODES:
         raise HTTPException(status_code=400, detail=f"Consultation Fee only accepts: {sorted(CONSULTATION_FEE_PAYMENT_MODES)}")
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    if not lead.get("package_id"):
-        raise HTTPException(status_code=400, detail="No package assigned yet")
+    if lead.get("consultation_stage") not in ("Consultation Visit", "Consultation Fee Collected"):
+        raise HTTPException(status_code=400, detail="Consultation Fee can only be collected once the Head Physio has completed the consultation")
+    if not lead.get("package_id") or lead.get("package_price") is None:
+        raise HTTPException(status_code=400, detail="No consultation package assigned yet")
 
+    amount = lead["package_price"]
+    is_update = lead.get("package_paid") is not None
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {
-        "package_paid": payload.paid_amount,
+        "package_paid": amount,
         "package_payment_mode": payload.payment_mode,
-        "consultation_stage": "Consultation Fee",
+        "consultation_stage": "Consultation Fee Collected",
         "updated_at": _now(),
     }})
     await v3_col("lead_activity").insert_one({
         "id": str(uuid.uuid4()),
         "lead_id": lead_id,
         "action": "package_payment_collected",
-        "details": f"Collected Consultation Fee Rs.{payload.paid_amount} for package '{lead.get('package_name')}' via {payload.payment_mode}",
+        "details": f"{'Updated' if is_update else 'Collected'} Consultation Fee Rs.{amount} for package '{lead.get('package_name')}' via {payload.payment_mode}",
         "created_by": user.full_name,
         "created_by_role": user.role,
         "created_at": _now(),
@@ -271,26 +278,32 @@ async def collect_package_payment(lead_id: str, payload: V3CollectPackagePayment
 
 @router.post("/leads/{lead_id}/collect-treatment-fee", response_model=dict)
 async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
-    """Branch admin chooses the Session package (FITSIO STORE > Sessions — distinct
-    from the Consultation package Head Physio chose earlier) and collects the
-    Treatment Fee in the same step, at the Treatment Fee stage — any payment method
-    is allowed here, including Cheque/Partial. Moves on to Physio Assign once
-    collected."""
+    """Branch admin collects the Treatment Fee for the Session package the Head
+    Physio already chose during the consultation decision (Consultation + Treatment)
+    — any payment method is allowed here, including Cheque/Partial, but neither the
+    package nor the amount can be changed here; both are locked in from
+    session_package_id/session_package_price. Moves on to Physio Assign once
+    collected. Callable while at 'Consultation Fee Collected' (first collection) or
+    already at 'Treatment Fee Collected' (correcting/updating a payment on file)."""
     if payload.payment_mode not in TREATMENT_FEE_PAYMENT_MODES:
         raise HTTPException(status_code=400, detail=f"Treatment Fee only accepts: {sorted(TREATMENT_FEE_PAYMENT_MODES)}")
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    item = await v3_col("store_items").find_one({"id": payload.item_id}, {"_id": 0})
-    if not item:
-        raise HTTPException(status_code=404, detail="Session package not found")
-    if item.get("item_type") != "session":
-        raise HTTPException(status_code=400, detail="Only Session packages can be chosen here")
+    if lead.get("consultation_decision") != "consultation_treatment":
+        raise HTTPException(status_code=400, detail="This patient's consultation was marked 'Consultation Only' — no Treatment Fee to collect")
+    if lead.get("consultation_stage") not in ("Consultation Fee Collected", "Treatment Fee Collected"):
+        raise HTTPException(status_code=400, detail="Treatment Fee can only be collected after the Consultation Fee has been collected")
+    if not lead.get("session_package_id") or lead.get("session_package_price") is None:
+        raise HTTPException(status_code=400, detail="No treatment package was selected by the Head Physio yet")
+
+    amount = lead["session_package_price"]
 
     # Mode-specific required fields + a structured payment_details record for the
     # receipt/activity log. Card number is never persisted beyond its last 4 digits.
     payment_details = {}
     detail_suffix = ""
+    installments = []
     if payload.payment_mode == "card":
         if not payload.card_number or not payload.card_number.strip() or not payload.card_holder_name or not payload.card_holder_name.strip():
             raise HTTPException(status_code=400, detail="Card Number and Card Holder Name are required")
@@ -303,7 +316,7 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
         payment_details = {
             "bank_name": payload.bank_name.strip(),
             "cheque_number": payload.cheque_number.strip(),
-            "amount": payload.paid_amount,
+            "amount": amount,
         }
         detail_suffix = f" · Cheque #{payload.cheque_number.strip()}, {payload.bank_name.strip()}"
     elif payload.payment_mode == "partial":
@@ -313,8 +326,8 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
         if any(inst.amount <= 0 or not inst.due_date for inst in installments):
             raise HTTPException(status_code=400, detail="Every installment needs an amount and a due date")
         installments_total = round(sum(inst.amount for inst in installments), 2)
-        if installments_total != round(payload.paid_amount, 2):
-            raise HTTPException(status_code=400, detail="Installment amounts must add up to the Total Amount")
+        if installments_total != round(amount, 2):
+            raise HTTPException(status_code=400, detail="Installment amounts must add up to the Treatment Fee")
         payment_details = {
             # The first installment is collected right now, as part of this same
             # transaction — every later one starts unpaid, due on its own date.
@@ -327,37 +340,58 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
         ]
         detail_suffix = f" · {', '.join(parts)}"
 
-    base_price = item.get("price_online") if payload.mode == "online" else item.get("price_offline")
-    base_sessions = item.get("sessions_online") if payload.mode == "online" else item.get("sessions_offline")
-    sessions = payload.sessions_override if payload.sessions_override and payload.sessions_override > 0 else base_sessions
-
+    is_update = lead.get("treatment_fee_paid") is not None
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {
-        "session_package_id": item["id"],
-        "session_package_name": item["name"],
-        "session_package_price": base_price,
-        "session_package_sessions": sessions,
-        "session_package_mode": payload.mode,
-        "treatment_fee_paid": payload.paid_amount,
+        "treatment_fee_paid": amount,
         "treatment_fee_payment_mode": payload.payment_mode,
         "treatment_fee_payment_details": payment_details or None,
-        "consultation_stage": "Physio Assign",
+        "consultation_stage": "Treatment Fee Collected",
         "updated_at": _now(),
     }})
     # For Partial Payment, only the first installment is actually collected right
     # now — the rest are just scheduled — so the log should say what was really
     # received today, not the full schedule's total.
-    collected_now = installments[0].amount if payload.payment_mode == "partial" else payload.paid_amount
+    collected_now = installments[0].amount if payload.payment_mode == "partial" else amount
     await v3_col("lead_activity").insert_one({
         "id": str(uuid.uuid4()),
         "lead_id": lead_id,
         "action": "treatment_fee_collected",
-        "details": f"Chose session package '{item['name']}' ({sessions} sessions) · Collected Treatment Fee Rs.{collected_now} via {payload.payment_mode}{detail_suffix}",
+        "details": f"{'Updated' if is_update else 'Collected'} Treatment Fee for session package '{lead.get('session_package_name')}' ({lead.get('session_package_sessions')} sessions) · Rs.{collected_now} via {payload.payment_mode}{detail_suffix}",
         "created_by": user.full_name,
         "created_by_role": user.role,
         "created_at": _now(),
     })
     updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     return {"message": "Payment collected", "lead": V3LeadOut(**updated).model_dump()}
+
+
+@router.post("/leads/{lead_id}/mark-consultation-completed", response_model=dict)
+async def mark_consultation_completed(lead_id: str, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
+    """Branch Admin closes out a 'Consultation Only' patient once the Consultation
+    Fee has been collected — no Treatment Fee is ever collected on this path."""
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    if lead.get("consultation_decision") != "consultation_only":
+        raise HTTPException(status_code=400, detail="Only a 'Consultation Only' patient can be marked completed here")
+    if lead.get("consultation_stage") not in ("Consultation Fee Collected", "Consultation Completed"):
+        raise HTTPException(status_code=400, detail="Consultation Fee must be collected before marking the consultation completed")
+
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": {
+        "consultation_stage": "Consultation Completed",
+        "updated_at": _now(),
+    }})
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": lead_id,
+        "action": "consultation_completed",
+        "details": "Consultation marked completed (Consultation Only — no treatment sessions)",
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": _now(),
+    })
+    updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    return {"message": "Consultation completed", "lead": V3LeadOut(**updated).model_dump()}
 
 
 @router.post("/leads/{lead_id}/physio-diagnosis", response_model=V3LeadOut)

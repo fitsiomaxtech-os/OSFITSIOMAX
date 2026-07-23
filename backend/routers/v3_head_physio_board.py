@@ -7,7 +7,7 @@ from database import v3_col
 from utils import now_iso
 from deps import v3_current_user, v3_require_roles
 from constants import V3_HEAD_CONSULTATION_STAGES
-from schemas.v3 import V3UserOut, V3PackageRecommendInput, V3HeadPhysioReviewInput, V3LeadOut
+from schemas.v3 import V3UserOut, V3PackageRecommendInput, V3HeadPhysioReviewInput, V3LeadOut, V3ConsultationDecisionInput
 
 router = APIRouter(prefix="/api/v3")
 
@@ -231,6 +231,11 @@ async def hp_move_head_consultation_stage(
     stage_names = await _head_consultation_stage_names()
     if payload.head_consultation_stage not in stage_names:
         raise HTTPException(status_code=400, detail=f"Invalid head_consultation_stage. Allowed: {stage_names}")
+    if payload.head_consultation_stage == "Consultation Visit":
+        raise HTTPException(
+            status_code=403,
+            detail="Use the consultation-decision endpoint (Save & Move) — it requires Diagnosis, Treatment Summary and a decision first.",
+        )
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -240,10 +245,6 @@ async def hp_move_head_consultation_stage(
         "head_consultation_stage": payload.head_consultation_stage,
         "updated_at": now_iso(),
     }
-    # Mirror onto Branch's own consultation_stage (view-only there) so Branch Admin
-    # can see the doctor's real progress without being able to trigger it themselves.
-    if payload.head_consultation_stage == "Consultation Visit":
-        updates["consultation_stage"] = payload.head_consultation_stage
     await v3_col("leads").update_one({"id": lead_id}, {"$set": updates})
     await v3_col("lead_activity").insert_one({
         "id": str(uuid.uuid4()),
@@ -258,6 +259,69 @@ async def hp_move_head_consultation_stage(
     return {"message": "Stage moved", "lead": V3LeadOut(**updated).model_dump()}
 
 
+@router.post("/leads/{lead_id}/consultation-decision", response_model=dict)
+async def hp_consultation_decision(
+    lead_id: str,
+    payload: V3ConsultationDecisionInput,
+    user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin")),
+):
+    """Head Physio's 'Save & Move' — the single action that closes out the
+    consultation: requires Diagnosis Report + Treatment Summary to already be
+    written, records the Consultation Only / Consultation + Treatment decision
+    (and, for the latter, the chosen Treatment/Session package — names only, no
+    price shown here), then hands the lead to Branch Admin's 'Consultation Visit'
+    column on both pipelines at once."""
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    if not (lead.get("physio_diagnosis_report") or "").strip():
+        raise HTTPException(status_code=400, detail="Write the Diagnosis Report before Save & Move")
+    if not (lead.get("treatment_summary") or "").strip():
+        raise HTTPException(status_code=400, detail="Write the Treatment Summary before Save & Move")
+
+    updates = {
+        "consultation_decision": payload.decision,
+        "head_consultation_stage": "Consultation Visit",
+        "consultation_stage": "Consultation Visit",
+        "updated_at": now_iso(),
+    }
+    detail = f"Consultation decision: {'Consultation Only' if payload.decision == 'consultation_only' else 'Consultation + Treatment'}"
+
+    if payload.decision == "consultation_treatment":
+        if not payload.item_id:
+            raise HTTPException(status_code=400, detail="Select a Treatment Package")
+        item = await v3_col("store_items").find_one({"id": payload.item_id}, {"_id": 0})
+        if not item:
+            raise HTTPException(status_code=404, detail="Treatment package not found")
+        if item.get("item_type") != "session":
+            raise HTTPException(status_code=400, detail="Only Session packages can be chosen as the Treatment Package")
+        base_price = item.get("price_online") if payload.mode == "online" else item.get("price_offline")
+        base_sessions = item.get("sessions_online") if payload.mode == "online" else item.get("sessions_offline")
+        sessions = payload.sessions_override if payload.sessions_override and payload.sessions_override > 0 else base_sessions
+        price = round((base_price / base_sessions) * sessions, 2) if base_sessions and base_price is not None else base_price
+        updates.update({
+            "session_package_id": item["id"],
+            "session_package_name": item["name"],
+            "session_package_price": price,
+            "session_package_sessions": sessions,
+            "session_package_mode": payload.mode,
+        })
+        detail += f" · Package: {item['name']} ({sessions} sessions)"
+
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": updates})
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": lead_id,
+        "action": "consultation_decision_saved",
+        "details": detail,
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": now_iso(),
+    })
+    updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    return {"message": "Saved & moved", "lead": V3LeadOut(**updated).model_dump()}
+
+
 @router.post("/leads/{lead_id}/assign-consultation-physio")
 async def hp_assign_consultation_physio(
     lead_id: str,
@@ -266,10 +330,14 @@ async def hp_assign_consultation_physio(
 ):
     """Branch Admin picks the physio who will deliver the assigned package's
     treatment sessions, moving the lead into Branch's own 'Physio Assign' stage —
-    the last step in the Consultations pipeline, after fees are collected."""
+    the last step in the Consultations pipeline, after fees are collected. Callable
+    while at 'Treatment Fee Collected' (first assignment) or already at 'Physio
+    Assign' (reassigning to a different physio)."""
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
+    if lead.get("consultation_stage") not in ("Treatment Fee Collected", "Physio Assign"):
+        raise HTTPException(status_code=400, detail="A physio can only be assigned after the Treatment Fee has been collected")
     physio = await v3_col("doctors").find_one(
         {"id": payload.physio_id, "profile_type": "physio"}, {"_id": 0}
     )
