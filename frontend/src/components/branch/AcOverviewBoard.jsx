@@ -4,8 +4,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { getRevenueOverview, getBranches } from "@/lib/api";
 import {
   ResponsiveContainer, XAxis, YAxis, CartesianGrid, Tooltip,
-  BarChart, Bar, Legend, PieChart, Pie, Cell,
+  BarChart, Bar, Legend,
 } from "recharts";
+import { NetCashflowSunburst } from "@/components/branch/NetCashflowSunburst";
 
 const DATE_PRESETS = [
   { key: "today", label: "Today" },
@@ -167,12 +168,6 @@ const TotalRevenueTab = ({ data, loading, fmt }) => {
   const paymentModes = Object.entries(data.payment_modes || {}).sort((a, z) => z[1] - a[1]);
   const modeTotal = paymentModes.reduce((s, [, v]) => s + v, 0) || 1;
 
-  const revenueSplit = [
-    { name: "Consultation", value: Number(b.consultation_revenue) || 0, color: CATEGORY_COLORS.consultation },
-    { name: "Session", value: Number(b.session_revenue) || 0, color: CATEGORY_COLORS.session },
-  ];
-  const revenueSplitTotal = revenueSplit.reduce((s, d) => s + d.value, 0);
-
   return (
     <div className="space-y-4" data-testid="ac-total-revenue-tab">
       {/* Revenue split */}
@@ -189,43 +184,8 @@ const TotalRevenueTab = ({ data, loading, fmt }) => {
         </div>
       </div>
 
-      {/* Revenue split donut */}
-      <Card>
-        <CardContent className="p-4">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Revenue by Category</p>
-          {revenueSplitTotal === 0 ? (
-            <p className="py-8 text-center text-sm text-slate-400">No transactions in this range.</p>
-          ) : (
-            <div className="relative">
-              <ResponsiveContainer width="100%" height={240}>
-                <PieChart>
-                  <Pie
-                    data={revenueSplit}
-                    dataKey="value"
-                    nameKey="name"
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={70}
-                    outerRadius={100}
-                    paddingAngle={2}
-                    stroke="none"
-                  >
-                    {revenueSplit.map((entry) => (
-                      <Cell key={entry.name} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(v) => fmt(v)} />
-                  <Legend wrapperStyle={{ fontSize: 11 }} />
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center pb-6">
-                <p className="text-[10px] uppercase tracking-wide text-slate-400">Total</p>
-                <p className="text-lg font-bold text-slate-800">{fmt(revenueSplitTotal)}</p>
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      {/* Revenue by Category — Net Cashflow sunburst */}
+      <NetCashflowSunburst data={data} />
 
       {/* Branch comparison — only meaningful across more than one branch */}
       {byBranch.length > 1 && (
