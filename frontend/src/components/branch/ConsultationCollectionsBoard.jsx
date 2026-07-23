@@ -44,7 +44,8 @@ export const ConsultationCollectionsBoard = ({ rows, onView }) => {
   const [search, setSearch] = useState("");
   const [branch, setBranch] = useState("all");
   const [mode, setMode] = useState("all");
-  const [date, setDate] = useState("");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
   const [activeCard, setActiveCard] = useState(null);
 
   const today = todayIso();
@@ -62,12 +63,14 @@ export const ConsultationCollectionsBoard = ({ rows, onView }) => {
     if (search && !(r.client_name || "").toLowerCase().includes(search.toLowerCase())) return false;
     if (branch !== "all" && r.branch_name !== branch) return false;
     if (mode !== "all" && r.payment_mode !== mode) return false;
-    if (date && (r.date || "").slice(0, 10) !== date) return false;
-    if (activeCard === "today" && (r.date || "").slice(0, 10) !== today) return false;
+    const d = (r.date || "").slice(0, 10);
+    if (fromDate && d < fromDate) return false;
+    if (toDate && d > toDate) return false;
+    if (activeCard === "today" && d !== today) return false;
     if (activeCard === "month" && (r.date || "").slice(0, 7) !== monthPrefix) return false;
     if (activeCard === "outstanding" && !(r.client_balance > 0)) return false;
     return true;
-  }), [rows, search, branch, mode, date, activeCard, today, monthPrefix]);
+  }), [rows, search, branch, mode, fromDate, toDate, activeCard, today, monthPrefix]);
 
   const totals = useMemo(() => {
     const uniqueBalances = new Map();
@@ -118,9 +121,14 @@ export const ConsultationCollectionsBoard = ({ rows, onView }) => {
             <option value="card">Card</option>
           </select>
           <input
-            type="date" value={date} onChange={(e) => setDate(e.target.value)}
+            type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)}
             className="h-9 rounded-md border border-slate-200 px-2 text-sm"
-            data-testid="consultation-collections-date-filter"
+            data-testid="consultation-collections-from-date"
+          />
+          <input
+            type="date" value={toDate} onChange={(e) => setToDate(e.target.value)}
+            className="h-9 rounded-md border border-slate-200 px-2 text-sm"
+            data-testid="consultation-collections-to-date"
           />
         </CardContent>
       </Card>
