@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Eye, Plus, Search, Settings as Cog, Calendar as CalendarIcon, Phone, FileText, StickyNote, ArrowRight, ArrowLeft, CheckCircle2, X, Pencil, PhoneOff, Clock, Bell, Building2, Video, Trash2, Dumbbell, Stethoscope, ClipboardList } from "lucide-react";
+import { Eye, Plus, Search, Settings as Cog, Calendar as CalendarIcon, Phone, FileText, StickyNote, ArrowRight, ArrowLeft, CheckCircle2, X, Pencil, PhoneOff, Clock, Bell, Building2, Video, Trash2, Dumbbell, Stethoscope, ClipboardList, Lock } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -53,6 +53,11 @@ const avatarColor = (name) => {
   if (idx < 0 || idx > 25) return { bg: "bg-slate-100", fg: "text-slate-700" };
   return AVATAR_PALETTE[idx];
 };
+
+// Locked by Super Admin request — freezes both the Super Admin Master View's own
+// "Pre-Sales CRM" tab and the standalone Pre-Sales Master View, since both render
+// this same component. Flip to false to restore access.
+const PRESALES_CRM_LOCKED = true;
 
 export const PreSalesCRM = ({ onManageStages, role }) => {
   const [stages, setStages] = useState([]);
@@ -168,6 +173,16 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
 
   // Pick KPI cards: total + up to 8 stage cards
   const kpiStages = stages.slice(0, 8);
+
+  if (PRESALES_CRM_LOCKED) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-slate-200 bg-white py-24 text-center" data-testid="presales-crm-locked">
+        <Lock className="h-10 w-10 text-slate-300" />
+        <h2 className="text-xl font-bold text-slate-700">Pre-Sales CRM is locked</h2>
+        <p className="max-w-sm text-sm text-slate-500">This dashboard has been locked by a Super Admin. Contact your administrator to restore access.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5" data-testid="presales-crm-page">
