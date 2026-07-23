@@ -78,7 +78,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
 
   // Consultation Decision (Head Physio only) — "Save & Move": Consultation Only vs
   // Consultation + Treatment (+ Treatment Package, names only, no prices shown here).
-  const [decisionDraft, setDecisionDraft] = useState({ decision: "consultation_only", item_id: "", mode: "offline" });
+  const [decisionDraft, setDecisionDraft] = useState({ decision: "consultation_only", item_id: "", mode: "offline", sessions: "" });
   const [savingDecision, setSavingDecision] = useState(false);
 
   // Mark Consultation Completed (Branch Admin only) — "Consultation Only" patients, at
@@ -168,7 +168,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
     setRescheduleDraft(null);
     setCollectFeeDraft(null);
     setTreatmentFeeDraft(null);
-    setDecisionDraft({ decision: "consultation_only", item_id: "", mode: "offline" });
+    setDecisionDraft({ decision: "consultation_only", item_id: "", mode: "offline", sessions: "" });
   }, [selectedLead?.id]);
 
   useEffect(() => {
@@ -204,6 +204,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
         decision: decisionDraft.decision,
         item_id: decisionDraft.decision === "consultation_treatment" ? decisionDraft.item_id : undefined,
         mode: decisionDraft.mode,
+        sessions_override: decisionDraft.decision === "consultation_treatment" && decisionDraft.sessions ? parseInt(decisionDraft.sessions, 10) : undefined,
       });
       toast.success("Saved & moved to Branch Admin");
       setSelectedLead(null);
@@ -690,7 +691,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                       <label className="mb-1 block text-[11px] font-medium text-slate-500">Treatment Package</label>
                       <select
                         value={decisionDraft.item_id}
-                        onChange={(e) => setDecisionDraft((p) => ({ ...p, item_id: e.target.value }))}
+                        onChange={(e) => {
+                          const item = treatmentPackageItems.find((i) => i.id === e.target.value);
+                          const baseSessions = item ? (decisionDraft.mode === "online" ? item.sessions_online : item.sessions_offline) : null;
+                          setDecisionDraft((p) => ({ ...p, item_id: e.target.value, sessions: baseSessions ? String(baseSessions) : "" }));
+                        }}
                         className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-xs"
                         data-testid="cons-decision-package-select"
                       >
@@ -699,6 +704,40 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                           <option key={i.id} value={i.id}>{i.name}</option>
                         ))}
                       </select>
+
+                      {decisionDraft.item_id && (() => {
+                        const item = treatmentPackageItems.find((i) => i.id === decisionDraft.item_id);
+                        if (!item) return null;
+                        const baseSessions = decisionDraft.mode === "online" ? item.sessions_online : item.sessions_offline;
+                        const basePrice = decisionDraft.mode === "online" ? item.price_online : item.price_offline;
+                        const effectiveSessions = decisionDraft.sessions ? parseInt(decisionDraft.sessions, 10) : baseSessions;
+                        const perSessionRate = baseSessions ? basePrice / baseSessions : null;
+                        const amount = perSessionRate != null && effectiveSessions ? Math.round(perSessionRate * effectiveSessions * 100) / 100 : null;
+                        return (
+                          <div className="mt-2 rounded-md border border-slate-200 bg-white p-3" data-testid="cons-decision-package-summary">
+                            <p className="text-sm font-semibold text-slate-800">{item.name}</p>
+                            <div className="mt-2 grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="mb-1 block text-[11px] font-medium text-slate-500">Sessions</label>
+                                <Input
+                                  type="number"
+                                  min="1"
+                                  value={decisionDraft.sessions}
+                                  onChange={(e) => setDecisionDraft((p) => ({ ...p, sessions: e.target.value }))}
+                                  className="h-9"
+                                  data-testid="cons-decision-sessions"
+                                />
+                              </div>
+                              <div>
+                                <label className="mb-1 block text-[11px] font-medium text-slate-500">Amount (₹)</label>
+                                <div className="flex h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-700" data-testid="cons-decision-amount">
+                                  {amount != null ? `Rs.${amount}` : "—"}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
                   <Button
