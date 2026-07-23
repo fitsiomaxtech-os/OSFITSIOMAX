@@ -287,6 +287,22 @@ async def hp_consultation_decision(
     }
     detail = f"Consultation decision: {'Consultation Only' if payload.decision == 'consultation_only' else 'Consultation + Treatment'}"
 
+    # Consultation Fee has a single fixed price (FITSIO STORE > Consultation) — there's
+    # nothing for the Head Physio to pick, so it's auto-assigned the first time a lead
+    # reaches this decision, the same way it always has been, just without a manual step.
+    if not lead.get("package_id"):
+        consultation_item = await v3_col("store_items").find_one({"item_type": "consultation"}, {"_id": 0})
+        if consultation_item:
+            mode = lead.get("appointment_mode") or "offline"
+            price = consultation_item.get("price_online") if mode == "online" else consultation_item.get("price_offline")
+            updates.update({
+                "package_id": consultation_item["id"],
+                "package_name": consultation_item["name"],
+                "package_price": price,
+                "package_duration_minutes": consultation_item.get("duration_minutes"),
+                "package_mode": mode,
+            })
+
     if payload.decision == "consultation_treatment":
         if not payload.item_id:
             raise HTTPException(status_code=400, detail="Select a Treatment Package")

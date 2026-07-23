@@ -274,12 +274,6 @@ class V3SellStoreItemInput(BaseModel):
     notes: Optional[str] = ""
 
 
-class V3AssignPackageInput(BaseModel):
-    item_id: str
-    mode: Literal["online", "offline"]
-    sessions_override: Optional[int] = None  # doctor can override the item's default session count
-
-
 class V3CollectPackagePaymentInput(BaseModel):
     # The fee amount is never client-supplied — it's always the already-assigned
     # package_price, read straight off the lead. Branch Admin can only pick the mode.

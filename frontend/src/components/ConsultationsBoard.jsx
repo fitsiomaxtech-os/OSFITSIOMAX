@@ -8,7 +8,7 @@ import { StageTabBar } from "@/components/ui/stage-tab";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import {
   getConsultationsBoard, moveConsultationStage, listStoreItems,
-  assignPackage, collectPackagePayment, collectTreatmentFee, savePhysioDiagnosis, unlockPhysioDiagnosis,
+  collectPackagePayment, collectTreatmentFee, savePhysioDiagnosis, unlockPhysioDiagnosis,
   saveTreatmentSummary, unlockTreatmentSummary, stagesList, getDoctors,
   assignConsultationPhysio,
   scheduleConsultationFollowUp, rescheduleConsultationFollowUp,
@@ -48,7 +48,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
   const [storeItems, setStoreItems] = useState([]);
   const [followUpDraft, setFollowUpDraft] = useState(null); // { date, time, remarks } | null
   const [rescheduleDraft, setRescheduleDraft] = useState(null); // { followupId, date, time, reason } | null
-  const [selling, setSelling] = useState(false);
   const [loading, setLoading] = useState(false);
 
   // Head Physio's own diagnosis report — separate from Pre-Sales' read-only `diagnosis`
@@ -62,11 +61,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
   const [treatmentEditing, setTreatmentEditing] = useState(false);
   const [savingTreatment, setSavingTreatment] = useState(false);
   const treatmentDebounceRef = useRef(null);
-
-  // Consultation package picker (Head Physio only) — an inline section in the popup,
-  // not a separate modal. showSessionModal just toggles picker vs. summary view.
-  const [showSessionModal, setShowSessionModal] = useState(false);
-  const [sessionDraft, setSessionDraft] = useState({ item_id: "", mode: "offline" });
 
   // Collect Fee popup (Branch Admin only) — at the Consultation Fee stage, Cash/UPI/Card only
   const [collectFeeDraft, setCollectFeeDraft] = useState(null); // { paid_amount, payment_mode } | null
@@ -168,7 +162,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
     setPhysioDiagEditing(!selectedLead?.physio_diagnosis_report);
     setTreatmentDraft(selectedLead?.treatment_summary || "");
     setTreatmentEditing(!selectedLead?.treatment_summary);
-    setShowSessionModal(false);
     setShowPhysioModal(false);
     setPhysioPick("");
     setFollowUpDraft(null);
@@ -184,9 +177,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
     getLeadActivity(selectedLead.id).then(setTimelineActivity).catch(() => setTimelineActivity([]));
   }, [selectedLead?.id, detailTab]);
 
-  const sessionItems = storeItems.filter((i) => i.item_type === "consultation");
-  // Session packages (weeks/session-count items) — chosen separately at the Treatment
-  // Fee stage, distinct from the Consultation package Head Physio chooses above.
+  // Session packages (weeks/session-count items) — the Treatment Package chosen
+  // as part of the Consultation Decision (Consultation + Treatment only).
   const treatmentPackageItems = storeItems.filter((i) => i.item_type === "session");
 
   const moveStage = async (lead, next) => {
@@ -311,31 +303,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
     } catch (err) {
       toast.error("Failed to unlock treatment summary");
     }
-  };
-
-  // ---- Consultation package assignment (Head Physio) ----
-  const openSessionModal = () => {
-    const mode = selectedLead.appointment_mode || "offline";
-    const auto = sessionItems.length === 1 ? sessionItems[0] : null;
-    setSessionDraft({ item_id: auto?.id || "", mode });
-    setShowSessionModal(true);
-  };
-
-  const submitSession = async () => {
-    if (!sessionDraft.item_id) { toast.error("Choose a consultation package"); return; }
-    setSelling(true);
-    try {
-      const res = await assignPackage(selectedLead.id, {
-        item_id: sessionDraft.item_id,
-        mode: sessionDraft.mode,
-      });
-      toast.success("Consultation package assigned to patient");
-      setShowSessionModal(false);
-      applyUpdatedLead(res.lead);
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || "Failed to assign package");
-    }
-    setSelling(false);
   };
 
   // ---- Collect Fee (Branch Admin) — at the Consultation Fee stage ----
@@ -650,53 +617,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                     placeholder="What treatment should be given to the patient..."
                     testPrefix="cons-treatment-summary"
                   />
-                )}
-              </div>
-            )}
-
-            {/* Consultation Package — an inline part of the popup, not a stage move.
-                Shows the assigned package (name + duration, never price) once chosen,
-                with a Change button; otherwise shows the picker directly. */}
-            {isConsultant && (
-              <div className="rounded-lg border border-violet-200 bg-violet-50 p-3" data-testid="cons-package-section">
-                <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-violet-700">
-                  <Dumbbell className="h-3.5 w-3.5" /> Consultation Package
-                </p>
-                {selectedLead.package_id && !showSessionModal ? (
-                  <>
-                    <p className="text-xs text-slate-700">
-                      <span className="font-semibold">{selectedLead.package_name}</span>
-                      {selectedLead.package_duration_minutes ? ` · ${selectedLead.package_duration_minutes} min` : ""}
-                      {" "}({selectedLead.package_mode})
-                    </p>
-                    <Button size="sm" variant="outline" className="mt-2 text-xs" onClick={openSessionModal} data-testid="cons-package-change">
-                      <Pencil className="mr-1 h-3 w-3" /> Change
-                    </Button>
-                  </>
-                ) : (
-                  <>
-                    <select
-                      value={sessionDraft.item_id}
-                      onChange={(e) => setSessionDraft({ ...sessionDraft, item_id: e.target.value })}
-                      className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-xs"
-                      data-testid="cons-session-item-select"
-                    >
-                      <option value="">-- choose a consultation package --</option>
-                      {sessionItems.map((i) => (
-                        <option key={i.id} value={i.id}>{i.name} — {i.duration_minutes ? `${i.duration_minutes} min` : "duration n/a"}</option>
-                      ))}
-                    </select>
-                    <div className="mt-2 flex gap-2">
-                      <Button size="sm" className="bg-violet-600 hover:bg-violet-700 text-xs" onClick={submitSession} disabled={selling || !sessionDraft.item_id} data-testid="cons-session-submit">
-                        {selling ? "Saving..." : "Save"}
-                      </Button>
-                      {selectedLead.package_id && (
-                        <Button size="sm" variant="outline" className="text-xs" onClick={() => setShowSessionModal(false)} data-testid="cons-package-cancel">
-                          Cancel
-                        </Button>
-                      )}
-                    </div>
-                  </>
                 )}
               </div>
             )}
