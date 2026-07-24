@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  AlertTriangle, ArrowRight, BarChart3, Building2, Calendar, CheckCircle2, Clock,
+  AlertTriangle, ArrowRight, BarChart3, Building2, Calendar, CheckCircle2, ChevronDown, Clock,
   Database, FileSpreadsheet, History, IndianRupee, Link as LinkIcon, MapPin,
   RefreshCw, Shield, ShieldCheck, ShieldAlert, Stethoscope, UserCheck, Users,
 } from "lucide-react";
@@ -279,7 +279,7 @@ export const MasterControlBoard = () => {
           ) : (
             <>
               {/* Filters */}
-              <div className="grid gap-3 md:grid-cols-4" data-testid="live-filters">
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-4" data-testid="live-filters">
                 <FilterSelect label="Branch" value={filters.branch} onChange={(v) => setFilters({ ...filters, branch: v })} options={[{ value: "", label: "All Branches" }, ...branches.map((b) => ({ value: b.id, label: b.branch_name || b.name }))]} testid="filter-branch" />
                 <FilterSelect label="Service Type" value={filters.service} onChange={(v) => setFilters({ ...filters, service: v })} options={[{ value: "", label: "All Service Types" }, ...verticals.map((v) => ({ value: v.name, label: v.name }))]} testid="filter-service" />
                 <FilterSelect label="Expert" value={filters.expert} onChange={(v) => setFilters({ ...filters, expert: v })} options={[{ value: "", label: "All Experts" }, ...doctors.map((d) => ({ value: d.id, label: d.full_name }))]} testid="filter-expert" />
@@ -358,15 +358,18 @@ const PerformanceSection = ({ perf }) => {
 
 const FilterSelect = ({ label, value, onChange, options, testid }) => (
   <div>
-    <p className="mb-1 text-xs font-medium text-slate-500">{label}</p>
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-sm"
-      data-testid={testid}
-    >
-      {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-    </select>
+    <label className="mb-1.5 block text-xs font-semibold text-slate-600">{label}</label>
+    <div className="relative">
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-10 w-full cursor-pointer appearance-none rounded-lg border border-slate-200 bg-white pl-3 pr-9 text-sm font-medium text-slate-700 shadow-sm transition hover:border-slate-300 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/30"
+        data-testid={testid}
+      >
+        {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+    </div>
   </div>
 );
 
