@@ -387,7 +387,7 @@ const FilterDropdown = ({ label, value, onChange, options, testid }) => {
           <ChevronDown className={`h-3.5 w-3.5 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} style={{ color: selColor }} />
         </button>
         {open && (
-          <div className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-md border border-slate-200 bg-white shadow-lg" data-testid={`${testid}-menu`}>
+          <div className="absolute z-20 mt-1 flex w-max min-w-full max-w-[80vw] flex-wrap gap-1.5 rounded-md border border-slate-200 bg-white p-2 shadow-lg" data-testid={`${testid}-menu`}>
             {options.map((o, idx) => {
               const color = FILTER_COLORS[idx % FILTER_COLORS.length];
               const selected = o.value === value;
@@ -396,7 +396,7 @@ const FilterDropdown = ({ label, value, onChange, options, testid }) => {
                   key={o.value}
                   type="button"
                   onClick={() => { onChange(o.value); setOpen(false); }}
-                  className="block w-full border-b border-slate-100 px-3 py-2 text-left text-xs font-semibold transition last:border-b-0 hover:brightness-95"
+                  className="whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-semibold transition hover:brightness-95"
                   style={{ backgroundColor: selected ? `${color}2e` : `${color}14`, color }}
                   data-testid={`${testid}-${o.value || "all"}`}
                 >
