@@ -6,9 +6,8 @@ import { toast } from "@/components/ui/sonner";
 import {
   getBranches,
   getBranchBoard,
-  getDoctors,
+  getAvailableExperts,
   listConsultAppointments,
-  getConsultAvailability,
   createConsultAppointment,
   updateConsultAppointment,
   cancelConsultAppointment,
@@ -28,7 +27,7 @@ const to12h = (t) => {
   return `${h12}:${m} ${hr >= 12 ? "PM" : "AM"}`;
 };
 
-const emptyDraft = () => ({ patient_name: "", doctor_id: "", date: iso(new Date()), time: "" });
+const emptyDraft = () => ({ patient_name: "", doctor_id: "", date: iso(new Date()), time: "10:00", notes: "", cancelled: false });
 
 // The branch Calendar reflects the working hours + holidays configured by Super Admin
 // in Branch Management, and lets the Branch Admin book / edit / cancel consultation
@@ -36,7 +35,6 @@ const emptyDraft = () => ({ patient_name: "", doctor_id: "", date: iso(new Date(
 export const BranchCalendarPanel = ({ branchId }) => {
   const [branch, setBranch] = useState(null);
   const [leads, setLeads] = useState([]);
-  const [headPhysios, setHeadPhysios] = useState([]);
   const [appts, setAppts] = useState([]);
   const [monthDate, setMonthDate] = useState(() => { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d; });
   const [loading, setLoading] = useState(false);
@@ -46,23 +44,21 @@ export const BranchCalendarPanel = ({ branchId }) => {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [draft, setDraft] = useState(emptyDraft());
-  const [avail, setAvail] = useState(null);
-  const [availLoading, setAvailLoading] = useState(false);
+  const [experts, setExperts] = useState([]);
+  const [expertsLoading, setExpertsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     if (!branchId) return;
     setLoading(true);
     try {
-      const [branches, board, doctors, apptRes] = await Promise.all([
+      const [branches, board, apptRes] = await Promise.all([
         getBranches(),
         getBranchBoard(branchId),
-        getDoctors({ branch_id: branchId }),
         listConsultAppointments(branchId),
       ]);
       setBranch((branches || []).find((b) => b.id === branchId) || null);
       setLeads(board?.leads || []);
-      setHeadPhysios((doctors || []).filter((d) => d.profile_type === "head_physio"));
       setAppts(apptRes?.appointments || []);
     } catch { /* silent — panel just shows an empty schedule */ }
     setLoading(false);
@@ -115,51 +111,45 @@ export const BranchCalendarPanel = ({ branchId }) => {
   const thisMonth = () => { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); setMonthDate(d); };
   const monthLabel = monthDate.toLocaleDateString("en-US", { month: "long", year: "numeric" });
 
-  // ---- Booking modal ----
-  const fetchAvail = useCallback(async (date, doctorId) => {
-    if (!date || !doctorId) { setAvail(null); return; }
-    setAvailLoading(true);
-    try { setAvail(await getConsultAvailability(branchId, date, doctorId)); }
-    catch { setAvail(null); }
-    setAvailLoading(false);
+  // ---- Booking / edit modal — Appointment Date & Time flow (matches Branch Leads) ----
+  const fetchExperts = useCallback(async (date) => {
+    if (!date) { setExperts([]); return; }
+    setExpertsLoading(true);
+    try { const res = await getAvailableExperts(branchId, date); setExperts(res?.experts || []); }
+    catch { setExperts([]); }
+    setExpertsLoading(false);
   }, [branchId]);
 
   useEffect(() => {
     if (!modalOpen) return;
-    fetchAvail(draft.date, draft.doctor_id);
-  }, [modalOpen, draft.date, draft.doctor_id, fetchAvail]);
+    fetchExperts(draft.date);
+  }, [modalOpen, draft.date, fetchExperts]);
 
   const openCreate = (date) => {
     setEditingId(null);
-    setDraft({ patient_name: "", doctor_id: headPhysios[0]?.id || "", date: date || iso(new Date()), time: "" });
+    setDraft({ patient_name: "", doctor_id: "", date: date || iso(new Date()), time: "10:00", notes: "", cancelled: false });
     setModalOpen(true);
   };
   const openEdit = (a) => {
     setEditingId(a.id);
-    setDraft({ patient_name: a.patient_name || a.lead_name || "", doctor_id: a.doctor_id, date: a.appointment_date, time: a.appointment_time });
+    setDraft({ patient_name: a.patient_name || a.lead_name || "", doctor_id: a.doctor_id, date: a.appointment_date, time: a.appointment_time, notes: a.notes || "", cancelled: false });
     setModalOpen(true);
   };
-  const closeModal = () => { setModalOpen(false); setEditingId(null); setAvail(null); };
-
-  const timeOptions = useMemo(() => {
-    const slots = avail?.open ? [...(avail.slots || [])] : [];
-    // When editing, the appointment's own time is "booked" by itself — keep it selectable.
-    if (editingId && draft.time && !slots.includes(draft.time)) slots.push(draft.time);
-    return slots.sort();
-  }, [avail, editingId, draft.time]);
+  const closeModal = () => { setModalOpen(false); setEditingId(null); setExperts([]); };
 
   const submit = async () => {
     if (!draft.patient_name.trim()) { toast.error("Enter the patient name"); return; }
-    if (!draft.doctor_id) { toast.error("Select a Head Physio"); return; }
-    if (!draft.date) { toast.error("Pick a date"); return; }
-    if (!draft.time) { toast.error("Pick an available time"); return; }
+    if (!draft.date || !draft.time) { toast.error("Date and time are required"); return; }
+    if (editingId && draft.cancelled) { await cancelAppt(); return; }
+    if (!draft.doctor_id) { toast.error("Please select an expert"); return; }
     setSaving(true);
     try {
+      const payload = { patient_name: draft.patient_name.trim(), doctor_id: draft.doctor_id, date: draft.date, time: draft.time, notes: draft.notes };
       if (editingId) {
-        await updateConsultAppointment(editingId, { patient_name: draft.patient_name.trim(), doctor_id: draft.doctor_id, date: draft.date, time: draft.time });
+        await updateConsultAppointment(editingId, payload);
         toast.success("Appointment updated");
       } else {
-        await createConsultAppointment(branchId, { patient_name: draft.patient_name.trim(), doctor_id: draft.doctor_id, date: draft.date, time: draft.time });
+        await createConsultAppointment(branchId, payload);
         toast.success("Consultation booked");
       }
       closeModal();
@@ -334,72 +324,82 @@ export const BranchCalendarPanel = ({ branchId }) => {
         </p>
       )}
 
-      {/* Booking / edit modal */}
+      {/* Appointment Date & Time modal — same format/flow as Branch Leads */}
       {modalOpen && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" data-testid="cal-booking-modal" onMouseDown={closeModal}>
-          <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl" onMouseDown={(e) => e.stopPropagation()}>
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-base font-semibold text-slate-800">{editingId ? "Edit Consultation" : "Book Consultation"}</h3>
-              <button onClick={closeModal} className="text-slate-400 hover:text-slate-600" data-testid="cal-modal-close"><X className="h-4 w-4" /></button>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" onMouseDown={(e) => { if (e.target === e.currentTarget) closeModal(); }} data-testid="cal-booking-modal">
+          <div className="max-h-[90vh] w-full max-w-md overflow-hidden overflow-y-auto rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between bg-gradient-to-r from-teal-500 to-cyan-600 px-5 py-4 text-white">
+              <div className="flex items-center gap-2">
+                <CalendarIcon className="h-5 w-5" />
+                <p className="text-base font-semibold">Appointment Date &amp; Time</p>
+              </div>
+              <button onClick={closeModal} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="cal-modal-close"><X className="h-4 w-4" /></button>
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-4 p-5">
               <div>
-                <label className="mb-1 block text-xs font-medium text-slate-500">Patient Name</label>
+                <label className="mb-1 block text-xs font-semibold text-slate-600">Patient Name *</label>
                 <Input value={draft.patient_name} onChange={(e) => setDraft((p) => ({ ...p, patient_name: e.target.value }))} placeholder="Client name" data-testid="cal-modal-patient" />
               </div>
-
               <div>
-                <label className="mb-1 block text-xs font-medium text-slate-500">Head Physio</label>
-                <select
-                  value={draft.doctor_id}
-                  onChange={(e) => setDraft((p) => ({ ...p, doctor_id: e.target.value, time: "" }))}
-                  className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm"
-                  data-testid="cal-modal-physio"
-                >
-                  <option value="">-- select a Head Physio --</option>
-                  {headPhysios.map((d) => <option key={d.id} value={d.id}>{d.full_name}</option>)}
-                </select>
-                {headPhysios.length === 0 && <p className="mt-1 text-[11px] text-amber-600">No Head Physios assigned to this branch yet — ask HR/Super Admin.</p>}
+                <label className="mb-1 block text-xs font-semibold text-slate-600">Date *</label>
+                <Input type="date" value={draft.date} onChange={(e) => setDraft((p) => ({ ...p, date: e.target.value }))} data-testid="cal-modal-date" />
               </div>
-
               <div>
-                <label className="mb-1 block text-xs font-medium text-slate-500">Date</label>
-                <Input type="date" value={draft.date} onChange={(e) => setDraft((p) => ({ ...p, date: e.target.value, time: "" }))} data-testid="cal-modal-date" />
+                <label className="mb-1 block text-xs font-semibold text-slate-600">Time *</label>
+                <Input type="time" value={draft.time} onChange={(e) => setDraft((p) => ({ ...p, time: e.target.value }))} data-testid="cal-modal-time" />
               </div>
-
               <div>
-                <label className="mb-1 block text-xs font-medium text-slate-500">Time {availLoading && <span className="text-slate-400">· checking availability…</span>}</label>
-                {avail && !avail.open ? (
-                  <p className="rounded-md bg-rose-50 px-3 py-2 text-xs font-medium text-rose-500" data-testid="cal-modal-closed">{avail.reason || "The branch is closed on this date."}</p>
+                <label className="mb-1 block text-xs font-semibold text-slate-600">Experts *</label>
+                <p className="mb-1.5 text-[11px] text-slate-400">Showing experts available on this date.</p>
+                {expertsLoading ? (
+                  <p className="text-xs text-slate-400">Checking availability...</p>
+                ) : experts.length === 0 ? (
+                  <p className="text-xs text-slate-400">No experts available on this date.</p>
                 ) : (
-                  <select
-                    value={draft.time}
-                    onChange={(e) => setDraft((p) => ({ ...p, time: e.target.value }))}
-                    disabled={!draft.doctor_id || !draft.date || availLoading}
-                    className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm disabled:opacity-50"
-                    data-testid="cal-modal-time"
-                  >
-                    <option value="">{timeOptions.length ? "-- select an available time --" : "No available times"}</option>
-                    {timeOptions.map((t) => <option key={t} value={t}>{to12h(t)}</option>)}
-                  </select>
+                  <div className="space-y-1.5">
+                    {experts.map((doc) => (
+                      <button
+                        key={doc.id}
+                        type="button"
+                        onClick={() => setDraft((p) => ({ ...p, doctor_id: doc.id }))}
+                        className={`flex w-full items-center gap-3 rounded-md border p-2.5 text-left ${draft.doctor_id === doc.id ? "border-teal-400 bg-teal-50" : "border-slate-200 bg-white hover:bg-slate-50"}`}
+                        data-testid={`cal-modal-expert-${doc.id}`}
+                      >
+                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-teal-100 text-xs font-bold text-teal-700">{doc.full_name?.charAt(0) || "E"}</div>
+                        <div>
+                          <p className="text-sm font-medium text-slate-800">{doc.full_name}</p>
+                          <p className="text-[10px] text-slate-400">{doc.specialization || doc.profile_type || "Expert"}</p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
                 )}
-                {avail?.open && <p className="mt-1 text-[11px] text-slate-400">Working hours {to12h(avail.open_time)}–{to12h(avail.close_time)}. Already-booked times are hidden.</p>}
               </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-600">Notes</label>
+                <textarea
+                  rows={3}
+                  className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-teal-400 focus:outline-none focus:ring-1 focus:ring-teal-400"
+                  placeholder="Optional notes about the appointment..."
+                  value={draft.notes}
+                  onChange={(e) => setDraft((p) => ({ ...p, notes: e.target.value }))}
+                  data-testid="cal-modal-notes"
+                />
+              </div>
+              {editingId && (
+                <label className="flex items-center gap-2 text-sm text-slate-600">
+                  <input type="checkbox" checked={draft.cancelled} onChange={(e) => setDraft((p) => ({ ...p, cancelled: e.target.checked }))} data-testid="cal-modal-cancel-toggle" />
+                  Cancelled
+                </label>
+              )}
             </div>
 
-            <div className="mt-5 flex items-center justify-between gap-2">
-              {editingId ? (
-                <Button variant="outline" onClick={cancelAppt} disabled={saving} className="border-rose-200 text-rose-600 hover:bg-rose-50" data-testid="cal-modal-cancel-appt">
-                  Cancel Appointment
-                </Button>
-              ) : <span />}
-              <div className="flex gap-2">
-                <Button variant="outline" onClick={closeModal} disabled={saving} data-testid="cal-modal-dismiss">Close</Button>
-                <Button onClick={submit} disabled={saving} className="bg-sky-600 hover:bg-sky-700" data-testid="cal-modal-save">
-                  {saving ? "Saving…" : editingId ? "Save Changes" : "Confirm Booking"}
-                </Button>
-              </div>
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/40 px-5 py-3">
+              <Button variant="outline" onClick={closeModal} disabled={saving} data-testid="cal-modal-dismiss">Cancel</Button>
+              <Button className="bg-teal-600 text-white hover:bg-teal-700" onClick={submit} disabled={saving} data-testid="cal-modal-save">
+                {saving ? "Saving…" : "Confirm"}
+              </Button>
             </div>
           </div>
         </div>

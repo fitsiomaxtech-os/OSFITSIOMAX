@@ -30,6 +30,7 @@ class ConsultApptCreate(BaseModel):
     date: str   # YYYY-MM-DD
     time: str   # HH:MM
     duration: Optional[int] = 30
+    notes: Optional[str] = None
     lead_id: Optional[str] = None
 
 
@@ -39,6 +40,7 @@ class ConsultApptUpdate(BaseModel):
     date: Optional[str] = None
     time: Optional[str] = None
     duration: Optional[int] = None
+    notes: Optional[str] = None
 
 
 def _day_key(date_str: str) -> Optional[str]:
@@ -55,10 +57,12 @@ async def _get_branch(branch_id: str) -> dict:
     return branch
 
 
-async def _get_head_physio(doctor_id: str) -> dict:
-    doc = await v3_col("doctors").find_one({"id": doctor_id, "profile_type": "head_physio"}, {"_id": 0})
+async def _get_doctor(doctor_id: str) -> dict:
+    # Any branch expert can be chosen for the appointment (matches the Branch Leads
+    # "Appointment Date & Time" flow, which lists all available experts).
+    doc = await v3_col("doctors").find_one({"id": doctor_id}, {"_id": 0})
     if not doc:
-        raise HTTPException(status_code=404, detail="Head Physio not found")
+        raise HTTPException(status_code=404, detail="Expert not found")
     return doc
 
 
@@ -135,7 +139,7 @@ async def create_consult_appointment(branch_id: str, payload: ConsultApptCreate,
     if not payload.patient_name.strip():
         raise HTTPException(status_code=400, detail="Patient name is required")
     branch = await _get_branch(branch_id)
-    doc = await _get_head_physio(payload.doctor_id)
+    doc = await _get_doctor(payload.doctor_id)
     slot = await _validate_slot(branch, payload.date, payload.time, payload.doctor_id)
     appt = {
         "id": str(uuid.uuid4()),
@@ -149,6 +153,7 @@ async def create_consult_appointment(branch_id: str, payload: ConsultApptCreate,
         "appointment_time": payload.time,
         "slot_time": slot,
         "duration": payload.duration or 30,
+        "notes": (payload.notes or "").strip(),
         "status": "new_appointment",
         "appt_kind": "consultation",
         "created_by": user.full_name,
@@ -173,10 +178,12 @@ async def update_consult_appointment(appt_id: str, payload: ConsultApptUpdate, _
         slot = await _validate_slot(branch, new_date, new_time, new_doctor, exclude_id=appt_id)
         updates.update({"appointment_date": new_date, "appointment_time": new_time, "slot_time": slot, "doctor_id": new_doctor})
         if payload.doctor_id and payload.doctor_id != appt["doctor_id"]:
-            updates["doctor_name"] = (await _get_head_physio(payload.doctor_id))["full_name"]
+            updates["doctor_name"] = (await _get_doctor(payload.doctor_id))["full_name"]
     if payload.patient_name is not None and payload.patient_name.strip():
         updates["patient_name"] = payload.patient_name.strip()
         updates["lead_name"] = payload.patient_name.strip()
+    if payload.notes is not None:
+        updates["notes"] = payload.notes.strip()
     if payload.duration:
         updates["duration"] = payload.duration
     await v3_col("appointments").update_one({"id": appt_id}, {"$set": updates})
