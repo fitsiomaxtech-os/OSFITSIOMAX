@@ -953,6 +953,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                       </div>
                     );
                   }
+                  const treatmentPaid = selectedLead.treatment_fee_paid != null;
                   return (
                     <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3" data-testid="cons-stage-panel-fee-collected">
                       <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-indigo-700">
@@ -972,13 +973,30 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                           </div>
                           <div className="flex items-center justify-between">
                             <span className="text-xs text-slate-500">Treatment Fee</span>
-                            <span className="font-semibold text-slate-800">{selectedLead.session_package_price != null ? `Rs.${selectedLead.session_package_price}` : "—"}</span>
+                            <span className="font-semibold text-slate-800">
+                              {selectedLead.session_package_price != null ? `Rs.${selectedLead.session_package_price}` : "—"}
+                              {treatmentPaid && <span className="ml-1 capitalize text-emerald-600">({selectedLead.treatment_fee_payment_mode})</span>}
+                            </span>
                           </div>
                         </div>
-                        <Button size="sm" className="mt-3 bg-indigo-600 text-xs hover:bg-indigo-700" onClick={openTreatmentFeeDraft} data-testid="cons-open-treatment-fee">
-                          Collect Payment
-                        </Button>
+                        {treatmentPaid ? (
+                          <p className="mt-1 flex items-center gap-1 text-[11px] font-medium text-emerald-600" data-testid="cons-treatment-fee-already-collected">
+                            <CheckCircle2 className="h-3 w-3" /> Already Collected
+                          </p>
+                        ) : (
+                          <Button size="sm" className="mt-3 bg-indigo-600 text-xs hover:bg-indigo-700" onClick={openTreatmentFeeDraft} data-testid="cons-open-treatment-fee">
+                            Collect Payment
+                          </Button>
+                        )}
                       </div>
+                      {treatmentPaid && (
+                        <div className="mt-3 border-t border-indigo-100 pt-3">
+                          <p className="mb-2 text-xs text-slate-600">Both fees collected. Choose the physiotherapist who will deliver the sessions.</p>
+                          <Button size="sm" className="bg-violet-600 text-xs hover:bg-violet-700" onClick={openPhysioModal} data-testid="cons-open-physio-assign-from-fee-collected">
+                            Assign Physio
+                          </Button>
+                        </div>
+                      )}
                       <div className="mt-3 flex flex-wrap gap-1.5">{CancelButton}</div>
                     </div>
                   );

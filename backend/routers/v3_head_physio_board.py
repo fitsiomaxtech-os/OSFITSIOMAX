@@ -345,14 +345,14 @@ async def hp_assign_consultation_physio(
     user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
 ):
     """Branch Admin picks the physio who will deliver the assigned package's
-    treatment sessions — the last step in the Consultations pipeline. Collecting
-    the Treatment Fee already advances the lead straight to 'Physio Assign', so
-    this is callable there for both the first assignment and reassigning to a
-    different physio."""
+    treatment sessions — the last step in the Consultations pipeline. The lead
+    rests at 'Fee Collected' once both fees are paid; this call is what actually
+    advances it to 'Physio Assign'. Also callable while already at 'Physio Assign'
+    for reassigning to a different physio."""
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    if lead.get("consultation_stage") != "Physio Assign":
+    if lead.get("consultation_stage") not in ("Fee Collected", "Physio Assign") or lead.get("treatment_fee_paid") is None:
         raise HTTPException(status_code=400, detail="A physio can only be assigned after the Treatment Fee has been collected")
     physio = await v3_col("doctors").find_one(
         {"id": payload.physio_id, "profile_type": "physio"}, {"_id": 0}

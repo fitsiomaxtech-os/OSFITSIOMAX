@@ -217,8 +217,9 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
     — any payment method is allowed here, including Cheque/Partial, but neither the
     package nor the amount can be changed here; both are locked in from
     session_package_id/session_package_price. Both Consultation Fee and Treatment
-    Fee are collected while the lead sits in the single 'Fee Collected' stage;
-    successful Treatment Fee collection is what finally advances it to Physio Assign."""
+    Fee are collected while the lead rests in the 'Fee Collected' stage; it stays
+    there after this call — moving on to Physio Assign is a separate, explicit
+    action (assign-consultation-physio), not an automatic side effect of payment."""
     if payload.payment_mode not in TREATMENT_FEE_PAYMENT_MODES:
         raise HTTPException(status_code=400, detail=f"Treatment Fee only accepts: {sorted(TREATMENT_FEE_PAYMENT_MODES)}")
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
@@ -275,11 +276,16 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
         detail_suffix = f" · {', '.join(parts)}"
 
     is_update = lead.get("treatment_fee_paid") is not None
+    # Rests at 'Fee Collected' on first collection — Physio Assign only happens via
+    # the separate assign-consultation-physio action. If this is just a payment-mode
+    # correction on a lead that's already past that (physio already assigned), leave
+    # its stage where it is rather than moving it backward.
+    stage_after = "Physio Assign" if lead.get("consultation_stage") == "Physio Assign" else "Fee Collected"
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {
         "treatment_fee_paid": amount,
         "treatment_fee_payment_mode": payload.payment_mode,
         "treatment_fee_payment_details": payment_details or None,
-        "consultation_stage": "Physio Assign",
+        "consultation_stage": stage_after,
         "updated_at": _now(),
     }})
     # For Partial Payment, only the first installment is actually collected right
