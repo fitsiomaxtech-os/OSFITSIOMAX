@@ -34,6 +34,15 @@ const partialInstallmentLabel = (idx) => `${PARTIAL_ORDINALS[idx] || `#${idx + 1
 // One distinct color per Treatment Package option (cycles if there are ever more than 5).
 const TREATMENT_PACKAGE_COLORS = ["#2563eb", "#059669", "#d97706", "#7c3aed", "#e11d48"];
 
+// One fixed color per payment mode, consistent everywhere it's offered.
+const PAYMENT_MODE_COLORS = {
+  cash: "#059669",
+  upi: "#2563eb",
+  card: "#7c3aed",
+  cheque: "#d97706",
+  partial: "#e11d48",
+};
+
 export const ConsultationsBoard = ({ branchId, viewerRole }) => {
   const isConsultant = viewerRole === "head_physio";
   // Head Physio tracks progress on their own independent pipeline (head_consultation_stage),
@@ -1163,16 +1172,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                     </div>
                     <div>
                       <label className="mb-1 block text-[11px] font-medium text-slate-500">Payment Mode</label>
-                      <select
+                      <PaymentModeSelect
                         value={collectFeeDraft.payment_mode}
-                        onChange={(e) => setCollectFeeDraft({ ...collectFeeDraft, payment_mode: e.target.value })}
-                        className="h-9 w-full rounded-md border border-slate-200 px-2 text-xs"
-                        data-testid="cons-collect-fee-mode"
-                      >
-                        {CONSULTATION_FEE_PAYMENT_MODES.map((m) => (
-                          <option key={m.value} value={m.value}>{m.label}</option>
-                        ))}
-                      </select>
+                        options={CONSULTATION_FEE_PAYMENT_MODES}
+                        onChange={(v) => setCollectFeeDraft({ ...collectFeeDraft, payment_mode: v })}
+                        testId="cons-collect-fee-mode"
+                      />
                     </div>
                   </div>
 
@@ -1200,16 +1205,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                       </div>
                       <div>
                         <label className="mb-1 block text-[11px] font-medium text-slate-500">Payment Mode</label>
-                        <select
+                        <PaymentModeSelect
                           value={treatmentFeeDraft.payment_mode}
-                          onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, payment_mode: e.target.value })}
-                          className="h-9 w-full rounded-md border border-slate-200 px-2 text-xs"
-                          data-testid="cons-treatment-fee-mode"
-                        >
-                          {TREATMENT_FEE_PAYMENT_MODES.map((m) => (
-                            <option key={m.value} value={m.value}>{m.label}</option>
-                          ))}
-                        </select>
+                          options={TREATMENT_FEE_PAYMENT_MODES}
+                          onChange={(v) => setTreatmentFeeDraft({ ...treatmentFeeDraft, payment_mode: v })}
+                          testId="cons-treatment-fee-mode"
+                        />
                       </div>
 
                       {treatmentFeeDraft.payment_mode === "card" && (
@@ -1385,16 +1386,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                   </div>
                   <div>
                     <label className="mb-1 block text-[11px] font-medium text-slate-500">Payment Mode</label>
-                    <select
+                    <PaymentModeSelect
                       value={treatmentFeeDraft.payment_mode}
-                      onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, payment_mode: e.target.value })}
-                      className="h-9 w-full rounded-md border border-slate-200 px-2 text-xs"
-                      data-testid="cons-treatment-fee-mode"
-                    >
-                      {TREATMENT_FEE_PAYMENT_MODES.map((m) => (
-                        <option key={m.value} value={m.value}>{m.label}</option>
-                      ))}
-                    </select>
+                      options={TREATMENT_FEE_PAYMENT_MODES}
+                      onChange={(v) => setTreatmentFeeDraft({ ...treatmentFeeDraft, payment_mode: v })}
+                      testId="cons-treatment-fee-mode"
+                    />
                   </div>
 
                   {treatmentFeeDraft.payment_mode === "card" && (
@@ -1753,6 +1750,51 @@ function AllStagesStepper({ stages, currentStage }) {
           </span>
         );
       })}
+    </div>
+  );
+}
+
+// Colored, centered replacement for a native <select> of payment modes —
+// native <option> backgrounds can't be reliably styled/centered cross-browser.
+function PaymentModeSelect({ value, options, onChange, testId }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+  const current = options.find((o) => o.value === value);
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex h-9 w-full items-center justify-center rounded-md px-2 text-center text-xs font-semibold text-white hover:opacity-90"
+        style={{ backgroundColor: PAYMENT_MODE_COLORS[value] || "#64748b" }}
+        data-testid={testId}
+      >
+        {current?.label || "-- select --"}
+      </button>
+      {open && (
+        <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-md border border-slate-200 bg-white shadow-lg" data-testid={`${testId}-options`}>
+          {options.map((o) => (
+            <button
+              key={o.value}
+              type="button"
+              onClick={() => { onChange(o.value); setOpen(false); }}
+              className="block w-full py-2 text-center text-xs font-semibold text-white transition-opacity hover:opacity-90"
+              style={{ backgroundColor: PAYMENT_MODE_COLORS[o.value] || "#64748b" }}
+              data-testid={`${testId}-option-${o.value}`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
