@@ -148,7 +148,6 @@ async def consult_day(branch_id: str, date: str, _: V3UserOut = Depends(v3_requi
     if not is_open:
         return {"open": False, "reason": reason, "open_time": None, "close_time": None, "head_physios": []}
 
-    all_slots = _slots_between(open_t, close_t)
     hps = await v3_col("doctors").find(
         {"branch_id": branch_id, "profile_type": "head_physio"}, {"_id": 0}
     ).to_list(200)
@@ -168,11 +167,18 @@ async def consult_day(branch_id: str, date: str, _: V3UserOut = Depends(v3_requi
     head_physios = []
     for d in hps:
         booked = booked_by_doc.get(d["id"], set())
+        # Availability is the Head Physio's OWN calendar slots (set in the Consultant
+        # Calendar) for this date, minus the ones already booked — not the whole
+        # branch working day.
+        day_times = sorted({
+            s.split("T")[1] for s in (d.get("slots") or [])
+            if isinstance(s, str) and s.startswith(f"{date}T")
+        })
         head_physios.append({
             "id": d["id"],
             "full_name": d["full_name"],
             "specialization": d.get("specialization", ""),
-            "available_slots": [s for s in all_slots if s not in booked],
+            "available_slots": [t for t in day_times if t not in booked],
             "booked_slots": sorted(booked),
         })
     return {"open": True, "reason": None, "open_time": open_t, "close_time": close_t, "head_physios": head_physios}

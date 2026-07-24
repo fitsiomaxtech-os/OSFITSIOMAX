@@ -380,7 +380,7 @@ export const BranchCalendarPanel = ({ branchId }) => {
                 <>
                   <div>
                     <label className="mb-1 block text-xs font-semibold text-slate-600">Head Physio *</label>
-                    <p className="mb-1.5 text-[11px] text-slate-400">Head Physios at this branch · working hours {to12h(dayInfo.open_time)}–{to12h(dayInfo.close_time)}.</p>
+                    <p className="mb-1.5 text-[11px] text-slate-400">Available times come from each Head Physio's calendar. Branch open {to12h(dayInfo.open_time)}–{to12h(dayInfo.close_time)}.</p>
                     {dayInfo.head_physios.length === 0 ? (
                       <p className="text-xs text-amber-600">No Head Physios assigned to this branch yet — ask HR / Super Admin.</p>
                     ) : (
@@ -402,7 +402,7 @@ export const BranchCalendarPanel = ({ branchId }) => {
                                 <p className="truncate text-[10px] text-slate-400">{hp.specialization || "Head Physio"}</p>
                               </div>
                               <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${freeCount > 0 ? "bg-emerald-50 text-emerald-600" : "bg-slate-100 text-slate-400"}`}>
-                                {freeCount > 0 ? `${freeCount} slots` : "Fully booked"}
+                                {freeCount > 0 ? `${freeCount} slots` : "No slots"}
                               </span>
                             </button>
                           );
