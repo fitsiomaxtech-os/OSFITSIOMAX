@@ -19,6 +19,15 @@ const DAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
+// 24h "HH:MM" -> 12h "h:MM AM/PM" for display only (stored/sent values stay 24h).
+const to12h = (t) => {
+  if (!t || !t.includes(":")) return t || "--:--";
+  const [h, m] = t.split(":");
+  const hr = parseInt(h, 10);
+  const h12 = hr % 12 === 0 ? 12 : hr % 12;
+  return `${h12}:${m} ${hr >= 12 ? "PM" : "AM"}`;
+};
+
 const emptyDraft = () => ({ patient_name: "", doctor_id: "", date: iso(new Date()), time: "" });
 
 // The branch Calendar reflects the working hours + holidays configured by Super Admin
@@ -260,16 +269,16 @@ export const BranchCalendarPanel = ({ branchId }) => {
                         type="button"
                         onClick={() => openEdit(a)}
                         className="block w-full truncate rounded border border-violet-200 bg-violet-50 px-1.5 py-0.5 text-left text-[10px] font-medium text-violet-700 hover:bg-violet-100"
-                        title={`${a.appointment_time} · ${a.patient_name || a.lead_name || ""}${a.doctor_name ? " · " + a.doctor_name : ""}`}
+                        title={`${to12h(a.appointment_time)} · ${a.patient_name || a.lead_name || ""}${a.doctor_name ? " · " + a.doctor_name : ""}`}
                         data-testid={`cal-appt-${a.id}`}
                       >
-                        <span className="font-bold">{a.appointment_time}</span> {a.patient_name || a.lead_name || "—"}
+                        <span className="font-bold">{to12h(a.appointment_time)}</span> {a.patient_name || a.lead_name || "—"}
                       </button>
                     ))}
                     {moreCount > 0 && <p className="px-1 text-[10px] font-medium text-slate-400">+{moreCount} more</p>}
                     {dayLeadAppts.slice(0, 2).map((a) => (
-                      <div key={a.id} className="truncate rounded border border-sky-100 bg-sky-50/60 px-1.5 py-0.5 text-[10px] text-slate-500" title={`${a.appointment_time || ""} · ${a.name || ""}`} data-testid={`cal-lead-appt-${a.id}`}>
-                        <span className="font-semibold text-sky-600">{a.appointment_time || "--:--"}</span> {a.name || "—"}
+                      <div key={a.id} className="truncate rounded border border-sky-100 bg-sky-50/60 px-1.5 py-0.5 text-[10px] text-slate-500" title={`${to12h(a.appointment_time)} · ${a.name || ""}`} data-testid={`cal-lead-appt-${a.id}`}>
+                        <span className="font-semibold text-sky-600">{to12h(a.appointment_time)}</span> {a.name || "—"}
                       </div>
                     ))}
                   </>
@@ -301,7 +310,7 @@ export const BranchCalendarPanel = ({ branchId }) => {
                   >
                     <div className="flex w-16 shrink-0 flex-col items-center rounded-md bg-violet-50 py-1">
                       <Clock className="h-3 w-3 text-violet-500" />
-                      <span className="text-xs font-bold text-violet-700">{a.appointment_time || "--:--"}</span>
+                      <span className="text-xs font-bold text-violet-700">{to12h(a.appointment_time)}</span>
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-semibold text-slate-800" title={a.patient_name}>{a.patient_name || a.lead_name || "—"}</p>
@@ -372,10 +381,10 @@ export const BranchCalendarPanel = ({ branchId }) => {
                     data-testid="cal-modal-time"
                   >
                     <option value="">{timeOptions.length ? "-- select an available time --" : "No available times"}</option>
-                    {timeOptions.map((t) => <option key={t} value={t}>{t}</option>)}
+                    {timeOptions.map((t) => <option key={t} value={t}>{to12h(t)}</option>)}
                   </select>
                 )}
-                {avail?.open && <p className="mt-1 text-[11px] text-slate-400">Working hours {avail.open_time}–{avail.close_time}. Already-booked times are hidden.</p>}
+                {avail?.open && <p className="mt-1 text-[11px] text-slate-400">Working hours {to12h(avail.open_time)}–{to12h(avail.close_time)}. Already-booked times are hidden.</p>}
               </div>
             </div>
 
