@@ -26,6 +26,7 @@ export const BranchCalendarPanel = ({ branchId }) => {
   const [leads, setLeads] = useState([]);
   const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()));
   const [loading, setLoading] = useState(false);
+  const [subTab, setSubTab] = useState("schedule");
 
   const load = useCallback(async () => {
     if (!branchId) return;
@@ -58,22 +59,46 @@ export const BranchCalendarPanel = ({ branchId }) => {
     return map;
   }, [leads]);
 
+  // Upcoming = appointments dated today or later, grouped by date (ascending).
+  const upcomingGroups = useMemo(() => {
+    const today = iso(new Date());
+    const map = {};
+    (leads || []).forEach((l) => {
+      if (!l.appointment_date || l.appointment_date < today) return;
+      (map[l.appointment_date] = map[l.appointment_date] || []).push(l);
+    });
+    const dates = Object.keys(map).sort();
+    dates.forEach((d) => map[d].sort((a, b) => (a.appointment_time || "").localeCompare(b.appointment_time || "")));
+    return dates.map((d) => ({ date: d, items: map[d] }));
+  }, [leads]);
+
   const todayIso = iso(new Date());
   const shiftWeek = (delta) => { const d = new Date(weekStart); d.setDate(d.getDate() + delta * 7); setWeekStart(d); };
   const rangeLabel = `${MONTHS[days[0].getMonth()]} ${days[0].getDate()} – ${MONTHS[days[6].getMonth()]} ${days[6].getDate()}, ${days[6].getFullYear()}`;
 
   return (
     <div className="space-y-4" data-testid="branch-calendar-panel">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="flex items-center gap-2 text-2xl font-bold text-slate-900"><CalendarIcon className="h-6 w-6 text-sky-600" /> Calendar</h2>
-          <p className="text-sm text-slate-500">Weekly schedule from the Super Admin → Branch Management setup, with appointments overlaid.</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button size="sm" variant="outline" onClick={() => shiftWeek(-1)} data-testid="cal-prev-week"><ChevronLeft className="h-4 w-4" /></Button>
-          <Button size="sm" variant="outline" onClick={() => setWeekStart(mondayOf(new Date()))} data-testid="cal-this-week">This Week</Button>
-          <Button size="sm" variant="outline" onClick={() => shiftWeek(1)} data-testid="cal-next-week"><ChevronRight className="h-4 w-4" /></Button>
-        </div>
+      <div>
+        <h2 className="flex items-center gap-2 text-2xl font-bold text-slate-900"><CalendarIcon className="h-6 w-6 text-sky-600" /> Calendar</h2>
+        <p className="text-sm text-slate-500">Weekly schedule from the Super Admin → Branch Management setup, with appointments overlaid.</p>
+      </div>
+
+      {/* Sub-tabs */}
+      <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="cal-subtabs">
+        <button type="button" onClick={() => setSubTab("schedule")} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${subTab === "schedule" ? "bg-sky-50 text-sky-600" : "text-slate-600 hover:bg-slate-50"}`} data-testid="cal-subtab-schedule">
+          <CalendarIcon className="h-4 w-4" />Schedule
+        </button>
+        <button type="button" onClick={() => setSubTab("upcoming")} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${subTab === "upcoming" ? "bg-sky-50 text-sky-600" : "text-slate-600 hover:bg-slate-50"}`} data-testid="cal-subtab-upcoming">
+          <Clock className="h-4 w-4" />Upcoming Appointments
+        </button>
+      </div>
+
+      {subTab === "schedule" ? (
+      <>
+      <div className="flex items-center justify-end gap-2">
+        <Button size="sm" variant="outline" onClick={() => shiftWeek(-1)} data-testid="cal-prev-week"><ChevronLeft className="h-4 w-4" /></Button>
+        <Button size="sm" variant="outline" onClick={() => setWeekStart(mondayOf(new Date()))} data-testid="cal-this-week">This Week</Button>
+        <Button size="sm" variant="outline" onClick={() => shiftWeek(1)} data-testid="cal-next-week"><ChevronRight className="h-4 w-4" /></Button>
       </div>
 
       <p className="text-sm font-semibold text-slate-600" data-testid="cal-range-label">{rangeLabel}</p>
@@ -129,6 +154,39 @@ export const BranchCalendarPanel = ({ branchId }) => {
           );
         })}
       </div>
+      </>
+      ) : (
+      <div className="space-y-4" data-testid="cal-upcoming-list">
+        {upcomingGroups.length === 0 ? (
+          <p className="rounded-lg border border-dashed border-slate-200 px-3 py-8 text-center text-sm text-slate-400">No upcoming appointments.</p>
+        ) : (
+          upcomingGroups.map((g) => (
+            <div key={g.date} data-testid={`cal-upcoming-${g.date}`}>
+              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                {new Date(g.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", year: "numeric" })}
+              </p>
+              <div className="space-y-1.5">
+                {g.items.map((a) => (
+                  <div key={a.id} className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2" data-testid={`cal-upcoming-appt-${a.id}`}>
+                    <div className="flex w-16 shrink-0 flex-col items-center rounded-md bg-sky-50 py-1">
+                      <Clock className="h-3 w-3 text-sky-500" />
+                      <span className="text-xs font-bold text-sky-700">{a.appointment_time || "--:--"}</span>
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-slate-800" title={a.name}>{a.name || "—"}</p>
+                      {a.assigned_physio_name && (
+                        <p className="flex items-center gap-1 truncate text-xs text-slate-500"><User className="h-3 w-3" />{a.assigned_physio_name}</p>
+                      )}
+                    </div>
+                    {a.branch_stage && <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">{a.branch_stage}</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+      )}
 
       {loading && <p className="text-center text-xs text-slate-400">Loading…</p>}
       {!loading && !branch && (
