@@ -105,21 +105,23 @@ async def list_consult_appointments(branch_id: str, _: V3UserOut = Depends(v3_re
     return {"appointments": rows}
 
 
+def _slots_between(open_t: str, close_t: str) -> list:
+    """30-minute start times in [open, close)."""
+    def to_min(t):
+        h, m = t.split(":")
+        return int(h) * 60 + int(m)
+    start, end = to_min(open_t), to_min(close_t)
+    return [f"{x // 60:02d}:{x % 60:02d}" for x in range(start, end, 30)]
+
+
 @router.get("/branch-admin/{branch_id}/consult-availability")
 async def consult_availability(branch_id: str, date: str, doctor_id: str, _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
-    """Available 30-minute start times for a Head Physio on a date, derived from the
+    """Available 30-minute start times for one Head Physio on a date, derived from the
     branch working hours minus times that Head Physio is already booked."""
     branch = await _get_branch(branch_id)
     is_open, open_t, close_t, reason = _hours_for(branch, date)
     if not is_open:
         return {"open": False, "reason": reason, "slots": []}
-
-    def to_min(t):
-        h, m = t.split(":")
-        return int(h) * 60 + int(m)
-
-    start, end = to_min(open_t), to_min(close_t)
-    all_slots = [f"{x // 60:02d}:{x % 60:02d}" for x in range(start, end, 30)]
     booked_rows = await v3_col("appointments").find(
         {"doctor_id": doctor_id, "status": "new_appointment", "slot_time": {"$regex": f"^{date}T"}},
         {"_id": 0, "slot_time": 1},
@@ -129,9 +131,51 @@ async def consult_availability(branch_id: str, date: str, doctor_id: str, _: V3U
         "open": True,
         "open_time": open_t,
         "close_time": close_t,
-        "slots": [s for s in all_slots if s not in booked],
+        "slots": [s for s in _slots_between(open_t, close_t) if s not in booked],
         "booked": sorted(booked),
     }
+
+
+@router.get("/branch-admin/{branch_id}/consult-day")
+async def consult_day(branch_id: str, date: str, _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
+    """Drives the Consultation Calendar booking flow for a selected date:
+    1) validate the date against the branch working calendar (weekly hours + holidays);
+    2) if open, load every Head Physio assigned to the branch and, per physio, return
+       the branch working-hour slots minus the 30-min slots they are already booked for
+       on that date. If closed/holiday, returns open=False with a reason and no physios."""
+    branch = await _get_branch(branch_id)
+    is_open, open_t, close_t, reason = _hours_for(branch, date)
+    if not is_open:
+        return {"open": False, "reason": reason, "open_time": None, "close_time": None, "head_physios": []}
+
+    all_slots = _slots_between(open_t, close_t)
+    hps = await v3_col("doctors").find(
+        {"branch_id": branch_id, "profile_type": "head_physio"}, {"_id": 0}
+    ).to_list(200)
+    doctor_ids = [d["id"] for d in hps]
+
+    booked_by_doc: dict = {}
+    if doctor_ids:
+        booked_rows = await v3_col("appointments").find(
+            {"doctor_id": {"$in": doctor_ids}, "status": "new_appointment", "slot_time": {"$regex": f"^{date}T"}},
+            {"_id": 0, "doctor_id": 1, "slot_time": 1},
+        ).to_list(2000)
+        for r in booked_rows:
+            st = r.get("slot_time") or ""
+            if "T" in st:
+                booked_by_doc.setdefault(r["doctor_id"], set()).add(st.split("T")[1])
+
+    head_physios = []
+    for d in hps:
+        booked = booked_by_doc.get(d["id"], set())
+        head_physios.append({
+            "id": d["id"],
+            "full_name": d["full_name"],
+            "specialization": d.get("specialization", ""),
+            "available_slots": [s for s in all_slots if s not in booked],
+            "booked_slots": sorted(booked),
+        })
+    return {"open": True, "reason": None, "open_time": open_t, "close_time": close_t, "head_physios": head_physios}
 
 
 @router.post("/branch-admin/{branch_id}/consult-appointments")
