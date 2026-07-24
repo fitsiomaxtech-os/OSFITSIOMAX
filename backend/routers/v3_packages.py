@@ -178,13 +178,13 @@ async def collect_package_payment(lead_id: str, payload: V3CollectPackagePayment
     always the package_price the Head Physio's package assignment set, so Branch
     Admin can confirm the payment mode but can never change the fee itself. Callable
     while the lead is at 'Consultation Visit' (first collection) or already at
-    'Consultation Fee Collected' (correcting/updating a payment already on file)."""
+    'Fee Collected' (correcting/updating a payment already on file)."""
     if payload.payment_mode not in CONSULTATION_FEE_PAYMENT_MODES:
         raise HTTPException(status_code=400, detail=f"Consultation Fee only accepts: {sorted(CONSULTATION_FEE_PAYMENT_MODES)}")
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    if lead.get("consultation_stage") not in ("Consultation Visit", "Consultation Fee Collected"):
+    if lead.get("consultation_stage") not in ("Consultation Visit", "Fee Collected"):
         raise HTTPException(status_code=400, detail="Consultation Fee can only be collected once the Head Physio has completed the consultation")
     if not lead.get("package_id") or lead.get("package_price") is None:
         raise HTTPException(status_code=400, detail="No consultation package assigned yet")
@@ -194,7 +194,7 @@ async def collect_package_payment(lead_id: str, payload: V3CollectPackagePayment
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {
         "package_paid": amount,
         "package_payment_mode": payload.payment_mode,
-        "consultation_stage": "Consultation Fee Collected",
+        "consultation_stage": "Fee Collected",
         "updated_at": _now(),
     }})
     await v3_col("lead_activity").insert_one({
@@ -216,9 +216,9 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
     Physio already chose during the consultation decision (Consultation + Treatment)
     — any payment method is allowed here, including Cheque/Partial, but neither the
     package nor the amount can be changed here; both are locked in from
-    session_package_id/session_package_price. Moves on to Physio Assign once
-    collected. Callable while at 'Consultation Fee Collected' (first collection) or
-    already at 'Treatment Fee Collected' (correcting/updating a payment on file)."""
+    session_package_id/session_package_price. Both Consultation Fee and Treatment
+    Fee are collected while the lead sits in the single 'Fee Collected' stage;
+    successful Treatment Fee collection is what finally advances it to Physio Assign."""
     if payload.payment_mode not in TREATMENT_FEE_PAYMENT_MODES:
         raise HTTPException(status_code=400, detail=f"Treatment Fee only accepts: {sorted(TREATMENT_FEE_PAYMENT_MODES)}")
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
@@ -226,7 +226,7 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
         raise HTTPException(status_code=404, detail="Lead not found")
     if lead.get("consultation_decision") != "consultation_treatment":
         raise HTTPException(status_code=400, detail="This patient's consultation was marked 'Consultation Only' — no Treatment Fee to collect")
-    if lead.get("consultation_stage") not in ("Consultation Fee Collected", "Treatment Fee Collected"):
+    if lead.get("consultation_stage") not in ("Fee Collected", "Physio Assign"):
         raise HTTPException(status_code=400, detail="Treatment Fee can only be collected after the Consultation Fee has been collected")
     if not lead.get("session_package_id") or lead.get("session_package_price") is None:
         raise HTTPException(status_code=400, detail="No treatment package was selected by the Head Physio yet")
@@ -279,7 +279,7 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
         "treatment_fee_paid": amount,
         "treatment_fee_payment_mode": payload.payment_mode,
         "treatment_fee_payment_details": payment_details or None,
-        "consultation_stage": "Treatment Fee Collected",
+        "consultation_stage": "Physio Assign",
         "updated_at": _now(),
     }})
     # For Partial Payment, only the first installment is actually collected right
@@ -308,7 +308,7 @@ async def mark_consultation_completed(lead_id: str, user: V3UserOut = Depends(v3
         raise HTTPException(status_code=404, detail="Lead not found")
     if lead.get("consultation_decision") != "consultation_only":
         raise HTTPException(status_code=400, detail="Only a 'Consultation Only' patient can be marked completed here")
-    if lead.get("consultation_stage") not in ("Consultation Fee Collected", "Consultation Completed"):
+    if lead.get("consultation_stage") not in ("Fee Collected", "Consultation Completed"):
         raise HTTPException(status_code=400, detail="Consultation Fee must be collected before marking the consultation completed")
 
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {

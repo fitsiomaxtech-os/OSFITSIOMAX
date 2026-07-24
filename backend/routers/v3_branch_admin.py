@@ -286,11 +286,10 @@ async def v3_consultations_board(branch_id: str, pipeline: Optional[str] = None,
 # Stages reachable only through their own dedicated, validated action endpoint —
 # never through a plain manual move.
 _CONSULTATION_STAGE_GATED = {
-    "Consultation Visit",       # via consultation-decision (Head Physio's Save & Move)
-    "Consultation Fee Collected",  # via collect-package-payment
-    "Treatment Fee Collected",     # via collect-treatment-fee
-    "Physio Assign",               # via assign-consultation-physio
-    "Consultation Completed",      # via mark-consultation-completed
+    "Consultation Visit",   # via consultation-decision (Head Physio's Save & Move)
+    "Fee Collected",        # via collect-package-payment / collect-treatment-fee
+    "Physio Assign",        # via collect-treatment-fee / assign-consultation-physio
+    "Consultation Completed",  # via mark-consultation-completed
 }
 
 

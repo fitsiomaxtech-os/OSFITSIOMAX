@@ -87,7 +87,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
   const packageDropdownRef = useRef(null);
 
   // Mark Consultation Completed (Branch Admin only) — "Consultation Only" patients, at
-  // the Consultation Fee Collected stage.
+  // the Fee Collected stage.
   const [completingConsultation, setCompletingConsultation] = useState(false);
 
   useEffect(() => {
@@ -351,8 +351,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
     setCollectingFee(false);
   };
 
-  // ---- Collect Treatment Fee (Branch Admin) — at the Consultation Fee Collected
-  // stage, for "Consultation + Treatment" patients only. The Treatment Package and
+  // ---- Collect Treatment Fee (Branch Admin) — at the Fee Collected stage, for
+  // "Consultation + Treatment" patients only. The Treatment Package and
   // its price are locked in from what the Head Physio already chose at Save & Move —
   // neither is editable here.
   const openTreatmentFeeDraft = () => {
@@ -788,7 +788,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
             {!isConsultant && (() => {
               const stage = selectedLead.consultation_stage;
               const decision = selectedLead.consultation_decision;
-              const cancellable = ["New Appointment", "Follow Up", "Consultation Visit", "Consultation Fee Collected", "Treatment Fee Collected"].includes(stage);
+              const cancellable = ["New Appointment", "Follow Up", "Consultation Visit", "Fee Collected", "Physio Assign"].includes(stage);
               // Once a lead has moved forward past a stage, it can never come back —
               // there's no manual "move backward" control anymore (see the backend's
               // matching rejection in move-consultation-stage).
@@ -882,70 +882,88 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                   );
                 }
 
-                if (stage === "Consultation Fee Collected") {
+                if (stage === "Fee Collected") {
+                  const consultationAlreadyPaid = selectedLead.package_paid != null;
+                  const ConsultationFeeSummary = (
+                    <div className="rounded-md border border-slate-200 bg-white p-2.5" data-testid="cons-fee-collected-consultation-summary">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-xs text-slate-500">Consultation Fee</span>
+                        <span className="font-semibold text-slate-800">
+                          {selectedLead.package_price != null ? `Rs.${selectedLead.package_price}` : "—"}
+                          {consultationAlreadyPaid && <span className="ml-1 capitalize text-emerald-600">({selectedLead.package_payment_mode})</span>}
+                        </span>
+                      </div>
+                      <Button size="sm" variant="outline" className="mt-2 text-xs" onClick={openCollectFeeDraft} data-testid="cons-open-collect-fee">
+                        Update Consultation Fee
+                      </Button>
+                    </div>
+                  );
+
                   if (decision === "consultation_only") {
                     return (
-                      <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3" data-testid="cons-stage-panel-consultation-only">
-                        <p className="text-sm font-semibold text-emerald-800">Consultation Only — no treatment sessions</p>
-                        <p className="mt-1 text-xs text-slate-600">Consultation Fee collected. Mark this consultation as completed to close it out.</p>
-                        <Button size="sm" className="mt-3 bg-emerald-600 text-xs hover:bg-emerald-700" onClick={submitMarkCompleted} disabled={completingConsultation} data-testid="cons-mark-completed">
+                      <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3" data-testid="cons-stage-panel-fee-collected">
+                        <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-emerald-700">
+                          <ClipboardCheck className="h-3.5 w-3.5" /> Fee Collected
+                        </p>
+                        {ConsultationFeeSummary}
+                        <p className="mb-2 mt-3 text-xs text-slate-600">Consultation Only — no treatment sessions. Mark this consultation as completed to close it out.</p>
+                        <Button size="sm" className="bg-emerald-600 text-xs hover:bg-emerald-700" onClick={submitMarkCompleted} disabled={completingConsultation} data-testid="cons-mark-completed">
                           {completingConsultation ? "Saving..." : "Mark Consultation Completed"}
                         </Button>
+                        <div className="mt-2 flex flex-wrap gap-1.5">{CancelButton}</div>
                       </div>
                     );
                   }
-                  const alreadyPaid = selectedLead.treatment_fee_paid != null;
                   return (
-                    <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3" data-testid="cons-stage-panel-treatment-fee">
+                    <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3" data-testid="cons-stage-panel-fee-collected">
                       <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-indigo-700">
-                        <Dumbbell className="h-3.5 w-3.5" /> Treatment Fee
+                        <ClipboardCheck className="h-3.5 w-3.5" /> Fee Collected
                       </p>
-                      <div className="space-y-1.5 text-sm">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs text-slate-500">Treatment Package</span>
-                          <span className="font-semibold text-slate-800">
-                            {selectedLead.session_package_name || "—"}{selectedLead.session_package_sessions ? ` · ${selectedLead.session_package_sessions} sessions` : ""}
-                          </span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs text-slate-500">Treatment Fee</span>
-                          <span className="font-semibold text-slate-800">{selectedLead.session_package_price != null ? `Rs.${selectedLead.session_package_price}` : "—"}</span>
-                        </div>
-                        {alreadyPaid && (
+                      {ConsultationFeeSummary}
+                      <div className="mt-3 border-t border-indigo-100 pt-3">
+                        <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-indigo-700">
+                          <Dumbbell className="h-3.5 w-3.5" /> Treatment Fee
+                        </p>
+                        <div className="space-y-1.5 text-sm">
                           <div className="flex items-center justify-between">
-                            <span className="text-xs text-slate-500">Already Paid Via</span>
-                            <span className="font-medium capitalize text-emerald-700">{selectedLead.treatment_fee_payment_mode}</span>
+                            <span className="text-xs text-slate-500">Treatment Package</span>
+                            <span className="font-semibold text-slate-800">
+                              {selectedLead.session_package_name || "—"}{selectedLead.session_package_sessions ? ` · ${selectedLead.session_package_sessions} sessions` : ""}
+                            </span>
                           </div>
-                        )}
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs text-slate-500">Treatment Fee</span>
+                            <span className="font-semibold text-slate-800">{selectedLead.session_package_price != null ? `Rs.${selectedLead.session_package_price}` : "—"}</span>
+                          </div>
+                        </div>
+                        <Button size="sm" className="mt-3 bg-indigo-600 text-xs hover:bg-indigo-700" onClick={openTreatmentFeeDraft} data-testid="cons-open-treatment-fee">
+                          Collect Payment
+                        </Button>
                       </div>
-                      <Button size="sm" className="mt-3 bg-indigo-600 text-xs hover:bg-indigo-700" onClick={openTreatmentFeeDraft} data-testid="cons-open-treatment-fee">
-                        {alreadyPaid ? "Update Payment" : "Collect Payment"}
-                      </Button>
-                      <div className="mt-2 flex flex-wrap gap-1.5">{CancelButton}</div>
-                    </div>
-                  );
-                }
-
-                if (stage === "Treatment Fee Collected") {
-                  return (
-                    <div className="rounded-lg border border-violet-200 bg-violet-50 p-3" data-testid="cons-stage-panel-physio-assign">
-                      <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-violet-700">
-                        <Users className="h-3.5 w-3.5" /> Physio Assign
-                      </p>
-                      <p className="text-xs text-slate-600">Treatment Fee collected. Choose the physiotherapist who will deliver the sessions.</p>
-                      <Button size="sm" className="mt-3 bg-violet-600 text-xs hover:bg-violet-700" onClick={openPhysioModal} data-testid="cons-open-physio-assign">
-                        Assign Physio
-                      </Button>
-                      <div className="mt-2 flex flex-wrap gap-1.5">{CancelButton}</div>
+                      <div className="mt-3 flex flex-wrap gap-1.5">{CancelButton}</div>
                     </div>
                   );
                 }
 
                 if (stage === "Physio Assign") {
+                  if (!selectedLead.assigned_physio_name) {
+                    return (
+                      <div className="rounded-lg border border-violet-200 bg-violet-50 p-3" data-testid="cons-stage-panel-physio-assign">
+                        <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-violet-700">
+                          <Users className="h-3.5 w-3.5" /> Physio Assign
+                        </p>
+                        <p className="text-xs text-slate-600">Treatment Fee collected. Choose the physiotherapist who will deliver the sessions.</p>
+                        <Button size="sm" className="mt-3 bg-violet-600 text-xs hover:bg-violet-700" onClick={openPhysioModal} data-testid="cons-open-physio-assign">
+                          Assign Physio
+                        </Button>
+                        <div className="mt-2 flex flex-wrap gap-1.5">{CancelButton}</div>
+                      </div>
+                    );
+                  }
                   return (
                     <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3" data-testid="cons-stage-panel-assigned">
                       <p className="text-sm font-semibold text-emerald-800">Treatment sessions in progress</p>
-                      <p className="mt-1 text-xs text-slate-600">Assigned Physio: <span className="font-semibold text-slate-800">{selectedLead.assigned_physio_name || "—"}</span></p>
+                      <p className="mt-1 text-xs text-slate-600">Assigned Physio: <span className="font-semibold text-slate-800">{selectedLead.assigned_physio_name}</span></p>
                       <Button size="sm" variant="outline" className="mt-3 text-xs" onClick={openPhysioModal} data-testid="cons-reassign-physio">
                         Reassign Physio
                       </Button>
