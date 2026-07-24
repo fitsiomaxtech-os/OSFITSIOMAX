@@ -883,19 +883,18 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                 }
 
                 if (stage === "Fee Collected") {
-                  const consultationAlreadyPaid = selectedLead.package_paid != null;
                   const ConsultationFeeSummary = (
                     <div className="rounded-md border border-slate-200 bg-white p-2.5" data-testid="cons-fee-collected-consultation-summary">
                       <div className="flex items-center justify-between text-sm">
                         <span className="text-xs text-slate-500">Consultation Fee</span>
                         <span className="font-semibold text-slate-800">
                           {selectedLead.package_price != null ? `Rs.${selectedLead.package_price}` : "—"}
-                          {consultationAlreadyPaid && <span className="ml-1 capitalize text-emerald-600">({selectedLead.package_payment_mode})</span>}
+                          <span className="ml-1 capitalize text-emerald-600">({selectedLead.package_payment_mode})</span>
                         </span>
                       </div>
-                      <Button size="sm" variant="outline" className="mt-2 text-xs" onClick={openCollectFeeDraft} data-testid="cons-open-collect-fee">
-                        Update Consultation Fee
-                      </Button>
+                      <p className="mt-1 flex items-center gap-1 text-[11px] font-medium text-emerald-600">
+                        <CheckCircle2 className="h-3 w-3" /> Already Collected
+                      </p>
                     </div>
                   );
 
@@ -1153,6 +1152,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                     <div className="flex h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-700" data-testid="cons-treatment-fee-amount">
                       {selectedLead.session_package_price != null ? `Rs.${selectedLead.session_package_price}` : "—"}
                     </div>
+                    {selectedLead.session_package_sessions && selectedLead.session_package_price != null && (
+                      <p className="mt-1 text-[11px] text-slate-500" data-testid="cons-treatment-fee-breakdown">
+                        Collect Total Session Fee = {selectedLead.session_package_sessions} sessions × Rs.{Math.round((selectedLead.session_package_price / selectedLead.session_package_sessions) * 100) / 100}/session = Rs.{selectedLead.session_package_price}
+                      </p>
+                    )}
                   </div>
                   <div>
                     <label className="mb-1 block text-[11px] font-medium text-slate-500">Payment Mode</label>

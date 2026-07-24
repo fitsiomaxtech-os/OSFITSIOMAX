@@ -325,6 +325,28 @@ async def normalize_session_item_prices() -> None:
             await v3_col("store_items").update_one({"id": item["id"]}, {"$set": updates})
 
 
+async def normalize_lead_session_package_prices() -> None:
+    """A lead's session_package_price is copied from the store item's price at the
+    moment the Head Physio's Consultation Decision was saved — leads saved before
+    normalize_session_item_prices() fixed the store item's price are left holding
+    the old, wrong total forever, since that copy is never recomputed live. Refresh
+    every lead's session_package_price to sessions x Rs.800 wherever it doesn't
+    already match. Only touches leads that haven't paid the Treatment Fee yet — once
+    treatment_fee_paid is on file, that figure is a real financial record and must
+    never be silently rewritten. Idempotent/safe to re-run."""
+    leads = await v3_col("leads").find(
+        {"session_package_sessions": {"$ne": None}, "treatment_fee_paid": None},
+        {"_id": 0, "id": 1, "session_package_sessions": 1, "session_package_price": 1},
+    ).to_list(2000)
+    for lead in leads:
+        expected_price = round(lead["session_package_sessions"] * SESSION_ITEM_RATE_PER_SESSION, 2)
+        if lead.get("session_package_price") != expected_price:
+            await v3_col("leads").update_one(
+                {"id": lead["id"]},
+                {"$set": {"session_package_price": expected_price, "updated_at": now_iso()}},
+            )
+
+
 async def deactivate_legacy_demo_admin() -> None:
     """Disable the old demo super_admin account (admin@fitsiomax.com / admin123).
     Replaced by a real Super Admin login; kept as a record for audit, not deleted. Safe to re-run."""
