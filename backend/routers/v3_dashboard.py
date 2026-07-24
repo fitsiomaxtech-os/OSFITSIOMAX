@@ -270,15 +270,26 @@ async def v3_master_control(
     total_leads = await leads.count_documents(merged())
     first_branch_stage = (await _stage_names("sales", V3_BRANCH_STAGES))[0]
 
-    # Patient journey counts (label → count) — 8 pills
+    # Patient journey counts (label → count).
+    # The displayed Journey Flow Map pills follow the real lifecycle
+    # Branch → Head Physio → Branch → End (see MasterControlBoard JOURNEY_PILLS):
+    #   New Appointment → Appointment Date & Time → Consultation → Fee Collected
+    #   → Physio Assign → Patient.
+    # The pre-sales (stage) and Portfolio counts are kept only to feed the Live
+    # Analytics workflow split below; they are not rendered as journey pills.
     journey = {
+        # Pre-sales + Portfolio — analytics only, not shown as pills
         "New Lead": await leads.count_documents(merged({"stage": "New Leads"})),
         "Follow Up": await leads.count_documents(merged({"stage": "Follow Up"})),
         "Appointment": await leads.count_documents(merged({"stage": "Appointment"})),
-        "New Appointment": await leads.count_documents(merged({"branch_stage": first_branch_stage})),
         "Portfolio": await leads.count_documents(merged({"branch_stage": "Portfolio"})),
+        # Branch (leads) → Head Physio (consultation) → Branch (consultation) → End
+        "New Appointment": await leads.count_documents(merged({"branch_stage": first_branch_stage})),
         "Appointment Date & Time": await leads.count_documents(merged({"branch_stage": "Appointment Date & Time"})),
-        "Patient": await leads.count_documents(merged({"branch_stage": "Appointment Date & Time", "appointment_date": {"$ne": None}})),
+        "Consultation": await leads.count_documents(merged({"head_consultation_stage": "Consultation Visit"})),
+        "Fee Collected": await leads.count_documents(merged({"consultation_stage": "Fee Collected"})),
+        "Physio Assign": await leads.count_documents(merged({"consultation_stage": "Physio Assign"})),
+        "Patient": await leads.count_documents(merged({"consultation_stage": "Consultation Completed"})),
     }
 
     # Attention Required

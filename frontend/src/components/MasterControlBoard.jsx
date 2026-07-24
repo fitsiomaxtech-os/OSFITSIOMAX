@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle, ArrowRight, BarChart3, Building2, Calendar, CheckCircle2, Clock,
-  Database, FileSpreadsheet, History, Link as LinkIcon, MapPin,
-  RefreshCw, Shield, ShieldCheck, ShieldAlert, UserCheck, UserPlus, Users,
+  Database, FileSpreadsheet, History, IndianRupee, Link as LinkIcon, MapPin,
+  RefreshCw, Shield, ShieldCheck, ShieldAlert, Stethoscope, UserCheck, Users,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,13 +13,15 @@ import { getMasterControl, getBranches, getDoctors, getLeads, getVerticals, upda
 
 const REFRESH_MS = 30000;
 
+// Branch → Head Physio → Branch → End. Pre-sales stages (New Lead / Follow Up /
+// Appointment on the `stage` field) are intentionally not shown here.
 const JOURNEY_PILLS = [
-  { label: "New Lead",                key: "New Lead",                color: "#22c55e", icon: UserPlus },
-  { label: "Follow Up",               key: "Follow Up",               color: "#f59e0b", icon: Clock },
-  { label: "Appointment",             key: "Appointment",             color: "#10b981", icon: Calendar },
   { label: "New Appointment",         key: "New Appointment",         color: "#3b82f6", icon: Calendar },
   { label: "Appointment Date & Time", key: "Appointment Date & Time", color: "#14b8a6", icon: Clock },
-  { label: "Patient",                 key: "Patient",                 color: "#22c55e", icon: Users },
+  { label: "Consultation",            key: "Consultation",            color: "#8b5cf6", icon: Stethoscope },
+  { label: "Fee Collected",           key: "Fee Collected",           color: "#f59e0b", icon: IndianRupee },
+  { label: "Physio Assign",           key: "Physio Assign",           color: "#a855f7", icon: Users },
+  { label: "Patient",                 key: "Patient",                 color: "#22c55e", icon: CheckCircle2 },
 ];
 
 const ATTENTION_ROWS = [
