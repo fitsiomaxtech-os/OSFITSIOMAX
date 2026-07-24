@@ -54,11 +54,15 @@ async def hp_my_calendar(branch_id: Optional[str] = None, user: V3UserOut = Depe
     ).to_list(1000)
     booked_map = {row["slot_time"]: row for row in booked_rows}
 
+    # Surface booked consultation slots even when the branch admin never pre-created
+    # an availability slot for them — union booked times into the displayed slots.
+    slots = sorted(set(doctor.get("slots", [])) | set(booked_map.keys()))
+
     return {
         "doctor_id": doctor["id"],
         "doctor_name": doctor["full_name"],
         "specialization": doctor.get("specialization", ""),
-        "slots": doctor.get("slots", []),
+        "slots": slots,
         "slot_details": doctor.get("slot_details", []),
         "booked": booked_map,
     }
