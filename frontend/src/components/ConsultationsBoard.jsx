@@ -747,32 +747,45 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                     <div className="mt-3">
                       <label className="mb-1 block text-[11px] font-medium text-slate-500">Treatment Package</label>
                       <div className="relative" ref={packageDropdownRef}>
-                        <button
-                          type="button"
-                          onClick={() => setPackageDropdownOpen((o) => !o)}
-                          className="flex h-9 w-full items-center justify-center rounded-md border border-slate-200 bg-white px-2 text-center text-xs font-medium text-slate-700 hover:bg-slate-50"
-                          data-testid="cons-decision-package-select"
-                        >
-                          {treatmentPackageItems.find((i) => i.id === decisionDraft.item_id)?.name || "-- choose a treatment package --"}
-                        </button>
+                        {(() => {
+                          const selIdx = treatmentPackageItems.findIndex((i) => i.id === decisionDraft.item_id);
+                          const selItem = selIdx >= 0 ? treatmentPackageItems[selIdx] : null;
+                          const selColor = selItem ? TREATMENT_PACKAGE_COLORS[selIdx % TREATMENT_PACKAGE_COLORS.length] : null;
+                          return (
+                            <button
+                              type="button"
+                              onClick={() => setPackageDropdownOpen((o) => !o)}
+                              className="flex h-9 w-full items-center justify-center rounded-md border px-2 text-center text-xs font-semibold transition hover:brightness-95"
+                              style={selItem
+                                ? { background: `${selColor}14`, color: selColor, borderColor: `${selColor}33` }
+                                : { background: "#fff", color: "#334155", borderColor: "#e2e8f0" }}
+                              data-testid="cons-decision-package-select"
+                            >
+                              {selItem?.name || "-- choose a treatment package --"}
+                            </button>
+                          );
+                        })()}
                         {packageDropdownOpen && (
                           <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-md border border-slate-200 bg-white shadow-lg" data-testid="cons-decision-package-options">
-                            {treatmentPackageItems.map((i, idx) => (
-                              <button
-                                key={i.id}
-                                type="button"
-                                onClick={() => {
-                                  const baseSessions = decisionDraft.mode === "online" ? i.sessions_online : i.sessions_offline;
-                                  setDecisionDraft((p) => ({ ...p, item_id: i.id, sessions: baseSessions ? String(baseSessions) : "" }));
-                                  setPackageDropdownOpen(false);
-                                }}
-                                className="block w-full py-2 text-center text-xs font-semibold text-white transition-opacity hover:opacity-90"
-                                style={{ backgroundColor: TREATMENT_PACKAGE_COLORS[idx % TREATMENT_PACKAGE_COLORS.length] }}
-                                data-testid={`cons-decision-package-option-${i.id}`}
-                              >
-                                {i.name}
-                              </button>
-                            ))}
+                            {treatmentPackageItems.map((i, idx) => {
+                              const color = TREATMENT_PACKAGE_COLORS[idx % TREATMENT_PACKAGE_COLORS.length];
+                              return (
+                                <button
+                                  key={i.id}
+                                  type="button"
+                                  onClick={() => {
+                                    const baseSessions = decisionDraft.mode === "online" ? i.sessions_online : i.sessions_offline;
+                                    setDecisionDraft((p) => ({ ...p, item_id: i.id, sessions: baseSessions ? String(baseSessions) : "" }));
+                                    setPackageDropdownOpen(false);
+                                  }}
+                                  className="block w-full border-b border-slate-100 py-2 text-center text-xs font-semibold transition last:border-b-0 hover:brightness-95"
+                                  style={{ backgroundColor: `${color}14`, color }}
+                                  data-testid={`cons-decision-package-option-${i.id}`}
+                                >
+                                  {i.name}
+                                </button>
+                              );
+                            })}
                           </div>
                         )}
                       </div>
