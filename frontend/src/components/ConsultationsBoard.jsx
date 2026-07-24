@@ -484,6 +484,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
         setStageFilter={setStageFilter}
         counts={derivedStageCounts}
         totalCount={(board.leads || []).length}
+        hideAllStages={isConsultant}
         testid="cons-metric"
       />
 

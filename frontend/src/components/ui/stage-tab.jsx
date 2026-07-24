@@ -20,20 +20,24 @@ export const StageTab = ({ label, count, active, onClick, color, testid }) => {
   );
 };
 
-export const StageTabBar = ({ stages, stageFilter, setStageFilter, counts, totalCount, testid }) => (
+// `hideAllStages` drops the leading "All Stages" pill (stage pills still toggle
+// off on a second click, so the filter can always be cleared).
+export const StageTabBar = ({ stages, stageFilter, setStageFilter, counts, totalCount, testid, hideAllStages = false }) => (
   <div
     className="sticky top-[88px] z-10 -mx-1 rounded-xl border border-slate-200 bg-white/95 p-1 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/80"
     data-testid={testid}
   >
     <div className="flex flex-nowrap gap-1">
-      <StageTab
-        label="All Stages"
-        count={totalCount}
-        active={stageFilter === null}
-        onClick={() => setStageFilter(null)}
-        color="#0ea5e9"
-        testid={`${testid}-total`}
-      />
+      {!hideAllStages && (
+        <StageTab
+          label="All Stages"
+          count={totalCount}
+          active={stageFilter === null}
+          onClick={() => setStageFilter(null)}
+          color="#0ea5e9"
+          testid={`${testid}-total`}
+        />
+      )}
       {stages.map((s) => (
         <StageTab
           key={s.id}
