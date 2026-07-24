@@ -278,8 +278,8 @@ export const MasterControlBoard = () => {
             </div>
           ) : (
             <>
-              {/* Filters — each row: label + color-themed dropdown */}
-              <div className="space-y-2.5 rounded-lg border border-slate-100 bg-slate-50/60 p-3" data-testid="live-filters">
+              {/* Filters — four color-themed dropdowns laid out horizontally */}
+              <div className="grid grid-cols-2 gap-3 rounded-lg border border-slate-100 bg-slate-50/60 p-3 md:grid-cols-4" data-testid="live-filters">
                 <FilterDropdown label="Branch" value={filters.branch} onChange={(v) => setFilters({ ...filters, branch: v })} options={[{ value: "", label: "All Branches" }, ...branches.map((b) => ({ value: b.id, label: b.branch_name || b.name }))]} testid="filter-branch" />
                 <FilterDropdown label="Service Type" value={filters.service} onChange={(v) => setFilters({ ...filters, service: v })} options={[{ value: "", label: "All Service Types" }, ...verticals.map((v) => ({ value: v.name, label: v.name }))]} testid="filter-service" />
                 <FilterDropdown label="Expert" value={filters.expert} onChange={(v) => setFilters({ ...filters, expert: v })} options={[{ value: "", label: "All Experts" }, ...doctors.map((d) => ({ value: d.id, label: d.full_name }))]} testid="filter-expert" />
@@ -373,9 +373,9 @@ const FilterDropdown = ({ label, value, onChange, options, testid }) => {
   const selOpt = options[selIdx];
   const selColor = FILTER_COLORS[selIdx % FILTER_COLORS.length];
   return (
-    <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center">
-      <p className="w-28 shrink-0 text-xs font-semibold text-slate-600">{label}</p>
-      <div className="relative w-full sm:w-72" ref={ref}>
+    <div className="flex flex-col gap-1.5">
+      <p className="text-xs font-semibold text-slate-600">{label}</p>
+      <div className="relative w-full" ref={ref}>
         <button
           type="button"
           onClick={() => setOpen((o) => !o)}
