@@ -1135,7 +1135,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                 fees are collected together in one action. */}
             {collectFeeDraft && (
               <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" data-testid="cons-collect-fee-modal">
-                <div className="max-h-[85vh] w-full max-w-sm space-y-3 overflow-y-auto rounded-xl bg-white p-4 shadow-2xl">
+                <div className="max-h-[85vh] w-full max-w-xl space-y-3 overflow-y-auto rounded-xl bg-white p-4 shadow-2xl">
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-semibold text-slate-800">
                       {treatmentFeeDraft ? "Collect Fees" : selectedLead.package_paid != null ? "Update Consultation Fee Payment" : "Collect Consultation Fee"}
