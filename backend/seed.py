@@ -174,6 +174,16 @@ async def migrate_consultation_stages() -> None:
     )
     await v3_col("pipeline_stages").delete_many({"type": "consultation", "name": "Consultation Pack"})
 
+    # Retire "New Appointment" from Branch's own consultation pipeline — consultations
+    # now begin at Follow Up. Backfill any lead still sitting on it first so nothing is
+    # orphaned, then drop the stage doc. Scoped to type="consultation" only: the Head
+    # Physio's independent pipeline keeps its own New Appointment stage.
+    await v3_col("leads").update_many(
+        {"consultation_stage": "New Appointment"},
+        {"$set": {"consultation_stage": "Follow Up", "updated_at": now_iso()}},
+    )
+    await v3_col("pipeline_stages").delete_many({"type": "consultation", "name": "New Appointment"})
+
     # Additive: make sure newer consultation stages (added after the initial seed) exist too,
     # without disturbing any Super Admin edits (color/order/rename) made to the existing ones.
     existing_names = set(await v3_col("pipeline_stages").find(
@@ -235,7 +245,7 @@ async def migrate_consultation_stages() -> None:
     # "All Stages" but invisible in every individual stage pill.
     valid_consultation_stages = set(await v3_col("pipeline_stages").distinct("name", {"type": "consultation"}))
     if valid_consultation_stages:
-        first_consultation_stage = await get_first_stage_name("consultation", "New Appointment")
+        first_consultation_stage = await get_first_stage_name("consultation", "Follow Up")
         await v3_col("leads").update_many(
             {"consultation_stage": {"$ne": None, "$nin": list(valid_consultation_stages)}},
             {"$set": {"consultation_stage": first_consultation_stage, "updated_at": now_iso()}},

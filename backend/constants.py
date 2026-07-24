@@ -28,8 +28,10 @@ V3_BRANCH_STAGES = [
     "Cancelled",
 ]
 
+# Branch's own consultation pipeline. "New Appointment" was retired — consultations
+# now begin at Follow Up (see seed.migrate_consultation_stages). The Head Physio's
+# independent pipeline below still has its own New Appointment stage.
 V3_CONSULTATION_STAGES = [
-    "New Appointment",
     "Follow Up",
     "Consultation Visit",
     "Fee Collected",
