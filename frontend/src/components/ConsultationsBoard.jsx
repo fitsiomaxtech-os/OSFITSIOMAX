@@ -1755,46 +1755,29 @@ function AllStagesStepper({ stages, currentStage }) {
 }
 
 // Colored, centered replacement for a native <select> of payment modes —
-// native <option> backgrounds can't be reliably styled/centered cross-browser.
+// every option is shown inline as its own button (no click-to-open dropdown),
+// since native <option> backgrounds also can't be reliably styled cross-browser.
 function PaymentModeSelect({ value, options, onChange, testId }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
-  const current = options.find((o) => o.value === value);
   return (
-    <div className="relative" ref={ref}>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="flex h-9 w-full items-center justify-center rounded-md px-2 text-center text-xs font-semibold text-white hover:opacity-90"
-        style={{ backgroundColor: PAYMENT_MODE_COLORS[value] || "#64748b" }}
-        data-testid={testId}
-      >
-        {current?.label || "-- select --"}
-      </button>
-      {open && (
-        <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-md border border-slate-200 bg-white shadow-lg" data-testid={`${testId}-options`}>
-          {options.map((o) => (
-            <button
-              key={o.value}
-              type="button"
-              onClick={() => { onChange(o.value); setOpen(false); }}
-              className="block w-full py-2 text-center text-xs font-semibold text-white transition-opacity hover:opacity-90"
-              style={{ backgroundColor: PAYMENT_MODE_COLORS[o.value] || "#64748b" }}
-              data-testid={`${testId}-option-${o.value}`}
-            >
-              {o.label}
-            </button>
-          ))}
-        </div>
-      )}
+    <div className="flex flex-wrap gap-1.5" data-testid={testId}>
+      {options.map((o) => {
+        const selected = o.value === value;
+        const hex = PAYMENT_MODE_COLORS[o.value] || "#64748b";
+        return (
+          <button
+            key={o.value}
+            type="button"
+            onClick={() => onChange(o.value)}
+            className={`h-9 min-w-[64px] flex-1 rounded-md text-center text-xs font-semibold transition ${
+              selected ? "text-white shadow-sm" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+            }`}
+            style={selected ? { backgroundColor: hex } : undefined}
+            data-testid={`${testId}-option-${o.value}`}
+          >
+            {o.label}
+          </button>
+        );
+      })}
     </div>
   );
 }
