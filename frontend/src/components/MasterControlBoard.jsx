@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  AlertTriangle, ArrowRight, BarChart3, Building2, Calendar, CheckCircle2, Clock,
+  AlertTriangle, ArrowRight, BarChart3, Building2, Calendar, CheckCircle2, ChevronDown, Clock,
   Database, FileSpreadsheet, History, IndianRupee, Link as LinkIcon, MapPin,
   RefreshCw, Shield, ShieldCheck, ShieldAlert, Stethoscope, UserCheck, Users,
 } from "lucide-react";
@@ -278,12 +278,12 @@ export const MasterControlBoard = () => {
             </div>
           ) : (
             <>
-              {/* Filters — each row: label + horizontal chip options */}
+              {/* Filters — each row: label + color-themed dropdown */}
               <div className="space-y-2.5 rounded-lg border border-slate-100 bg-slate-50/60 p-3" data-testid="live-filters">
-                <FilterChips label="Branch" value={filters.branch} onChange={(v) => setFilters({ ...filters, branch: v })} options={[{ value: "", label: "All Branches" }, ...branches.map((b) => ({ value: b.id, label: b.branch_name || b.name }))]} testid="filter-branch" />
-                <FilterChips label="Service Type" value={filters.service} onChange={(v) => setFilters({ ...filters, service: v })} options={[{ value: "", label: "All Service Types" }, ...verticals.map((v) => ({ value: v.name, label: v.name }))]} testid="filter-service" />
-                <FilterChips label="Expert" value={filters.expert} onChange={(v) => setFilters({ ...filters, expert: v })} options={[{ value: "", label: "All Experts" }, ...doctors.map((d) => ({ value: d.id, label: d.full_name }))]} testid="filter-expert" />
-                <FilterChips label="Time Range" value={filters.time_range} onChange={(v) => setFilters({ ...filters, time_range: v })} options={[{ value: "current", label: "Current Academic Year (2025 - 2026)" }, { value: "last_30", label: "Last 30 Days" }, { value: "last_90", label: "Last 90 Days" }]} testid="filter-time-range" />
+                <FilterDropdown label="Branch" value={filters.branch} onChange={(v) => setFilters({ ...filters, branch: v })} options={[{ value: "", label: "All Branches" }, ...branches.map((b) => ({ value: b.id, label: b.branch_name || b.name }))]} testid="filter-branch" />
+                <FilterDropdown label="Service Type" value={filters.service} onChange={(v) => setFilters({ ...filters, service: v })} options={[{ value: "", label: "All Service Types" }, ...verticals.map((v) => ({ value: v.name, label: v.name }))]} testid="filter-service" />
+                <FilterDropdown label="Expert" value={filters.expert} onChange={(v) => setFilters({ ...filters, expert: v })} options={[{ value: "", label: "All Experts" }, ...doctors.map((d) => ({ value: d.id, label: d.full_name }))]} testid="filter-expert" />
+                <FilterDropdown label="Time Range" value={filters.time_range} onChange={(v) => setFilters({ ...filters, time_range: v })} options={[{ value: "current", label: "Current Academic Year (2025 - 2026)" }, { value: "last_30", label: "Last 30 Days" }, { value: "last_90", label: "Last 90 Days" }]} testid="filter-time-range" />
               </div>
 
               {/* Donuts */}
@@ -356,32 +356,60 @@ const PerformanceSection = ({ perf }) => {
   );
 };
 
-const FilterChips = ({ label, value, onChange, options, testid }) => (
-  <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center">
-    <p className="w-28 shrink-0 text-xs font-semibold text-slate-600">{label}</p>
-    <div className="flex flex-wrap gap-1.5" data-testid={testid}>
-      {options.map((o) => {
-        const selected = value === o.value;
-        return (
-          <button
-            key={o.value}
-            type="button"
-            onClick={() => onChange(o.value)}
-            className={
-              "rounded-full border px-3 py-1 text-xs font-medium transition " +
-              (selected
-                ? "border-sky-500 bg-sky-500 text-white shadow-sm"
-                : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:bg-sky-50")
-            }
-            data-testid={`${testid}-${o.value || "all"}`}
-          >
-            {o.label}
-          </button>
-        );
-      })}
+// Cycling color palette for the filter dropdown options — same soft-pill theme
+// as the Treatment Package picker on the Consultations board.
+const FILTER_COLORS = ["#2563eb", "#059669", "#d97706", "#7c3aed", "#e11d48", "#0891b2"];
+
+const FilterDropdown = ({ label, value, onChange, options, testid }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+  const selIdx = Math.max(options.findIndex((o) => o.value === value), 0);
+  const selOpt = options[selIdx];
+  const selColor = FILTER_COLORS[selIdx % FILTER_COLORS.length];
+  return (
+    <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center">
+      <p className="w-28 shrink-0 text-xs font-semibold text-slate-600">{label}</p>
+      <div className="relative w-full sm:w-72" ref={ref}>
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className="flex h-9 w-full items-center justify-between gap-2 rounded-md border px-3 text-left text-xs font-semibold transition hover:brightness-95"
+          style={{ background: `${selColor}14`, color: selColor, borderColor: `${selColor}33` }}
+          data-testid={testid}
+        >
+          <span className="truncate">{selOpt?.label}</span>
+          <ChevronDown className={`h-3.5 w-3.5 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} style={{ color: selColor }} />
+        </button>
+        {open && (
+          <div className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-md border border-slate-200 bg-white shadow-lg" data-testid={`${testid}-menu`}>
+            {options.map((o, idx) => {
+              const color = FILTER_COLORS[idx % FILTER_COLORS.length];
+              const selected = o.value === value;
+              return (
+                <button
+                  key={o.value}
+                  type="button"
+                  onClick={() => { onChange(o.value); setOpen(false); }}
+                  className="block w-full border-b border-slate-100 px-3 py-2 text-left text-xs font-semibold transition last:border-b-0 hover:brightness-95"
+                  style={{ backgroundColor: selected ? `${color}2e` : `${color}14`, color }}
+                  data-testid={`${testid}-${o.value || "all"}`}
+                >
+                  {o.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 const DonutBlock = ({ title, totalLabel, total, data, colors, testid }) => {
   const hasData = data.some((d) => (d.value || 0) > 0);
