@@ -780,32 +780,22 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                       {decisionDraft.item_id && (() => {
                         const item = treatmentPackageItems.find((i) => i.id === decisionDraft.item_id);
                         if (!item) return null;
-                        const baseSessions = decisionDraft.mode === "online" ? item.sessions_online : item.sessions_offline;
-                        const basePrice = decisionDraft.mode === "online" ? item.price_online : item.price_offline;
-                        const effectiveSessions = decisionDraft.sessions ? parseInt(decisionDraft.sessions, 10) : baseSessions;
-                        const perSessionRate = baseSessions ? basePrice / baseSessions : null;
-                        const amount = perSessionRate != null && effectiveSessions ? Math.round(perSessionRate * effectiveSessions * 100) / 100 : null;
+                        // Head Physio sees the session count only — never the price.
+                        // The Treatment Fee amount is derived server-side from
+                        // sessions_override and shown to Branch Admin at fee collection.
                         return (
                           <div className="mt-2 rounded-md border border-slate-200 bg-white p-3" data-testid="cons-decision-package-summary">
                             <p className="text-sm font-semibold text-slate-800">{item.name}</p>
-                            <div className="mt-2 grid grid-cols-2 gap-3">
-                              <div>
-                                <label className="mb-1 block text-[11px] font-medium text-slate-500">Sessions</label>
-                                <Input
-                                  type="number"
-                                  min="1"
-                                  value={decisionDraft.sessions}
-                                  onChange={(e) => setDecisionDraft((p) => ({ ...p, sessions: e.target.value }))}
-                                  className="h-9"
-                                  data-testid="cons-decision-sessions"
-                                />
-                              </div>
-                              <div>
-                                <label className="mb-1 block text-[11px] font-medium text-slate-500">Amount (₹)</label>
-                                <div className="flex h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-700" data-testid="cons-decision-amount">
-                                  {amount != null ? `Rs.${amount}` : "—"}
-                                </div>
-                              </div>
+                            <div className="mt-2 max-w-[220px]">
+                              <label className="mb-1 block text-[11px] font-medium text-slate-500">Sessions</label>
+                              <Input
+                                type="number"
+                                min="1"
+                                value={decisionDraft.sessions}
+                                onChange={(e) => setDecisionDraft((p) => ({ ...p, sessions: e.target.value }))}
+                                className="h-9"
+                                data-testid="cons-decision-sessions"
+                              />
                             </div>
                           </div>
                         );
