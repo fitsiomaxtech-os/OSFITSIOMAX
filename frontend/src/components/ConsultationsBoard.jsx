@@ -408,66 +408,55 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
     return payload;
   };
 
-  // Submits the Consultation Fee, and — if the Treatment Fee draft is also open
-  // (Consultation + Treatment, collected together) — the Treatment Fee right after,
-  // in the same action. If Consultation Fee succeeds but Treatment Fee fails, the
-  // lead is left open at Fee Collected so it can be retried from there alone.
-  const submitCollectFee = async () => {
-    let treatmentPayload = null;
-    if (treatmentFeeDraft) {
-      treatmentPayload = buildTreatmentFeePayload();
-      if (!treatmentPayload) return;
-    }
+  // Both fee sections are collected independently — each has its own "Collect"
+  // button and can be actioned in either order. The popup only closes once every
+  // fee it was opened for is collected; until then it stays open so the other
+  // section's own button is still reachable.
+  const bothFeesDone = (lead) => !treatmentFeeDraft || lead.treatment_fee_paid != null;
+  const consultationFeeDone = (lead) => !collectFeeDraft || lead.package_paid != null;
+
+  // Submits ONLY the Consultation Fee. Leaves the Treatment Fee section (if
+  // present) untouched and open for its own button.
+  const submitConsultationFeeOnly = async () => {
     setCollectingFee(true);
     try {
-      const res1 = await collectPackagePayment(selectedLead.id, { payment_mode: collectFeeDraft.payment_mode });
-      let finalLead = res1.lead;
-      if (treatmentPayload) {
-        setCollectingTreatmentFee(true);
-        try {
-          const res2 = await collectTreatmentFee(selectedLead.id, treatmentPayload);
-          finalLead = res2.lead;
-          toast.success("Consultation Fee & Treatment Fee collected");
-        } catch (err) {
-          toast.error(err?.response?.data?.detail || "Consultation Fee collected, but Treatment Fee failed — collect it from the Fee Collected panel");
-          setCollectingTreatmentFee(false);
-          setCollectingFee(false);
-          setCollectFeeDraft(null);
-          setTreatmentFeeDraft(null);
-          setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === finalLead.id ? finalLead : l) }));
-          return;
-        }
-        setCollectingTreatmentFee(false);
+      const res = await collectPackagePayment(selectedLead.id, { payment_mode: collectFeeDraft.payment_mode });
+      toast.success(selectedLead.package_paid != null ? "Consultation Fee payment updated" : "Consultation Fee collected");
+      setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === res.lead.id ? res.lead : l) }));
+      if (bothFeesDone(res.lead)) {
+        setCollectFeeDraft(null);
+        setTreatmentFeeDraft(null);
+        setSelectedLead(null);
       } else {
-        toast.success(selectedLead.package_paid != null ? "Payment updated" : "Fee collected");
+        setSelectedLead(res.lead);
       }
-      setCollectFeeDraft(null);
-      setTreatmentFeeDraft(null);
-      // Close the lead card instantly, same as a plain stage move — don't leave it
-      // open on the stale pre-payment lead while the board list updates in the background.
-      setSelectedLead(null);
-      setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === finalLead.id ? finalLead : l) }));
     } catch (err) {
-      toast.error(err?.response?.data?.detail || "Failed to collect fee");
+      toast.error(err?.response?.data?.detail || "Failed to collect Consultation Fee");
     }
     setCollectingFee(false);
   };
 
-  // Standalone Treatment Fee submit — used only when its draft is opened alone (the
-  // Fee Collected panel's fallback), not when bundled into submitCollectFee above.
+  // Submits ONLY the Treatment Fee — used both from the combined popup (its own
+  // button, Consultation Fee handled separately above) and from the Fee Collected
+  // panel's standalone fallback (where collectFeeDraft is always null, so this
+  // always closes the popup on success).
   const submitTreatmentFee = async () => {
     const payload = buildTreatmentFeePayload();
     if (!payload) return;
     setCollectingTreatmentFee(true);
     try {
       const res = await collectTreatmentFee(selectedLead.id, payload);
-      toast.success("Treatment fee collected");
-      setTreatmentFeeDraft(null);
-      // Close the lead card instantly, same as a plain stage move.
-      setSelectedLead(null);
+      toast.success(selectedLead.treatment_fee_paid != null ? "Treatment Fee payment updated" : "Treatment Fee collected");
       setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === res.lead.id ? res.lead : l) }));
+      if (consultationFeeDone(res.lead)) {
+        setCollectFeeDraft(null);
+        setTreatmentFeeDraft(null);
+        setSelectedLead(null);
+      } else {
+        setSelectedLead(res.lead);
+      }
     } catch (err) {
-      toast.error(err?.response?.data?.detail || "Failed to collect treatment fee");
+      toast.error(err?.response?.data?.detail || "Failed to collect Treatment Fee");
     }
     setCollectingTreatmentFee(false);
   };
@@ -1155,8 +1144,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                   </div>
 
                   <div className={treatmentFeeDraft ? "grid grid-cols-1 items-start gap-3 sm:grid-cols-2" : ""}>
-                  <div className="space-y-3 rounded-lg border border-slate-200 p-3">
-                    <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-sky-700">
+                  <div className={`space-y-3 rounded-lg border p-3 ${selectedLead.package_paid != null ? "border-emerald-200 bg-emerald-50" : "border-slate-200"}`}>
+                    <p className={`flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider ${selectedLead.package_paid != null ? "text-emerald-700" : "text-sky-700"}`}>
                       <Stethoscope className="h-3.5 w-3.5" /> Consultation Fee
                     </p>
                     {selectedLead.package_name && (
@@ -1164,28 +1153,68 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                         Package: <span className="font-semibold text-slate-700">{selectedLead.package_name}</span>
                       </p>
                     )}
-                    <div>
-                      <label className="mb-1 block text-[11px] font-medium text-slate-500">Consultation Fee (₹)</label>
-                      <div className="flex h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-700" data-testid="cons-collect-fee-amount">
-                        {selectedLead.package_price != null ? `Rs.${selectedLead.package_price}` : "—"}
+                    {selectedLead.package_paid != null ? (
+                      <div data-testid="cons-collect-fee-locked">
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-xs text-slate-500">Consultation Fee</span>
+                          <span className="font-semibold text-slate-800">
+                            Rs.{selectedLead.package_price}
+                            <span className="ml-1 capitalize text-emerald-600">({selectedLead.package_payment_mode})</span>
+                          </span>
+                        </div>
+                        <p className="mt-1 flex items-center gap-1 text-[11px] font-medium text-emerald-600">
+                          <CheckCircle2 className="h-3 w-3" /> Already Collected
+                        </p>
                       </div>
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-[11px] font-medium text-slate-500">Payment Mode</label>
-                      <PaymentModeSelect
-                        value={collectFeeDraft.payment_mode}
-                        options={CONSULTATION_FEE_PAYMENT_MODES}
-                        onChange={(v) => setCollectFeeDraft({ ...collectFeeDraft, payment_mode: v })}
-                        testId="cons-collect-fee-mode"
-                      />
-                    </div>
+                    ) : (
+                      <>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium text-slate-500">Consultation Fee (₹)</label>
+                          <div className="flex h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-700" data-testid="cons-collect-fee-amount">
+                            {selectedLead.package_price != null ? `Rs.${selectedLead.package_price}` : "—"}
+                          </div>
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium text-slate-500">Payment Mode</label>
+                          <PaymentModeSelect
+                            value={collectFeeDraft.payment_mode}
+                            options={CONSULTATION_FEE_PAYMENT_MODES}
+                            onChange={(v) => setCollectFeeDraft({ ...collectFeeDraft, payment_mode: v })}
+                            testId="cons-collect-fee-mode"
+                          />
+                        </div>
+                        <Button
+                          className="w-full bg-sky-600 text-xs hover:bg-sky-700"
+                          onClick={submitConsultationFeeOnly}
+                          disabled={collectingFee || selectedLead.package_price == null}
+                          data-testid="cons-collect-fee-submit"
+                        >
+                          {collectingFee ? "Saving..." : "Collect Consultation Fee"}
+                        </Button>
+                      </>
+                    )}
                   </div>
 
                   {treatmentFeeDraft && (
-                    <div className="space-y-3 rounded-lg border border-indigo-200 bg-indigo-50/40 p-3">
-                      <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-indigo-700">
+                    <div className={`space-y-3 rounded-lg border p-3 ${selectedLead.treatment_fee_paid != null ? "border-emerald-200 bg-emerald-50" : "border-indigo-200 bg-indigo-50/40"}`}>
+                      <p className={`flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider ${selectedLead.treatment_fee_paid != null ? "text-emerald-700" : "text-indigo-700"}`}>
                         <Dumbbell className="h-3.5 w-3.5" /> Treatment Fee
                       </p>
+                      {selectedLead.treatment_fee_paid != null ? (
+                        <div data-testid="cons-treatment-fee-locked">
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="text-xs text-slate-500">Treatment Fee</span>
+                            <span className="font-semibold text-slate-800">
+                              Rs.{selectedLead.session_package_price}
+                              <span className="ml-1 capitalize text-emerald-600">({selectedLead.treatment_fee_payment_mode})</span>
+                            </span>
+                          </div>
+                          <p className="mt-1 flex items-center gap-1 text-[11px] font-medium text-emerald-600">
+                            <CheckCircle2 className="h-3 w-3" /> Already Collected
+                          </p>
+                        </div>
+                      ) : (
+                        <>
                       <div>
                         <label className="mb-1 block text-[11px] font-medium text-slate-500">Treatment Package (chosen by Head Physio)</label>
                         <div className="flex h-9 items-center rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700" data-testid="cons-treatment-fee-item-readonly">
@@ -1328,31 +1357,25 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                           )}
                         </div>
                       )}
+                      <Button
+                        className="w-full bg-indigo-600 text-xs hover:bg-indigo-700"
+                        onClick={submitTreatmentFee}
+                        disabled={
+                          collectingTreatmentFee ||
+                          selectedLead.session_package_price == null ||
+                          (treatmentFeeDraft.payment_mode === "card" && (!treatmentFeeDraft.card_number.trim() || !treatmentFeeDraft.card_holder_name.trim())) ||
+                          (treatmentFeeDraft.payment_mode === "cheque" && (!treatmentFeeDraft.bank_name.trim() || !treatmentFeeDraft.cheque_number.trim())) ||
+                          (treatmentFeeDraft.payment_mode === "partial" && (!partialAllFilled || partialMismatch))
+                        }
+                        data-testid="cons-treatment-fee-submit-combined"
+                      >
+                        {collectingTreatmentFee ? "Saving..." : "Collect Treatment Fee"}
+                      </Button>
+                        </>
+                      )}
                     </div>
                   )}
                   </div>
-
-                  <Button
-                    className="w-full bg-sky-600 hover:bg-sky-700 text-xs"
-                    onClick={submitCollectFee}
-                    disabled={
-                      collectingFee || collectingTreatmentFee ||
-                      selectedLead.package_price == null ||
-                      (!!treatmentFeeDraft && (
-                        selectedLead.session_package_price == null ||
-                        (treatmentFeeDraft.payment_mode === "card" && (!treatmentFeeDraft.card_number.trim() || !treatmentFeeDraft.card_holder_name.trim())) ||
-                        (treatmentFeeDraft.payment_mode === "cheque" && (!treatmentFeeDraft.bank_name.trim() || !treatmentFeeDraft.cheque_number.trim())) ||
-                        (treatmentFeeDraft.payment_mode === "partial" && (!partialAllFilled || partialMismatch))
-                      ))
-                    }
-                    data-testid="cons-collect-fee-submit"
-                  >
-                    {collectingFee || collectingTreatmentFee
-                      ? "Saving..."
-                      : treatmentFeeDraft
-                        ? "Confirm & Collect All Fees"
-                        : selectedLead.package_paid != null ? "Update Payment" : "Confirm & Move"}
-                  </Button>
                 </div>
               </div>
             )}
