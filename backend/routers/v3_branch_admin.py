@@ -192,9 +192,14 @@ async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointm
         "branch_stage": payload.final_stage,
         "updated_at": now_iso(),
     }
-    # When the appointment is booked (not cancelled), seed the Consultations pipeline
+    # When the appointment is booked (not cancelled), hand the lead to BOTH consultation
+    # pipelines at once:
+    #   - Head Physio's own board -> its first stage ("New Appointment"), where they pick it up
+    #   - Branch Admin's own board -> its first stage ("Follow Up"), kept for rescheduling
+    # Existing values are never overwritten, so a lead already further along stays put.
     if payload.final_stage == "Appointment Date & Time":
         updates["consultation_stage"] = lead.get("consultation_stage") or (await _consultation_stage_names())[0]
+        updates["head_consultation_stage"] = lead.get("head_consultation_stage") or (await _head_consultation_stage_names())[0]
     if payload.notes and payload.notes.strip():
         existing_notes = (lead.get("notes") or "").strip()
         appended = f"[Appt {payload.appointment_date} {payload.appointment_time}] {payload.notes.strip()}"
