@@ -92,8 +92,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
   // Consultation + Treatment (+ Treatment Package, names only, no prices shown here).
   const [decisionDraft, setDecisionDraft] = useState({ decision: "consultation_only", item_id: "", mode: "offline", sessions: "" });
   const [savingDecision, setSavingDecision] = useState(false);
-  const [packageDropdownOpen, setPackageDropdownOpen] = useState(false);
-  const packageDropdownRef = useRef(null);
 
   // Mark Consultation Completed (Branch Admin only) — "Consultation Only" patients, at
   // the Fee Collected stage.
@@ -183,19 +181,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
     setCollectFeeDraft(null);
     setTreatmentFeeDraft(null);
     setDecisionDraft({ decision: "consultation_only", item_id: "", mode: "offline", sessions: "" });
-    setPackageDropdownOpen(false);
   }, [selectedLead?.id]);
-
-  useEffect(() => {
-    if (!packageDropdownOpen) return;
-    const onClickOutside = (e) => {
-      if (packageDropdownRef.current && !packageDropdownRef.current.contains(e.target)) {
-        setPackageDropdownOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onClickOutside);
-    return () => document.removeEventListener("mousedown", onClickOutside);
-  }, [packageDropdownOpen]);
 
   useEffect(() => {
     if (!selectedLead?.id || detailTab !== "timeline") return;
@@ -746,48 +732,28 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                   {isTreatment && (
                     <div className="mt-3">
                       <label className="mb-1 block text-[11px] font-medium text-slate-500">Treatment Package</label>
-                      <div className="relative" ref={packageDropdownRef}>
-                        {(() => {
-                          const selIdx = treatmentPackageItems.findIndex((i) => i.id === decisionDraft.item_id);
-                          const selItem = selIdx >= 0 ? treatmentPackageItems[selIdx] : null;
-                          const selColor = selItem ? TREATMENT_PACKAGE_COLORS[selIdx % TREATMENT_PACKAGE_COLORS.length] : null;
+                      <div className="flex flex-wrap gap-2" data-testid="cons-decision-package-options">
+                        {treatmentPackageItems.map((i, idx) => {
+                          const color = TREATMENT_PACKAGE_COLORS[idx % TREATMENT_PACKAGE_COLORS.length];
+                          const selected = decisionDraft.item_id === i.id;
                           return (
                             <button
+                              key={i.id}
                               type="button"
-                              onClick={() => setPackageDropdownOpen((o) => !o)}
-                              className="flex h-9 w-full items-center justify-center rounded-md border px-2 text-center text-xs font-semibold transition hover:brightness-95"
-                              style={selItem
-                                ? { background: `${selColor}14`, color: selColor, borderColor: `${selColor}33` }
-                                : { background: "#fff", color: "#334155", borderColor: "#e2e8f0" }}
-                              data-testid="cons-decision-package-select"
+                              onClick={() => {
+                                const baseSessions = decisionDraft.mode === "online" ? i.sessions_online : i.sessions_offline;
+                                setDecisionDraft((p) => ({ ...p, item_id: i.id, sessions: baseSessions ? String(baseSessions) : "" }));
+                              }}
+                              className="rounded-md border px-3 py-1.5 text-xs font-semibold transition hover:brightness-95"
+                              style={selected
+                                ? { background: `${color}22`, color, borderColor: color, boxShadow: `inset 0 0 0 1px ${color}` }
+                                : { background: `${color}14`, color, borderColor: `${color}33` }}
+                              data-testid={`cons-decision-package-option-${i.id}`}
                             >
-                              {selItem?.name || "-- choose a treatment package --"}
+                              {i.name}
                             </button>
                           );
-                        })()}
-                        {packageDropdownOpen && (
-                          <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-md border border-slate-200 bg-white shadow-lg" data-testid="cons-decision-package-options">
-                            {treatmentPackageItems.map((i, idx) => {
-                              const color = TREATMENT_PACKAGE_COLORS[idx % TREATMENT_PACKAGE_COLORS.length];
-                              return (
-                                <button
-                                  key={i.id}
-                                  type="button"
-                                  onClick={() => {
-                                    const baseSessions = decisionDraft.mode === "online" ? i.sessions_online : i.sessions_offline;
-                                    setDecisionDraft((p) => ({ ...p, item_id: i.id, sessions: baseSessions ? String(baseSessions) : "" }));
-                                    setPackageDropdownOpen(false);
-                                  }}
-                                  className="block w-full border-b border-slate-100 py-2 text-center text-xs font-semibold transition last:border-b-0 hover:brightness-95"
-                                  style={{ backgroundColor: `${color}14`, color }}
-                                  data-testid={`cons-decision-package-option-${i.id}`}
-                                >
-                                  {i.name}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
+                        })}
                       </div>
 
                       {decisionDraft.item_id && (() => {
