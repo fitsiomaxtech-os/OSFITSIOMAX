@@ -325,6 +325,7 @@ export const BranchAdminBoard = ({ branchId }) => {
       {showCreateLead && (
         <CreateLeadModal
           isSuperAdmin={false}
+          branchId={branchId}
           onClose={() => setShowCreateLead(false)}
           onSaved={loadBoard}
         />

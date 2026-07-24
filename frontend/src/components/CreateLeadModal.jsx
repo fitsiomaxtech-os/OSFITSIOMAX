@@ -24,8 +24,8 @@ const blank = {
   expected_consultation_date: "", branch_id: "",
 };
 
-export const CreateLeadModal = ({ onClose, onSaved, isSuperAdmin = true }) => {
-  const [form, setForm] = useState(blank);
+export const CreateLeadModal = ({ onClose, onSaved, isSuperAdmin = true, branchId = null }) => {
+  const [form, setForm] = useState(branchId ? { ...blank, branch_id: branchId } : blank);
   const [extraFields, setExtraFields] = useState({});
   const [customFields, setCustomFields] = useState([]);
   const [branches, setBranches] = useState([]);
@@ -49,7 +49,8 @@ export const CreateLeadModal = ({ onClose, onSaved, isSuperAdmin = true }) => {
     else payload.months_of_pain = Number(payload.months_of_pain);
     if (payload.age === "") payload.age = null;
     else payload.age = Number(payload.age);
-    if (!["offline_physio", "offline_fitness"].includes(payload.department)) payload.branch_id = "";
+    if (branchId) payload.branch_id = branchId;
+    else if (!["offline_physio", "offline_fitness"].includes(payload.department)) payload.branch_id = "";
     payload.source_type = "manual";
     const VERTICAL_MAP = {
       online_physio: "online_physiotherapy",
@@ -111,7 +112,7 @@ export const CreateLeadModal = ({ onClose, onSaved, isSuperAdmin = true }) => {
               <Field label="Expected Consultation Date" className="sm:col-span-2"><Input type="date" value={form.expected_consultation_date} onChange={(e) => set("expected_consultation_date", e.target.value)} data-testid="lead-create-consultdate" /></Field>
             </div>
 
-            {["offline_physio", "offline_fitness"].includes(form.department) && (
+            {!branchId && ["offline_physio", "offline_fitness"].includes(form.department) && (
               <div className="mt-3 rounded-md border border-sky-200 bg-sky-50 p-3" data-testid="lead-create-branch-section">
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-sky-700">Assign to Branch</p>
                 <div className="grid gap-2 sm:grid-cols-2 max-h-44 overflow-y-auto">
