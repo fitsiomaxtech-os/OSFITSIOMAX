@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Calendar, CheckCircle2, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2, Ban, ClipboardCheck } from "lucide-react";
+import { Calendar, CheckCircle2, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2, Ban, ClipboardCheck, IndianRupee } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -897,16 +897,23 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
 
                 if (stage === "Consultation Visit") {
                   const alreadyPaid = selectedLead.package_paid != null;
+                  const hasTreatment = decision === "consultation_treatment";
                   return (
                     <div className="rounded-lg border border-sky-200 bg-sky-50 p-3" data-testid="cons-stage-panel-consultation-visit">
                       <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-sky-700">
-                        <Stethoscope className="h-3.5 w-3.5" /> Consultation Fee
+                        <IndianRupee className="h-3.5 w-3.5" /> Collect a Payment
                       </p>
                       <div className="space-y-1.5 text-sm">
                         <div className="flex items-center justify-between">
                           <span className="text-xs text-slate-500">Consultation Fee</span>
                           <span className="font-semibold text-slate-800">{selectedLead.package_price != null ? `Rs.${selectedLead.package_price}` : "—"}</span>
                         </div>
+                        {hasTreatment && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs text-slate-500">Treatment Fee</span>
+                            <span className="font-semibold text-slate-800">{selectedLead.session_package_price != null ? `Rs.${selectedLead.session_package_price}` : "—"}</span>
+                          </div>
+                        )}
                         {alreadyPaid && (
                           <div className="flex items-center justify-between">
                             <span className="text-xs text-slate-500">Already Paid Via</span>
