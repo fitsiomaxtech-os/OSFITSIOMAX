@@ -446,6 +446,7 @@ const DetailStat = ({ label, value, color }) => (
 );
 
 // ---------- Service Type (moved from Super Admin Master View "Business Verticals") ----------
+const SERVICE_TYPE_COLORS = ["#2563eb", "#059669", "#d97706", "#7c3aed", "#e11d48", "#0891b2"];
 const ServiceTypeTab = () => {
   const [items, setItems] = useState([]);
   const [name, setName] = useState("");
@@ -487,28 +488,38 @@ const ServiceTypeTab = () => {
       <CardHeader>
         <CardTitle className="text-base">Service Type</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-3">
+      <CardContent className="space-y-4">
         <form className="flex gap-2" onSubmit={addItem} data-testid="service-type-form">
           <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="new_service_type"
+            className="h-10 flex-1"
             data-testid="service-type-input"
           />
-          <Button type="submit" disabled={loading} data-testid="service-type-submit">Add</Button>
+          <Button type="submit" disabled={loading} className="h-10 shrink-0 bg-sky-600 px-5 hover:bg-sky-700" data-testid="service-type-submit">
+            <Plus className="mr-1 h-4 w-4" />Add
+          </Button>
         </form>
-        <div className="space-y-1">
-          {items.map((item) => (
-            <div
-              key={item.id}
-              className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
-              data-testid={`service-type-row-${item.id}`}
-            >
-              {item.name}
-            </div>
-          ))}
+        <div className="grid gap-2 sm:grid-cols-2">
+          {items.map((item, idx) => {
+            const color = SERVICE_TYPE_COLORS[idx % SERVICE_TYPE_COLORS.length];
+            return (
+              <div
+                key={item.id}
+                className="flex items-center gap-3 rounded-lg border px-3 py-2.5 text-sm transition hover:shadow-sm"
+                style={{ backgroundColor: `${color}0f`, borderColor: `${color}33` }}
+                data-testid={`service-type-row-${item.id}`}
+              >
+                <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md" style={{ backgroundColor: `${color}24` }}>
+                  <Layers className="h-3.5 w-3.5" style={{ color }} />
+                </span>
+                <span className="truncate font-medium text-slate-700">{item.name}</span>
+              </div>
+            );
+          })}
           {items.length === 0 && (
-            <p className="rounded border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-500">
+            <p className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-500 sm:col-span-2">
               No service types yet. Add one above.
             </p>
           )}
