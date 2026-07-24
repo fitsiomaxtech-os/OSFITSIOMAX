@@ -42,6 +42,7 @@ import { BranchSessionsPanel, FitsiomaxStorePanel } from "@/components/BranchSto
 import { PullFromSheetButton } from "@/components/PullFromSheetButton";
 import { PlaceholderPanel } from "@/components/PackagesBoard";
 import { AccountantManageTab } from "@/components/branch/AccountantManageTab";
+import { BranchCalendarPanel } from "@/components/branch/BranchCalendarPanel";
 import { CreateLeadModal } from "@/components/CreateLeadModal";
 
 export const BranchAdminBoard = ({ branchId }) => {
@@ -122,8 +123,9 @@ export const BranchAdminBoard = ({ branchId }) => {
   const VIEW_TABS = [
     { key: "pipeline", label: "Branch Leads", icon: LayoutDashboard },
     { key: "consultations", label: "Consultations", icon: Stethoscope },
-    { key: "sessions", label: "Treatment Sessions", icon: CalendarRange },
     { key: "accountant_mgmt", label: "Accountant Manage", icon: BadgeIndianRupee },
+    { key: "calendar", label: "Calendar", icon: Calendar },
+    { key: "sessions", label: "Treatment Sessions", icon: CalendarRange },
     { key: "rehab", label: "Rehab", icon: Activity },
     { key: "store", label: "Fitsiomax Store", icon: ShoppingCart },
   ];
@@ -178,6 +180,8 @@ export const BranchAdminBoard = ({ branchId }) => {
             <HeadPhysioCalendar branchId={branchId} />
           )}
         </div>
+      ) : activeView === "calendar" ? (
+        <BranchCalendarPanel branchId={branchId} />
       ) : activeView === "sessions" ? (
         <BranchSessionsPanel />
       ) : activeView === "rehab" ? (

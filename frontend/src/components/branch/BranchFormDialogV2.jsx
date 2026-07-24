@@ -40,7 +40,9 @@ export const BranchFormDialogV2 = ({ branch, onClose, onSaved }) => {
     opened_date: branch?.opened_date || "",
     vertical: branch?.vertical || "offline_physiotherapy",
     weekly_hours: branch?.weekly_hours && Object.keys(branch.weekly_hours).length ? { ...emptyWeekly(), ...branch.weekly_hours } : emptyWeekly(),
+    holidays: branch?.holidays || [],
   });
+  const [holidayInput, setHolidayInput] = useState("");
   const [finance, setFinance] = useState(null);
   const [hpCandidates, setHpCandidates] = useState([]);
   const [hpPick, setHpPick] = useState("");
@@ -72,6 +74,12 @@ export const BranchFormDialogV2 = ({ branch, onClose, onSaved }) => {
 
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
   const setDay = (dayKey, patch) => setForm((p) => ({ ...p, weekly_hours: { ...p.weekly_hours, [dayKey]: { ...p.weekly_hours[dayKey], ...patch } } }));
+  const addHoliday = () => {
+    if (!holidayInput) return;
+    setForm((p) => (p.holidays.includes(holidayInput) ? p : { ...p, holidays: [...p.holidays, holidayInput].sort() }));
+    setHolidayInput("");
+  };
+  const removeHoliday = (d) => setForm((p) => ({ ...p, holidays: p.holidays.filter((x) => x !== d) }));
 
   const submit = async () => {
     if (!form.branch_name.trim() || !form.address.trim()) { setTab("details"); toast.error("Branch name + address required"); return; }
@@ -81,14 +89,14 @@ export const BranchFormDialogV2 = ({ branch, onClose, onSaved }) => {
         await updateBranch(branch.id, {
           branch_name: form.branch_name, address: form.address, admin_phone: form.admin_phone,
           phone: form.phone, email: form.email, map_location: form.map_location,
-          opened_date: form.opened_date, vertical: form.vertical, weekly_hours: form.weekly_hours,
+          opened_date: form.opened_date, vertical: form.vertical, weekly_hours: form.weekly_hours, holidays: form.holidays,
         });
         toast.success("Branch updated");
       } else {
         await bmCreateWithExistingAdmin({
           branch_name: form.branch_name, address: form.address, admin_user_id: form.admin_user_id, admin_phone: form.admin_phone,
           phone: form.phone, email: form.email, map_location: form.map_location,
-          opened_date: form.opened_date, vertical: form.vertical, weekly_hours: form.weekly_hours,
+          opened_date: form.opened_date, vertical: form.vertical, weekly_hours: form.weekly_hours, holidays: form.holidays,
         });
         toast.success("Branch created — finance summary will populate once leads are assigned.");
       }
@@ -178,6 +186,27 @@ export const BranchFormDialogV2 = ({ branch, onClose, onSaved }) => {
                 <button type="button" onClick={() => DAYS.forEach((d) => setDay(d.key, { is_open: true, open: form.weekly_hours.mon.open, close: form.weekly_hours.mon.close }))} className="text-xs font-medium text-sky-600 hover:underline" data-testid="bf2-copy-mon">Copy Monday to all days</button>
                 <span className="text-slate-300">·</span>
                 <button type="button" onClick={() => setForm((p) => ({ ...p, weekly_hours: { ...p.weekly_hours, sat: { ...p.weekly_hours.sat, is_open: false }, sun: { ...p.weekly_hours.sun, is_open: false } } }))} className="text-xs font-medium text-sky-600 hover:underline" data-testid="bf2-close-weekend">Mark weekend closed</button>
+              </div>
+
+              <div className="mt-3 border-t border-slate-100 pt-3" data-testid="bf2-holidays">
+                <p className="text-xs font-semibold text-slate-600">Branch Holidays (closed days)</p>
+                <p className="mb-2 text-xs text-slate-500">Add specific dates the branch is closed. These appear as holidays on the Branch Admin calendar.</p>
+                <div className="flex gap-2">
+                  <Input type="date" value={holidayInput} onChange={(e) => setHolidayInput(e.target.value)} className="w-44" data-testid="bf2-holiday-input" />
+                  <Button type="button" variant="outline" onClick={addHoliday} data-testid="bf2-holiday-add">Add Holiday</Button>
+                </div>
+                {form.holidays.length > 0 ? (
+                  <div className="mt-2 flex flex-wrap gap-1.5" data-testid="bf2-holiday-list">
+                    {form.holidays.map((d) => (
+                      <span key={d} className="inline-flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-600" data-testid={`bf2-holiday-${d}`}>
+                        {d}
+                        <button type="button" onClick={() => removeHoliday(d)} className="text-rose-400 hover:text-rose-600" aria-label="Remove holiday"><X className="h-3 w-3" /></button>
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-2 text-xs text-slate-400">No holidays added.</p>
+                )}
               </div>
             </div>
           )}

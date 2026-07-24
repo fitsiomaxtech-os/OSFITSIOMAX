@@ -24,6 +24,7 @@ class BranchAssignedCreate(BaseModel):
     email: Optional[str] = ""
     map_location: Optional[str] = ""
     weekly_hours: Optional[Dict[str, Any]] = None
+    holidays: Optional[List[str]] = None
 
 
 class AssignAdmin(BaseModel):
@@ -85,6 +86,7 @@ async def create_branch_with_existing_admin(payload: BranchAssignedCreate, _: V3
         "email": payload.email or "",
         "map_location": payload.map_location or "",
         "weekly_hours": payload.weekly_hours or {},
+        "holidays": payload.holidays or [],
         "created_at": now_iso(),
     }
     await v3_col("branches").insert_one(branch.copy())

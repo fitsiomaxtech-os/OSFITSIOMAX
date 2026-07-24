@@ -73,6 +73,7 @@ class V3BranchOut(BaseModel):
     email: Optional[str] = ""
     map_location: Optional[str] = ""
     weekly_hours: Optional[Dict[str, Any]] = None
+    holidays: Optional[List[str]] = None
     created_at: str
 
 
@@ -89,6 +90,7 @@ class V3BranchUpdate(BaseModel):
     email: Optional[str] = None
     map_location: Optional[str] = None
     weekly_hours: Optional[Dict[str, Any]] = None
+    holidays: Optional[List[str]] = None
 
 
 class V3DoctorCreate(BaseModel):
