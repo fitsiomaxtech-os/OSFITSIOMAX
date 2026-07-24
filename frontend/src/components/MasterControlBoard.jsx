@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle, ArrowRight, BarChart3, Building2, Calendar, CheckCircle2, Clock,
-  Database, FileSpreadsheet, FileText, History, Link as LinkIcon, MapPin,
+  Database, FileSpreadsheet, History, Link as LinkIcon, MapPin,
   RefreshCw, Shield, ShieldCheck, ShieldAlert, UserCheck, UserPlus, Users,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,7 +18,6 @@ const JOURNEY_PILLS = [
   { label: "Follow Up",               key: "Follow Up",               color: "#f59e0b", icon: Clock },
   { label: "Appointment",             key: "Appointment",             color: "#10b981", icon: Calendar },
   { label: "New Appointment",         key: "New Appointment",         color: "#3b82f6", icon: Calendar },
-  { label: "Portfolio",               key: "Portfolio",               color: "#8b5cf6", icon: FileText },
   { label: "Appointment Date & Time", key: "Appointment Date & Time", color: "#14b8a6", icon: Clock },
   { label: "Patient",                 key: "Patient",                 color: "#22c55e", icon: Users },
 ];
