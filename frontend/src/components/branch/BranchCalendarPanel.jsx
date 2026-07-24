@@ -17,18 +17,7 @@ import {
 // weekly_hours is keyed mon..sun; JS getDay() is 0=Sun..6=Sat.
 const DAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
 const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-
-// Monday that starts the week containing `date`.
-const mondayOf = (date) => {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  const dow = d.getDay();
-  d.setDate(d.getDate() + (dow === 0 ? -6 : 1 - dow));
-  return d;
-};
 
 const emptyDraft = () => ({ patient_name: "", doctor_id: "", date: iso(new Date()), time: "" });
 
@@ -40,7 +29,7 @@ export const BranchCalendarPanel = ({ branchId }) => {
   const [leads, setLeads] = useState([]);
   const [headPhysios, setHeadPhysios] = useState([]);
   const [appts, setAppts] = useState([]);
-  const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()));
+  const [monthDate, setMonthDate] = useState(() => { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d; });
   const [loading, setLoading] = useState(false);
   const [subTab, setSubTab] = useState("schedule");
 
@@ -75,10 +64,18 @@ export const BranchCalendarPanel = ({ branchId }) => {
   const weekly = branch?.weekly_hours || {};
   const holidays = branch?.holidays || [];
 
-  const days = useMemo(
-    () => Array.from({ length: 7 }, (_, i) => { const d = new Date(weekStart); d.setDate(d.getDate() + i); return d; }),
-    [weekStart],
-  );
+  const monthCells = useMemo(() => {
+    const year = monthDate.getFullYear();
+    const month = monthDate.getMonth();
+    const firstDow = new Date(year, month, 1).getDay();  // 0 Sun..6 Sat
+    const lead = firstDow === 0 ? 6 : firstDow - 1;       // Monday-based leading blanks
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const cells = [];
+    for (let i = 0; i < lead; i++) cells.push(null);
+    for (let day = 1; day <= daysInMonth; day++) cells.push(new Date(year, month, day));
+    while (cells.length % 7 !== 0) cells.push(null);
+    return cells;
+  }, [monthDate]);
 
   // Consultation appointments grouped by date (the schedulable, editable events).
   const apptsByDate = useMemo(() => {
@@ -105,8 +102,9 @@ export const BranchCalendarPanel = ({ branchId }) => {
   }, [appts]);
 
   const todayIso = iso(new Date());
-  const shiftWeek = (delta) => { const d = new Date(weekStart); d.setDate(d.getDate() + delta * 7); setWeekStart(d); };
-  const rangeLabel = `${MONTHS[days[0].getMonth()]} ${days[0].getDate()} – ${MONTHS[days[6].getMonth()]} ${days[6].getDate()}, ${days[6].getFullYear()}`;
+  const shiftMonth = (delta) => setMonthDate((prev) => { const d = new Date(prev); d.setMonth(d.getMonth() + delta); return d; });
+  const thisMonth = () => { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); setMonthDate(d); };
+  const monthLabel = monthDate.toLocaleDateString("en-US", { month: "long", year: "numeric" });
 
   // ---- Booking modal ----
   const fetchAvail = useCallback(async (date, doctorId) => {
@@ -201,16 +199,26 @@ export const BranchCalendarPanel = ({ branchId }) => {
 
       {subTab === "schedule" ? (
       <>
-      <div className="flex items-center justify-end gap-2">
-        <Button size="sm" variant="outline" onClick={() => shiftWeek(-1)} data-testid="cal-prev-week"><ChevronLeft className="h-4 w-4" /></Button>
-        <Button size="sm" variant="outline" onClick={() => setWeekStart(mondayOf(new Date()))} data-testid="cal-this-week">This Week</Button>
-        <Button size="sm" variant="outline" onClick={() => shiftWeek(1)} data-testid="cal-next-week"><ChevronRight className="h-4 w-4" /></Button>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-base font-semibold text-slate-700" data-testid="cal-month-label">{monthLabel}</p>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={() => shiftMonth(-1)} data-testid="cal-prev-month"><ChevronLeft className="h-4 w-4" /></Button>
+          <Button size="sm" variant="outline" onClick={thisMonth} data-testid="cal-this-month">This Month</Button>
+          <Button size="sm" variant="outline" onClick={() => shiftMonth(1)} data-testid="cal-next-month"><ChevronRight className="h-4 w-4" /></Button>
+        </div>
       </div>
 
-      <p className="text-sm font-semibold text-slate-600" data-testid="cal-range-label">{rangeLabel}</p>
+      {/* Weekday headers (desktop) */}
+      <div className="hidden grid-cols-7 gap-2 sm:grid" data-testid="cal-weekday-headers">
+        {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((w) => (
+          <p key={w} className="text-center text-[11px] font-semibold uppercase tracking-wider text-slate-400">{w}</p>
+        ))}
+      </div>
 
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-7" data-testid="cal-week-grid">
-        {days.map((d) => {
+      {/* Month grid */}
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-7" data-testid="cal-month-grid">
+        {monthCells.map((d, idx) => {
+          if (!d) return <div key={`empty-${idx}`} className="hidden rounded-lg border border-transparent sm:block" />;
           const dateStr = iso(d);
           const dowIdx = d.getDay();
           const cfg = weekly[DAY_KEYS[dowIdx]];
@@ -220,55 +228,50 @@ export const BranchCalendarPanel = ({ branchId }) => {
           const dayAppts = apptsByDate[dateStr] || [];
           const dayLeadAppts = leadApptsByDate[dateStr] || [];
           const bookable = !isHoliday && isOpen;
+          const shown = dayAppts.slice(0, 3);
+          const moreCount = dayAppts.length - shown.length;
           return (
             <div
               key={dateStr}
-              className={`flex min-h-[170px] flex-col overflow-hidden rounded-lg border ${isToday ? "border-sky-400 ring-1 ring-sky-200" : "border-slate-200"} bg-white`}
+              className={`flex min-h-[104px] flex-col overflow-hidden rounded-lg border ${isToday ? "border-sky-400 ring-1 ring-sky-200" : "border-slate-200"} ${isHoliday ? "bg-rose-50/40" : isOpen ? "bg-white" : "bg-slate-50"}`}
               data-testid={`cal-day-${dateStr}`}
             >
-              <div className={`flex items-center justify-between px-2 py-1.5 ${isHoliday ? "bg-rose-50" : isOpen ? "bg-slate-50" : "bg-slate-100"}`}>
-                <div>
-                  <p className="text-[11px] font-semibold uppercase text-slate-500">{DAY_LABELS[dowIdx]}</p>
-                  <p className={`text-sm font-bold ${isToday ? "text-sky-700" : "text-slate-700"}`}>{d.getDate()}</p>
+              <div className="flex items-center justify-between px-2 py-1">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] font-semibold uppercase text-slate-400 sm:hidden">{DAY_LABELS[dowIdx]}</span>
+                  <span className={`text-sm font-bold ${isToday ? "text-sky-700" : "text-slate-700"}`}>{d.getDate()}</span>
                 </div>
                 {bookable && (
-                  <button type="button" onClick={() => openCreate(dateStr)} className="rounded-md p-1 text-slate-400 hover:bg-white hover:text-sky-600" title="Book consultation" data-testid={`cal-day-add-${dateStr}`}>
+                  <button type="button" onClick={() => openCreate(dateStr)} className="rounded p-0.5 text-slate-300 hover:bg-slate-100 hover:text-sky-600" title="Book consultation" data-testid={`cal-day-add-${dateStr}`}>
                     <Plus className="h-3.5 w-3.5" />
                   </button>
                 )}
               </div>
-              <div className="flex-1 space-y-1.5 p-1.5">
+              <div className="flex-1 space-y-1 px-1.5 pb-1.5">
                 {isHoliday ? (
-                  <p className="rounded-md bg-rose-50 px-2 py-1 text-center text-[11px] font-semibold text-rose-500">Holiday</p>
+                  <p className="rounded bg-rose-100/70 px-1.5 py-0.5 text-center text-[10px] font-semibold text-rose-500">Holiday</p>
                 ) : !isOpen ? (
-                  <p className="rounded-md bg-slate-50 px-2 py-1 text-center text-[11px] font-medium text-slate-400">Closed</p>
+                  <p className="rounded bg-slate-100 px-1.5 py-0.5 text-center text-[10px] font-medium text-slate-400">Closed</p>
                 ) : (
                   <>
-                    <p className="flex items-center justify-center gap-1 text-[10px] text-slate-400">
-                      <Clock className="h-3 w-3" />{cfg?.open || "09:00"}–{cfg?.close || "20:00"}
-                    </p>
-                    {dayAppts.map((a) => (
+                    {shown.map((a) => (
                       <button
                         key={a.id}
                         type="button"
                         onClick={() => openEdit(a)}
-                        className="block w-full rounded-md border border-violet-200 bg-violet-50 px-2 py-1 text-left hover:border-violet-300 hover:bg-violet-100"
+                        className="block w-full truncate rounded border border-violet-200 bg-violet-50 px-1.5 py-0.5 text-left text-[10px] font-medium text-violet-700 hover:bg-violet-100"
+                        title={`${a.appointment_time} · ${a.patient_name || a.lead_name || ""}${a.doctor_name ? " · " + a.doctor_name : ""}`}
                         data-testid={`cal-appt-${a.id}`}
                       >
-                        <p className="text-[11px] font-bold text-violet-700">{a.appointment_time || "--:--"}</p>
-                        <p className="truncate text-[11px] font-medium text-slate-700" title={a.patient_name}>{a.patient_name || a.lead_name || "—"}</p>
-                        {a.doctor_name && <p className="flex items-center gap-0.5 truncate text-[10px] text-slate-400"><User className="h-2.5 w-2.5" />{a.doctor_name}</p>}
+                        <span className="font-bold">{a.appointment_time}</span> {a.patient_name || a.lead_name || "—"}
                       </button>
                     ))}
-                    {dayLeadAppts.map((a) => (
-                      <div key={a.id} className="rounded-md border border-sky-100 bg-sky-50/60 px-2 py-1" data-testid={`cal-lead-appt-${a.id}`}>
-                        <p className="text-[11px] font-bold text-sky-600">{a.appointment_time || "--:--"}</p>
-                        <p className="truncate text-[11px] text-slate-600" title={a.name}>{a.name || "—"}</p>
+                    {moreCount > 0 && <p className="px-1 text-[10px] font-medium text-slate-400">+{moreCount} more</p>}
+                    {dayLeadAppts.slice(0, 2).map((a) => (
+                      <div key={a.id} className="truncate rounded border border-sky-100 bg-sky-50/60 px-1.5 py-0.5 text-[10px] text-slate-500" title={`${a.appointment_time || ""} · ${a.name || ""}`} data-testid={`cal-lead-appt-${a.id}`}>
+                        <span className="font-semibold text-sky-600">{a.appointment_time || "--:--"}</span> {a.name || "—"}
                       </div>
                     ))}
-                    {dayAppts.length === 0 && dayLeadAppts.length === 0 && (
-                      <p className="pt-2 text-center text-[10px] text-slate-300">No appointments</p>
-                    )}
                   </>
                 )}
               </div>
