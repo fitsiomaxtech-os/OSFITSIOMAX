@@ -323,38 +323,27 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
     }
   };
 
-  // ---- Collect Fee (Branch Admin) — at the Consultation Fee stage ----
+  // ---- Collect Fee (Branch Admin) — at the Consultation Visit stage ----
   // Consultation Fee is never editable here — it's whatever the Head Physio's
   // package assignment already set (package_price), Branch Admin can only pick
-  // the payment mode and confirm.
+  // the payment mode and confirm. If the Head Physio's decision was "Consultation +
+  // Treatment" and the Treatment Fee hasn't been paid yet, its draft opens
+  // alongside this one so both fees are collected together in one popup.
   const openCollectFeeDraft = () => {
     setCollectFeeDraft({
       payment_mode: selectedLead.package_payment_mode || "cash",
     });
-  };
-
-  const submitCollectFee = async () => {
-    setCollectingFee(true);
-    try {
-      const res = await collectPackagePayment(selectedLead.id, {
-        payment_mode: collectFeeDraft.payment_mode,
-      });
-      toast.success(selectedLead.package_paid != null ? "Payment updated" : "Fee collected");
-      setCollectFeeDraft(null);
-      // Close the lead card instantly, same as a plain stage move — don't leave it
-      // open on the stale pre-payment lead while the board list updates in the background.
-      setSelectedLead(null);
-      setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === res.lead.id ? res.lead : l) }));
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || "Failed to collect fee");
+    if (selectedLead.consultation_decision === "consultation_treatment" && selectedLead.treatment_fee_paid == null) {
+      openTreatmentFeeDraft();
     }
-    setCollectingFee(false);
   };
 
-  // ---- Collect Treatment Fee (Branch Admin) — at the Fee Collected stage, for
-  // "Consultation + Treatment" patients only. The Treatment Package and
-  // its price are locked in from what the Head Physio already chose at Save & Move —
-  // neither is editable here.
+  // ---- Collect Treatment Fee (Branch Admin) — for "Consultation + Treatment"
+  // patients only. The Treatment Package and its price are locked in from what the
+  // Head Physio already chose at Save & Move — neither is editable here. Normally
+  // opened together with the Consultation Fee draft above; also independently
+  // reachable from the Fee Collected panel as a fallback if it wasn't collected
+  // together the first time.
   const openTreatmentFeeDraft = () => {
     setTreatmentFeeDraft({
       payment_mode: selectedLead.treatment_fee_payment_mode || "cash",
@@ -374,39 +363,92 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
   const partialMismatch = Math.abs(partialInstallmentsTotal - treatmentFeeTotal) > 0.01;
   const partialAllFilled = partialInstallments.length >= 2 && partialInstallments.every((i) => parseFloat(i.amount) > 0 && i.due_date);
 
-  const submitTreatmentFee = async () => {
+  // Shared validation for the Treatment Fee's mode-specific fields — used both when
+  // it's collected on its own and when it's bundled into the combined submit below.
+  const buildTreatmentFeePayload = () => {
     const mode = treatmentFeeDraft.payment_mode;
-    const payload = {
-      payment_mode: mode,
-    };
+    const payload = { payment_mode: mode };
     if (mode === "card") {
       if (!treatmentFeeDraft.card_number.trim() || !treatmentFeeDraft.card_holder_name.trim()) {
         toast.error("Card Number and Card Holder Name are required");
-        return;
+        return null;
       }
       payload.card_number = treatmentFeeDraft.card_number.trim();
       payload.card_holder_name = treatmentFeeDraft.card_holder_name.trim();
     } else if (mode === "cheque") {
       if (!treatmentFeeDraft.bank_name.trim() || !treatmentFeeDraft.cheque_number.trim()) {
         toast.error("Bank Name and Cheque Number are required");
-        return;
+        return null;
       }
       payload.bank_name = treatmentFeeDraft.bank_name.trim();
       payload.cheque_number = treatmentFeeDraft.cheque_number.trim();
     } else if (mode === "partial") {
       if (!partialAllFilled) {
         toast.error("Every installment needs an amount and a due date");
-        return;
+        return null;
       }
       if (partialMismatch) {
         toast.error("Installment amounts must add up to the Total Amount");
-        return;
+        return null;
       }
       payload.partial_installments = partialInstallments.map((i) => ({
         amount: parseFloat(i.amount),
         due_date: i.due_date,
       }));
     }
+    return payload;
+  };
+
+  // Submits the Consultation Fee, and — if the Treatment Fee draft is also open
+  // (Consultation + Treatment, collected together) — the Treatment Fee right after,
+  // in the same action. If Consultation Fee succeeds but Treatment Fee fails, the
+  // lead is left open at Fee Collected so it can be retried from there alone.
+  const submitCollectFee = async () => {
+    let treatmentPayload = null;
+    if (treatmentFeeDraft) {
+      treatmentPayload = buildTreatmentFeePayload();
+      if (!treatmentPayload) return;
+    }
+    setCollectingFee(true);
+    try {
+      const res1 = await collectPackagePayment(selectedLead.id, { payment_mode: collectFeeDraft.payment_mode });
+      let finalLead = res1.lead;
+      if (treatmentPayload) {
+        setCollectingTreatmentFee(true);
+        try {
+          const res2 = await collectTreatmentFee(selectedLead.id, treatmentPayload);
+          finalLead = res2.lead;
+          toast.success("Consultation Fee & Treatment Fee collected");
+        } catch (err) {
+          toast.error(err?.response?.data?.detail || "Consultation Fee collected, but Treatment Fee failed — collect it from the Fee Collected panel");
+          setCollectingTreatmentFee(false);
+          setCollectingFee(false);
+          setCollectFeeDraft(null);
+          setTreatmentFeeDraft(null);
+          setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === finalLead.id ? finalLead : l) }));
+          return;
+        }
+        setCollectingTreatmentFee(false);
+      } else {
+        toast.success(selectedLead.package_paid != null ? "Payment updated" : "Fee collected");
+      }
+      setCollectFeeDraft(null);
+      setTreatmentFeeDraft(null);
+      // Close the lead card instantly, same as a plain stage move — don't leave it
+      // open on the stale pre-payment lead while the board list updates in the background.
+      setSelectedLead(null);
+      setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === finalLead.id ? finalLead : l) }));
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to collect fee");
+    }
+    setCollectingFee(false);
+  };
+
+  // Standalone Treatment Fee submit — used only when its draft is opened alone (the
+  // Fee Collected panel's fallback), not when bundled into submitCollectFee above.
+  const submitTreatmentFee = async () => {
+    const payload = buildTreatmentFeePayload();
+    if (!payload) return;
     setCollectingTreatmentFee(true);
     try {
       const res = await collectTreatmentFee(selectedLead.id, payload);
@@ -1089,52 +1131,233 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
               </div>
             )}
 
-            {/* Collect Fee popup (Branch Admin) — Consultation Fee stage */}
+            {/* Collect Fee popup (Branch Admin) — Consultation Visit stage. When the
+                Head Physio's decision is "Consultation + Treatment" and the Treatment
+                Fee isn't paid yet, its section renders in this same popup so both
+                fees are collected together in one action. */}
             {collectFeeDraft && (
               <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" data-testid="cons-collect-fee-modal">
-                <div className="w-full max-w-sm space-y-3 rounded-xl bg-white p-4 shadow-2xl">
+                <div className="max-h-[85vh] w-full max-w-sm space-y-3 overflow-y-auto rounded-xl bg-white p-4 shadow-2xl">
                   <div className="flex items-center justify-between">
-                    <p className="text-sm font-semibold text-slate-800">{selectedLead.package_paid != null ? "Update Consultation Fee Payment" : "Collect Consultation Fee"}</p>
-                    <button onClick={() => setCollectFeeDraft(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-collect-fee-close"><X className="h-4 w-4" /></button>
-                  </div>
-                  {selectedLead.package_name && (
-                    <p className="text-[11px] text-slate-500">
-                      Package: <span className="font-semibold text-slate-700">{selectedLead.package_name}</span>
+                    <p className="text-sm font-semibold text-slate-800">
+                      {treatmentFeeDraft ? "Collect Fees" : selectedLead.package_paid != null ? "Update Consultation Fee Payment" : "Collect Consultation Fee"}
                     </p>
-                  )}
-                  <div>
-                    <label className="mb-1 block text-[11px] font-medium text-slate-500">Consultation Fee (₹)</label>
-                    <div className="flex h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-700" data-testid="cons-collect-fee-amount">
-                      {selectedLead.package_price != null ? `Rs.${selectedLead.package_price}` : "—"}
+                    <button onClick={() => { setCollectFeeDraft(null); setTreatmentFeeDraft(null); }} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-collect-fee-close"><X className="h-4 w-4" /></button>
+                  </div>
+
+                  <div className="space-y-3 rounded-lg border border-slate-200 p-3">
+                    <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-sky-700">
+                      <Stethoscope className="h-3.5 w-3.5" /> Consultation Fee
+                    </p>
+                    {selectedLead.package_name && (
+                      <p className="text-[11px] text-slate-500">
+                        Package: <span className="font-semibold text-slate-700">{selectedLead.package_name}</span>
+                      </p>
+                    )}
+                    <div>
+                      <label className="mb-1 block text-[11px] font-medium text-slate-500">Consultation Fee (₹)</label>
+                      <div className="flex h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-700" data-testid="cons-collect-fee-amount">
+                        {selectedLead.package_price != null ? `Rs.${selectedLead.package_price}` : "—"}
+                      </div>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-[11px] font-medium text-slate-500">Payment Mode</label>
+                      <select
+                        value={collectFeeDraft.payment_mode}
+                        onChange={(e) => setCollectFeeDraft({ ...collectFeeDraft, payment_mode: e.target.value })}
+                        className="h-9 w-full rounded-md border border-slate-200 px-2 text-xs"
+                        data-testid="cons-collect-fee-mode"
+                      >
+                        {CONSULTATION_FEE_PAYMENT_MODES.map((m) => (
+                          <option key={m.value} value={m.value}>{m.label}</option>
+                        ))}
+                      </select>
                     </div>
                   </div>
-                  <div>
-                    <label className="mb-1 block text-[11px] font-medium text-slate-500">Payment Mode</label>
-                    <select
-                      value={collectFeeDraft.payment_mode}
-                      onChange={(e) => setCollectFeeDraft({ ...collectFeeDraft, payment_mode: e.target.value })}
-                      className="h-9 w-full rounded-md border border-slate-200 px-2 text-xs"
-                      data-testid="cons-collect-fee-mode"
-                    >
-                      {CONSULTATION_FEE_PAYMENT_MODES.map((m) => (
-                        <option key={m.value} value={m.value}>{m.label}</option>
-                      ))}
-                    </select>
-                  </div>
+
+                  {treatmentFeeDraft && (
+                    <div className="space-y-3 rounded-lg border border-indigo-200 bg-indigo-50/40 p-3">
+                      <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-indigo-700">
+                        <Dumbbell className="h-3.5 w-3.5" /> Treatment Fee
+                      </p>
+                      <div>
+                        <label className="mb-1 block text-[11px] font-medium text-slate-500">Treatment Package (chosen by Head Physio)</label>
+                        <div className="flex h-9 items-center rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700" data-testid="cons-treatment-fee-item-readonly">
+                          {selectedLead.session_package_name || "—"}{selectedLead.session_package_sessions ? ` · ${selectedLead.session_package_sessions} sessions` : ""}
+                        </div>
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-[11px] font-medium text-slate-500">Treatment Fee (₹)</label>
+                        <div className="flex h-9 items-center rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700" data-testid="cons-treatment-fee-amount">
+                          {selectedLead.session_package_price != null ? `Rs.${selectedLead.session_package_price}` : "—"}
+                        </div>
+                        {selectedLead.session_package_sessions && selectedLead.session_package_price != null && (
+                          <p className="mt-1 text-[11px] text-slate-500" data-testid="cons-treatment-fee-breakdown">
+                            Collect Total Session Fee = {selectedLead.session_package_sessions} sessions × Rs.{Math.round((selectedLead.session_package_price / selectedLead.session_package_sessions) * 100) / 100}/session = Rs.{selectedLead.session_package_price}
+                          </p>
+                        )}
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-[11px] font-medium text-slate-500">Payment Mode</label>
+                        <select
+                          value={treatmentFeeDraft.payment_mode}
+                          onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, payment_mode: e.target.value })}
+                          className="h-9 w-full rounded-md border border-slate-200 px-2 text-xs"
+                          data-testid="cons-treatment-fee-mode"
+                        >
+                          {TREATMENT_FEE_PAYMENT_MODES.map((m) => (
+                            <option key={m.value} value={m.value}>{m.label}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {treatmentFeeDraft.payment_mode === "card" && (
+                        <>
+                          <div>
+                            <label className="mb-1 block text-[11px] font-medium text-slate-500">Card Number</label>
+                            <Input
+                              value={treatmentFeeDraft.card_number}
+                              onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, card_number: e.target.value })}
+                              className="h-9"
+                              data-testid="cons-treatment-fee-card-number"
+                            />
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-[11px] font-medium text-slate-500">Card Holder Name</label>
+                            <Input
+                              value={treatmentFeeDraft.card_holder_name}
+                              onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, card_holder_name: e.target.value })}
+                              className="h-9"
+                              data-testid="cons-treatment-fee-card-holder"
+                            />
+                          </div>
+                        </>
+                      )}
+
+                      {treatmentFeeDraft.payment_mode === "cheque" && (
+                        <>
+                          <div>
+                            <label className="mb-1 block text-[11px] font-medium text-slate-500">Bank Name</label>
+                            <Input
+                              value={treatmentFeeDraft.bank_name}
+                              onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, bank_name: e.target.value })}
+                              className="h-9"
+                              data-testid="cons-treatment-fee-bank-name"
+                            />
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-[11px] font-medium text-slate-500">Cheque Number</label>
+                            <Input
+                              value={treatmentFeeDraft.cheque_number}
+                              onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, cheque_number: e.target.value })}
+                              className="h-9"
+                              data-testid="cons-treatment-fee-cheque-number"
+                            />
+                          </div>
+                        </>
+                      )}
+
+                      {treatmentFeeDraft.payment_mode === "partial" && (
+                        <div className="space-y-2 rounded-md border border-slate-200 bg-white p-2">
+                          <div className="flex items-center justify-between">
+                            <p className="text-[11px] font-semibold text-slate-600">Payment Schedule</p>
+                            <button
+                              type="button"
+                              onClick={() => setTreatmentFeeDraft({
+                                ...treatmentFeeDraft,
+                                partial_installments: [...partialInstallments, { amount: "", due_date: "" }],
+                              })}
+                              className="flex items-center gap-1 text-[11px] font-semibold text-sky-600 hover:text-sky-700"
+                              data-testid="cons-treatment-fee-partial-add"
+                            >
+                              <Plus className="h-3.5 w-3.5" /> Add Payment
+                            </button>
+                          </div>
+                          {partialInstallments.map((inst, idx) => (
+                            <div key={idx} className="flex items-end gap-1.5" data-testid={`cons-treatment-fee-partial-row-${idx}`}>
+                              <div className="flex-1">
+                                <label className="mb-1 block text-[11px] font-medium text-slate-500">{partialInstallmentLabel(idx)} Amount *</label>
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  value={inst.amount}
+                                  onChange={(e) => {
+                                    const next = [...partialInstallments];
+                                    next[idx] = { ...next[idx], amount: e.target.value };
+                                    setTreatmentFeeDraft({ ...treatmentFeeDraft, partial_installments: next });
+                                  }}
+                                  className="h-9"
+                                  data-testid={`cons-treatment-fee-partial-amount-${idx}`}
+                                />
+                              </div>
+                              <div className="flex-1">
+                                <label className="mb-1 block text-[11px] font-medium text-slate-500">Due Date *</label>
+                                <Input
+                                  type="date"
+                                  value={inst.due_date}
+                                  onChange={(e) => {
+                                    const next = [...partialInstallments];
+                                    next[idx] = { ...next[idx], due_date: e.target.value };
+                                    setTreatmentFeeDraft({ ...treatmentFeeDraft, partial_installments: next });
+                                  }}
+                                  className="h-9"
+                                  data-testid={`cons-treatment-fee-partial-date-${idx}`}
+                                />
+                              </div>
+                              {partialInstallments.length > 2 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setTreatmentFeeDraft({
+                                    ...treatmentFeeDraft,
+                                    partial_installments: partialInstallments.filter((_, i) => i !== idx),
+                                  })}
+                                  className="mb-1.5 rounded p-1.5 text-rose-400 hover:bg-rose-50 hover:text-rose-600"
+                                  data-testid={`cons-treatment-fee-partial-remove-${idx}`}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                          {partialInstallmentsTotal > 0 && partialMismatch && (
+                            <p className="text-[11px] text-rose-600" data-testid="cons-treatment-fee-partial-mismatch">
+                              Installments total (₹{partialInstallmentsTotal}) must equal the Total Amount (₹{treatmentFeeTotal})
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <Button
                     className="w-full bg-sky-600 hover:bg-sky-700 text-xs"
                     onClick={submitCollectFee}
-                    disabled={collectingFee || selectedLead.package_price == null}
+                    disabled={
+                      collectingFee || collectingTreatmentFee ||
+                      selectedLead.package_price == null ||
+                      (!!treatmentFeeDraft && (
+                        selectedLead.session_package_price == null ||
+                        (treatmentFeeDraft.payment_mode === "card" && (!treatmentFeeDraft.card_number.trim() || !treatmentFeeDraft.card_holder_name.trim())) ||
+                        (treatmentFeeDraft.payment_mode === "cheque" && (!treatmentFeeDraft.bank_name.trim() || !treatmentFeeDraft.cheque_number.trim())) ||
+                        (treatmentFeeDraft.payment_mode === "partial" && (!partialAllFilled || partialMismatch))
+                      ))
+                    }
                     data-testid="cons-collect-fee-submit"
                   >
-                    {collectingFee ? "Saving..." : selectedLead.package_paid != null ? "Update Payment" : "Confirm & Move"}
+                    {collectingFee || collectingTreatmentFee
+                      ? "Saving..."
+                      : treatmentFeeDraft
+                        ? "Confirm & Collect All Fees"
+                        : selectedLead.package_paid != null ? "Update Payment" : "Confirm & Move"}
                   </Button>
                 </div>
               </div>
             )}
 
-            {/* Collect Treatment Fee popup (Branch Admin) — Treatment Fee stage, any payment method */}
-            {treatmentFeeDraft && (
+            {/* Collect Treatment Fee popup (Branch Admin) — fallback: only reachable on
+                its own from the Fee Collected panel if it wasn't collected together
+                with the Consultation Fee the first time. */}
+            {treatmentFeeDraft && !collectFeeDraft && (
               <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" data-testid="cons-treatment-fee-modal">
                 <div className="w-full max-w-sm space-y-3 rounded-xl bg-white p-4 shadow-2xl">
                   <div className="flex items-center justify-between">
