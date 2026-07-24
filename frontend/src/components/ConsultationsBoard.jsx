@@ -1137,7 +1137,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                 fees are collected together in one action. */}
             {collectFeeDraft && (
               <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" data-testid="cons-collect-fee-modal">
-                <div className="max-h-[85vh] w-full max-w-sm space-y-3 overflow-y-auto rounded-xl bg-white p-4 shadow-2xl">
+                <div className={`max-h-[85vh] w-full ${treatmentFeeDraft ? "max-w-3xl" : "max-w-sm"} space-y-3 overflow-y-auto rounded-xl bg-white p-4 shadow-2xl`}>
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-semibold text-slate-800">
                       {treatmentFeeDraft ? "Collect Fees" : selectedLead.package_paid != null ? "Update Consultation Fee Payment" : "Collect Consultation Fee"}
@@ -1145,6 +1145,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                     <button onClick={() => { setCollectFeeDraft(null); setTreatmentFeeDraft(null); }} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-collect-fee-close"><X className="h-4 w-4" /></button>
                   </div>
 
+                  <div className={treatmentFeeDraft ? "grid grid-cols-1 items-start gap-3 sm:grid-cols-2" : ""}>
                   <div className="space-y-3 rounded-lg border border-slate-200 p-3">
                     <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-sky-700">
                       <Stethoscope className="h-3.5 w-3.5" /> Consultation Fee
@@ -1328,6 +1329,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
                       )}
                     </div>
                   )}
+                  </div>
 
                   <Button
                     className="w-full bg-sky-600 hover:bg-sky-700 text-xs"
