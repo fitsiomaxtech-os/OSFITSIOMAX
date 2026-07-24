@@ -17,7 +17,7 @@ const TABS = [
   { key: "head_physio", label: "Head Physio", icon: Stethoscope },
 ];
 
-export const BranchDetailPage = ({ branchId, onBack }) => {
+export const BranchDetailPage = ({ branchId, onBack, readOnly = false }) => {
   const [tab, setTab] = useState("summary");
   const [data, setData] = useState(null);
   const [showEdit, setShowEdit] = useState(false);
@@ -32,7 +32,7 @@ export const BranchDetailPage = ({ branchId, onBack }) => {
     <div className="space-y-5" data-testid="branch-detail-page">
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="sm" onClick={onBack} data-testid="branch-detail-back"><ArrowLeft className="h-4 w-4 mr-1" />Branches</Button>
+          {onBack && <Button variant="ghost" size="sm" onClick={onBack} data-testid="branch-detail-back"><ArrowLeft className="h-4 w-4 mr-1" />Branches</Button>}
           <div>
             <h2 className="text-2xl font-bold text-slate-900">{b.branch_name}</h2>
             <p className="text-sm text-slate-500"><MapPin className="inline h-3 w-3 mr-1" />{b.address}</p>
@@ -40,7 +40,7 @@ export const BranchDetailPage = ({ branchId, onBack }) => {
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={load} data-testid="branch-detail-refresh"><RefreshCw className="h-4 w-4" /></Button>
-          <Button variant="outline" onClick={() => setShowEdit(true)} data-testid="branch-detail-edit"><Pencil className="h-4 w-4 mr-1" />Edit</Button>
+          {!readOnly && <Button variant="outline" onClick={() => setShowEdit(true)} data-testid="branch-detail-edit"><Pencil className="h-4 w-4 mr-1" />Edit</Button>}
         </div>
       </div>
 
@@ -56,10 +56,10 @@ export const BranchDetailPage = ({ branchId, onBack }) => {
         })}
       </div>
 
-      {tab === "summary" && <SummaryTab data={data} branchId={branchId} onChanged={load} />}
+      {tab === "summary" && <SummaryTab data={data} branchId={branchId} onChanged={load} readOnly={readOnly} />}
       {tab === "staff" && <StaffTab staff={data.staff} />}
       {tab === "performance" && <PerformanceTab perf={data.performance} />}
-      {tab === "head_physio" && <HeadPhysioTab hp={data.head_physio_section} branchId={branchId} onChanged={load} />}
+      {tab === "head_physio" && <HeadPhysioTab hp={data.head_physio_section} branchId={branchId} onChanged={load} readOnly={readOnly} />}
 
       {showEdit && <BranchFormDialogV2 branch={b} onClose={() => setShowEdit(false)} onSaved={() => { setShowEdit(false); load(); }} />}
     </div>
@@ -68,7 +68,7 @@ export const BranchDetailPage = ({ branchId, onBack }) => {
 
 // ---------- Summary tab ----------
 
-const SummaryTab = ({ data, branchId, onChanged }) => {
+const SummaryTab = ({ data, branchId, onChanged, readOnly = false }) => {
   const b = data.branch;
   const adm = data.admin_user;
   const [showEditAdmin, setShowEditAdmin] = useState(false);
@@ -91,8 +91,8 @@ const SummaryTab = ({ data, branchId, onChanged }) => {
         <CardHeader className="flex flex-row items-start justify-between gap-2">
           <CardTitle className="text-base">Branch Admin</CardTitle>
           <div className="flex gap-1">
-            <button onClick={() => setShowEditAdmin(true)} className="text-blue-500 hover:text-blue-700 p-1" title="Edit admin contact" data-testid="branch-admin-edit-btn"><Pencil className="h-4 w-4" /></button>
-            <button onClick={() => setShowReassign(true)} className="text-sky-600 hover:text-sky-700 p-1" title="Reassign admin" data-testid="branch-admin-reassign-btn"><UserCog className="h-4 w-4" /></button>
+            {!readOnly && <button onClick={() => setShowEditAdmin(true)} className="text-blue-500 hover:text-blue-700 p-1" title="Edit admin contact" data-testid="branch-admin-edit-btn"><Pencil className="h-4 w-4" /></button>}
+            {!readOnly && <button onClick={() => setShowReassign(true)} className="text-sky-600 hover:text-sky-700 p-1" title="Reassign admin" data-testid="branch-admin-reassign-btn"><UserCog className="h-4 w-4" /></button>}
           </div>
         </CardHeader>
         <CardContent className="space-y-2">
@@ -285,7 +285,7 @@ const PerformanceTab = ({ perf }) => {
 
 // ---------- Head Physio tab ----------
 
-const HeadPhysioTab = ({ hp, branchId, onChanged }) => {
+const HeadPhysioTab = ({ hp, branchId, onChanged, readOnly = false }) => {
   const [showAssign, setShowAssign] = useState(false);
   return (
   <div className="space-y-4" data-testid="branch-head-physio-tab">
@@ -293,7 +293,7 @@ const HeadPhysioTab = ({ hp, branchId, onChanged }) => {
       <Card data-testid="branch-hp-calendars">
         <CardHeader className="flex flex-row items-center justify-between gap-2">
           <CardTitle className="text-base">Head Physio Calendars</CardTitle>
-          <button onClick={() => setShowAssign(true)} className="text-sky-600 hover:text-sky-700 p-1" title="Assign a Head Physio" data-testid="branch-hp-assign-btn"><UserCog className="h-4 w-4" /></button>
+          {!readOnly && <button onClick={() => setShowAssign(true)} className="text-sky-600 hover:text-sky-700 p-1" title="Assign a Head Physio" data-testid="branch-hp-assign-btn"><UserCog className="h-4 w-4" /></button>}
         </CardHeader>
         <CardContent>
           {hp.calendars.length === 0 ? <p className="text-sm text-slate-400">No Head Physio assigned yet. Click the assign icon above to link an unassigned Head Physio from HR → Roles &amp; Credentials.</p> : (

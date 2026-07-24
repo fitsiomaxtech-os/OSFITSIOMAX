@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Clock, User, Plus, X, Pencil } from "lucide-react";
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Clock, User, Plus, X, Pencil, UserCog } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
+import { BranchDetailPage } from "@/components/branch/BranchDetailPage";
 import {
   getBranches,
   getBranchBoard,
@@ -181,9 +182,11 @@ export const BranchCalendarPanel = ({ branchId }) => {
           <h2 className="flex items-center gap-2 text-2xl font-bold text-slate-900"><CalendarIcon className="h-6 w-6 text-sky-600" /> Calendar</h2>
           <p className="text-sm text-slate-500">Schedule consultations between clients and Head Physios, based on the branch working hours set in Branch Management.</p>
         </div>
-        <Button onClick={() => openCreate()} className="bg-sky-600 hover:bg-sky-700" data-testid="cal-book-btn">
-          <Plus className="mr-1.5 h-4 w-4" />Book Consultation
-        </Button>
+        {subTab !== "manager" && (
+          <Button onClick={() => openCreate()} className="bg-sky-600 hover:bg-sky-700" data-testid="cal-book-btn">
+            <Plus className="mr-1.5 h-4 w-4" />Book Consultation
+          </Button>
+        )}
       </div>
 
       {/* Sub-tabs */}
@@ -191,12 +194,15 @@ export const BranchCalendarPanel = ({ branchId }) => {
         <button type="button" onClick={() => setSubTab("schedule")} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${subTab === "schedule" ? "bg-sky-50 text-sky-600" : "text-slate-600 hover:bg-slate-50"}`} data-testid="cal-subtab-schedule">
           <CalendarIcon className="h-4 w-4" />Schedule
         </button>
+        <button type="button" onClick={() => setSubTab("manager")} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${subTab === "manager" ? "bg-sky-50 text-sky-600" : "text-slate-600 hover:bg-slate-50"}`} data-testid="cal-subtab-manager">
+          <UserCog className="h-4 w-4" />Manager
+        </button>
         <button type="button" onClick={() => setSubTab("upcoming")} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${subTab === "upcoming" ? "bg-sky-50 text-sky-600" : "text-slate-600 hover:bg-slate-50"}`} data-testid="cal-subtab-upcoming">
           <Clock className="h-4 w-4" />Upcoming Appointments
         </button>
       </div>
 
-      {subTab === "schedule" ? (
+      {subTab === "schedule" && (
       <>
       <div className="flex items-center justify-between gap-2">
         <p className="text-base font-semibold text-slate-700" data-testid="cal-month-label">{monthLabel}</p>
@@ -279,7 +285,13 @@ export const BranchCalendarPanel = ({ branchId }) => {
         })}
       </div>
       </>
-      ) : (
+      )}
+
+      {subTab === "manager" && (
+        <BranchDetailPage branchId={branchId} readOnly />
+      )}
+
+      {subTab === "upcoming" && (
       <div className="space-y-4" data-testid="cal-upcoming-list">
         {upcomingGroups.length === 0 ? (
           <p className="rounded-lg border border-dashed border-slate-200 px-3 py-8 text-center text-sm text-slate-400">No upcoming consultations. Use “Book Consultation” to schedule one.</p>

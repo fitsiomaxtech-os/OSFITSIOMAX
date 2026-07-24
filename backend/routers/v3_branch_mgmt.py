@@ -234,7 +234,11 @@ async def performance_summary(_: V3UserOut = Depends(v3_require_roles("super_adm
 
 
 @router.get("/{branch_id}/detail")
-async def branch_detail(branch_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev", "marketing_head"))):
+async def branch_detail(branch_id: str, user: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev", "marketing_head", "branch_admin"))):
+    # A Branch Admin may view their own branch's detail (read-only Manager view);
+    # everyone else with a management role may view any branch.
+    if user.role == "branch_admin" and user.branch_id != branch_id:
+        raise HTTPException(status_code=403, detail="You can only view your own branch")
     branch = await v3_col("branches").find_one({"id": branch_id}, {"_id": 0})
     if not branch:
         raise HTTPException(status_code=404, detail="Branch not found")
