@@ -401,17 +401,27 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       card_holder_name: "",
       bank_name: "",
       cheque_number: "",
-      partial_installments: [{ amount: "", due_date: "" }, { amount: "", due_date: "" }],
+      // First installment defaults to today — it's the one being collected right now;
+      // later installments get their own scheduled due date.
+      partial_installments: [
+        { sessions: "", due_date: new Date().toISOString().slice(0, 10) },
+        { sessions: "", due_date: "" },
+      ],
     });
   };
 
-  // Partial Payment derived figures — the total to split is the locked-in
-  // session_package_price, never a client-editable field.
+  // Partial Payment is split by session count, not a raw amount — each installment's
+  // amount is derived from how many of the package's sessions it covers, at the
+  // package's own per-session rate, so the numbers always agree with "N sessions x
+  // Rs.rate/session" shown elsewhere. Total to split is the locked-in
+  // session_package_price/session_package_sessions, never client-editable fields.
   const treatmentFeeTotal = selectedLead?.session_package_price || 0;
+  const treatmentFeeTotalSessions = selectedLead?.session_package_sessions || 0;
+  const perSessionRate = treatmentFeeTotalSessions ? treatmentFeeTotal / treatmentFeeTotalSessions : 0;
   const partialInstallments = treatmentFeeDraft?.partial_installments || [];
-  const partialInstallmentsTotal = Math.round(partialInstallments.reduce((sum, i) => sum + (parseFloat(i.amount) || 0), 0) * 100) / 100;
-  const partialMismatch = Math.abs(partialInstallmentsTotal - treatmentFeeTotal) > 0.01;
-  const partialAllFilled = partialInstallments.length >= 2 && partialInstallments.every((i) => parseFloat(i.amount) > 0 && i.due_date);
+  const partialSessionsTotal = partialInstallments.reduce((sum, i) => sum + (parseInt(i.sessions, 10) || 0), 0);
+  const partialMismatch = treatmentFeeTotalSessions > 0 && partialSessionsTotal !== treatmentFeeTotalSessions;
+  const partialAllFilled = partialInstallments.length >= 2 && partialInstallments.every((i) => parseInt(i.sessions, 10) > 0 && i.due_date);
 
   // Shared validation for the Treatment Fee's mode-specific fields — used both when
   // it's collected on its own and when it's bundled into the combined submit below.
@@ -434,15 +444,15 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       payload.cheque_number = treatmentFeeDraft.cheque_number.trim();
     } else if (mode === "partial") {
       if (!partialAllFilled) {
-        toast.error("Every installment needs an amount and a due date");
+        toast.error("Every installment needs a session count and a due date");
         return null;
       }
       if (partialMismatch) {
-        toast.error("Installment amounts must add up to the Total Amount");
+        toast.error("Installment sessions must add up to the Total Sessions");
         return null;
       }
       payload.partial_installments = partialInstallments.map((i) => ({
-        amount: parseFloat(i.amount),
+        amount: Math.round((parseInt(i.sessions, 10) || 0) * perSessionRate),
         due_date: i.due_date,
       }));
     }
@@ -1372,73 +1382,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       )}
 
                       {treatmentFeeDraft.payment_mode === "partial" && (
-                        <div className="space-y-2 rounded-md border border-slate-200 bg-white p-2">
-                          <div className="flex items-center justify-between">
-                            <p className="text-[11px] font-semibold text-slate-600">Payment Schedule</p>
-                            <button
-                              type="button"
-                              onClick={() => setTreatmentFeeDraft({
-                                ...treatmentFeeDraft,
-                                partial_installments: [...partialInstallments, { amount: "", due_date: "" }],
-                              })}
-                              className="flex items-center gap-1 text-[11px] font-semibold text-sky-600 hover:text-sky-700"
-                              data-testid="cons-treatment-fee-partial-add"
-                            >
-                              <Plus className="h-3.5 w-3.5" /> Add Payment
-                            </button>
-                          </div>
-                          {partialInstallments.map((inst, idx) => (
-                            <div key={idx} className="flex items-end gap-1.5" data-testid={`cons-treatment-fee-partial-row-${idx}`}>
-                              <div className="flex-1">
-                                <label className="mb-1 block text-[11px] font-medium text-slate-500">{partialInstallmentLabel(idx)} Amount *</label>
-                                <Input
-                                  type="number"
-                                  min="0"
-                                  value={inst.amount}
-                                  onChange={(e) => {
-                                    const next = [...partialInstallments];
-                                    next[idx] = { ...next[idx], amount: e.target.value };
-                                    setTreatmentFeeDraft({ ...treatmentFeeDraft, partial_installments: next });
-                                  }}
-                                  className="h-9"
-                                  data-testid={`cons-treatment-fee-partial-amount-${idx}`}
-                                />
-                              </div>
-                              <div className="flex-1">
-                                <label className="mb-1 block text-[11px] font-medium text-slate-500">Due Date *</label>
-                                <Input
-                                  type="date"
-                                  value={inst.due_date}
-                                  onChange={(e) => {
-                                    const next = [...partialInstallments];
-                                    next[idx] = { ...next[idx], due_date: e.target.value };
-                                    setTreatmentFeeDraft({ ...treatmentFeeDraft, partial_installments: next });
-                                  }}
-                                  className="h-9"
-                                  data-testid={`cons-treatment-fee-partial-date-${idx}`}
-                                />
-                              </div>
-                              {partialInstallments.length > 2 && (
-                                <button
-                                  type="button"
-                                  onClick={() => setTreatmentFeeDraft({
-                                    ...treatmentFeeDraft,
-                                    partial_installments: partialInstallments.filter((_, i) => i !== idx),
-                                  })}
-                                  className="mb-1.5 rounded p-1.5 text-rose-400 hover:bg-rose-50 hover:text-rose-600"
-                                  data-testid={`cons-treatment-fee-partial-remove-${idx}`}
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </button>
-                              )}
-                            </div>
-                          ))}
-                          {partialInstallmentsTotal > 0 && partialMismatch && (
-                            <p className="text-[11px] text-rose-600" data-testid="cons-treatment-fee-partial-mismatch">
-                              Installments total (₹{partialInstallmentsTotal}) must equal the Total Amount (₹{treatmentFeeTotal})
-                            </p>
-                          )}
-                        </div>
+                        <PartialInstallmentsEditor
+                          installments={partialInstallments}
+                          setInstallments={(next) => setTreatmentFeeDraft({ ...treatmentFeeDraft, partial_installments: next })}
+                          totalSessions={treatmentFeeTotalSessions}
+                          perSessionRate={perSessionRate}
+                        />
                       )}
                       <Button
                         className="w-full bg-indigo-600 text-xs hover:bg-indigo-700"
@@ -1547,73 +1496,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                   )}
 
                   {treatmentFeeDraft.payment_mode === "partial" && (
-                    <div className="space-y-2 rounded-md border border-slate-200 p-2">
-                      <div className="flex items-center justify-between">
-                        <p className="text-[11px] font-semibold text-slate-600">Payment Schedule</p>
-                        <button
-                          type="button"
-                          onClick={() => setTreatmentFeeDraft({
-                            ...treatmentFeeDraft,
-                            partial_installments: [...partialInstallments, { amount: "", due_date: "" }],
-                          })}
-                          className="flex items-center gap-1 text-[11px] font-semibold text-sky-600 hover:text-sky-700"
-                          data-testid="cons-treatment-fee-partial-add"
-                        >
-                          <Plus className="h-3.5 w-3.5" /> Add Payment
-                        </button>
-                      </div>
-                      {partialInstallments.map((inst, idx) => (
-                        <div key={idx} className="flex items-end gap-1.5" data-testid={`cons-treatment-fee-partial-row-${idx}`}>
-                          <div className="flex-1">
-                            <label className="mb-1 block text-[11px] font-medium text-slate-500">{partialInstallmentLabel(idx)} Amount *</label>
-                            <Input
-                              type="number"
-                              min="0"
-                              value={inst.amount}
-                              onChange={(e) => {
-                                const next = [...partialInstallments];
-                                next[idx] = { ...next[idx], amount: e.target.value };
-                                setTreatmentFeeDraft({ ...treatmentFeeDraft, partial_installments: next });
-                              }}
-                              className="h-9"
-                              data-testid={`cons-treatment-fee-partial-amount-${idx}`}
-                            />
-                          </div>
-                          <div className="flex-1">
-                            <label className="mb-1 block text-[11px] font-medium text-slate-500">Due Date *</label>
-                            <Input
-                              type="date"
-                              value={inst.due_date}
-                              onChange={(e) => {
-                                const next = [...partialInstallments];
-                                next[idx] = { ...next[idx], due_date: e.target.value };
-                                setTreatmentFeeDraft({ ...treatmentFeeDraft, partial_installments: next });
-                              }}
-                              className="h-9"
-                              data-testid={`cons-treatment-fee-partial-date-${idx}`}
-                            />
-                          </div>
-                          {partialInstallments.length > 2 && (
-                            <button
-                              type="button"
-                              onClick={() => setTreatmentFeeDraft({
-                                ...treatmentFeeDraft,
-                                partial_installments: partialInstallments.filter((_, i) => i !== idx),
-                              })}
-                              className="mb-1.5 rounded p-1.5 text-rose-400 hover:bg-rose-50 hover:text-rose-600"
-                              data-testid={`cons-treatment-fee-partial-remove-${idx}`}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          )}
-                        </div>
-                      ))}
-                      {partialInstallmentsTotal > 0 && partialMismatch && (
-                        <p className="text-[11px] text-rose-600" data-testid="cons-treatment-fee-partial-mismatch">
-                          Installments total (₹{partialInstallmentsTotal}) must equal the Total Amount (₹{treatmentFeeTotal})
-                        </p>
-                      )}
-                    </div>
+                    <PartialInstallmentsEditor
+                      installments={partialInstallments}
+                      setInstallments={(next) => setTreatmentFeeDraft({ ...treatmentFeeDraft, partial_installments: next })}
+                      totalSessions={treatmentFeeTotalSessions}
+                      perSessionRate={perSessionRate}
+                    />
                   )}
 
                   <Button
@@ -1916,6 +1804,88 @@ function PaymentModeSelect({ value, options, onChange, testId }) {
           </button>
         );
       })}
+    </div>
+  );
+}
+
+/**
+ * Partial Payment schedule, split by session count rather than a raw rupee amount —
+ * each installment's amount is computed from how many sessions it covers at the
+ * package's own per-session rate, so it always agrees with "N sessions x rate/session"
+ * shown elsewhere. The first installment's due date defaults to today (set by the
+ * caller); later ones are scheduled ahead.
+ */
+function PartialInstallmentsEditor({ installments, setInstallments, totalSessions, perSessionRate }) {
+  const sessionsTotal = installments.reduce((sum, i) => sum + (parseInt(i.sessions, 10) || 0), 0);
+  const mismatch = totalSessions > 0 && sessionsTotal !== totalSessions;
+
+  return (
+    <div className="space-y-2 rounded-md border border-slate-200 bg-white p-2">
+      <div className="flex items-center justify-between">
+        <p className="text-[11px] font-semibold text-slate-600">Payment Schedule</p>
+        <button
+          type="button"
+          onClick={() => setInstallments([...installments, { sessions: "", due_date: "" }])}
+          className="flex items-center gap-1 text-[11px] font-semibold text-sky-600 hover:text-sky-700"
+          data-testid="cons-treatment-fee-partial-add"
+        >
+          <Plus className="h-3.5 w-3.5" /> Add Payment
+        </button>
+      </div>
+      {installments.map((inst, idx) => {
+        const sessionsNum = parseInt(inst.sessions, 10) || 0;
+        const amount = Math.round(sessionsNum * perSessionRate);
+        return (
+          <div key={idx} className="flex items-end gap-1.5" data-testid={`cons-treatment-fee-partial-row-${idx}`}>
+            <div className="flex-1">
+              <label className="mb-1 block text-[11px] font-medium text-slate-500">{partialInstallmentLabel(idx)} Sessions *</label>
+              <Input
+                type="number"
+                min="1"
+                max={totalSessions || undefined}
+                value={inst.sessions}
+                onChange={(e) => {
+                  const next = [...installments];
+                  next[idx] = { ...next[idx], sessions: e.target.value };
+                  setInstallments(next);
+                }}
+                className="h-9"
+                data-testid={`cons-treatment-fee-partial-sessions-${idx}`}
+              />
+              {sessionsNum > 0 && <p className="mt-0.5 text-[10px] text-slate-500">₹{amount}</p>}
+            </div>
+            <div className="flex-1">
+              <label className="mb-1 block text-[11px] font-medium text-slate-500">Due Date *</label>
+              <Input
+                type="date"
+                value={inst.due_date}
+                onChange={(e) => {
+                  const next = [...installments];
+                  next[idx] = { ...next[idx], due_date: e.target.value };
+                  setInstallments(next);
+                }}
+                className="h-9"
+                data-testid={`cons-treatment-fee-partial-date-${idx}`}
+              />
+            </div>
+            {installments.length > 2 && (
+              <button
+                type="button"
+                onClick={() => setInstallments(installments.filter((_, i) => i !== idx))}
+                className="mb-1.5 rounded p-1.5 text-rose-400 hover:bg-rose-50 hover:text-rose-600"
+                data-testid={`cons-treatment-fee-partial-remove-${idx}`}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        );
+      })}
+      {sessionsTotal > 0 && mismatch && (
+        <p className="text-[11px] text-rose-600" data-testid="cons-treatment-fee-partial-mismatch">
+          Installments total ({sessionsTotal} sessions) must equal the Total Sessions ({totalSessions})
+        </p>
+      )}
     </div>
   );
 }
