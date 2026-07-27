@@ -193,7 +193,10 @@ const CreationTab = ({ onDrillIn }) => {
           <Card key={b.id} className="border-slate-200 cursor-pointer hover:shadow-md transition" data-testid={`bm-branch-card-${b.id}`} onClick={() => onDrillIn && onDrillIn(b.id)}>
             <CardHeader className="flex flex-row items-start justify-between gap-2">
               <div>
-                <CardTitle className="text-base text-slate-900 hover:text-sky-700">{b.branch_name}</CardTitle>
+                <CardTitle className="flex items-center gap-1.5 text-base text-slate-900 hover:text-sky-700">
+                  {b.branch_name}
+                  {b.code && <span className="rounded bg-sky-50 px-1.5 py-0.5 text-[10px] font-semibold text-sky-600" data-testid={`bm-branch-code-${b.id}`}>{b.code}</span>}
+                </CardTitle>
                 <p className="mt-0.5 inline-flex items-center text-xs text-slate-500"><MapPin className="h-3 w-3 mr-1" />{b.address}</p>
               </div>
               <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>

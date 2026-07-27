@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 import uuid
 
 from database import v3_col
-from utils import now_iso
+from utils import now_iso, derive_branch_code
 from deps import v3_require_roles
 from schemas.v3 import V3UserOut
 
@@ -25,6 +25,7 @@ class BranchAssignedCreate(BaseModel):
     map_location: Optional[str] = ""
     weekly_hours: Optional[Dict[str, Any]] = None
     holidays: Optional[List[str]] = None
+    code: Optional[str] = None  # short unique prefix for Patient Numbers, e.g. "ANN" — auto-derived if omitted
 
 
 class AssignAdmin(BaseModel):
@@ -71,8 +72,16 @@ async def create_branch_with_existing_admin(payload: BranchAssignedCreate, _: V3
         raise HTTPException(status_code=409, detail=f"User already assigned to branch '{already.get('branch_name')}'")
 
     branch_id = str(uuid.uuid4())
+    existing_codes = set(await v3_col("branches").distinct("code"))
+    code = (payload.code or "").strip().upper()
+    if code:
+        if code in existing_codes:
+            raise HTTPException(status_code=409, detail=f"Branch code '{code}' is already in use")
+    else:
+        code = derive_branch_code(payload.branch_name, existing_codes)
     branch = {
         "id": branch_id,
+        "code": code,
         "branch_name": payload.branch_name,
         "address": payload.address,
         "admin_user_id": payload.admin_user_id,

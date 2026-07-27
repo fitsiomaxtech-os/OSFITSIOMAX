@@ -1,6 +1,6 @@
 import uuid
 from database import db, v2_col, v3_col
-from utils import now_iso
+from utils import now_iso, derive_branch_code, generate_patient_number
 from security import hash_password
 from constants import V3_VERTICALS, V3_BRANCH_STAGES, V3_STAGES, V3_CONSULTATION_STAGES, V3_HEAD_CONSULTATION_STAGES
 from stage_utils import get_first_stage_name
@@ -355,6 +355,39 @@ async def normalize_lead_session_package_prices() -> None:
                 {"id": lead["id"]},
                 {"$set": {"session_package_price": expected_price, "updated_at": now_iso()}},
             )
+
+
+async def backfill_branch_codes() -> None:
+    """Every branch needs a short unique code (e.g. 'ANN' for Anna Nagar, 'ECR' for ECR)
+    that prefixes its patients' Patient Numbers. Auto-derives one from the branch name
+    for any branch that doesn't already have one set (existing branches, first run).
+    Idempotent/safe to re-run — only ever fills in a missing code, never overwrites one
+    a Super Admin already set."""
+    branches = await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1, "code": 1}).to_list(1000)
+    existing_codes = {b["code"] for b in branches if b.get("code")}
+    for b in branches:
+        if b.get("code"):
+            continue
+        code = derive_branch_code(b.get("branch_name", ""), existing_codes)
+        existing_codes.add(code)
+        await v3_col("branches").update_one({"id": b["id"]}, {"$set": {"code": code}})
+
+
+async def backfill_patient_numbers() -> None:
+    """Assign a Patient Number (BRANCHCODE-YYMMDD-SEQUENCE, e.g. ANN-260727-0000) to any
+    lead that has a branch_id but no patient_number yet — processed oldest-first so the
+    sequence reads chronologically. Runs after backfill_branch_codes() so every branch
+    already has a code to draw from. Uses the same atomic per-branch-per-day counter as
+    live lead creation, so a backfilled number can never collide with one a real request
+    assigns for the same branch+day. Idempotent/safe to re-run."""
+    leads = await v3_col("leads").find(
+        {"branch_id": {"$ne": None}, "patient_number": None},
+        {"_id": 0, "id": 1, "branch_id": 1, "created_at": 1},
+    ).sort("created_at", 1).to_list(20000)
+    for lead in leads:
+        patient_number = await generate_patient_number(lead["branch_id"], at=lead.get("created_at"))
+        if patient_number:
+            await v3_col("leads").update_one({"id": lead["id"]}, {"$set": {"patient_number": patient_number}})
 
 
 async def deactivate_legacy_demo_admin() -> None:

@@ -24,7 +24,7 @@ from google.auth.transport.requests import Request as GoogleRequest
 from google.oauth2.credentials import Credentials
 
 from database import v3_col
-from utils import now_iso
+from utils import now_iso, generate_patient_number
 from deps import v3_require_roles
 from schemas.v3 import V3UserOut
 from stage_utils import get_first_stage_name
@@ -325,8 +325,10 @@ async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Di
 
         assigned = await round_robin_assign("pre_sales")
         source_branch_id = source.get("branch_id")
+        patient_number = await generate_patient_number(source_branch_id) if source_branch_id else None
         lead = {
             "id": str(uuid.uuid4()),
+            "patient_number": patient_number,
             "name": (std_payload.get("name") or "").strip() or "Unknown",
             "phone": phone_raw,
             "phone_normalized": phone_norm,

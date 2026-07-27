@@ -4,7 +4,7 @@ from pydantic import BaseModel
 import uuid
 
 from database import v3_col
-from utils import now_iso, normalize_slot_time
+from utils import now_iso, normalize_slot_time, generate_patient_number
 from deps import v3_current_user, v3_require_roles
 from constants import V3_STAGES
 from stage_utils import get_first_stage_name
@@ -55,8 +55,10 @@ async def v3_manual_lead(payload: V3LeadCreate, _: V3UserOut = Depends(v3_requir
     # Admin) must land on the branch's own New Lead stage too, same as sheet/Meta-imported
     # leads — otherwise it has a branch_id but no branch_stage and never shows on that board.
     branch_stage = await get_first_stage_name("sales", "New Appointment") if payload.branch_id else None
+    patient_number = await generate_patient_number(payload.branch_id) if payload.branch_id else None
     lead = {
         "id": str(uuid.uuid4()),
+        "patient_number": patient_number,
         "name": payload.name,
         "phone": payload.phone,
         "email": payload.email,
@@ -163,11 +165,18 @@ async def v3_assign_branch(lead_id: str, payload: V3AssignBranchInput, _: V3User
     branch = await v3_col("branches").find_one({"id": payload.branch_id}, {"_id": 0, "id": 1})
     if not branch:
         raise HTTPException(status_code=404, detail="Branch not found")
+    existing_lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0, "patient_number": 1})
+    if not existing_lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
     new_branch_stage = await get_first_stage_name("sales", "New Appointment")
-    await v3_col("leads").update_one(
-        {"id": lead_id},
-        {"$set": {"branch_id": payload.branch_id, "stage": "Appointment", "branch_stage": new_branch_stage, "updated_at": now_iso()}},
-    )
+    updates = {"branch_id": payload.branch_id, "stage": "Appointment", "branch_stage": new_branch_stage, "updated_at": now_iso()}
+    # A lead created without a branch (e.g. straight from Pre-Sales) never got a Patient
+    # Number — this is its first branch, so assign one now instead of leaving it blank forever.
+    if not existing_lead.get("patient_number"):
+        patient_number = await generate_patient_number(payload.branch_id)
+        if patient_number:
+            updates["patient_number"] = patient_number
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": updates})
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")

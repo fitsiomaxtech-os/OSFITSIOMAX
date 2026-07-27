@@ -5,7 +5,7 @@ import uuid
 import re
 
 from database import v3_col
-from utils import now_iso
+from utils import now_iso, generate_patient_number
 from deps import v3_require_roles, v3_current_user
 from constants import V3_STAGES
 from security import hash_password
@@ -463,8 +463,10 @@ async def sync_source(source_id: str, payload: MarketingSyncInput, _: V3UserOut 
 
         assigned = await round_robin_assign("pre_sales")
         source_branch_id = source.get("branch_id")
+        patient_number = await generate_patient_number(source_branch_id) if source_branch_id else None
         lead = {
             "id": str(uuid.uuid4()),
+            "patient_number": patient_number,
             "name": (std_payload.get("name") or "").strip() or "Unknown",
             "phone": phone_raw,
             "phone_normalized": phone_norm,

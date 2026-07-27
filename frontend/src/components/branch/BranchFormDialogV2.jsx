@@ -31,6 +31,7 @@ export const BranchFormDialogV2 = ({ branch, onClose, onSaved }) => {
   const [candidates, setCandidates] = useState([]);
   const [form, setForm] = useState({
     branch_name: branch?.branch_name || "",
+    code: branch?.code || "",
     address: branch?.address || "",
     admin_user_id: branch?.admin_user_id || "",
     admin_phone: branch?.admin_phone || "",
@@ -87,14 +88,14 @@ export const BranchFormDialogV2 = ({ branch, onClose, onSaved }) => {
     try {
       if (isEdit) {
         await updateBranch(branch.id, {
-          branch_name: form.branch_name, address: form.address, admin_phone: form.admin_phone,
+          branch_name: form.branch_name, code: form.code || undefined, address: form.address, admin_phone: form.admin_phone,
           phone: form.phone, email: form.email, map_location: form.map_location,
           opened_date: form.opened_date, vertical: form.vertical, weekly_hours: form.weekly_hours, holidays: form.holidays,
         });
         toast.success("Branch updated");
       } else {
         await bmCreateWithExistingAdmin({
-          branch_name: form.branch_name, address: form.address, admin_user_id: form.admin_user_id, admin_phone: form.admin_phone,
+          branch_name: form.branch_name, code: form.code || undefined, address: form.address, admin_user_id: form.admin_user_id, admin_phone: form.admin_phone,
           phone: form.phone, email: form.email, map_location: form.map_location,
           opened_date: form.opened_date, vertical: form.vertical, weekly_hours: form.weekly_hours, holidays: form.holidays,
         });
@@ -132,6 +133,16 @@ export const BranchFormDialogV2 = ({ branch, onClose, onSaved }) => {
           {tab === "details" && (
             <div className="grid gap-3 sm:grid-cols-2" data-testid="bf2-details-tab">
               <Field label="Branch Name *"><Input value={form.branch_name} onChange={(e) => set("branch_name", e.target.value)} data-testid="bf2-name" placeholder="e.g. Anna Nagar" /></Field>
+              <Field label="Branch Code">
+                <Input
+                  value={form.code}
+                  onChange={(e) => set("code", e.target.value.toUpperCase())}
+                  placeholder="Auto-generated if left blank, e.g. ANN"
+                  maxLength={10}
+                  data-testid="bf2-code"
+                />
+                <p className="mt-1 text-[11px] text-slate-400">Prefixes every patient's unique Patient Number at this branch (e.g. ANN-260727-0000).</p>
+              </Field>
               <Field label="Vertical">
                 <select className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm" value={form.vertical} onChange={(e) => set("vertical", e.target.value)} data-testid="bf2-vertical">
                   <option value="offline_physiotherapy">Offline Physiotherapy</option>

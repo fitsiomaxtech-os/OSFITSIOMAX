@@ -54,12 +54,14 @@ class V3BranchCreate(BaseModel):
     admin_password: str
     admin_phone: Optional[str] = ""
     vertical: str = "offline_physiotherapy"
+    code: Optional[str] = None  # short unique prefix for Patient Numbers, e.g. "ANN" — auto-derived if omitted
 
 
 class V3BranchOut(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     id: str
+    code: Optional[str] = None
     branch_name: str
     address: str
     admin_user_id: str
@@ -78,6 +80,7 @@ class V3BranchOut(BaseModel):
 
 
 class V3BranchUpdate(BaseModel):
+    code: Optional[str] = None
     branch_name: Optional[str] = None
     address: Optional[str] = None
     admin_name: Optional[str] = None
@@ -174,6 +177,7 @@ class V3LeadOut(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     id: str
+    patient_number: Optional[str] = None  # e.g. "ANN-260727-0000" — BRANCHCODE-YYMMDD-SEQUENCE, set once branch_id is known
     name: str
     phone: str
     email: Optional[str] = ""

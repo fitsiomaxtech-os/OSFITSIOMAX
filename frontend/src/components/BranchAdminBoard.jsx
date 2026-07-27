@@ -340,7 +340,10 @@ export const BranchAdminBoard = ({ branchId }) => {
                             <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-violet-100 text-xs font-bold text-violet-700">
                               {lead.name?.charAt(0)?.toUpperCase() || "?"}
                             </div>
-                            <span className="truncate font-medium text-slate-800" title={lead.name}>{lead.name}</span>
+                            <div className="min-w-0">
+                              <span className="block truncate font-medium text-slate-800" title={lead.name}>{lead.name}</span>
+                              {lead.patient_number && <span className="block truncate font-mono text-[10px] text-slate-400" title={lead.patient_number}>{lead.patient_number}</span>}
+                            </div>
                           </div>
                         </td>
                         <td className="truncate px-4 py-3 text-slate-600" title={lead.phone}>{lead.phone || "—"}</td>
@@ -552,6 +555,9 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
               <div>
                 <p className="text-base font-semibold leading-tight" data-testid="branch-lead-name">{lead.name}</p>
                 <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                  {lead.patient_number && (
+                    <span className="rounded-[5px] bg-white/20 px-2 py-0.5 font-mono text-[10px] font-semibold text-white" data-testid="branch-lead-patient-number">{lead.patient_number}</span>
+                  )}
                   <span className="rounded-[5px] bg-white/95 px-2.5 py-0.5 text-[11px] font-semibold text-slate-700" data-testid="branch-lead-stage">
                     {lead.branch_stage || "No Stage"}
                   </span>
