@@ -382,6 +382,14 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   const openCollectFeeDraft = () => {
     setCollectFeeDraft({
       payment_mode: selectedLead.package_payment_mode || "cash",
+      amount: selectedLead.package_paid ?? selectedLead.package_price ?? "",
+      confirmed: false,
+      upi_transaction_id: "",
+      upi_utr: "",
+      account_number: "",
+      account_holder_name: "",
+      bank_name: "",
+      ifsc_code: "",
     });
     if (selectedLead.consultation_decision === "consultation_treatment" && selectedLead.treatment_fee_paid == null) {
       openTreatmentFeeDraft();
@@ -466,12 +474,48 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   const bothFeesDone = (lead) => !treatmentFeeDraft || lead.treatment_fee_paid != null;
   const consultationFeeDone = (lead) => !collectFeeDraft || lead.package_paid != null;
 
+  // Validates the Consultation Fee draft's amount + mode-specific fields + the
+  // required double-confirmation checkbox — mirrors buildTreatmentFeePayload below.
+  const buildConsultationFeePayload = () => {
+    const amount = parseFloat(collectFeeDraft.amount);
+    if (!(amount > 0)) {
+      toast.error("Enter a valid Consultation Fee amount");
+      return null;
+    }
+    if (!collectFeeDraft.confirmed) {
+      toast.error("Please confirm the payment before submitting");
+      return null;
+    }
+    const mode = collectFeeDraft.payment_mode;
+    const payload = { payment_mode: mode, amount, confirmed: true };
+    if (mode === "upi") {
+      if (!collectFeeDraft.upi_transaction_id.trim() || !collectFeeDraft.upi_utr.trim()) {
+        toast.error("UPI Transaction ID and UTR are required");
+        return null;
+      }
+      payload.upi_transaction_id = collectFeeDraft.upi_transaction_id.trim();
+      payload.upi_utr = collectFeeDraft.upi_utr.trim();
+    } else if (mode === "card") {
+      if (!collectFeeDraft.account_number.trim() || !collectFeeDraft.account_holder_name.trim() || !collectFeeDraft.bank_name.trim() || !collectFeeDraft.ifsc_code.trim()) {
+        toast.error("Account Number, Account Holder Name, Bank Name and IFSC Code are required");
+        return null;
+      }
+      payload.account_number = collectFeeDraft.account_number.trim();
+      payload.account_holder_name = collectFeeDraft.account_holder_name.trim();
+      payload.bank_name = collectFeeDraft.bank_name.trim();
+      payload.ifsc_code = collectFeeDraft.ifsc_code.trim();
+    }
+    return payload;
+  };
+
   // Submits ONLY the Consultation Fee. Leaves the Treatment Fee section (if
   // present) untouched and open for its own button.
   const submitConsultationFeeOnly = async () => {
+    const payload = buildConsultationFeePayload();
+    if (!payload) return;
     setCollectingFee(true);
     try {
-      const res = await collectPackagePayment(selectedLead.id, { payment_mode: collectFeeDraft.payment_mode });
+      const res = await collectPackagePayment(selectedLead.id, payload);
       toast.success(selectedLead.package_paid != null ? "Consultation Fee payment updated" : "Consultation Fee collected");
       setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === res.lead.id ? res.lead : l) }));
       if (bothFeesDone(res.lead)) {
@@ -1305,23 +1349,111 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       <>
                         <div>
                           <label className="mb-1 block text-[11px] font-medium text-slate-500">Consultation Fee (₹)</label>
-                          <div className="flex h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-700" data-testid="cons-collect-fee-amount">
-                            {selectedLead.package_price != null ? `Rs.${selectedLead.package_price}` : "—"}
-                          </div>
+                          <Input
+                            type="number"
+                            min="0"
+                            value={collectFeeDraft.amount}
+                            onChange={(e) => setCollectFeeDraft({ ...collectFeeDraft, amount: e.target.value, confirmed: false })}
+                            className="h-9"
+                            data-testid="cons-collect-fee-amount"
+                          />
+                          {selectedLead.package_price != null && (
+                            <p className="mt-1 text-[11px] text-slate-400">Assigned package price: Rs.{selectedLead.package_price} — editable if a different amount was actually collected.</p>
+                          )}
                         </div>
                         <div>
                           <label className="mb-1 block text-[11px] font-medium text-slate-500">Payment Mode</label>
                           <PaymentModeSelect
                             value={collectFeeDraft.payment_mode}
                             options={CONSULTATION_FEE_PAYMENT_MODES}
-                            onChange={(v) => setCollectFeeDraft({ ...collectFeeDraft, payment_mode: v })}
+                            onChange={(v) => setCollectFeeDraft({ ...collectFeeDraft, payment_mode: v, confirmed: false })}
                             testId="cons-collect-fee-mode"
                           />
                         </div>
+
+                        {collectFeeDraft.payment_mode === "upi" && (
+                          <>
+                            <div>
+                              <label className="mb-1 block text-[11px] font-medium text-slate-500">UPI Transaction ID</label>
+                              <Input
+                                value={collectFeeDraft.upi_transaction_id}
+                                onChange={(e) => setCollectFeeDraft({ ...collectFeeDraft, upi_transaction_id: e.target.value, confirmed: false })}
+                                className="h-9"
+                                data-testid="cons-collect-fee-upi-txn"
+                              />
+                            </div>
+                            <div>
+                              <label className="mb-1 block text-[11px] font-medium text-slate-500">UTR</label>
+                              <Input
+                                value={collectFeeDraft.upi_utr}
+                                onChange={(e) => setCollectFeeDraft({ ...collectFeeDraft, upi_utr: e.target.value, confirmed: false })}
+                                className="h-9"
+                                data-testid="cons-collect-fee-upi-utr"
+                              />
+                            </div>
+                          </>
+                        )}
+
+                        {collectFeeDraft.payment_mode === "card" && (
+                          <>
+                            <div>
+                              <label className="mb-1 block text-[11px] font-medium text-slate-500">Account Number</label>
+                              <Input
+                                value={collectFeeDraft.account_number}
+                                onChange={(e) => setCollectFeeDraft({ ...collectFeeDraft, account_number: e.target.value, confirmed: false })}
+                                className="h-9"
+                                data-testid="cons-collect-fee-account-number"
+                              />
+                            </div>
+                            <div>
+                              <label className="mb-1 block text-[11px] font-medium text-slate-500">Account Holder Name</label>
+                              <Input
+                                value={collectFeeDraft.account_holder_name}
+                                onChange={(e) => setCollectFeeDraft({ ...collectFeeDraft, account_holder_name: e.target.value, confirmed: false })}
+                                className="h-9"
+                                data-testid="cons-collect-fee-account-holder"
+                              />
+                            </div>
+                            <div>
+                              <label className="mb-1 block text-[11px] font-medium text-slate-500">Bank Name</label>
+                              <Input
+                                value={collectFeeDraft.bank_name}
+                                onChange={(e) => setCollectFeeDraft({ ...collectFeeDraft, bank_name: e.target.value, confirmed: false })}
+                                className="h-9"
+                                data-testid="cons-collect-fee-bank-name"
+                              />
+                            </div>
+                            <div>
+                              <label className="mb-1 block text-[11px] font-medium text-slate-500">IFSC Code</label>
+                              <Input
+                                value={collectFeeDraft.ifsc_code}
+                                onChange={(e) => setCollectFeeDraft({ ...collectFeeDraft, ifsc_code: e.target.value.toUpperCase(), confirmed: false })}
+                                className="h-9"
+                                data-testid="cons-collect-fee-ifsc"
+                              />
+                            </div>
+                          </>
+                        )}
+
+                        <label className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-800">
+                          <input
+                            type="checkbox"
+                            checked={collectFeeDraft.confirmed}
+                            onChange={(e) => setCollectFeeDraft({ ...collectFeeDraft, confirmed: e.target.checked })}
+                            className="mt-0.5"
+                            data-testid="cons-collect-fee-confirm"
+                          />
+                          <span>I confirm Rs.{collectFeeDraft.amount || "0"} has been received via {CONSULTATION_FEE_PAYMENT_MODES.find((m) => m.value === collectFeeDraft.payment_mode)?.label || collectFeeDraft.payment_mode}.</span>
+                        </label>
+
                         <Button
                           className="w-full bg-sky-600 text-xs hover:bg-sky-700"
                           onClick={submitConsultationFeeOnly}
-                          disabled={collectingFee || selectedLead.package_price == null}
+                          disabled={
+                            collectingFee || !collectFeeDraft.confirmed || !(parseFloat(collectFeeDraft.amount) > 0) ||
+                            (collectFeeDraft.payment_mode === "upi" && (!collectFeeDraft.upi_transaction_id.trim() || !collectFeeDraft.upi_utr.trim())) ||
+                            (collectFeeDraft.payment_mode === "card" && (!collectFeeDraft.account_number.trim() || !collectFeeDraft.account_holder_name.trim() || !collectFeeDraft.bank_name.trim() || !collectFeeDraft.ifsc_code.trim()))
+                          }
                           data-testid="cons-collect-fee-submit"
                         >
                           {collectingFee ? "Saving..." : "Collect Consultation Fee"}

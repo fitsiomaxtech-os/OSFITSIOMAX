@@ -174,13 +174,16 @@ TREATMENT_FEE_PAYMENT_MODES = {"cash", "upi", "card", "cheque", "partial"}
 @router.post("/leads/{lead_id}/collect-package-payment", response_model=dict)
 async def collect_package_payment(lead_id: str, payload: V3CollectPackagePaymentInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
     """Branch admin collects the Consultation Fee for the package the consultant
-    already assigned — Cash/UPI/Card only. The amount is never client-supplied: it's
-    always the package_price the Head Physio's package assignment set, so Branch
-    Admin can confirm the payment mode but can never change the fee itself. Callable
-    while the lead is at 'Consultation Visit' (first collection) or already at
-    'Fee Collected' (correcting/updating a payment already on file)."""
+    already assigned — Cash/UPI/Card. The amount defaults to package_price but Branch
+    Admin can manually override it (discount, rounding, partial cash collected).
+    Every mode requires an explicit `confirmed` acknowledgement before it's accepted —
+    a deliberate double-check, not a single click. Callable while the lead is at
+    'Consultation Visit' (first collection) or already at 'Fee Collected' (correcting/
+    updating a payment already on file)."""
     if payload.payment_mode not in CONSULTATION_FEE_PAYMENT_MODES:
         raise HTTPException(status_code=400, detail=f"Consultation Fee only accepts: {sorted(CONSULTATION_FEE_PAYMENT_MODES)}")
+    if not payload.confirmed:
+        raise HTTPException(status_code=400, detail="Please confirm the payment before submitting")
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -189,11 +192,35 @@ async def collect_package_payment(lead_id: str, payload: V3CollectPackagePayment
     if not lead.get("package_id") or lead.get("package_price") is None:
         raise HTTPException(status_code=400, detail="No consultation package assigned yet")
 
-    amount = lead["package_price"]
+    amount = payload.amount if payload.amount is not None else lead["package_price"]
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be greater than zero")
+
+    payment_details = {}
+    detail_suffix = ""
+    if payload.payment_mode == "upi":
+        if not payload.upi_transaction_id or not payload.upi_transaction_id.strip() or not payload.upi_utr or not payload.upi_utr.strip():
+            raise HTTPException(status_code=400, detail="UPI Transaction ID and UTR are required")
+        payment_details = {"upi_transaction_id": payload.upi_transaction_id.strip(), "upi_utr": payload.upi_utr.strip()}
+        detail_suffix = f" · UPI txn {payload.upi_transaction_id.strip()}, UTR {payload.upi_utr.strip()}"
+    elif payload.payment_mode == "card":
+        if not all([payload.account_number and payload.account_number.strip(), payload.account_holder_name and payload.account_holder_name.strip(),
+                    payload.bank_name and payload.bank_name.strip(), payload.ifsc_code and payload.ifsc_code.strip()]):
+            raise HTTPException(status_code=400, detail="Account Number, Account Holder Name, Bank Name and IFSC Code are required")
+        last4 = "".join(ch for ch in payload.account_number if ch.isdigit())[-4:]
+        payment_details = {
+            "account_last4": last4,
+            "account_holder_name": payload.account_holder_name.strip(),
+            "bank_name": payload.bank_name.strip(),
+            "ifsc_code": payload.ifsc_code.strip().upper(),
+        }
+        detail_suffix = f" · A/C ****{last4}, {payload.account_holder_name.strip()}, {payload.bank_name.strip()} ({payload.ifsc_code.strip().upper()})"
+
     is_update = lead.get("package_paid") is not None
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {
         "package_paid": amount,
         "package_payment_mode": payload.payment_mode,
+        "package_payment_details": payment_details or None,
         "consultation_stage": "Fee Collected",
         "updated_at": _now(),
     }})
@@ -201,7 +228,7 @@ async def collect_package_payment(lead_id: str, payload: V3CollectPackagePayment
         "id": str(uuid.uuid4()),
         "lead_id": lead_id,
         "action": "package_payment_collected",
-        "details": f"{'Updated' if is_update else 'Collected'} Consultation Fee Rs.{amount} for package '{lead.get('package_name')}' via {payload.payment_mode}",
+        "details": f"{'Updated' if is_update else 'Collected'} Consultation Fee Rs.{amount} for package '{lead.get('package_name')}' via {payload.payment_mode}{detail_suffix}",
         "created_by": user.full_name,
         "created_by_role": user.role,
         "created_at": _now(),

@@ -201,6 +201,7 @@ class V3LeadOut(BaseModel):
     package_price: Optional[float] = None
     package_paid: Optional[float] = None  # the Consultation Fee payment — Cash/UPI/Card only
     package_payment_mode: Optional[str] = None  # "cash" | "upi" | "card"
+    package_payment_details: Optional[dict] = None  # mode-specific fields (UPI txn/UTR, card/account last 4)
     treatment_fee_paid: Optional[float] = None  # the Treatment Fee payment — any payment method
     treatment_fee_payment_mode: Optional[str] = None  # "cash" | "upi" | "card" | "cheque" | "partial"
     treatment_fee_payment_details: Optional[dict] = None  # mode-specific fields (card last 4, cheque no., Partial schedule)
@@ -281,9 +282,22 @@ class V3SellStoreItemInput(BaseModel):
 
 
 class V3CollectPackagePaymentInput(BaseModel):
-    # The fee amount is never client-supplied — it's always the already-assigned
-    # package_price, read straight off the lead. Branch Admin can only pick the mode.
     payment_mode: str = "cash"
+    # Manual entry — defaults to the assigned package_price if omitted, but Branch
+    # Admin can override it (discount, rounding, partial cash collected, etc).
+    amount: Optional[float] = None
+    # Branch Admin must explicitly tick a confirmation before this is accepted —
+    # a deliberate double-check step, not just clicking Collect once.
+    confirmed: bool = False
+    # UPI
+    upi_transaction_id: Optional[str] = None
+    upi_utr: Optional[str] = None
+    # Card — only the last 4 digits of the account number are ever persisted; the
+    # full number is never stored.
+    account_number: Optional[str] = None
+    account_holder_name: Optional[str] = None
+    bank_name: Optional[str] = None
+    ifsc_code: Optional[str] = None
 
 
 class V3PartialInstallment(BaseModel):
