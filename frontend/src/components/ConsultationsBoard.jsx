@@ -167,19 +167,29 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     return rows;
   }, [board.leads, dateFilter, search]);
 
+  // "Treatments" (Head Physio's own board only) is a cross-cutting view, not a real
+  // position in the head_consultation_stage pipeline — a lead shows up here the moment
+  // any Treatment Fee amount is collected, while staying visible under "Consultation
+  // Visit" too, since head_consultation_stage itself never actually changes to
+  // "Treatments" (there's nothing to "leave" for it to count as a real stage move).
+  const matchesStage = useCallback((lead, stageName) => {
+    if (isConsultant && stageName === "Treatments") return lead.treatment_fee_paid != null;
+    return lead[stageField] === stageName;
+  }, [isConsultant, stageField]);
+
   const filtered = useMemo(() => {
     if (!stageFilter) return dateAndSearchFiltered;
-    return dateAndSearchFiltered.filter((l) => l[stageField] === stageFilter);
-  }, [dateAndSearchFiltered, stageFilter, stageField]);
+    return dateAndSearchFiltered.filter((l) => matchesStage(l, stageFilter));
+  }, [dateAndSearchFiltered, stageFilter, matchesStage]);
 
   // Stage counts for the head bar — derived client-side from the Date Filter/search-only
   // list so they always match whichever pipeline (branch vs. head physio) is active for
   // this viewer, and reflect the active filters rather than all-time totals.
   const derivedStageCounts = useMemo(() => {
     const counts = {};
-    stages.forEach((s) => { counts[s.name] = dateAndSearchFiltered.filter((l) => l[stageField] === s.name).length; });
+    stages.forEach((s) => { counts[s.name] = dateAndSearchFiltered.filter((l) => matchesStage(l, s.name)).length; });
     return counts;
-  }, [dateAndSearchFiltered, stages, stageField]);
+  }, [dateAndSearchFiltered, stages, matchesStage]);
 
   useEffect(() => {
     listStoreItems().then(setStoreItems).catch(() => setStoreItems([]));
