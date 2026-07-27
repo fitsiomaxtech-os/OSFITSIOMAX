@@ -22,6 +22,10 @@ const CONSULTATION_TYPES = [
   { value: "review", label: "Review", color: "bg-emerald-100 text-emerald-700 border-emerald-300" },
 ];
 
+const SESSION_TYPES = [
+  { value: "session", label: "Treatment Session", color: "bg-sky-100 text-sky-700 border-sky-300" },
+];
+
 const DURATIONS = [15, 30, 45, 60];
 
 function getDaysInMonth(year, month) {
@@ -32,7 +36,15 @@ function getFirstDayOfMonth(year, month) {
   return new Date(year, month, 1).getDay();
 }
 
-export const HeadPhysioCalendar = ({ branchId }) => {
+// `profileType`: "head_physio" (default) manages Head Physios' consultation calendars;
+// "physio" manages regular Physios' treatment-session calendars. Same UI and backend
+// endpoints either way — only the doctor filter, labels, and slot-type options differ.
+export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) => {
+  const isPhysio = profileType === "physio";
+  const roleLabel = isPhysio ? "Physio" : "Head Physio";
+  const roleLabelPlural = isPhysio ? "Physios" : "Head Physios";
+  const SLOT_TYPES = isPhysio ? SESSION_TYPES : CONSULTATION_TYPES;
+
   const [doctors, setDoctors] = useState([]);
   const [selectedDoctor, setSelectedDoctor] = useState(null);
   const [calendarData, setCalendarData] = useState(null);
@@ -42,7 +54,7 @@ export const HeadPhysioCalendar = ({ branchId }) => {
   const [selectedDate, setSelectedDate] = useState(null);
 
   const [slotDuration, setSlotDuration] = useState(30);
-  const [slotType, setSlotType] = useState("initial");
+  const [slotType, setSlotType] = useState(SLOT_TYPES[0].value);
   const [pendingSlots, setPendingSlots] = useState([]);
   const [saving, setSaving] = useState(false);
 
@@ -54,9 +66,9 @@ export const HeadPhysioCalendar = ({ branchId }) => {
     if (!branchId) return;
     try {
       const all = await getDoctors({ branch_id: branchId });
-      setDoctors(all.filter((d) => d.profile_type === "head_physio"));
+      setDoctors(all.filter((d) => d.profile_type === profileType));
     } catch { /* silent */ }
-  }, [branchId]);
+  }, [branchId, profileType]);
 
   useEffect(() => { loadDoctors(); }, [loadDoctors]);
 
@@ -249,7 +261,7 @@ export const HeadPhysioCalendar = ({ branchId }) => {
         <div className="p-4 border-b border-slate-100 bg-slate-50/60">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
-              <Stethoscope className="h-4 w-4 text-violet-500" /> Head Physios
+              <Stethoscope className="h-4 w-4 text-violet-500" /> {roleLabelPlural}
             </h3>
             <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-semibold text-violet-700">{doctors.length}</span>
           </div>
@@ -258,7 +270,7 @@ export const HeadPhysioCalendar = ({ branchId }) => {
 
         <div className="flex-1 overflow-y-auto p-2 space-y-1.5" data-testid="doctor-list">
           {doctors.length === 0 && (
-            <p className="text-xs text-slate-400 text-center py-6">No Head Physios assigned to this branch yet — ask HR Admin to add one.</p>
+            <p className="text-xs text-slate-400 text-center py-6">No {roleLabelPlural} assigned to this branch yet — ask HR Admin to add one.</p>
           )}
           {doctors.map((doc) => {
             const isActive = selectedDoctor?.id === doc.id;
@@ -299,7 +311,7 @@ export const HeadPhysioCalendar = ({ branchId }) => {
           <div className="flex-1 flex items-center justify-center" data-testid="calendar-empty-state">
             <div className="text-center">
               <CalendarIcon className="h-12 w-12 text-slate-200 mx-auto mb-3" />
-              <p className="text-sm text-slate-400">Select a Head Physio to manage their calendar</p>
+              <p className="text-sm text-slate-400">Select a {roleLabel} to manage their calendar</p>
             </div>
           </div>
         ) : (
@@ -399,9 +411,9 @@ export const HeadPhysioCalendar = ({ branchId }) => {
                     </div>
                   </div>
                   <div>
-                    <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-1 block">Consultation Type</label>
+                    <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-1 block">{isPhysio ? "Session Type" : "Consultation Type"}</label>
                     <div className="space-y-1" data-testid="type-options">
-                      {CONSULTATION_TYPES.map((ct) => (
+                      {SLOT_TYPES.map((ct) => (
                         <button
                           key={ct.value}
                           type="button"
@@ -506,7 +518,7 @@ export const HeadPhysioCalendar = ({ branchId }) => {
                           borderColor = "border-emerald-300";
                           bgColor = "bg-emerald-50";
                           textColor = "text-emerald-800";
-                          const ct = CONSULTATION_TYPES.find((c) => c.value === detail?.consultation_type);
+                          const ct = SLOT_TYPES.find((c) => c.value === detail?.consultation_type);
                           badge = (
                             <div className="flex items-center gap-1">
                               <span className="text-[9px] bg-emerald-100 text-emerald-600 rounded px-1.5 py-0.5">{detail?.duration || 30}m</span>

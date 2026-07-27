@@ -10,7 +10,7 @@ import {
   getConsultationsBoard, moveConsultationStage, listStoreItems,
   collectPackagePayment, collectTreatmentFee, savePhysioDiagnosis, unlockPhysioDiagnosis,
   saveTreatmentSummary, unlockTreatmentSummary, stagesList, getDoctors,
-  assignConsultationPhysio,
+  assignPhysioWithSessions, getDoctorCalendar,
   scheduleConsultationFollowUp, rescheduleConsultationFollowUp,
   getLeadRemarks, getLeadActivity,
   saveConsultationDecision, markConsultationCompleted,
@@ -82,11 +82,15 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   const [treatmentFeeDraft, setTreatmentFeeDraft] = useState(null); // { paid_amount, payment_mode } | null
   const [collectingTreatmentFee, setCollectingTreatmentFee] = useState(false);
 
-  // Physio Assign popup (Branch Admin only) — pick an available Jr. Physio to deliver the package
+  // Physio Assign popup (Branch Admin only) — pick an available Jr. Physio, then book all
+  // of the paid session package's sessions against that physio's own calendar (Consultations
+  // > Physio Calendar) in the same step.
   const [showPhysioModal, setShowPhysioModal] = useState(false);
   const [physioOptions, setPhysioOptions] = useState([]);
   const [physioPick, setPhysioPick] = useState("");
   const [assigningPhysio, setAssigningPhysio] = useState(false);
+  const [physioCalendarData, setPhysioCalendarData] = useState(null);
+  const [loadingPhysioCalendar, setLoadingPhysioCalendar] = useState(false);
 
   // Consultation Decision (Head Physio only) — "Save & Move": Consultation Only vs
   // Consultation + Treatment (+ Treatment Package, names only, no prices shown here).
@@ -465,6 +469,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   const openPhysioModal = async () => {
     setShowPhysioModal(true);
     setPhysioPick(selectedLead.assigned_physio_id || "");
+    setPhysioCalendarData(null);
     try {
       const rows = await getDoctors({ branch_id: branchId });
       setPhysioOptions((rows || []).filter((d) => d.profile_type === "physio"));
@@ -473,12 +478,42 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     }
   };
 
+  // Load the picked physio's own calendar (same one managed at Consultations > Physio
+  // Calendar) so we can propose enough of their already-available, not-yet-booked slots
+  // to cover every session in the patient's paid package.
+  useEffect(() => {
+    if (!showPhysioModal || !physioPick) { setPhysioCalendarData(null); return; }
+    let cancelled = false;
+    setLoadingPhysioCalendar(true);
+    getDoctorCalendar(physioPick)
+      .then((data) => { if (!cancelled) setPhysioCalendarData(data); })
+      .catch(() => { if (!cancelled) setPhysioCalendarData(null); })
+      .finally(() => { if (!cancelled) setLoadingPhysioCalendar(false); });
+    return () => { cancelled = true; };
+  }, [showPhysioModal, physioPick]);
+
+  const totalSessionsNeeded = selectedLead?.session_package_sessions || 0;
+  const availablePhysioSlots = physioCalendarData
+    ? [...(physioCalendarData.slots || [])]
+        // A slot already booked by this same lead (e.g. re-opening this modal for the
+        // physio they're already assigned to) is fine to re-propose — it'll just be
+        // replaced with itself. Only someone else's booking makes a slot unavailable.
+        .filter((s) => !physioCalendarData.booked?.[s] || physioCalendarData.booked[s].lead_id === selectedLead?.id)
+        .sort()
+    : [];
+  const proposedSessionSlots = availablePhysioSlots.slice(0, totalSessionsNeeded);
+  const hasEnoughPhysioSlots = totalSessionsNeeded > 0 && proposedSessionSlots.length === totalSessionsNeeded;
+
   const submitPhysioAssign = async () => {
     if (!physioPick) { toast.error("Choose a physio"); return; }
+    if (!hasEnoughPhysioSlots) {
+      toast.error(`This physio only has ${proposedSessionSlots.length} of the ${totalSessionsNeeded} needed slots open — add more in Physio Calendar first`);
+      return;
+    }
     setAssigningPhysio(true);
     try {
-      const res = await assignConsultationPhysio(selectedLead.id, physioPick);
-      toast.success("Physio assigned for treatment");
+      const res = await assignPhysioWithSessions(selectedLead.id, { physio_id: physioPick, slot_times: proposedSessionSlots });
+      toast.success(`Physio assigned — ${res.sessions_booked} sessions booked`);
       setShowPhysioModal(false);
       // Close the lead card instantly, same as a plain stage move.
       setSelectedLead(null);
@@ -1566,17 +1601,29 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
             {/* Physio Assign popup (Branch Admin) — after fees are collected */}
             {showPhysioModal && (
               <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" data-testid="cons-physio-modal">
-                <div className="w-full max-w-sm space-y-3 rounded-xl bg-white p-4 shadow-2xl">
+                <div className="w-full max-w-md space-y-3 rounded-xl bg-white p-4 shadow-2xl">
                   <div className="flex items-center justify-between">
                     <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-800"><Users className="h-4 w-4 text-emerald-600" /> Assign Physio</p>
                     <button onClick={() => setShowPhysioModal(false)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-physio-close"><X className="h-4 w-4" /></button>
                   </div>
+
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600" data-testid="cons-physio-package-context">
+                    <p className="font-semibold text-slate-700">{selectedLead.session_package_name || "Session package"} · {totalSessionsNeeded} sessions</p>
+                    <p className="mt-0.5">
+                      Treatment Fee: {selectedLead.treatment_fee_paid != null ? (
+                        <span className="font-semibold text-emerald-700">Rs.{selectedLead.treatment_fee_paid} paid ({selectedLead.treatment_fee_payment_mode || "—"})</span>
+                      ) : (
+                        <span className="text-amber-600">not paid</span>
+                      )}
+                    </p>
+                  </div>
+
                   <p className="text-[11px] text-slate-500">Available physios in this branch</p>
 
                   {physioOptions.length === 0 ? (
                     <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-4 text-center text-xs text-slate-400">No physios found for this branch yet.</p>
                   ) : (
-                    <div className="max-h-56 space-y-1.5 overflow-y-auto">
+                    <div className="max-h-40 space-y-1.5 overflow-y-auto">
                       {physioOptions.map((p) => (
                         <button
                           key={p.id}
@@ -1594,13 +1641,33 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     </div>
                   )}
 
+                  {physioPick && (
+                    <div className="rounded-lg border border-violet-200 bg-violet-50 p-3" data-testid="cons-physio-sessions-preview">
+                      <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-violet-700">Sessions to be booked</p>
+                      {loadingPhysioCalendar ? (
+                        <p className="text-xs text-violet-500">Loading this physio's calendar...</p>
+                      ) : !hasEnoughPhysioSlots ? (
+                        <p className="text-xs text-amber-700">
+                          Only {proposedSessionSlots.length} of {totalSessionsNeeded} needed slots are open on this physio's calendar.
+                          Add more in Consultations → Physio Calendar first.
+                        </p>
+                      ) : (
+                        <div className="max-h-28 space-y-1 overflow-y-auto text-xs text-violet-800" data-testid="cons-physio-sessions-list">
+                          {proposedSessionSlots.map((slot, i) => (
+                            <p key={slot}>#{i + 1} · {slot.replace("T", " ")}</p>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <Button
                     className="w-full bg-emerald-600 hover:bg-emerald-700 text-xs"
                     onClick={submitPhysioAssign}
-                    disabled={assigningPhysio || !physioPick}
+                    disabled={assigningPhysio || !physioPick || loadingPhysioCalendar || !hasEnoughPhysioSlots}
                     data-testid="cons-physio-submit"
                   >
-                    {assigningPhysio ? "Assigning..." : "Assign"}
+                    {assigningPhysio ? "Assigning..." : "Assign & Book Sessions"}
                   </Button>
                 </div>
               </div>

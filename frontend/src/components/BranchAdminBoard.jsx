@@ -202,9 +202,19 @@ export const BranchAdminBoard = ({ branchId }) => {
             >
               <Calendar className="h-4 w-4" />Consultant Calendar
             </button>
+            <button
+              type="button"
+              onClick={() => setConsultationsSubTab("physio")}
+              className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${consultationsSubTab === "physio" ? "bg-sky-50 text-sky-600" : "text-slate-600 hover:bg-slate-50"}`}
+              data-testid="branch-consultations-subtab-physio"
+            >
+              <Activity className="h-4 w-4" />Physio Calendar
+            </button>
           </div>
           {consultationsSubTab === "consultation" ? (
             <ConsultationsBoard branchId={branchId} viewerRole="branch_admin" />
+          ) : consultationsSubTab === "physio" ? (
+            <HeadPhysioCalendar branchId={branchId} profileType="physio" />
           ) : (
             <HeadPhysioCalendar branchId={branchId} />
           )}

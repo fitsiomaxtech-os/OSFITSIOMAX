@@ -18,11 +18,20 @@ async def get_doctor_calendar(doctor_id: str, _: V3UserOut = Depends(v3_require_
     if not doctor:
         raise HTTPException(status_code=404, detail="Doctor not found")
 
-    booked_rows = await v3_col("appointments").find(
+    # Head Physios get booked from `appointments` (doctor_id); regular Physios get booked
+    # treatment sessions from `sessions` (physio_id) — a different collection entirely, so
+    # both need checking to correctly reflect either doctor kind's calendar. `lead_id` is
+    # included so a caller re-assigning a lead to the same physio can tell "already booked
+    # by this same lead" (fine to re-propose) apart from "booked by someone else".
+    appt_rows = await v3_col("appointments").find(
         {"doctor_id": doctor_id, "status": "new_appointment"},
-        {"_id": 0, "slot_time": 1, "lead_name": 1, "id": 1},
+        {"_id": 0, "slot_time": 1, "lead_name": 1, "lead_id": 1, "id": 1},
     ).to_list(1000)
-    booked_map = {row["slot_time"]: row for row in booked_rows}
+    session_rows = await v3_col("sessions").find(
+        {"physio_id": doctor_id, "status": "upcoming"},
+        {"_id": 0, "slot_time": 1, "lead_name": 1, "lead_id": 1, "id": 1},
+    ).to_list(1000)
+    booked_map = {row["slot_time"]: row for row in [*appt_rows, *session_rows]}
 
     return {
         "doctor_id": doctor["id"],
@@ -79,11 +88,15 @@ async def remove_calendar_slots(doctor_id: str, payload: V3RemoveSlotsInput, _: 
 
     normalized_remove = {normalize_slot_time(s) for s in payload.slot_times}
 
-    booked = await v3_col("appointments").find(
+    booked_appts = await v3_col("appointments").find(
         {"doctor_id": doctor_id, "status": "new_appointment", "slot_time": {"$in": list(normalized_remove)}},
         {"_id": 0, "slot_time": 1},
     ).to_list(100)
-    booked_times = {b["slot_time"] for b in booked}
+    booked_sessions = await v3_col("sessions").find(
+        {"physio_id": doctor_id, "status": "upcoming", "slot_time": {"$in": list(normalized_remove)}},
+        {"_id": 0, "slot_time": 1},
+    ).to_list(100)
+    booked_times = {b["slot_time"] for b in [*booked_appts, *booked_sessions]}
     blocked = normalized_remove.intersection(booked_times)
     if blocked:
         raise HTTPException(status_code=400, detail=f"Cannot remove booked slots: {', '.join(sorted(blocked))}")

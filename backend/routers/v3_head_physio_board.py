@@ -1,13 +1,17 @@
 from fastapi import APIRouter, HTTPException, Depends
 from typing import Optional
 from pydantic import BaseModel
+from datetime import date
 import uuid
 
 from database import v3_col
 from utils import now_iso
 from deps import v3_current_user, v3_require_roles
 from constants import V3_HEAD_CONSULTATION_STAGES
-from schemas.v3 import V3UserOut, V3PackageRecommendInput, V3HeadPhysioReviewInput, V3LeadOut, V3ConsultationDecisionInput
+from schemas.v3 import (
+    V3UserOut, V3PackageRecommendInput, V3HeadPhysioReviewInput, V3LeadOut,
+    V3ConsultationDecisionInput, V3AssignPhysioSessionsInput,
+)
 
 router = APIRouter(prefix="/api/v3")
 
@@ -382,3 +386,92 @@ async def hp_assign_consultation_physio(
     })
     updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     return {"message": "Physio assigned", "lead": V3LeadOut(**updated).model_dump()}
+
+
+@router.post("/leads/{lead_id}/assign-physio-sessions")
+async def hp_assign_physio_with_sessions(
+    lead_id: str,
+    payload: V3AssignPhysioSessionsInput,
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+):
+    """Branch Admin picks the physio AND books every one of the patient's paid
+    session-package sessions against that physio's own calendar (Consultations >
+    Physio Calendar), in one step — same eligibility guard as
+    assign-consultation-physio, but this is what actually turns the paid session
+    count into real, dated `sessions` records rather than just a label."""
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    if lead.get("consultation_stage") not in ("Fee Collected", "Physio Assign") or lead.get("treatment_fee_paid") is None:
+        raise HTTPException(status_code=400, detail="A physio can only be assigned after the Treatment Fee has been collected")
+
+    total_sessions = lead.get("session_package_sessions")
+    if not total_sessions:
+        raise HTTPException(status_code=400, detail="This lead has no session package to schedule")
+
+    sorted_slots = sorted(set(payload.slot_times))
+    if len(sorted_slots) != len(payload.slot_times):
+        raise HTTPException(status_code=400, detail="Duplicate session slot times were submitted")
+    if len(sorted_slots) != total_sessions:
+        raise HTTPException(status_code=400, detail=f"Pick exactly {total_sessions} session slots (got {len(sorted_slots)})")
+
+    physio = await v3_col("doctors").find_one({"id": payload.physio_id, "profile_type": "physio"}, {"_id": 0})
+    if not physio:
+        raise HTTPException(status_code=404, detail="Physio not found")
+
+    # Drop this lead's own previous, not-yet-completed sessions *before* the conflict
+    # check below — otherwise reassigning to the very same physio would see this lead's
+    # own existing bookings as a clash against itself. Whether that's a same-physio
+    # re-confirm or a switch to someone else, this lead's old session set is being
+    # replaced wholesale by the one just submitted either way.
+    await v3_col("sessions").delete_many({"lead_id": lead_id, "status": "upcoming"})
+
+    already_booked = await v3_col("sessions").find(
+        {"physio_id": payload.physio_id, "status": "upcoming", "slot_time": {"$in": sorted_slots}},
+        {"_id": 0, "slot_time": 1},
+    ).to_list(200)
+    if already_booked:
+        clashing = ", ".join(sorted(b["slot_time"] for b in already_booked))
+        raise HTTPException(status_code=400, detail=f"Already booked for this physio: {clashing}")
+
+    now = now_iso()
+    first_date = date.fromisoformat(sorted_slots[0].split("T")[0])
+    session_docs = []
+    for i, slot_time in enumerate(sorted_slots):
+        this_date = date.fromisoformat(slot_time.split("T")[0])
+        session_docs.append({
+            "id": str(uuid.uuid4()),
+            "lead_id": lead_id,
+            "lead_name": lead.get("name", "Unknown"),
+            "physio_id": physio["id"],
+            "session_number": i + 1,
+            "total_sessions": total_sessions,
+            "week_number": (this_date - first_date).days // 7 + 1,
+            "slot_time": slot_time,
+            "status": "upcoming",
+            "created_at": now,
+        })
+    await v3_col("sessions").insert_many([d.copy() for d in session_docs])
+
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": {
+        "assigned_physio_id": physio["id"],
+        "assigned_physio_name": physio["full_name"],
+        "physio_assigned_at": now,
+        "consultation_stage": "Physio Assign",
+        "updated_at": now,
+    }})
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": lead_id,
+        "action": "consultation_physio_assigned",
+        "details": f"Assigned {physio['full_name']} and booked all {total_sessions} sessions",
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": now,
+    })
+    updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    return {
+        "message": "Physio assigned and sessions booked",
+        "lead": V3LeadOut(**updated).model_dump(),
+        "sessions_booked": len(session_docs),
+    }

@@ -313,6 +313,14 @@ class V3ConsultationDecisionInput(BaseModel):
     sessions_override: Optional[int] = None
 
 
+class V3AssignPhysioSessionsInput(BaseModel):
+    physio_id: str
+    # Exactly `session_package_sessions` slot_time strings, picked from the physio's own
+    # already-configured calendar (Consultations > Physio Calendar) — booking all of the
+    # patient's paid sessions in the same step the physio is assigned.
+    slot_times: List[str]
+
+
 class V3AssignBranchInput(BaseModel):
     branch_id: str
 
