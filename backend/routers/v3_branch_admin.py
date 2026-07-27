@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timedelta
 from calendar import monthrange
+import logging
 import uuid
 
 from database import v3_col
@@ -48,7 +49,14 @@ async def v3_branch_board_new(branch_id: str, _: V3UserOut = Depends(v3_require_
     stage_counts = {}
     for stage in await _branch_stage_names():
         stage_counts[stage] = sum(1 for lead in leads if lead.get("branch_stage") == stage)
-    lead_list = [V3LeadOut(**lead) for lead in leads]
+    # One malformed lead document shouldn't 500 the whole board — skip it and keep
+    # showing every other lead rather than failing the entire list.
+    lead_list = []
+    for lead in leads:
+        try:
+            lead_list.append(V3LeadOut(**lead))
+        except Exception as e:
+            logging.getLogger(__name__).error(f"branch-board: skipping unparseable lead {lead.get('id')}: {e}")
     return {"leads": [lead.model_dump() for lead in lead_list], "stage_counts": stage_counts}
 
 
@@ -284,7 +292,14 @@ async def v3_consultations_board(branch_id: str, pipeline: Optional[str] = None,
     stage_counts = {}
     for stage in stage_names:
         stage_counts[stage] = sum(1 for ld in leads_docs if ld.get(field) == stage)
-    lead_list = [V3LeadOut(**ld).model_dump() for ld in leads_docs]
+    # One malformed lead document shouldn't 500 the whole board — skip it and keep
+    # showing every other lead rather than failing the entire list.
+    lead_list = []
+    for ld in leads_docs:
+        try:
+            lead_list.append(V3LeadOut(**ld).model_dump())
+        except Exception as e:
+            logging.getLogger(__name__).error(f"consultations-board: skipping unparseable lead {ld.get('id')}: {e}")
     return {"leads": lead_list, "stage_counts": stage_counts, "stages": stage_names}
 
 
