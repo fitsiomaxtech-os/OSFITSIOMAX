@@ -306,16 +306,27 @@ class V3PartialInstallment(BaseModel):
 
 
 class V3CollectTreatmentFeeInput(BaseModel):
-    # The Session/Treatment package and its price are locked in by the Head Physio's
-    # earlier consultation-decision — Branch Admin can't choose or change either one
-    # here, so neither item_id/mode/sessions_override nor paid_amount are accepted.
+    # The Session/Treatment package itself is locked in by the Head Physio's earlier
+    # consultation-decision — Branch Admin can't choose or change item_id/mode/
+    # sessions_override here. The amount defaults to the locked session_package_price
+    # but can be manually overridden for Cash/UPI/Card (discount, rounding, etc);
+    # Cheque and Partial Payment keep using the locked amount as before.
     payment_mode: str
-    # Card — only the last 4 digits are ever persisted; the full number is never stored.
-    card_number: Optional[str] = None
-    card_holder_name: Optional[str] = None
-    # Cheque
+    amount: Optional[float] = None
+    # Branch Admin must explicitly tick a confirmation before Cash/UPI/Card is
+    # accepted — a deliberate double-check step, not just clicking Collect once.
+    confirmed: bool = False
+    # UPI
+    upi_transaction_id: Optional[str] = None
+    upi_utr: Optional[str] = None
+    # Card — only the last 4 digits of the account number are ever persisted; the
+    # full number is never stored.
+    account_number: Optional[str] = None
+    account_holder_name: Optional[str] = None
+    # Cheque (bank_name is shared with Card)
     bank_name: Optional[str] = None
     cheque_number: Optional[str] = None
+    ifsc_code: Optional[str] = None
     # Partial Payment — an arbitrary-length installment schedule (some clients want 2
     # payments, others want 5 or 6); every installment needs its own amount and due
     # date, and they must sum to the locked-in session_package_price.

@@ -240,13 +240,14 @@ async def collect_package_payment(lead_id: str, payload: V3CollectPackagePayment
 @router.post("/leads/{lead_id}/collect-treatment-fee", response_model=dict)
 async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
     """Branch admin collects the Treatment Fee for the Session package the Head
-    Physio already chose during the consultation decision (Consultation + Treatment)
-    — any payment method is allowed here, including Cheque/Partial, but neither the
-    package nor the amount can be changed here; both are locked in from
-    session_package_id/session_package_price. Both Consultation Fee and Treatment
-    Fee are collected while the lead rests in the 'Fee Collected' stage; it stays
-    there after this call — moving on to Physio Assign is a separate, explicit
-    action (assign-consultation-physio), not an automatic side effect of payment."""
+    Physio already chose during the consultation decision (Consultation + Treatment).
+    The package itself is locked in from session_package_id — Cash/UPI/Card can
+    manually override the amount (discount, rounding, partial cash collected) and
+    require an explicit confirmation; Cheque/Partial Payment keep the locked
+    session_package_price as before. Both Consultation Fee and Treatment Fee are
+    collected while the lead rests in the 'Fee Collected' stage; it stays there
+    after this call — moving on to Physio Assign is a separate, explicit action
+    (assign-consultation-physio), not an automatic side effect of payment."""
     if payload.payment_mode not in TREATMENT_FEE_PAYMENT_MODES:
         raise HTTPException(status_code=400, detail=f"Treatment Fee only accepts: {sorted(TREATMENT_FEE_PAYMENT_MODES)}")
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
@@ -259,19 +260,40 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
     if not lead.get("session_package_id") or lead.get("session_package_price") is None:
         raise HTTPException(status_code=400, detail="No treatment package was selected by the Head Physio yet")
 
-    amount = lead["session_package_price"]
+    # Cash/UPI/Card can be manually adjusted (discount, rounding, partial cash
+    # collected); Cheque and Partial Payment keep the locked session_package_price.
+    if payload.payment_mode in ("cash", "upi", "card"):
+        amount = payload.amount if payload.amount is not None else lead["session_package_price"]
+        if amount <= 0:
+            raise HTTPException(status_code=400, detail="Amount must be greater than zero")
+    else:
+        amount = lead["session_package_price"]
+
+    if payload.payment_mode in ("cash", "upi", "card") and not payload.confirmed:
+        raise HTTPException(status_code=400, detail="Please confirm the payment before submitting")
 
     # Mode-specific required fields + a structured payment_details record for the
-    # receipt/activity log. Card number is never persisted beyond its last 4 digits.
+    # receipt/activity log. Account number is never persisted beyond its last 4 digits.
     payment_details = {}
     detail_suffix = ""
     installments = []
-    if payload.payment_mode == "card":
-        if not payload.card_number or not payload.card_number.strip() or not payload.card_holder_name or not payload.card_holder_name.strip():
-            raise HTTPException(status_code=400, detail="Card Number and Card Holder Name are required")
-        last4 = "".join(ch for ch in payload.card_number if ch.isdigit())[-4:]
-        payment_details = {"card_last4": last4, "card_holder_name": payload.card_holder_name.strip()}
-        detail_suffix = f" · Card ****{last4}, {payload.card_holder_name.strip()}"
+    if payload.payment_mode == "upi":
+        if not payload.upi_transaction_id or not payload.upi_transaction_id.strip() or not payload.upi_utr or not payload.upi_utr.strip():
+            raise HTTPException(status_code=400, detail="UPI Transaction ID and UTR are required")
+        payment_details = {"upi_transaction_id": payload.upi_transaction_id.strip(), "upi_utr": payload.upi_utr.strip()}
+        detail_suffix = f" · UPI txn {payload.upi_transaction_id.strip()}, UTR {payload.upi_utr.strip()}"
+    elif payload.payment_mode == "card":
+        if not all([payload.account_number and payload.account_number.strip(), payload.account_holder_name and payload.account_holder_name.strip(),
+                    payload.bank_name and payload.bank_name.strip(), payload.ifsc_code and payload.ifsc_code.strip()]):
+            raise HTTPException(status_code=400, detail="Account Number, Account Holder Name, Bank Name and IFSC Code are required")
+        last4 = "".join(ch for ch in payload.account_number if ch.isdigit())[-4:]
+        payment_details = {
+            "account_last4": last4,
+            "account_holder_name": payload.account_holder_name.strip(),
+            "bank_name": payload.bank_name.strip(),
+            "ifsc_code": payload.ifsc_code.strip().upper(),
+        }
+        detail_suffix = f" · A/C ****{last4}, {payload.account_holder_name.strip()}, {payload.bank_name.strip()} ({payload.ifsc_code.strip().upper()})"
     elif payload.payment_mode == "cheque":
         if not payload.bank_name or not payload.bank_name.strip() or not payload.cheque_number or not payload.cheque_number.strip():
             raise HTTPException(status_code=400, detail="Bank Name and Cheque Number are required")

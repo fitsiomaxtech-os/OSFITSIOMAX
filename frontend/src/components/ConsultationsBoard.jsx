@@ -83,12 +83,21 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   const treatmentDebounceRef = useRef(null);
 
   // Collect Fee popup (Branch Admin only) — at the Consultation Fee stage, Cash/UPI/Card only
-  const [collectFeeDraft, setCollectFeeDraft] = useState(null); // { paid_amount, payment_mode } | null
+  const [collectFeeDraft, setCollectFeeDraft] = useState(null); // { amount, payment_mode } | null
   const [collectingFee, setCollectingFee] = useState(false);
+  // Second-step popup — only opens if the entered amount doesn't match the assigned
+  // package price (needs an explicit "yes, that's right" confirm) and/or the chosen
+  // mode needs its own extra fields (UPI Transaction ID/UTR, Card account details).
+  // Cash at the expected amount skips this entirely and submits straight away.
+  const [packageConfirmDraft, setPackageConfirmDraft] = useState(null);
 
   // Collect Treatment Fee popup (Branch Admin only) — at the Treatment Fee stage, any payment method
   const [treatmentFeeDraft, setTreatmentFeeDraft] = useState(null); // { paid_amount, payment_mode } | null
   const [collectingTreatmentFee, setCollectingTreatmentFee] = useState(false);
+  // Same second-step confirm popup as packageConfirmDraft above, but for Cash/UPI/Card
+  // on the Treatment Fee. Cheque and Partial Payment keep their existing single-popup
+  // flow (locked amount, no manual override, no confirm step).
+  const [treatmentConfirmDraft, setTreatmentConfirmDraft] = useState(null);
 
   // Physio Assign popup (Branch Admin only) — pick an available Jr. Physio, then book all
   // of the paid session package's sessions against that physio's own calendar (Consultations
@@ -374,22 +383,14 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   };
 
   // ---- Collect Fee (Branch Admin) — at the Consultation Visit stage ----
-  // Consultation Fee is never editable here — it's whatever the Head Physio's
-  // package assignment already set (package_price), Branch Admin can only pick
-  // the payment mode and confirm. If the Head Physio's decision was "Consultation +
-  // Treatment" and the Treatment Fee hasn't been paid yet, its draft opens
-  // alongside this one so both fees are collected together in one popup.
+  // The amount defaults to the assigned package_price but Branch Admin can edit it
+  // if a different amount was actually collected. If the Head Physio's decision was
+  // "Consultation + Treatment" and the Treatment Fee hasn't been paid yet, its draft
+  // opens alongside this one so both fees are collected together in one popup.
   const openCollectFeeDraft = () => {
     setCollectFeeDraft({
       payment_mode: selectedLead.package_payment_mode || "cash",
       amount: selectedLead.package_paid ?? selectedLead.package_price ?? "",
-      confirmed: false,
-      upi_transaction_id: "",
-      upi_utr: "",
-      account_number: "",
-      account_holder_name: "",
-      bank_name: "",
-      ifsc_code: "",
     });
     if (selectedLead.consultation_decision === "consultation_treatment" && selectedLead.treatment_fee_paid == null) {
       openTreatmentFeeDraft();
@@ -405,8 +406,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   const openTreatmentFeeDraft = () => {
     setTreatmentFeeDraft({
       payment_mode: selectedLead.treatment_fee_payment_mode || "cash",
-      card_number: "",
-      card_holder_name: "",
+      amount: selectedLead.treatment_fee_paid ?? selectedLead.session_package_price ?? "",
       bank_name: "",
       cheque_number: "",
       // First installment defaults to today — it's the one being collected right now;
@@ -431,19 +431,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   const partialMismatch = treatmentFeeTotalSessions > 0 && partialSessionsTotal !== treatmentFeeTotalSessions;
   const partialAllFilled = partialInstallments.length >= 2 && partialInstallments.every((i) => parseInt(i.sessions, 10) > 0 && i.due_date);
 
-  // Shared validation for the Treatment Fee's mode-specific fields — used both when
-  // it's collected on its own and when it's bundled into the combined submit below.
+  // Shared validation for Cheque/Partial Payment's own fields — Cash/UPI/Card
+  // don't use this at all, they go through the separate confirm-popup flow below
+  // since their amount is editable and (for UPI/Card) they need their own fields.
   const buildTreatmentFeePayload = () => {
     const mode = treatmentFeeDraft.payment_mode;
     const payload = { payment_mode: mode };
-    if (mode === "card") {
-      if (!treatmentFeeDraft.card_number.trim() || !treatmentFeeDraft.card_holder_name.trim()) {
-        toast.error("Card Number and Card Holder Name are required");
-        return null;
-      }
-      payload.card_number = treatmentFeeDraft.card_number.trim();
-      payload.card_holder_name = treatmentFeeDraft.card_holder_name.trim();
-    } else if (mode === "cheque") {
+    if (mode === "cheque") {
       if (!treatmentFeeDraft.bank_name.trim() || !treatmentFeeDraft.cheque_number.trim()) {
         toast.error("Bank Name and Cheque Number are required");
         return null;
@@ -474,50 +468,61 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   const bothFeesDone = (lead) => !treatmentFeeDraft || lead.treatment_fee_paid != null;
   const consultationFeeDone = (lead) => !collectFeeDraft || lead.package_paid != null;
 
-  // Validates the Consultation Fee draft's amount + mode-specific fields + the
-  // required double-confirmation checkbox — mirrors buildTreatmentFeePayload below.
-  const buildConsultationFeePayload = () => {
+  // Clicking "Collect Consultation Fee" in the main popup. Cash at exactly the
+  // assigned package price submits immediately — nothing else needed. Any other
+  // case (amount doesn't match, or UPI/Card need their own fields) opens the
+  // second "Confirm Payment" popup instead of submitting straight away.
+  const startCollectConsultationFee = () => {
     const amount = parseFloat(collectFeeDraft.amount);
     if (!(amount > 0)) {
       toast.error("Enter a valid Consultation Fee amount");
-      return null;
+      return;
     }
-    if (!collectFeeDraft.confirmed) {
-      toast.error("Please confirm the payment before submitting");
-      return null;
+    const mode = collectFeeDraft.payment_mode;
+    const expected = selectedLead.package_price;
+    const mismatch = expected != null && Math.round(amount * 100) !== Math.round(expected * 100);
+    if (mode === "cash" && !mismatch) {
+      submitConsultationFee({ payment_mode: mode, amount, confirmed: true });
+      return;
     }
+    setPackageConfirmDraft({ upi_transaction_id: "", upi_utr: "", account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "" });
+  };
+
+  // Confirm button inside the second "Confirm Payment" popup — validates
+  // UPI/Card's own fields (Cash just needed the mismatch acknowledged).
+  const confirmCollectConsultationFee = () => {
+    const amount = parseFloat(collectFeeDraft.amount);
     const mode = collectFeeDraft.payment_mode;
     const payload = { payment_mode: mode, amount, confirmed: true };
     if (mode === "upi") {
-      if (!collectFeeDraft.upi_transaction_id.trim() || !collectFeeDraft.upi_utr.trim()) {
+      if (!packageConfirmDraft.upi_transaction_id.trim() || !packageConfirmDraft.upi_utr.trim()) {
         toast.error("UPI Transaction ID and UTR are required");
-        return null;
+        return;
       }
-      payload.upi_transaction_id = collectFeeDraft.upi_transaction_id.trim();
-      payload.upi_utr = collectFeeDraft.upi_utr.trim();
+      payload.upi_transaction_id = packageConfirmDraft.upi_transaction_id.trim();
+      payload.upi_utr = packageConfirmDraft.upi_utr.trim();
     } else if (mode === "card") {
-      if (!collectFeeDraft.account_number.trim() || !collectFeeDraft.account_holder_name.trim() || !collectFeeDraft.bank_name.trim() || !collectFeeDraft.ifsc_code.trim()) {
+      if (!packageConfirmDraft.account_number.trim() || !packageConfirmDraft.account_holder_name.trim() || !packageConfirmDraft.bank_name.trim() || !packageConfirmDraft.ifsc_code.trim()) {
         toast.error("Account Number, Account Holder Name, Bank Name and IFSC Code are required");
-        return null;
+        return;
       }
-      payload.account_number = collectFeeDraft.account_number.trim();
-      payload.account_holder_name = collectFeeDraft.account_holder_name.trim();
-      payload.bank_name = collectFeeDraft.bank_name.trim();
-      payload.ifsc_code = collectFeeDraft.ifsc_code.trim();
+      payload.account_number = packageConfirmDraft.account_number.trim();
+      payload.account_holder_name = packageConfirmDraft.account_holder_name.trim();
+      payload.bank_name = packageConfirmDraft.bank_name.trim();
+      payload.ifsc_code = packageConfirmDraft.ifsc_code.trim();
     }
-    return payload;
+    submitConsultationFee(payload);
   };
 
-  // Submits ONLY the Consultation Fee. Leaves the Treatment Fee section (if
-  // present) untouched and open for its own button.
-  const submitConsultationFeeOnly = async () => {
-    const payload = buildConsultationFeePayload();
-    if (!payload) return;
+  // Actually calls the API. Leaves the Treatment Fee section (if present)
+  // untouched and open for its own button.
+  const submitConsultationFee = async (payload) => {
     setCollectingFee(true);
     try {
       const res = await collectPackagePayment(selectedLead.id, payload);
       toast.success(selectedLead.package_paid != null ? "Consultation Fee payment updated" : "Consultation Fee collected");
       setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === res.lead.id ? res.lead : l) }));
+      setPackageConfirmDraft(null);
       if (bothFeesDone(res.lead)) {
         setCollectFeeDraft(null);
         setTreatmentFeeDraft(null);
@@ -531,18 +536,72 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     setCollectingFee(false);
   };
 
-  // Submits ONLY the Treatment Fee — used both from the combined popup (its own
-  // button, Consultation Fee handled separately above) and from the Fee Collected
-  // panel's standalone fallback (where collectFeeDraft is always null, so this
-  // always closes the popup on success).
-  const submitTreatmentFee = async () => {
-    const payload = buildTreatmentFeePayload();
+  // Clicking "Collect Treatment Fee". Cheque/Partial Payment keep their existing
+  // flow (fields collected inline, locked amount, submit straight away). Cash at
+  // exactly the assigned session_package_price also submits immediately; any other
+  // case (amount doesn't match, or UPI/Card need their own fields) opens the second
+  // "Confirm Payment" popup instead.
+  const startCollectTreatmentFee = () => {
+    const mode = treatmentFeeDraft.payment_mode;
+    if (mode === "cheque" || mode === "partial") {
+      submitTreatmentFee();
+      return;
+    }
+    const amount = parseFloat(treatmentFeeDraft.amount);
+    if (!(amount > 0)) {
+      toast.error("Enter a valid Treatment Fee amount");
+      return;
+    }
+    const expected = selectedLead.session_package_price;
+    const mismatch = expected != null && Math.round(amount * 100) !== Math.round(expected * 100);
+    if (mode === "cash" && !mismatch) {
+      submitTreatmentFee({ payment_mode: mode, amount, confirmed: true });
+      return;
+    }
+    setTreatmentConfirmDraft({ upi_transaction_id: "", upi_utr: "", account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "" });
+  };
+
+  // Confirm button inside the second "Confirm Payment" popup — validates
+  // UPI/Card's own fields (Cash just needed the mismatch acknowledged).
+  const confirmCollectTreatmentFee = () => {
+    const amount = parseFloat(treatmentFeeDraft.amount);
+    const mode = treatmentFeeDraft.payment_mode;
+    const payload = { payment_mode: mode, amount, confirmed: true };
+    if (mode === "upi") {
+      if (!treatmentConfirmDraft.upi_transaction_id.trim() || !treatmentConfirmDraft.upi_utr.trim()) {
+        toast.error("UPI Transaction ID and UTR are required");
+        return;
+      }
+      payload.upi_transaction_id = treatmentConfirmDraft.upi_transaction_id.trim();
+      payload.upi_utr = treatmentConfirmDraft.upi_utr.trim();
+    } else if (mode === "card") {
+      if (!treatmentConfirmDraft.account_number.trim() || !treatmentConfirmDraft.account_holder_name.trim() || !treatmentConfirmDraft.bank_name.trim() || !treatmentConfirmDraft.ifsc_code.trim()) {
+        toast.error("Account Number, Account Holder Name, Bank Name and IFSC Code are required");
+        return;
+      }
+      payload.account_number = treatmentConfirmDraft.account_number.trim();
+      payload.account_holder_name = treatmentConfirmDraft.account_holder_name.trim();
+      payload.bank_name = treatmentConfirmDraft.bank_name.trim();
+      payload.ifsc_code = treatmentConfirmDraft.ifsc_code.trim();
+    }
+    submitTreatmentFee(payload);
+  };
+
+  // Submits the Treatment Fee — used both from the combined popup (its own button,
+  // Consultation Fee handled separately above) and from the Fee Collected panel's
+  // standalone fallback (where collectFeeDraft is always null, so this always
+  // closes the popup on success). Pass a payload directly for Cash/UPI/Card (built
+  // above); omit it for Cheque/Partial Payment, which build their own from the
+  // inline fields via buildTreatmentFeePayload.
+  const submitTreatmentFee = async (directPayload) => {
+    const payload = directPayload || buildTreatmentFeePayload();
     if (!payload) return;
     setCollectingTreatmentFee(true);
     try {
       const res = await collectTreatmentFee(selectedLead.id, payload);
       toast.success(selectedLead.treatment_fee_paid != null ? "Treatment Fee payment updated" : "Treatment Fee collected");
       setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === res.lead.id ? res.lead : l) }));
+      setTreatmentConfirmDraft(null);
       if (consultationFeeDone(res.lead)) {
         setCollectFeeDraft(null);
         setTreatmentFeeDraft(null);
@@ -1353,7 +1412,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             type="number"
                             min="0"
                             value={collectFeeDraft.amount}
-                            onChange={(e) => setCollectFeeDraft({ ...collectFeeDraft, amount: e.target.value, confirmed: false })}
+                            onChange={(e) => setCollectFeeDraft({ ...collectFeeDraft, amount: e.target.value })}
                             className="h-9"
                             data-testid="cons-collect-fee-amount"
                           />
@@ -1366,94 +1425,14 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           <PaymentModeSelect
                             value={collectFeeDraft.payment_mode}
                             options={CONSULTATION_FEE_PAYMENT_MODES}
-                            onChange={(v) => setCollectFeeDraft({ ...collectFeeDraft, payment_mode: v, confirmed: false })}
+                            onChange={(v) => setCollectFeeDraft({ ...collectFeeDraft, payment_mode: v })}
                             testId="cons-collect-fee-mode"
                           />
                         </div>
-
-                        {collectFeeDraft.payment_mode === "upi" && (
-                          <>
-                            <div>
-                              <label className="mb-1 block text-[11px] font-medium text-slate-500">UPI Transaction ID</label>
-                              <Input
-                                value={collectFeeDraft.upi_transaction_id}
-                                onChange={(e) => setCollectFeeDraft({ ...collectFeeDraft, upi_transaction_id: e.target.value, confirmed: false })}
-                                className="h-9"
-                                data-testid="cons-collect-fee-upi-txn"
-                              />
-                            </div>
-                            <div>
-                              <label className="mb-1 block text-[11px] font-medium text-slate-500">UTR</label>
-                              <Input
-                                value={collectFeeDraft.upi_utr}
-                                onChange={(e) => setCollectFeeDraft({ ...collectFeeDraft, upi_utr: e.target.value, confirmed: false })}
-                                className="h-9"
-                                data-testid="cons-collect-fee-upi-utr"
-                              />
-                            </div>
-                          </>
-                        )}
-
-                        {collectFeeDraft.payment_mode === "card" && (
-                          <>
-                            <div>
-                              <label className="mb-1 block text-[11px] font-medium text-slate-500">Account Number</label>
-                              <Input
-                                value={collectFeeDraft.account_number}
-                                onChange={(e) => setCollectFeeDraft({ ...collectFeeDraft, account_number: e.target.value, confirmed: false })}
-                                className="h-9"
-                                data-testid="cons-collect-fee-account-number"
-                              />
-                            </div>
-                            <div>
-                              <label className="mb-1 block text-[11px] font-medium text-slate-500">Account Holder Name</label>
-                              <Input
-                                value={collectFeeDraft.account_holder_name}
-                                onChange={(e) => setCollectFeeDraft({ ...collectFeeDraft, account_holder_name: e.target.value, confirmed: false })}
-                                className="h-9"
-                                data-testid="cons-collect-fee-account-holder"
-                              />
-                            </div>
-                            <div>
-                              <label className="mb-1 block text-[11px] font-medium text-slate-500">Bank Name</label>
-                              <Input
-                                value={collectFeeDraft.bank_name}
-                                onChange={(e) => setCollectFeeDraft({ ...collectFeeDraft, bank_name: e.target.value, confirmed: false })}
-                                className="h-9"
-                                data-testid="cons-collect-fee-bank-name"
-                              />
-                            </div>
-                            <div>
-                              <label className="mb-1 block text-[11px] font-medium text-slate-500">IFSC Code</label>
-                              <Input
-                                value={collectFeeDraft.ifsc_code}
-                                onChange={(e) => setCollectFeeDraft({ ...collectFeeDraft, ifsc_code: e.target.value.toUpperCase(), confirmed: false })}
-                                className="h-9"
-                                data-testid="cons-collect-fee-ifsc"
-                              />
-                            </div>
-                          </>
-                        )}
-
-                        <label className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-800">
-                          <input
-                            type="checkbox"
-                            checked={collectFeeDraft.confirmed}
-                            onChange={(e) => setCollectFeeDraft({ ...collectFeeDraft, confirmed: e.target.checked })}
-                            className="mt-0.5"
-                            data-testid="cons-collect-fee-confirm"
-                          />
-                          <span>I confirm Rs.{collectFeeDraft.amount || "0"} has been received via {CONSULTATION_FEE_PAYMENT_MODES.find((m) => m.value === collectFeeDraft.payment_mode)?.label || collectFeeDraft.payment_mode}.</span>
-                        </label>
-
                         <Button
                           className="w-full bg-sky-600 text-xs hover:bg-sky-700"
-                          onClick={submitConsultationFeeOnly}
-                          disabled={
-                            collectingFee || !collectFeeDraft.confirmed || !(parseFloat(collectFeeDraft.amount) > 0) ||
-                            (collectFeeDraft.payment_mode === "upi" && (!collectFeeDraft.upi_transaction_id.trim() || !collectFeeDraft.upi_utr.trim())) ||
-                            (collectFeeDraft.payment_mode === "card" && (!collectFeeDraft.account_number.trim() || !collectFeeDraft.account_holder_name.trim() || !collectFeeDraft.bank_name.trim() || !collectFeeDraft.ifsc_code.trim()))
-                          }
+                          onClick={startCollectConsultationFee}
+                          disabled={collectingFee || !(parseFloat(collectFeeDraft.amount) > 0)}
                           data-testid="cons-collect-fee-submit"
                         >
                           {collectingFee ? "Saving..." : "Collect Consultation Fee"}
@@ -1502,9 +1481,20 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       </div>
                       <div>
                         <label className="mb-1 block text-[11px] font-medium text-slate-500">Treatment Fee (₹)</label>
-                        <div className="flex h-9 items-center rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700" data-testid="cons-treatment-fee-amount">
-                          {selectedLead.session_package_price != null ? `Rs.${selectedLead.session_package_price}` : "—"}
-                        </div>
+                        {["cash", "upi", "card"].includes(treatmentFeeDraft.payment_mode) ? (
+                          <Input
+                            type="number"
+                            min="0"
+                            value={treatmentFeeDraft.amount}
+                            onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, amount: e.target.value })}
+                            className="h-9"
+                            data-testid="cons-treatment-fee-amount"
+                          />
+                        ) : (
+                          <div className="flex h-9 items-center rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700" data-testid="cons-treatment-fee-amount">
+                            {selectedLead.session_package_price != null ? `Rs.${selectedLead.session_package_price}` : "—"}
+                          </div>
+                        )}
                         {selectedLead.session_package_sessions && selectedLead.session_package_price != null && (
                           <p className="mt-1 text-[11px] text-slate-500" data-testid="cons-treatment-fee-breakdown">
                             Collect Total Session Fee = {selectedLead.session_package_sessions} sessions × Rs.{Math.round((selectedLead.session_package_price / selectedLead.session_package_sessions) * 100) / 100}/session = Rs.{selectedLead.session_package_price}
@@ -1520,29 +1510,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           testId="cons-treatment-fee-mode"
                         />
                       </div>
-
-                      {treatmentFeeDraft.payment_mode === "card" && (
-                        <>
-                          <div>
-                            <label className="mb-1 block text-[11px] font-medium text-slate-500">Card Number</label>
-                            <Input
-                              value={treatmentFeeDraft.card_number}
-                              onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, card_number: e.target.value })}
-                              className="h-9"
-                              data-testid="cons-treatment-fee-card-number"
-                            />
-                          </div>
-                          <div>
-                            <label className="mb-1 block text-[11px] font-medium text-slate-500">Card Holder Name</label>
-                            <Input
-                              value={treatmentFeeDraft.card_holder_name}
-                              onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, card_holder_name: e.target.value })}
-                              className="h-9"
-                              data-testid="cons-treatment-fee-card-holder"
-                            />
-                          </div>
-                        </>
-                      )}
 
                       {treatmentFeeDraft.payment_mode === "cheque" && (
                         <>
@@ -1579,11 +1546,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       )}
                       <Button
                         className="w-full bg-indigo-600 text-xs hover:bg-indigo-700"
-                        onClick={submitTreatmentFee}
+                        onClick={startCollectTreatmentFee}
                         disabled={
                           collectingTreatmentFee ||
                           selectedLead.session_package_price == null ||
-                          (treatmentFeeDraft.payment_mode === "card" && (!treatmentFeeDraft.card_number.trim() || !treatmentFeeDraft.card_holder_name.trim())) ||
+                          (["cash", "upi", "card"].includes(treatmentFeeDraft.payment_mode) && !(parseFloat(treatmentFeeDraft.amount) > 0)) ||
                           (treatmentFeeDraft.payment_mode === "cheque" && (!treatmentFeeDraft.bank_name.trim() || !treatmentFeeDraft.cheque_number.trim())) ||
                           (treatmentFeeDraft.payment_mode === "partial" && (!partialAllFilled || partialMismatch))
                         }
@@ -1600,12 +1567,115 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               </div>
             )}
 
+            {/* Confirm Consultation Fee Payment — second-step popup, only shown when the
+                entered amount doesn't match the assigned package price and/or the mode
+                (UPI/Card) needs its own fields. Layered above the main popup. */}
+            {packageConfirmDraft && collectFeeDraft && (() => {
+              const amount = parseFloat(collectFeeDraft.amount);
+              const expected = selectedLead.package_price;
+              const mismatch = expected != null && Math.round(amount * 100) !== Math.round(expected * 100);
+              const mode = collectFeeDraft.payment_mode;
+              return (
+                <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" data-testid="cons-collect-fee-confirm-modal">
+                  <div className="w-full max-w-sm space-y-3 rounded-xl bg-white p-4 shadow-2xl">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-semibold text-slate-800">Confirm Consultation Fee Payment</p>
+                      <button onClick={() => setPackageConfirmDraft(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-collect-fee-confirm-close"><X className="h-4 w-4" /></button>
+                    </div>
+
+                    {mismatch && (
+                      <div className="rounded-md border border-amber-200 bg-amber-50 p-2.5 text-[11px] text-amber-800" data-testid="cons-collect-fee-mismatch-warning">
+                        Entered amount <span className="font-semibold">Rs.{amount}</span> differs from the assigned Consultation Fee <span className="font-semibold">Rs.{expected}</span>. Please confirm this is correct.
+                      </div>
+                    )}
+
+                    {mode === "upi" && (
+                      <>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium text-slate-500">UPI Transaction ID</label>
+                          <Input
+                            value={packageConfirmDraft.upi_transaction_id}
+                            onChange={(e) => setPackageConfirmDraft({ ...packageConfirmDraft, upi_transaction_id: e.target.value })}
+                            className="h-9"
+                            data-testid="cons-collect-fee-upi-txn"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium text-slate-500">UTR</label>
+                          <Input
+                            value={packageConfirmDraft.upi_utr}
+                            onChange={(e) => setPackageConfirmDraft({ ...packageConfirmDraft, upi_utr: e.target.value })}
+                            className="h-9"
+                            data-testid="cons-collect-fee-upi-utr"
+                          />
+                        </div>
+                      </>
+                    )}
+
+                    {mode === "card" && (
+                      <>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium text-slate-500">Account Number</label>
+                          <Input
+                            value={packageConfirmDraft.account_number}
+                            onChange={(e) => setPackageConfirmDraft({ ...packageConfirmDraft, account_number: e.target.value })}
+                            className="h-9"
+                            data-testid="cons-collect-fee-account-number"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium text-slate-500">Account Holder Name</label>
+                          <Input
+                            value={packageConfirmDraft.account_holder_name}
+                            onChange={(e) => setPackageConfirmDraft({ ...packageConfirmDraft, account_holder_name: e.target.value })}
+                            className="h-9"
+                            data-testid="cons-collect-fee-account-holder"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium text-slate-500">Bank Name</label>
+                          <Input
+                            value={packageConfirmDraft.bank_name}
+                            onChange={(e) => setPackageConfirmDraft({ ...packageConfirmDraft, bank_name: e.target.value })}
+                            className="h-9"
+                            data-testid="cons-collect-fee-bank-name"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium text-slate-500">IFSC Code</label>
+                          <Input
+                            value={packageConfirmDraft.ifsc_code}
+                            onChange={(e) => setPackageConfirmDraft({ ...packageConfirmDraft, ifsc_code: e.target.value.toUpperCase() })}
+                            className="h-9"
+                            data-testid="cons-collect-fee-ifsc"
+                          />
+                        </div>
+                      </>
+                    )}
+
+                    <Button
+                      className="w-full bg-sky-600 text-xs hover:bg-sky-700"
+                      onClick={confirmCollectConsultationFee}
+                      disabled={
+                        collectingFee ||
+                        (mode === "upi" && (!packageConfirmDraft.upi_transaction_id.trim() || !packageConfirmDraft.upi_utr.trim())) ||
+                        (mode === "card" && (!packageConfirmDraft.account_number.trim() || !packageConfirmDraft.account_holder_name.trim() || !packageConfirmDraft.bank_name.trim() || !packageConfirmDraft.ifsc_code.trim()))
+                      }
+                      data-testid="cons-collect-fee-confirm-submit"
+                    >
+                      {collectingFee ? "Saving..." : "Confirm & Collect"}
+                    </Button>
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* Collect Treatment Fee popup (Branch Admin) — fallback: only reachable on
                 its own from the Fee Collected panel if it wasn't collected together
                 with the Consultation Fee the first time. */}
             {treatmentFeeDraft && !collectFeeDraft && (
               <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" data-testid="cons-treatment-fee-modal">
-                <div className="w-full max-w-sm space-y-3 rounded-xl bg-white p-4 shadow-2xl">
+                <div className="max-h-[85vh] w-full max-w-2xl space-y-3 overflow-y-auto rounded-xl bg-white p-4 shadow-2xl">
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-semibold text-slate-800">{selectedLead.treatment_fee_paid != null ? "Update Treatment Fee Payment" : "Collect Treatment Fee"}</p>
                     <button onClick={() => setTreatmentFeeDraft(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-treatment-fee-close"><X className="h-4 w-4" /></button>
@@ -1618,9 +1688,20 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                   </div>
                   <div>
                     <label className="mb-1 block text-[11px] font-medium text-slate-500">Treatment Fee (₹)</label>
-                    <div className="flex h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-700" data-testid="cons-treatment-fee-amount">
-                      {selectedLead.session_package_price != null ? `Rs.${selectedLead.session_package_price}` : "—"}
-                    </div>
+                    {["cash", "upi", "card"].includes(treatmentFeeDraft.payment_mode) ? (
+                      <Input
+                        type="number"
+                        min="0"
+                        value={treatmentFeeDraft.amount}
+                        onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, amount: e.target.value })}
+                        className="h-9"
+                        data-testid="cons-treatment-fee-amount"
+                      />
+                    ) : (
+                      <div className="flex h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-700" data-testid="cons-treatment-fee-amount">
+                        {selectedLead.session_package_price != null ? `Rs.${selectedLead.session_package_price}` : "—"}
+                      </div>
+                    )}
                     {selectedLead.session_package_sessions && selectedLead.session_package_price != null && (
                       <p className="mt-1 text-[11px] text-slate-500" data-testid="cons-treatment-fee-breakdown">
                         Collect Total Session Fee = {selectedLead.session_package_sessions} sessions × Rs.{Math.round((selectedLead.session_package_price / selectedLead.session_package_sessions) * 100) / 100}/session = Rs.{selectedLead.session_package_price}
@@ -1636,29 +1717,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       testId="cons-treatment-fee-mode"
                     />
                   </div>
-
-                  {treatmentFeeDraft.payment_mode === "card" && (
-                    <>
-                      <div>
-                        <label className="mb-1 block text-[11px] font-medium text-slate-500">Card Number</label>
-                        <Input
-                          value={treatmentFeeDraft.card_number}
-                          onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, card_number: e.target.value })}
-                          className="h-9"
-                          data-testid="cons-treatment-fee-card-number"
-                        />
-                      </div>
-                      <div>
-                        <label className="mb-1 block text-[11px] font-medium text-slate-500">Card Holder Name</label>
-                        <Input
-                          value={treatmentFeeDraft.card_holder_name}
-                          onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, card_holder_name: e.target.value })}
-                          className="h-9"
-                          data-testid="cons-treatment-fee-card-holder"
-                        />
-                      </div>
-                    </>
-                  )}
 
                   {treatmentFeeDraft.payment_mode === "cheque" && (
                     <>
@@ -1696,11 +1754,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
 
                   <Button
                     className="w-full bg-sky-600 hover:bg-sky-700 text-xs"
-                    onClick={submitTreatmentFee}
+                    onClick={startCollectTreatmentFee}
                     disabled={
                       collectingTreatmentFee ||
                       selectedLead.session_package_price == null ||
-                      (treatmentFeeDraft.payment_mode === "card" && (!treatmentFeeDraft.card_number.trim() || !treatmentFeeDraft.card_holder_name.trim())) ||
+                      (["cash", "upi", "card"].includes(treatmentFeeDraft.payment_mode) && !(parseFloat(treatmentFeeDraft.amount) > 0)) ||
                       (treatmentFeeDraft.payment_mode === "cheque" && (!treatmentFeeDraft.bank_name.trim() || !treatmentFeeDraft.cheque_number.trim())) ||
                       (treatmentFeeDraft.payment_mode === "partial" && (!partialAllFilled || partialMismatch))
                     }
@@ -1711,6 +1769,110 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 </div>
               </div>
             )}
+
+            {/* Confirm Treatment Fee Payment — second-step popup, only shown when the
+                entered amount doesn't match the assigned session_package_price and/or
+                the mode (UPI/Card) needs its own fields. Layered above whichever of the
+                two Treatment Fee popups (combined or standalone) is currently open. */}
+            {treatmentConfirmDraft && treatmentFeeDraft && (() => {
+              const amount = parseFloat(treatmentFeeDraft.amount);
+              const expected = selectedLead.session_package_price;
+              const mismatch = expected != null && Math.round(amount * 100) !== Math.round(expected * 100);
+              const mode = treatmentFeeDraft.payment_mode;
+              return (
+                <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" data-testid="cons-treatment-fee-confirm-modal">
+                  <div className="w-full max-w-sm space-y-3 rounded-xl bg-white p-4 shadow-2xl">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-semibold text-slate-800">Confirm Treatment Fee Payment</p>
+                      <button onClick={() => setTreatmentConfirmDraft(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-treatment-fee-confirm-close"><X className="h-4 w-4" /></button>
+                    </div>
+
+                    {mismatch && (
+                      <div className="rounded-md border border-amber-200 bg-amber-50 p-2.5 text-[11px] text-amber-800" data-testid="cons-treatment-fee-mismatch-warning">
+                        Entered amount <span className="font-semibold">Rs.{amount}</span> differs from the assigned Treatment Fee <span className="font-semibold">Rs.{expected}</span>. Please confirm this is correct.
+                      </div>
+                    )}
+
+                    {mode === "upi" && (
+                      <>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium text-slate-500">UPI Transaction ID</label>
+                          <Input
+                            value={treatmentConfirmDraft.upi_transaction_id}
+                            onChange={(e) => setTreatmentConfirmDraft({ ...treatmentConfirmDraft, upi_transaction_id: e.target.value })}
+                            className="h-9"
+                            data-testid="cons-treatment-fee-upi-txn"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium text-slate-500">UTR</label>
+                          <Input
+                            value={treatmentConfirmDraft.upi_utr}
+                            onChange={(e) => setTreatmentConfirmDraft({ ...treatmentConfirmDraft, upi_utr: e.target.value })}
+                            className="h-9"
+                            data-testid="cons-treatment-fee-upi-utr"
+                          />
+                        </div>
+                      </>
+                    )}
+
+                    {mode === "card" && (
+                      <>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium text-slate-500">Account Number</label>
+                          <Input
+                            value={treatmentConfirmDraft.account_number}
+                            onChange={(e) => setTreatmentConfirmDraft({ ...treatmentConfirmDraft, account_number: e.target.value })}
+                            className="h-9"
+                            data-testid="cons-treatment-fee-account-number"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium text-slate-500">Account Holder Name</label>
+                          <Input
+                            value={treatmentConfirmDraft.account_holder_name}
+                            onChange={(e) => setTreatmentConfirmDraft({ ...treatmentConfirmDraft, account_holder_name: e.target.value })}
+                            className="h-9"
+                            data-testid="cons-treatment-fee-account-holder"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium text-slate-500">Bank Name</label>
+                          <Input
+                            value={treatmentConfirmDraft.bank_name}
+                            onChange={(e) => setTreatmentConfirmDraft({ ...treatmentConfirmDraft, bank_name: e.target.value })}
+                            className="h-9"
+                            data-testid="cons-treatment-fee-confirm-bank-name"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium text-slate-500">IFSC Code</label>
+                          <Input
+                            value={treatmentConfirmDraft.ifsc_code}
+                            onChange={(e) => setTreatmentConfirmDraft({ ...treatmentConfirmDraft, ifsc_code: e.target.value.toUpperCase() })}
+                            className="h-9"
+                            data-testid="cons-treatment-fee-ifsc"
+                          />
+                        </div>
+                      </>
+                    )}
+
+                    <Button
+                      className="w-full bg-indigo-600 text-xs hover:bg-indigo-700"
+                      onClick={confirmCollectTreatmentFee}
+                      disabled={
+                        collectingTreatmentFee ||
+                        (mode === "upi" && (!treatmentConfirmDraft.upi_transaction_id.trim() || !treatmentConfirmDraft.upi_utr.trim())) ||
+                        (mode === "card" && (!treatmentConfirmDraft.account_number.trim() || !treatmentConfirmDraft.account_holder_name.trim() || !treatmentConfirmDraft.bank_name.trim() || !treatmentConfirmDraft.ifsc_code.trim()))
+                      }
+                      data-testid="cons-treatment-fee-confirm-submit"
+                    >
+                      {collectingTreatmentFee ? "Saving..." : "Confirm & Collect"}
+                    </Button>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Physio Assign popup (Branch Admin) — after fees are collected */}
             {showPhysioModal && (
