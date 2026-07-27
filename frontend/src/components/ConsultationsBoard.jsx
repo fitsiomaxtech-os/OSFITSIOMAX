@@ -34,6 +34,14 @@ const partialInstallmentLabel = (idx) => `${PARTIAL_ORDINALS[idx] || `#${idx + 1
 // One distinct color per Treatment Package option (cycles if there are ever more than 5).
 const TREATMENT_PACKAGE_COLORS = ["#2563eb", "#059669", "#d97706", "#7c3aed", "#e11d48"];
 
+// FITSIO STORE session packages are named like "02 Weeks" / "03 Week" — there's no
+// separate structured weeks field, so the duration is read off the leading number in
+// the name. Falls back to null (shown as "—") for a package that isn't named this way.
+const weeksFromPackageName = (name) => {
+  const match = (name || "").match(/^(\d+)/);
+  return match ? parseInt(match[1], 10) : null;
+};
+
 // One fixed color per payment mode, consistent everywhere it's offered.
 const PAYMENT_MODE_COLORS = {
   cash: "#059669",
@@ -96,7 +104,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // sessions once Diagnosis Report + Treatment Summary are written; only the Treatment
   // Package (names only, no prices shown here) is chosen. "consultation_only" is a legacy
   // decision value some existing leads already carry — no longer offered as a choice.
-  const [decisionDraft, setDecisionDraft] = useState({ decision: "consultation_treatment", item_id: "", mode: "offline", sessions: "" });
+  const [decisionDraft, setDecisionDraft] = useState({ decision: "consultation_treatment", item_id: "", mode: "offline", sessionsPerWeek: "" });
   const [savingDecision, setSavingDecision] = useState(false);
 
   // Mark Consultation Completed (Branch Admin only) — "Consultation Only" patients, at
@@ -212,7 +220,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     setRescheduleDraft(null);
     setCollectFeeDraft(null);
     setTreatmentFeeDraft(null);
-    setDecisionDraft({ decision: "consultation_treatment", item_id: "", mode: "offline", sessions: "" });
+    setDecisionDraft({ decision: "consultation_treatment", item_id: "", mode: "offline", sessionsPerWeek: "" });
   }, [selectedLead?.id]);
 
   useEffect(() => {
@@ -241,14 +249,19 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   const submitConsultationDecision = async () => {
     if (!(selectedLead.physio_diagnosis_report || "").trim()) { toast.error("Write the Diagnosis Report first"); return; }
     if (!(selectedLead.treatment_summary || "").trim()) { toast.error("Write the Treatment Summary first"); return; }
-    if (decisionDraft.decision === "consultation_treatment" && !decisionDraft.item_id) { toast.error("Select a Treatment Package"); return; }
+    if (!decisionDraft.item_id) { toast.error("Select a Treatment Package"); return; }
+    const item = treatmentPackageItems.find((i) => i.id === decisionDraft.item_id);
+    const weeks = weeksFromPackageName(item?.name);
+    if (!weeks) { toast.error("Couldn't read a week count from this package's name"); return; }
+    const perWeek = parseInt(decisionDraft.sessionsPerWeek, 10) || 0;
+    if (!perWeek) { toast.error("Enter sessions per week"); return; }
     setSavingDecision(true);
     try {
       const res = await saveConsultationDecision(selectedLead.id, {
         decision: decisionDraft.decision,
-        item_id: decisionDraft.decision === "consultation_treatment" ? decisionDraft.item_id : undefined,
+        item_id: decisionDraft.item_id,
         mode: decisionDraft.mode,
-        sessions_override: decisionDraft.decision === "consultation_treatment" && decisionDraft.sessions ? parseInt(decisionDraft.sessions, 10) : undefined,
+        sessions_override: weeks * perWeek,
       });
       toast.success("Saved & moved to Branch Admin");
       setSelectedLead(null);
@@ -743,7 +756,9 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               const alreadyMoved = selectedLead.head_consultation_stage === "Consultation Visit";
               const diagnosisReady = !!(selectedLead.physio_diagnosis_report || "").trim();
               const summaryReady = !!(selectedLead.treatment_summary || "").trim();
-              const canSave = diagnosisReady && summaryReady && !!decisionDraft.item_id;
+              const selectedPackage = treatmentPackageItems.find((i) => i.id === decisionDraft.item_id);
+              const selectedPackageWeeks = selectedPackage ? weeksFromPackageName(selectedPackage.name) : null;
+              const canSave = diagnosisReady && summaryReady && !!decisionDraft.item_id && !!selectedPackageWeeks && !!parseInt(decisionDraft.sessionsPerWeek, 10);
 
               if (alreadyMoved) {
                 return (
@@ -784,10 +799,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           <button
                             key={i.id}
                             type="button"
-                            onClick={() => {
-                              const baseSessions = decisionDraft.mode === "online" ? i.sessions_online : i.sessions_offline;
-                              setDecisionDraft((p) => ({ ...p, item_id: i.id, sessions: baseSessions ? String(baseSessions) : "" }));
-                            }}
+                            onClick={() => setDecisionDraft((p) => ({ ...p, item_id: i.id, sessionsPerWeek: "" }))}
                             className="rounded-md border px-3 py-1.5 text-xs font-semibold transition hover:brightness-95"
                             style={selected
                               ? { background: `${color}22`, color, borderColor: color, boxShadow: `inset 0 0 0 1px ${color}` }
@@ -806,19 +818,31 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       // Head Physio sees the session count only — never the price.
                       // The Treatment Fee amount is derived server-side from
                       // sessions_override and shown to Branch Admin at fee collection.
+                      const weeks = weeksFromPackageName(item.name);
+                      const perWeek = parseInt(decisionDraft.sessionsPerWeek, 10) || 0;
+                      const totalSessions = weeks && perWeek ? weeks * perWeek : 0;
                       return (
                         <div className="mt-2 rounded-md border border-slate-200 bg-white p-3" data-testid="cons-decision-package-summary">
-                          <p className="text-sm font-semibold text-slate-800">{item.name}</p>
-                          <div className="mt-2 max-w-[220px]">
-                            <label className="mb-1 block text-[11px] font-medium text-slate-500">Total Sessions</label>
-                            <Input
-                              type="number"
-                              min="1"
-                              value={decisionDraft.sessions}
-                              onChange={(e) => setDecisionDraft((p) => ({ ...p, sessions: e.target.value }))}
-                              className="h-9"
-                              data-testid="cons-decision-sessions"
-                            />
+                          <p className="text-sm font-semibold text-slate-800">{item.name}{weeks ? ` · ${weeks} week${weeks > 1 ? "s" : ""}` : ""}</p>
+                          <div className="mt-2 flex items-end gap-3">
+                            <div className="max-w-[160px]">
+                              <label className="mb-1 block text-[11px] font-medium text-slate-500">Sessions / week</label>
+                              <Input
+                                type="number"
+                                min="1"
+                                value={decisionDraft.sessionsPerWeek}
+                                onChange={(e) => setDecisionDraft((p) => ({ ...p, sessionsPerWeek: e.target.value }))}
+                                className="h-9"
+                                data-testid="cons-decision-sessions-per-week"
+                              />
+                            </div>
+                            <div className="pb-1.5 text-xs text-slate-500">
+                              <span data-testid="cons-decision-total-sessions">
+                                {weeks ? `${weeks} week${weeks > 1 ? "s" : ""} × ${perWeek || "?"}/week = ` : ""}
+                                <span className="text-sm font-semibold text-slate-800">{totalSessions || "—"} Total Sessions</span>
+                              </span>
+                              {!weeks && <p className="mt-0.5 text-amber-600">Couldn't read a week count from this package's name.</p>}
+                            </div>
                           </div>
                         </div>
                       );
