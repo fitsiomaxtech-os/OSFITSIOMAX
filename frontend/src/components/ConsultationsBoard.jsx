@@ -8,7 +8,7 @@ import { StageTabBar } from "@/components/ui/stage-tab";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import {
   getConsultationsBoard, moveConsultationStage, listStoreItems,
-  collectPackagePayment, collectTreatmentFee, savePhysioDiagnosis, unlockPhysioDiagnosis,
+  collectPackagePayment, collectTreatmentFee, markInstallmentPaid, savePhysioDiagnosis, unlockPhysioDiagnosis,
   saveTreatmentSummary, unlockTreatmentSummary, stagesList, getDoctors,
   assignPhysioWithSessions, getDoctorCalendar,
   scheduleConsultationFollowUp, rescheduleConsultationFollowUp,
@@ -508,6 +508,41 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       }
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed to collect Treatment Fee");
+    }
+    setCollectingTreatmentFee(false);
+  };
+
+  // Collects one specific Partial Payment installment right now: creates the whole
+  // schedule (every row starts unpaid — see collect-treatment-fee) and immediately
+  // marks just this one row paid, in the same action. Every other row stays pending
+  // until its own due date — collectible later from Accountant Manage's Outstanding
+  // Amount / Payment Schedules boards, which already read the same paid flags.
+  const collectPartialInstallmentNow = async (idx) => {
+    const payload = buildTreatmentFeePayload();
+    if (!payload) return;
+    setCollectingTreatmentFee(true);
+    try {
+      const res = await collectTreatmentFee(selectedLead.id, payload);
+      await markInstallmentPaid(selectedLead.id, idx + 1);
+      const installments = res.lead.treatment_fee_payment_details?.installments || [];
+      const lead = {
+        ...res.lead,
+        treatment_fee_payment_details: {
+          ...res.lead.treatment_fee_payment_details,
+          installments: installments.map((inst, i) => (i === idx ? { ...inst, paid: true } : inst)),
+        },
+      };
+      toast.success(`Payment #${idx + 1} collected`);
+      setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === lead.id ? lead : l) }));
+      if (consultationFeeDone(lead)) {
+        setCollectFeeDraft(null);
+        setTreatmentFeeDraft(null);
+        setSelectedLead(null);
+      } else {
+        setSelectedLead(lead);
+      }
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to collect this installment");
     }
     setCollectingTreatmentFee(false);
   };
@@ -1228,7 +1263,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 fees are collected together in one action. */}
             {collectFeeDraft && (
               <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" data-testid="cons-collect-fee-modal">
-                <div className="max-h-[85vh] w-full max-w-xl space-y-3 overflow-y-auto rounded-xl bg-white p-4 shadow-2xl">
+                <div className="max-h-[85vh] w-full max-w-2xl space-y-3 overflow-y-auto rounded-xl bg-white p-4 shadow-2xl">
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-semibold text-slate-800">
                       {treatmentFeeDraft ? "Collect Fees" : selectedLead.package_paid != null ? "Update Consultation Fee Payment" : "Collect Consultation Fee"}
@@ -1289,11 +1324,23 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                   </div>
 
                   {treatmentFeeDraft && (
-                    <div className={`space-y-3 rounded-lg border p-3 ${selectedLead.treatment_fee_paid != null ? "border-emerald-200 bg-emerald-50" : "border-indigo-200 bg-indigo-50/40"}`}>
-                      <p className={`flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider ${selectedLead.treatment_fee_paid != null ? "text-emerald-700" : "text-indigo-700"}`}>
+                    <div className={`space-y-3 rounded-lg border p-3 ${
+                      selectedLead.treatment_fee_paid != null ? "border-emerald-200 bg-emerald-50"
+                      : selectedLead.package_paid == null ? "border-slate-200 bg-slate-50"
+                      : "border-indigo-200 bg-indigo-50/40"
+                    }`}>
+                      <p className={`flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider ${
+                        selectedLead.treatment_fee_paid != null ? "text-emerald-700"
+                        : selectedLead.package_paid == null ? "text-slate-400"
+                        : "text-indigo-700"
+                      }`}>
                         <Dumbbell className="h-3.5 w-3.5" /> Treatment Fee
                       </p>
-                      {selectedLead.treatment_fee_paid != null ? (
+                      {selectedLead.package_paid == null ? (
+                        <p className="text-xs text-slate-500" data-testid="cons-treatment-fee-gated">
+                          Collect the Consultation Fee above first — Treatment Fee unlocks once it's paid.
+                        </p>
+                      ) : selectedLead.treatment_fee_paid != null ? (
                         <div data-testid="cons-treatment-fee-locked">
                           <div className="flex items-center justify-between text-sm">
                             <span className="text-xs text-slate-500">Treatment Fee</span>
@@ -1387,6 +1434,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           setInstallments={(next) => setTreatmentFeeDraft({ ...treatmentFeeDraft, partial_installments: next })}
                           totalSessions={treatmentFeeTotalSessions}
                           perSessionRate={perSessionRate}
+                          onCollectRow={collectPartialInstallmentNow}
+                          collecting={collectingTreatmentFee}
                         />
                       )}
                       <Button
@@ -1501,6 +1550,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       setInstallments={(next) => setTreatmentFeeDraft({ ...treatmentFeeDraft, partial_installments: next })}
                       totalSessions={treatmentFeeTotalSessions}
                       perSessionRate={perSessionRate}
+                      onCollectRow={collectPartialInstallmentNow}
+                      collecting={collectingTreatmentFee}
                     />
                   )}
 
@@ -1814,10 +1865,18 @@ function PaymentModeSelect({ value, options, onChange, testId }) {
  * package's own per-session rate, so it always agrees with "N sessions x rate/session"
  * shown elsewhere. The first installment's due date defaults to today (set by the
  * caller); later ones are scheduled ahead.
+ *
+ * Only a row whose due date is today can be collected right here — clicking its
+ * Collect button saves the whole schedule (every other row stays unpaid) and marks
+ * just that one row paid, in one action. Future-dated rows have no Collect button;
+ * they're picked up later from Accountant Manage's Outstanding Amount / Payment
+ * Schedules boards once their date arrives.
  */
-function PartialInstallmentsEditor({ installments, setInstallments, totalSessions, perSessionRate }) {
+function PartialInstallmentsEditor({ installments, setInstallments, totalSessions, perSessionRate, onCollectRow, collecting }) {
   const sessionsTotal = installments.reduce((sum, i) => sum + (parseInt(i.sessions, 10) || 0), 0);
   const mismatch = totalSessions > 0 && sessionsTotal !== totalSessions;
+  const allFilled = installments.length >= 2 && installments.every((i) => parseInt(i.sessions, 10) > 0 && i.due_date);
+  const todayIso = new Date().toISOString().slice(0, 10);
 
   return (
     <div className="space-y-2 rounded-md border border-slate-200 bg-white p-2">
@@ -1835,6 +1894,7 @@ function PartialInstallmentsEditor({ installments, setInstallments, totalSession
       {installments.map((inst, idx) => {
         const sessionsNum = parseInt(inst.sessions, 10) || 0;
         const amount = Math.round(sessionsNum * perSessionRate);
+        const isToday = !!inst.due_date && inst.due_date === todayIso;
         return (
           <div key={idx} className="flex items-end gap-1.5" data-testid={`cons-treatment-fee-partial-row-${idx}`}>
             <div className="flex-1">
@@ -1852,7 +1912,12 @@ function PartialInstallmentsEditor({ installments, setInstallments, totalSession
                 className="h-9"
                 data-testid={`cons-treatment-fee-partial-sessions-${idx}`}
               />
-              {sessionsNum > 0 && <p className="mt-0.5 text-[10px] text-slate-500">₹{amount}</p>}
+            </div>
+            <div className="w-20">
+              <label className="mb-1 block text-[11px] font-medium text-slate-500">Amount</label>
+              <div className="flex h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-2 text-xs font-semibold text-slate-700" data-testid={`cons-treatment-fee-partial-computed-amount-${idx}`}>
+                {sessionsNum > 0 ? `₹${amount}` : "—"}
+              </div>
             </div>
             <div className="flex-1">
               <label className="mb-1 block text-[11px] font-medium text-slate-500">Due Date *</label>
@@ -1868,6 +1933,17 @@ function PartialInstallmentsEditor({ installments, setInstallments, totalSession
                 data-testid={`cons-treatment-fee-partial-date-${idx}`}
               />
             </div>
+            {isToday && (
+              <Button
+                size="sm"
+                onClick={() => onCollectRow(idx)}
+                disabled={collecting || !allFilled || mismatch}
+                className="h-9 bg-emerald-600 text-xs hover:bg-emerald-700"
+                data-testid={`cons-treatment-fee-partial-collect-${idx}`}
+              >
+                Collect
+              </Button>
+            )}
             {installments.length > 2 && (
               <button
                 type="button"

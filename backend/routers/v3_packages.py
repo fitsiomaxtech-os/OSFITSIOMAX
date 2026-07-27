@@ -264,9 +264,10 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
         if installments_total != round(amount, 2):
             raise HTTPException(status_code=400, detail="Installment amounts must add up to the Treatment Fee")
         payment_details = {
-            # The first installment is collected right now, as part of this same
-            # transaction — every later one starts unpaid, due on its own date.
-            "installments": [{"amount": inst.amount, "due_date": inst.due_date, "paid": i == 0} for i, inst in enumerate(installments)],
+            # This call only schedules the plan — every installment starts unpaid.
+            # Collecting one (including one due today) is a separate, explicit action
+            # (mark_installment_paid), not an automatic side effect of scheduling.
+            "installments": [{"amount": inst.amount, "due_date": inst.due_date, "paid": False} for inst in installments],
         }
         ordinals = ["First", "Second", "Third", "Fourth", "Fifth", "Sixth", "Seventh", "Eighth", "Ninth", "Tenth"]
         parts = [
@@ -288,15 +289,18 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
         "consultation_stage": stage_after,
         "updated_at": _now(),
     }})
-    # For Partial Payment, only the first installment is actually collected right
-    # now — the rest are just scheduled — so the log should say what was really
-    # received today, not the full schedule's total.
-    collected_now = installments[0].amount if payload.payment_mode == "partial" else amount
+    # Partial Payment schedules nothing as collected yet — the log should say a
+    # schedule was created, not that money came in, since collecting any one
+    # installment (including one due today) is now its own separate action.
+    if payload.payment_mode == "partial":
+        details = f"{'Updated' if is_update else 'Created'} Payment Schedule for session package '{lead.get('session_package_name')}' ({lead.get('session_package_sessions')} sessions) · Rs.{amount} across {len(installments)} installments{detail_suffix}"
+    else:
+        details = f"{'Updated' if is_update else 'Collected'} Treatment Fee for session package '{lead.get('session_package_name')}' ({lead.get('session_package_sessions')} sessions) · Rs.{amount} via {payload.payment_mode}{detail_suffix}"
     await v3_col("lead_activity").insert_one({
         "id": str(uuid.uuid4()),
         "lead_id": lead_id,
         "action": "treatment_fee_collected",
-        "details": f"{'Updated' if is_update else 'Collected'} Treatment Fee for session package '{lead.get('session_package_name')}' ({lead.get('session_package_sessions')} sessions) · Rs.{collected_now} via {payload.payment_mode}{detail_suffix}",
+        "details": details,
         "created_by": user.full_name,
         "created_by_role": user.role,
         "created_at": _now(),
