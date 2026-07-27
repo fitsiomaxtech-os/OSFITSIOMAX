@@ -45,19 +45,25 @@ async def _head_consultation_stage_names() -> list:
 
 @router.get("/branch-board/{branch_id}")
 async def v3_branch_board_new(branch_id: str, _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev"))):
-    leads = await v3_col("leads").find({"branch_id": branch_id}, {"_id": 0}).sort("updated_at", -1).to_list(20000)
-    stage_counts = {}
-    for stage in await _branch_stage_names():
-        stage_counts[stage] = sum(1 for lead in leads if lead.get("branch_stage") == stage)
-    # One malformed lead document shouldn't 500 the whole board — skip it and keep
-    # showing every other lead rather than failing the entire list.
-    lead_list = []
-    for lead in leads:
-        try:
-            lead_list.append(V3LeadOut(**lead))
-        except Exception as e:
-            logging.getLogger(__name__).error(f"branch-board: skipping unparseable lead {lead.get('id')}: {e}")
-    return {"leads": [lead.model_dump() for lead in lead_list], "stage_counts": stage_counts}
+    try:
+        leads = await v3_col("leads").find({"branch_id": branch_id}, {"_id": 0}).sort("updated_at", -1).to_list(20000)
+        stage_counts = {}
+        for stage in await _branch_stage_names():
+            stage_counts[stage] = sum(1 for lead in leads if lead.get("branch_stage") == stage)
+        # One malformed lead document shouldn't 500 the whole board — skip it and keep
+        # showing every other lead rather than failing the entire list.
+        lead_list = []
+        for lead in leads:
+            try:
+                lead_list.append(V3LeadOut(**lead))
+            except Exception as e:
+                logging.getLogger(__name__).error(f"branch-board: skipping unparseable lead {lead.get('id')}: {e}")
+        return {"leads": [lead.model_dump() for lead in lead_list], "stage_counts": stage_counts}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.getLogger(__name__).exception("branch-board: failed to load")
+        raise HTTPException(status_code=500, detail=f"branch-board error: {type(e).__name__}: {e}")
 
 
 @router.post("/leads/{lead_id}/branch-stage")
@@ -284,23 +290,29 @@ async def v3_consultations_board(branch_id: str, pipeline: Optional[str] = None,
     actually handed off to them, inflating "All Stages" beyond the sum of their own stage pills.
     Super Admin driving a branch's Head Physio board (Branch Management > Branch Control) can
     pass pipeline=head_consultation to see it the same way that branch's head physio would."""
-    is_hp = user.role == "head_physio" or (user.role == "super_admin" and pipeline == "head_consultation")
-    field = "head_consultation_stage" if is_hp else "consultation_stage"
-    query = {"branch_id": branch_id, field: {"$ne": None}}
-    leads_docs = await v3_col("leads").find(query, {"_id": 0}).sort("updated_at", -1).to_list(2000)
-    stage_names = await _head_consultation_stage_names() if is_hp else await _consultation_stage_names()
-    stage_counts = {}
-    for stage in stage_names:
-        stage_counts[stage] = sum(1 for ld in leads_docs if ld.get(field) == stage)
-    # One malformed lead document shouldn't 500 the whole board — skip it and keep
-    # showing every other lead rather than failing the entire list.
-    lead_list = []
-    for ld in leads_docs:
-        try:
-            lead_list.append(V3LeadOut(**ld).model_dump())
-        except Exception as e:
-            logging.getLogger(__name__).error(f"consultations-board: skipping unparseable lead {ld.get('id')}: {e}")
-    return {"leads": lead_list, "stage_counts": stage_counts, "stages": stage_names}
+    try:
+        is_hp = user.role == "head_physio" or (user.role == "super_admin" and pipeline == "head_consultation")
+        field = "head_consultation_stage" if is_hp else "consultation_stage"
+        query = {"branch_id": branch_id, field: {"$ne": None}}
+        leads_docs = await v3_col("leads").find(query, {"_id": 0}).sort("updated_at", -1).to_list(2000)
+        stage_names = await _head_consultation_stage_names() if is_hp else await _consultation_stage_names()
+        stage_counts = {}
+        for stage in stage_names:
+            stage_counts[stage] = sum(1 for ld in leads_docs if ld.get(field) == stage)
+        # One malformed lead document shouldn't 500 the whole board — skip it and keep
+        # showing every other lead rather than failing the entire list.
+        lead_list = []
+        for ld in leads_docs:
+            try:
+                lead_list.append(V3LeadOut(**ld).model_dump())
+            except Exception as e:
+                logging.getLogger(__name__).error(f"consultations-board: skipping unparseable lead {ld.get('id')}: {e}")
+        return {"leads": lead_list, "stage_counts": stage_counts, "stages": stage_names}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.getLogger(__name__).exception("consultations-board: failed to load")
+        raise HTTPException(status_code=500, detail=f"consultations-board error: {type(e).__name__}: {e}")
 
 
 # Stages reachable only through their own dedicated, validated action endpoint —
