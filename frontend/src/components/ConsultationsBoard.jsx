@@ -824,25 +824,37 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       return (
                         <div className="mt-2 rounded-md border border-slate-200 bg-white p-3" data-testid="cons-decision-package-summary">
                           <p className="text-sm font-semibold text-slate-800">{item.name}{weeks ? ` · ${weeks} week${weeks > 1 ? "s" : ""}` : ""}</p>
-                          <div className="mt-2 flex items-end gap-3">
-                            <div className="max-w-[160px]">
-                              <label className="mb-1 block text-[11px] font-medium text-slate-500">Sessions / week</label>
-                              <Input
-                                type="number"
-                                min="1"
-                                value={decisionDraft.sessionsPerWeek}
-                                onChange={(e) => setDecisionDraft((p) => ({ ...p, sessionsPerWeek: e.target.value }))}
-                                className="h-9"
-                                data-testid="cons-decision-sessions-per-week"
-                              />
+                          <div className="mt-2">
+                            <label className="mb-1 block text-[11px] font-medium text-slate-500">Sessions / week</label>
+                            <div className="flex flex-wrap gap-1.5" data-testid="cons-decision-sessions-per-week">
+                              {[1, 2, 3, 4, 5, 6, 7].map((n) => {
+                                const selected = perWeek === n;
+                                return (
+                                  <button
+                                    key={n}
+                                    type="button"
+                                    onClick={() => setDecisionDraft((p) => ({ ...p, sessionsPerWeek: String(n) }))}
+                                    className={`h-8 w-8 rounded-md border text-xs font-semibold transition ${
+                                      selected ? "border-sky-500 bg-sky-500 text-white" : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                                    }`}
+                                    data-testid={`cons-decision-sessions-per-week-${n}`}
+                                  >
+                                    {n}
+                                  </button>
+                                );
+                              })}
                             </div>
-                            <div className="pb-1.5 text-xs text-slate-500">
-                              <span data-testid="cons-decision-total-sessions">
-                                {weeks ? `${weeks} week${weeks > 1 ? "s" : ""} × ${perWeek || "?"}/week = ` : ""}
-                                <span className="text-sm font-semibold text-slate-800">{totalSessions || "—"} Total Sessions</span>
-                              </span>
-                              {!weeks && <p className="mt-0.5 text-amber-600">Couldn't read a week count from this package's name.</p>}
-                            </div>
+                            <p className="mt-2 text-xs text-slate-500" data-testid="cons-decision-total-sessions">
+                              {!weeks
+                                ? <span className="text-amber-600">Couldn't read a week count from this package's name.</span>
+                                : !perWeek
+                                ? "Choose sessions per week"
+                                : (
+                                  <>
+                                    {perWeek} session{perWeek > 1 ? "s" : ""} Weekly × {weeks} Week{weeks > 1 ? "s" : ""} = <span className="text-sm font-semibold text-slate-800">{totalSessions} Total Sessions</span>
+                                  </>
+                                )}
+                            </p>
                           </div>
                         </div>
                       );
