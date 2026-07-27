@@ -129,9 +129,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     }
   }, [branchId]);
 
-  const filtered = useMemo(() => {
+  // Date Filter + search only — deliberately excludes the stage-pill filter, so this can
+  // also drive the per-stage counts below (counting by stage after narrowing to
+  // "everything in the date range", not after already narrowing to one stage).
+  const dateAndSearchFiltered = useMemo(() => {
     let rows = board.leads || [];
-    if (stageFilter) rows = rows.filter((l) => l[stageField] === stageFilter);
     if (dateFilter) {
       const from = dateFilter.from?.getTime();
       const to = dateFilter.to?.getTime();
@@ -149,15 +151,21 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       rows = rows.filter((l) => `${l.name || ""} ${l.phone || ""}`.toLowerCase().includes(q));
     }
     return rows;
-  }, [board.leads, stageFilter, dateFilter, search, stageField]);
+  }, [board.leads, dateFilter, search]);
 
-  // Stage counts for the head bar — derived client-side from the current lead list so they
-  // always match whichever pipeline (branch vs. head physio) is active for this viewer.
+  const filtered = useMemo(() => {
+    if (!stageFilter) return dateAndSearchFiltered;
+    return dateAndSearchFiltered.filter((l) => l[stageField] === stageFilter);
+  }, [dateAndSearchFiltered, stageFilter, stageField]);
+
+  // Stage counts for the head bar — derived client-side from the Date Filter/search-only
+  // list so they always match whichever pipeline (branch vs. head physio) is active for
+  // this viewer, and reflect the active filters rather than all-time totals.
   const derivedStageCounts = useMemo(() => {
     const counts = {};
-    stages.forEach((s) => { counts[s.name] = (board.leads || []).filter((l) => l[stageField] === s.name).length; });
+    stages.forEach((s) => { counts[s.name] = dateAndSearchFiltered.filter((l) => l[stageField] === s.name).length; });
     return counts;
-  }, [board.leads, stages, stageField]);
+  }, [dateAndSearchFiltered, stages, stageField]);
 
   useEffect(() => {
     listStoreItems().then(setStoreItems).catch(() => setStoreItems([]));
@@ -491,7 +499,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
           stageFilter={stageFilter}
           setStageFilter={setStageFilter}
           counts={derivedStageCounts}
-          totalCount={(board.leads || []).length}
+          totalCount={dateAndSearchFiltered.length}
           hideAllStages
           testid="cons-metric"
         />

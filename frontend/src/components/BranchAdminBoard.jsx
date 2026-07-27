@@ -95,12 +95,6 @@ export const BranchAdminBoard = ({ branchId }) => {
     () => [...stages, ...consultationStages.filter((cs) => !stages.some((s) => s.name === cs.name))],
     [stages, consultationStages],
   );
-  const consultationCounts = useMemo(() => {
-    const counts = {};
-    consultationStages.forEach((s) => { counts[s.name] = (boardData.leads || []).filter((l) => l.consultation_stage === s.name).length; });
-    return counts;
-  }, [boardData.leads, consultationStages]);
-  const combinedCounts = { ...consultationCounts, ...boardData.stage_counts };
   // True only when the active pill is one of the Consultation-only stages just merged in —
   // those render the real Consultations board (same table, same popups) instead of the
   // Branch Leads table below.
@@ -128,11 +122,24 @@ export const BranchAdminBoard = ({ branchId }) => {
     return list;
   }, [boardData.leads, searchQuery, dateFilter]);
 
-  // "All Stages" is just the total lead count for this branch — every lead the branch has,
-  // regardless of which stage it currently sits in. (The backend now always stamps a lead's
-  // branch_stage with a currently-valid stage name, so this naturally stays in sync with the
-  // sum of the individual stage pills too.)
-  const totalLeads = boardData.leads.length;
+  // Summary card counts follow the Date Filter (and search) too, instead of always
+  // reflecting the branch's all-time totals — so the cards actually describe what's in
+  // the table below them right now.
+  const salesCounts = useMemo(() => {
+    const counts = {};
+    stages.forEach((s) => { counts[s.name] = filteredLeads.filter((l) => l.branch_stage === s.name).length; });
+    return counts;
+  }, [filteredLeads, stages]);
+  const consultationCounts = useMemo(() => {
+    const counts = {};
+    consultationStages.forEach((s) => { counts[s.name] = filteredLeads.filter((l) => l.consultation_stage === s.name).length; });
+    return counts;
+  }, [filteredLeads, consultationStages]);
+  const combinedCounts = { ...consultationCounts, ...salesCounts };
+
+  // "All Stages" is the count of every lead matching the active Date Filter/search —
+  // every lead in the branch when neither is set.
+  const totalLeads = filteredLeads.length;
 
   const handleStageUpdate = async () => {
     const data = await loadBoard();
