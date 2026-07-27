@@ -43,7 +43,7 @@ const PAYMENT_MODE_COLORS = {
   partial: "#e11d48",
 };
 
-export const ConsultationsBoard = ({ branchId, viewerRole }) => {
+export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true }) => {
   const isConsultant = viewerRole === "head_physio";
   // Head Physio tracks progress on their own independent pipeline (head_consultation_stage),
   // fully separate from Branch's own consultation_stage pipeline.
@@ -163,6 +163,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
     listStoreItems().then(setStoreItems).catch(() => setStoreItems([]));
     stagesList(isConsultant ? "head_consultation" : "consultation").then(setStages).catch(() => setStages([]));
   }, [isConsultant]);
+
+  // When embedded inside another board (e.g. Branch Leads' unified stage bar), let the
+  // parent drive which stage this board is filtered to.
+  useEffect(() => {
+    if (externalStageFilter !== undefined) setStageFilter(externalStageFilter);
+  }, [externalStageFilter]);
 
   const stageColor = useCallback(
     (name) => stages.find((s) => s.name === name)?.color || "#64748b",
@@ -477,16 +483,19 @@ export const ConsultationsBoard = ({ branchId, viewerRole }) => {
 
   return (
     <div className="space-y-3" data-testid="consultations-board">
-      {/* Stage Head Bar — Pre-Sales / Branch Leads style sticky segmented tabs */}
-      <StageTabBar
-        stages={stages}
-        stageFilter={stageFilter}
-        setStageFilter={setStageFilter}
-        counts={derivedStageCounts}
-        totalCount={(board.leads || []).length}
-        hideAllStages
-        testid="cons-metric"
-      />
+      {/* Stage Head Bar — Pre-Sales / Branch Leads style sticky segmented tabs.
+          Suppressed when embedded inside Branch Leads' own unified stage bar. */}
+      {showOwnStageBar && (
+        <StageTabBar
+          stages={stages}
+          stageFilter={stageFilter}
+          setStageFilter={setStageFilter}
+          counts={derivedStageCounts}
+          totalCount={(board.leads || []).length}
+          hideAllStages
+          testid="cons-metric"
+        />
+      )}
 
       {/* Search */}
       <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2">

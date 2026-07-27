@@ -48,6 +48,7 @@ import { CreateLeadModal } from "@/components/CreateLeadModal";
 export const BranchAdminBoard = ({ branchId }) => {
   const [boardData, setBoardData] = useState({ leads: [], stage_counts: {} });
   const [stages, setStages] = useState([]); // dynamic Branch Stages, from Super Admin > Pipeline Stage Management
+  const [consultationStages, setConsultationStages] = useState([]); // dynamic Consultation Stages, merged into the same stage bar
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedLead, setSelectedLead] = useState(null);
@@ -73,6 +74,7 @@ export const BranchAdminBoard = ({ branchId }) => {
 
   useEffect(() => { loadBoard(); }, [loadBoard]);
   useEffect(() => { stagesList("sales").then(setStages).catch(() => {}); }, []);
+  useEffect(() => { stagesList("consultation").then(setConsultationStages).catch(() => {}); }, []);
 
   const stageColor = useCallback(
     (name) => stages.find((s) => s.name === name)?.color || "#64748b",
@@ -83,6 +85,26 @@ export const BranchAdminBoard = ({ branchId }) => {
   // rename it) — read structurally off position 0 rather than hardcoding the label, since
   // Pipeline Stage Management lets it be renamed at any time.
   const firstStageName = stages[0]?.name;
+
+  // Branch Leads' stage bar shows both pipelines' stages in one continuous strip, so a
+  // branch admin never needs to leave this tab to track a patient's whole journey. Any
+  // stage name shared by both pipelines (e.g. "Follow Up") only gets one pill, backed by
+  // the sales-side field — the Consultations tab itself is still the place to see a lead
+  // sitting in the post-appointment Follow Up.
+  const combinedStages = useMemo(
+    () => [...stages, ...consultationStages.filter((cs) => !stages.some((s) => s.name === cs.name))],
+    [stages, consultationStages],
+  );
+  const consultationCounts = useMemo(() => {
+    const counts = {};
+    consultationStages.forEach((s) => { counts[s.name] = (boardData.leads || []).filter((l) => l.consultation_stage === s.name).length; });
+    return counts;
+  }, [boardData.leads, consultationStages]);
+  const combinedCounts = { ...consultationCounts, ...boardData.stage_counts };
+  // True only when the active pill is one of the Consultation-only stages just merged in —
+  // those render the real Consultations board (same table, same popups) instead of the
+  // Branch Leads table below.
+  const isConsultationStage = !!stageFilter && !stages.some((s) => s.name === stageFilter);
 
   const filteredLeads = useMemo(() => {
     let list = boardData.leads;
@@ -202,16 +224,28 @@ export const BranchAdminBoard = ({ branchId }) => {
             </Button>
           </div>
 
-          {/* Stage Head Bar — Pre-Sales style sticky segmented tabs */}
+          {/* Stage Head Bar — Pre-Sales style sticky segmented tabs. Merges in the
+              Consultation pipeline's stages too, so this one bar covers a patient's whole
+              journey; selecting one of those switches the view below to the real
+              Consultations board (see isConsultationStage). */}
           <StageTabBar
-            stages={stages}
+            stages={combinedStages}
             stageFilter={stageFilter}
             setStageFilter={setStageFilter}
-            counts={boardData.stage_counts}
+            counts={combinedCounts}
             totalCount={totalLeads}
             testid="branch-metric"
           />
 
+          {isConsultationStage ? (
+            <ConsultationsBoard
+              branchId={branchId}
+              viewerRole="branch_admin"
+              externalStageFilter={stageFilter}
+              showOwnStageBar={false}
+            />
+          ) : (
+          <>
           {/* Toolbar */}
           <div className="flex items-center gap-3" data-testid="branch-toolbar">
             <div className="relative flex-1">
@@ -325,6 +359,8 @@ export const BranchAdminBoard = ({ branchId }) => {
           }}
         />
       )}
+          </>
+          )}
 
       {showCreateLead && (
         <CreateLeadModal
