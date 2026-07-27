@@ -57,6 +57,10 @@ export const BranchAdminBoard = ({ branchId }) => {
   const [stageFilter, setStageFilter] = useState(null); // null = show all stages
   const [dateFilter, setDateFilter] = useState(null); // { from, to, label, key } | null
   const [showCreateLead, setShowCreateLead] = useState(false);
+  // Set when a lead's own detail popup hands off to a Consultation-only stage — tells the
+  // embedded ConsultationsBoard which lead to auto-open once it loads, so the handoff lands
+  // straight on that lead's own rich modal instead of just the filtered list.
+  const [autoOpenLeadId, setAutoOpenLeadId] = useState(null);
 
   const loadBoard = useCallback(async () => {
     if (!branchId) return null;
@@ -260,6 +264,8 @@ export const BranchAdminBoard = ({ branchId }) => {
               viewerRole="branch_admin"
               externalStageFilter={stageFilter}
               showOwnStageBar={false}
+              autoOpenLeadId={autoOpenLeadId}
+              onAutoOpened={() => setAutoOpenLeadId(null)}
             />
           ) : (
           <>
@@ -365,8 +371,18 @@ export const BranchAdminBoard = ({ branchId }) => {
           lead={selectedLead}
           branchId={branchId}
           stages={stages}
+          consultationStages={consultationStages}
           onClose={() => setSelectedLead(null)}
           onUpdate={handleStageUpdate}
+          onOpenConsultationStage={(stage) => {
+            // Hand off to the embedded Consultations board: close this modal, switch the
+            // stage bar to the requested Consultation stage, and tell that board which
+            // lead to auto-open — same lead, same rich stage-specific popups it already
+            // has (Collect Payment, Physio Assign, etc.), instead of duplicating them here.
+            setAutoOpenLeadId(selectedLead.id);
+            setSelectedLead(null);
+            setStageFilter(stage);
+          }}
           onMoved={() => {
             // Close first, then refresh the list in the background via loadBoard directly
             // (not handleStageUpdate) — that closure's stale selectedLead would otherwise
@@ -398,7 +414,12 @@ export const BranchAdminBoard = ({ branchId }) => {
 };
 
 /* ─── Branch Lead Detail Modal ─── */
-function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved }) {
+function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, onUpdate, onMoved, onOpenConsultationStage }) {
+  // Same merge as the main Branch Leads stage bar — one continuous pipeline covering both
+  // branch_stage and consultation_stage, with shared names (e.g. "Follow Up") kept to a
+  // single pill backed by the sales-side field.
+  const pipelineStages = [...stages, ...consultationStages.filter((cs) => !stages.some((s) => s.name === cs.name))];
+  const isConsultationOnlyStage = (name) => !stages.some((s) => s.name === name);
   const [activeTab, setActiveTab] = useState("overview");
   const [remarks, setRemarks] = useState([]);
   const [activityLog, setActivityLog] = useState([]);
@@ -620,9 +641,14 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved })
                   <p className="text-xs font-bold uppercase tracking-wider text-violet-700">Pipeline Stage</p>
                 </div>
                 <div className="flex flex-wrap gap-2 px-4 py-3">
-                  {(stages || []).map((s) => {
+                  {(pipelineStages || []).map((s) => {
                     const stage = s.name;
-                    const isActive = lead.branch_stage === stage;
+                    const isActive = lead.branch_stage === stage || lead.consultation_stage === stage;
+                    const consultationOnly = isConsultationOnlyStage(stage);
+                    // A Consultation-only stage isn't reachable until the lead has actually
+                    // entered that pipeline (schedule-branch-appointment seeds
+                    // consultation_stage the first time) — shown, but not yet clickable.
+                    const notYetReached = consultationOnly && !lead.consultation_stage;
                     const tint = s.color || "#64748b";
                     const handleClick = () => {
                       if (stage === "Appointment Date & Time") {
@@ -639,13 +665,21 @@ function BranchLeadModal({ lead, branchId, stages, onClose, onUpdate, onMoved })
                         setFollowUpMoveDraft({ date: tomorrowIso(), time: "10:00", remarks: "" });
                         return;
                       }
+                      if (consultationOnly) {
+                        if (notYetReached) {
+                          toast.error("This lead needs an appointment scheduled before it can enter the Consultations pipeline");
+                          return;
+                        }
+                        onOpenConsultationStage && onOpenConsultationStage(stage);
+                        return;
+                      }
                       moveStage(stage);
                     };
                     return (
                       <button
                         key={s.id}
                         type="button"
-                        disabled={isActive}
+                        disabled={isActive || notYetReached}
                         onClick={handleClick}
                         className="rounded-lg px-3 py-1.5 text-xs font-semibold transition-all hover:shadow-md disabled:cursor-not-allowed disabled:opacity-90"
                         style={isActive ? { background: tint, color: "#ffffff" } : { background: `${tint}14`, color: tint, border: `1px solid ${tint}33` }}

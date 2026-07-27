@@ -43,7 +43,7 @@ const PAYMENT_MODE_COLORS = {
   partial: "#e11d48",
 };
 
-export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true }) => {
+export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened }) => {
   const isConsultant = viewerRole === "head_physio";
   // Head Physio tracks progress on their own independent pipeline (head_consultation_stage),
   // fully separate from Branch's own consultation_stage pipeline.
@@ -181,6 +181,18 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   useEffect(() => {
     if (externalStageFilter !== undefined) setStageFilter(externalStageFilter);
   }, [externalStageFilter]);
+
+  // Branch Leads' own lead popup hands off a specific lead here (rather than duplicating
+  // this board's stage-specific popups) — once this board's own data has loaded, find that
+  // lead and open its detail modal directly.
+  useEffect(() => {
+    if (!autoOpenLeadId || !(board.leads || []).length) return;
+    const match = board.leads.find((l) => l.id === autoOpenLeadId);
+    if (match) {
+      setSelectedLead(match);
+      onAutoOpened && onAutoOpened();
+    }
+  }, [autoOpenLeadId, board.leads]);
 
   const stageColor = useCallback(
     (name) => stages.find((s) => s.name === name)?.color || "#64748b",
