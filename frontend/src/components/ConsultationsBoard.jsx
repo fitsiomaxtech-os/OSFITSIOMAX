@@ -92,9 +92,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   const [physioCalendarData, setPhysioCalendarData] = useState(null);
   const [loadingPhysioCalendar, setLoadingPhysioCalendar] = useState(false);
 
-  // Consultation Decision (Head Physio only) — "Save & Move": Consultation Only vs
-  // Consultation + Treatment (+ Treatment Package, names only, no prices shown here).
-  const [decisionDraft, setDecisionDraft] = useState({ decision: "consultation_only", item_id: "", mode: "offline", sessions: "" });
+  // Treatment (Head Physio only) — "Save & Move": every patient goes on to treatment
+  // sessions once Diagnosis Report + Treatment Summary are written; only the Treatment
+  // Package (names only, no prices shown here) is chosen. "consultation_only" is a legacy
+  // decision value some existing leads already carry — no longer offered as a choice.
+  const [decisionDraft, setDecisionDraft] = useState({ decision: "consultation_treatment", item_id: "", mode: "offline", sessions: "" });
   const [savingDecision, setSavingDecision] = useState(false);
 
   // Mark Consultation Completed (Branch Admin only) — "Consultation Only" patients, at
@@ -210,7 +212,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     setRescheduleDraft(null);
     setCollectFeeDraft(null);
     setTreatmentFeeDraft(null);
-    setDecisionDraft({ decision: "consultation_only", item_id: "", mode: "offline", sessions: "" });
+    setDecisionDraft({ decision: "consultation_treatment", item_id: "", mode: "offline", sessions: "" });
   }, [selectedLead?.id]);
 
   useEffect(() => {
@@ -730,26 +732,27 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               </div>
             )}
 
-            {/* Consultation Decision — Head Physio's own "Save & Move". Requires Diagnosis
-                Report + Treatment Summary to already be written. Package choice for
-                "Consultation Only" happens above (Consultation Package); the Treatment
-                Package (names only, no prices) is chosen here only for "Consultation +
-                Treatment". Physio assignment lives entirely on Branch Admin's own board,
-                after both fees are collected. */}
+            {/* Treatment — Head Physio's own "Save & Move". Requires Diagnosis Report +
+                Treatment Summary to already be written (that's what marks the consultation
+                itself done and ready for Branch Admin to collect the Consultation Fee).
+                Every patient goes on to a Treatment Package here — "Consultation Only" is a
+                legacy decision value some already-existing leads still carry, no longer
+                offered as a choice. Physio assignment lives entirely on Branch Admin's own
+                board, after both fees are collected. */}
             {isConsultant && (() => {
               const alreadyMoved = selectedLead.head_consultation_stage === "Consultation Visit";
               const diagnosisReady = !!(selectedLead.physio_diagnosis_report || "").trim();
               const summaryReady = !!(selectedLead.treatment_summary || "").trim();
-              const canSave = diagnosisReady && summaryReady && (decisionDraft.decision === "consultation_only" || decisionDraft.item_id);
+              const canSave = diagnosisReady && summaryReady && !!decisionDraft.item_id;
 
               if (alreadyMoved) {
                 return (
                   <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3" data-testid="cons-decision-summary">
                     <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-emerald-700">
-                      <ClipboardCheck className="h-3.5 w-3.5" /> Consultation Decision
+                      <ClipboardCheck className="h-3.5 w-3.5" /> Treatment
                     </p>
                     <p className="text-sm font-semibold text-slate-800">
-                      {selectedLead.consultation_decision === "consultation_treatment" ? "Consultation + Treatment" : "Consultation Only"}
+                      {selectedLead.consultation_decision === "consultation_treatment" ? "Treatment" : "Consultation Only"}
                     </p>
                     {selectedLead.consultation_decision === "consultation_treatment" && selectedLead.session_package_name && (
                       <p className="mt-0.5 text-xs text-slate-600">
@@ -761,91 +764,66 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 );
               }
 
-              const isOnly = decisionDraft.decision === "consultation_only";
-              const isTreatment = decisionDraft.decision === "consultation_treatment";
-
               return (
                 <div className="rounded-lg border border-sky-200 bg-sky-50 p-3" data-testid="cons-decision-form">
                   <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-sky-700">
-                    <ClipboardCheck className="h-3.5 w-3.5" /> Consultation Decision
+                    <ClipboardCheck className="h-3.5 w-3.5" /> Treatment
                   </p>
                   {(!diagnosisReady || !summaryReady) && (
                     <p className="mb-2 text-[11px] font-medium text-amber-600" data-testid="cons-decision-required-hint">
                       Write the Diagnosis Report and Treatment Summary above before Save & Move.
                     </p>
                   )}
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-5">
-                    <button
-                      type="button"
-                      onClick={() => setDecisionDraft((p) => ({ ...p, decision: "consultation_only" }))}
-                      className={`rounded-lg border-2 p-3 text-left transition sm:col-span-2 ${isOnly ? "border-sky-500 bg-white shadow-sm" : "border-slate-200 bg-white/60 hover:bg-white"}`}
-                      data-testid="cons-decision-only"
-                    >
-                      <p className="text-sm font-semibold text-slate-800">Consultation Only</p>
-                      <p className="mt-1 text-[11px] text-slate-500">No treatment sessions required.</p>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setDecisionDraft((p) => ({ ...p, decision: "consultation_treatment" }))}
-                      className={`rounded-lg border-2 p-3 text-left transition sm:col-span-3 ${isTreatment ? "border-sky-500 bg-white shadow-sm" : "border-slate-200 bg-white/60 hover:bg-white"}`}
-                      data-testid="cons-decision-treatment"
-                    >
-                      <p className="text-sm font-semibold text-slate-800">Consultation + Treatment</p>
-                      <p className="mt-1 text-[11px] text-slate-500">Patient continues on to treatment sessions.</p>
-                    </button>
-                  </div>
-                  {isTreatment && (
-                    <div className="mt-3">
-                      <label className="mb-1 block text-[11px] font-medium text-slate-500">Treatment Package</label>
-                      <div className="flex flex-wrap gap-2" data-testid="cons-decision-package-options">
-                        {treatmentPackageItems.map((i, idx) => {
-                          const color = TREATMENT_PACKAGE_COLORS[idx % TREATMENT_PACKAGE_COLORS.length];
-                          const selected = decisionDraft.item_id === i.id;
-                          return (
-                            <button
-                              key={i.id}
-                              type="button"
-                              onClick={() => {
-                                const baseSessions = decisionDraft.mode === "online" ? i.sessions_online : i.sessions_offline;
-                                setDecisionDraft((p) => ({ ...p, item_id: i.id, sessions: baseSessions ? String(baseSessions) : "" }));
-                              }}
-                              className="rounded-md border px-3 py-1.5 text-xs font-semibold transition hover:brightness-95"
-                              style={selected
-                                ? { background: `${color}22`, color, borderColor: color, boxShadow: `inset 0 0 0 1px ${color}` }
-                                : { background: `${color}14`, color, borderColor: `${color}33` }}
-                              data-testid={`cons-decision-package-option-${i.id}`}
-                            >
-                              {i.name}
-                            </button>
-                          );
-                        })}
-                      </div>
-
-                      {decisionDraft.item_id && (() => {
-                        const item = treatmentPackageItems.find((i) => i.id === decisionDraft.item_id);
-                        if (!item) return null;
-                        // Head Physio sees the session count only — never the price.
-                        // The Treatment Fee amount is derived server-side from
-                        // sessions_override and shown to Branch Admin at fee collection.
+                  <div>
+                    <label className="mb-1 block text-[11px] font-medium text-slate-500">Treatment Package</label>
+                    <div className="flex flex-wrap gap-2" data-testid="cons-decision-package-options">
+                      {treatmentPackageItems.map((i, idx) => {
+                        const color = TREATMENT_PACKAGE_COLORS[idx % TREATMENT_PACKAGE_COLORS.length];
+                        const selected = decisionDraft.item_id === i.id;
                         return (
-                          <div className="mt-2 rounded-md border border-slate-200 bg-white p-3" data-testid="cons-decision-package-summary">
-                            <p className="text-sm font-semibold text-slate-800">{item.name}</p>
-                            <div className="mt-2 max-w-[220px]">
-                              <label className="mb-1 block text-[11px] font-medium text-slate-500">Sessions</label>
-                              <Input
-                                type="number"
-                                min="1"
-                                value={decisionDraft.sessions}
-                                onChange={(e) => setDecisionDraft((p) => ({ ...p, sessions: e.target.value }))}
-                                className="h-9"
-                                data-testid="cons-decision-sessions"
-                              />
-                            </div>
-                          </div>
+                          <button
+                            key={i.id}
+                            type="button"
+                            onClick={() => {
+                              const baseSessions = decisionDraft.mode === "online" ? i.sessions_online : i.sessions_offline;
+                              setDecisionDraft((p) => ({ ...p, item_id: i.id, sessions: baseSessions ? String(baseSessions) : "" }));
+                            }}
+                            className="rounded-md border px-3 py-1.5 text-xs font-semibold transition hover:brightness-95"
+                            style={selected
+                              ? { background: `${color}22`, color, borderColor: color, boxShadow: `inset 0 0 0 1px ${color}` }
+                              : { background: `${color}14`, color, borderColor: `${color}33` }}
+                            data-testid={`cons-decision-package-option-${i.id}`}
+                          >
+                            {i.name}
+                          </button>
                         );
-                      })()}
+                      })}
                     </div>
-                  )}
+
+                    {decisionDraft.item_id && (() => {
+                      const item = treatmentPackageItems.find((i) => i.id === decisionDraft.item_id);
+                      if (!item) return null;
+                      // Head Physio sees the session count only — never the price.
+                      // The Treatment Fee amount is derived server-side from
+                      // sessions_override and shown to Branch Admin at fee collection.
+                      return (
+                        <div className="mt-2 rounded-md border border-slate-200 bg-white p-3" data-testid="cons-decision-package-summary">
+                          <p className="text-sm font-semibold text-slate-800">{item.name}</p>
+                          <div className="mt-2 max-w-[220px]">
+                            <label className="mb-1 block text-[11px] font-medium text-slate-500">Total Sessions</label>
+                            <Input
+                              type="number"
+                              min="1"
+                              value={decisionDraft.sessions}
+                              onChange={(e) => setDecisionDraft((p) => ({ ...p, sessions: e.target.value }))}
+                              className="h-9"
+                              data-testid="cons-decision-sessions"
+                            />
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
                   <Button
                     size="sm"
                     className="mt-3 bg-sky-600 hover:bg-sky-700 text-xs"
@@ -853,7 +831,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     disabled={savingDecision || !canSave}
                     data-testid="cons-decision-save"
                   >
-                    {savingDecision ? "Saving..." : isTreatment ? "Choose and Confirm & Select the Package" : "Choose and Confirm"}
+                    {savingDecision ? "Saving..." : "Choose and Confirm & Select the Package"}
                   </Button>
                 </div>
               );
