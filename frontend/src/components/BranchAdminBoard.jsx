@@ -7,7 +7,6 @@ import {
   Mail,
   Search,
   Stethoscope,
-  User,
   UserPlus,
   X,
   Activity,
@@ -53,7 +52,7 @@ export const BranchAdminBoard = ({ branchId }) => {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedLead, setSelectedLead] = useState(null);
   const [activeView, setActiveView] = useState("pipeline");
-  const [consultationsSubTab, setConsultationsSubTab] = useState("consultation");
+  const [consultationsSubTab, setConsultationsSubTab] = useState("head_physio");
   const [stageFilter, setStageFilter] = useState(null); // null = show all stages
   const [dateFilter, setDateFilter] = useState(null); // { from, to, label, key } | null
   const [showCreateLead, setShowCreateLead] = useState(false);
@@ -192,14 +191,6 @@ export const BranchAdminBoard = ({ branchId }) => {
           <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="branch-consultations-subtabs">
             <button
               type="button"
-              onClick={() => setConsultationsSubTab("consultation")}
-              className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${consultationsSubTab === "consultation" ? "bg-sky-50 text-sky-600" : "text-slate-600 hover:bg-slate-50"}`}
-              data-testid="branch-consultations-subtab-consultation"
-            >
-              <User className="h-4 w-4" />Consultation
-            </button>
-            <button
-              type="button"
               onClick={() => setConsultationsSubTab("head_physio")}
               className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${consultationsSubTab === "head_physio" ? "bg-sky-50 text-sky-600" : "text-slate-600 hover:bg-slate-50"}`}
               data-testid="branch-consultations-subtab-head_physio"
@@ -215,9 +206,7 @@ export const BranchAdminBoard = ({ branchId }) => {
               <Activity className="h-4 w-4" />Physio Calendar
             </button>
           </div>
-          {consultationsSubTab === "consultation" ? (
-            <ConsultationsBoard branchId={branchId} viewerRole="branch_admin" />
-          ) : consultationsSubTab === "physio" ? (
+          {consultationsSubTab === "physio" ? (
             <HeadPhysioCalendar branchId={branchId} profileType="physio" />
           ) : (
             <HeadPhysioCalendar branchId={branchId} />
