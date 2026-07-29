@@ -255,7 +255,7 @@ export const MasterControlBoard = () => {
         </CardHeader>
         <CardContent className="space-y-4">
           {/* Tabs */}
-          <div className="flex border-b border-slate-200">
+          <div className="flex overflow-x-auto border-b border-slate-200">
             {[
               { k: "data", label: "Data Processing" },
               { k: "analytical", label: "Analytical" },
@@ -264,7 +264,7 @@ export const MasterControlBoard = () => {
               <button
                 key={t.k}
                 onClick={() => setTab(t.k)}
-                className={`px-4 py-2 text-sm font-semibold transition ${tab === t.k ? "border-b-2 border-blue-500 text-blue-600" : "text-slate-500 hover:text-slate-700"}`}
+                className={`shrink-0 whitespace-nowrap px-4 py-2 text-sm font-semibold transition ${tab === t.k ? "border-b-2 border-blue-500 text-blue-600" : "text-slate-500 hover:text-slate-700"}`}
                 data-testid={`live-tab-${t.k}`}
               >
                 {t.label}

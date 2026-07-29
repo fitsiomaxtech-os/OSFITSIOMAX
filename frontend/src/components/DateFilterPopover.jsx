@@ -93,7 +93,7 @@ export const DateFilterPopover = ({ value, onChange, testid = "date-filter" }) =
           {activeLabel}
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="relative w-auto p-0" align="start" data-testid={`${testid}-panel`}>
+      <PopoverContent className="relative w-auto max-w-[calc(100vw-2rem)] p-0" align="start" data-testid={`${testid}-panel`}>
         <button
           type="button"
           onClick={() => setOpen(false)}
@@ -104,15 +104,15 @@ export const DateFilterPopover = ({ value, onChange, testid = "date-filter" }) =
         >
           <X className="h-4 w-4" />
         </button>
-        <div className="flex">
+        <div className="flex max-h-[80vh] flex-col overflow-y-auto sm:max-h-none sm:flex-row sm:overflow-visible">
           {/* Left rail */}
-          <div className="flex w-40 flex-col gap-0.5 border-r border-slate-200 bg-slate-50/40 p-2 pt-8" data-testid={`${testid}-presets`}>
+          <div className="flex w-full flex-row flex-wrap gap-1 border-b border-slate-200 bg-slate-50/40 p-2 pt-8 sm:w-40 sm:flex-col sm:flex-nowrap sm:gap-0.5 sm:border-b-0 sm:border-r" data-testid={`${testid}-presets`}>
             {list.map((p) => (
               <button
                 key={p.key}
                 type="button"
                 onClick={() => apply(p)}
-                className={`w-full rounded-md px-3 py-2 text-left text-sm transition-colors ${value?.key === p.key ? "bg-sky-100 font-semibold text-sky-700" : "text-slate-700 hover:bg-slate-100"}`}
+                className={`w-auto rounded-md px-3 py-2 text-left text-sm transition-colors sm:w-full ${value?.key === p.key ? "bg-sky-100 font-semibold text-sky-700" : "text-slate-700 hover:bg-slate-100"}`}
                 data-testid={`${testid}-preset-${p.key}`}
               >
                 {p.label}
@@ -121,7 +121,7 @@ export const DateFilterPopover = ({ value, onChange, testid = "date-filter" }) =
             <button
               type="button"
               onClick={openRange}
-              className={`w-full rounded-md px-3 py-2 text-left text-sm transition-colors ${value?.key === "range" || showRange ? "bg-sky-100 font-semibold text-sky-700" : "text-slate-700 hover:bg-slate-100"}`}
+              className={`w-auto rounded-md px-3 py-2 text-left text-sm transition-colors sm:w-full ${value?.key === "range" || showRange ? "bg-sky-100 font-semibold text-sky-700" : "text-slate-700 hover:bg-slate-100"}`}
               data-testid={`${testid}-preset-range`}
             >
               Custom Range
@@ -130,7 +130,7 @@ export const DateFilterPopover = ({ value, onChange, testid = "date-filter" }) =
 
           {/* Calendar or Custom Range */}
           {showRange ? (
-            <div className="w-64 space-y-3 p-4 pt-8" data-testid={`${testid}-range-panel`}>
+            <div className="w-full space-y-3 p-4 pt-8 sm:w-64" data-testid={`${testid}-range-panel`}>
               <p className="text-sm font-semibold text-slate-700">Custom Range</p>
               <div className="space-y-2">
                 <div>
@@ -152,7 +152,7 @@ export const DateFilterPopover = ({ value, onChange, testid = "date-filter" }) =
               </Button>
             </div>
           ) : (
-            <div className="p-2 pt-8">
+            <div className="overflow-x-auto p-2 pt-8">
               <Calendar
                 mode="single"
                 selected={value?.key === "exact" ? value.from : undefined}

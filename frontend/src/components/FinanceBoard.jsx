@@ -112,7 +112,7 @@ export const FinanceBoard = ({ branchId } = {}) => {
   return (
     <div className="space-y-5" data-testid="finance-board-root">
       {/* Summary Cards */}
-      <div className="grid grid-cols-4 gap-3" data-testid="finance-summary-cards">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4" data-testid="finance-summary-cards">
         {SUMMARY_CARDS.map((card) => {
           const Icon = card.icon;
           return (
@@ -142,7 +142,8 @@ export const FinanceBoard = ({ branchId } = {}) => {
           <div className="border-b border-slate-100 bg-slate-50/80 px-4 py-2.5">
             <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Revenue by Branch</p>
           </div>
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[560px] text-sm">
             <thead>
               <tr className="border-b border-slate-100">
                 <th className="px-4 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Branch</th>
@@ -164,6 +165,7 @@ export const FinanceBoard = ({ branchId } = {}) => {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 

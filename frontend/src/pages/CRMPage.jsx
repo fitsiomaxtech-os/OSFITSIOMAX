@@ -534,21 +534,21 @@ export const CRMPage = ({ auth, onLogout }) => {
       <Toaster richColors position="top-right" />
 
       <div className="w-full" data-testid="role-board-full-width-wrap">
-        <header className="sticky top-0 z-20 w-full border-b border-slate-200 bg-white px-6 py-4 shadow-sm" data-testid="role-board-header">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <img src={LOGO_URL} alt="Fitsiomax" className="h-14 w-14 rounded-lg object-contain" data-testid="header-left-logo" />
-              <div>
-                <p className="text-xs font-semibold tracking-wide text-sky-600" data-testid="role-board-brand-subtitle">
+        <header className="sticky top-0 z-20 w-full border-b border-slate-200 bg-white px-3 py-3 shadow-sm sm:px-6 sm:py-4" data-testid="role-board-header">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-2 sm:gap-4">
+              <img src={LOGO_URL} alt="Fitsiomax" className="h-9 w-9 shrink-0 rounded-lg object-contain sm:h-14 sm:w-14" data-testid="header-left-logo" />
+              <div className="min-w-0">
+                <p className="text-[10px] font-semibold tracking-wide text-sky-600 sm:text-xs" data-testid="role-board-brand-subtitle">
                   FitsiomaxOS
                 </p>
-                <h1 className="text-2xl font-bold text-slate-900" data-testid="role-board-title">
+                <h1 className="truncate text-base font-bold text-slate-900 sm:text-2xl" data-testid="role-board-title">
                   {boardTitle}
                 </h1>
               </div>
             </div>
-            <div className="flex items-center gap-3">
-              <span className="text-sm font-medium text-sky-700" data-testid="role-board-user-greeting">
+            <div className="flex items-center gap-2 sm:gap-3">
+              <span className="hidden text-sm font-medium text-sky-700 sm:inline" data-testid="role-board-user-greeting">
                 Hi {(showBranchBoard || showHeadPhysioBoard) ? auth.user.full_name : auth.user.full_name?.split(" ")[0]}
               </span>
               {(showBranchBoard || showHeadPhysioBoard) && (
@@ -556,17 +556,17 @@ export const CRMPage = ({ auth, onLogout }) => {
                   variant="outline"
                   size="sm"
                   onClick={() => setShowProfile(true)}
-                  className="border-slate-200 text-slate-600 hover:bg-slate-50"
+                  className="border-slate-200 px-2 text-slate-600 hover:bg-slate-50 sm:px-3"
                   data-testid="role-board-profile-button"
                 >
-                  <UserCircle className="h-4 w-4 mr-1.5" />My Profile
+                  <UserCircle className="h-4 w-4 sm:mr-1.5" /><span className="hidden sm:inline">My Profile</span>
                 </Button>
               )}
               <Button
                 variant="outline"
                 size="sm"
                 onClick={logout}
-                className="border-slate-200 text-slate-600 hover:bg-slate-50"
+                className="border-slate-200 px-2 text-slate-600 hover:bg-slate-50 sm:px-3"
                 data-testid="role-board-logout-button"
               >
                 <LogOut className="h-4 w-4" />
@@ -579,7 +579,7 @@ export const CRMPage = ({ auth, onLogout }) => {
           <MyProfileModal user={auth.user} roleLabel={roleLabel} onClose={() => setShowProfile(false)} />
         )}
 
-        <div className="w-full space-y-6 px-6 py-6">
+        <div className="w-full space-y-4 px-3 py-4 sm:space-y-6 sm:px-6 sm:py-6">
 
         {showSuperAdminBoard && (
           <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2" data-testid="super-admin-nav">

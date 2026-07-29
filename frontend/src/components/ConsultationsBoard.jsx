@@ -742,8 +742,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
 
       {/* Table */}
       <Card className="overflow-hidden border-slate-200">
-        <CardContent className="p-0">
-          <table className="w-full table-fixed text-sm">
+        <CardContent className="overflow-x-auto p-0">
+          <table className="w-full min-w-[720px] table-fixed text-sm">
             <thead className="bg-slate-50 text-xs uppercase text-slate-500">
               <tr>
                 <th className="w-[18%] px-4 py-2 text-left">Patient</th>

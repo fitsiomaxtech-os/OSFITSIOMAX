@@ -33,7 +33,7 @@ export const PatientViewPage = ({ token }) => {
   return (
     <div className="min-h-screen bg-slate-50" data-testid="patient-view-page">
       {/* Header */}
-      <div className="bg-white border-b border-slate-200 px-6 py-5">
+      <div className="bg-white border-b border-slate-200 px-4 py-5 sm:px-6">
         <div className="max-w-3xl mx-auto flex items-center gap-4">
           <div className="h-12 w-12 rounded-full bg-sky-100 flex items-center justify-center text-lg font-bold text-sky-700">
             {data.patient_name?.charAt(0)?.toUpperCase()}
@@ -45,9 +45,9 @@ export const PatientViewPage = ({ token }) => {
         </div>
       </div>
 
-      <div className="max-w-3xl mx-auto px-6 py-6 space-y-6">
+      <div className="max-w-3xl mx-auto px-4 py-6 space-y-6 sm:px-6">
         {/* Progress Summary */}
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-3 gap-2 sm:gap-3">
           <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-center">
             <p className="text-2xl font-bold text-emerald-700">{data.completed_sessions}</p>
             <p className="text-[10px] text-emerald-500">Completed</p>

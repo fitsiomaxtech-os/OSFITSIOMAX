@@ -844,7 +844,7 @@ function DashboardTab({
             <CardHeader className="pb-2">
               <CardTitle className="text-base">Pipeline Health</CardTitle>
             </CardHeader>
-            <CardContent className="grid grid-cols-3 gap-3">
+            <CardContent className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
                 <p className="text-xs text-slate-500">Conversion Rate</p>
                 <p className="text-lg font-bold text-emerald-600">{summary.conversion_rate}%</p>

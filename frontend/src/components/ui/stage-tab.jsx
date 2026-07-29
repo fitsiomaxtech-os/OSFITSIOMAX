@@ -7,7 +7,7 @@ export const StageTab = ({ label, count, active, onClick, color, testid }) => {
       onClick={onClick}
       data-testid={testid}
       type="button"
-      className="relative flex min-w-0 flex-1 flex-col items-center justify-center rounded-lg px-3 py-2.5 text-center transition-all hover:shadow-sm"
+      className="relative flex min-w-[86px] shrink-0 flex-col items-center justify-center rounded-lg px-3 py-2.5 text-center transition-all hover:shadow-sm sm:min-w-0 sm:flex-1 sm:shrink"
       style={
         active
           ? { background: tint, color: "#ffffff", boxShadow: `0 2px 8px ${tint}40` }
@@ -27,7 +27,7 @@ export const StageTabBar = ({ stages, stageFilter, setStageFilter, counts, total
     className="sticky top-[88px] z-10 -mx-1 rounded-xl border border-slate-200 bg-white/95 p-1 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/80"
     data-testid={testid}
   >
-    <div className="flex flex-nowrap gap-1">
+    <div className="flex flex-nowrap gap-1 overflow-x-auto sm:overflow-visible">
       {!hideAllStages && (
         <StageTab
           label="All Stages"

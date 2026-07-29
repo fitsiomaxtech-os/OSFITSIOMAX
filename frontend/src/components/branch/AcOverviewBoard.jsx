@@ -111,7 +111,7 @@ export const AcOverviewBoard = () => {
       </div>
 
       {/* KPI cards */}
-      <div className="grid grid-cols-4 gap-3" data-testid="ac-overview-kpis">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4" data-testid="ac-overview-kpis">
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
           <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Total Collected</p>
           <p className="mt-1 text-2xl font-bold text-emerald-700">{fmt(k.total_collected)}</p>

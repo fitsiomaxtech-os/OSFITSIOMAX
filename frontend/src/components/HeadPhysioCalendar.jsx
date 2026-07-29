@@ -255,9 +255,9 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
   const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
 
   return (
-    <div className="flex gap-4 h-[calc(100vh-220px)]" data-testid="head-physio-calendar-root">
+    <div className="flex flex-col gap-4 lg:h-[calc(100vh-220px)] lg:flex-row" data-testid="head-physio-calendar-root">
       {/* LEFT PANEL — Doctor List */}
-      <div className="w-72 flex-shrink-0 flex flex-col border border-slate-200 rounded-xl bg-white overflow-hidden" data-testid="doctor-list-panel">
+      <div className="flex max-h-64 w-full flex-shrink-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white lg:h-full lg:max-h-none lg:w-72" data-testid="doctor-list-panel">
         <div className="p-4 border-b border-slate-100 bg-slate-50/60">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
@@ -306,7 +306,7 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
       </div>
 
       {/* RIGHT PANEL — Calendar */}
-      <div className="flex-1 border border-slate-200 rounded-xl bg-white overflow-hidden flex flex-col" data-testid="calendar-panel">
+      <div className="flex flex-1 flex-col overflow-visible rounded-xl border border-slate-200 bg-white lg:overflow-hidden" data-testid="calendar-panel">
         {!selectedDoctor ? (
           <div className="flex-1 flex items-center justify-center" data-testid="calendar-empty-state">
             <div className="text-center">
@@ -338,9 +338,9 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
               )}
             </div>
 
-            <div className="flex-1 flex overflow-hidden">
+            <div className="flex flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
               {/* Month Calendar */}
-              <div className="w-80 flex-shrink-0 border-r border-slate-100 p-4 flex flex-col">
+              <div className="w-full flex-shrink-0 border-b border-slate-100 p-4 flex flex-col lg:w-80 lg:border-b-0 lg:border-r">
                 <div className="flex items-center justify-between mb-4">
                   <button type="button" onClick={prevMonth} className="p-1 rounded hover:bg-slate-100" data-testid="cal-prev-month">
                     <ChevronLeft className="h-4 w-4 text-slate-500" />
@@ -486,11 +486,11 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
                   </div>
                 ) : (
                   <>
-                    <div className="flex items-center justify-between mb-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
                       <h4 className="text-sm font-semibold text-slate-700" data-testid="selected-date-title">
                         {new Date(selectedDate + "T00:00:00").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}
                       </h4>
-                      <div className="flex items-center gap-3 text-[10px] text-slate-400">
+                      <div className="flex flex-wrap items-center gap-3 text-[10px] text-slate-400">
                         <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-emerald-400 inline-block" /> Available</span>
                         <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-violet-400 inline-block" /> Adding</span>
                         <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-red-300 inline-block" /> Removing</span>

@@ -38,7 +38,7 @@ export const PhysioBoard = ({ physioId } = {}) => {
 
   return (
     <div className="space-y-4" data-testid="physio-board-root">
-      <div className="flex items-center gap-1 border-b border-slate-200">
+      <div className="flex items-center gap-1 overflow-x-auto border-b border-slate-200">
         {TABS.map((tab) => {
           const Icon = tab.icon;
           return (
@@ -46,7 +46,7 @@ export const PhysioBoard = ({ physioId } = {}) => {
               key={tab.key}
               type="button"
               onClick={() => setActiveTab(tab.key)}
-              className={`flex items-center gap-1.5 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
+              className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
                 activeTab === tab.key
                   ? "border-sky-500 text-sky-700"
                   : "border-transparent text-slate-400 hover:text-slate-600"

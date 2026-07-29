@@ -165,7 +165,7 @@ export const BranchAdminBoard = ({ branchId }) => {
   return (
     <div className="space-y-4" data-testid="branch-admin-board-root">
       {/* View Tabs */}
-      <div className="flex items-center gap-1 border-b border-slate-200 pb-0" data-testid="branch-view-tabs">
+      <div className="flex items-center gap-1 overflow-x-auto border-b border-slate-200 pb-0" data-testid="branch-view-tabs">
         {VIEW_TABS.map((tab) => {
           const Icon = tab.icon;
           return (
@@ -173,7 +173,7 @@ export const BranchAdminBoard = ({ branchId }) => {
               key={tab.key}
               type="button"
               onClick={() => setActiveView(tab.key)}
-              className={`flex items-center gap-1.5 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
+              className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
                 activeView === tab.key
                   ? "border-sky-500 text-sky-700"
                   : "border-transparent text-slate-400 hover:text-slate-600"
@@ -276,8 +276,8 @@ export const BranchAdminBoard = ({ branchId }) => {
           {/* List View (table) — its own scroll region so the sticky header can use top-0
               instead of guessing the page header's pixel height, which was colliding with
               the stat cards row as it scrolled past. */}
-          <div className="w-full max-h-[65vh] overflow-y-auto rounded-lg border border-slate-200 bg-white" data-testid="branch-list">
-            <table className="w-full table-fixed divide-y divide-slate-200 text-sm">
+          <div className="w-full max-h-[65vh] overflow-auto rounded-lg border border-slate-200 bg-white" data-testid="branch-list">
+            <table className="w-full min-w-[640px] table-fixed divide-y divide-slate-200 text-sm">
               <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                 <tr>
                   {/* New Leads haven't had a physio assigned yet, so that column is dropped

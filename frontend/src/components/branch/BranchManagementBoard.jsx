@@ -38,12 +38,12 @@ export const BranchManagementBoard = ({ actingUser } = {}) => {
         <h2 className="text-2xl font-bold text-slate-900">Branch Management</h2>
         <p className="text-sm text-slate-500">Create branches, assign managers, and track performance.</p>
       </div>
-      <div className="flex gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="bm-subtabs">
+      <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="bm-subtabs">
         {TABS.map((t) => {
           const Icon = t.icon;
           const active = tab === t.key;
           return (
-            <button key={t.key} onClick={() => setTab(t.key)} data-testid={`bm-subtab-${t.key}`} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${active ? "bg-sky-50 text-sky-700" : "text-slate-600 hover:bg-slate-50"}`}>
+            <button key={t.key} onClick={() => setTab(t.key)} data-testid={`bm-subtab-${t.key}`} className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition ${active ? "bg-sky-50 text-sky-700" : "text-slate-600 hover:bg-slate-50"}`}>
               <Icon className="h-4 w-4" />{t.label}
             </button>
           );
@@ -97,13 +97,13 @@ const BranchControlTab = ({ actingUser }) => {
         </div>
         {selected && <span className="text-xs text-slate-400">{selected.admin_name ? `Managed by ${selected.admin_name}` : "No admin assigned"}</span>}
 
-        <div className="ml-auto flex gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1">
+        <div className="flex w-full flex-wrap gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1 sm:ml-auto sm:w-auto">
           {[{ key: "branch_admin", label: "Branch Admin View" }, { key: "head_physio", label: "Head Physio View" }, { key: "physio", label: "Physio View" }].map((t) => (
             <button
               key={t.key}
               type="button"
               onClick={() => setViewAs(t.key)}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
+              className={`shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-medium transition ${
                 viewAs === t.key ? "bg-white text-sky-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
               }`}
               data-testid={`bm-branch-control-viewas-${t.key}`}
@@ -212,7 +212,7 @@ const CreationTab = ({ onDrillIn }) => {
                 {b.admin_phone && <p className="text-xs text-slate-500"><Phone className="inline h-3 w-3 mr-1" />{b.admin_phone}</p>}
                 <button onClick={(e) => { e.stopPropagation(); setReassigning(b); }} className="mt-2 text-xs font-medium text-sky-600 hover:underline" data-testid={`bm-branch-reassign-${b.id}`}>Reassign Manager →</button>
               </div>
-              <div className="grid grid-cols-4 gap-2 text-center text-xs">
+              <div className="grid grid-cols-2 gap-2 text-center text-xs sm:grid-cols-4">
                 <Stat label="Leads" value={b.leads_total || 0} color="#0ea5e9" />
                 <Stat label="Open" value={b.leads_open || 0} color="#f59e0b" />
                 <Stat label="Completed" value={b.leads_completed || 0} color="#22c55e" />

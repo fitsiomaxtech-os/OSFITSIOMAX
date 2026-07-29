@@ -77,7 +77,7 @@ export const AutoSyncPopover = () => {
 
       {open && (
         <div
-          className="absolute right-0 z-40 mt-2 w-[420px] rounded-xl border border-slate-200 bg-white p-4 shadow-2xl"
+          className="absolute right-0 z-40 mt-2 w-[calc(100vw-2rem)] max-w-[420px] rounded-xl border border-slate-200 bg-white p-4 shadow-2xl"
           data-testid="presales-autosync-panel"
         >
           <div className="mb-3 flex items-center justify-between">
