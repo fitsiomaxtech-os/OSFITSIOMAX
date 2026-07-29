@@ -319,10 +319,14 @@ async def hp_consultation_decision(
             raise HTTPException(status_code=404, detail="Treatment package not found")
         if item.get("item_type") != "session":
             raise HTTPException(status_code=400, detail="Only Session packages can be chosen as the Treatment Package")
+        # price_online/price_offline is a flat per-session rate (same across every
+        # package size) — the total is just that rate × however many sessions this
+        # patient is actually being charged for, never prorated against the package's
+        # own default session count.
         base_price = item.get("price_online") if payload.mode == "online" else item.get("price_offline")
         base_sessions = item.get("sessions_online") if payload.mode == "online" else item.get("sessions_offline")
         sessions = payload.sessions_override if payload.sessions_override and payload.sessions_override > 0 else base_sessions
-        price = round((base_price / base_sessions) * sessions, 2) if base_sessions and base_price is not None else base_price
+        price = round(base_price * sessions, 2) if base_price is not None and sessions else base_price
         updates.update({
             "session_package_id": item["id"],
             "session_package_name": item["name"],
