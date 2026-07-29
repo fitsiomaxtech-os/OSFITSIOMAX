@@ -318,21 +318,19 @@ SESSION_ITEM_RATE_PER_SESSION_OFFLINE = 800
 async def normalize_session_item_prices() -> None:
     """Enforce the fixed per-session rate across every FITSIO STORE Session item
     (the week-based Treatment Packages, e.g. "01 Week" = 7 sessions, "05 week" = 35
-    sessions) — total price = sessions x rate, Rs.1200/session Online and Rs.800/
-    session Offline (the two modes are priced differently and must never collapse
-    to the same total). Idempotent/safe to re-run: only writes an item whose price
-    doesn't already match."""
+    sessions) — price_online/price_offline is a FLAT per-session rate, Rs.1200
+    Online and Rs.800 Offline, identical across every package size; only the
+    session count differs between packages, never the rate. (The Store UI and
+    hp_consultation_decision() both multiply this rate by a session count
+    themselves — it must never be pre-multiplied here.) Idempotent/safe to
+    re-run: only writes an item whose price doesn't already match."""
     session_items = await v3_col("store_items").find({"item_type": "session"}, {"_id": 0}).to_list(500)
     for item in session_items:
         updates = {}
-        if item.get("sessions_offline"):
-            expected_offline = round(item["sessions_offline"] * SESSION_ITEM_RATE_PER_SESSION_OFFLINE, 2)
-            if item.get("price_offline") != expected_offline:
-                updates["price_offline"] = expected_offline
-        if item.get("sessions_online"):
-            expected_online = round(item["sessions_online"] * SESSION_ITEM_RATE_PER_SESSION_ONLINE, 2)
-            if item.get("price_online") != expected_online:
-                updates["price_online"] = expected_online
+        if item.get("sessions_offline") and item.get("price_offline") != SESSION_ITEM_RATE_PER_SESSION_OFFLINE:
+            updates["price_offline"] = SESSION_ITEM_RATE_PER_SESSION_OFFLINE
+        if item.get("sessions_online") and item.get("price_online") != SESSION_ITEM_RATE_PER_SESSION_ONLINE:
+            updates["price_online"] = SESSION_ITEM_RATE_PER_SESSION_ONLINE
         if updates:
             updates["updated_at"] = now_iso()
             await v3_col("store_items").update_one({"id": item["id"]}, {"$set": updates})
