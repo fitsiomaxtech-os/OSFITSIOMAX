@@ -7,7 +7,7 @@ import { toast } from "@/components/ui/sonner";
 import {
   hrDashboard, hrEmployees, hrCreateEmployee, hrUpdateEmployee, hrDeleteEmployee,
   hrUsers, hrCreateUser, hrUpdateUser, hrResetPassword, hrDeactivateUser, hrActivateUser, hrDeleteUserPermanent, hrUpdateUserRole, hrMeta,
-  getBranches, getDoctors, createDoctor, addDoctorSlots, requestExpertVerification, verifyAndCreateExpert,
+  getBranches, getDoctors, createDoctor, addDoctorSlots,
 } from "@/lib/api";
 
 const TABS = [
@@ -648,8 +648,6 @@ const FitsiomaxExpertsTab = () => {
   const [employees, setEmployees] = useState([]);
   const [form, setForm] = useState(blankExpertForm);
   const [saving, setSaving] = useState(false);
-  const [otpStep, setOtpStep] = useState(null); // { requestId } | null
-  const [otp, setOtp] = useState("");
 
   const [slotDoctorId, setSlotDoctorId] = useState("");
   const [slotTime, setSlotTime] = useState("");
@@ -682,7 +680,7 @@ const FitsiomaxExpertsTab = () => {
     setForm((p) => ({ ...p, employee_id: id, full_name: p.full_name || emp?.full_name || "" }));
   };
 
-  const resetForm = () => { setForm(blankExpertForm); setOtpStep(null); setOtp(""); };
+  const resetForm = () => { setForm(blankExpertForm); };
 
   const finishWithSlot = async (doctorId) => {
     if (!form.slot) return;
@@ -694,27 +692,6 @@ const FitsiomaxExpertsTab = () => {
     event.preventDefault();
     if (!form.full_name.trim()) { toast.error("Enter a name"); return; }
     if (!form.branch_id) { toast.error("Choose a branch"); return; }
-
-    if (form.profile_type === "head_physio") {
-      if (!form.employee_id) { toast.error("Head Physio must be linked to an existing employee (needed to send the OTP)"); return; }
-      try {
-        setSaving(true);
-        const res = await requestExpertVerification({
-          full_name: form.full_name,
-          branch_id: form.branch_id,
-          employee_id: form.employee_id,
-          specialization: form.specialization,
-          joining_date: form.joining_date || null,
-        });
-        setOtpStep({ requestId: res.request_id });
-        toast.success(res.message || "OTP sent");
-      } catch (err) {
-        toast.error(err?.response?.data?.detail || "Failed to send OTP");
-      } finally {
-        setSaving(false);
-      }
-      return;
-    }
 
     try {
       setSaving(true);
@@ -732,23 +709,6 @@ const FitsiomaxExpertsTab = () => {
       toast.success("Fitsiomax Expert created");
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed to create");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const submitOtp = async (event) => {
-    event.preventDefault();
-    if (!otp.trim()) { toast.error("Enter the OTP"); return; }
-    try {
-      setSaving(true);
-      const created = await verifyAndCreateExpert(otpStep.requestId, otp.trim());
-      await finishWithSlot(created.id);
-      resetForm();
-      await reloadList();
-      toast.success("Head Physio verified and created");
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || "Invalid OTP");
     } finally {
       setSaving(false);
     }
@@ -778,8 +738,7 @@ const FitsiomaxExpertsTab = () => {
         <CardTitle className="text-base">Fitsiomax Experts</CardTitle>
       </CardHeader>
       <CardContent className="space-y-5">
-        {!otpStep ? (
-          <div>
+        <div>
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500" data-testid="hr-experts-add-heading">Create Physio / Head Physio / Doctor</p>
             <form className="grid gap-2 md:grid-cols-3" onSubmit={submitCreate} data-testid="hr-experts-create-form">
               <Field label="Name *">
@@ -788,7 +747,7 @@ const FitsiomaxExpertsTab = () => {
               <Field label="Type *">
                 <select value={form.profile_type} onChange={(e) => set("profile_type", e.target.value)} className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm" data-testid="hr-experts-profile-select">
                   <option value="physio">Physio</option>
-                  <option value="head_physio">Head Physio (requires OTP)</option>
+                  <option value="head_physio">Head Physio</option>
                   <option value="doctor">Doctor</option>
                 </select>
               </Field>
@@ -798,7 +757,7 @@ const FitsiomaxExpertsTab = () => {
                   {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.branch_name}</option>)}
                 </select>
               </Field>
-              <Field label={`Assign Fitsiomax Expert${form.profile_type === "head_physio" ? " *" : " (optional)"}`} className="md:col-span-2">
+              <Field label="Assign Fitsiomax Expert (optional)" className="md:col-span-2">
                 <div className="flex gap-2">
                   <select value={form.employee_id} onChange={(e) => pickEmployee(e.target.value)} className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm" data-testid="hr-experts-employee-select">
                     <option value="">Link to an existing employee...</option>
@@ -822,24 +781,11 @@ const FitsiomaxExpertsTab = () => {
               </Field>
               <div className="md:col-span-3">
                 <Button type="submit" disabled={saving} data-testid="hr-experts-create-submit">
-                  {form.profile_type === "head_physio" ? "Send OTP & Continue" : "Create Fitsiomax Expert"}
+                  Create Fitsiomax Expert
                 </Button>
               </div>
             </form>
-          </div>
-        ) : (
-          <div className="rounded-lg border border-sky-200 bg-sky-50 p-4" data-testid="hr-experts-otp-panel">
-            <p className="mb-1 flex items-center gap-1.5 text-sm font-semibold text-sky-700"><KeyRound className="h-4 w-4" /> Verify OTP for {form.full_name}</p>
-            <p className="mb-3 text-xs text-sky-600">Enter the OTP emailed to the linked employee to finish creating this Head Physio.</p>
-            <form className="flex flex-wrap items-end gap-2" onSubmit={submitOtp} data-testid="hr-experts-otp-form">
-              <Field label="OTP">
-                <Input value={otp} onChange={(e) => setOtp(e.target.value)} placeholder="6-digit code" maxLength={6} data-testid="hr-experts-otp-input" />
-              </Field>
-              <Button type="submit" disabled={saving} className="bg-sky-600 hover:bg-sky-700" data-testid="hr-experts-otp-submit">Verify &amp; Create</Button>
-              <Button type="button" variant="outline" onClick={resetForm} data-testid="hr-experts-otp-cancel">Cancel</Button>
-            </form>
-          </div>
-        )}
+        </div>
 
         <div>
           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Add Availability Slot to an Existing Expert</p>

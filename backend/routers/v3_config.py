@@ -1,15 +1,11 @@
 from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Optional, Dict
 from pydantic import BaseModel
-from datetime import datetime, timedelta
-import hashlib
-import secrets
 import uuid
 
 from database import v3_col
-from utils import now_iso, now_utc, normalize_slot_time, derive_branch_code
+from utils import now_iso, normalize_slot_time, derive_branch_code
 from security import hash_password
-from email_utils import send_email
 from deps import v3_current_user, v3_require_roles
 from stage_utils import get_first_stage_name
 from schemas.v3 import (
@@ -185,11 +181,6 @@ async def v3_get_doctors(branch_id: Optional[str] = None, user: V3UserOut = Depe
 
 @router.post("/doctors", response_model=V3DoctorOut)
 async def v3_add_doctor(payload: V3DoctorCreate, user: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin", "head_physio"))):
-    if payload.profile_type == "head_physio":
-        raise HTTPException(
-            status_code=400,
-            detail="Head Physio requires OTP verification — use POST /doctors/request-verification instead",
-        )
     branch_id = payload.branch_id or user.branch_id
     if not branch_id:
         raise HTTPException(status_code=400, detail="Branch is required")
@@ -218,99 +209,6 @@ async def v3_add_slots(doctor_id: str, payload: V3DoctorSlotsInput, _: V3UserOut
     await v3_col("doctors").update_one({"id": doctor_id}, {"$set": {"slots": all_slots}})
     updated = await v3_col("doctors").find_one({"id": doctor_id}, {"_id": 0})
     return V3DoctorOut(**updated)
-
-
-EXPERT_OTP_TTL_MINUTES = 5
-EXPERT_MAX_OTP_ATTEMPTS = 5
-
-
-class V3ExpertVerificationRequest(BaseModel):
-    full_name: str
-    branch_id: str
-    employee_id: str
-    specialization: Optional[str] = ""
-    joining_date: Optional[str] = None
-
-
-class V3ExpertVerifyRequest(BaseModel):
-    request_id: str
-    otp: str
-
-
-@router.post("/doctors/request-verification")
-async def v3_request_expert_verification(payload: V3ExpertVerificationRequest, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
-    """Step 1 of creating a Head Physio: send an OTP to the linked employee's email.
-    Nothing is created in `doctors` until verify-and-create succeeds."""
-    employee = await v3_col("employees").find_one({"id": payload.employee_id}, {"_id": 0})
-    if not employee:
-        raise HTTPException(status_code=404, detail="Linked employee not found")
-    if not employee.get("email"):
-        raise HTTPException(status_code=400, detail="Linked employee has no email on file — add one before assigning as Head Physio")
-    branch = await v3_col("branches").find_one({"id": payload.branch_id}, {"_id": 0})
-    if not branch:
-        raise HTTPException(status_code=404, detail="Branch not found")
-
-    otp = f"{secrets.randbelow(1000000):06d}"
-    request_id = str(uuid.uuid4())
-    doc = {
-        "id": request_id,
-        "full_name": payload.full_name,
-        "branch_id": payload.branch_id,
-        "employee_id": payload.employee_id,
-        "specialization": payload.specialization or "",
-        "joining_date": payload.joining_date,
-        "otp_hash": hashlib.sha256(otp.encode()).hexdigest(),
-        "attempts": 0,
-        "consumed": False,
-        "expires_at": (now_utc() + timedelta(minutes=EXPERT_OTP_TTL_MINUTES)).isoformat(),
-        "created_at": now_iso(),
-    }
-    await v3_col("expert_verification_requests").insert_one(doc.copy())
-    send_email(
-        employee["email"],
-        "FitsiomaxOS — Head Physio verification OTP",
-        (
-            f"Hi {employee.get('full_name', '')},\n\n"
-            f"You're being added as a Head Physio ({payload.full_name}) on FitsiomaxOS.\n\n"
-            f"OTP: {otp}\n"
-            f"This code expires in {EXPERT_OTP_TTL_MINUTES} minutes.\n\n"
-            f"If you did not expect this, ignore this email — no account changes will be made."
-        ),
-    )
-    return {"request_id": request_id, "message": f"OTP sent to {employee['email']}"}
-
-
-@router.post("/doctors/verify-and-create", response_model=V3DoctorOut)
-async def v3_verify_and_create_expert(payload: V3ExpertVerifyRequest, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
-    """Step 2: verify the OTP, then create the Head Physio doctors record."""
-    req = await v3_col("expert_verification_requests").find_one({"id": payload.request_id}, {"_id": 0})
-    if not req:
-        raise HTTPException(status_code=404, detail="Verification request not found")
-    if req["consumed"]:
-        raise HTTPException(status_code=400, detail="This verification request has already been used")
-    if datetime.fromisoformat(req["expires_at"]) < now_utc():
-        raise HTTPException(status_code=400, detail="OTP expired — please request a new one")
-    if req["attempts"] >= EXPERT_MAX_OTP_ATTEMPTS:
-        raise HTTPException(status_code=400, detail="Too many incorrect attempts — please request a new OTP")
-
-    if hashlib.sha256(payload.otp.encode()).hexdigest() != req["otp_hash"]:
-        await v3_col("expert_verification_requests").update_one({"id": req["id"]}, {"$inc": {"attempts": 1}})
-        raise HTTPException(status_code=401, detail="Invalid OTP")
-
-    doctor = {
-        "id": str(uuid.uuid4()),
-        "full_name": req["full_name"],
-        "profile_type": "head_physio",
-        "branch_id": req["branch_id"],
-        "specialization": req.get("specialization", ""),
-        "employee_id": req.get("employee_id"),
-        "joining_date": req.get("joining_date"),
-        "slots": [],
-        "created_at": now_iso(),
-    }
-    await v3_col("doctors").insert_one(doctor.copy())
-    await v3_col("expert_verification_requests").update_one({"id": req["id"]}, {"$set": {"consumed": True}})
-    return V3DoctorOut(**doctor)
 
 
 @router.get("/doctors/available")
