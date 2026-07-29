@@ -311,23 +311,26 @@ async def migrate_head_consultation_stages() -> None:
         )
 
 
-SESSION_ITEM_RATE_PER_SESSION = 800
+SESSION_ITEM_RATE_PER_SESSION_ONLINE = 1200
+SESSION_ITEM_RATE_PER_SESSION_OFFLINE = 800
 
 
 async def normalize_session_item_prices() -> None:
-    """Enforce the fixed Rs.800/session rate across every FITSIO STORE Session item
+    """Enforce the fixed per-session rate across every FITSIO STORE Session item
     (the week-based Treatment Packages, e.g. "01 Week" = 7 sessions, "05 week" = 35
-    sessions) — total price = sessions x 800, for both online and offline. Idempotent/
-    safe to re-run: only writes an item whose price doesn't already match."""
+    sessions) — total price = sessions x rate, Rs.1200/session Online and Rs.800/
+    session Offline (the two modes are priced differently and must never collapse
+    to the same total). Idempotent/safe to re-run: only writes an item whose price
+    doesn't already match."""
     session_items = await v3_col("store_items").find({"item_type": "session"}, {"_id": 0}).to_list(500)
     for item in session_items:
         updates = {}
         if item.get("sessions_offline"):
-            expected_offline = round(item["sessions_offline"] * SESSION_ITEM_RATE_PER_SESSION, 2)
+            expected_offline = round(item["sessions_offline"] * SESSION_ITEM_RATE_PER_SESSION_OFFLINE, 2)
             if item.get("price_offline") != expected_offline:
                 updates["price_offline"] = expected_offline
         if item.get("sessions_online"):
-            expected_online = round(item["sessions_online"] * SESSION_ITEM_RATE_PER_SESSION, 2)
+            expected_online = round(item["sessions_online"] * SESSION_ITEM_RATE_PER_SESSION_ONLINE, 2)
             if item.get("price_online") != expected_online:
                 updates["price_online"] = expected_online
         if updates:
@@ -340,16 +343,18 @@ async def normalize_lead_session_package_prices() -> None:
     moment the Head Physio's Consultation Decision was saved — leads saved before
     normalize_session_item_prices() fixed the store item's price are left holding
     the old, wrong total forever, since that copy is never recomputed live. Refresh
-    every lead's session_package_price to sessions x Rs.800 wherever it doesn't
+    every lead's session_package_price to sessions x the correct per-session rate
+    for that lead's own mode (Rs.1200 Online / Rs.800 Offline) wherever it doesn't
     already match. Only touches leads that haven't paid the Treatment Fee yet — once
     treatment_fee_paid is on file, that figure is a real financial record and must
     never be silently rewritten. Idempotent/safe to re-run."""
     leads = await v3_col("leads").find(
         {"session_package_sessions": {"$ne": None}, "treatment_fee_paid": None},
-        {"_id": 0, "id": 1, "session_package_sessions": 1, "session_package_price": 1},
+        {"_id": 0, "id": 1, "session_package_sessions": 1, "session_package_price": 1, "session_package_mode": 1},
     ).to_list(2000)
     for lead in leads:
-        expected_price = round(lead["session_package_sessions"] * SESSION_ITEM_RATE_PER_SESSION, 2)
+        rate = SESSION_ITEM_RATE_PER_SESSION_ONLINE if lead.get("session_package_mode") == "online" else SESSION_ITEM_RATE_PER_SESSION_OFFLINE
+        expected_price = round(lead["session_package_sessions"] * rate, 2)
         if lead.get("session_package_price") != expected_price:
             await v3_col("leads").update_one(
                 {"id": lead["id"]},
