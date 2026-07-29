@@ -683,6 +683,62 @@ const RoleSelectDropdown = ({ value, options, onChange, onAddNew }) => {
   );
 };
 
+// Designation text (e.g. "HEAD PHYSIO") reuses the same role coloring as
+// roleClasses/roleLabel by converting it back to a role slug ("head_physio").
+const designationSlug = (designation) => (designation || "").trim().toLowerCase().replace(/\s+/g, "_");
+
+const EmployeeSelectDropdown = ({ value, employees, onChange }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const onDocClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, []);
+
+  const selected = employees.find((e) => e.id === value);
+  const currentClasses = selected ? roleClasses(designationSlug(selected.designation)) : "border-slate-200 bg-white text-slate-700";
+  const currentLabel = selected ? `${selected.employee_code} — ${selected.full_name} (${selected.designation || "—"})` : "Select employee...";
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={`flex h-10 w-full items-center justify-between gap-2 rounded-md border px-3 text-left text-sm font-semibold ${currentClasses}`}
+        data-testid="hr-create-user-emp"
+      >
+        <span className="truncate">{currentLabel}</span>
+        <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
+      </button>
+      {open && (
+        <div className="absolute left-0 right-0 z-20 mt-1 max-h-64 space-y-1 overflow-y-auto rounded-md border border-slate-200 bg-white p-1.5 shadow-lg" data-testid="hr-create-user-emp-list">
+          <button
+            type="button"
+            onClick={() => { onChange(""); setOpen(false); }}
+            className="block w-full rounded-md border border-slate-200 bg-white px-3 py-1.5 text-left text-xs font-semibold text-slate-700"
+            data-testid="hr-create-user-emp-option-none"
+          >
+            Select employee...
+          </button>
+          {employees.map((e) => (
+            <button
+              key={e.id}
+              type="button"
+              onClick={() => { onChange(e.id); setOpen(false); }}
+              className={`block w-full rounded-md border px-3 py-1.5 text-left text-xs font-semibold ${roleClasses(designationSlug(e.designation))}`}
+              data-testid={`hr-create-user-emp-option-${e.id}`}
+            >
+              {e.employee_code} — {e.full_name} ({e.designation || "—"})
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const CreateUserModal = ({ meta, reloadMeta, onClose, onSaved }) => {
   const [employees, setEmployees] = useState([]);
   const [form, setForm] = useState({ employee_id: "", full_name: "", email: "", role: "", password: "", confirm: "" });
@@ -732,10 +788,7 @@ const CreateUserModal = ({ meta, reloadMeta, onClose, onSaved }) => {
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600" data-testid="hr-create-user-close"><X className="h-4 w-4" /></button>
         </div>
         <Field label="Link to Employee (optional)">
-          <select className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm" value={form.employee_id} onChange={(e) => pickEmployee(e.target.value)} data-testid="hr-create-user-emp">
-            <option value="">Select employee...</option>
-            {employees.map((e) => <option key={e.id} value={e.id}>{e.employee_code} — {e.full_name} ({e.designation || "—"})</option>)}
-          </select>
+          <EmployeeSelectDropdown value={form.employee_id} employees={employees} onChange={pickEmployee} />
         </Field>
         <Field label="Name"><Input placeholder="Full name" value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} data-testid="hr-create-user-name" /></Field>
         <Field label="Username (Email) *"><Input placeholder="user@company.com" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} data-testid="hr-create-user-email" /></Field>
