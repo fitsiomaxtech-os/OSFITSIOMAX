@@ -1404,12 +1404,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             type="number"
                             min="0"
                             value={collectFeeDraft.amount}
-                            onChange={(e) => setCollectFeeDraft({ ...collectFeeDraft, amount: e.target.value })}
-                            className="h-9"
+                            readOnly
+                            disabled
+                            className="h-9 bg-slate-50 text-slate-600"
                             data-testid="cons-collect-fee-amount"
                           />
                           {selectedLead.package_price != null && (
-                            <p className="mt-1 text-[11px] text-slate-400">Assigned package price: Rs.{selectedLead.package_price} — editable if a different amount was actually collected.</p>
+                            <p className="mt-1 text-[11px] text-slate-400">Assigned package price: Rs.{selectedLead.package_price} — editable in the next step if a different amount was actually collected.</p>
                           )}
                         </div>
                         <div>
