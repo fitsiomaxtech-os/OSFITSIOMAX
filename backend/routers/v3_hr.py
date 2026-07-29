@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from typing import Optional, List, Literal, Dict, Any
+from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, field_validator
 import uuid
 
@@ -15,6 +15,24 @@ router = APIRouter(prefix="/api/v3/hr")
 
 DEFAULT_DEPARTMENTS = ["Pre-Sales", "Branch", "HR", "Accounts", "Operations", "Marketing", "Experts"]
 DEFAULT_ROLES = ["super_admin", "business_dev", "branch_admin", "head_physio", "physio", "marketing_head", "accountant"]
+
+
+def _slugify_role(label: str) -> str:
+    import re
+    slug = re.sub(r"[^a-z0-9]+", "_", label.strip().lower()).strip("_")
+    return slug
+
+
+async def _custom_roles() -> list:
+    return await v3_col("custom_roles").find({}, {"_id": 0}).sort("created_at", 1).to_list(200)
+
+
+async def _all_role_names() -> list:
+    return DEFAULT_ROLES + [r["name"] for r in await _custom_roles()]
+
+
+class CustomRoleCreate(BaseModel):
+    label: str
 
 
 class EmployeeCreate(BaseModel):
@@ -79,7 +97,9 @@ class UserAccountCreate(BaseModel):
     full_name: str
     email: str
     password: str
-    role: Literal["super_admin", "business_dev", "branch_admin", "head_physio", "physio", "marketing_head", "accountant"]
+    # Not a Literal — the allowed set now includes custom roles added at runtime
+    # via POST /hr/roles, so membership is checked in the handler instead.
+    role: str
     employee_id: Optional[str] = None
     branch_id: Optional[str] = None
     mobile_number: Optional[str] = None
@@ -229,6 +249,8 @@ async def list_users(search: Optional[str] = None, role: Optional[str] = None, _
 async def create_user_account(payload: UserAccountCreate, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
     if payload.role == "super_admin":
         raise HTTPException(status_code=403, detail="Super Admin accounts can only be created via the OTP-approved Super Admin creation page")
+    if payload.role not in await _all_role_names():
+        raise HTTPException(status_code=400, detail="Invalid role")
     if len(payload.password) < 6:
         raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
     existing = await v3_col("users").find_one({"email": payload.email}, {"_id": 0, "id": 1})
@@ -296,7 +318,7 @@ async def update_user_account(user_id: str, payload: UserAccountUpdate, _: V3Use
 
 @router.patch("/users/{user_id}/role")
 async def update_user_role(user_id: str, role: str, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
-    if role not in DEFAULT_ROLES:
+    if role not in await _all_role_names():
         raise HTTPException(status_code=400, detail="Invalid role")
     if role == "super_admin":
         raise HTTPException(status_code=403, detail="Super Admin accounts can only be created via the OTP-approved Super Admin creation page")
@@ -377,6 +399,30 @@ async def branch_admin_candidates(_: V3UserOut = Depends(v3_require_roles("super
     return out
 
 
+@router.post("/roles")
+async def add_custom_role(payload: CustomRoleCreate, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    """Add a new selectable Role name (e.g. "Tech Manager" -> tech_manager) so it
+    shows up in Create User Account going forward. This only registers the name —
+    it has no page/permission access wired up on its own; that's a separate,
+    later step once there's an actual screen or endpoint meant for it."""
+    label = payload.label.strip()
+    if not label:
+        raise HTTPException(status_code=400, detail="Role name is required")
+    slug = _slugify_role(label)
+    if not slug:
+        raise HTTPException(status_code=400, detail="Role name must contain letters or numbers")
+    if slug in await _all_role_names():
+        raise HTTPException(status_code=409, detail="This role already exists")
+    role = {"id": str(uuid.uuid4()), "name": slug, "label": label.upper(), "created_at": now_iso()}
+    await v3_col("custom_roles").insert_one(role.copy())
+    return role
+
+
 @router.get("/meta")
 async def hr_meta(_: V3UserOut = Depends(v3_require_roles("super_admin", "marketing_head"))):
-    return {"departments": DEFAULT_DEPARTMENTS, "roles": DEFAULT_ROLES}
+    custom = await _custom_roles()
+    return {
+        "departments": DEFAULT_DEPARTMENTS,
+        "roles": DEFAULT_ROLES + [r["name"] for r in custom],
+        "custom_roles": custom,
+    }

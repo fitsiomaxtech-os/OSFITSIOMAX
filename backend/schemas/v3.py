@@ -8,10 +8,10 @@ class V3UserOut(BaseModel):
     id: str
     full_name: str
     email: str
-    # "pre_sales" is discontinued (no longer assignable — see v3_hr.DEFAULT_ROLES / v3_require_roles
-    # call sites) but stays in this read-model's Literal so any pre-existing account with that role
-    # still deserializes instead of 500ing every list/detail endpoint that returns it.
-    role: Literal["super_admin", "business_dev", "pre_sales", "branch_admin", "head_physio", "physio", "marketing_head", "accountant"]
+    # Not a Literal — custom roles can be added at runtime via POST /hr/roles
+    # (see v3_hr.py), so any string already stored on a user document must
+    # deserialize here instead of 500ing every endpoint that returns it.
+    role: str
     branch_id: Optional[str] = None
     created_at: str
 

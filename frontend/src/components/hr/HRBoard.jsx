@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import {
   hrDashboard, hrEmployees, hrCreateEmployee, hrUpdateEmployee, hrDeleteEmployee,
-  hrUsers, hrCreateUser, hrUpdateUser, hrResetPassword, hrDeactivateUser, hrActivateUser, hrDeleteUserPermanent, hrUpdateUserRole, hrMeta,
+  hrUsers, hrCreateUser, hrUpdateUser, hrResetPassword, hrDeactivateUser, hrActivateUser, hrDeleteUserPermanent, hrUpdateUserRole, hrMeta, hrAddCustomRole,
   getBranches, getDoctors, createDoctor, deleteDoctor, addDoctorSlots,
 } from "@/lib/api";
 
@@ -19,8 +19,9 @@ const TABS = [
 
 export const HRBoard = () => {
   const [tab, setTab] = useState("dashboard");
-  const [meta, setMeta] = useState({ departments: [], roles: [] });
-  useEffect(() => { hrMeta().then(setMeta).catch((e) => console.warn("[load failed]", e?.message || e)); }, []);
+  const [meta, setMeta] = useState({ departments: [], roles: [], custom_roles: [] });
+  const reloadMeta = useCallback(() => hrMeta().then(setMeta).catch((e) => console.warn("[load failed]", e?.message || e)), []);
+  useEffect(() => { reloadMeta(); }, [reloadMeta]);
   return (
     <div className="space-y-5" data-testid="hr-board">
       <div>
@@ -41,7 +42,7 @@ export const HRBoard = () => {
       {tab === "dashboard" && <DashboardTab />}
       {tab === "employees" && <EmployeesTab meta={meta} />}
       {tab === "experts" && <FitsiomaxExpertsTab />}
-      {tab === "roles" && <RolesTab meta={meta} />}
+      {tab === "roles" && <RolesTab meta={meta} reloadMeta={reloadMeta} />}
     </div>
   );
 };
@@ -296,7 +297,7 @@ const ROLE_META = {
 const roleLabel = (role) => ROLE_META[role]?.label || role.replace(/_/g, " ").toUpperCase();
 const roleClasses = (role) => ROLE_META[role]?.classes || "border-slate-200 bg-white text-slate-600";
 
-const RolesTab = ({ meta }) => {
+const RolesTab = ({ meta, reloadMeta }) => {
   const [users, setUsers] = useState([]);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
@@ -362,7 +363,7 @@ const RolesTab = ({ meta }) => {
         </CardContent>
       </Card>
 
-      {showCreate && <CreateUserModal meta={meta} onClose={() => setShowCreate(false)} onSaved={() => { setShowCreate(false); load(); }} />}
+      {showCreate && <CreateUserModal meta={meta} reloadMeta={reloadMeta} onClose={() => setShowCreate(false)} onSaved={() => { setShowCreate(false); load(); }} />}
 
       {actionTarget && (
         <UserActionsModal
@@ -574,14 +575,41 @@ const UserActionsModal = ({ user, onClose, onDone }) => {
   );
 };
 
-const CreateUserModal = ({ meta, onClose, onSaved }) => {
+const ADD_ROLE_OPTION = "__add_new_role__";
+
+const CreateUserModal = ({ meta, reloadMeta, onClose, onSaved }) => {
   const [employees, setEmployees] = useState([]);
   const [form, setForm] = useState({ employee_id: "", full_name: "", email: "", role: "", password: "", confirm: "" });
+  const [addingRole, setAddingRole] = useState(false);
+  const [newRoleLabel, setNewRoleLabel] = useState("");
+  const [savingRole, setSavingRole] = useState(false);
   useEffect(() => { hrEmployees({ status: "active" }).then(setEmployees).catch((e) => console.warn("[load failed]", e?.message || e)); }, []);
 
   const pickEmployee = (id) => {
     const emp = employees.find((e) => e.id === id);
     setForm((p) => ({ ...p, employee_id: id, full_name: emp?.full_name || p.full_name, email: emp?.email || p.email }));
+  };
+
+  const handleRoleSelect = (value) => {
+    if (value === ADD_ROLE_OPTION) { setAddingRole(true); return; }
+    setForm({ ...form, role: value });
+  };
+
+  const createRole = async () => {
+    if (!newRoleLabel.trim()) { toast.error("Enter a role name"); return; }
+    setSavingRole(true);
+    try {
+      const created = await hrAddCustomRole(newRoleLabel.trim());
+      toast.success(`Role "${created.label}" added`);
+      await reloadMeta?.();
+      setForm((p) => ({ ...p, role: created.name }));
+      setAddingRole(false);
+      setNewRoleLabel("");
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Failed to add role");
+    } finally {
+      setSavingRole(false);
+    }
   };
 
   const submit = async () => {
@@ -611,10 +639,38 @@ const CreateUserModal = ({ meta, onClose, onSaved }) => {
         <Field label="Name"><Input placeholder="Full name" value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} data-testid="hr-create-user-name" /></Field>
         <Field label="Username (Email) *"><Input placeholder="user@company.com" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} data-testid="hr-create-user-email" /></Field>
         <Field label="Role *">
-          <select className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} data-testid="hr-create-user-role">
+          <select
+            className={`h-10 w-full rounded-md border px-3 text-sm font-semibold ${form.role ? roleClasses(form.role) : "border-slate-200 text-slate-700"}`}
+            value={form.role}
+            onChange={(e) => handleRoleSelect(e.target.value)}
+            data-testid="hr-create-user-role"
+          >
             <option value="">Select role</option>
             {meta.roles.filter((r) => r !== "super_admin").map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
+            <option value={ADD_ROLE_OPTION}>+ Add New Role...</option>
           </select>
+          {addingRole && (
+            <div className="mt-2 flex items-center gap-2 rounded-md border border-sky-200 bg-sky-50 p-2" data-testid="hr-create-user-new-role">
+              <Input
+                autoFocus
+                placeholder="e.g. Tech Manager"
+                value={newRoleLabel}
+                onChange={(e) => setNewRoleLabel(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); createRole(); } }}
+                className="h-8 flex-1 bg-white text-sm"
+                data-testid="hr-create-user-new-role-input"
+              />
+              <Button size="sm" onClick={createRole} disabled={savingRole} className="h-8 bg-sky-600 hover:bg-sky-700" data-testid="hr-create-user-new-role-add">
+                {savingRole ? "Adding..." : "Add"}
+              </Button>
+              <button type="button" onClick={() => { setAddingRole(false); setNewRoleLabel(""); }} className="p-1 text-slate-400 hover:text-slate-600" data-testid="hr-create-user-new-role-cancel">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+          {!addingRole && (
+            <p className="mt-1 text-[10px] text-slate-400">A new role only adds a selectable name — page access still needs to be built for it separately.</p>
+          )}
         </Field>
         <Field label="Password *"><Input type="password" placeholder="Min 6 characters" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} data-testid="hr-create-user-pwd" /></Field>
         <Field label="Confirm Password *"><Input type="password" placeholder="Confirm password" value={form.confirm} onChange={(e) => setForm({ ...form, confirm: e.target.value })} data-testid="hr-create-user-confirm" /></Field>
