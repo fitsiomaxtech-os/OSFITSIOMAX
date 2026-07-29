@@ -629,7 +629,59 @@ const UserActionsModal = ({ user, onClose, onDone }) => {
   );
 };
 
-const ADD_ROLE_OPTION = "__add_new_role__";
+// Same idea as RoleFilterDropdown — a native <select>'s open list can't be
+// reliably colored per-item, so this renders each role as its own colored,
+// rounded row, plus a distinct trailing "+ Add New Role..." row.
+const RoleSelectDropdown = ({ value, options, onChange, onAddNew }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const onDocClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, []);
+
+  const currentClasses = value ? roleClasses(value) : "border-slate-200 bg-white text-slate-700";
+  const currentLabel = value ? roleLabel(value) : "Select role";
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={`flex h-10 w-full items-center justify-between gap-2 rounded-md border px-3 text-sm font-semibold ${currentClasses}`}
+        data-testid="hr-create-user-role"
+      >
+        {currentLabel}
+        <ChevronDown className="h-3.5 w-3.5 opacity-60" />
+      </button>
+      {open && (
+        <div className="absolute left-0 right-0 z-20 mt-1 max-h-64 space-y-1 overflow-y-auto rounded-md border border-slate-200 bg-white p-1.5 shadow-lg" data-testid="hr-create-user-role-list">
+          {options.map((r) => (
+            <button
+              key={r}
+              type="button"
+              onClick={() => { onChange(r); setOpen(false); }}
+              className={`block w-full rounded-md border px-3 py-1.5 text-left text-xs font-semibold ${roleClasses(r)}`}
+              data-testid={`hr-create-user-role-option-${r}`}
+            >
+              {roleLabel(r)}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => { onAddNew(); setOpen(false); }}
+            className="block w-full rounded-md border border-dashed border-sky-300 bg-sky-50 px-3 py-1.5 text-left text-xs font-semibold text-sky-700"
+            data-testid="hr-create-user-role-option-add-new"
+          >
+            + Add New Role...
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
 
 const CreateUserModal = ({ meta, reloadMeta, onClose, onSaved }) => {
   const [employees, setEmployees] = useState([]);
@@ -642,11 +694,6 @@ const CreateUserModal = ({ meta, reloadMeta, onClose, onSaved }) => {
   const pickEmployee = (id) => {
     const emp = employees.find((e) => e.id === id);
     setForm((p) => ({ ...p, employee_id: id, full_name: emp?.full_name || p.full_name, email: emp?.email || p.email }));
-  };
-
-  const handleRoleSelect = (value) => {
-    if (value === ADD_ROLE_OPTION) { setAddingRole(true); return; }
-    setForm({ ...form, role: value });
   };
 
   const createRole = async () => {
@@ -693,16 +740,12 @@ const CreateUserModal = ({ meta, reloadMeta, onClose, onSaved }) => {
         <Field label="Name"><Input placeholder="Full name" value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} data-testid="hr-create-user-name" /></Field>
         <Field label="Username (Email) *"><Input placeholder="user@company.com" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} data-testid="hr-create-user-email" /></Field>
         <Field label="Role *">
-          <select
-            className={`h-10 w-full rounded-md border px-3 text-sm font-semibold ${form.role ? roleClasses(form.role) : "border-slate-200 text-slate-700"}`}
+          <RoleSelectDropdown
             value={form.role}
-            onChange={(e) => handleRoleSelect(e.target.value)}
-            data-testid="hr-create-user-role"
-          >
-            <option value="">Select role</option>
-            {meta.roles.filter((r) => r !== "super_admin").map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
-            <option value={ADD_ROLE_OPTION}>+ Add New Role...</option>
-          </select>
+            options={meta.roles.filter((r) => r !== "super_admin")}
+            onChange={(r) => setForm({ ...form, role: r })}
+            onAddNew={() => setAddingRole(true)}
+          />
           {addingRole && (
             <div className="mt-2 flex items-center gap-2 rounded-md border border-sky-200 bg-sky-50 p-2" data-testid="hr-create-user-new-role">
               <Input
