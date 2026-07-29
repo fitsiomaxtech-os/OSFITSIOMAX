@@ -211,14 +211,19 @@ const CreateConsultationModal = ({ item, onClose, onSaved }) => {
   );
 };
 
+const WEEKS_OPTIONS = [1, 2, 3, 4, 5];
+const SESSIONS_PER_WEEK = 7;
+
 const CreateSessionPackageModal = ({ item, onClose, onSaved }) => {
   const isEdit = Boolean(item);
   const [name, setName] = useState(item?.name || "");
   const [description, setDescription] = useState(item?.description || "");
   const [priceOnline, setPriceOnline] = useState(item?.price_online ?? DEFAULT_PRICE_ONLINE);
   const [priceOffline, setPriceOffline] = useState(item?.price_offline ?? DEFAULT_PRICE_OFFLINE);
-  const [sessionsOnline, setSessionsOnline] = useState(item?.sessions_online ?? "");
-  const [sessionsOffline, setSessionsOffline] = useState(item?.sessions_offline ?? "");
+  // Sessions always come from Weeks x 7 — a package's session count doesn't vary
+  // by Online vs Offline, only the per-session price does. Fall back to deriving
+  // Weeks from an existing item's session count when editing older data.
+  const [weeks, setWeeks] = useState(item?.sessions_online ? Math.max(1, Math.round(item.sessions_online / SESSIONS_PER_WEEK)) : 1);
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(item?.image_url || null);
   const [saving, setSaving] = useState(false);
@@ -231,13 +236,12 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved }) => {
     setImagePreview(URL.createObjectURL(file));
   };
 
-  const totalOnline = (Number(priceOnline) || 0) * (Number(sessionsOnline) || 0);
-  const totalOffline = (Number(priceOffline) || 0) * (Number(sessionsOffline) || 0);
+  const sessions = Number(weeks) * SESSIONS_PER_WEEK;
+  const totalOnline = (Number(priceOnline) || 0) * sessions;
+  const totalOffline = (Number(priceOffline) || 0) * sessions;
 
   const submit = async () => {
     if (!name.trim()) { toast.error("Package name is required"); return; }
-    if (!sessionsOnline || Number(sessionsOnline) < 1) { toast.error("Enter number of Online sessions"); return; }
-    if (!sessionsOffline || Number(sessionsOffline) < 1) { toast.error("Enter number of Offline sessions"); return; }
     setSaving(true);
     try {
       let image_url = item?.image_url || null;
@@ -253,8 +257,8 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved }) => {
         image_url,
         price_online: Number(priceOnline) || 0,
         price_offline: Number(priceOffline) || 0,
-        sessions_online: Number(sessionsOnline),
-        sessions_offline: Number(sessionsOffline),
+        sessions_online: sessions,
+        sessions_offline: sessions,
       };
       if (isEdit) {
         await updateStoreItem(item.id, payload);
@@ -331,16 +335,28 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved }) => {
 
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600">Online &amp; Offline Setup</label>
+            <div className="mb-2">
+              <label className="mb-0.5 block text-[10px] font-semibold text-slate-500">Number of Weeks</label>
+              <select
+                value={weeks}
+                onChange={(e) => setWeeks(Number(e.target.value))}
+                className="h-8 w-full rounded-md border border-slate-200 px-2 text-sm"
+                data-testid="session-create-weeks"
+              >
+                {WEEKS_OPTIONS.map((w) => <option key={w} value={w}>{w} Week{w > 1 ? "s" : ""}</option>)}
+              </select>
+              <p className="mt-1 text-[10px] text-slate-400">{sessions} sessions ({weeks} week{weeks > 1 ? "s" : ""} × {SESSIONS_PER_WEEK} sessions/week)</p>
+            </div>
             <div className="grid grid-cols-2 gap-2" data-testid="session-create-mode-boxes">
               <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 p-3">
                 <p className="mb-2 flex items-center gap-1 text-xs font-bold text-emerald-800"><Wifi className="h-3 w-3" />Online Mode</p>
-                <label className="mb-0.5 block text-[10px] font-semibold text-emerald-700">Per Session</label>
+                <label className="mb-0.5 block text-[10px] font-semibold text-emerald-700">Per Session Amount</label>
                 <div className="relative mb-2">
                   <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-emerald-600">₹</span>
                   <Input type="number" min="0" value={priceOnline} onChange={(e) => setPriceOnline(e.target.value)} className="h-8 pl-6 text-sm" data-testid="session-create-price-online" />
                 </div>
                 <label className="mb-0.5 block text-[10px] font-semibold text-emerald-700">Sessions</label>
-                <Input type="number" min="1" value={sessionsOnline} onChange={(e) => setSessionsOnline(e.target.value)} placeholder="e.g. 5" className="h-8 text-sm" data-testid="session-create-sessions-online" />
+                <Input type="number" value={sessions} readOnly disabled className="h-8 bg-emerald-50 text-sm" data-testid="session-create-sessions-online" />
                 <div className="mt-2 flex items-center justify-between border-t border-emerald-200 pt-1.5">
                   <span className="text-[11px] font-semibold text-emerald-700">Total Amount</span>
                   <span className="text-sm font-extrabold text-emerald-900" data-testid="session-create-total-online">₹{totalOnline}</span>
@@ -348,13 +364,13 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved }) => {
               </div>
               <div className="rounded-lg border border-amber-100 bg-amber-50/60 p-3">
                 <p className="mb-2 flex items-center gap-1 text-xs font-bold text-amber-800"><MapPin className="h-3 w-3" />Offline Mode</p>
-                <label className="mb-0.5 block text-[10px] font-semibold text-amber-700">Per Session</label>
+                <label className="mb-0.5 block text-[10px] font-semibold text-amber-700">Per Session Amount</label>
                 <div className="relative mb-2">
                   <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-amber-600">₹</span>
                   <Input type="number" min="0" value={priceOffline} onChange={(e) => setPriceOffline(e.target.value)} className="h-8 pl-6 text-sm" data-testid="session-create-price-offline" />
                 </div>
                 <label className="mb-0.5 block text-[10px] font-semibold text-amber-700">Sessions</label>
-                <Input type="number" min="1" value={sessionsOffline} onChange={(e) => setSessionsOffline(e.target.value)} placeholder="e.g. 4" className="h-8 text-sm" data-testid="session-create-sessions-offline" />
+                <Input type="number" value={sessions} readOnly disabled className="h-8 bg-amber-50 text-sm" data-testid="session-create-sessions-offline" />
                 <div className="mt-2 flex items-center justify-between border-t border-amber-200 pt-1.5">
                   <span className="text-[11px] font-semibold text-amber-700">Total Amount</span>
                   <span className="text-sm font-extrabold text-amber-900" data-testid="session-create-total-offline">₹{totalOffline}</span>
