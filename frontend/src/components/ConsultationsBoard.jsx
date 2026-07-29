@@ -468,21 +468,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   const bothFeesDone = (lead) => !treatmentFeeDraft || lead.treatment_fee_paid != null;
   const consultationFeeDone = (lead) => !collectFeeDraft || lead.package_paid != null;
 
-  // Clicking "Collect Consultation Fee" in the main popup. Cash at exactly the
-  // assigned package price submits immediately — nothing else needed. Any other
-  // case (amount doesn't match, or UPI/Card need their own fields) opens the
-  // second "Confirm Payment" popup instead of submitting straight away.
+  // Clicking "Collect Consultation Fee" in the main popup always opens the
+  // second "Confirm Payment" popup — a simple, explicit confirm/cancel step
+  // (with the amount still editable there) before anything is actually saved.
   const startCollectConsultationFee = () => {
     const amount = parseFloat(collectFeeDraft.amount);
     if (!(amount > 0)) {
       toast.error("Enter a valid Consultation Fee amount");
-      return;
-    }
-    const mode = collectFeeDraft.payment_mode;
-    const expected = selectedLead.package_price;
-    const mismatch = expected != null && Math.round(amount * 100) !== Math.round(expected * 100);
-    if (mode === "cash" && !mismatch) {
-      submitConsultationFee({ payment_mode: mode, amount, confirmed: true });
       return;
     }
     setPackageConfirmDraft({ upi_transaction_id: "", upi_utr: "", account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "" });
@@ -1583,6 +1575,18 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       <button onClick={() => setPackageConfirmDraft(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-collect-fee-confirm-close"><X className="h-4 w-4" /></button>
                     </div>
 
+                    <div>
+                      <label className="mb-1 block text-[11px] font-medium text-slate-500">Consultation Fee (₹)</label>
+                      <Input
+                        type="number"
+                        min="0"
+                        value={collectFeeDraft.amount}
+                        onChange={(e) => setCollectFeeDraft({ ...collectFeeDraft, amount: e.target.value })}
+                        className="h-9"
+                        data-testid="cons-collect-fee-confirm-amount"
+                      />
+                    </div>
+
                     {mismatch && (
                       <div className="rounded-md border border-amber-200 bg-amber-50 p-2.5 text-[11px] text-amber-800" data-testid="cons-collect-fee-mismatch-warning">
                         Entered amount <span className="font-semibold">Rs.{amount}</span> differs from the assigned Consultation Fee <span className="font-semibold">Rs.{expected}</span>. Please confirm this is correct.
@@ -1653,18 +1657,30 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       </>
                     )}
 
-                    <Button
-                      className="w-full bg-sky-600 text-xs hover:bg-sky-700"
-                      onClick={confirmCollectConsultationFee}
-                      disabled={
-                        collectingFee ||
-                        (mode === "upi" && (!packageConfirmDraft.upi_transaction_id.trim() || !packageConfirmDraft.upi_utr.trim())) ||
-                        (mode === "card" && (!packageConfirmDraft.account_number.trim() || !packageConfirmDraft.account_holder_name.trim() || !packageConfirmDraft.bank_name.trim() || !packageConfirmDraft.ifsc_code.trim()))
-                      }
-                      data-testid="cons-collect-fee-confirm-submit"
-                    >
-                      {collectingFee ? "Saving..." : "Confirm & Collect"}
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        className="flex-1 text-xs"
+                        onClick={() => setPackageConfirmDraft(null)}
+                        disabled={collectingFee}
+                        data-testid="cons-collect-fee-confirm-cancel"
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        className="flex-1 bg-sky-600 text-xs hover:bg-sky-700"
+                        onClick={confirmCollectConsultationFee}
+                        disabled={
+                          collectingFee ||
+                          !(parseFloat(collectFeeDraft.amount) > 0) ||
+                          (mode === "upi" && (!packageConfirmDraft.upi_transaction_id.trim() || !packageConfirmDraft.upi_utr.trim())) ||
+                          (mode === "card" && (!packageConfirmDraft.account_number.trim() || !packageConfirmDraft.account_holder_name.trim() || !packageConfirmDraft.bank_name.trim() || !packageConfirmDraft.ifsc_code.trim()))
+                        }
+                        data-testid="cons-collect-fee-confirm-submit"
+                      >
+                        {collectingFee ? "Saving..." : "Confirm & Collect"}
+                      </Button>
+                    </div>
                   </div>
                 </div>
               );
