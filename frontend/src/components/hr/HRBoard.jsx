@@ -7,7 +7,7 @@ import { toast } from "@/components/ui/sonner";
 import {
   hrDashboard, hrEmployees, hrCreateEmployee, hrUpdateEmployee, hrDeleteEmployee,
   hrUsers, hrCreateUser, hrUpdateUser, hrResetPassword, hrDeactivateUser, hrActivateUser, hrDeleteUserPermanent, hrUpdateUserRole, hrMeta,
-  getBranches, getDoctors, createDoctor, addDoctorSlots,
+  getBranches, getDoctors, createDoctor, deleteDoctor, addDoctorSlots,
 } from "@/lib/api";
 
 const TABS = [
@@ -714,6 +714,17 @@ const FitsiomaxExpertsTab = () => {
     }
   };
 
+  const removeDoctor = async (doctor) => {
+    if (!window.confirm(`Delete expert profile "${doctor.full_name}"?`)) return;
+    try {
+      await deleteDoctor(doctor.id);
+      toast.success("Expert deleted");
+      await reloadList();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Delete failed");
+    }
+  };
+
   const addSlotNow = async (event) => {
     event.preventDefault();
     if (!slotDoctorId || !slotTime) {
@@ -785,6 +796,33 @@ const FitsiomaxExpertsTab = () => {
                 </Button>
               </div>
             </form>
+        </div>
+
+        <div>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500" data-testid="hr-experts-list-heading">Existing Experts</p>
+          <div className="overflow-auto rounded-md border border-slate-200">
+            <table className="min-w-full text-sm">
+              <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+                <tr><th className="px-3 py-2">Name</th><th className="px-3 py-2">Type</th><th className="px-3 py-2">Branch</th><th className="px-3 py-2">Specialization</th><th className="px-3 py-2">Actions</th></tr>
+              </thead>
+              <tbody>
+                {doctors.map((d) => (
+                  <tr key={d.id} className="border-t border-slate-100" data-testid={`hr-experts-row-${d.id}`}>
+                    <td className="px-3 py-2 font-medium text-slate-800">{d.full_name}</td>
+                    <td className="px-3 py-2 text-slate-600">{d.profile_type}</td>
+                    <td className="px-3 py-2 text-slate-600">{branches.find((b) => b.id === d.branch_id)?.branch_name || "—"}</td>
+                    <td className="px-3 py-2 text-slate-600">{d.specialization || "—"}</td>
+                    <td className="px-3 py-2">
+                      <button onClick={() => removeDoctor(d)} className="text-red-500 hover:text-red-700" title="Delete expert profile" data-testid={`hr-experts-delete-${d.id}`}>
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {doctors.length === 0 && <tr><td colSpan="5" className="px-3 py-6 text-center text-slate-400">No experts yet.</td></tr>}
+              </tbody>
+            </table>
+          </div>
         </div>
 
         <div>

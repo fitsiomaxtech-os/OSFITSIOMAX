@@ -199,6 +199,24 @@ async def v3_add_doctor(payload: V3DoctorCreate, user: V3UserOut = Depends(v3_re
     return V3DoctorOut(**doctor)
 
 
+@router.delete("/doctors/{doctor_id}")
+async def v3_delete_doctor(doctor_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    """Remove an expert profile created via HR > Fitsiomax Experts. Only for
+    profile-only entries with no linked login and no appointment/session history —
+    those are real accounts or real patient history, not stray test/duplicate rows."""
+    doctor = await v3_col("doctors").find_one({"id": doctor_id}, {"_id": 0})
+    if not doctor:
+        raise HTTPException(status_code=404, detail="Expert not found")
+    if doctor.get("user_id"):
+        raise HTTPException(status_code=400, detail="This expert is linked to a login account — remove the login in Roles & Credentials instead")
+    if await v3_col("appointments").find_one({"doctor_id": doctor_id}, {"_id": 0, "id": 1}):
+        raise HTTPException(status_code=400, detail="This expert has appointment history and can't be deleted")
+    if await v3_col("sessions").find_one({"physio_id": doctor_id}, {"_id": 0, "id": 1}):
+        raise HTTPException(status_code=400, detail="This expert has session history and can't be deleted")
+    await v3_col("doctors").delete_one({"id": doctor_id})
+    return {"message": "Expert deleted"}
+
+
 @router.post("/doctors/{doctor_id}/slots", response_model=V3DoctorOut)
 async def v3_add_slots(doctor_id: str, payload: V3DoctorSlotsInput, _: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin", "head_physio"))):
     doctor = await v3_col("doctors").find_one({"id": doctor_id}, {"_id": 0})

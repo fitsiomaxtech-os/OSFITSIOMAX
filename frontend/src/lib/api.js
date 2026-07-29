@@ -81,6 +81,7 @@ export const deleteBranch = async (branchId) => (await api.delete(`/branches/${b
 
 export const getDoctors = async (params) => (await api.get("/doctors", { params })).data;
 export const createDoctor = async (payload) => (await api.post("/doctors", payload)).data;
+export const deleteDoctor = async (doctorId) => (await api.delete(`/doctors/${doctorId}`)).data;
 export const addDoctorSlots = async (doctorId, payload) => (await api.post(`/doctors/${doctorId}/slots`, payload)).data;
 export const getAvailableDoctors = async (params) => (await api.get("/doctors/available", { params })).data;
 
