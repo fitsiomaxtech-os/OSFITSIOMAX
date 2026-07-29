@@ -593,13 +593,12 @@ async def v2_seed() -> None:
 
 
 async def v3_seed() -> None:
+    # Only the real Super Admin is seeded here. The generic demo role accounts
+    # (Business Dev/Pre Sales/Branch Admin/Head Physio/Physio @fitsiomax.com)
+    # that used to live in this list had hardcoded, guessable passwords and
+    # were removed — real accounts are created through HR > Roles & Credentials.
     seed_users = [
         {"full_name": "Super Admin", "email": "fitsiomaxtech@gmail.com", "password": "FitsioMax06", "role": "super_admin"},
-        {"full_name": "Business Development", "email": "businessdev@fitsiomax.com", "password": "bd123", "role": "business_dev"},
-        {"full_name": "Pre Sales", "email": "presales@fitsiomax.com", "password": "presales123", "role": "pre_sales"},
-        {"full_name": "Branch Admin", "email": "branchadmin@fitsiomax.com", "password": "branch123", "role": "branch_admin"},
-        {"full_name": "Head Physio", "email": "headphysio@fitsiomax.com", "password": "head123", "role": "head_physio"},
-        {"full_name": "Physio", "email": "physio@fitsiomax.com", "password": "physio123", "role": "physio"},
     ]
     for user in seed_users:
         exists = await v3_col("users").find_one({"email": user["email"]}, {"_id": 0})
