@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { Users, ShieldCheck, BarChart3, Plus, Pencil, Trash2, Eye, KeyRound, X, UserPlus, Stethoscope, MoreVertical, CheckCircle2, XCircle, AlertOctagon } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Users, ShieldCheck, BarChart3, Plus, Pencil, Trash2, Eye, KeyRound, X, UserPlus, Stethoscope, MoreVertical, CheckCircle2, XCircle, AlertOctagon, ChevronDown } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -297,6 +297,60 @@ const ROLE_META = {
 const roleLabel = (role) => ROLE_META[role]?.label || role.replace(/_/g, " ").toUpperCase();
 const roleClasses = (role) => ROLE_META[role]?.classes || "border-slate-200 bg-white text-slate-600";
 
+// Native <select> can't reliably color individual dropdown-list items across
+// browsers — only the closed box. This renders each role as its own colored,
+// rounded row in a custom open list instead.
+const RoleFilterDropdown = ({ value, options, onChange }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const onDocClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, []);
+
+  const currentClasses = value === "all" ? "border-slate-200 bg-white text-slate-700" : roleClasses(value);
+  const currentLabel = value === "all" ? "ALL" : roleLabel(value);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={`flex h-10 items-center gap-2 rounded-md border px-3 text-sm font-semibold ${currentClasses}`}
+        data-testid="hr-roles-role-filter"
+      >
+        {currentLabel}
+        <ChevronDown className="h-3.5 w-3.5 opacity-60" />
+      </button>
+      {open && (
+        <div className="absolute right-0 z-20 mt-1 min-w-[170px] space-y-1 rounded-md border border-slate-200 bg-white p-1.5 shadow-lg" data-testid="hr-roles-role-filter-list">
+          <button
+            type="button"
+            onClick={() => { onChange("all"); setOpen(false); }}
+            className="block w-full rounded-md border border-slate-200 bg-white px-3 py-1.5 text-left text-xs font-semibold text-slate-700"
+            data-testid="hr-roles-role-filter-option-all"
+          >
+            ALL
+          </button>
+          {options.map((r) => (
+            <button
+              key={r}
+              type="button"
+              onClick={() => { onChange(r); setOpen(false); }}
+              className={`block w-full rounded-md border px-3 py-1.5 text-left text-xs font-semibold ${roleClasses(r)}`}
+              data-testid={`hr-roles-role-filter-option-${r}`}
+            >
+              {roleLabel(r)}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const RolesTab = ({ meta, reloadMeta }) => {
   const [users, setUsers] = useState([]);
   const [search, setSearch] = useState("");
@@ -319,15 +373,7 @@ const RolesTab = ({ meta, reloadMeta }) => {
           <CardTitle className="text-base">User Roles & Credentials</CardTitle>
           <div className="flex gap-2">
             <Input placeholder="Search name or email..." value={search} onChange={(e) => setSearch(e.target.value)} className="w-64" data-testid="hr-roles-search" />
-            <select
-              value={roleFilter}
-              onChange={(e) => setRoleFilter(e.target.value)}
-              className={`h-10 rounded-md border px-3 text-sm font-semibold ${roleFilter === "all" ? "border-slate-200 text-slate-700" : roleClasses(roleFilter)}`}
-              data-testid="hr-roles-role-filter"
-            >
-              <option value="all">ALL</option>
-              {meta.roles.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
-            </select>
+            <RoleFilterDropdown value={roleFilter} options={meta.roles} onChange={setRoleFilter} />
             <Button onClick={() => setShowCreate(true)} className="bg-sky-600 hover:bg-sky-700" data-testid="hr-roles-create-btn"><UserPlus className="h-4 w-4 mr-1" />Create User</Button>
           </div>
         </CardHeader>
