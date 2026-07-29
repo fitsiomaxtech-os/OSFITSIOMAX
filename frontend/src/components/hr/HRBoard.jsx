@@ -319,7 +319,15 @@ const RolesTab = ({ meta, reloadMeta }) => {
           <CardTitle className="text-base">User Roles & Credentials</CardTitle>
           <div className="flex gap-2">
             <Input placeholder="Search name or email..." value={search} onChange={(e) => setSearch(e.target.value)} className="w-64" data-testid="hr-roles-search" />
-            <Select value={roleFilter} onChange={setRoleFilter} options={["all", ...meta.roles]} testid="hr-roles-role-filter" />
+            <select
+              value={roleFilter}
+              onChange={(e) => setRoleFilter(e.target.value)}
+              className={`h-10 rounded-md border px-3 text-sm font-semibold ${roleFilter === "all" ? "border-slate-200 text-slate-700" : roleClasses(roleFilter)}`}
+              data-testid="hr-roles-role-filter"
+            >
+              <option value="all">ALL</option>
+              {meta.roles.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
+            </select>
             <Button onClick={() => setShowCreate(true)} className="bg-sky-600 hover:bg-sky-700" data-testid="hr-roles-create-btn"><UserPlus className="h-4 w-4 mr-1" />Create User</Button>
           </div>
         </CardHeader>
