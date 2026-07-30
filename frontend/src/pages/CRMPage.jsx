@@ -55,6 +55,7 @@ import { MasterControlBoard } from "@/components/MasterControlBoard";
 import { PipelineStageManagement } from "@/components/PipelineStageManagement";
 import { HRBoard } from "@/components/hr/HRBoard";
 import { BranchManagementBoard } from "@/components/branch/BranchManagementBoard";
+import { BranchWiseBoard } from "@/components/branch/BranchWiseBoard";
 import { PackagesBoard } from "@/components/PackagesBoard";
 import { FinanceBoard } from "@/components/FinanceBoard";
 
@@ -588,6 +589,7 @@ export const CRMPage = ({ auth, onLogout }) => {
             <button onClick={() => setSuperAdminView("stages")} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${superAdminView === "stages" ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"}`} data-testid="super-admin-tab-stages">Rehabilitation Phase</button>
             <button onClick={() => setSuperAdminView("hr")} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${superAdminView === "hr" ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"}`} data-testid="super-admin-tab-hr">HR Admin</button>
             <button onClick={() => setSuperAdminView("branches")} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${superAdminView === "branches" ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"}`} data-testid="super-admin-tab-branches">Branch Management</button>
+            <button onClick={() => setSuperAdminView("branch_wise")} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${superAdminView === "branch_wise" ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"}`} data-testid="super-admin-tab-branch-wise">Branch Wise</button>
             <button onClick={() => setSuperAdminView("packages")} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${superAdminView === "packages" ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"}`} data-testid="super-admin-tab-packages">FITSIO STORE</button>
           </div>
         )}
@@ -598,6 +600,10 @@ export const CRMPage = ({ auth, onLogout }) => {
 
         {showSuperAdminBoard && superAdminView === "branches" && (
           <BranchManagementBoard actingUser={auth.user} />
+        )}
+
+        {showSuperAdminBoard && superAdminView === "branch_wise" && (
+          <BranchWiseBoard branches={branches} />
         )}
 
         {showSuperAdminBoard && superAdminView === "packages" && (
