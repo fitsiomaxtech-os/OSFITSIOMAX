@@ -565,31 +565,26 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     setCollectingFee(false);
   };
 
-  // Clicking "Collect Treatment Fee". Cheque/Partial Payment keep their existing
-  // flow (fields collected inline, locked amount, submit straight away). Cash at
-  // exactly the assigned session_package_price also submits immediately; any other
-  // case (amount doesn't match, or UPI/Card need their own fields) opens the second
-  // "Confirm Payment" popup instead.
-  const startCollectTreatmentFee = () => {
+  // Clicking one of the 5 Payment Mode buttons opens that mode's own dedicated
+  // popup — every mode (including Cash) now goes through its own explicit
+  // "Collect" step there, rather than sharing one form with a mode selector.
+  const chooseTreatmentPaymentMode = (mode) => {
+    setTreatmentFeeDraft({ ...treatmentFeeDraft, payment_mode: mode });
+    setTreatmentConfirmDraft({ upi_transaction_id: "", upi_utr: "", account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "" });
+  };
+
+  // The dedicated popup's own submit button — dispatches to whichever path
+  // already handles that mode (Cheque/Partial build their own payload directly;
+  // Cash/UPI/Card go through the shared confirm-and-collect path).
+  const submitTreatmentModePopup = () => {
     const mode = treatmentFeeDraft.payment_mode;
     if (mode === "cheque" || mode === "partial") {
-      submitTreatmentFee();
-      return;
-    }
-    const amount = parseFloat(treatmentFeeDraft.amount);
-    if (!(amount > 0)) {
-      toast.error("Enter a valid Treatment Fee amount");
-      return;
-    }
-    const expected = selectedLead.session_package_price;
-    const mismatch = expected != null && Math.round(amount * 100) !== Math.round(expected * 100);
-    if (mode === "cash" && !mismatch) {
-      const payload = attachSessionsSplit({ payment_mode: mode, amount, confirmed: true });
+      const payload = buildTreatmentFeePayload();
       if (!payload) return;
       submitTreatmentFee(payload);
       return;
     }
-    setTreatmentConfirmDraft({ upi_transaction_id: "", upi_utr: "", account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "" });
+    confirmCollectTreatmentFee();
   };
 
   // Confirm button inside the second "Confirm Payment" popup — validates
@@ -1514,115 +1509,15 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         </div>
                       </div>
                       <div>
-                        <label className="mb-1 block text-[11px] font-medium text-slate-500">Treatment Fee (₹)</label>
-                        {["cash", "upi", "card"].includes(treatmentFeeDraft.payment_mode) ? (
-                          <Input
-                            type="number"
-                            min="0"
-                            value={treatmentFeeDraft.amount}
-                            onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, amount: e.target.value })}
-                            className="h-9"
-                            data-testid="cons-treatment-fee-amount"
-                          />
-                        ) : (
-                          <div className="flex h-9 items-center rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700" data-testid="cons-treatment-fee-amount">
-                            {treatmentFeeTotalSessions ? `Rs.${treatmentComputedAmount}` : (selectedLead.session_package_price != null ? `Rs.${selectedLead.session_package_price}` : "—")}
-                          </div>
-                        )}
-                        {selectedLead.session_package_sessions && selectedLead.session_package_price != null && (
-                          <p className="mt-1 text-[11px] text-slate-500" data-testid="cons-treatment-fee-breakdown">
-                            {treatmentIsPartialSessions
-                              ? `Collect Now = ${treatmentSessionsNow} of ${treatmentFeeTotalSessions} sessions × Rs.${Math.round(perSessionRate * 100) / 100}/session = Rs.${treatmentComputedAmount}`
-                              : `Collect Total Session Fee = ${selectedLead.session_package_sessions} sessions × Rs.${Math.round((selectedLead.session_package_price / selectedLead.session_package_sessions) * 100) / 100}/session = Rs.${selectedLead.session_package_price}`}
-                          </p>
-                        )}
-                      </div>
-                      {["cash", "upi", "card", "cheque"].includes(treatmentFeeDraft.payment_mode) && treatmentFeeTotalSessions > 0 && (
-                        <div>
-                          <label className="mb-1 block text-[11px] font-medium text-slate-500">Sessions Covered Now *</label>
-                          <Input
-                            type="number"
-                            min="1"
-                            max={treatmentFeeTotalSessions}
-                            value={treatmentFeeDraft.sessions_now}
-                            onChange={(e) => setTreatmentSessionsNow(e.target.value)}
-                            className="h-9"
-                            data-testid="cons-treatment-fee-sessions-now"
-                          />
-                        </div>
-                      )}
-                      {treatmentIsPartialSessions && (
-                        <div>
-                          <label className="mb-1 block text-[11px] font-medium text-slate-500">
-                            Due Date for Balance ({treatmentRemainingSessions} sessions, Rs.{treatmentRemainingAmount}) *
-                          </label>
-                          <Input
-                            type="date"
-                            value={treatmentFeeDraft.balance_due_date}
-                            onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, balance_due_date: e.target.value })}
-                            className="h-9"
-                            data-testid="cons-treatment-fee-balance-due-date"
-                          />
-                        </div>
-                      )}
-                      <div>
                         <label className="mb-1 block text-[11px] font-medium text-slate-500">Payment Mode</label>
                         <PaymentModeSelect
                           value={treatmentFeeDraft.payment_mode}
                           options={TREATMENT_FEE_PAYMENT_MODES}
-                          onChange={(v) => setTreatmentFeeDraft({ ...treatmentFeeDraft, payment_mode: v })}
+                          onChange={chooseTreatmentPaymentMode}
                           testId="cons-treatment-fee-mode"
                         />
+                        <p className="mt-1 text-[11px] text-slate-400">Pick a payment method to open its own Collect popup.</p>
                       </div>
-
-                      {treatmentFeeDraft.payment_mode === "cheque" && (
-                        <>
-                          <div>
-                            <label className="mb-1 block text-[11px] font-medium text-slate-500">Bank Name</label>
-                            <Input
-                              value={treatmentFeeDraft.bank_name}
-                              onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, bank_name: e.target.value })}
-                              className="h-9"
-                              data-testid="cons-treatment-fee-bank-name"
-                            />
-                          </div>
-                          <div>
-                            <label className="mb-1 block text-[11px] font-medium text-slate-500">Cheque Number</label>
-                            <Input
-                              value={treatmentFeeDraft.cheque_number}
-                              onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, cheque_number: e.target.value })}
-                              className="h-9"
-                              data-testid="cons-treatment-fee-cheque-number"
-                            />
-                          </div>
-                        </>
-                      )}
-
-                      {treatmentFeeDraft.payment_mode === "partial" && (
-                        <PartialInstallmentsEditor
-                          installments={partialInstallments}
-                          setInstallments={(next) => setTreatmentFeeDraft({ ...treatmentFeeDraft, partial_installments: next })}
-                          totalSessions={treatmentFeeTotalSessions}
-                          perSessionRate={perSessionRate}
-                          onCollectRow={collectPartialInstallmentNow}
-                          collecting={collectingTreatmentFee}
-                        />
-                      )}
-                      <Button
-                        className="w-full bg-indigo-600 text-xs hover:bg-indigo-700"
-                        onClick={startCollectTreatmentFee}
-                        disabled={
-                          collectingTreatmentFee ||
-                          selectedLead.session_package_price == null ||
-                          (["cash", "upi", "card"].includes(treatmentFeeDraft.payment_mode) && !(parseFloat(treatmentFeeDraft.amount) > 0)) ||
-                          (treatmentFeeDraft.payment_mode === "cheque" && (!treatmentFeeDraft.bank_name.trim() || !treatmentFeeDraft.cheque_number.trim())) ||
-                          (treatmentFeeDraft.payment_mode === "partial" && (!partialAllFilled || partialMismatch)) ||
-                          (["cash", "upi", "card", "cheque"].includes(treatmentFeeDraft.payment_mode) && treatmentIsPartialSessions && !treatmentFeeDraft.balance_due_date)
-                        }
-                        data-testid="cons-treatment-fee-submit-combined"
-                      >
-                        {collectingTreatmentFee ? "Saving..." : "Collect Treatment Fee"}
-                      </Button>
                         </>
                       )}
                     </div>
@@ -1776,124 +1671,24 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     </div>
                   </div>
                   <div>
-                    <label className="mb-1 block text-[11px] font-medium text-slate-500">Treatment Fee (₹)</label>
-                    {["cash", "upi", "card"].includes(treatmentFeeDraft.payment_mode) ? (
-                      <Input
-                        type="number"
-                        min="0"
-                        value={treatmentFeeDraft.amount}
-                        onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, amount: e.target.value })}
-                        className="h-9"
-                        data-testid="cons-treatment-fee-amount"
-                      />
-                    ) : (
-                      <div className="flex h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-700" data-testid="cons-treatment-fee-amount">
-                        {treatmentFeeTotalSessions ? `Rs.${treatmentComputedAmount}` : (selectedLead.session_package_price != null ? `Rs.${selectedLead.session_package_price}` : "—")}
-                      </div>
-                    )}
-                    {selectedLead.session_package_sessions && selectedLead.session_package_price != null && (
-                      <p className="mt-1 text-[11px] text-slate-500" data-testid="cons-treatment-fee-breakdown">
-                        {treatmentIsPartialSessions
-                          ? `Collect Now = ${treatmentSessionsNow} of ${treatmentFeeTotalSessions} sessions × Rs.${Math.round(perSessionRate * 100) / 100}/session = Rs.${treatmentComputedAmount}`
-                          : `Collect Total Session Fee = ${selectedLead.session_package_sessions} sessions × Rs.${Math.round((selectedLead.session_package_price / selectedLead.session_package_sessions) * 100) / 100}/session = Rs.${selectedLead.session_package_price}`}
-                      </p>
-                    )}
-                  </div>
-                  {["cash", "upi", "card", "cheque"].includes(treatmentFeeDraft.payment_mode) && treatmentFeeTotalSessions > 0 && (
-                    <div>
-                      <label className="mb-1 block text-[11px] font-medium text-slate-500">Sessions Covered Now *</label>
-                      <Input
-                        type="number"
-                        min="1"
-                        max={treatmentFeeTotalSessions}
-                        value={treatmentFeeDraft.sessions_now}
-                        onChange={(e) => setTreatmentSessionsNow(e.target.value)}
-                        className="h-9"
-                        data-testid="cons-treatment-fee-sessions-now"
-                      />
-                    </div>
-                  )}
-                  {treatmentIsPartialSessions && (
-                    <div>
-                      <label className="mb-1 block text-[11px] font-medium text-slate-500">
-                        Due Date for Balance ({treatmentRemainingSessions} sessions, Rs.{treatmentRemainingAmount}) *
-                      </label>
-                      <Input
-                        type="date"
-                        value={treatmentFeeDraft.balance_due_date}
-                        onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, balance_due_date: e.target.value })}
-                        className="h-9"
-                        data-testid="cons-treatment-fee-balance-due-date"
-                      />
-                    </div>
-                  )}
-                  <div>
                     <label className="mb-1 block text-[11px] font-medium text-slate-500">Payment Mode</label>
                     <PaymentModeSelect
                       value={treatmentFeeDraft.payment_mode}
                       options={TREATMENT_FEE_PAYMENT_MODES}
-                      onChange={(v) => setTreatmentFeeDraft({ ...treatmentFeeDraft, payment_mode: v })}
+                      onChange={chooseTreatmentPaymentMode}
                       testId="cons-treatment-fee-mode"
                     />
+                    <p className="mt-1 text-[11px] text-slate-400">Pick a payment method to open its own Collect popup.</p>
                   </div>
-
-                  {treatmentFeeDraft.payment_mode === "cheque" && (
-                    <>
-                      <div>
-                        <label className="mb-1 block text-[11px] font-medium text-slate-500">Bank Name</label>
-                        <Input
-                          value={treatmentFeeDraft.bank_name}
-                          onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, bank_name: e.target.value })}
-                          className="h-9"
-                          data-testid="cons-treatment-fee-bank-name"
-                        />
-                      </div>
-                      <div>
-                        <label className="mb-1 block text-[11px] font-medium text-slate-500">Cheque Number</label>
-                        <Input
-                          value={treatmentFeeDraft.cheque_number}
-                          onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, cheque_number: e.target.value })}
-                          className="h-9"
-                          data-testid="cons-treatment-fee-cheque-number"
-                        />
-                      </div>
-                    </>
-                  )}
-
-                  {treatmentFeeDraft.payment_mode === "partial" && (
-                    <PartialInstallmentsEditor
-                      installments={partialInstallments}
-                      setInstallments={(next) => setTreatmentFeeDraft({ ...treatmentFeeDraft, partial_installments: next })}
-                      totalSessions={treatmentFeeTotalSessions}
-                      perSessionRate={perSessionRate}
-                      onCollectRow={collectPartialInstallmentNow}
-                      collecting={collectingTreatmentFee}
-                    />
-                  )}
-
-                  <Button
-                    className="w-full bg-sky-600 hover:bg-sky-700 text-xs"
-                    onClick={startCollectTreatmentFee}
-                    disabled={
-                      collectingTreatmentFee ||
-                      selectedLead.session_package_price == null ||
-                      (["cash", "upi", "card"].includes(treatmentFeeDraft.payment_mode) && !(parseFloat(treatmentFeeDraft.amount) > 0)) ||
-                      (treatmentFeeDraft.payment_mode === "cheque" && (!treatmentFeeDraft.bank_name.trim() || !treatmentFeeDraft.cheque_number.trim())) ||
-                      (treatmentFeeDraft.payment_mode === "partial" && (!partialAllFilled || partialMismatch)) ||
-                      (["cash", "upi", "card", "cheque"].includes(treatmentFeeDraft.payment_mode) && treatmentIsPartialSessions && !treatmentFeeDraft.balance_due_date)
-                    }
-                    data-testid="cons-treatment-fee-submit"
-                  >
-                    {collectingTreatmentFee ? "Saving..." : selectedLead.treatment_fee_paid != null ? "Update Payment" : "Confirm & Move"}
-                  </Button>
                 </div>
               </div>
             )}
 
-            {/* Confirm Treatment Fee Payment — second-step popup, only shown when the
-                entered amount doesn't match the assigned session_package_price and/or
-                the mode (UPI/Card) needs its own fields. Layered above whichever of the
-                two Treatment Fee popups (combined or standalone) is currently open. */}
+            {/* Collect {Mode} Payment — each of the 5 Treatment Fee payment modes gets
+                its own dedicated popup here (opened by chooseTreatmentPaymentMode),
+                rather than sharing one form with a mode selector. Layered above
+                whichever of the two Treatment Fee popups (combined or standalone) is
+                currently open. */}
             {treatmentConfirmDraft && treatmentFeeDraft && (() => {
               const amount = parseFloat(treatmentFeeDraft.amount);
               const expected = selectedLead.session_package_price;
@@ -1903,13 +1698,75 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               const expectedForSessionsNow = treatmentIsPartialSessions ? treatmentComputedAmount : expected;
               const mismatch = expectedForSessionsNow != null && Math.round(amount * 100) !== Math.round(expectedForSessionsNow * 100);
               const mode = treatmentFeeDraft.payment_mode;
+              const modeLabel = TREATMENT_FEE_PAYMENT_MODES.find((m) => m.value === mode)?.label || "";
               return (
                 <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" data-testid="cons-treatment-fee-confirm-modal">
-                  <div className="w-full max-w-sm space-y-3 rounded-xl bg-white p-4 shadow-2xl">
+                  <div className="max-h-[85vh] w-full max-w-sm space-y-3 overflow-y-auto rounded-xl bg-white p-4 shadow-2xl">
                     <div className="flex items-center justify-between">
-                      <p className="text-sm font-semibold text-slate-800">Confirm Treatment Fee Payment</p>
+                      <p className="text-sm font-semibold text-slate-800">{mode === "partial" ? "Partial Payment Schedule" : `Collect ${modeLabel} Payment`}</p>
                       <button onClick={() => setTreatmentConfirmDraft(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-treatment-fee-confirm-close"><X className="h-4 w-4" /></button>
                     </div>
+
+                    <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600" data-testid="cons-treatment-fee-confirm-package">
+                      {selectedLead.session_package_name || "—"}{selectedLead.session_package_sessions ? ` · ${selectedLead.session_package_sessions} sessions` : ""}
+                    </div>
+
+                    {mode !== "partial" && (
+                      <div>
+                        <label className="mb-1 block text-[11px] font-medium text-slate-500">{modeLabel} Amount (₹)</label>
+                        {["cash", "upi", "card"].includes(mode) ? (
+                          <Input
+                            type="number"
+                            min="0"
+                            value={treatmentFeeDraft.amount}
+                            onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, amount: e.target.value })}
+                            className="h-9"
+                            data-testid="cons-treatment-fee-amount"
+                          />
+                        ) : (
+                          <div className="flex h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-700" data-testid="cons-treatment-fee-amount">
+                            {treatmentFeeTotalSessions ? `Rs.${treatmentComputedAmount}` : (selectedLead.session_package_price != null ? `Rs.${selectedLead.session_package_price}` : "—")}
+                          </div>
+                        )}
+                        {selectedLead.session_package_sessions && selectedLead.session_package_price != null && (
+                          <p className="mt-1 text-[11px] text-slate-500" data-testid="cons-treatment-fee-breakdown">
+                            {treatmentIsPartialSessions
+                              ? `Collect Now = ${treatmentSessionsNow} of ${treatmentFeeTotalSessions} sessions × Rs.${Math.round(perSessionRate * 100) / 100}/session = Rs.${treatmentComputedAmount}`
+                              : `Collect Total Session Fee = ${selectedLead.session_package_sessions} sessions × Rs.${Math.round((selectedLead.session_package_price / selectedLead.session_package_sessions) * 100) / 100}/session = Rs.${selectedLead.session_package_price}`}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {mode !== "partial" && treatmentFeeTotalSessions > 0 && (
+                      <div>
+                        <label className="mb-1 block text-[11px] font-medium text-slate-500">Sessions Covered Now *</label>
+                        <Input
+                          type="number"
+                          min="1"
+                          max={treatmentFeeTotalSessions}
+                          value={treatmentFeeDraft.sessions_now}
+                          onChange={(e) => setTreatmentSessionsNow(e.target.value)}
+                          className="h-9"
+                          data-testid="cons-treatment-fee-sessions-now"
+                        />
+                      </div>
+                    )}
+
+                    {treatmentIsPartialSessions && (
+                      <div>
+                        <label className="mb-1 block text-[11px] font-medium text-slate-500">
+                          Due Date for Balance ({treatmentRemainingSessions} sessions, Rs.{treatmentRemainingAmount}) *
+                        </label>
+                        <Input
+                          type="date"
+                          value={treatmentFeeDraft.balance_due_date}
+                          onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, balance_due_date: e.target.value })}
+                          className="h-9"
+                          data-testid="cons-treatment-fee-balance-due-date"
+                        />
+                      </div>
+                    )}
 
                     {treatmentIsPartialSessions && (
                       <div className="rounded-md border border-sky-200 bg-sky-50 p-2.5 text-[11px] text-sky-800" data-testid="cons-treatment-fee-partial-sessions-note">
@@ -1987,18 +1844,56 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       </>
                     )}
 
+                    {mode === "cheque" && (
+                      <>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium text-slate-500">Bank Name</label>
+                          <Input
+                            value={treatmentFeeDraft.bank_name}
+                            onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, bank_name: e.target.value })}
+                            className="h-9"
+                            data-testid="cons-treatment-fee-bank-name"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium text-slate-500">Cheque Number</label>
+                          <Input
+                            value={treatmentFeeDraft.cheque_number}
+                            onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, cheque_number: e.target.value })}
+                            className="h-9"
+                            data-testid="cons-treatment-fee-cheque-number"
+                          />
+                        </div>
+                      </>
+                    )}
+
+                    {mode === "partial" && (
+                      <PartialInstallmentsEditor
+                        installments={partialInstallments}
+                        setInstallments={(next) => setTreatmentFeeDraft({ ...treatmentFeeDraft, partial_installments: next })}
+                        totalSessions={treatmentFeeTotalSessions}
+                        perSessionRate={perSessionRate}
+                        onCollectRow={collectPartialInstallmentNow}
+                        collecting={collectingTreatmentFee}
+                      />
+                    )}
+
                     <Button
                       className="w-full bg-indigo-600 text-xs hover:bg-indigo-700"
-                      onClick={confirmCollectTreatmentFee}
+                      onClick={submitTreatmentModePopup}
                       disabled={
                         collectingTreatmentFee ||
+                        selectedLead.session_package_price == null ||
+                        (["cash", "upi", "card"].includes(mode) && !(parseFloat(treatmentFeeDraft.amount) > 0)) ||
+                        (mode === "cheque" && (!treatmentFeeDraft.bank_name.trim() || !treatmentFeeDraft.cheque_number.trim())) ||
+                        (mode === "partial" && (!partialAllFilled || partialMismatch)) ||
+                        (["cash", "upi", "card", "cheque"].includes(mode) && treatmentIsPartialSessions && !treatmentFeeDraft.balance_due_date) ||
                         (mode === "upi" && (!treatmentConfirmDraft.upi_transaction_id.trim() || !treatmentConfirmDraft.upi_utr.trim())) ||
-                        (mode === "card" && (!treatmentConfirmDraft.account_number.trim() || !treatmentConfirmDraft.account_holder_name.trim() || !treatmentConfirmDraft.bank_name.trim() || !treatmentConfirmDraft.ifsc_code.trim())) ||
-                        (treatmentIsPartialSessions && !treatmentFeeDraft.balance_due_date)
+                        (mode === "card" && (!treatmentConfirmDraft.account_number.trim() || !treatmentConfirmDraft.account_holder_name.trim() || !treatmentConfirmDraft.bank_name.trim() || !treatmentConfirmDraft.ifsc_code.trim()))
                       }
                       data-testid="cons-treatment-fee-confirm-submit"
                     >
-                      {collectingTreatmentFee ? "Saving..." : "Confirm & Collect"}
+                      {collectingTreatmentFee ? "Saving..." : mode === "partial" ? "Save Payment Schedule" : `Collect ${modeLabel} Payment`}
                     </Button>
                   </div>
                 </div>
