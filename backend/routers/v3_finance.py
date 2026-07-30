@@ -187,13 +187,15 @@ def _installment_status(inst: dict, today: str) -> str:
 
 
 def _lead_outstanding_balance(lead: dict) -> float:
-    """Total still owed by this client across everything on their record: the gap
-    between an assigned Consultation package's price and what was actually
-    collected for it, plus — for a Partial Payment treatment fee — every
-    installment not yet marked paid."""
+    """Total still owed by this client across everything on their record: the
+    Consultation Fee's assigned price if it hasn't been collected yet at all,
+    plus — for a Partial Payment treatment fee — every installment not yet
+    marked paid. Once a Consultation Fee payment has been confirmed (even at a
+    Branch-Admin-negotiated discount below the assigned price), it's settled in
+    full — the discount is a deliberate decision, not money still owed."""
     balance = 0.0
-    if lead.get("package_id"):
-        balance += max((lead.get("package_price") or 0) - (lead.get("package_paid") or 0), 0)
+    if lead.get("package_id") and lead.get("package_paid") is None:
+        balance += lead.get("package_price") or 0
     if lead.get("treatment_fee_payment_mode") == "partial":
         installments = (lead.get("treatment_fee_payment_details") or {}).get("installments") or []
         balance += sum(i.get("amount", 0) for i in installments if not i.get("paid"))
@@ -223,8 +225,12 @@ def _lead_outstanding_detail(lead: dict, today: str) -> dict:
     the next due date (from the Partial Payment schedule, if any) and a status
     badge: overdue (past due date), due_soon (due within 3 days), or partial
     (owes money but nothing scheduled yet / due further out)."""
-    total_bill = lead.get("package_price") or 0
-    paid_amount = lead.get("package_paid") or 0
+    # A confirmed Consultation Fee (even at a negotiated discount) is fully
+    # settled -- its "bill" for outstanding-balance purposes is whatever was
+    # actually collected, not the original assigned price.
+    package_paid = lead.get("package_paid")
+    total_bill = package_paid if package_paid is not None else (lead.get("package_price") or 0)
+    paid_amount = package_paid or 0
     due_date = None
     next_installment_number = None
 
@@ -571,11 +577,12 @@ async def client_transaction_history(
         for idx, inst in enumerate(installments, start=1)
     ]
 
-    package_paid = lead.get("package_paid") or 0
-    package_price = lead.get("package_price") or 0
     consultation_status = None
     if lead.get("package_id"):
-        consultation_status = "paid" if package_paid >= package_price and package_price > 0 else "pending"
+        # A confirmed collection (even a negotiated discount below the assigned
+        # price) counts as fully paid -- not still-pending -- since it's a
+        # deliberate confirmed payment, not a partial/outstanding one.
+        consultation_status = "paid" if lead.get("package_paid") is not None else "pending"
 
     return {
         "client": {
