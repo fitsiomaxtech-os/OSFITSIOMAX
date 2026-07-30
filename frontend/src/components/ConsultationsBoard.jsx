@@ -2260,7 +2260,7 @@ function PartialInstallmentsEditor({ installments, setInstallments, totalSession
                 data-testid={`cons-treatment-fee-partial-date-${idx}`}
               />
             </div>
-            {isToday && (
+            {isToday ? (
               <Button
                 size="sm"
                 onClick={() => onCollectRow(idx)}
@@ -2269,6 +2269,15 @@ function PartialInstallmentsEditor({ installments, setInstallments, totalSession
                 data-testid={`cons-treatment-fee-partial-collect-${idx}`}
               >
                 Collect
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                disabled
+                className="h-9 border border-slate-200 bg-slate-100 text-xs text-slate-400 hover:bg-slate-100"
+                data-testid={`cons-treatment-fee-partial-due-${idx}`}
+              >
+                Due
               </Button>
             )}
             {installments.length > 2 && (
