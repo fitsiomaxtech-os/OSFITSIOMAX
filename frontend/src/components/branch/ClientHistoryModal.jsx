@@ -235,15 +235,34 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
                   {transactions.length === 0 ? (
                     <p className="py-4 text-center text-xs text-slate-400">No transactions yet.</p>
                   ) : transactions.map((tx) => (
-                    <div key={tx.id} className="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-2 text-xs" data-testid={`client-history-tx-${tx.id}`}>
-                      <div>
-                        <p className="font-medium text-slate-700 capitalize">{tx.source} · <span className="text-slate-500">{formatMode(tx.payment_mode)}</span></p>
-                        <p className="text-[10px] text-slate-400">{fmtDate(tx.date)} {tx.receipt_no && `· ${tx.receipt_no}`}</p>
+                    <div key={tx.id} className="rounded-lg border border-slate-100 px-3 py-2 text-xs" data-testid={`client-history-tx-${tx.id}`}>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="font-medium text-slate-700 capitalize">{tx.source} · <span className="text-slate-500">{formatMode(tx.payment_mode)}</span></p>
+                          <p className="text-[10px] text-slate-400">{fmtDate(tx.date)} {tx.receipt_no && `· ${tx.receipt_no}`}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-semibold text-emerald-700">{fmt(tx.amount)}</p>
+                          <p className="text-[10px] font-medium text-emerald-600">Paid</p>
+                        </div>
                       </div>
-                      <div className="text-right">
-                        <p className="font-semibold text-emerald-700">{fmt(tx.amount)}</p>
-                        <p className="text-[10px] font-medium text-emerald-600">Paid</p>
-                      </div>
+                      {!!tx.discount_amount && (
+                        <div className="mt-1.5 grid grid-cols-3 gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5" data-testid={`client-history-tx-discount-${tx.id}`}>
+                          <div>
+                            <p className="text-[9px] uppercase tracking-wide text-amber-700">Actual Price</p>
+                            <p className="text-[11px] font-semibold text-slate-700">{fmt(tx.original_amount)}</p>
+                          </div>
+                          <div>
+                            <p className="text-[9px] uppercase tracking-wide text-amber-700">Collected</p>
+                            <p className="text-[11px] font-semibold text-slate-700">{fmt(tx.amount)}</p>
+                          </div>
+                          <div>
+                            <p className="text-[9px] uppercase tracking-wide text-amber-700">{tx.discount_amount > 0 ? "Discount" : "Extra"}</p>
+                            <p className="text-[11px] font-semibold text-amber-700">{fmt(Math.abs(tx.discount_amount))}</p>
+                          </div>
+                          <p className="col-span-3 mt-0.5 text-[10px] font-medium text-amber-700">{tx.discount_reason}</p>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

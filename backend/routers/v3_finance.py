@@ -551,6 +551,9 @@ async def client_transaction_history(
             "details": details,
             "collected_by": act.get("created_by", ""),
             "receipt_no": f"RCPT-{act.get('id', '')[-6:].upper()}" if act.get("id") else None,
+            "original_amount": act.get("original_amount"),
+            "discount_amount": act.get("discount_amount"),
+            "discount_reason": act.get("discount_reason"),
         })
 
     balance = _lead_outstanding_balance(lead)

@@ -192,9 +192,24 @@ async def collect_package_payment(lead_id: str, payload: V3CollectPackagePayment
     if not lead.get("package_id") or lead.get("package_price") is None:
         raise HTTPException(status_code=400, detail="No consultation package assigned yet")
 
-    amount = payload.amount if payload.amount is not None else lead["package_price"]
+    original_price = lead["package_price"]
+    amount = payload.amount if payload.amount is not None else original_price
     if amount <= 0:
         raise HTTPException(status_code=400, detail="Amount must be greater than zero")
+
+    # Assigned price vs what was actually collected — Branch Admin can negotiate a
+    # discount on the spot (e.g. Rs.800 assigned, client only has Rs.750). The gap is
+    # logged on the activity record so Transaction History shows the reason, not just
+    # the final number.
+    discount_amount = round(original_price - amount, 2) if original_price is not None else 0
+    discount_suffix = ""
+    discount_reason = None
+    if discount_amount > 0:
+        discount_reason = "Negotiated discount"
+        discount_suffix = f" · Actual Price Rs.{original_price}, Negotiated Discount Rs.{discount_amount}"
+    elif discount_amount < 0:
+        discount_reason = "Additional amount collected"
+        discount_suffix = f" · Actual Price Rs.{original_price}, Rs.{abs(discount_amount)} above assigned fee"
 
     payment_details = {}
     detail_suffix = ""
@@ -228,7 +243,11 @@ async def collect_package_payment(lead_id: str, payload: V3CollectPackagePayment
         "id": str(uuid.uuid4()),
         "lead_id": lead_id,
         "action": "package_payment_collected",
-        "details": f"{'Updated' if is_update else 'Collected'} Consultation Fee Rs.{amount} for package '{lead.get('package_name')}' via {payload.payment_mode}{detail_suffix}",
+        "details": f"{'Updated' if is_update else 'Collected'} Consultation Fee Rs.{amount} for package '{lead.get('package_name')}' via {payload.payment_mode}{detail_suffix}{discount_suffix}",
+        "original_amount": original_price,
+        "collected_amount": amount,
+        "discount_amount": discount_amount if discount_amount != 0 else None,
+        "discount_reason": discount_reason,
         "created_by": user.full_name,
         "created_by_role": user.role,
         "created_at": _now(),
@@ -262,15 +281,30 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
 
     # Cash/UPI/Card can be manually adjusted (discount, rounding, partial cash
     # collected); Cheque and Partial Payment keep the locked session_package_price.
+    original_price = lead["session_package_price"]
     if payload.payment_mode in ("cash", "upi", "card"):
-        amount = payload.amount if payload.amount is not None else lead["session_package_price"]
+        amount = payload.amount if payload.amount is not None else original_price
         if amount <= 0:
             raise HTTPException(status_code=400, detail="Amount must be greater than zero")
     else:
-        amount = lead["session_package_price"]
+        amount = original_price
 
     if payload.payment_mode in ("cash", "upi", "card") and not payload.confirmed:
         raise HTTPException(status_code=400, detail="Please confirm the payment before submitting")
+
+    # Same negotiated-discount tracking as the Consultation Fee — only meaningful
+    # for the modes where the amount can actually be adjusted.
+    discount_amount = 0
+    discount_reason = None
+    discount_suffix = ""
+    if payload.payment_mode in ("cash", "upi", "card"):
+        discount_amount = round(original_price - amount, 2) if original_price is not None else 0
+        if discount_amount > 0:
+            discount_reason = "Negotiated discount"
+            discount_suffix = f" · Actual Price Rs.{original_price}, Negotiated Discount Rs.{discount_amount}"
+        elif discount_amount < 0:
+            discount_reason = "Additional amount collected"
+            discount_suffix = f" · Actual Price Rs.{original_price}, Rs.{abs(discount_amount)} above assigned fee"
 
     # Mode-specific required fields + a structured payment_details record for the
     # receipt/activity log. Account number is never persisted beyond its last 4 digits.
@@ -344,12 +378,16 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
     if payload.payment_mode == "partial":
         details = f"{'Updated' if is_update else 'Created'} Payment Schedule for session package '{lead.get('session_package_name')}' ({lead.get('session_package_sessions')} sessions) · Rs.{amount} across {len(installments)} installments{detail_suffix}"
     else:
-        details = f"{'Updated' if is_update else 'Collected'} Treatment Fee for session package '{lead.get('session_package_name')}' ({lead.get('session_package_sessions')} sessions) · Rs.{amount} via {payload.payment_mode}{detail_suffix}"
+        details = f"{'Updated' if is_update else 'Collected'} Treatment Fee for session package '{lead.get('session_package_name')}' ({lead.get('session_package_sessions')} sessions) · Rs.{amount} via {payload.payment_mode}{detail_suffix}{discount_suffix}"
     await v3_col("lead_activity").insert_one({
         "id": str(uuid.uuid4()),
         "lead_id": lead_id,
         "action": "treatment_fee_collected",
         "details": details,
+        "original_amount": original_price if payload.payment_mode in ("cash", "upi", "card") else None,
+        "collected_amount": amount if payload.payment_mode in ("cash", "upi", "card") else None,
+        "discount_amount": discount_amount if discount_amount != 0 else None,
+        "discount_reason": discount_reason,
         "created_by": user.full_name,
         "created_by_role": user.role,
         "created_at": _now(),
