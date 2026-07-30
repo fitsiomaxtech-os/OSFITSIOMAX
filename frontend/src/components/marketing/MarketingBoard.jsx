@@ -475,7 +475,7 @@ const ASSIGNEE_COLOR_PALETTE = [
 // Native <select> can't reliably color individual dropdown-list items across
 // browsers — only the closed box. This renders each option as its own colored,
 // rounded row in a custom open list instead (same pattern as HRBoard's role filter).
-const ColorFilterDropdown = ({ value, options, onChange, testId }) => {
+const ColorFilterDropdown = ({ value, options, onChange, testId, compact = false }) => {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -492,14 +492,16 @@ const ColorFilterDropdown = ({ value, options, onChange, testId }) => {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className={`flex h-9 w-full items-center justify-between gap-2 rounded-md border px-3 text-sm font-semibold ${current?.classes || "border-slate-200 bg-white text-slate-700"}`}
+        className={`flex w-full items-center justify-between gap-2 rounded-md border font-semibold ${
+          compact ? "h-7 px-2 text-[11px]" : "h-9 px-3 text-sm"
+        } ${current?.classes || "border-slate-200 bg-white text-slate-700"}`}
         data-testid={testId}
       >
         <span className="truncate">{current?.label}</span>
-        <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
+        <ChevronDown className={`shrink-0 opacity-60 ${compact ? "h-3 w-3" : "h-3.5 w-3.5"}`} />
       </button>
       {open && (
-        <div className="absolute left-0 z-20 mt-1 max-h-64 w-full min-w-[170px] space-y-1 overflow-y-auto rounded-md border border-slate-200 bg-white p-1.5 shadow-lg" data-testid={`${testId}-list`}>
+        <div className={`absolute left-0 z-20 mt-1 max-h-64 w-full overflow-y-auto space-y-1 rounded-md border border-slate-200 bg-white p-1.5 shadow-lg ${compact ? "min-w-[150px]" : "min-w-[170px]"}`} data-testid={`${testId}-list`}>
           {options.map((o) => (
             <button
               key={o.value || "empty"}
@@ -609,10 +611,16 @@ const AllLeadsTab = ({ team }) => {
                 <td className="px-3 py-2"><SourcePill source={l.source_tab || l.source_type} /></td>
                 <td className="px-3 py-2 text-slate-600">{l.stage}</td>
                 <td className="px-3 py-2">
-                  <select className="h-7 rounded border border-slate-200 px-1 text-[11px]" value={l.assigned_user_id || ""} onChange={(e) => reassign(l.id, e.target.value)} data-testid={`mk-lead-reassign-${l.id}`}>
-                    <option value="">— Unassigned —</option>
-                    {everyone.map((u) => <option key={u.id} value={u.id}>{u.full_name}</option>)}
-                  </select>
+                  <ColorFilterDropdown
+                    compact
+                    value={l.assigned_user_id || ""}
+                    options={[
+                      { value: "", label: "— Unassigned —", classes: "border-slate-200 bg-white text-slate-700" },
+                      ...everyone.map((u, i) => ({ value: u.id, label: u.full_name, classes: ASSIGNEE_COLOR_PALETTE[i % ASSIGNEE_COLOR_PALETTE.length] })),
+                    ]}
+                    onChange={(v) => reassign(l.id, v)}
+                    testId={`mk-lead-reassign-${l.id}`}
+                  />
                 </td>
                 <td className="px-3 py-2 text-slate-400">{(l.created_at || "").slice(0, 10)}</td>
                 <td className="px-3 py-2"><button onClick={() => remove(l.id)} className="text-red-500 hover:text-red-700" data-testid={`mk-lead-delete-${l.id}`}><Trash2 className="h-4 w-4" /></button></td>
