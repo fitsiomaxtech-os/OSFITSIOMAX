@@ -1,4 +1,3 @@
-# Trigger test commit to verify SSH deploy secrets
 name: Deploy to VPS
 
 on:
@@ -8,18 +7,8 @@ on:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, osfitsiomax-vps]
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
       - name: Deploy to VPS
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: ${{ secrets.SSH_PORT }}
-          script: |
-            bash ~/deploy-osfitsiomax.sh
+        run: bash /root/deploy-osfitsiomax.sh
