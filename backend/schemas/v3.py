@@ -331,6 +331,13 @@ class V3CollectTreatmentFeeInput(BaseModel):
     # payments, others want 5 or 6); every installment needs its own amount and due
     # date, and they must sum to the locked-in session_package_price.
     partial_installments: Optional[List[V3PartialInstallment]] = None
+    # Cash/UPI/Card/Cheque can ALSO collect for only some of the package's sessions
+    # right now (e.g. 5 of 10) rather than the full package — sessions_now defaults
+    # to every session when omitted (today's full-collection behavior, unchanged).
+    # balance_due_date is required whenever sessions_now is less than the package's
+    # total; the remaining sessions are scheduled as a single balance installment.
+    sessions_now: Optional[int] = None
+    balance_due_date: Optional[str] = None
 
 
 class V3ConsultationDecisionInput(BaseModel):

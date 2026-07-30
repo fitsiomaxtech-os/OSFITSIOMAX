@@ -186,18 +186,28 @@ def _installment_status(inst: dict, today: str) -> str:
     return "upcoming"
 
 
+def _treatment_installments(lead: dict) -> list:
+    """A Treatment Fee installment schedule exists whenever the record has one —
+    whether it came from choosing 'Partial Payment' outright, or from collecting
+    Cash/UPI/Card/Cheque for only some of the package's sessions right now (the
+    remaining sessions get scheduled the same way). Keyed off the data shape
+    itself rather than the stored payment_mode, so both paths share every
+    downstream balance/schedule/status calculation for free."""
+    return (lead.get("treatment_fee_payment_details") or {}).get("installments") or []
+
+
 def _lead_outstanding_balance(lead: dict) -> float:
     """Total still owed by this client across everything on their record: the
     Consultation Fee's assigned price if it hasn't been collected yet at all,
-    plus — for a Partial Payment treatment fee — every installment not yet
-    marked paid. Once a Consultation Fee payment has been confirmed (even at a
-    Branch-Admin-negotiated discount below the assigned price), it's settled in
-    full — the discount is a deliberate decision, not money still owed."""
+    plus every Treatment Fee installment not yet marked paid. Once a Consultation
+    Fee payment has been confirmed (even at a Branch-Admin-negotiated discount
+    below the assigned price), it's settled in full — the discount is a
+    deliberate decision, not money still owed."""
     balance = 0.0
     if lead.get("package_id") and lead.get("package_paid") is None:
         balance += lead.get("package_price") or 0
-    if lead.get("treatment_fee_payment_mode") == "partial":
-        installments = (lead.get("treatment_fee_payment_details") or {}).get("installments") or []
+    installments = _treatment_installments(lead)
+    if installments:
         balance += sum(i.get("amount", 0) for i in installments if not i.get("paid"))
     return round(balance, 2)
 
@@ -207,9 +217,9 @@ def _lead_payment_progress(lead: dict) -> Optional[dict]:
     Due Amount / Paid Amount columns show: the next unpaid installment (its date
     and amount, whether it's overdue or just upcoming), plus the total already
     paid. None of the fields apply once every installment is settled."""
-    if lead.get("treatment_fee_payment_mode") != "partial":
+    installments = _treatment_installments(lead)
+    if not installments:
         return None
-    installments = (lead.get("treatment_fee_payment_details") or {}).get("installments") or []
     paid_amount = sum(i.get("amount", 0) for i in installments if i.get("paid"))
     unpaid = sorted((i for i in installments if not i.get("paid")), key=lambda i: i.get("due_date", ""))
     next_due = unpaid[0] if unpaid else None
@@ -234,8 +244,8 @@ def _lead_outstanding_detail(lead: dict, today: str) -> dict:
     due_date = None
     next_installment_number = None
 
-    if lead.get("treatment_fee_payment_mode") == "partial":
-        installments = (lead.get("treatment_fee_payment_details") or {}).get("installments") or []
+    installments = _treatment_installments(lead)
+    if installments:
         total_bill += sum(i.get("amount", 0) for i in installments)
         paid_amount += sum(i.get("amount", 0) for i in installments if i.get("paid"))
         unpaid = sorted((i for i in installments if not i.get("paid")), key=lambda i: i.get("due_date", ""))
@@ -277,8 +287,8 @@ def _lead_session_summary(lead: dict) -> dict:
     total = 0.0
     paid = 0.0
     next_installment_number = None
-    if lead.get("treatment_fee_payment_mode") == "partial":
-        installments = (lead.get("treatment_fee_payment_details") or {}).get("installments") or []
+    installments = _treatment_installments(lead)
+    if installments:
         total = sum(i.get("amount", 0) for i in installments)
         paid = sum(i.get("amount", 0) for i in installments if i.get("paid"))
         unpaid = sorted((i for i in installments if not i.get("paid")), key=lambda i: i.get("due_date", ""))
@@ -464,8 +474,8 @@ async def revenue_overview(
                 "status": detail["status"],
                 "next_installment_number": detail["next_installment_number"],
             })
-        if l.get("treatment_fee_payment_mode") == "partial":
-            installments = (l.get("treatment_fee_payment_details") or {}).get("installments") or []
+        installments = _treatment_installments(l)
+        if installments:
             installments_total = len(installments)
             installments_paid = len([i for i in installments if i.get("paid")])
             for idx, inst in enumerate(installments, start=1):
@@ -474,7 +484,7 @@ async def revenue_overview(
                     "client_name": l.get("name", "Unknown"),
                     "phone": l.get("phone", ""),
                     "branch_name": branch_name_map.get(l.get("branch_id"), ""),
-                    "category": "session",  # Partial Payment only exists on Treatment Fee today
+                    "category": "session",  # Treatment Fee installment schedule (Partial Payment, or a partial-sessions collection)
                     "installment_number": idx,
                     "amount": inst.get("amount", 0),
                     "due_date": inst.get("due_date", ""),

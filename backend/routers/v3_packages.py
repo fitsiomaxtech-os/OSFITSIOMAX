@@ -282,29 +282,50 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
     # Cash/UPI/Card can be manually adjusted (discount, rounding, partial cash
     # collected); Cheque and Partial Payment keep the locked session_package_price.
     original_price = lead["session_package_price"]
+    total_sessions = lead.get("session_package_sessions") or 0
+    per_session_rate = (original_price / total_sessions) if total_sessions else 0
+
+    # Cash/UPI/Card/Cheque can ALSO collect for only some of the package's sessions
+    # right now (e.g. 5 of 10) — sessions_now defaults to every session (today's
+    # full-collection behavior) when the caller doesn't specify it.
+    sessions_now = total_sessions
+    is_partial_sessions = False
+    if payload.payment_mode in ("cash", "upi", "card", "cheque") and payload.sessions_now is not None:
+        sessions_now = payload.sessions_now
+        if total_sessions and (sessions_now <= 0 or sessions_now > total_sessions):
+            raise HTTPException(status_code=400, detail="Sessions Covered Now must be between 1 and the package's total sessions")
+        is_partial_sessions = total_sessions > 0 and sessions_now < total_sessions
+        if is_partial_sessions and not payload.balance_due_date:
+            raise HTTPException(status_code=400, detail="A due date is required for the balance sessions")
+
+    computed_amount = round(sessions_now * per_session_rate, 2) if total_sessions else original_price
+
     if payload.payment_mode in ("cash", "upi", "card"):
-        amount = payload.amount if payload.amount is not None else original_price
+        amount = payload.amount if payload.amount is not None else computed_amount
         if amount <= 0:
             raise HTTPException(status_code=400, detail="Amount must be greater than zero")
+    elif payload.payment_mode == "cheque":
+        amount = computed_amount
     else:
         amount = original_price
 
     if payload.payment_mode in ("cash", "upi", "card") and not payload.confirmed:
         raise HTTPException(status_code=400, detail="Please confirm the payment before submitting")
 
-    # Same negotiated-discount tracking as the Consultation Fee — only meaningful
-    # for the modes where the amount can actually be adjusted.
+    # Same negotiated-discount tracking as the Consultation Fee — compared against
+    # what these specific sessions should cost (not the whole package's price),
+    # so collecting for fewer sessions is never mistaken for a discount.
     discount_amount = 0
     discount_reason = None
     discount_suffix = ""
     if payload.payment_mode in ("cash", "upi", "card"):
-        discount_amount = round(original_price - amount, 2) if original_price is not None else 0
+        discount_amount = round(computed_amount - amount, 2)
         if discount_amount > 0:
             discount_reason = "Negotiated discount"
-            discount_suffix = f" · Actual Price Rs.{original_price}, Negotiated Discount Rs.{discount_amount}"
+            discount_suffix = f" · Actual Price Rs.{computed_amount}, Negotiated Discount Rs.{discount_amount}"
         elif discount_amount < 0:
             discount_reason = "Additional amount collected"
-            discount_suffix = f" · Actual Price Rs.{original_price}, Rs.{abs(discount_amount)} above assigned fee"
+            discount_suffix = f" · Actual Price Rs.{computed_amount}, Rs.{abs(discount_amount)} above assigned fee"
 
     # Mode-specific required fields + a structured payment_details record for the
     # receipt/activity log. Account number is never persisted beyond its last 4 digits.
@@ -359,6 +380,20 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
         ]
         detail_suffix = f" · {', '.join(parts)}"
 
+    # Cash/UPI/Card/Cheque covering only some sessions right now — schedule the
+    # remaining sessions as a single balance installment, reusing the exact same
+    # `installments` shape Partial Payment uses so Payment Schedules / Outstanding
+    # Amount / the client's own Payment Schedule panel all pick it up for free.
+    balance_suffix = ""
+    if payload.payment_mode in ("cash", "upi", "card", "cheque") and is_partial_sessions:
+        remaining_sessions = total_sessions - sessions_now
+        remaining_amount = round(original_price - amount, 2)
+        payment_details["installments"] = [
+            {"sessions": sessions_now, "amount": amount, "due_date": _now()[:10], "paid": True},
+            {"sessions": remaining_sessions, "amount": remaining_amount, "due_date": payload.balance_due_date, "paid": False},
+        ]
+        balance_suffix = f" · covers {sessions_now} of {total_sessions} sessions, balance Rs.{remaining_amount} ({remaining_sessions} sessions) due {payload.balance_due_date}"
+
     is_update = lead.get("treatment_fee_paid") is not None
     # Rests at 'Fee Collected' on first collection — Physio Assign only happens via
     # the separate assign-consultation-physio action. If this is just a payment-mode
@@ -378,13 +413,13 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
     if payload.payment_mode == "partial":
         details = f"{'Updated' if is_update else 'Created'} Payment Schedule for session package '{lead.get('session_package_name')}' ({lead.get('session_package_sessions')} sessions) · Rs.{amount} across {len(installments)} installments{detail_suffix}"
     else:
-        details = f"{'Updated' if is_update else 'Collected'} Treatment Fee for session package '{lead.get('session_package_name')}' ({lead.get('session_package_sessions')} sessions) · Rs.{amount} via {payload.payment_mode}{detail_suffix}{discount_suffix}"
+        details = f"{'Updated' if is_update else 'Collected'} Treatment Fee for session package '{lead.get('session_package_name')}' ({lead.get('session_package_sessions')} sessions) · Rs.{amount} via {payload.payment_mode}{detail_suffix}{discount_suffix}{balance_suffix}"
     await v3_col("lead_activity").insert_one({
         "id": str(uuid.uuid4()),
         "lead_id": lead_id,
         "action": "treatment_fee_collected",
         "details": details,
-        "original_amount": original_price if payload.payment_mode in ("cash", "upi", "card") else None,
+        "original_amount": computed_amount if payload.payment_mode in ("cash", "upi", "card") else None,
         "collected_amount": amount if payload.payment_mode in ("cash", "upi", "card") else None,
         "discount_amount": discount_amount if discount_amount != 0 else None,
         "discount_reason": discount_reason,
