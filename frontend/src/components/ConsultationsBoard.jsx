@@ -1701,7 +1701,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               const modeLabel = TREATMENT_FEE_PAYMENT_MODES.find((m) => m.value === mode)?.label || "";
               return (
                 <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" data-testid="cons-treatment-fee-confirm-modal">
-                  <div className="max-h-[85vh] w-full max-w-xl space-y-3 overflow-y-auto rounded-xl bg-white p-4 shadow-2xl">
+                  <div className="max-h-[110vh] w-full max-w-xl space-y-3 overflow-y-auto rounded-xl bg-white p-4 shadow-2xl">
                     <div className="flex items-center justify-between">
                       <p className="text-sm font-semibold text-slate-800">{mode === "partial" ? "Partial Payment Schedule" : `Collect ${modeLabel} Payment`}</p>
                       <button onClick={() => setTreatmentConfirmDraft(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-treatment-fee-confirm-close"><X className="h-4 w-4" /></button>
