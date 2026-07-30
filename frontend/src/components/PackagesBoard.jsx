@@ -4,7 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
-import { uploadStoreImage, createStoreItem, updateStoreItem, deleteStoreItem, listStoreItems, getStoreHistory, getPaymentHistory, getFollowUpHistory, getLoginHistory } from "@/lib/api";
+import { uploadStoreImage, createStoreItem, updateStoreItem, deleteStoreItem, listStoreItems, getPaymentHistory, getFollowUpHistory, getLoginHistory } from "@/lib/api";
 
 export const TABS = [
   { key: "consultations", label: "Consultations", icon: Stethoscope },
@@ -861,14 +861,13 @@ const LoginHistoryTable = () => {
 };
 
 const HISTORY_SUBTABS = [
-  { key: "transactions", label: "Transactions History" },
   { key: "payments", label: "Payment History" },
   { key: "followups", label: "Follow Up History" },
   { key: "logins", label: "Login Tracker" },
 ];
 
 const HistoryPanel = () => {
-  const [sub, setSub] = useState("transactions");
+  const [sub, setSub] = useState("payments");
   return (
     <div className="space-y-3" data-testid="packages-panel-history">
       <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="history-subtabs">
@@ -883,9 +882,6 @@ const HistoryPanel = () => {
           </button>
         ))}
       </div>
-      {sub === "transactions" && (
-        <ActivityHistoryTable fetchFn={getStoreHistory} emptyLabel="No store transactions yet." testidPrefix="txn-history" />
-      )}
       {sub === "payments" && (
         <ActivityHistoryTable fetchFn={getPaymentHistory} emptyLabel="No payments collected yet." testidPrefix="payment-history" />
       )}
