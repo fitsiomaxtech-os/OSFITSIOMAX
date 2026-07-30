@@ -28,6 +28,12 @@ const TREATMENT_FEE_PAYMENT_MODES = [
   { value: "cheque", label: "Cheque" },
   { value: "partial", label: "Partial Payment" },
 ];
+const INSTALLMENT_PAYMENT_MODES = [
+  { value: "cash", label: "Cash" },
+  { value: "upi", label: "UPI" },
+  { value: "card", label: "Card" },
+  { value: "cheque", label: "Cheque" },
+];
 const PARTIAL_ORDINALS = ["First", "Second", "Third", "Fourth", "Fifth", "Sixth", "Seventh", "Eighth", "Ninth", "Tenth"];
 const partialInstallmentLabel = (idx) => `${PARTIAL_ORDINALS[idx] || `#${idx + 1}`} Payment`;
 
@@ -98,6 +104,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // on the Treatment Fee. Cheque and Partial Payment keep their existing single-popup
   // flow (locked amount, no manual override, no confirm step).
   const [treatmentConfirmDraft, setTreatmentConfirmDraft] = useState(null);
+
+  // Partial Payment schedule's own per-row Collect popup — collecting one specific
+  // installment is a real payment in its own right (amount, mode, UTR/cheque number),
+  // same as every other Treatment Fee mode, not just a bare "mark paid" flip.
+  const [partialCollectDraft, setPartialCollectDraft] = useState(null); // { idx, amount, payment_mode, ... } | null
 
   // Physio Assign popup (Branch Admin only) — pick an available Jr. Physio, then book all
   // of the paid session package's sessions against that physio's own calendar (Consultations
@@ -404,6 +415,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // reachable from the Fee Collected panel as a fallback if it wasn't collected
   // together the first time.
   const openTreatmentFeeDraft = () => {
+    // A Partial Payment schedule that already exists on the lead (whether or not
+    // every installment is collected yet) is reloaded from the real saved rows —
+    // never reset back to two blank ones — so reopening this always shows what's
+    // actually still owed, with already-collected rows carrying their paid flag.
+    const total = selectedLead.session_package_sessions || 0;
+    const rate = total ? (selectedLead.session_package_price || 0) / total : 0;
+    const existing = selectedLead.treatment_fee_payment_details?.installments;
     setTreatmentFeeDraft({
       payment_mode: selectedLead.treatment_fee_payment_mode || "cash",
       amount: selectedLead.treatment_fee_paid ?? selectedLead.session_package_price ?? "",
@@ -415,11 +433,26 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       balance_due_date: "",
       // First installment defaults to today — it's the one being collected right now;
       // later installments get their own scheduled due date.
-      partial_installments: [
-        { sessions: "", due_date: new Date().toISOString().slice(0, 10) },
-        { sessions: "", due_date: "" },
-      ],
+      partial_installments: existing && existing.length
+        ? existing.map((inst) => ({
+            sessions: rate ? String(Math.round((inst.amount || 0) / rate)) : "",
+            due_date: inst.due_date || "",
+            paid: !!inst.paid,
+          }))
+        : [
+            { sessions: "", due_date: new Date().toISOString().slice(0, 10) },
+            { sessions: "", due_date: "" },
+          ],
     });
+  };
+
+  // Jumps straight to the Payment Schedule view (skipping the mode-picker click)
+  // for a lead whose Partial Payment plan already exists — used by both the
+  // combined "Collect Fees" popup and the Fee Collected side panel once
+  // hasPendingInstallments is true.
+  const openPartialScheduleDraft = () => {
+    openTreatmentFeeDraft();
+    setTreatmentConfirmDraft({ upi_transaction_id: "", upi_utr: "", account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "" });
   };
 
   // Partial Payment is split by session count, not a raw amount — each installment's
@@ -434,6 +467,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   const partialSessionsTotal = partialInstallments.reduce((sum, i) => sum + (parseInt(i.sessions, 10) || 0), 0);
   const partialMismatch = treatmentFeeTotalSessions > 0 && partialSessionsTotal !== treatmentFeeTotalSessions;
   const partialAllFilled = partialInstallments.length >= 2 && partialInstallments.every((i) => parseInt(i.sessions, 10) > 0 && i.due_date);
+
+  // A Partial Payment schedule leaves treatment_fee_paid set (the full price) the
+  // moment it's created — even though nothing may actually be collected yet — so
+  // "already collected" everywhere else in this file has to be read together with
+  // whether any installment is still unpaid, not treatment_fee_paid alone.
+  const savedInstallments = selectedLead?.treatment_fee_payment_details?.installments || [];
+  const hasPendingInstallments = selectedLead?.treatment_fee_payment_mode === "partial" && savedInstallments.some((i) => !i.paid);
 
   // Cash/UPI/Card/Cheque can ALSO collect for only some sessions right now (e.g.
   // 5 of 10) — same session-split math as Partial Payment, but as a single
@@ -635,34 +675,88 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     setCollectingTreatmentFee(false);
   };
 
-  // Collects one specific Partial Payment installment right now: creates the whole
-  // schedule (every row starts unpaid — see collect-treatment-fee) and immediately
-  // marks just this one row paid, in the same action. Every other row stays pending
-  // until its own due date — collectible later from Accountant Manage's Outstanding
-  // Amount / Payment Schedules boards, which already read the same paid flags.
-  const collectPartialInstallmentNow = async (idx) => {
-    const payload = buildTreatmentFeePayload();
-    if (!payload) return;
+  // Opens the Collect popup for one specific Partial Payment installment — amount
+  // pre-filled from the real saved amount if the schedule already exists on the
+  // lead, or computed from that row's sessions x rate for a schedule not yet
+  // saved — but always re-editable, plus a payment mode picker (same 4 modes as
+  // everywhere else) and that mode's own fields.
+  const openPartialCollectPopup = (idx) => {
+    const inst = partialInstallments[idx] || {};
+    const saved = savedInstallments[idx];
+    const amount = saved?.amount ?? Math.round((parseInt(inst.sessions, 10) || 0) * perSessionRate);
+    setPartialCollectDraft({
+      idx,
+      amount: amount > 0 ? String(amount) : "",
+      payment_mode: "cash",
+      upi_transaction_id: "", upi_utr: "",
+      account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "",
+      cheque_number: "",
+    });
+  };
+
+  // Submits the per-installment Collect popup. If the Partial Payment schedule
+  // hasn't been saved to the lead yet (first-ever collect on this draft), it's
+  // created first — every installment still starts unpaid, same as always — then
+  // this one specific installment is collected with its own mode/UTR/cheque details,
+  // which also logs a real activity entry so it shows up in Session Collections /
+  // Accountant Manage exactly like any other Treatment Fee collection.
+  const submitPartialCollect = async () => {
+    const draft = partialCollectDraft;
+    const amount = parseFloat(draft.amount);
+    if (!(amount > 0)) {
+      toast.error("Enter a valid amount");
+      return;
+    }
+    const mode = draft.payment_mode;
+    const payload = { payment_mode: mode, amount };
+    if (mode === "upi") {
+      payload.upi_transaction_id = draft.upi_transaction_id.trim();
+      payload.upi_utr = draft.upi_utr.trim();
+    } else if (mode === "card") {
+      if (!draft.account_number.trim() || !draft.account_holder_name.trim() || !draft.bank_name.trim() || !draft.ifsc_code.trim()) {
+        toast.error("Account Number, Account Holder Name, Bank Name and IFSC Code are required");
+        return;
+      }
+      payload.account_number = draft.account_number.trim();
+      payload.account_holder_name = draft.account_holder_name.trim();
+      payload.bank_name = draft.bank_name.trim();
+      payload.ifsc_code = draft.ifsc_code.trim();
+    } else if (mode === "cheque") {
+      if (!draft.bank_name.trim() || !draft.cheque_number.trim()) {
+        toast.error("Bank Name and Cheque Number are required");
+        return;
+      }
+      payload.bank_name = draft.bank_name.trim();
+      payload.cheque_number = draft.cheque_number.trim();
+    }
+
     setCollectingTreatmentFee(true);
     try {
-      const res = await collectTreatmentFee(selectedLead.id, payload);
-      await markInstallmentPaid(selectedLead.id, idx + 1);
-      const installments = res.lead.treatment_fee_payment_details?.installments || [];
-      const lead = {
-        ...res.lead,
-        treatment_fee_payment_details: {
-          ...res.lead.treatment_fee_payment_details,
-          installments: installments.map((inst, i) => (i === idx ? { ...inst, paid: true } : inst)),
-        },
-      };
-      toast.success(`Payment #${idx + 1} collected`);
-      setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === lead.id ? lead : l) }));
-      if (consultationFeeDone(lead)) {
+      let lead = selectedLead;
+      const scheduleExists = (lead.treatment_fee_payment_details?.installments || []).length > 0;
+      if (!scheduleExists) {
+        const schedulePayload = buildTreatmentFeePayload();
+        if (!schedulePayload) {
+          setCollectingTreatmentFee(false);
+          return;
+        }
+        const res = await collectTreatmentFee(lead.id, schedulePayload);
+        lead = res.lead;
+      }
+      await markInstallmentPaid(lead.id, draft.idx + 1, payload);
+      const installments = (lead.treatment_fee_payment_details?.installments || []).map((inst, i) =>
+        i === draft.idx ? { ...inst, paid: true, amount, payment_mode: mode } : inst
+      );
+      const updatedLead = { ...lead, treatment_fee_payment_details: { ...lead.treatment_fee_payment_details, installments } };
+      toast.success(`Payment #${draft.idx + 1} collected`);
+      setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => (l.id === updatedLead.id ? updatedLead : l)) }));
+      setPartialCollectDraft(null);
+      if (consultationFeeDone(updatedLead)) {
         setCollectFeeDraft(null);
         setTreatmentFeeDraft(null);
         setSelectedLead(null);
       } else {
-        setSelectedLead(lead);
+        setSelectedLead(updatedLead);
       }
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed to collect this installment");
@@ -1215,11 +1309,21 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             <span className="text-xs text-slate-500">Treatment Fee</span>
                             <span className="font-semibold text-slate-800">
                               {selectedLead.session_package_price != null ? `Rs.${selectedLead.session_package_price}` : "—"}
-                              {treatmentPaid && <span className="ml-1 capitalize text-emerald-600">({selectedLead.treatment_fee_payment_mode})</span>}
+                              {treatmentPaid && !hasPendingInstallments && <span className="ml-1 capitalize text-emerald-600">({selectedLead.treatment_fee_payment_mode})</span>}
+                              {hasPendingInstallments && <span className="ml-1 capitalize text-indigo-600">(partial)</span>}
                             </span>
                           </div>
                         </div>
-                        {treatmentPaid ? (
+                        {hasPendingInstallments ? (
+                          <>
+                            <p className="mt-1 text-[11px] text-slate-500">
+                              {savedInstallments.filter((i) => i.paid).length} of {savedInstallments.length} installments collected.
+                            </p>
+                            <Button size="sm" className="mt-2 bg-indigo-600 text-xs hover:bg-indigo-700" onClick={openPartialScheduleDraft} data-testid="cons-open-partial-schedule-sidebar">
+                              View Payment Schedule
+                            </Button>
+                          </>
+                        ) : treatmentPaid ? (
                           <p className="mt-1 flex items-center gap-1 text-[11px] font-medium text-emerald-600" data-testid="cons-treatment-fee-already-collected">
                             <CheckCircle2 className="h-3 w-3" /> Already Collected
                           </p>
@@ -1464,12 +1568,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
 
                   {treatmentFeeDraft && (
                     <div className={`space-y-3 rounded-lg border p-3 ${
-                      selectedLead.treatment_fee_paid != null ? "border-emerald-200 bg-emerald-50"
+                      selectedLead.treatment_fee_paid != null && !hasPendingInstallments ? "border-emerald-200 bg-emerald-50"
                       : selectedLead.package_paid == null ? "border-slate-200 bg-slate-50"
                       : "border-indigo-200 bg-indigo-50/40"
                     }`}>
                       <p className={`flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider ${
-                        selectedLead.treatment_fee_paid != null ? "text-emerald-700"
+                        selectedLead.treatment_fee_paid != null && !hasPendingInstallments ? "text-emerald-700"
                         : selectedLead.package_paid == null ? "text-slate-400"
                         : "text-indigo-700"
                       }`}>
@@ -1479,6 +1583,22 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         <p className="text-xs text-slate-500" data-testid="cons-treatment-fee-gated">
                           Collect the Consultation Fee above first — Treatment Fee unlocks once it's paid.
                         </p>
+                      ) : hasPendingInstallments ? (
+                        <div data-testid="cons-treatment-fee-partial-pending">
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="text-xs text-slate-500">Treatment Fee</span>
+                            <span className="font-semibold text-slate-800">
+                              Rs.{selectedLead.session_package_price}
+                              <span className="ml-1 capitalize text-indigo-600">(partial)</span>
+                            </span>
+                          </div>
+                          <p className="mt-1 text-[11px] text-slate-500">
+                            {savedInstallments.filter((i) => i.paid).length} of {savedInstallments.length} installments collected.
+                          </p>
+                          <Button size="sm" className="mt-2 bg-indigo-600 text-xs hover:bg-indigo-700" onClick={openPartialScheduleDraft} data-testid="cons-open-partial-schedule">
+                            View Payment Schedule
+                          </Button>
+                        </div>
                       ) : selectedLead.treatment_fee_paid != null ? (
                         <div data-testid="cons-treatment-fee-locked">
                           <div className="flex items-center justify-between text-sm">
@@ -1864,7 +1984,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         setInstallments={(next) => setTreatmentFeeDraft({ ...treatmentFeeDraft, partial_installments: next })}
                         totalSessions={treatmentFeeTotalSessions}
                         perSessionRate={perSessionRate}
-                        onCollectRow={collectPartialInstallmentNow}
+                        onCollectRow={openPartialCollectPopup}
                         collecting={collectingTreatmentFee}
                       />
                     )}
@@ -1884,6 +2004,148 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       data-testid="cons-treatment-fee-confirm-submit"
                     >
                       {collectingTreatmentFee ? "Saving..." : mode === "partial" ? "Save Payment Schedule" : `Collect ${modeLabel} Payment`}
+                    </Button>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Collect Payment #N — the Partial Payment schedule's own per-row Collect
+                popup, opened from PartialInstallmentsEditor above. Layered above the
+                Partial Payment Schedule popup itself (z-[80] > z-[70]) since that's
+                where the row it belongs to is rendered. */}
+            {partialCollectDraft && (() => {
+              const mode = partialCollectDraft.payment_mode;
+              const modeLabel = INSTALLMENT_PAYMENT_MODES.find((m) => m.value === mode)?.label || "";
+              return (
+                <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4" data-testid="cons-partial-collect-modal">
+                  <div className="max-h-[90vh] w-full max-w-sm space-y-3 overflow-y-auto rounded-xl bg-white p-4 shadow-2xl">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-semibold text-slate-800">Collect {partialInstallmentLabel(partialCollectDraft.idx)}</p>
+                      <button onClick={() => setPartialCollectDraft(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-partial-collect-close"><X className="h-4 w-4" /></button>
+                    </div>
+
+                    <div>
+                      <label className="mb-1 block text-[11px] font-medium text-slate-500">Amount (₹) *</label>
+                      <Input
+                        type="number"
+                        min="0"
+                        value={partialCollectDraft.amount}
+                        onChange={(e) => setPartialCollectDraft({ ...partialCollectDraft, amount: e.target.value })}
+                        className="h-9"
+                        data-testid="cons-partial-collect-amount"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="mb-1 block text-[11px] font-medium text-slate-500">Payment Mode</label>
+                      <PaymentModeSelect
+                        value={mode}
+                        options={INSTALLMENT_PAYMENT_MODES}
+                        onChange={(v) => setPartialCollectDraft({ ...partialCollectDraft, payment_mode: v })}
+                        testId="cons-partial-collect-mode"
+                      />
+                    </div>
+
+                    {mode === "upi" && (
+                      <>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium text-slate-500">UPI Transaction ID</label>
+                          <Input
+                            value={partialCollectDraft.upi_transaction_id}
+                            onChange={(e) => setPartialCollectDraft({ ...partialCollectDraft, upi_transaction_id: e.target.value })}
+                            className="h-9"
+                            data-testid="cons-partial-collect-upi-txn"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium text-slate-500">UTR</label>
+                          <Input
+                            value={partialCollectDraft.upi_utr}
+                            onChange={(e) => setPartialCollectDraft({ ...partialCollectDraft, upi_utr: e.target.value })}
+                            className="h-9"
+                            data-testid="cons-partial-collect-upi-utr"
+                          />
+                        </div>
+                      </>
+                    )}
+
+                    {mode === "card" && (
+                      <>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium text-slate-500">Account Number</label>
+                          <Input
+                            value={partialCollectDraft.account_number}
+                            onChange={(e) => setPartialCollectDraft({ ...partialCollectDraft, account_number: e.target.value })}
+                            className="h-9"
+                            data-testid="cons-partial-collect-account-number"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium text-slate-500">Account Holder Name</label>
+                          <Input
+                            value={partialCollectDraft.account_holder_name}
+                            onChange={(e) => setPartialCollectDraft({ ...partialCollectDraft, account_holder_name: e.target.value })}
+                            className="h-9"
+                            data-testid="cons-partial-collect-account-holder"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium text-slate-500">Bank Name</label>
+                          <Input
+                            value={partialCollectDraft.bank_name}
+                            onChange={(e) => setPartialCollectDraft({ ...partialCollectDraft, bank_name: e.target.value })}
+                            className="h-9"
+                            data-testid="cons-partial-collect-bank-name"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium text-slate-500">IFSC Code</label>
+                          <Input
+                            value={partialCollectDraft.ifsc_code}
+                            onChange={(e) => setPartialCollectDraft({ ...partialCollectDraft, ifsc_code: e.target.value.toUpperCase() })}
+                            className="h-9"
+                            data-testid="cons-partial-collect-ifsc"
+                          />
+                        </div>
+                      </>
+                    )}
+
+                    {mode === "cheque" && (
+                      <>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium text-slate-500">Bank Name</label>
+                          <Input
+                            value={partialCollectDraft.bank_name}
+                            onChange={(e) => setPartialCollectDraft({ ...partialCollectDraft, bank_name: e.target.value })}
+                            className="h-9"
+                            data-testid="cons-partial-collect-cheque-bank-name"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium text-slate-500">Cheque Number</label>
+                          <Input
+                            value={partialCollectDraft.cheque_number}
+                            onChange={(e) => setPartialCollectDraft({ ...partialCollectDraft, cheque_number: e.target.value })}
+                            className="h-9"
+                            data-testid="cons-partial-collect-cheque-number"
+                          />
+                        </div>
+                      </>
+                    )}
+
+                    <Button
+                      className="w-full bg-emerald-600 text-xs hover:bg-emerald-700"
+                      onClick={submitPartialCollect}
+                      disabled={
+                        collectingTreatmentFee ||
+                        !(parseFloat(partialCollectDraft.amount) > 0) ||
+                        (mode === "card" && (!partialCollectDraft.account_number.trim() || !partialCollectDraft.account_holder_name.trim() || !partialCollectDraft.bank_name.trim() || !partialCollectDraft.ifsc_code.trim())) ||
+                        (mode === "cheque" && (!partialCollectDraft.bank_name.trim() || !partialCollectDraft.cheque_number.trim()))
+                      }
+                      data-testid="cons-partial-collect-submit"
+                    >
+                      {collectingTreatmentFee ? "Saving..." : `Collect ${modeLabel} Payment`}
                     </Button>
                   </div>
                 </div>
@@ -2212,6 +2474,7 @@ function PartialInstallmentsEditor({ installments, setInstallments, totalSession
         const sessionsNum = parseInt(inst.sessions, 10) || 0;
         const amount = Math.round(sessionsNum * perSessionRate);
         const isToday = !!inst.due_date && inst.due_date === todayIso;
+        const isPaid = !!inst.paid;
         return (
           <div key={idx} className="flex items-end gap-1.5" data-testid={`cons-treatment-fee-partial-row-${idx}`}>
             <div className="flex-1">
@@ -2221,6 +2484,7 @@ function PartialInstallmentsEditor({ installments, setInstallments, totalSession
                 min="1"
                 max={totalSessions || undefined}
                 value={inst.sessions}
+                disabled={isPaid}
                 onChange={(e) => {
                   const next = [...installments];
                   next[idx] = { ...next[idx], sessions: e.target.value };
@@ -2241,6 +2505,7 @@ function PartialInstallmentsEditor({ installments, setInstallments, totalSession
               <Input
                 type="date"
                 value={inst.due_date}
+                disabled={isPaid}
                 onChange={(e) => {
                   const next = [...installments];
                   next[idx] = { ...next[idx], due_date: e.target.value };
@@ -2250,7 +2515,16 @@ function PartialInstallmentsEditor({ installments, setInstallments, totalSession
                 data-testid={`cons-treatment-fee-partial-date-${idx}`}
               />
             </div>
-            {isToday ? (
+            {isPaid ? (
+              <Button
+                size="sm"
+                disabled
+                className="h-9 bg-emerald-600 text-xs text-white hover:bg-emerald-600 disabled:!opacity-100"
+                data-testid={`cons-treatment-fee-partial-paid-${idx}`}
+              >
+                <CheckCircle2 className="mr-1 h-3.5 w-3.5" /> Paid
+              </Button>
+            ) : isToday ? (
               <Button
                 size="sm"
                 onClick={() => onCollectRow(idx)}
@@ -2270,7 +2544,7 @@ function PartialInstallmentsEditor({ installments, setInstallments, totalSession
                 Due
               </Button>
             )}
-            {installments.length > 2 && (
+            {installments.length > 2 && !isPaid && (
               <button
                 type="button"
                 onClick={() => setInstallments(installments.filter((_, i) => i !== idx))}

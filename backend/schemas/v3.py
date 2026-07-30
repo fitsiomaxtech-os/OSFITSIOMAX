@@ -340,6 +340,24 @@ class V3CollectTreatmentFeeInput(BaseModel):
     balance_due_date: Optional[str] = None
 
 
+class V3MarkInstallmentPaidInput(BaseModel):
+    # Optional for backward compatibility: a caller that sends no body (or omits
+    # payment_mode) gets the old behavior — just flip `paid` to true, no payment
+    # metadata, no activity log entry. Sending payment_mode is how the Partial
+    # Payment schedule's own per-row Collect button records a real payment (mode,
+    # UTR/cheque number, and an activity-log entry so it surfaces in Session
+    # Collections / Accountant Manage), same as every other Treatment Fee mode.
+    payment_mode: Optional[Literal["cash", "upi", "card", "cheque"]] = None
+    amount: Optional[float] = None
+    upi_transaction_id: Optional[str] = None
+    upi_utr: Optional[str] = None
+    account_number: Optional[str] = None
+    account_holder_name: Optional[str] = None
+    bank_name: Optional[str] = None
+    ifsc_code: Optional[str] = None
+    cheque_number: Optional[str] = None
+
+
 class V3ConsultationDecisionInput(BaseModel):
     decision: Literal["consultation_only", "consultation_treatment"]
     # Required only when decision == "consultation_treatment" — the Treatment/Session

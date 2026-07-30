@@ -1,12 +1,17 @@
 import re
+import uuid
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional
 
 from database import v3_col
 from deps import v3_require_roles
-from schemas.v3 import V3UserOut
+from schemas.v3 import V3UserOut, V3MarkInstallmentPaidInput
 from stage_utils import get_first_stage_name
+
+
+def _now():
+    return datetime.now(timezone.utc).isoformat()
 
 router = APIRouter(prefix="/api/v3")
 
@@ -633,10 +638,17 @@ async def client_transaction_history(
 async def mark_installment_paid(
     lead_id: str,
     installment_number: int,
+    payload: V3MarkInstallmentPaidInput = V3MarkInstallmentPaidInput(),
     user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "accountant")),
 ):
     """Payment Schedules — mark one Partial Payment installment as collected.
-    installment_number is 1-based (matches what the Payment Schedules table shows)."""
+    installment_number is 1-based (matches what the Payment Schedules table shows).
+    When payload.payment_mode is sent (the Branch Admin's per-row Collect popup),
+    this records the same mode-specific details every other Treatment Fee mode does
+    and logs a 'treatment_fee_collected' activity entry, so the collection shows up
+    in Session Collections / Accountant Manage exactly like a fresh collection would.
+    Omitting payment_mode keeps the old bare "just flip paid" behavior (e.g. the
+    Outstanding Amount panel's quick-collect action)."""
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Client not found")
@@ -648,10 +660,60 @@ async def mark_installment_paid(
     idx = installment_number - 1
     if idx < 0 or idx >= len(installments):
         raise HTTPException(status_code=404, detail="Installment not found")
+    if installments[idx].get("paid"):
+        raise HTTPException(status_code=400, detail="This installment has already been collected")
 
-    installments[idx]["paid"] = True
+    activity_details = None
+    if payload.payment_mode:
+        mode = payload.payment_mode
+        amount = payload.amount if payload.amount is not None else installments[idx].get("amount", 0)
+        if amount <= 0:
+            raise HTTPException(status_code=400, detail="Amount must be greater than zero")
+
+        mode_fields = {}
+        detail_suffix = ""
+        if mode == "upi":
+            mode_fields = {"upi_transaction_id": (payload.upi_transaction_id or "").strip(), "upi_utr": (payload.upi_utr or "").strip()}
+            if mode_fields["upi_transaction_id"] or mode_fields["upi_utr"]:
+                detail_suffix = f" · UPI txn {mode_fields['upi_transaction_id']}, UTR {mode_fields['upi_utr']}"
+        elif mode == "card":
+            if not all([payload.account_number and payload.account_number.strip(), payload.account_holder_name and payload.account_holder_name.strip(),
+                        payload.bank_name and payload.bank_name.strip(), payload.ifsc_code and payload.ifsc_code.strip()]):
+                raise HTTPException(status_code=400, detail="Account Number, Account Holder Name, Bank Name and IFSC Code are required")
+            last4 = "".join(ch for ch in payload.account_number if ch.isdigit())[-4:]
+            mode_fields = {
+                "account_last4": last4,
+                "account_holder_name": payload.account_holder_name.strip(),
+                "bank_name": payload.bank_name.strip(),
+                "ifsc_code": payload.ifsc_code.strip().upper(),
+            }
+            detail_suffix = f" · A/C ****{last4}, {payload.account_holder_name.strip()}, {payload.bank_name.strip()} ({payload.ifsc_code.strip().upper()})"
+        elif mode == "cheque":
+            if not payload.bank_name or not payload.bank_name.strip() or not payload.cheque_number or not payload.cheque_number.strip():
+                raise HTTPException(status_code=400, detail="Bank Name and Cheque Number are required")
+            mode_fields = {"bank_name": payload.bank_name.strip(), "cheque_number": payload.cheque_number.strip()}
+            detail_suffix = f" · Cheque #{payload.cheque_number.strip()}, {payload.bank_name.strip()}"
+
+        installments[idx] = {**installments[idx], "paid": True, "amount": amount, "payment_mode": mode, **mode_fields}
+        activity_details = f"Collected Installment #{installment_number} for session package '{lead.get('session_package_name')}' · Rs.{amount} via {mode}{detail_suffix}"
+    else:
+        installments[idx]["paid"] = True
+
     await v3_col("leads").update_one(
         {"id": lead_id},
         {"$set": {"treatment_fee_payment_details.installments": installments}},
     )
-    return {"message": "Installment marked as paid", "balance": _lead_outstanding_balance({**lead, "treatment_fee_payment_details": details})}
+
+    if activity_details:
+        await v3_col("lead_activity").insert_one({
+            "id": str(uuid.uuid4()),
+            "lead_id": lead_id,
+            "action": "treatment_fee_collected",
+            "details": activity_details,
+            "created_by": user.full_name,
+            "created_by_role": user.role,
+            "created_at": _now(),
+        })
+
+    updated_details = {**details, "installments": installments}
+    return {"message": "Installment marked as paid", "balance": _lead_outstanding_balance({**lead, "treatment_fee_payment_details": updated_details})}
