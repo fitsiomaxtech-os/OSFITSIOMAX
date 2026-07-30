@@ -2274,7 +2274,7 @@ function PartialInstallmentsEditor({ installments, setInstallments, totalSession
               <Button
                 size="sm"
                 disabled
-                className="h-9 border border-slate-200 bg-slate-100 text-xs text-slate-400 hover:bg-slate-100"
+                className="h-9 bg-rose-600 text-xs text-white hover:bg-rose-600 disabled:!opacity-100"
                 data-testid={`cons-treatment-fee-partial-due-${idx}`}
               >
                 Due
