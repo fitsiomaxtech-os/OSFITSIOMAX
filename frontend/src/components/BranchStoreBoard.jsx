@@ -163,6 +163,8 @@ export const BranchSessionsPanel = () => {
   );
 };
 
+const BRANCH_STORE_TABS = TABS.filter((t) => t.key !== "history");
+
 export const FitsiomaxStorePanel = () => {
   const [tab, setTab] = useState("consultations");
 
@@ -174,7 +176,7 @@ export const FitsiomaxStorePanel = () => {
       </div>
 
       <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="branch-store-subtabs">
-        {TABS.map((t) => {
+        {BRANCH_STORE_TABS.map((t) => {
           const Icon = t.icon;
           const active = tab === t.key;
           return (
@@ -192,7 +194,7 @@ export const FitsiomaxStorePanel = () => {
 
       {tab === "consultations" && <BranchConsultationsPanel />}
       {tab === "sessions" && <BranchSessionsPanel />}
-      {tab !== "consultations" && tab !== "sessions" && TABS.map((t) => tab === t.key && (
+      {tab !== "consultations" && tab !== "sessions" && BRANCH_STORE_TABS.map((t) => tab === t.key && (
         <PlaceholderPanel key={t.key} label={t.label} testid={`branch-store-panel-${t.key}`} />
       ))}
     </div>
