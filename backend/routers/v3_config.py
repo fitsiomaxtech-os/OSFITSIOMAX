@@ -200,12 +200,16 @@ async def v3_add_doctor(payload: V3DoctorCreate, user: V3UserOut = Depends(v3_re
 
 
 @router.delete("/doctors/{doctor_id}")
-async def v3_delete_doctor(doctor_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
-    """Remove an expert profile created via HR > Fitsiomax Experts. Only for
-    profile-only entries with no linked login and no appointment/session history —
-    those are real accounts or real patient history, not stray test/duplicate rows."""
+async def v3_delete_doctor(doctor_id: str, user: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin"))):
+    """Remove an expert profile created via HR > Fitsiomax Experts (or Branch
+    Admin's own Fitsiomax Experts tab). Only for profile-only entries with no
+    linked login and no appointment/session history — those are real accounts
+    or real patient history, not stray test/duplicate rows. Branch Admin can
+    only delete an expert from their own branch."""
     doctor = await v3_col("doctors").find_one({"id": doctor_id}, {"_id": 0})
     if not doctor:
+        raise HTTPException(status_code=404, detail="Expert not found")
+    if user.role == "branch_admin" and doctor.get("branch_id") != user.branch_id:
         raise HTTPException(status_code=404, detail="Expert not found")
     if doctor.get("user_id"):
         raise HTTPException(status_code=400, detail="This expert is linked to a login account — remove the login in Roles & Credentials instead")

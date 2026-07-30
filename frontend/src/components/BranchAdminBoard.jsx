@@ -41,6 +41,7 @@ import { BranchSessionsPanel, FitsiomaxStorePanel } from "@/components/BranchSto
 import { PullFromSheetButton } from "@/components/PullFromSheetButton";
 import { PlaceholderPanel } from "@/components/PackagesBoard";
 import { AccountantManageTab } from "@/components/branch/AccountantManageTab";
+import { BranchExpertsTab } from "@/components/branch/BranchExpertsTab";
 import { BranchCalendarPanel } from "@/components/branch/BranchCalendarPanel";
 import { CreateLeadModal } from "@/components/CreateLeadModal";
 
@@ -156,6 +157,7 @@ export const BranchAdminBoard = ({ branchId }) => {
     { key: "pipeline", label: "Branch Leads", icon: LayoutDashboard },
     { key: "consultations", label: "Consultations", icon: Stethoscope },
     { key: "accountant_mgmt", label: "Accountant Manage", icon: BadgeIndianRupee },
+    { key: "experts", label: "FITSIOMAX EXPERTS", icon: Stethoscope },
     { key: "calendar", label: "Calendar", icon: Calendar },
     { key: "sessions", label: "Treatment Sessions", icon: CalendarRange },
     { key: "rehab", label: "Rehab", icon: Activity },
@@ -222,6 +224,8 @@ export const BranchAdminBoard = ({ branchId }) => {
         <FitsiomaxStorePanel />
       ) : activeView === "accountant_mgmt" ? (
         <AccountantManageTab branchId={branchId} />
+      ) : activeView === "experts" ? (
+        <BranchExpertsTab />
       ) : (
         <>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between" data-testid="branch-pipeline-header">
