@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  FileSpreadsheet, Layers, Users,
+  FileSpreadsheet, Layers, Users, ChevronDown,
   Plus, RefreshCw, Trash2, Link as LinkIcon, ArrowRightLeft, X, Pencil,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -452,6 +452,71 @@ const MappingEditor = ({ source, onClose, onSaved }) => {
 
 // ============ All Leads ============
 
+const STAGE_TYPE_META = {
+  all: { label: "All Stages", classes: "border-slate-200 bg-white text-slate-700" },
+  pre_sales: { label: "Pre-Sales", classes: "border-indigo-300 bg-indigo-50 text-indigo-700" },
+  sales: { label: "Sales", classes: "border-emerald-300 bg-emerald-50 text-emerald-700" },
+};
+
+// A fixed color per assignee would need a stable id->color map that survives
+// the list changing; cycling a palette by list position is simpler and still
+// gives each assignee its own distinct color in the open dropdown.
+const ASSIGNEE_COLOR_PALETTE = [
+  "border-purple-300 bg-purple-50 text-purple-700",
+  "border-indigo-300 bg-indigo-50 text-indigo-700",
+  "border-emerald-300 bg-emerald-50 text-emerald-700",
+  "border-amber-300 bg-amber-50 text-amber-700",
+  "border-cyan-300 bg-cyan-50 text-cyan-700",
+  "border-pink-300 bg-pink-50 text-pink-700",
+  "border-orange-300 bg-orange-50 text-orange-700",
+  "border-sky-300 bg-sky-50 text-sky-700",
+];
+
+// Native <select> can't reliably color individual dropdown-list items across
+// browsers — only the closed box. This renders each option as its own colored,
+// rounded row in a custom open list instead (same pattern as HRBoard's role filter).
+const ColorFilterDropdown = ({ value, options, onChange, testId }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const onDocClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, []);
+
+  const current = options.find((o) => o.value === value) || options[0];
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={`flex h-9 w-full items-center justify-between gap-2 rounded-md border px-3 text-sm font-semibold ${current?.classes || "border-slate-200 bg-white text-slate-700"}`}
+        data-testid={testId}
+      >
+        <span className="truncate">{current?.label}</span>
+        <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
+      </button>
+      {open && (
+        <div className="absolute left-0 z-20 mt-1 max-h-64 w-full min-w-[170px] space-y-1 overflow-y-auto rounded-md border border-slate-200 bg-white p-1.5 shadow-lg" data-testid={`${testId}-list`}>
+          {options.map((o) => (
+            <button
+              key={o.value || "empty"}
+              type="button"
+              onClick={() => { onChange(o.value); setOpen(false); }}
+              className={`block w-full rounded-md border px-3 py-1.5 text-left text-xs font-semibold ${o.classes}`}
+              data-testid={`${testId}-option-${o.value || "empty"}`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const AllLeadsTab = ({ team }) => {
   const [filter, setFilter] = useState({ stage_type: "all", source: "", assigned_to: "", search: "" });
   const [page, setPage] = useState(1);
@@ -490,19 +555,30 @@ const AllLeadsTab = ({ team }) => {
 
   const everyone = [...(team.pre_sales || []), ...(team.sales || [])];
 
+  const stageOptions = [STAGE_TYPE_META.all, STAGE_TYPE_META.pre_sales, STAGE_TYPE_META.sales].map((meta, idx) => ({
+    value: ["all", "pre_sales", "sales"][idx], label: meta.label, classes: meta.classes,
+  }));
+  const assigneeOptions = [
+    { value: "", label: "All Assignees", classes: "border-slate-200 bg-white text-slate-700" },
+    ...everyone.map((u, i) => ({ value: u.id, label: u.full_name, classes: ASSIGNEE_COLOR_PALETTE[i % ASSIGNEE_COLOR_PALETTE.length] })),
+  ];
+
   return (
     <div className="space-y-3" data-testid="mk-all-leads-tab">
       <div className="grid gap-2 sm:grid-cols-5">
-        <select className="h-9 rounded-md border border-slate-200 px-3 text-sm" value={filter.stage_type} onChange={(e) => { setPage(1); setFilter({ ...filter, stage_type: e.target.value }); }} data-testid="mk-filter-stage">
-          <option value="all">All Stages</option>
-          <option value="pre_sales">Pre-Sales</option>
-          <option value="sales">Sales</option>
-        </select>
+        <ColorFilterDropdown
+          value={filter.stage_type}
+          options={stageOptions}
+          onChange={(v) => { setPage(1); setFilter({ ...filter, stage_type: v }); }}
+          testId="mk-filter-stage"
+        />
         <Input placeholder="Source name" value={filter.source} onChange={(e) => { setPage(1); setFilter({ ...filter, source: e.target.value }); }} data-testid="mk-filter-source" />
-        <select className="h-9 rounded-md border border-slate-200 px-3 text-sm" value={filter.assigned_to} onChange={(e) => { setPage(1); setFilter({ ...filter, assigned_to: e.target.value }); }} data-testid="mk-filter-assigned">
-          <option value="">All Assignees</option>
-          {everyone.map((u) => <option key={u.id} value={u.id}>{u.full_name}</option>)}
-        </select>
+        <ColorFilterDropdown
+          value={filter.assigned_to}
+          options={assigneeOptions}
+          onChange={(v) => { setPage(1); setFilter({ ...filter, assigned_to: v }); }}
+          testId="mk-filter-assigned"
+        />
         <Input placeholder="Search name/phone/email" value={filter.search} onChange={(e) => { setPage(1); setFilter({ ...filter, search: e.target.value }); }} data-testid="mk-filter-search" />
         <div className="flex gap-2">
           <Button variant="outline" onClick={load} data-testid="mk-leads-refresh"><RefreshCw className="h-4 w-4" /></Button>
