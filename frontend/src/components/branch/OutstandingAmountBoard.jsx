@@ -1,8 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { Eye, Wallet, MessageCircle, Mail, ChevronDown, ChevronRight, ChevronLeft, Printer, FileSpreadsheet } from "lucide-react";
+import { Eye, ChevronDown, ChevronRight, ChevronLeft, Printer, FileSpreadsheet } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
-import { toast } from "@/components/ui/sonner";
-import { getClientTransactionHistory, markInstallmentPaid } from "@/lib/api";
+import { getClientTransactionHistory } from "@/lib/api";
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 const todayIso = () => new Date().toISOString().slice(0, 10);
@@ -216,14 +215,13 @@ const ExpandedHistory = ({ leadId }) => {
   );
 };
 
-export const OutstandingAmountBoard = ({ rows, onView, onChanged }) => {
+export const OutstandingAmountBoard = ({ rows, onView }) => {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
   const [month, setMonth] = useState("all");
   const [minAmount, setMinAmount] = useState("");
   const [maxAmount, setMaxAmount] = useState("");
   const [expanded, setExpanded] = useState(null);
-  const [collecting, setCollecting] = useState(null);
 
   const today = todayIso();
 
@@ -253,33 +251,6 @@ export const OutstandingAmountBoard = ({ rows, onView, onChanged }) => {
     paid_amount: acc.paid_amount + (r.paid_amount || 0),
     balance: acc.balance + (r.balance || 0),
   }), { total_bill: 0, paid_amount: 0, balance: 0 }), [filtered]);
-
-  const collectPayment = async (row) => {
-    if (!row.next_installment_number) return;
-    setCollecting(row.lead_id);
-    try {
-      await markInstallmentPaid(row.lead_id, row.next_installment_number);
-      toast.success(`Payment collected for ${row.client_name}`);
-      onChanged && onChanged();
-    } catch (e) {
-      toast.error(e?.response?.data?.detail || "Failed to collect payment");
-    }
-    setCollecting(null);
-  };
-
-  const sendWhatsapp = (row) => {
-    if (!row.phone) return;
-    const digits = row.phone.replace(/[^0-9]/g, "");
-    const msg = encodeURIComponent(`Hi ${row.client_name}, this is a reminder that you have an outstanding balance of ${fmt(row.balance)}. Kindly clear it at your earliest convenience.`);
-    window.open(`https://wa.me/${digits}?text=${msg}`, "_blank");
-  };
-
-  const sendEmail = (row) => {
-    if (!row.email) return;
-    const subject = encodeURIComponent("Outstanding Payment Reminder");
-    const body = encodeURIComponent(`Hi ${row.client_name},\n\nThis is a reminder that you have an outstanding balance of ${fmt(row.balance)}.\n\nKindly clear it at your earliest convenience.`);
-    window.location.href = `mailto:${row.email}?subject=${subject}&body=${body}`;
-  };
 
   return (
     <div className="space-y-4" data-testid="outstanding-amount-board">
@@ -380,22 +351,9 @@ export const OutstandingAmountBoard = ({ rows, onView, onChanged }) => {
                       <td className="border-y border-slate-200 bg-white px-3 py-2 text-center text-slate-600">{r.due_date || "—"}</td>
                       <td className="border-y border-slate-200 bg-white px-3 py-2 text-center"><StatusBadge status={r.status} /></td>
                       <td className="rounded-r-[5px] border-y border-r border-slate-200 bg-white px-3 py-2">
-                        <div className="flex items-center justify-center gap-1">
+                        <div className="flex items-center justify-center">
                           <button type="button" onClick={() => onView && onView(r.lead_id)} title="View Details" className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-sky-600">
                             <Eye className="h-3.5 w-3.5" />
-                          </button>
-                          <button
-                            type="button" onClick={() => collectPayment(r)} title="Collect Payment"
-                            disabled={!r.next_installment_number || collecting === r.lead_id}
-                            className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-emerald-600 disabled:cursor-not-allowed disabled:opacity-30"
-                          >
-                            <Wallet className="h-3.5 w-3.5" />
-                          </button>
-                          <button type="button" onClick={() => sendWhatsapp(r)} title="Send WhatsApp Reminder" disabled={!r.phone} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-emerald-600 disabled:cursor-not-allowed disabled:opacity-30">
-                            <MessageCircle className="h-3.5 w-3.5" />
-                          </button>
-                          <button type="button" onClick={() => sendEmail(r)} title="Send Email" disabled={!r.email} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-sky-600 disabled:cursor-not-allowed disabled:opacity-30">
-                            <Mail className="h-3.5 w-3.5" />
                           </button>
                         </div>
                       </td>

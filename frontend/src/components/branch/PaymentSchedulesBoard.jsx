@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Eye, Wallet, MessageCircle, Printer, ChevronDown } from "lucide-react";
+import { Eye, Printer, ChevronDown } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
-import { toast } from "@/components/ui/sonner";
-import { markInstallmentPaid } from "@/lib/api";
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 const todayIso = () => new Date().toISOString().slice(0, 10);
@@ -108,12 +106,11 @@ const ColorFilterDropdown = ({ value, options, onChange, testId }) => {
   );
 };
 
-export const PaymentSchedulesBoard = ({ rows, onView, onChanged }) => {
+export const PaymentSchedulesBoard = ({ rows, onView }) => {
   const [search, setSearch] = useState("");
   const [branch, setBranch] = useState("all");
   const [status, setStatus] = useState("all");
   const [dueFilter, setDueFilter] = useState("all");
-  const [marking, setMarking] = useState(null);
 
   const today = todayIso();
   const weekAhead = useMemo(() => {
@@ -140,26 +137,6 @@ export const PaymentSchedulesBoard = ({ rows, onView, onChanged }) => {
     pending: rows.filter((r) => r.status === "upcoming" || r.status === "due_today").length,
     overdue: rows.filter((r) => r.status === "overdue").length,
   }), [rows]);
-
-  const markPaid = async (row) => {
-    const key = `${row.lead_id}-${row.installment_number}`;
-    setMarking(key);
-    try {
-      await markInstallmentPaid(row.lead_id, row.installment_number);
-      toast.success(`Installment #${row.installment_number} for ${row.client_name} marked as paid`);
-      onChanged && onChanged();
-    } catch (e) {
-      toast.error(e?.response?.data?.detail || "Failed to mark as paid");
-    }
-    setMarking(null);
-  };
-
-  const sendReminder = (row) => {
-    if (!row.phone) return;
-    const digits = row.phone.replace(/[^0-9]/g, "");
-    const msg = encodeURIComponent(`Hi ${row.client_name}, this is a reminder that installment #${row.installment_number} of ${fmt(row.amount)} is due on ${row.due_date}. Kindly clear it at your earliest convenience.`);
-    window.open(`https://wa.me/${digits}?text=${msg}`, "_blank");
-  };
 
   return (
     <div className="space-y-4" data-testid="payment-schedules-board">
@@ -254,30 +231,9 @@ export const PaymentSchedulesBoard = ({ rows, onView, onChanged }) => {
                         <ProgressBar paid={r.installments_paid} total={r.installments_total} />
                       </td>
                       <td className="rounded-r-[5px] border-y border-r border-slate-200 bg-white px-3 py-2">
-                        <div className="flex items-center justify-center gap-1">
+                        <div className="flex items-center justify-center">
                           <button type="button" onClick={() => onView && onView(r.lead_id)} title="View Details" className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-sky-600">
                             <Eye className="h-3.5 w-3.5" />
-                          </button>
-                          <button
-                            type="button" onClick={() => markPaid(r)} title={r.status === "paid" ? "Already paid" : "Collect Payment"}
-                            disabled={r.status === "paid" || marking === key}
-                            className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-emerald-600 disabled:cursor-not-allowed disabled:opacity-30"
-                          >
-                            <Wallet className="h-3.5 w-3.5" />
-                          </button>
-                          <button
-                            type="button" onClick={() => sendReminder(r)} title="Send Reminder"
-                            disabled={r.status === "paid" || !r.phone}
-                            className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-emerald-600 disabled:cursor-not-allowed disabled:opacity-30"
-                          >
-                            <MessageCircle className="h-3.5 w-3.5" />
-                          </button>
-                          <button
-                            type="button" onClick={() => window.print()} title="Print Receipt"
-                            disabled={r.status !== "paid"}
-                            className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-30"
-                          >
-                            <Printer className="h-3.5 w-3.5" />
                           </button>
                         </div>
                       </td>
