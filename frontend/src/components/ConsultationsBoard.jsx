@@ -524,10 +524,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     const mode = collectFeeDraft.payment_mode;
     const payload = { payment_mode: mode, amount, confirmed: true };
     if (mode === "upi") {
-      if (!packageConfirmDraft.upi_transaction_id.trim() || !packageConfirmDraft.upi_utr.trim()) {
-        toast.error("UPI Transaction ID and UTR are required");
-        return;
-      }
       payload.upi_transaction_id = packageConfirmDraft.upi_transaction_id.trim();
       payload.upi_utr = packageConfirmDraft.upi_utr.trim();
     } else if (mode === "card") {
@@ -594,10 +590,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     const mode = treatmentFeeDraft.payment_mode;
     const payload = { payment_mode: mode, amount, confirmed: true };
     if (mode === "upi") {
-      if (!treatmentConfirmDraft.upi_transaction_id.trim() || !treatmentConfirmDraft.upi_utr.trim()) {
-        toast.error("UPI Transaction ID and UTR are required");
-        return;
-      }
       payload.upi_transaction_id = treatmentConfirmDraft.upi_transaction_id.trim();
       payload.upi_utr = treatmentConfirmDraft.upi_utr.trim();
     } else if (mode === "card") {
@@ -1641,7 +1633,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         disabled={
                           collectingFee ||
                           !(parseFloat(collectFeeDraft.amount) > 0) ||
-                          (mode === "upi" && (!packageConfirmDraft.upi_transaction_id.trim() || !packageConfirmDraft.upi_utr.trim())) ||
                           (mode === "card" && (!packageConfirmDraft.account_number.trim() || !packageConfirmDraft.account_holder_name.trim() || !packageConfirmDraft.bank_name.trim() || !packageConfirmDraft.ifsc_code.trim()))
                         }
                         data-testid="cons-collect-fee-confirm-submit"
@@ -1888,7 +1879,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         (mode === "cheque" && (!treatmentFeeDraft.bank_name.trim() || !treatmentFeeDraft.cheque_number.trim())) ||
                         (mode === "partial" && (!partialAllFilled || partialMismatch)) ||
                         (["cash", "upi", "card", "cheque"].includes(mode) && treatmentIsPartialSessions && !treatmentFeeDraft.balance_due_date) ||
-                        (mode === "upi" && (!treatmentConfirmDraft.upi_transaction_id.trim() || !treatmentConfirmDraft.upi_utr.trim())) ||
                         (mode === "card" && (!treatmentConfirmDraft.account_number.trim() || !treatmentConfirmDraft.account_holder_name.trim() || !treatmentConfirmDraft.bank_name.trim() || !treatmentConfirmDraft.ifsc_code.trim()))
                       }
                       data-testid="cons-treatment-fee-confirm-submit"
