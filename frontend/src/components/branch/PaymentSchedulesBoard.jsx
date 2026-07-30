@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { Eye, Wallet, MessageCircle, Printer } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Eye, Wallet, MessageCircle, Printer, ChevronDown } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "@/components/ui/sonner";
 import { markInstallmentPaid } from "@/lib/api";
@@ -43,11 +43,70 @@ const SummaryCard = ({ label, value, color }) => (
 );
 
 const DUE_PRESETS = [
-  { key: "all", label: "All Due Dates" },
-  { key: "overdue", label: "Overdue" },
-  { key: "today", label: "Due Today" },
-  { key: "week", label: "Next 7 Days" },
+  { key: "all", label: "All Due Dates", classes: "border-slate-200 bg-white text-slate-700" },
+  { key: "overdue", label: "Overdue", classes: STATUS_META.overdue.classes },
+  { key: "today", label: "Due Today", classes: STATUS_META.due_today.classes },
+  { key: "week", label: "Next 7 Days", classes: STATUS_META.upcoming.classes },
 ];
+
+// A fixed color per branch would need a stable name->color map that survives
+// the branch list changing; cycling a palette by list position is simpler and
+// still gives each branch its own distinct color in the open dropdown.
+const BRANCH_COLOR_PALETTE = [
+  "border-purple-300 bg-purple-50 text-purple-700",
+  "border-indigo-300 bg-indigo-50 text-indigo-700",
+  "border-emerald-300 bg-emerald-50 text-emerald-700",
+  "border-amber-300 bg-amber-50 text-amber-700",
+  "border-cyan-300 bg-cyan-50 text-cyan-700",
+  "border-pink-300 bg-pink-50 text-pink-700",
+  "border-orange-300 bg-orange-50 text-orange-700",
+  "border-sky-300 bg-sky-50 text-sky-700",
+];
+
+// Native <select> can't reliably color individual dropdown-list items across
+// browsers — only the closed box. This renders each option as its own colored,
+// rounded row in a custom open list instead.
+const ColorFilterDropdown = ({ value, options, onChange, testId }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const onDocClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, []);
+
+  const current = options.find((o) => o.value === value) || options[0];
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={`flex h-9 items-center justify-between gap-2 rounded-md border px-3 text-sm font-semibold ${current?.classes || "border-slate-200 bg-white text-slate-700"}`}
+        data-testid={testId}
+      >
+        <span className="truncate">{current?.label}</span>
+        <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
+      </button>
+      {open && (
+        <div className="absolute left-0 z-20 mt-1 max-h-64 min-w-[170px] space-y-1 overflow-y-auto rounded-md border border-slate-200 bg-white p-1.5 shadow-lg" data-testid={`${testId}-list`}>
+          {options.map((o) => (
+            <button
+              key={o.value}
+              type="button"
+              onClick={() => { onChange(o.value); setOpen(false); }}
+              className={`block w-full whitespace-nowrap rounded-md border px-3 py-1.5 text-left text-xs font-semibold ${o.classes}`}
+              data-testid={`${testId}-option-${o.value}`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 export const PaymentSchedulesBoard = ({ rows, onView, onChanged }) => {
   const [search, setSearch] = useState("");
@@ -120,20 +179,33 @@ export const PaymentSchedulesBoard = ({ rows, onView, onChanged }) => {
             className="h-9 min-w-[200px] flex-1 rounded-md border border-slate-200 px-3 text-sm"
             data-testid="schedules-search"
           />
-          <select value={branch} onChange={(e) => setBranch(e.target.value)} className="h-9 rounded-md border border-slate-200 px-2 text-sm" data-testid="schedules-branch-filter">
-            <option value="all">All Branches</option>
-            {branches.map((b) => <option key={b} value={b}>{b}</option>)}
-          </select>
-          <select value={status} onChange={(e) => setStatus(e.target.value)} className="h-9 rounded-md border border-slate-200 px-2 text-sm" data-testid="schedules-status-filter">
-            <option value="all">All Statuses</option>
-            <option value="paid">Paid</option>
-            <option value="upcoming">Upcoming</option>
-            <option value="due_today">Due Today</option>
-            <option value="overdue">Overdue</option>
-          </select>
-          <select value={dueFilter} onChange={(e) => setDueFilter(e.target.value)} className="h-9 rounded-md border border-slate-200 px-2 text-sm" data-testid="schedules-due-filter">
-            {DUE_PRESETS.map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}
-          </select>
+          <ColorFilterDropdown
+            value={branch}
+            options={[
+              { value: "all", label: "All Branches", classes: "border-slate-200 bg-white text-slate-700" },
+              ...branches.map((b, i) => ({ value: b, label: b, classes: BRANCH_COLOR_PALETTE[i % BRANCH_COLOR_PALETTE.length] })),
+            ]}
+            onChange={setBranch}
+            testId="schedules-branch-filter"
+          />
+          <ColorFilterDropdown
+            value={status}
+            options={[
+              { value: "all", label: "All Statuses", classes: "border-slate-200 bg-white text-slate-700" },
+              { value: "paid", label: "Paid", classes: STATUS_META.paid.classes },
+              { value: "upcoming", label: "Upcoming", classes: STATUS_META.upcoming.classes },
+              { value: "due_today", label: "Due Today", classes: STATUS_META.due_today.classes },
+              { value: "overdue", label: "Overdue", classes: STATUS_META.overdue.classes },
+            ]}
+            onChange={setStatus}
+            testId="schedules-status-filter"
+          />
+          <ColorFilterDropdown
+            value={dueFilter}
+            options={DUE_PRESETS.map((d) => ({ value: d.key, label: d.label, classes: d.classes }))}
+            onChange={setDueFilter}
+            testId="schedules-due-filter"
+          />
           <button
             type="button" onClick={() => window.print()}
             className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50"

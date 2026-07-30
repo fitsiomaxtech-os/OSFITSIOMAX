@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { Eye, Banknote, CreditCard, Smartphone, Layers } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Eye, Banknote, CreditCard, Smartphone, Layers, ChevronDown } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
@@ -35,6 +35,65 @@ const StatusBadge = ({ status }) => {
     <span className={`inline-flex items-center rounded-[5px] border px-2 py-0.5 text-[10px] font-semibold ${meta.classes}`}>
       {meta.label}
     </span>
+  );
+};
+
+// A fixed color per branch would need a stable name->color map that survives
+// the branch list changing; cycling a palette by list position is simpler and
+// still gives each branch its own distinct color in the open dropdown.
+const BRANCH_COLOR_PALETTE = [
+  "border-purple-300 bg-purple-50 text-purple-700",
+  "border-indigo-300 bg-indigo-50 text-indigo-700",
+  "border-emerald-300 bg-emerald-50 text-emerald-700",
+  "border-amber-300 bg-amber-50 text-amber-700",
+  "border-cyan-300 bg-cyan-50 text-cyan-700",
+  "border-pink-300 bg-pink-50 text-pink-700",
+  "border-orange-300 bg-orange-50 text-orange-700",
+  "border-sky-300 bg-sky-50 text-sky-700",
+];
+
+// Native <select> can't reliably color individual dropdown-list items across
+// browsers — only the closed box. This renders each option as its own colored,
+// rounded row in a custom open list instead.
+const ColorFilterDropdown = ({ value, options, onChange, testId }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const onDocClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, []);
+
+  const current = options.find((o) => o.value === value) || options[0];
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={`flex h-9 items-center justify-between gap-2 rounded-md border px-3 text-sm font-semibold ${current?.classes || "border-slate-200 bg-white text-slate-700"}`}
+        data-testid={testId}
+      >
+        <span className="truncate">{current?.label}</span>
+        <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
+      </button>
+      {open && (
+        <div className="absolute left-0 z-20 mt-1 max-h-64 min-w-[170px] space-y-1 overflow-y-auto rounded-md border border-slate-200 bg-white p-1.5 shadow-lg" data-testid={`${testId}-list`}>
+          {options.map((o) => (
+            <button
+              key={o.value}
+              type="button"
+              onClick={() => { onChange(o.value); setOpen(false); }}
+              className={`block w-full whitespace-nowrap rounded-md border px-3 py-1.5 text-left text-xs font-semibold ${o.classes}`}
+              data-testid={`${testId}-option-${o.value}`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 };
 
@@ -120,38 +179,45 @@ export const SessionCollectionsBoard = ({ rows, onView }) => {
             className="h-9 min-w-[180px] flex-1 rounded-md border border-slate-200 px-3 text-sm"
             data-testid="session-collections-search"
           />
-          <select value={branch} onChange={(e) => setBranch(e.target.value)} className="h-9 rounded-md border border-slate-200 px-2 text-sm" data-testid="session-collections-branch-filter">
-            <option value="all">All Branches</option>
-            {branches.map((b) => <option key={b} value={b}>{b}</option>)}
-          </select>
-          <select
+          <ColorFilterDropdown
+            value={branch}
+            options={[
+              { value: "all", label: "All Branches", classes: "border-slate-200 bg-white text-slate-700" },
+              ...branches.map((b, i) => ({ value: b, label: b, classes: BRANCH_COLOR_PALETTE[i % BRANCH_COLOR_PALETTE.length] })),
+            ]}
+            onChange={setBranch}
+            testId="session-collections-branch-filter"
+          />
+          <ColorFilterDropdown
             value={mode}
-            onChange={(e) => {
-              setMode(e.target.value);
-              setActiveCard(["cash", "card", "upi"].includes(e.target.value) ? e.target.value : null);
+            options={[
+              { value: "all", label: "All Payment Modes", classes: "border-slate-200 bg-white text-slate-700" },
+              { value: "cash", label: "Cash", classes: MODE_META.cash.classes },
+              { value: "upi", label: "UPI", classes: MODE_META.upi.classes },
+              { value: "card", label: "Card", classes: MODE_META.card.classes },
+              { value: "cheque", label: "Cheque", classes: MODE_META.cheque.classes },
+              { value: "partial", label: "Partial", classes: MODE_META.partial.classes },
+            ]}
+            onChange={(v) => {
+              setMode(v);
+              setActiveCard(["cash", "card", "upi"].includes(v) ? v : null);
             }}
-            className="h-9 rounded-md border border-slate-200 px-2 text-sm" data-testid="session-collections-mode-filter"
-          >
-            <option value="all">All Payment Modes</option>
-            <option value="cash">Cash</option>
-            <option value="upi">UPI</option>
-            <option value="card">Card</option>
-            <option value="cheque">Cheque</option>
-            <option value="partial">Partial</option>
-          </select>
-          <select
+            testId="session-collections-mode-filter"
+          />
+          <ColorFilterDropdown
             value={status}
-            onChange={(e) => {
-              setStatus(e.target.value);
-              setActiveCard(e.target.value === "partial" ? "partial" : null);
+            options={[
+              { value: "all", label: "All Statuses", classes: "border-slate-200 bg-white text-slate-700" },
+              { value: "paid", label: "Paid", classes: STATUS_META.paid.classes },
+              { value: "partial", label: "Partial", classes: STATUS_META.partial.classes },
+              { value: "pending", label: "Pending", classes: STATUS_META.pending.classes },
+            ]}
+            onChange={(v) => {
+              setStatus(v);
+              setActiveCard(v === "partial" ? "partial" : null);
             }}
-            className="h-9 rounded-md border border-slate-200 px-2 text-sm" data-testid="session-collections-status-filter"
-          >
-            <option value="all">All Statuses</option>
-            <option value="paid">Paid</option>
-            <option value="partial">Partial</option>
-            <option value="pending">Pending</option>
-          </select>
+            testId="session-collections-status-filter"
+          />
           <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="h-9 rounded-md border border-slate-200 px-2 text-sm" data-testid="session-collections-from-date" />
           <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="h-9 rounded-md border border-slate-200 px-2 text-sm" data-testid="session-collections-to-date" />
         </CardContent>

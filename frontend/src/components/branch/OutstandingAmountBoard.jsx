@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Eye, Wallet, MessageCircle, Mail, ChevronDown, ChevronRight, ChevronLeft, Printer, FileSpreadsheet } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "@/components/ui/sonner";
@@ -30,6 +30,51 @@ const StatusBadge = ({ status }) => {
     <span className={`inline-flex items-center rounded-[5px] border px-2 py-0.5 text-[10px] font-semibold ${meta.classes}`}>
       {meta.label}
     </span>
+  );
+};
+
+// Native <select> can't reliably color individual dropdown-list items across
+// browsers — only the closed box. This renders each option as its own colored,
+// rounded row in a custom open list instead.
+const ColorFilterDropdown = ({ value, options, onChange, testId }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const onDocClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, []);
+
+  const current = options.find((o) => o.value === value) || options[0];
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={`flex h-9 items-center justify-between gap-2 rounded-md border px-3 text-sm font-semibold ${current?.classes || "border-slate-200 bg-white text-slate-700"}`}
+        data-testid={testId}
+      >
+        <span className="truncate">{current?.label}</span>
+        <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
+      </button>
+      {open && (
+        <div className="absolute left-0 z-20 mt-1 max-h-64 min-w-[170px] space-y-1 overflow-y-auto rounded-md border border-slate-200 bg-white p-1.5 shadow-lg" data-testid={`${testId}-list`}>
+          {options.map((o) => (
+            <button
+              key={o.value}
+              type="button"
+              onClick={() => { onChange(o.value); setOpen(false); }}
+              className={`block w-full whitespace-nowrap rounded-md border px-3 py-1.5 text-left text-xs font-semibold ${o.classes}`}
+              data-testid={`${testId}-option-${o.value}`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 };
 
@@ -256,17 +301,17 @@ export const OutstandingAmountBoard = ({ rows, onView, onChanged }) => {
             className="h-9 min-w-[200px] flex-1 rounded-md border border-slate-200 px-3 text-sm"
             data-testid="outstanding-search"
           />
-          <select
+          <ColorFilterDropdown
             value={status}
-            onChange={(e) => setStatus(e.target.value)}
-            className="h-9 rounded-md border border-slate-200 px-2 text-sm"
-            data-testid="outstanding-status-filter"
-          >
-            <option value="all">All Statuses</option>
-            <option value="overdue">Overdue</option>
-            <option value="due_soon">Due Soon</option>
-            <option value="partial">Partial Paid</option>
-          </select>
+            options={[
+              { value: "all", label: "All Statuses", classes: "border-slate-200 bg-white text-slate-700" },
+              { value: "overdue", label: "Overdue", classes: STATUS_META.overdue.classes },
+              { value: "due_soon", label: "Due Soon", classes: STATUS_META.due_soon.classes },
+              { value: "partial", label: "Partial Paid", classes: STATUS_META.partial.classes },
+            ]}
+            onChange={setStatus}
+            testId="outstanding-status-filter"
+          />
           <input
             type="number" value={minAmount} onChange={(e) => setMinAmount(e.target.value)}
             placeholder="Min amount" className="h-9 w-28 rounded-md border border-slate-200 px-2 text-sm"
