@@ -22,8 +22,8 @@ const PaymentModeBadge = ({ mode }) => {
 };
 
 const StatusBadge = ({ paid }) => (
-  <span className={`inline-flex items-center rounded-[5px] border px-2 py-0.5 text-[10px] font-semibold ${paid ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-amber-100 text-amber-700 border-amber-200"}`}>
-    {paid ? "Paid" : "Pending"}
+  <span className={`inline-flex items-center rounded-[5px] border px-2 py-0.5 text-[10px] font-semibold ${paid ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-rose-100 text-rose-700 border-rose-200"}`}>
+    {paid ? "PAID" : "NOT PAID"}
   </span>
 );
 
