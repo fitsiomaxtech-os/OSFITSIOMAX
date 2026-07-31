@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
-from typing import Optional
+from typing import Dict, Optional
 from datetime import datetime, timedelta
 from calendar import monthrange
 import logging
@@ -330,25 +330,38 @@ async def v3_available_experts(
     if not branch_experts:
         branch_experts = await v3_col("doctors").find({}, {"_id": 0}).to_list(500)
 
-    # Find leads already taking those slots
-    busy_lead_query = {
-        "appointment_date": date,
-        "assigned_physio_id": {"$ne": None},
-        "branch_stage": {"$ne": "Cancelled"},
-    }
-    if time:
-        busy_lead_query["appointment_time"] = time
-    busy_leads = await v3_col("leads").find(busy_lead_query, {"_id": 0, "assigned_physio_id": 1}).to_list(500)
-    busy_ids = {ld["assigned_physio_id"] for ld in busy_leads if ld.get("assigned_physio_id")}
+    # Availability is decided per slot, not per day: an expert with a 9:30 booking is
+    # still free at 10:00. So a same-day booking no longer hides them — only being
+    # genuinely full does (every slot they published for this date is taken). An expert
+    # who published nothing stays listed, so the booking popup can say so and point at
+    # the Consultant Calendar instead of silently offering no one.
+    booked_rows = await v3_col("appointments").find(
+        {"status": "new_appointment", "slot_time": {"$regex": f"^{date}T"}},
+        {"_id": 0, "doctor_id": 1, "slot_time": 1},
+    ).to_list(2000)
+    booked_by_doc: Dict[str, set] = {}
+    for r in booked_rows:
+        booked_by_doc.setdefault(r.get("doctor_id"), set()).add(r.get("slot_time"))
 
-    available = [d for d in branch_experts if d.get("id") not in busy_ids]
+    available = []
+    for d in branch_experts:
+        published = {s for s in (d.get("slots") or []) if isinstance(s, str) and s.startswith(f"{date}T")}
+        taken = booked_by_doc.get(d.get("id"), set())
+        free = published - taken
+        if time:
+            # Caller asked about one exact time — only offer experts free right then.
+            if f"{date}T{time}" in taken:
+                continue
+        elif published and not free:
+            continue  # fully booked for the day
+        available.append({**d, "free_slot_count": len(free), "published_slot_count": len(published)})
     return {
         "date": date,
         "time": time,
         "branch_id": branch_id,
         "total_branch_experts": len(branch_experts),
         "available_count": len(available),
-        "busy_count": len(busy_ids & {d["id"] for d in branch_experts}),
+        "busy_count": len(branch_experts) - len(available),
         "experts": available,
     }
 
