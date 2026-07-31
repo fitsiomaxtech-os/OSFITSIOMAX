@@ -183,19 +183,6 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
 
   return (
     <div className="space-y-5" data-testid="presales-crm-page">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-900">Pre-Sales CRM</h2>
-          <p className="text-sm text-slate-500">Manage incoming leads, follow-ups, and stage transitions.</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {role === "super_admin" && (
-            <Button variant="outline" onClick={onManageStages} data-testid="presales-manage-stages-btn"><Cog className="h-4 w-4 mr-1" />Manage Stages</Button>
-          )}
-          <Button onClick={() => setShowCreate(true)} className="bg-sky-600 hover:bg-sky-700" data-testid="presales-create-lead-btn"><Plus className="h-4 w-4 mr-1" />Create Lead</Button>
-        </div>
-      </div>
-
       {/* KPI Cards */}
       <div className="flex flex-nowrap gap-3" data-testid="presales-kpi-row">
         <KpiCard label="Total Leads" value={stageCounts.All} active={stageFilter === "All"} color="#22c55e" onClick={() => setStageFilter("All")} testid="presales-kpi-all" />
@@ -215,6 +202,7 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
         </Button>
         <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="presales-date-filter" />
         <PullFromSheetButton onPulled={load} />
+        <Button onClick={() => setShowCreate(true)} className="h-10 bg-sky-600 hover:bg-sky-700" data-testid="presales-create-lead-btn"><Plus className="h-4 w-4 mr-1" />Create Lead</Button>
         <select
           className="h-10 w-[200px] rounded-md border border-slate-200 px-3 text-sm"
           value={sourceFilter}
@@ -224,11 +212,16 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
           <option value="">All Sources</option>
           {sourceOptions.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
+        {role === "super_admin" && (
+          <Button variant="outline" className="h-10" onClick={onManageStages} data-testid="presales-manage-stages-btn"><Cog className="h-4 w-4 mr-1" />Manage Stages</Button>
+        )}
       </div>
 
-      {/* Stage Tabs — sticky below the page header when scrolling */}
-      <div className="sticky top-[88px] z-10 -mx-1 rounded-xl border border-slate-200 bg-white/95 p-1 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/80" data-testid="presales-stage-tabs">
-        <div className="grid grid-cols-2 gap-1 sm:grid-cols-3 lg:grid-cols-5">
+      {/* Stage Tabs — sticky below the page header when scrolling. One continuous
+          strip (divide-x between segments, rounding only on the outer edges) rather
+          than separate gapped pills. */}
+      <div className="sticky top-[88px] z-10 -mx-1 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/80" data-testid="presales-stage-tabs">
+        <div className="flex flex-wrap divide-x divide-slate-200 overflow-hidden rounded-xl border border-slate-200 bg-white/95">
           <StageTab label="All" active={stageFilter === "All"} onClick={() => setStageFilter("All")} color="#0ea5e9" testid="presales-chip-all" />
           {stages.map((s) => (
             <StageTab key={s.id} label={s.name} active={stageFilter === s.name} onClick={() => setStageFilter(s.name)} color={s.color} testid={`presales-chip-${s.name}`} />
@@ -461,12 +454,8 @@ const StageTab = ({ label, active, onClick, color, testid }) => {
       onClick={onClick}
       data-testid={testid}
       type="button"
-      className="relative flex items-center justify-center rounded-lg px-4 py-3 text-center transition-all hover:shadow-sm"
-      style={
-        active
-          ? { background: tint, color: "#ffffff", boxShadow: `0 2px 8px ${tint}40` }
-          : { background: `${tint}14`, color: tint, border: `1px solid ${tint}33` }
-      }
+      className="relative flex flex-1 min-w-[110px] items-center justify-center px-4 py-3 text-center transition-colors hover:brightness-95"
+      style={active ? { background: tint, color: "#ffffff" } : { background: `${tint}14`, color: tint }}
     >
       <span className="text-xs font-semibold uppercase tracking-wider leading-tight">{label}</span>
     </button>
