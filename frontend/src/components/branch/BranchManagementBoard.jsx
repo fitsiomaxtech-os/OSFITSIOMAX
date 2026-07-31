@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Plus, Pencil, Trash2, X, Users, MapPin, Phone, Mail, TrendingUp, BarChart3, RefreshCw, Layers, LayoutDashboard, ChevronDown, BadgeIndianRupee } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -60,6 +60,75 @@ export const BranchManagementBoard = ({ actingUser } = {}) => {
 
 // ---------- Branch Control (Super Admin driving a Branch Admin's own board) ----------
 
+// A fixed color per branch would need a stable id->color map that survives
+// the branch list changing; cycling a palette by list position is simpler and
+// still gives each branch its own distinct color in the open dropdown.
+const BRANCH_COLOR_PALETTE = [
+  "border-purple-300 bg-purple-50 text-purple-700",
+  "border-indigo-300 bg-indigo-50 text-indigo-700",
+  "border-emerald-300 bg-emerald-50 text-emerald-700",
+  "border-amber-300 bg-amber-50 text-amber-700",
+  "border-cyan-300 bg-cyan-50 text-cyan-700",
+  "border-pink-300 bg-pink-50 text-pink-700",
+  "border-orange-300 bg-orange-50 text-orange-700",
+  "border-sky-300 bg-sky-50 text-sky-700",
+];
+
+// Native <select> can't reliably color individual dropdown-list items across
+// browsers — only the closed box. This renders each option as its own colored,
+// rounded row in a custom open list instead.
+const BranchSelectDropdown = ({ value, branches, onChange }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const onDocClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, []);
+
+  const idx = branches.findIndex((b) => b.id === value);
+  const currentClasses = idx >= 0 ? BRANCH_COLOR_PALETTE[idx % BRANCH_COLOR_PALETTE.length] : "border-slate-200 bg-white text-slate-700";
+  const currentLabel = idx >= 0 ? branches[idx].branch_name : "— Select a branch —";
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={`flex h-9 min-w-[240px] items-center justify-between gap-2 rounded-md border px-3 text-sm font-semibold ${currentClasses}`}
+        data-testid="bm-branch-control-select"
+      >
+        <span className="truncate">{currentLabel}</span>
+        <ChevronDown className="h-4 w-4 shrink-0 opacity-60" />
+      </button>
+      {open && (
+        <div className="absolute left-0 z-20 mt-1 max-h-64 min-w-[240px] space-y-1 overflow-y-auto rounded-md border border-slate-200 bg-white p-1.5 shadow-lg" data-testid="bm-branch-control-select-list">
+          <button
+            type="button"
+            onClick={() => { onChange(""); setOpen(false); }}
+            className="block w-full rounded-md border border-slate-200 bg-white px-3 py-1.5 text-left text-xs font-semibold text-slate-700"
+            data-testid="bm-branch-control-select-option-none"
+          >
+            — Select a branch —
+          </button>
+          {branches.map((b, i) => (
+            <button
+              key={b.id}
+              type="button"
+              onClick={() => { onChange(b.id); setOpen(false); }}
+              className={`block w-full rounded-md border px-3 py-1.5 text-left text-xs font-semibold ${BRANCH_COLOR_PALETTE[i % BRANCH_COLOR_PALETTE.length]}`}
+              data-testid={`bm-branch-control-select-option-${b.id}`}
+            >
+              {b.branch_name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const BranchControlTab = ({ actingUser }) => {
   const [branches, setBranches] = useState([]);
   const [selectedId, setSelectedId] = useState("");
@@ -83,18 +152,7 @@ const BranchControlTab = ({ actingUser }) => {
     <div className="space-y-4" data-testid="bm-branch-control-tab">
       <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white p-3">
         <label className="text-xs font-medium text-slate-600">Viewing branch:</label>
-        <div className="relative">
-          <select
-            value={selectedId}
-            onChange={(e) => setSelectedId(e.target.value)}
-            className="h-9 min-w-[240px] appearance-none rounded-md border border-slate-200 bg-white px-3 pr-8 text-sm"
-            data-testid="bm-branch-control-select"
-          >
-            <option value="">— Select a branch —</option>
-            {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
-          </select>
-          <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-        </div>
+        <BranchSelectDropdown value={selectedId} branches={branches} onChange={setSelectedId} />
         {selected && <span className="text-xs text-slate-400">{selected.admin_name ? `Managed by ${selected.admin_name}` : "No admin assigned"}</span>}
 
         <div className="flex w-full flex-wrap gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1 sm:ml-auto sm:w-auto">
