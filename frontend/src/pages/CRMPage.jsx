@@ -553,7 +553,7 @@ export const CRMPage = ({ auth, onLogout }) => {
             </div>
             <div className="flex items-center gap-2 sm:gap-3">
               <span className="hidden text-sm font-medium text-sky-700 sm:inline" data-testid="role-board-user-greeting">
-                Hi {(showPreSalesBoard || showBranchBoard || showHeadPhysioBoard) ? auth.user.full_name : auth.user.full_name?.split(" ")[0]}
+                {(showPreSalesBoard || showBranchBoard || showHeadPhysioBoard) ? auth.user.full_name : auth.user.full_name?.split(" ")[0]}
               </span>
               {(showPreSalesBoard || showBranchBoard || showHeadPhysioBoard) && (
                 <Button
