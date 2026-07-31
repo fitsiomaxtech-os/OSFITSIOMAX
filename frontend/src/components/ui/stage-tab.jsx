@@ -1,3 +1,8 @@
+// Some stage names are long-form internal labels; shorten them for on-screen display
+// only — the underlying stage value (used for filtering/API calls) stays unchanged.
+const STAGE_DISPLAY_LABELS = { "Appointment Date & Time": "Appointment" };
+export const stageDisplayLabel = (name) => STAGE_DISPLAY_LABELS[name] || name;
+
 // Sticky segmented pill tab used to filter a leads list by stage — shared between
 // Branch Admin's Branch Leads pipeline and Consultations boards.
 export const StageTab = ({ label, count, active, onClick, color, testid }) => {
@@ -41,7 +46,7 @@ export const StageTabBar = ({ stages, stageFilter, setStageFilter, counts, total
       {stages.map((s) => (
         <StageTab
           key={s.id}
-          label={s.name}
+          label={stageDisplayLabel(s.name)}
           count={counts?.[s.name] || 0}
           active={stageFilter === s.name}
           onClick={() => setStageFilter(stageFilter === s.name ? null : s.name)}
