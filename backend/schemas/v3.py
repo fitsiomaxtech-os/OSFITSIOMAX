@@ -388,14 +388,17 @@ class V3AppointmentOut(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     id: str
-    lead_id: str
+    # A consultation booked straight from the Calendar tab can be a walk-in with no lead
+    # behind it, and older rows predate created_by_role — neither is worth 500ing the
+    # whole appointments list over, so both are optional here.
+    lead_id: Optional[str] = None
     lead_name: str
     branch_id: str
     doctor_id: str
     doctor_name: str
     slot_time: str
     status: str
-    created_by_role: str
+    created_by_role: Optional[str] = None
     created_at: str
 
 

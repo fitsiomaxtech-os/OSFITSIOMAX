@@ -207,6 +207,9 @@ async def create_consult_appointment(branch_id: str, payload: ConsultApptCreate,
         "status": "new_appointment",
         "appt_kind": "consultation",
         "created_by": user.full_name,
+        # Written alongside created_by so every appointment carries the same audit pair
+        # regardless of which screen booked it.
+        "created_by_role": user.role,
         "created_at": now_iso(),
         "updated_at": now_iso(),
     }
