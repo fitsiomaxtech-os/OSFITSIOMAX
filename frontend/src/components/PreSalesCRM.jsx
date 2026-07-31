@@ -299,7 +299,7 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
           <div className="overflow-auto">
             <table className="min-w-full border-separate border-spacing-x-0 border-spacing-y-2 text-sm">
               <thead className="text-center text-xs text-slate-500">
-                <tr><th className="px-3 py-2">LEAD</th><th className="px-3 py-2">CONTACT</th><th className="px-3 py-2">SOURCE</th><th className="px-3 py-2">STAGE</th><th className="px-3 py-2">{stageFilter === "Appointment" ? "BRANCH ADMIN STATUS" : "DEPARTMENT"}</th><th className="px-3 py-2">CREATED</th><th className="px-3 py-2">ACTIONS</th></tr>
+                <tr><th className="px-3 py-2">LEAD</th><th className="px-3 py-2">PHONE</th><th className="px-3 py-2">EMAIL</th><th className="px-3 py-2">SOURCE</th><th className="px-3 py-2">STAGE</th><th className="px-3 py-2">{stageFilter === "Appointment" ? "BRANCH ADMIN STATUS" : "DEPARTMENT"}</th><th className="px-3 py-2">CREATED</th><th className="px-3 py-2">ACTIONS</th></tr>
               </thead>
               <tbody>
                 {visibleLeads.map((l) => {
@@ -307,7 +307,8 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
                   return (
                     <tr key={l.id} onClick={() => setEditing(l)} className="group cursor-pointer" data-testid={`presales-lead-row-${l.id}`}>
                       <td className="rounded-l-[5px] border-y border-l border-slate-200 bg-white px-3 py-3 text-center font-medium text-slate-800 transition-colors group-hover:bg-slate-50">{l.name}</td>
-                      <td className="border-y border-slate-200 bg-white px-3 py-3 text-center transition-colors group-hover:bg-slate-50"><MaskedContact phone={l.phone} email={l.email} /></td>
+                      <td className="border-y border-slate-200 bg-white px-3 py-3 text-center transition-colors group-hover:bg-slate-50"><MaskedContact phone={l.phone} /></td>
+                      <td className="border-y border-slate-200 bg-white px-3 py-3 text-center transition-colors group-hover:bg-slate-50"><MaskedContact email={l.email} /></td>
                       <td className="border-y border-slate-200 bg-white px-3 py-3 text-center transition-colors group-hover:bg-slate-50"><SourcePill source={l.source_tab || l.source_type} /></td>
                       <td className="border-y border-slate-200 bg-white px-3 py-3 transition-colors group-hover:bg-slate-50">
                         <div className="flex flex-col items-center gap-1">
@@ -378,7 +379,7 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
                     </tr>
                   );
                 })}
-                {filtered.length === 0 && <tr><td colSpan="8" className="px-3 py-8 text-center text-slate-400">{loading ? "Loading..." : "No leads match."}</td></tr>}
+                {filtered.length === 0 && <tr><td colSpan="9" className="px-3 py-8 text-center text-slate-400">{loading ? "Loading..." : "No leads match."}</td></tr>}
               </tbody>
             </table>
           </div>
