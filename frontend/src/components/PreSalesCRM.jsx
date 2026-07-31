@@ -64,7 +64,6 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
   const [apptMode, setApptMode] = useState("offline"); // "offline" | "online"
   const [apptBranchFilter, setApptBranchFilter] = useState(""); // "" = all branches for offline
   const [sourceFilter, setSourceFilter] = useState("");
-  const [sortNewest, setSortNewest] = useState(true);
   const [dateFilter, setDateFilter] = useState(null);
   const [editing, setEditing] = useState(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -151,15 +150,12 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
       const q = search.toLowerCase();
       rows = rows.filter((l) => (l.name || "").toLowerCase().includes(q) || (l.phone || "").includes(q) || (l.email || "").toLowerCase().includes(q));
     }
-    return rows.slice().sort((a, b) => {
-      const da = a.created_at || ""; const db = b.created_at || "";
-      return sortNewest ? db.localeCompare(da) : da.localeCompare(db);
-    });
-  }, [dateSourceFiltered, stageFilter, apptMode, apptBranchFilter, search, sortNewest]);
+    return rows.slice().sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
+  }, [dateSourceFiltered, stageFilter, apptMode, apptBranchFilter, search]);
 
   // Rendering thousands of rows at once is fine on desktop but chokes mobile
   // devices, so re-page back to 50 whenever the filtered set changes.
-  useEffect(() => { setVisibleCount(50); }, [stageFilter, apptMode, apptBranchFilter, sourceFilter, search, dateFilter, sortNewest]);
+  useEffect(() => { setVisibleCount(50); }, [stageFilter, apptMode, apptBranchFilter, sourceFilter, search, dateFilter]);
   const visibleLeads = filtered.slice(0, visibleCount);
 
   const moveToStage = async (leadId, stageName) => {
@@ -196,9 +192,6 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
           <Search className="pointer-events-none absolute left-2 top-2.5 h-4 w-4 text-slate-400" />
           <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search leads by name, email, phone..." className="h-10 pl-8" data-testid="presales-search" />
         </div>
-        <Button variant="outline" className="h-10" onClick={() => setSortNewest((s) => !s)} data-testid="presales-sort">
-          <CalendarIcon className="mr-1 h-4 w-4" />{sortNewest ? "Newest first" : "Oldest first"}
-        </Button>
         <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="presales-date-filter" />
         <PullFromSheetButton onPulled={load} />
         <Button onClick={() => setShowCreate(true)} className="h-10 bg-sky-600 hover:bg-sky-700" data-testid="presales-create-lead-btn"><Plus className="h-4 w-4 mr-1" />Create Lead</Button>
