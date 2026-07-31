@@ -260,13 +260,16 @@ async def create_user_account(payload: UserAccountCreate, _: V3UserOut = Depends
         emp = await v3_col("employees").find_one({"id": payload.employee_id}, {"_id": 0, "id": 1})
         if not emp:
             raise HTTPException(status_code=404, detail="Linked employee not found")
+    # Head Physios serve every branch, so they're never tied to one — any branch sent
+    # for that role is ignored rather than silently creating a half-scoped account.
+    branch_id = None if payload.role == "head_physio" else payload.branch_id
     user = {
         "id": str(uuid.uuid4()),
         "full_name": payload.full_name,
         "email": payload.email,
         "password": hash_password(payload.password),
         "role": payload.role,
-        "branch_id": payload.branch_id,
+        "branch_id": branch_id,
         "employee_id": payload.employee_id,
         "mobile_number": payload.mobile_number,
         "aadhar_number": payload.aadhar_number,
@@ -279,7 +282,7 @@ async def create_user_account(payload: UserAccountCreate, _: V3UserOut = Depends
             "id": str(uuid.uuid4()),
             "full_name": payload.full_name,
             "profile_type": "head_physio",
-            "branch_id": payload.branch_id,
+            "branch_id": None,
             "specialization": "",
             "slots": [],
             "slot_details": [],
@@ -303,6 +306,11 @@ async def update_user_account(user_id: str, payload: UserAccountUpdate, _: V3Use
         emp = await v3_col("employees").find_one({"id": updates["employee_id"]}, {"_id": 0, "id": 1})
         if not emp:
             raise HTTPException(status_code=404, detail="Linked employee not found")
+    # A Head Physio serves every branch — never let an edit pin one to a single branch.
+    if "branch_id" in updates:
+        current = await v3_col("users").find_one({"id": user_id}, {"_id": 0, "role": 1})
+        if (current or {}).get("role") == "head_physio":
+            updates["branch_id"] = None
     res = await v3_col("users").update_one({"id": user_id}, {"$set": updates})
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="User not found")

@@ -581,12 +581,22 @@ const UserActionsModal = ({ user, onClose, onDone }) => {
           <div className="space-y-3" data-testid="hr-actions-edit-form">
             <Field label="Name"><Input placeholder="Full name" value={editForm.full_name} onChange={(e) => setEditForm({ ...editForm, full_name: e.target.value })} data-testid="hr-actions-edit-name" /></Field>
             <Field label="Email"><Input placeholder="user@company.com" value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} data-testid="hr-actions-edit-email" /></Field>
-            <Field label="Branch">
-              <select className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm" value={editForm.branch_id} onChange={(e) => setEditForm({ ...editForm, branch_id: e.target.value })} data-testid="hr-actions-edit-branch">
-                <option value="">No branch</option>
-                {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
-              </select>
-            </Field>
+            {/* Head Physios serve every branch, so there's no branch to assign them to —
+                the field is replaced with a note rather than shown and ignored. */}
+            {user.role === "head_physio" ? (
+              <Field label="Branch">
+                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800" data-testid="hr-actions-edit-branch-shared">
+                  Head Physios are shared across all branches — no branch assignment needed.
+                </div>
+              </Field>
+            ) : (
+              <Field label="Branch">
+                <select className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm" value={editForm.branch_id} onChange={(e) => setEditForm({ ...editForm, branch_id: e.target.value })} data-testid="hr-actions-edit-branch">
+                  <option value="">No branch</option>
+                  {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
+                </select>
+              </Field>
+            )}
             <Field label="Linked Employee">
               <select className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm" value={editForm.employee_id} onChange={(e) => setEditForm({ ...editForm, employee_id: e.target.value })} data-testid="hr-actions-edit-employee">
                 <option value="">Not linked</option>
@@ -891,9 +901,17 @@ const CreateUserModal = ({ meta, reloadMeta, onClose, onSaved }) => {
             <p className="mt-1 text-[10px] text-slate-400">A new role only adds a selectable name — page access still needs to be built for it separately.</p>
           )}
         </Field>
-        <Field label="Branch (optional)">
-          <BranchSelectDropdown value={form.branch_id} branches={branches} onChange={(id) => setForm({ ...form, branch_id: id })} />
-        </Field>
+        {form.role === "head_physio" ? (
+          <Field label="Branch">
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800" data-testid="hr-create-user-branch-shared">
+              Head Physios are shared across all branches — no branch assignment needed.
+            </div>
+          </Field>
+        ) : (
+          <Field label="Branch (optional)">
+            <BranchSelectDropdown value={form.branch_id} branches={branches} onChange={(id) => setForm({ ...form, branch_id: id })} />
+          </Field>
+        )}
         <Field label="Password *"><Input type="password" placeholder="Min 6 characters" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} data-testid="hr-create-user-pwd" /></Field>
         <Field label="Confirm Password *"><Input type="password" placeholder="Confirm password" value={form.confirm} onChange={(e) => setForm({ ...form, confirm: e.target.value })} data-testid="hr-create-user-confirm" /></Field>
         <div className="flex gap-2 pt-2"><Button variant="outline" onClick={onClose} className="flex-1" data-testid="hr-create-user-cancel">Cancel</Button><Button onClick={submit} className="flex-1 bg-sky-600 hover:bg-sky-700" data-testid="hr-create-user-submit">Create User</Button></div>
