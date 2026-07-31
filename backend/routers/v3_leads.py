@@ -50,7 +50,7 @@ async def v3_get_leads(
 
 
 @router.post("/leads/manual", response_model=V3LeadOut)
-async def v3_manual_lead(payload: V3LeadCreate, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev", "branch_admin"))):
+async def v3_manual_lead(payload: V3LeadCreate, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev", "pre_sales", "branch_admin"))):
     # A lead created directly against a branch (e.g. a walk-in added by Super Admin/Branch
     # Admin) must land on the branch's own New Lead stage too, same as sheet/Meta-imported
     # leads — otherwise it has a branch_id but no branch_stage and never shows on that board.
@@ -109,7 +109,7 @@ async def v3_delete_lead(
 async def v3_edit_lead(
     lead_id: str,
     payload: V3LeadUpdate,
-    user: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev", "branch_admin")),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev", "pre_sales", "branch_admin")),
 ):
     updates = {k: v for k, v in payload.model_dump().items() if v is not None}
     if not updates:
@@ -152,7 +152,7 @@ async def v3_edit_lead(
 
 
 @router.post("/leads/{lead_id}/qualify", response_model=V3LeadOut)
-async def v3_qualify_lead(lead_id: str, _: V3UserOut = Depends(v3_require_roles("business_dev", "super_admin"))):
+async def v3_qualify_lead(lead_id: str, _: V3UserOut = Depends(v3_require_roles("pre_sales", "business_dev", "super_admin"))):
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {"stage": "Follow Up", "updated_at": now_iso()}})
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
@@ -161,7 +161,7 @@ async def v3_qualify_lead(lead_id: str, _: V3UserOut = Depends(v3_require_roles(
 
 
 @router.post("/leads/{lead_id}/assign-branch", response_model=V3LeadOut)
-async def v3_assign_branch(lead_id: str, payload: V3AssignBranchInput, _: V3UserOut = Depends(v3_require_roles("business_dev", "super_admin"))):
+async def v3_assign_branch(lead_id: str, payload: V3AssignBranchInput, _: V3UserOut = Depends(v3_require_roles("pre_sales", "business_dev", "super_admin"))):
     branch = await v3_col("branches").find_one({"id": payload.branch_id}, {"_id": 0, "id": 1})
     if not branch:
         raise HTTPException(status_code=404, detail="Branch not found")
@@ -204,7 +204,7 @@ async def v3_confirm_lead(lead_id: str, user: V3UserOut = Depends(v3_require_rol
 
 
 @router.post("/leads/{lead_id}/book-appointment", response_model=V3AppointmentOut)
-async def v3_book_appointment(lead_id: str, payload: V3BookAppointmentInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "head_physio", "super_admin"))):
+async def v3_book_appointment(lead_id: str, payload: V3BookAppointmentInput, user: V3UserOut = Depends(v3_require_roles("pre_sales", "branch_admin", "head_physio", "super_admin"))):
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -301,7 +301,7 @@ async def v3_get_activity(lead_id: str, _: V3UserOut = Depends(v3_current_user))
 
 
 @router.post("/leads/{lead_id}/move-stage")
-async def v3_move_stage(lead_id: str, payload: V3MoveStageInput, user: V3UserOut = Depends(v3_require_roles("business_dev", "super_admin", "branch_admin"))):
+async def v3_move_stage(lead_id: str, payload: V3MoveStageInput, user: V3UserOut = Depends(v3_require_roles("pre_sales", "business_dev", "super_admin", "branch_admin"))):
     if payload.stage not in V3_STAGES:
         raise HTTPException(status_code=400, detail="Invalid stage")
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
@@ -329,7 +329,7 @@ async def v3_move_stage(lead_id: str, payload: V3MoveStageInput, user: V3UserOut
 
 
 @router.post("/leads/{lead_id}/rnr-attempt", response_model=V3LeadOut)
-async def v3_rnr_attempt(lead_id: str, user: V3UserOut = Depends(v3_require_roles("business_dev", "super_admin", "branch_admin"))):
+async def v3_rnr_attempt(lead_id: str, user: V3UserOut = Depends(v3_require_roles("pre_sales", "business_dev", "super_admin", "branch_admin"))):
     """Increment the 'rnr_attempts' counter on a lead (Ring-Not-Responded)."""
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
@@ -367,7 +367,7 @@ class V3AppointmentScheduleInput(BaseModel):
 
 
 @router.post("/leads/{lead_id}/schedule-appointment", response_model=V3LeadOut)
-async def v3_schedule_appointment(lead_id: str, payload: V3AppointmentScheduleInput, user: V3UserOut = Depends(v3_require_roles("business_dev", "super_admin", "branch_admin"))):
+async def v3_schedule_appointment(lead_id: str, payload: V3AppointmentScheduleInput, user: V3UserOut = Depends(v3_require_roles("pre_sales", "business_dev", "super_admin", "branch_admin"))):
     """Move lead to Appointment stage with department (physio/fitness), mode (offline/online),
     and branch (offline only). Pre-Sales only assigns the branch (+ a basic diagnosis for
     Physio/Offline); the Branch Admin assigns the Fitsiomax Expert and appointment time later."""
@@ -418,7 +418,7 @@ async def v3_schedule_appointment(lead_id: str, payload: V3AppointmentScheduleIn
 
 
 @router.post("/leads/{lead_id}/follow-up", response_model=V3LeadOut)
-async def v3_schedule_follow_up(lead_id: str, payload: V3FollowUpInput, user: V3UserOut = Depends(v3_require_roles("business_dev", "super_admin", "branch_admin"))):
+async def v3_schedule_follow_up(lead_id: str, payload: V3FollowUpInput, user: V3UserOut = Depends(v3_require_roles("pre_sales", "business_dev", "super_admin", "branch_admin"))):
     """Schedule a follow-up for a lead. Appends to follow_ups[] and moves stage to 'Follow Up'."""
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
@@ -456,7 +456,7 @@ class V3FollowUpRescheduleInput(BaseModel):
 
 
 @router.post("/leads/{lead_id}/follow-up/{followup_id}/reschedule", response_model=V3LeadOut)
-async def v3_reschedule_follow_up(lead_id: str, followup_id: str, payload: V3FollowUpRescheduleInput, user: V3UserOut = Depends(v3_require_roles("business_dev", "super_admin", "branch_admin"))):
+async def v3_reschedule_follow_up(lead_id: str, followup_id: str, payload: V3FollowUpRescheduleInput, user: V3UserOut = Depends(v3_require_roles("pre_sales", "business_dev", "super_admin", "branch_admin"))):
     """Mark an existing follow-up as rescheduled (with a reason) and add a new active one in its place."""
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:

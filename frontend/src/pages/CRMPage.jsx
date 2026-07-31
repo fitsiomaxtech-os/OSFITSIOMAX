@@ -6,6 +6,7 @@ import {
   Building2,
   CalendarDays,
   Database,
+  Headphones,
   LogOut,
   Mail,
   ShieldCheck,
@@ -51,6 +52,7 @@ import { BranchAdminBoard } from "@/components/BranchAdminBoard";
 import { HeadPhysioBoard } from "@/components/HeadPhysioBoard";
 import { PhysioBoard } from "@/components/PhysioBoard";
 import { MarketingBoard } from "@/components/marketing/MarketingBoard";
+import { PreSalesCRM } from "@/components/PreSalesCRM";
 import { MasterControlBoard } from "@/components/MasterControlBoard";
 import { PipelineStageManagement } from "@/components/PipelineStageManagement";
 import { HRBoard } from "@/components/hr/HRBoard";
@@ -62,6 +64,7 @@ import { FinanceBoard } from "@/components/FinanceBoard";
 const ROLE_META = {
   super_admin: { label: "Super Admin", icon: ShieldCheck },
   business_dev: { label: "Business Development", icon: Briefcase },
+  pre_sales: { label: "Pre-sales", icon: Headphones },
   branch_admin: { label: "Branch Admin", icon: Building2 },
   head_physio: { label: "Head Physio", icon: Stethoscope },
   physio: { label: "Physio", icon: Activity },
@@ -189,7 +192,7 @@ export const CRMPage = ({ auth, onLogout }) => {
 
   const role = auth.user.role;
   const roleLabel = ROLE_META[role]?.label || role;
-  const boardTitle = `${roleLabel} Master View`;
+  const boardTitle = role === "pre_sales" ? "Pre-sales Master View" : `${roleLabel} Master View`;
 
   const [superAdminView, setSuperAdminView] = useState(() => {
     if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("sheets_connect")) {
@@ -550,9 +553,9 @@ export const CRMPage = ({ auth, onLogout }) => {
             </div>
             <div className="flex items-center gap-2 sm:gap-3">
               <span className="hidden text-sm font-medium text-sky-700 sm:inline" data-testid="role-board-user-greeting">
-                Hi {(showBranchBoard || showHeadPhysioBoard) ? auth.user.full_name : auth.user.full_name?.split(" ")[0]}
+                Hi {(showPreSalesBoard || showBranchBoard || showHeadPhysioBoard) ? auth.user.full_name : auth.user.full_name?.split(" ")[0]}
               </span>
-              {(showBranchBoard || showHeadPhysioBoard) && (
+              {(showPreSalesBoard || showBranchBoard || showHeadPhysioBoard) && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -586,6 +589,7 @@ export const CRMPage = ({ auth, onLogout }) => {
           <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2" data-testid="super-admin-nav">
             <button onClick={() => setSuperAdminView("master")} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${superAdminView === "master" ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"}`} data-testid="super-admin-tab-master">Master View</button>
             <button onClick={() => setSuperAdminView("marketing")} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${superAdminView === "marketing" ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"}`} data-testid="super-admin-tab-marketing">Marketing Board</button>
+            <button onClick={() => setSuperAdminView("presales")} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${superAdminView === "presales" ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"}`} data-testid="super-admin-tab-presales">Pre-Sales CRM</button>
             <button onClick={() => setSuperAdminView("stages")} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${superAdminView === "stages" ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"}`} data-testid="super-admin-tab-stages">Rehabilitation Phase</button>
             <button onClick={() => setSuperAdminView("hr")} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${superAdminView === "hr" ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"}`} data-testid="super-admin-tab-hr">HR Admin</button>
             <button onClick={() => setSuperAdminView("branches")} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${superAdminView === "branches" ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"}`} data-testid="super-admin-tab-branches">Branch Management</button>
@@ -614,15 +618,16 @@ export const CRMPage = ({ auth, onLogout }) => {
           <MarketingBoard branches={branches} />
         )}
 
+        {showSuperAdminBoard && superAdminView === "presales" && (
+          <PreSalesCRM onManageStages={() => setSuperAdminView("stages")} role={role} />
+        )}
+
         {showSuperAdminBoard && superAdminView === "stages" && (
-          <PipelineStageManagement onBack={() => setSuperAdminView("master")} />
+          <PipelineStageManagement onBack={() => setSuperAdminView("presales")} />
         )}
 
         {showPreSalesBoard && (
-          <div className="rounded-xl border border-slate-200 bg-white p-10 text-center" data-testid="presales-role-removed">
-            <p className="text-lg font-semibold text-slate-700">This role has been discontinued</p>
-            <p className="mt-1 text-sm text-slate-500">Pre-Sales CRM is no longer available. Contact your Super Admin if you believe this is a mistake.</p>
-          </div>
+          <PreSalesCRM role={role} />
         )}
 
         {(showSuperAdminBoard && superAdminView === "master") && (
