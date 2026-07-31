@@ -298,7 +298,7 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
           <div className="overflow-auto">
             <table className="min-w-full border-separate border-spacing-x-0 border-spacing-y-2 text-sm">
               <thead className="text-center text-xs text-slate-500">
-                <tr><th className="px-3 py-2">LEAD</th><th className="px-3 py-2">PHONE</th><th className="px-3 py-2">EMAIL</th><th className="px-3 py-2">SOURCE</th><th className="px-3 py-2">STAGE</th><th className="px-3 py-2">{stageFilter === "Appointment" ? "BRANCH ADMIN STATUS" : "DEPARTMENT"}</th><th className="px-3 py-2">CREATED</th><th className="px-3 py-2">ACTIONS</th></tr>
+                <tr><th className="px-3 py-2">LEAD</th><th className="px-3 py-2">PHONE</th><th className="px-3 py-2">EMAIL</th><th className="px-3 py-2">SOURCE</th><th className="px-3 py-2">STAGE</th>{stageFilter === "Appointment" && <th className="px-3 py-2">BRANCH ADMIN STATUS</th>}<th className="px-3 py-2">CREATED</th><th className="px-3 py-2">ACTIONS</th></tr>
               </thead>
               <tbody>
                 {visibleLeads.map((l) => {
@@ -338,18 +338,18 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
                           })()}
                         </div>
                       </td>
-                      <td className="border-y border-slate-200 bg-white px-3 py-3 text-center text-xs transition-colors group-hover:bg-slate-50">
-                        {stageFilter === "Appointment" ? (() => {
-                          const branchName = l.branch_id ? (branches.find((b) => b.id === l.branch_id)?.branch_name || branches.find((b) => b.id === l.branch_id)?.name) : (l.appointment_mode === "online" ? "Online Consultation" : "Unassigned");
-                          const status = l.branch_stage || "Pending";
-                          const statusColor = {
-                            "New Appointment": "bg-blue-50 text-blue-700 border-blue-200",
-                            "Portfolio": "bg-violet-50 text-violet-700 border-violet-200",
-                            "Follow Up": "bg-orange-50 text-orange-700 border-orange-200",
-                            "Appointment Date & Time": "bg-teal-50 text-teal-700 border-teal-200",
-                            "Cancelled": "bg-rose-50 text-rose-700 border-rose-200",
-                          }[status] || "bg-slate-50 text-slate-600 border-slate-200";
-                          return (
+                      {stageFilter === "Appointment" && (() => {
+                        const branchName = l.branch_id ? (branches.find((b) => b.id === l.branch_id)?.branch_name || branches.find((b) => b.id === l.branch_id)?.name) : (l.appointment_mode === "online" ? "Online Consultation" : "Unassigned");
+                        const status = l.branch_stage || "Pending";
+                        const statusColor = {
+                          "New Appointment": "bg-blue-50 text-blue-700 border-blue-200",
+                          "Portfolio": "bg-violet-50 text-violet-700 border-violet-200",
+                          "Follow Up": "bg-orange-50 text-orange-700 border-orange-200",
+                          "Appointment Date & Time": "bg-teal-50 text-teal-700 border-teal-200",
+                          "Cancelled": "bg-rose-50 text-rose-700 border-rose-200",
+                        }[status] || "bg-slate-50 text-slate-600 border-slate-200";
+                        return (
+                          <td className="border-y border-slate-200 bg-white px-3 py-3 text-center text-xs transition-colors group-hover:bg-slate-50">
                             <div className="flex flex-col items-center gap-1" data-testid={`presales-branch-status-${l.id}`}>
                               <span className="font-semibold text-slate-700">{branchName || "—"}</span>
                               <span className={`inline-flex w-fit items-center rounded border px-1.5 text-[10px] font-semibold ${statusColor}`}>{status}</span>
@@ -359,9 +359,9 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
                                 <span className="text-[10px] text-amber-600">Pending Expert</span>
                               )}
                             </div>
-                          );
-                        })() : (l.department || "—")}
-                      </td>
+                          </td>
+                        );
+                      })()}
                       <td className="border-y border-slate-200 bg-white px-3 py-3 text-center text-xs text-slate-400 transition-colors group-hover:bg-slate-50">{(l.created_at || "").slice(0, 10)}</td>
                       <td className="rounded-r-[5px] border-y border-r border-slate-200 bg-white px-3 py-3 text-center transition-colors group-hover:bg-slate-50">
                         <div className="flex items-center justify-center gap-1">
@@ -378,7 +378,7 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
                     </tr>
                   );
                 })}
-                {filtered.length === 0 && <tr><td colSpan="9" className="px-3 py-8 text-center text-slate-400">{loading ? "Loading..." : "No leads match."}</td></tr>}
+                {filtered.length === 0 && <tr><td colSpan={stageFilter === "Appointment" ? 8 : 7} className="px-3 py-8 text-center text-slate-400">{loading ? "Loading..." : "No leads match."}</td></tr>}
               </tbody>
             </table>
           </div>
