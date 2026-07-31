@@ -17,6 +17,10 @@ const TABS = [
   { key: "roles", label: "Roles & Credentials", icon: ShieldCheck },
 ];
 
+// Both consultant roles can cover more than one branch — every other role keeps the
+// original single Branch select.
+const MULTI_BRANCH_ROLE_LABELS = { head_physio: "Head Physio", physio: "Physio" };
+
 export const HRBoard = () => {
   const [tab, setTab] = useState("dashboard");
   const [meta, setMeta] = useState({ departments: [], roles: [], custom_roles: [] });
@@ -438,10 +442,13 @@ const UserActionsModal = ({ user, onClose, onDone }) => {
   const [busy, setBusy] = useState(false);
   const [branches, setBranches] = useState([]);
   const [employees, setEmployees] = useState([]);
+  const roleLabelForMulti = MULTI_BRANCH_ROLE_LABELS[user.role];
+  const isMultiBranchRole = Boolean(roleLabelForMulti);
   const [editForm, setEditForm] = useState({
     full_name: user.full_name || "",
     email: user.email || "",
     branch_id: user.branch_id || "",
+    branch_ids: user.branch_ids && user.branch_ids.length ? user.branch_ids : (user.branch_id ? [user.branch_id] : []),
     employee_id: user.employee_id || "",
     mobile_number: user.mobile_number || "",
     aadhar_number: user.aadhar_number || "",
@@ -455,9 +462,14 @@ const UserActionsModal = ({ user, onClose, onDone }) => {
 
   const submitEdit = async () => {
     if (!editForm.full_name.trim() || !editForm.email.trim()) { toast.error("Name and email are required"); return; }
+    if (isMultiBranchRole && editForm.branch_ids.length === 0) { toast.error("Select at least one branch"); return; }
     try {
       setBusy(true);
-      await hrUpdateUser(user.id, editForm);
+      // branch_ids only applies (and is only sent) for Head Physio/Physio — every other
+      // role keeps its single `branch_id` select untouched by the multi-branch field.
+      const { branch_ids, branch_id, ...rest } = editForm;
+      const payload = isMultiBranchRole ? { ...rest, branch_ids } : { ...rest, branch_id };
+      await hrUpdateUser(user.id, payload);
       toast.success(`${editForm.full_name} updated`);
       onDone();
     } catch (e) { toast.error(e?.response?.data?.detail || "Failed to update user"); }
@@ -581,12 +593,29 @@ const UserActionsModal = ({ user, onClose, onDone }) => {
           <div className="space-y-3" data-testid="hr-actions-edit-form">
             <Field label="Name"><Input placeholder="Full name" value={editForm.full_name} onChange={(e) => setEditForm({ ...editForm, full_name: e.target.value })} data-testid="hr-actions-edit-name" /></Field>
             <Field label="Email"><Input placeholder="user@company.com" value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} data-testid="hr-actions-edit-email" /></Field>
-            {/* Head Physios serve every branch, so there's no branch to assign them to —
-                the field is replaced with a note rather than shown and ignored. */}
-            {user.role === "head_physio" ? (
-              <Field label="Branch">
-                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800" data-testid="hr-actions-edit-branch-shared">
-                  Head Physios are shared across all branches — no branch assignment needed.
+            {isMultiBranchRole ? (
+              <Field label={`Branches (${roleLabelForMulti} can cover more than one)`}>
+                <div className="space-y-1.5 rounded-md border border-slate-200 p-2" data-testid="hr-actions-edit-branch-ids">
+                  {branches.map((b) => {
+                    const checked = editForm.branch_ids.includes(b.id);
+                    return (
+                      <label key={b.id} className="flex items-center gap-2 rounded px-1.5 py-1 text-sm hover:bg-slate-50">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) => setEditForm({
+                            ...editForm,
+                            branch_ids: e.target.checked
+                              ? [...editForm.branch_ids, b.id]
+                              : editForm.branch_ids.filter((id) => id !== b.id),
+                          })}
+                          data-testid={`hr-actions-edit-branch-ids-${b.id}`}
+                        />
+                        {b.branch_name}
+                      </label>
+                    );
+                  })}
+                  {branches.length === 0 && <p className="px-1.5 py-1 text-xs text-slate-400">No branches yet</p>}
                 </div>
               </Field>
             ) : (
@@ -819,7 +848,9 @@ const BranchSelectDropdown = ({ value, branches, onChange }) => {
 const CreateUserModal = ({ meta, reloadMeta, onClose, onSaved }) => {
   const [employees, setEmployees] = useState([]);
   const [branches, setBranches] = useState([]);
-  const [form, setForm] = useState({ employee_id: "", full_name: "", email: "", role: "", branch_id: "", password: "", confirm: "" });
+  const [form, setForm] = useState({ employee_id: "", full_name: "", email: "", role: "", branch_id: "", branch_ids: [], password: "", confirm: "" });
+  const roleLabelForMulti = MULTI_BRANCH_ROLE_LABELS[form.role];
+  const isMultiBranchRole = Boolean(roleLabelForMulti);
   const [addingRole, setAddingRole] = useState(false);
   const [newRoleLabel, setNewRoleLabel] = useState("");
   const [savingRole, setSavingRole] = useState(false);
@@ -852,8 +883,16 @@ const CreateUserModal = ({ meta, reloadMeta, onClose, onSaved }) => {
     if (!form.email || !form.password || !form.role) { toast.error("Email, role, password required"); return; }
     if (form.password.length < 6) { toast.error("Min 6 characters"); return; }
     if (form.password !== form.confirm) { toast.error("Passwords do not match"); return; }
+    if (isMultiBranchRole && form.branch_ids.length === 0) { toast.error("Select at least one branch"); return; }
     try {
-      await hrCreateUser({ full_name: form.full_name || form.email.split("@")[0], email: form.email, password: form.password, role: form.role, branch_id: form.branch_id || null, employee_id: form.employee_id || null });
+      await hrCreateUser({
+        full_name: form.full_name || form.email.split("@")[0],
+        email: form.email,
+        password: form.password,
+        role: form.role,
+        employee_id: form.employee_id || null,
+        ...(isMultiBranchRole ? { branch_ids: form.branch_ids } : { branch_id: form.branch_id || null }),
+      });
       toast.success("User created");
       onSaved();
     } catch (e) { toast.error(e?.response?.data?.detail || "Create failed"); }
@@ -901,10 +940,29 @@ const CreateUserModal = ({ meta, reloadMeta, onClose, onSaved }) => {
             <p className="mt-1 text-[10px] text-slate-400">A new role only adds a selectable name — page access still needs to be built for it separately.</p>
           )}
         </Field>
-        {form.role === "head_physio" ? (
-          <Field label="Branch">
-            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800" data-testid="hr-create-user-branch-shared">
-              Head Physios are shared across all branches — no branch assignment needed.
+        {isMultiBranchRole ? (
+          <Field label={`Branches (${roleLabelForMulti} can cover more than one)`}>
+            <div className="space-y-1.5 rounded-md border border-slate-200 p-2" data-testid="hr-create-user-branch-ids">
+              {branches.map((b) => {
+                const checked = form.branch_ids.includes(b.id);
+                return (
+                  <label key={b.id} className="flex items-center gap-2 rounded px-1.5 py-1 text-sm hover:bg-slate-50">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(e) => setForm({
+                        ...form,
+                        branch_ids: e.target.checked
+                          ? [...form.branch_ids, b.id]
+                          : form.branch_ids.filter((id) => id !== b.id),
+                      })}
+                      data-testid={`hr-create-user-branch-ids-${b.id}`}
+                    />
+                    {b.branch_name}
+                  </label>
+                );
+              })}
+              {branches.length === 0 && <p className="px-1.5 py-1 text-xs text-slate-400">No branches yet</p>}
             </div>
           </Field>
         ) : (

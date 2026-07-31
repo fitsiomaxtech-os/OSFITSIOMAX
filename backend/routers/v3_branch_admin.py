@@ -320,13 +320,13 @@ async def v3_available_experts(
     """
     if not date:
         raise HTTPException(status_code=400, detail="date is required")
-    # Head Physios are shared across the whole organisation — every branch can book any
-    # of them — so they're included regardless of which branch they happen to be tagged
-    # to (or not tagged to at all). Other expert types stay scoped to this branch.
+    # All experts at this branch — a Head Physio/Physio assigned to several branches has
+    # one doctors record per branch, so they only show up in the branches they're
+    # actually assigned to, not every branch in the org.
     branch_experts = await v3_col("doctors").find(
-        {"$or": [{"branch_id": branch_id}, {"profile_type": "head_physio"}]}, {"_id": 0}
+        {"branch_id": branch_id}, {"_id": 0}
     ).to_list(500)
-    # Fallback for a branch with nothing mapped and no Head Physios on file at all.
+    # All experts (fallback when no branch-mapped experts)
     if not branch_experts:
         branch_experts = await v3_col("doctors").find({}, {"_id": 0}).to_list(500)
 

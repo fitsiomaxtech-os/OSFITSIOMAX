@@ -16,6 +16,10 @@ router = APIRouter(prefix="/api/v3/hr")
 DEFAULT_DEPARTMENTS = ["Pre-Sales", "Branch", "HR", "Accounts", "Operations", "Marketing", "Experts"]
 DEFAULT_ROLES = ["super_admin", "business_dev", "pre_sales", "branch_admin", "head_physio", "physio", "marketing_head", "accountant"]
 
+# Both consultant roles can be assigned to more than one branch (a linked `doctors`
+# record is kept in sync per branch) — every other role stays pinned to a single branch.
+MULTI_BRANCH_ROLES = {"head_physio", "physio"}
+
 
 def _slugify_role(label: str) -> str:
     import re
@@ -102,6 +106,10 @@ class UserAccountCreate(BaseModel):
     role: str
     employee_id: Optional[str] = None
     branch_id: Optional[str] = None
+    # Only meaningful for role="head_physio"/"physio" — lets a consultant be assigned
+    # across several branches. branch_id above stays the primary/first branch
+    # so every other single-branch filter in the app keeps working unchanged.
+    branch_ids: Optional[List[str]] = None
     mobile_number: Optional[str] = None
     aadhar_number: Optional[str] = None
 
@@ -117,6 +125,7 @@ class UserAccountUpdate(BaseModel):
     email: Optional[str] = None
     employee_id: Optional[str] = None
     branch_id: Optional[str] = None
+    branch_ids: Optional[List[str]] = None
     mobile_number: Optional[str] = None
     aadhar_number: Optional[str] = None
 
@@ -260,16 +269,14 @@ async def create_user_account(payload: UserAccountCreate, _: V3UserOut = Depends
         emp = await v3_col("employees").find_one({"id": payload.employee_id}, {"_id": 0, "id": 1})
         if not emp:
             raise HTTPException(status_code=404, detail="Linked employee not found")
-    # Head Physios serve every branch, so they're never tied to one — any branch sent
-    # for that role is ignored rather than silently creating a half-scoped account.
-    branch_id = None if payload.role == "head_physio" else payload.branch_id
     user = {
         "id": str(uuid.uuid4()),
         "full_name": payload.full_name,
         "email": payload.email,
         "password": hash_password(payload.password),
         "role": payload.role,
-        "branch_id": branch_id,
+        "branch_id": payload.branch_id,
+        "branch_ids": payload.branch_ids,
         "employee_id": payload.employee_id,
         "mobile_number": payload.mobile_number,
         "aadhar_number": payload.aadhar_number,
@@ -277,18 +284,21 @@ async def create_user_account(payload: UserAccountCreate, _: V3UserOut = Depends
         "created_at": now_iso(),
     }
     await v3_col("users").insert_one(user.copy())
-    if payload.role == "head_physio":
-        await v3_col("doctors").insert_one({
-            "id": str(uuid.uuid4()),
-            "full_name": payload.full_name,
-            "profile_type": "head_physio",
-            "branch_id": None,
-            "specialization": "",
-            "slots": [],
-            "slot_details": [],
-            "user_id": user["id"],
-            "created_at": now_iso(),
-        })
+    if payload.role in MULTI_BRANCH_ROLES:
+        # One doctors record per assigned branch (each branch's calendar/booking is
+        # scoped to its own record) — plain single-branch case is just a list of one.
+        for b_id in (payload.branch_ids or [payload.branch_id]):
+            await v3_col("doctors").insert_one({
+                "id": str(uuid.uuid4()),
+                "full_name": payload.full_name,
+                "profile_type": payload.role,
+                "branch_id": b_id,
+                "specialization": "",
+                "slots": [],
+                "slot_details": [],
+                "user_id": user["id"],
+                "created_at": now_iso(),
+            })
     safe = {k: v for k, v in user.items() if k != "password"}
     return safe
 
@@ -306,11 +316,13 @@ async def update_user_account(user_id: str, payload: UserAccountUpdate, _: V3Use
         emp = await v3_col("employees").find_one({"id": updates["employee_id"]}, {"_id": 0, "id": 1})
         if not emp:
             raise HTTPException(status_code=404, detail="Linked employee not found")
-    # A Head Physio serves every branch — never let an edit pin one to a single branch.
-    if "branch_id" in updates:
-        current = await v3_col("users").find_one({"id": user_id}, {"_id": 0, "role": 1})
-        if (current or {}).get("role") == "head_physio":
-            updates["branch_id"] = None
+
+    branch_ids = updates.get("branch_ids")
+    if branch_ids is not None:
+        # branch_id stays in sync as the primary/first branch, since every other
+        # single-branch filter in the app (leads, finance, sessions...) still reads it.
+        updates["branch_id"] = branch_ids[0] if branch_ids else None
+
     res = await v3_col("users").update_one({"id": user_id}, {"$set": updates})
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="User not found")
@@ -321,6 +333,28 @@ async def update_user_account(user_id: str, payload: UserAccountUpdate, _: V3Use
         await v3_col("doctors").update_many({"user_id": user_id}, {"$set": {"full_name": updates["full_name"]}})
         if user and user.get("employee_id"):
             await v3_col("employees").update_one({"id": user["employee_id"]}, {"$set": {"full_name": updates["full_name"], "updated_at": now_iso()}})
+
+    if branch_ids is not None and user and user.get("role") in MULTI_BRANCH_ROLES:
+        # Add a doctors record for any newly-assigned branch that doesn't already have
+        # one. Branches removed from the list are left as-is so their existing calendar
+        # slots/appointments aren't destroyed by an accidental unassign.
+        existing_docs = await v3_col("doctors").find(
+            {"user_id": user_id, "profile_type": user["role"]}, {"_id": 0, "branch_id": 1}
+        ).to_list(50)
+        existing_branch_ids = {d.get("branch_id") for d in existing_docs}
+        for b_id in branch_ids:
+            if b_id not in existing_branch_ids:
+                await v3_col("doctors").insert_one({
+                    "id": str(uuid.uuid4()),
+                    "full_name": user["full_name"],
+                    "profile_type": user["role"],
+                    "branch_id": b_id,
+                    "specialization": "",
+                    "slots": [],
+                    "slot_details": [],
+                    "user_id": user_id,
+                    "created_at": now_iso(),
+                })
     return user
 
 
@@ -333,21 +367,25 @@ async def update_user_role(user_id: str, role: str, _: V3UserOut = Depends(v3_re
     res = await v3_col("users").update_one({"id": user_id}, {"$set": {"role": role}})
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="User not found")
-    if role == "head_physio":
-        has_doctor = await v3_col("doctors").find_one({"user_id": user_id}, {"_id": 0, "id": 1})
-        if not has_doctor:
-            user = await v3_col("users").find_one({"id": user_id}, {"_id": 0})
-            await v3_col("doctors").insert_one({
-                "id": str(uuid.uuid4()),
-                "full_name": user["full_name"],
-                "profile_type": "head_physio",
-                "branch_id": user.get("branch_id"),
-                "specialization": "",
-                "slots": [],
-                "slot_details": [],
-                "user_id": user_id,
-                "created_at": now_iso(),
-            })
+    if role in MULTI_BRANCH_ROLES:
+        user = await v3_col("users").find_one({"id": user_id}, {"_id": 0})
+        existing_docs = await v3_col("doctors").find(
+            {"user_id": user_id, "profile_type": role}, {"_id": 0, "branch_id": 1}
+        ).to_list(50)
+        existing_branch_ids = {d.get("branch_id") for d in existing_docs}
+        for b_id in (user.get("branch_ids") or [user.get("branch_id")]):
+            if b_id not in existing_branch_ids:
+                await v3_col("doctors").insert_one({
+                    "id": str(uuid.uuid4()),
+                    "full_name": user["full_name"],
+                    "profile_type": role,
+                    "branch_id": b_id,
+                    "specialization": "",
+                    "slots": [],
+                    "slot_details": [],
+                    "user_id": user_id,
+                    "created_at": now_iso(),
+                })
     return {"message": "Role updated"}
 
 

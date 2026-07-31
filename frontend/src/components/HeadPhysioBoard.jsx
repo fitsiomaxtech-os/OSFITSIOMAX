@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Activity,
+  Building2,
   Calendar,
   CalendarClock,
   Check,
@@ -22,6 +23,7 @@ import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { ConsultationsBoard } from "@/components/ConsultationsBoard";
 import {
+  getBranches,
   getHPMyCalendar,
   getHPMyPatients,
   hpRecommendPackage,
@@ -39,7 +41,7 @@ const VIEW_TABS = [
   { key: "profile", label: "My Profile", icon: UserCircle },
 ];
 
-export const HeadPhysioBoard = ({ branchId, user }) => {
+export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
   const [activeTab, setActiveTab] = useState("consultations");
   const [patients, setPatients] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -47,19 +49,53 @@ export const HeadPhysioBoard = ({ branchId, user }) => {
   const [showRecommendModal, setShowRecommendModal] = useState(null);
   const [showReviewModal, setShowReviewModal] = useState(null);
 
+  // Assigned to just one branch (the common case) keeps working exactly as before —
+  // the switcher only appears once a Head Physio covers more than one branch.
+  const assignedBranchIds = branchIds && branchIds.length ? branchIds : (branchId ? [branchId] : []);
+  const [activeBranchId, setActiveBranchId] = useState(assignedBranchIds[0] || branchId);
+  const [branchNames, setBranchNames] = useState({});
+
+  useEffect(() => {
+    if (assignedBranchIds.length < 2) return;
+    getBranches().then((rows) => {
+      setBranchNames(Object.fromEntries((rows || []).map((b) => [b.id, b.branch_name])));
+    }).catch(() => {});
+  }, [assignedBranchIds.join(",")]);
+
+  const effectiveBranchId = activeBranchId || branchId;
+
   const loadPatients = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await getHPMyPatients(branchId);
+      const data = await getHPMyPatients(effectiveBranchId);
       setPatients(data.patients || []);
     } catch { /* silent */ }
     setLoading(false);
-  }, [branchId]);
+  }, [effectiveBranchId]);
 
   useEffect(() => { loadPatients(); }, [loadPatients]);
 
   return (
     <div className="space-y-4" data-testid="head-physio-board-root">
+      {assignedBranchIds.length > 1 && (
+        <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-slate-200 bg-white p-1.5" data-testid="hp-branch-switcher">
+          <Building2 className="ml-1.5 h-4 w-4 text-slate-400" />
+          {assignedBranchIds.map((bId) => (
+            <button
+              key={bId}
+              type="button"
+              onClick={() => setActiveBranchId(bId)}
+              className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+                effectiveBranchId === bId ? "bg-teal-600 text-white" : "text-slate-600 hover:bg-slate-100"
+              }`}
+              data-testid={`hp-branch-switch-${bId}`}
+            >
+              {branchNames[bId] || bId}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Tabs */}
       <div className="flex items-center gap-1 overflow-x-auto border-b border-slate-200">
         {VIEW_TABS.map((tab) => {
@@ -82,7 +118,7 @@ export const HeadPhysioBoard = ({ branchId, user }) => {
         })}
       </div>
 
-      {activeTab === "consultations" && <ConsultationsBoard branchId={branchId} viewerRole="head_physio" />}
+      {activeTab === "consultations" && <ConsultationsBoard branchId={effectiveBranchId} viewerRole="head_physio" />}
 
       {activeTab === "rehab" && (
         <PatientsTab
@@ -100,7 +136,7 @@ export const HeadPhysioBoard = ({ branchId, user }) => {
         />
       )}
 
-      {activeTab === "calendar" && <MyCalendarTab branchId={branchId} />}
+      {activeTab === "calendar" && <MyCalendarTab branchId={effectiveBranchId} />}
 
       {activeTab === "profile" && <MyProfileTab user={user} />}
 

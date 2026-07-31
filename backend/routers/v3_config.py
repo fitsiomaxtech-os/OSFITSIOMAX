@@ -163,17 +163,10 @@ async def v3_delete_branch(branch_id: str, _: V3UserOut = Depends(v3_require_rol
 @router.get("/doctors", response_model=List[V3DoctorOut])
 async def v3_get_doctors(
     branch_id: Optional[str] = None,
-    all_branches: bool = False,
     user: V3UserOut = Depends(v3_current_user),
 ):
     query: Dict[str, object] = {}
-    if all_branches:
-        # Consultant Calendar opts in here: Head Physios are shared across the whole
-        # organisation, so a Branch Admin publishes availability for any of them —
-        # not just the ones tagged to their own branch. Every other caller keeps the
-        # branch-scoped default below.
-        pass
-    elif user.role in ["branch_admin", "head_physio", "physio"] and user.branch_id:
+    if user.role in ["branch_admin", "head_physio", "physio"] and user.branch_id:
         query["branch_id"] = user.branch_id
     elif branch_id:
         query["branch_id"] = branch_id

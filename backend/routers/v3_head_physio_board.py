@@ -28,8 +28,18 @@ async def _head_consultation_stage_names() -> list:
 
 async def _resolve_hp_doctor(user: V3UserOut, branch_id: Optional[str] = None) -> Optional[dict]:
     """Find the doctors record for the logged-in head physio/consultant, scoped to their own
-    user_id. Super Admin driving a specific branch's board (e.g. from Branch Management >
-    Branch Control) can pass that branch's id to resolve its head physio instead."""
+    user_id. A Head Physio assigned to several branches has one doctors record per branch, so
+    `branch_id` (the branch currently selected on their own board) picks the right one among
+    those; without it, this falls back to whichever of their own records comes first. Super
+    Admin driving a specific branch's board (e.g. from Branch Management > Branch Control) can
+    pass that branch's id to resolve its head physio the same way."""
+    if branch_id:
+        doctor = await v3_col("doctors").find_one(
+            {"user_id": user.id, "branch_id": branch_id, "profile_type": "head_physio"},
+            {"_id": 0},
+        )
+        if doctor:
+            return doctor
     doctor = await v3_col("doctors").find_one(
         {"user_id": user.id, "profile_type": "head_physio"},
         {"_id": 0},

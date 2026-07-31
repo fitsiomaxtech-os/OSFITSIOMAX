@@ -646,7 +646,7 @@ export const CRMPage = ({ auth, onLogout }) => {
         )}
 
         {showHeadPhysioBoard && (
-          <HeadPhysioBoard branchId={auth?.user?.branch_id} user={auth?.user} />
+          <HeadPhysioBoard branchId={auth?.user?.branch_id} branchIds={auth?.user?.branch_ids} user={auth?.user} />
         )}
 
         {showPhysioBoard && (

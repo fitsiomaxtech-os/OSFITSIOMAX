@@ -13,6 +13,10 @@ class V3UserOut(BaseModel):
     # deserialize here instead of 500ing every endpoint that returns it.
     role: str
     branch_id: Optional[str] = None
+    # A Head Physio can be assigned to more than one branch (branch_id stays the
+    # "primary"/first branch for every existing single-branch filter elsewhere);
+    # this is the additional set consulted for branch-switching on their own board.
+    branch_ids: Optional[List[str]] = None
     created_at: str
 
     @field_validator("role", mode="before")

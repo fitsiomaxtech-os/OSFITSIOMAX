@@ -66,14 +66,10 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
   const loadDoctors = useCallback(async () => {
     if (!branchId) return;
     try {
-      // Head Physios are shared org-wide, so the Consultant Calendar lists every one of
-      // them regardless of branch. Physios stay branch-scoped — they belong to a branch.
-      const all = isPhysio
-        ? await getDoctors({ branch_id: branchId })
-        : await getDoctors({ all_branches: true });
+      const all = await getDoctors({ branch_id: branchId });
       setDoctors(all.filter((d) => d.profile_type === profileType));
     } catch { /* silent */ }
-  }, [branchId, profileType, isPhysio]);
+  }, [branchId, profileType]);
 
   useEffect(() => { loadDoctors(); }, [loadDoctors]);
 
