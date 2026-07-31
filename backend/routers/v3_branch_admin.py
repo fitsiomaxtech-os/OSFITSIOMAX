@@ -182,6 +182,9 @@ class V3BranchAppointmentInput(BaseModel):
     physio_id: str
     notes: Optional[str] = ""
     final_stage: str = "Appointment Date & Time"   # "Appointment Date & Time" or "Cancelled"
+    # Length of the picked slot, carried from the expert's published calendar so the
+    # Calendar tab can render the real end time (09:30–10:00) rather than assuming 30.
+    duration: Optional[int] = None
 
 
 @router.post("/leads/{lead_id}/schedule-branch-appointment", response_model=V3LeadOut)
@@ -192,9 +195,30 @@ async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointm
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    physio = await v3_col("doctors").find_one({"id": payload.physio_id}, {"_id": 0, "full_name": 1})
+    physio = await v3_col("doctors").find_one({"id": payload.physio_id}, {"_id": 0, "full_name": 1, "slot_details": 1})
     if not physio:
         raise HTTPException(status_code=404, detail="Physio not found")
+
+    slot_time = f"{payload.appointment_date}T{payload.appointment_time}"
+    # Someone else already holding this exact slot blocks the booking — the slot belongs
+    # to whichever client took it. Re-picking the same slot for the SAME lead is fine
+    # (that's a reschedule onto itself / a notes edit), so this lead is excluded.
+    if payload.final_stage == "Appointment Date & Time":
+        clash = await v3_col("appointments").find_one(
+            {
+                "doctor_id": payload.physio_id,
+                "slot_time": slot_time,
+                "status": "new_appointment",
+                "lead_id": {"$ne": lead_id},
+            },
+            {"_id": 0, "lead_name": 1},
+        )
+        if clash:
+            raise HTTPException(
+                status_code=409,
+                detail=f"{payload.appointment_time} is already booked with {physio['full_name']}"
+                       + (f" for {clash.get('lead_name')}" if clash.get("lead_name") else ""),
+            )
 
     updates = {
         "appointment_date": payload.appointment_date,
@@ -219,6 +243,53 @@ async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointm
         appended = f"[Appt {payload.appointment_date} {payload.appointment_time}] {payload.notes.strip()}"
         updates["notes"] = f"{existing_notes}\n{appended}" if existing_notes else appended
     await v3_col("leads").update_one({"id": lead_id}, {"$set": updates})
+
+    # The lead fields above drive the Branch Leads table; the `appointments` record below
+    # is what the Calendar tab renders and what marks the expert's slot as Booked on the
+    # Consultant Calendar. Both must be written or the booking is invisible to scheduling.
+    existing_appt = await v3_col("appointments").find_one(
+        {"lead_id": lead_id, "appt_kind": "consultation", "status": "new_appointment"}, {"_id": 0, "id": 1}
+    )
+    if payload.final_stage == "Cancelled":
+        # Frees the slot again for everyone else.
+        await v3_col("appointments").update_many(
+            {"lead_id": lead_id, "status": "new_appointment"},
+            {"$set": {"status": "cancelled", "updated_at": now_iso()}},
+        )
+    else:
+        duration = payload.duration
+        if not duration:
+            # Fall back to whatever length the expert published this slot at.
+            detail = next(
+                (d for d in (physio.get("slot_details") or []) if d.get("slot_time") == slot_time),
+                None,
+            )
+            duration = (detail or {}).get("duration") or 30
+        appt_fields = {
+            "branch_id": lead.get("branch_id"),
+            "doctor_id": payload.physio_id,
+            "doctor_name": physio["full_name"],
+            "lead_id": lead_id,
+            "lead_name": lead.get("name"),
+            "patient_name": lead.get("name"),
+            "appointment_date": payload.appointment_date,
+            "appointment_time": payload.appointment_time,
+            "slot_time": slot_time,
+            "duration": duration,
+            "notes": (payload.notes or "").strip(),
+            "status": "new_appointment",
+            "appt_kind": "consultation",
+            "created_by": user.full_name,
+            "created_by_role": user.role,
+            "updated_at": now_iso(),
+        }
+        if existing_appt:
+            # Rescheduling an existing booking — move it rather than leaving a stale row
+            # holding the old slot.
+            await v3_col("appointments").update_one({"id": existing_appt["id"]}, {"$set": appt_fields})
+        else:
+            await v3_col("appointments").insert_one({**appt_fields, "id": str(uuid.uuid4()), "created_at": now_iso()})
+
     await v3_col("lead_activity").insert_one({
         "id": str(uuid.uuid4()),
         "lead_id": lead_id,

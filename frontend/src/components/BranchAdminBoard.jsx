@@ -34,6 +34,7 @@ import {
   stagesList,
   scheduleBranchFollowUp,
   rescheduleBranchFollowUp,
+  getDoctorCalendar,
 } from "@/lib/api";
 import { HeadPhysioCalendar } from "@/components/HeadPhysioCalendar";
 import { ConsultationsBoard } from "@/components/ConsultationsBoard";
@@ -410,6 +411,14 @@ export const BranchAdminBoard = ({ branchId }) => {
 };
 
 /* ─── Branch Lead Detail Modal ─── */
+// "09:30" + 30 -> "10:00" — renders the slot's end time next to its start.
+const addMinutes = (time, minutes) => {
+  const [h, m] = (time || "").split(":").map(Number);
+  if (Number.isNaN(h) || Number.isNaN(m)) return time;
+  const total = h * 60 + m + (minutes || 0);
+  return `${String(Math.floor(total / 60) % 24).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+};
+
 function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, onUpdate, onMoved, onOpenConsultationStage }) {
   // Same merge as the main Branch Leads stage bar — one continuous pipeline covering both
   // branch_stage and consultation_stage, with shared names (e.g. "Follow Up") kept to a
@@ -420,8 +429,11 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
   const [remarks, setRemarks] = useState([]);
   const [activityLog, setActivityLog] = useState([]);
 
-  const [apptDraft, setApptDraft] = useState(null); // { appointment_date, appointment_time, physio_id, notes, final_stage } | null
+  const [apptDraft, setApptDraft] = useState(null); // { appointment_date, appointment_time, physio_id, notes, final_stage, duration } | null
   const [apptExperts, setApptExperts] = useState({ experts: [], available_count: 0, busy_count: 0, loading: false });
+  // The picked expert's published availability for the picked date — the only times the
+  // Branch Admin can book into. Empty means the expert hasn't confirmed that day yet.
+  const [apptSlots, setApptSlots] = useState({ slots: [], loading: false });
 
   // Follow-up scheduling
   const tomorrowIso = () => new Date(Date.now() + 86400000).toISOString().slice(0, 10);
@@ -454,10 +466,47 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
     }
   }, []);
 
+  // Pulls the expert's own calendar and keeps only this date's slots that nobody has
+  // taken yet. A slot booked by THIS lead stays selectable so reopening the popup shows
+  // the current booking rather than hiding it.
+  const fetchExpertSlots = useCallback(async (physioId, dateStr, leadId) => {
+    if (!physioId || !dateStr) { setApptSlots({ slots: [], loading: false }); return; }
+    setApptSlots({ slots: [], loading: true });
+    try {
+      const cal = await getDoctorCalendar(physioId);
+      const booked = cal.booked || {};
+      const details = cal.slot_details || [];
+      const detailByTime = new Map(details.map((d) => [d.slot_time, d]));
+      const slots = (cal.slots || [])
+        .filter((s) => s.startsWith(`${dateStr}T`))
+        .filter((s) => !booked[s] || booked[s].lead_id === leadId)
+        .sort()
+        .map((s) => {
+          const time = s.split("T")[1];
+          const detail = detailByTime.get(s);
+          return {
+            time,
+            slot_time: s,
+            duration: detail?.duration || 30,
+            consultation_type: detail?.consultation_type || null,
+            mine: !!booked[s],
+          };
+        });
+      setApptSlots({ slots, loading: false });
+    } catch {
+      setApptSlots({ slots: [], loading: false });
+    }
+  }, []);
+
   useEffect(() => {
     if (!apptDraft || !apptDraft.appointment_date || !branchId) return;
     fetchAvailableExperts(branchId, apptDraft.appointment_date);
   }, [apptDraft?.appointment_date, branchId, fetchAvailableExperts]);
+
+  useEffect(() => {
+    if (!apptDraft) { setApptSlots({ slots: [], loading: false }); return; }
+    fetchExpertSlots(apptDraft.physio_id, apptDraft.appointment_date, lead.id);
+  }, [apptDraft?.physio_id, apptDraft?.appointment_date, lead.id, fetchExpertSlots]);
 
   useEffect(() => {
     if (activeTab === "timeline") { loadRemarks(); loadActivity(); }
@@ -653,9 +702,13 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                       if (stage === "Appointment Date & Time") {
                         setApptDraft({
                           appointment_date: lead.appointment_date || new Date(Date.now() + 86400000).toISOString().slice(0, 10),
-                          appointment_time: lead.appointment_time || "10:00",
+                          // Left blank on purpose — the time has to be picked from the
+                          // expert's published slots, so pre-filling a guess like 10:00
+                          // would show a time that may not actually be bookable.
+                          appointment_time: lead.appointment_time || "",
                           physio_id: lead.assigned_physio_id || "",
                           notes: "",
+                          duration: null,
                           final_stage: "Appointment Date & Time",
                         });
                         return;
@@ -817,10 +870,6 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                 <Input type="date" value={apptDraft.appointment_date} min={new Date().toISOString().slice(0, 10)} onChange={(e) => setApptDraft({ ...apptDraft, appointment_date: e.target.value })} data-testid="branch-appt-date" />
               </div>
               <div>
-                <label className="mb-1 block text-xs font-semibold text-slate-600">Time *</label>
-                <Input type="time" value={apptDraft.appointment_time} onChange={(e) => setApptDraft({ ...apptDraft, appointment_time: e.target.value })} data-testid="branch-appt-time" />
-              </div>
-              <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600">Experts *</label>
                 <p className="mb-1.5 text-[11px] text-slate-400">Showing experts available on this date.</p>
                 {apptExperts.loading ? (
@@ -833,7 +882,7 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                       <button
                         key={doc.id}
                         type="button"
-                        onClick={() => setApptDraft({ ...apptDraft, physio_id: doc.id })}
+                        onClick={() => setApptDraft({ ...apptDraft, physio_id: doc.id, appointment_time: "", duration: null })}
                         className={`flex w-full items-center gap-3 rounded-md border p-2.5 text-left ${apptDraft.physio_id === doc.id ? "border-teal-400 bg-teal-50" : "border-slate-200 bg-white hover:bg-slate-50"}`}
                         data-testid={`branch-appt-expert-${doc.id}`}
                       >
@@ -847,6 +896,48 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                       </button>
                     ))}
                   </div>
+                )}
+              </div>
+
+              {/* Time comes only from what the expert has actually confirmed on their
+                  Consultant Calendar — no free typing, so nothing gets booked into a
+                  slot the Head Physio never agreed to. */}
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-600">Time Slot *</label>
+                {!apptDraft.physio_id ? (
+                  <p className="text-xs text-slate-400">Select an expert to see their available times.</p>
+                ) : apptSlots.loading ? (
+                  <p className="text-xs text-slate-400">Loading available slots...</p>
+                ) : apptSlots.slots.length === 0 ? (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5" data-testid="branch-appt-no-slots">
+                    <p className="text-[11px] font-medium text-amber-800">No availability published for this date.</p>
+                    <p className="mt-0.5 text-[11px] text-amber-700">
+                      Confirm with the expert, then open MANAGEMENT → Consultant Calendar and mark them available.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-3 gap-1.5" data-testid="branch-appt-slots">
+                    {apptSlots.slots.map((s) => {
+                      const active = apptDraft.appointment_time === s.time;
+                      return (
+                        <button
+                          key={s.slot_time}
+                          type="button"
+                          onClick={() => setApptDraft({ ...apptDraft, appointment_time: s.time, duration: s.duration })}
+                          className={`rounded-md border px-2 py-1.5 text-center transition ${active ? "border-teal-400 bg-teal-50 text-teal-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}
+                          data-testid={`branch-appt-slot-${s.time}`}
+                        >
+                          <span className="block text-xs font-semibold">{s.time}</span>
+                          <span className="block text-[9px] text-slate-400">{s.duration} min</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                {apptDraft.appointment_time && apptDraft.duration && (
+                  <p className="mt-2 text-[11px] font-medium text-teal-700" data-testid="branch-appt-slot-summary">
+                    {apptDraft.appointment_time} – {addMinutes(apptDraft.appointment_time, apptDraft.duration)} · {apptDraft.duration} minute consultation
+                  </p>
                 )}
               </div>
               <div>
@@ -875,8 +966,9 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
               <Button
                 className="bg-teal-600 text-white hover:bg-teal-700"
                 onClick={async () => {
-                  if (!apptDraft.appointment_date || !apptDraft.appointment_time) { toast.error("Date and time are required"); return; }
+                  if (!apptDraft.appointment_date) { toast.error("Pick a date"); return; }
                   if (!apptDraft.physio_id) { toast.error("Please select an expert"); return; }
+                  if (!apptDraft.appointment_time) { toast.error("Pick a time slot"); return; }
                   try {
                     await scheduleBranchAppointment(lead.id, apptDraft);
                     toast.success(`Appointment ${apptDraft.appointment_date} ${apptDraft.appointment_time} → ${apptDraft.final_stage}`);

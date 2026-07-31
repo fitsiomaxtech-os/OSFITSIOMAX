@@ -65,10 +65,14 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
   const loadDoctors = useCallback(async () => {
     if (!branchId) return;
     try {
-      const all = await getDoctors({ branch_id: branchId });
+      // Head Physios are shared org-wide, so the Consultant Calendar lists every one of
+      // them regardless of branch. Physios stay branch-scoped — they belong to a branch.
+      const all = isPhysio
+        ? await getDoctors({ branch_id: branchId })
+        : await getDoctors({ all_branches: true });
       setDoctors(all.filter((d) => d.profile_type === profileType));
     } catch { /* silent */ }
-  }, [branchId, profileType]);
+  }, [branchId, profileType, isPhysio]);
 
   useEffect(() => { loadDoctors(); }, [loadDoctors]);
 
@@ -118,16 +122,43 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
     return calendarData?.booked?.[slotTime];
   };
 
+  // The working window a Head Physio can be marked available across: 08:00 to 22:00.
+  // Steps by the currently-selected duration, so a 30-min day yields 08:00…21:30 and a
+  // 45-min day yields 08:00…21:15 — every generated slot finishes by 22:00.
+  const DAY_START_MIN = 8 * 60;
+  const DAY_END_MIN = 22 * 60;
+
   const generateTimeGrid = () => {
     const slots = [];
-    for (let h = 8; h <= 20; h++) {
-      for (let m = 0; m < 60; m += 30) {
-        if (h === 20 && m > 0) break;
-        const time = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-        slots.push(time);
-      }
+    const step = slotDuration || 30;
+    for (let m = DAY_START_MIN; m + step <= DAY_END_MIN; m += step) {
+      slots.push(`${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`);
     }
     return slots;
+  };
+
+  // "Available all day" — the confirm step after the Branch Admin has checked with the
+  // Head Physio. Stages every free slot in the window; already-published and booked
+  // slots are left alone so this never double-adds or disturbs a real appointment.
+  const markWholeDayAvailable = () => {
+    if (!selectedDate) { toast.error("Pick a date first"); return; }
+    const additions = generateTimeGrid()
+      .filter((time) => {
+        const full = `${selectedDate}T${time}`;
+        return !isBooked(full) && !isSlotExisting(time) && !isSlotPending(time);
+      })
+      .map((time) => ({
+        slot_time: `${selectedDate}T${time}`,
+        duration: slotDuration,
+        consultation_type: slotType,
+      }));
+    if (additions.length === 0) { toast.info("Every slot for this day is already open"); return; }
+    // Drop any staged removals for this date — "available all day" overrides them.
+    setPendingSlots((prev) => [
+      ...prev.filter((s) => !(s._remove && s.slot_time.startsWith(selectedDate))),
+      ...additions,
+    ]);
+    toast.success(`${additions.length} slots staged — press Save to publish`);
   };
 
   const isSlotExisting = (time) => {
@@ -428,6 +459,23 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
                       ))}
                     </div>
                   </div>
+
+                  {selectedDate && (
+                    <div data-testid="whole-day-panel">
+                      <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-1 block">Confirmed Availability</label>
+                      <p className="mb-2 text-[10px] text-slate-400">
+                        {roleLabel} confirmed free all day? Open every {slotDuration}-minute slot from 08:00 to 22:00.
+                      </p>
+                      <Button
+                        type="button"
+                        onClick={markWholeDayAvailable}
+                        className="w-full bg-emerald-600 text-[11px] hover:bg-emerald-700"
+                        data-testid="mark-whole-day-available"
+                      >
+                        Available All Day
+                      </Button>
+                    </div>
+                  )}
 
                   {selectedDate && (
                     <div data-testid="repeat-schedule-panel">
