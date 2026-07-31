@@ -170,11 +170,6 @@ export const FitsiomaxStorePanel = () => {
 
   return (
     <div className="space-y-4" data-testid="branch-store-board">
-      <div>
-        <h2 className="text-2xl font-bold text-slate-900">Fitsiomax Store</h2>
-        <p className="text-sm text-slate-500">View-only mirror of Super Admin's store — Consultations, Sessions, Tablet, Supplementary, Equipment, and Vending Machine.</p>
-      </div>
-
       <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="branch-store-subtabs">
         {BRANCH_STORE_TABS.map((t) => {
           const Icon = t.icon;

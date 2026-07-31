@@ -80,13 +80,6 @@ export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
 
   return (
     <div className="space-y-4" data-testid="accountant-manage-tab">
-      <div>
-        <h2 className="text-xl font-bold text-slate-900">Accountant Manage</h2>
-        <p className="text-sm text-slate-500">
-          Revenue, collections, outstanding balances, and payment schedules {fixedBranchId ? "for your branch" : "across every branch"}.
-        </p>
-      </div>
-
       {!fixedBranchId && (
         <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-3">
           <label className="text-xs font-medium text-slate-600">Branch:</label>
