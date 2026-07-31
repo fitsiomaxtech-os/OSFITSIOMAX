@@ -472,7 +472,7 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
                         className="w-full bg-emerald-600 text-[11px] hover:bg-emerald-700"
                         data-testid="mark-whole-day-available"
                       >
-                        Available All Day
+                        Mark Whole Day Available
                       </Button>
                     </div>
                   )}
