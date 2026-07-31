@@ -291,14 +291,19 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
           <div className="overflow-auto">
             <table className="min-w-full border-separate border-spacing-x-0 border-spacing-y-2 text-sm">
               <thead className="text-center text-xs text-slate-500">
-                <tr><th className="px-3 py-2">LEAD</th><th className="px-3 py-2">PHONE</th><th className="px-3 py-2">EMAIL</th><th className="px-3 py-2">SOURCE</th><th className="px-3 py-2">STAGE</th>{stageFilter === "Appointment" && <th className="px-3 py-2">BRANCH ADMIN STATUS</th>}<th className="px-3 py-2">CREATED</th><th className="px-3 py-2">ACTIONS</th></tr>
+                <tr><th className="px-3 py-2 text-left">LEAD</th><th className="px-3 py-2">PHONE</th><th className="px-3 py-2">EMAIL</th><th className="px-3 py-2">SOURCE</th><th className="px-3 py-2">STAGE</th>{stageFilter === "Appointment" && <th className="px-3 py-2">BRANCH ADMIN STATUS</th>}<th className="px-3 py-2">CREATED</th><th className="px-3 py-2">ACTIONS</th></tr>
               </thead>
               <tbody>
                 {visibleLeads.map((l) => {
                   const stg = stages.find((s) => s.name === l.stage);
                   return (
                     <tr key={l.id} onClick={() => setEditing(l)} className="group cursor-pointer" data-testid={`presales-lead-row-${l.id}`}>
-                      <td className="rounded-l-[5px] border-y border-l border-slate-200 bg-white px-3 py-3 text-center font-medium text-slate-800 transition-colors group-hover:bg-slate-50">{l.name}</td>
+                      <td className="rounded-l-[5px] border-y border-l border-slate-200 bg-white px-3 py-3 text-left font-medium text-slate-800 transition-colors group-hover:bg-slate-50">
+                        <div className="flex items-center gap-2">
+                          <span className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-xs font-bold ${avatarColor(l.name).bg} ${avatarColor(l.name).fg}`}>{initials(l.name)}</span>
+                          <span className="truncate">{l.name}</span>
+                        </div>
+                      </td>
                       <td className="border-y border-slate-200 bg-white px-3 py-3 text-center font-mono text-xs text-slate-700 transition-colors group-hover:bg-slate-50">{l.phone || "—"}</td>
                       <td className="border-y border-slate-200 bg-white px-3 py-3 text-center text-xs text-slate-600 transition-colors group-hover:bg-slate-50">{l.email || "—"}</td>
                       <td className="border-y border-slate-200 bg-white px-3 py-3 text-center transition-colors group-hover:bg-slate-50"><SourcePill source={l.source_tab || l.source_type} /></td>
