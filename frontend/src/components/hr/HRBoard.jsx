@@ -741,11 +741,13 @@ const EmployeeSelectDropdown = ({ value, employees, onChange }) => {
 
 const CreateUserModal = ({ meta, reloadMeta, onClose, onSaved }) => {
   const [employees, setEmployees] = useState([]);
-  const [form, setForm] = useState({ employee_id: "", full_name: "", email: "", role: "", password: "", confirm: "" });
+  const [branches, setBranches] = useState([]);
+  const [form, setForm] = useState({ employee_id: "", full_name: "", email: "", role: "", branch_id: "", password: "", confirm: "" });
   const [addingRole, setAddingRole] = useState(false);
   const [newRoleLabel, setNewRoleLabel] = useState("");
   const [savingRole, setSavingRole] = useState(false);
   useEffect(() => { hrEmployees({ status: "active" }).then(setEmployees).catch((e) => console.warn("[load failed]", e?.message || e)); }, []);
+  useEffect(() => { getBranches().then(setBranches).catch((e) => console.warn("[load failed]", e?.message || e)); }, []);
 
   const pickEmployee = (id) => {
     const emp = employees.find((e) => e.id === id);
@@ -774,7 +776,7 @@ const CreateUserModal = ({ meta, reloadMeta, onClose, onSaved }) => {
     if (form.password.length < 6) { toast.error("Min 6 characters"); return; }
     if (form.password !== form.confirm) { toast.error("Passwords do not match"); return; }
     try {
-      await hrCreateUser({ full_name: form.full_name || form.email.split("@")[0], email: form.email, password: form.password, role: form.role, employee_id: form.employee_id || null });
+      await hrCreateUser({ full_name: form.full_name || form.email.split("@")[0], email: form.email, password: form.password, role: form.role, branch_id: form.branch_id || null, employee_id: form.employee_id || null });
       toast.success("User created");
       onSaved();
     } catch (e) { toast.error(e?.response?.data?.detail || "Create failed"); }
@@ -821,6 +823,17 @@ const CreateUserModal = ({ meta, reloadMeta, onClose, onSaved }) => {
           {!addingRole && (
             <p className="mt-1 text-[10px] text-slate-400">A new role only adds a selectable name — page access still needs to be built for it separately.</p>
           )}
+        </Field>
+        <Field label="Branch (optional)">
+          <select
+            value={form.branch_id}
+            onChange={(e) => setForm({ ...form, branch_id: e.target.value })}
+            className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm"
+            data-testid="hr-create-user-branch"
+          >
+            <option value="">No branch</option>
+            {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
+          </select>
         </Field>
         <Field label="Password *"><Input type="password" placeholder="Min 6 characters" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} data-testid="hr-create-user-pwd" /></Field>
         <Field label="Confirm Password *"><Input type="password" placeholder="Confirm password" value={form.confirm} onChange={(e) => setForm({ ...form, confirm: e.target.value })} data-testid="hr-create-user-confirm" /></Field>
