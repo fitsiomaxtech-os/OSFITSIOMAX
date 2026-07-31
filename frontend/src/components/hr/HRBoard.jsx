@@ -739,6 +739,72 @@ const EmployeeSelectDropdown = ({ value, employees, onChange }) => {
   );
 };
 
+// A fixed color per branch would need a stable id->color map that survives
+// the branch list changing; cycling a palette by list position is simpler and
+// still gives each branch its own distinct color in the open dropdown.
+const BRANCH_COLOR_PALETTE = [
+  "border-purple-300 bg-purple-50 text-purple-700",
+  "border-indigo-300 bg-indigo-50 text-indigo-700",
+  "border-emerald-300 bg-emerald-50 text-emerald-700",
+  "border-amber-300 bg-amber-50 text-amber-700",
+  "border-cyan-300 bg-cyan-50 text-cyan-700",
+  "border-pink-300 bg-pink-50 text-pink-700",
+  "border-orange-300 bg-orange-50 text-orange-700",
+  "border-sky-300 bg-sky-50 text-sky-700",
+];
+
+const BranchSelectDropdown = ({ value, branches, onChange }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const onDocClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, []);
+
+  const idx = branches.findIndex((b) => b.id === value);
+  const currentClasses = idx >= 0 ? BRANCH_COLOR_PALETTE[idx % BRANCH_COLOR_PALETTE.length] : "border-slate-200 bg-white text-slate-700";
+  const currentLabel = idx >= 0 ? branches[idx].branch_name : "No branch";
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={`flex h-10 w-full items-center justify-between gap-2 rounded-md border px-3 text-left text-sm font-semibold ${currentClasses}`}
+        data-testid="hr-create-user-branch"
+      >
+        <span className="truncate">{currentLabel}</span>
+        <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
+      </button>
+      {open && (
+        <div className="absolute left-0 right-0 z-20 mt-1 max-h-64 space-y-1 overflow-y-auto rounded-md border border-slate-200 bg-white p-1.5 shadow-lg" data-testid="hr-create-user-branch-list">
+          <button
+            type="button"
+            onClick={() => { onChange(""); setOpen(false); }}
+            className="block w-full rounded-md border border-slate-200 bg-white px-3 py-1.5 text-left text-xs font-semibold text-slate-700"
+            data-testid="hr-create-user-branch-option-none"
+          >
+            No branch
+          </button>
+          {branches.map((b, i) => (
+            <button
+              key={b.id}
+              type="button"
+              onClick={() => { onChange(b.id); setOpen(false); }}
+              className={`block w-full rounded-md border px-3 py-1.5 text-left text-xs font-semibold ${BRANCH_COLOR_PALETTE[i % BRANCH_COLOR_PALETTE.length]}`}
+              data-testid={`hr-create-user-branch-option-${b.id}`}
+            >
+              {b.branch_name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const CreateUserModal = ({ meta, reloadMeta, onClose, onSaved }) => {
   const [employees, setEmployees] = useState([]);
   const [branches, setBranches] = useState([]);
@@ -825,15 +891,7 @@ const CreateUserModal = ({ meta, reloadMeta, onClose, onSaved }) => {
           )}
         </Field>
         <Field label="Branch (optional)">
-          <select
-            value={form.branch_id}
-            onChange={(e) => setForm({ ...form, branch_id: e.target.value })}
-            className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm"
-            data-testid="hr-create-user-branch"
-          >
-            <option value="">No branch</option>
-            {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
-          </select>
+          <BranchSelectDropdown value={form.branch_id} branches={branches} onChange={(id) => setForm({ ...form, branch_id: id })} />
         </Field>
         <Field label="Password *"><Input type="password" placeholder="Min 6 characters" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} data-testid="hr-create-user-pwd" /></Field>
         <Field label="Confirm Password *"><Input type="password" placeholder="Confirm password" value={form.confirm} onChange={(e) => setForm({ ...form, confirm: e.target.value })} data-testid="hr-create-user-confirm" /></Field>
