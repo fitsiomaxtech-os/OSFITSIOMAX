@@ -228,16 +228,6 @@ export const BranchAdminBoard = ({ branchId }) => {
         <BranchExpertsTab />
       ) : (
         <>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between" data-testid="branch-pipeline-header">
-            <div>
-              <h2 className="text-2xl font-bold text-slate-900">Branch Leads</h2>
-              <p className="text-sm text-slate-500">Track patients from first appointment through to their stage in your branch.</p>
-            </div>
-            <Button onClick={() => setShowCreateLead(true)} className="bg-sky-600 hover:bg-sky-700" data-testid="branch-create-lead-btn">
-              <UserPlus className="h-4 w-4 mr-1.5" />Create Lead
-            </Button>
-          </div>
-
           {/* Stage Head Bar — Pre-Sales style sticky segmented tabs. Merges in the
               Consultation pipeline's stages too, so this one bar covers a patient's whole
               journey; selecting one of those switches the view below to the real
@@ -269,6 +259,9 @@ export const BranchAdminBoard = ({ branchId }) => {
               <Input className="pl-9" placeholder="Search patients..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} data-testid="branch-search" />
             </div>
             <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="branch-date-filter" />
+            <Button onClick={() => setShowCreateLead(true)} className="bg-sky-600 hover:bg-sky-700" data-testid="branch-create-lead-btn">
+              <UserPlus className="h-4 w-4 mr-1.5" />Create Lead
+            </Button>
             <PullFromSheetButton
               onPulled={loadBoard}
               notConnectedHint="Google Sheets isn't connected yet — ask your Super Admin to connect it."
