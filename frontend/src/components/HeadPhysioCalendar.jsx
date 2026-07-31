@@ -134,30 +134,6 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
     return slots;
   };
 
-  // "Available all day" — the confirm step after the Branch Admin has checked with the
-  // Head Physio. Stages every free slot in the window; already-published and booked
-  // slots are left alone so this never double-adds or disturbs a real appointment.
-  const markWholeDayAvailable = () => {
-    if (!selectedDate) { toast.error("Pick a date first"); return; }
-    const additions = generateTimeGrid()
-      .filter((time) => {
-        const full = `${selectedDate}T${time}`;
-        return !isBooked(full) && !isSlotExisting(time) && !isSlotPending(time);
-      })
-      .map((time) => ({
-        slot_time: `${selectedDate}T${time}`,
-        duration: slotDuration,
-        consultation_type: slotType,
-      }));
-    if (additions.length === 0) { toast.info("Every slot for this day is already open"); return; }
-    // Drop any staged removals for this date — "available all day" overrides them.
-    setPendingSlots((prev) => [
-      ...prev.filter((s) => !(s._remove && s.slot_time.startsWith(selectedDate))),
-      ...additions,
-    ]);
-    toast.success(`${additions.length} slots staged — press Save to publish`);
-  };
-
   const isSlotExisting = (time) => {
     if (!selectedDate || !calendarData) return false;
     const full = `${selectedDate}T${time}`;
@@ -440,41 +416,6 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
                       ))}
                     </div>
                   </div>
-                  <div>
-                    <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-1 block">{isPhysio ? "Session Type" : "Consultation Type"}</label>
-                    <div className="space-y-1" data-testid="type-options">
-                      {SLOT_TYPES.map((ct) => (
-                        <button
-                          key={ct.value}
-                          type="button"
-                          onClick={() => setSlotType(ct.value)}
-                          className={`w-full rounded-md border px-3 py-1.5 text-left text-[11px] font-medium transition-all ${
-                            slotType === ct.value ? `${ct.color} border` : "border-slate-200 text-slate-500 hover:bg-slate-50"
-                          }`}
-                          data-testid={`type-${ct.value}`}
-                        >
-                          {ct.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {selectedDate && (
-                    <div data-testid="whole-day-panel">
-                      <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-1 block">Confirmed Availability</label>
-                      <p className="mb-2 text-[10px] text-slate-400">
-                        {roleLabel} confirmed free all day? Open every {slotDuration}-minute slot from 8:00 AM to 10:00 PM.
-                      </p>
-                      <Button
-                        type="button"
-                        onClick={markWholeDayAvailable}
-                        className="w-full bg-emerald-600 text-[11px] hover:bg-emerald-700"
-                        data-testid="mark-whole-day-available"
-                      >
-                        Mark Whole Day Available
-                      </Button>
-                    </div>
-                  )}
 
                   {selectedDate && (
                     <div data-testid="repeat-schedule-panel">
