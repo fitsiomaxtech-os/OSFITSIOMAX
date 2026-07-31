@@ -10,7 +10,6 @@ import {
 import { LeadEditModal } from "@/components/LeadEditModal";
 import { CreateLeadModal } from "@/components/CreateLeadModal";
 import { SourcePill } from "@/components/marketing/SourcePill";
-import { MaskedContact } from "@/components/MaskedContact";
 import { PullFromSheetButton } from "@/components/PullFromSheetButton";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 
@@ -307,8 +306,8 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
                   return (
                     <tr key={l.id} onClick={() => setEditing(l)} className="group cursor-pointer" data-testid={`presales-lead-row-${l.id}`}>
                       <td className="rounded-l-[5px] border-y border-l border-slate-200 bg-white px-3 py-3 text-center font-medium text-slate-800 transition-colors group-hover:bg-slate-50">{l.name}</td>
-                      <td className="border-y border-slate-200 bg-white px-3 py-3 text-center transition-colors group-hover:bg-slate-50"><MaskedContact phone={l.phone} /></td>
-                      <td className="border-y border-slate-200 bg-white px-3 py-3 text-center transition-colors group-hover:bg-slate-50"><MaskedContact email={l.email} /></td>
+                      <td className="border-y border-slate-200 bg-white px-3 py-3 text-center font-mono text-xs text-slate-700 transition-colors group-hover:bg-slate-50">{l.phone || "—"}</td>
+                      <td className="border-y border-slate-200 bg-white px-3 py-3 text-center text-xs text-slate-600 transition-colors group-hover:bg-slate-50">{l.email || "—"}</td>
                       <td className="border-y border-slate-200 bg-white px-3 py-3 text-center transition-colors group-hover:bg-slate-50"><SourcePill source={l.source_tab || l.source_type} /></td>
                       <td className="border-y border-slate-200 bg-white px-3 py-3 transition-colors group-hover:bg-slate-50">
                         <div className="flex flex-col items-center gap-1">
