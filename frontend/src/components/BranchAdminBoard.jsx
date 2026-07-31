@@ -156,10 +156,17 @@ export const BranchAdminBoard = ({ branchId }) => {
     { key: "pipeline", label: "Branch Leads", icon: LayoutDashboard },
     { key: "consultations", label: "MANAGEMENT", icon: Stethoscope },
     { key: "accountant_mgmt", label: "Accountant Manage", icon: BadgeIndianRupee },
-    { key: "experts", label: "FITSIOMAX EXPERTS", icon: Stethoscope },
-    { key: "calendar", label: "Calendar", icon: Calendar },
     { key: "rehab", label: "Rehab", icon: Activity },
     { key: "store", label: "Fitsiomax Store", icon: ShoppingCart },
+  ];
+
+  // Everything under MANAGEMENT — Experts and Calendar used to be their own
+  // top-level tabs and now live here alongside the two calendars.
+  const MANAGEMENT_SUB_TABS = [
+    { key: "head_physio", label: "Consultant Calendar", icon: Calendar },
+    { key: "physio", label: "Physio Calendar", icon: Activity },
+    { key: "experts", label: "EXPERTS", icon: Stethoscope },
+    { key: "calendar", label: "Calendar", icon: Calendar },
   ];
 
   return (
@@ -189,39 +196,37 @@ export const BranchAdminBoard = ({ branchId }) => {
       {activeView === "consultations" ? (
         <div className="space-y-4" data-testid="branch-consultations-headphysio">
           <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="branch-consultations-subtabs">
-            <button
-              type="button"
-              onClick={() => setConsultationsSubTab("head_physio")}
-              className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${consultationsSubTab === "head_physio" ? "bg-sky-50 text-sky-600" : "text-slate-600 hover:bg-slate-50"}`}
-              data-testid="branch-consultations-subtab-head_physio"
-            >
-              <Calendar className="h-4 w-4" />Consultant Calendar
-            </button>
-            <button
-              type="button"
-              onClick={() => setConsultationsSubTab("physio")}
-              className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${consultationsSubTab === "physio" ? "bg-sky-50 text-sky-600" : "text-slate-600 hover:bg-slate-50"}`}
-              data-testid="branch-consultations-subtab-physio"
-            >
-              <Activity className="h-4 w-4" />Physio Calendar
-            </button>
+            {MANAGEMENT_SUB_TABS.map((t) => {
+              const Icon = t.icon;
+              return (
+                <button
+                  key={t.key}
+                  type="button"
+                  onClick={() => setConsultationsSubTab(t.key)}
+                  className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition ${consultationsSubTab === t.key ? "bg-sky-50 text-sky-600" : "text-slate-600 hover:bg-slate-50"}`}
+                  data-testid={`branch-consultations-subtab-${t.key}`}
+                >
+                  <Icon className="h-4 w-4" />{t.label}
+                </button>
+              );
+            })}
           </div>
           {consultationsSubTab === "physio" ? (
             <HeadPhysioCalendar branchId={branchId} profileType="physio" />
+          ) : consultationsSubTab === "experts" ? (
+            <BranchExpertsTab />
+          ) : consultationsSubTab === "calendar" ? (
+            <BranchCalendarPanel branchId={branchId} />
           ) : (
             <HeadPhysioCalendar branchId={branchId} />
           )}
         </div>
-      ) : activeView === "calendar" ? (
-        <BranchCalendarPanel branchId={branchId} />
       ) : activeView === "rehab" ? (
         <PlaceholderPanel label="Rehab" testid="branch-rehab-panel" />
       ) : activeView === "store" ? (
         <FitsiomaxStorePanel />
       ) : activeView === "accountant_mgmt" ? (
         <AccountantManageTab branchId={branchId} />
-      ) : activeView === "experts" ? (
-        <BranchExpertsTab />
       ) : (
         <>
           {/* Stage Head Bar — Pre-Sales style sticky segmented tabs. Merges in the
