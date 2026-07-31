@@ -16,6 +16,7 @@ import {
   ClipboardList,
   Bell,
   BadgeIndianRupee,
+  UserCog,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -42,6 +43,7 @@ import { PlaceholderPanel } from "@/components/PackagesBoard";
 import { AccountantManageTab } from "@/components/branch/AccountantManageTab";
 import { BranchExpertsTab } from "@/components/branch/BranchExpertsTab";
 import { BranchCalendarPanel } from "@/components/branch/BranchCalendarPanel";
+import { BranchDetailPage } from "@/components/branch/BranchDetailPage";
 import { CreateLeadModal } from "@/components/CreateLeadModal";
 
 export const BranchAdminBoard = ({ branchId }) => {
@@ -161,11 +163,13 @@ export const BranchAdminBoard = ({ branchId }) => {
   ];
 
   // Everything under MANAGEMENT — Experts and Calendar used to be their own
-  // top-level tabs and now live here alongside the two calendars.
+  // top-level tabs, and Manager used to sit one level deeper inside Calendar;
+  // all three now live here alongside the two calendars.
   const MANAGEMENT_SUB_TABS = [
     { key: "head_physio", label: "Consultant Calendar", icon: Calendar },
     { key: "physio", label: "Physio Calendar", icon: Activity },
     { key: "experts", label: "EXPERTS", icon: Stethoscope },
+    { key: "manager", label: "Manager", icon: UserCog },
     { key: "calendar", label: "Calendar", icon: Calendar },
   ];
 
@@ -215,6 +219,8 @@ export const BranchAdminBoard = ({ branchId }) => {
             <HeadPhysioCalendar branchId={branchId} profileType="physio" />
           ) : consultationsSubTab === "experts" ? (
             <BranchExpertsTab />
+          ) : consultationsSubTab === "manager" ? (
+            <BranchDetailPage branchId={branchId} readOnly />
           ) : consultationsSubTab === "calendar" ? (
             <BranchCalendarPanel branchId={branchId} />
           ) : (
