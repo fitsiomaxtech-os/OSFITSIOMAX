@@ -308,9 +308,9 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
                     <tr key={l.id} onClick={() => setEditing(l)} className="group cursor-pointer" data-testid={`presales-lead-row-${l.id}`}>
                       <td className="rounded-l-[5px] border-y border-l border-slate-200 bg-white px-3 py-3 font-medium text-slate-800 transition-colors group-hover:bg-slate-50">{l.name}</td>
                       <td className="border-y border-slate-200 bg-white px-3 py-3 transition-colors group-hover:bg-slate-50"><MaskedContact phone={l.phone} email={l.email} /></td>
-                      <td className="border-y border-slate-200 bg-white px-3 py-3 transition-colors group-hover:bg-slate-50"><SourcePill source={l.source_tab || l.source_type} /></td>
+                      <td className="border-y border-slate-200 bg-white px-3 py-3 text-center transition-colors group-hover:bg-slate-50"><SourcePill source={l.source_tab || l.source_type} /></td>
                       <td className="border-y border-slate-200 bg-white px-3 py-3 transition-colors group-hover:bg-slate-50">
-                        <div className="flex flex-col items-start gap-1">
+                        <div className="flex flex-col items-center gap-1">
                           <div className="flex items-center gap-1.5">
                             <span className="inline-flex h-6 items-center rounded border px-2 text-[10px] font-semibold" style={{ borderColor: stg?.color || "#cbd5e1", color: stg?.color || "#64748b" }}>{l.stage}</span>
                             {l.stage === "RNR" && (l.rnr_attempts || 0) > 0 && (
