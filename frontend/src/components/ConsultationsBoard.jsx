@@ -15,6 +15,7 @@ import {
   getLeadRemarks, getLeadActivity,
   saveConsultationDecision, markConsultationCompleted,
 } from "@/lib/api";
+import { to12h } from "@/lib/time";
 
 const CONSULTATION_FEE_PAYMENT_MODES = [
   { value: "cash", label: "Cash" },
@@ -896,7 +897,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       </span>
                     </td>
                     <td className="truncate px-4 py-3 text-slate-600" title={l.assigned_physio_name}>{l.assigned_physio_name || "—"}</td>
-                    <td className="px-4 py-3 text-xs text-slate-500">{l.appointment_date ? `${l.appointment_date} ${l.appointment_time || ""}` : "—"}</td>
+                    <td className="px-4 py-3 text-xs text-slate-500">{l.appointment_date ? `${l.appointment_date} ${l.appointment_time ? to12h(l.appointment_time) : ""}`.trim() : "—"}</td>
                     <td className="px-4 py-3 text-xs text-slate-400">{(l.updated_at || "").slice(0, 10)}</td>
                   </tr>
                 );
@@ -926,7 +927,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 <p className="mt-0.5 flex items-center gap-2 text-xs text-slate-500">
                   <Phone className="h-3 w-3" /> {selectedLead.phone || "—"}
                   {selectedLead.appointment_date && (
-                    <>· <Calendar className="ml-1 h-3 w-3" /> {selectedLead.appointment_date} {selectedLead.appointment_time}</>
+                    <>· <Calendar className="ml-1 h-3 w-3" /> {selectedLead.appointment_date} {to12h(selectedLead.appointment_time)}</>
                   )}
                 </p>
                 {selectedLead.assigned_physio_name && (

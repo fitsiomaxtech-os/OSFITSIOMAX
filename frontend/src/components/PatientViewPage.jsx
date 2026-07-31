@@ -7,6 +7,7 @@ import {
   User,
 } from "lucide-react";
 import { patientView } from "@/lib/api";
+import { slotTo12h } from "@/lib/time";
 
 export const PatientViewPage = ({ token }) => {
   const [data, setData] = useState(null);
@@ -97,7 +98,7 @@ export const PatientViewPage = ({ token }) => {
                   </p>
                   <p className="text-[10px] text-slate-400 flex items-center gap-1">
                     <Clock className="h-3 w-3" />
-                    {s.slot_time?.replace("T", " at ")}
+                    {s.slot_time ? `${s.slot_time.split("T")[0]} at ${slotTo12h(s.slot_time)}` : "—"}
                     {s.physio_name && <span> · {s.physio_name}</span>}
                   </p>
                   {s.jr_physio_remarks && (

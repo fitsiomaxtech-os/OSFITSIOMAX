@@ -38,6 +38,7 @@ import {
   moveLeadStage,
   updateLead,
 } from "@/lib/api";
+import { to12h } from "@/lib/time";
 
 const PIPELINE_STAGES = [
   "New Lead",
@@ -778,7 +779,7 @@ function LeadDetailModal({ lead, branches, onClose, onStageMove, onRefresh }) {
                             <label className="text-[10px] font-medium text-slate-500">Select Time Slot</label>
                             <div className="mt-1 grid grid-cols-4 gap-1" data-testid="booking-time-slots">
                               {generateTimeSlots().map((slot) => {
-                                const timeStr = slot.slice(11, 16);
+                                const timeStr = to12h(slot.slice(11, 16));
                                 const isSelected = selectedSlot === slot;
                                 return (
                                   <button

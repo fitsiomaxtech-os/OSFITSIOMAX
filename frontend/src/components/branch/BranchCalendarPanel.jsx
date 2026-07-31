@@ -12,20 +12,13 @@ import {
   updateConsultAppointment,
   cancelConsultAppointment,
 } from "@/lib/api";
+import { to12h } from "@/lib/time";
 
 // weekly_hours is keyed mon..sun; JS getDay() is 0=Sun..6=Sat.
 const DAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
-// 24h "HH:MM" -> 12h "h:MM AM/PM" for display only (stored/sent values stay 24h).
-const to12h = (t) => {
-  if (!t || !t.includes(":")) return t || "--:--";
-  const [h, m] = t.split(":");
-  const hr = parseInt(h, 10);
-  const h12 = hr % 12 === 0 ? 12 : hr % 12;
-  return `${h12}:${m} ${hr >= 12 ? "PM" : "AM"}`;
-};
 
 const emptyDraft = () => ({ patient_name: "", doctor_id: "", date: iso(new Date()), time: "", notes: "", cancelled: false });
 

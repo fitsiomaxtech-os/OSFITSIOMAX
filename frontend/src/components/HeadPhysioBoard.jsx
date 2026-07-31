@@ -29,6 +29,7 @@ import {
   hpWeeklyReview,
   physioSessions,
 } from "@/lib/api";
+import { to12h, slotTo12h } from "@/lib/time";
 
 const VIEW_TABS = [
   { key: "consultations", label: "Consultations", icon: Calendar },
@@ -170,7 +171,7 @@ function MyCalendarTab({ branchId }) {
           <div className="flex flex-wrap gap-2">
             {grouped[date].map((slot) => {
               const booking = data.booked?.[slot];
-              const time = slot.split("T")[1];
+              const time = to12h(slot.split("T")[1]);
               return (
                 <div
                   key={slot}
@@ -508,7 +509,7 @@ function PatientSessionsModal({ patient, onClose }) {
                   </div>
                   <div className="flex-1">
                     <p className="text-xs font-medium text-slate-700">Session #{s.session_number} · Week {s.week_number}</p>
-                    <p className="text-[10px] text-slate-400">{s.slot_time?.replace("T", " at ")}</p>
+                    <p className="text-[10px] text-slate-400">{s.slot_time ? `${s.slot_time.split("T")[0]} at ${slotTo12h(s.slot_time)}` : "—"}</p>
                     {s.jr_physio_remarks && <p className="text-[10px] text-emerald-600 mt-0.5">Remarks: {s.jr_physio_remarks}</p>}
                   </div>
                   <span className={`rounded-full px-2 py-0.5 text-[9px] font-semibold ${s.status === "completed" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>

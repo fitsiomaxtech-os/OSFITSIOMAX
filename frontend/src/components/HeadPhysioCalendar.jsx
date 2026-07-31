@@ -15,6 +15,7 @@ import {
   getDoctors,
   removeCalendarSlots,
 } from "@/lib/api";
+import { to12h } from "@/lib/time";
 
 const CONSULTATION_TYPES = [
   { value: "initial", label: "Initial Consultation", color: "bg-blue-100 text-blue-700 border-blue-300" },
@@ -370,8 +371,10 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
             </div>
 
             <div className="flex flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
-              {/* Month Calendar */}
-              <div className="w-full flex-shrink-0 border-b border-slate-100 p-4 flex flex-col lg:w-80 lg:border-b-0 lg:border-r">
+              {/* Month Calendar — scrolls on its own, otherwise the controls below it
+                  (duration, type, Mark Whole Day Available, Repeat) get clipped by the
+                  row's lg:overflow-hidden with no way to reach them. */}
+              <div className="w-full flex-shrink-0 border-b border-slate-100 p-4 flex flex-col lg:w-80 lg:border-b-0 lg:border-r lg:overflow-y-auto">
                 <div className="flex items-center justify-between mb-4">
                   <button type="button" onClick={prevMonth} className="p-1 rounded hover:bg-slate-100" data-testid="cal-prev-month">
                     <ChevronLeft className="h-4 w-4 text-slate-500" />
@@ -464,7 +467,7 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
                     <div data-testid="whole-day-panel">
                       <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-1 block">Confirmed Availability</label>
                       <p className="mb-2 text-[10px] text-slate-400">
-                        {roleLabel} confirmed free all day? Open every {slotDuration}-minute slot from 08:00 to 22:00.
+                        {roleLabel} confirmed free all day? Open every {slotDuration}-minute slot from 8:00 AM to 10:00 PM.
                       </p>
                       <Button
                         type="button"
@@ -595,7 +598,7 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
                             data-testid={`slot-${time}`}
                           >
                             <div className="flex items-center justify-between mb-1">
-                              <span className={`text-sm font-semibold ${textColor}`}>{time}</span>
+                              <span className={`text-sm font-semibold ${textColor}`}>{to12h(time)}</span>
                               {state === "existing" && !booked && (
                                 <Trash2 className="h-3 w-3 text-slate-300 hover:text-red-400 transition-colors" />
                               )}

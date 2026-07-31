@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { bmDetail, updateBranch, bmReassignAdmin, hrBranchAdminCandidates, bmHeadPhysioCandidates, bmAssignHeadPhysio } from "@/lib/api";
 import { BranchFormDialogV2 } from "@/components/branch/BranchFormDialogV2";
+import { slotTo12h } from "@/lib/time";
 
 const TABS = [
   { key: "summary", label: "Summary", icon: BarChart3 },
@@ -217,7 +218,7 @@ const PerformanceTab = ({ perf }) => {
             </div>
             <ListTable rows={perf.appointments.list} columns={[
               { key: "patient_name", label: "Patient" },
-              { key: "appointment_time", label: "Date/Time", fmt: (v) => (v || "").replace("T", " ").slice(0, 16) },
+              { key: "appointment_time", label: "Date/Time", fmt: (v) => (v ? `${v.slice(0, 10)} ${slotTo12h(v)}` : "") },
               { key: "doctor_name", label: "Doctor" },
               { key: "status", label: "Status" },
             ]} empty="No appointments." testid="branch-perf-appt-table" />

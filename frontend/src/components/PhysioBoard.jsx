@@ -25,6 +25,7 @@ import {
   physioCompleteSession,
   physioWeeklyAssessment,
 } from "@/lib/api";
+import { to12h, slotTo12h } from "@/lib/time";
 
 const TABS = [
   { key: "consultations", label: "Consultations", icon: ClipboardList },
@@ -85,7 +86,7 @@ function ConsultationsTab({ physioId }) {
 
   const formatDateTime = (lead) => {
     if (!lead.appointment_date) return "No appointment scheduled yet";
-    const time = lead.appointment_time ? ` · ${lead.appointment_time}` : "";
+    const time = lead.appointment_time ? ` · ${to12h(lead.appointment_time)}` : "";
     return `${lead.appointment_date}${time}`;
   };
 
@@ -193,7 +194,7 @@ function ConsultationDetailModal({ lead, physioId, onClose, onDone }) {
             <Row label="Occupation" value={lead.occupation} />
             <Row label="Condition" value={lead.condition} />
             <Row label="Months of Pain" value={lead.months_of_pain} />
-            <Row label="Appointment" value={lead.appointment_date ? `${lead.appointment_date}${lead.appointment_time ? ` · ${lead.appointment_time}` : ""}` : null} />
+            <Row label="Appointment" value={lead.appointment_date ? `${lead.appointment_date}${lead.appointment_time ? ` · ${to12h(lead.appointment_time)}` : ""}` : null} />
           </div>
 
           {lead.diagnosis && (
@@ -250,11 +251,7 @@ function TodayTab({ physioId }) {
 
   useEffect(() => { load(); }, [load]);
 
-  const formatTime = (iso) => {
-    if (!iso) return "";
-    const t = iso.split("T")[1];
-    return t ? t.slice(0, 5) : "";
-  };
+  const formatTime = (iso) => (iso ? slotTo12h(iso) : "");
 
   return (
     <div data-testid="physio-today-tab">
@@ -440,7 +437,7 @@ function CalendarTab({ physioId }) {
                 {daySessions.map((s) => (
                   <div key={s.id} className={`rounded-lg border p-3 ${s.status === "completed" ? "border-emerald-200 bg-emerald-50" : "border-slate-200"}`}>
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-semibold text-slate-700">{s.slot_time?.split("T")[1]?.slice(0, 5)}</span>
+                      <span className="text-xs font-semibold text-slate-700">{slotTo12h(s.slot_time)}</span>
                       <span className={`text-[9px] rounded-full px-1.5 py-0.5 font-semibold ${s.status === "completed" ? "bg-emerald-100 text-emerald-700" : "bg-sky-100 text-sky-700"}`}>
                         {s.status}
                       </span>
@@ -610,7 +607,7 @@ function PatientDetailModal({ patient, physioId, onClose, onRefresh }) {
                   </div>
                   <div className="flex-1">
                     <p className="text-xs font-medium text-slate-700">Session #{s.session_number} · Week {s.week_number}</p>
-                    <p className="text-[10px] text-slate-400">{s.slot_time?.replace("T", " at ")}</p>
+                    <p className="text-[10px] text-slate-400">{s.slot_time ? `${s.slot_time.split("T")[0]} at ${slotTo12h(s.slot_time)}` : "—"}</p>
                     {s.jr_physio_remarks && <p className="text-[10px] text-emerald-600 mt-0.5">Remarks: {s.jr_physio_remarks}</p>}
                   </div>
                   {s.status === "upcoming" ? (
@@ -708,7 +705,7 @@ function CompleteSessionModal({ session, onClose, onDone }) {
       <div className="w-full max-w-md rounded-xl bg-white shadow-2xl" data-testid="complete-session-modal">
         <div className="border-b p-5">
           <h3 className="text-base font-semibold text-slate-800">Complete Session #{session.session_number}</h3>
-          <p className="text-[10px] text-slate-400">{session.lead_name} · {session.slot_time?.replace("T", " at ")}</p>
+          <p className="text-[10px] text-slate-400">{session.lead_name} · {session.slot_time ? `${session.slot_time.split("T")[0]} at ${slotTo12h(session.slot_time)}` : "—"}</p>
         </div>
         <div className="p-5">
           <label className="text-xs font-medium text-slate-600 mb-1 block">Session Remarks (visible to patient)</label>

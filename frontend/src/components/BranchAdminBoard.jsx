@@ -36,6 +36,7 @@ import {
   rescheduleBranchFollowUp,
   getDoctorCalendar,
 } from "@/lib/api";
+import { to12h, endTime12h } from "@/lib/time";
 import { HeadPhysioCalendar } from "@/components/HeadPhysioCalendar";
 import { ConsultationsBoard } from "@/components/ConsultationsBoard";
 import { FitsiomaxStorePanel } from "@/components/BranchStoreBoard";
@@ -411,14 +412,6 @@ export const BranchAdminBoard = ({ branchId }) => {
 };
 
 /* ─── Branch Lead Detail Modal ─── */
-// "09:30" + 30 -> "10:00" — renders the slot's end time next to its start.
-const addMinutes = (time, minutes) => {
-  const [h, m] = (time || "").split(":").map(Number);
-  if (Number.isNaN(h) || Number.isNaN(m)) return time;
-  const total = h * 60 + m + (minutes || 0);
-  return `${String(Math.floor(total / 60) % 24).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
-};
-
 function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, onUpdate, onMoved, onOpenConsultationStage }) {
   // Same merge as the main Branch Leads stage bar — one continuous pipeline covering both
   // branch_stage and consultation_stage, with shared names (e.g. "Follow Up") kept to a
@@ -927,7 +920,7 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                           className={`rounded-md border px-2 py-1.5 text-center transition ${active ? "border-teal-400 bg-teal-50 text-teal-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}
                           data-testid={`branch-appt-slot-${s.time}`}
                         >
-                          <span className="block text-xs font-semibold">{s.time}</span>
+                          <span className="block text-xs font-semibold">{to12h(s.time)}</span>
                           <span className="block text-[9px] text-slate-400">{s.duration} min</span>
                         </button>
                       );
@@ -936,7 +929,7 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                 )}
                 {apptDraft.appointment_time && apptDraft.duration && (
                   <p className="mt-2 text-[11px] font-medium text-teal-700" data-testid="branch-appt-slot-summary">
-                    {apptDraft.appointment_time} – {addMinutes(apptDraft.appointment_time, apptDraft.duration)} · {apptDraft.duration} minute consultation
+                    {to12h(apptDraft.appointment_time)} – {endTime12h(apptDraft.appointment_time, apptDraft.duration)} · {apptDraft.duration} minute consultation
                   </p>
                 )}
               </div>
@@ -971,7 +964,7 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                   if (!apptDraft.appointment_time) { toast.error("Pick a time slot"); return; }
                   try {
                     await scheduleBranchAppointment(lead.id, apptDraft);
-                    toast.success(`Appointment ${apptDraft.appointment_date} ${apptDraft.appointment_time} → ${apptDraft.final_stage}`);
+                    toast.success(`Appointment ${apptDraft.appointment_date} ${to12h(apptDraft.appointment_time)} → ${apptDraft.final_stage}`);
                     setApptDraft(null);
                     onMoved && onMoved(apptDraft.final_stage); // closes immediately; parent refreshes the list itself
                   } catch (e) { toast.error(e?.response?.data?.detail || "Failed to schedule"); }
