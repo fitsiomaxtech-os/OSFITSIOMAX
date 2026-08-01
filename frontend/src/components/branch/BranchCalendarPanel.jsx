@@ -18,10 +18,11 @@ import { to12h } from "@/lib/time";
 const DAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
-// Month filter window — three months back, the month being viewed, two ahead. The viewed
-// month always sits in the same (4th) position, so the strip's shape never shifts under
-// the cursor no matter which month is open.
-const MONTH_WINDOW = [-3, -2, -1, 0, 1, 2];
+// Month filter — six months at a time, opening on three back / current / two ahead. The
+// strip only moves when its arrows are pressed: clicking a month inside it just changes
+// which one is highlighted, so the row never reflows under the cursor.
+const MONTH_STRIP_LENGTH = 6;
+const MONTH_STRIP_LEAD = 3;
 
 
 const emptyDraft = () => ({ patient_name: "", doctor_id: "", date: iso(new Date()), time: "", notes: "", cancelled: false });
@@ -34,6 +35,7 @@ export const BranchCalendarPanel = ({ branchId }) => {
   const [leads, setLeads] = useState([]);
   const [appts, setAppts] = useState([]);
   const [monthDate, setMonthDate] = useState(() => { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d; });
+  const [stripStart, setStripStart] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth() - MONTH_STRIP_LEAD, 1); });
   const [loading, setLoading] = useState(false);
   const [subTab, setSubTab] = useState("schedule");
 
@@ -147,9 +149,20 @@ export const BranchCalendarPanel = ({ branchId }) => {
     .filter((r) => r.name.trim().toLowerCase() === (name || "").trim().toLowerCase() && r.date >= todayIso)
     .sort((a, b) => `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`))[0] || null;
 
-  const shiftMonth = (delta) => setMonthDate((prev) => { const d = new Date(prev); d.setMonth(d.getMonth() + delta); return d; });
   const monthLabel = monthDate.toLocaleDateString("en-US", { month: "long", year: "numeric" });
   const currentMonthKey = `${new Date().getFullYear()}-${new Date().getMonth()}`;
+
+  // The six months the strip is showing. Held separately from the month being viewed so a
+  // click inside the strip only moves the highlight — the arrows are the only thing that
+  // slides the window, and they carry the viewed month along so it keeps its position.
+  const monthStrip = useMemo(
+    () => Array.from({ length: MONTH_STRIP_LENGTH }, (_, i) => new Date(stripStart.getFullYear(), stripStart.getMonth() + i, 1)),
+    [stripStart],
+  );
+  const shiftStrip = (delta) => {
+    setStripStart((prev) => new Date(prev.getFullYear(), prev.getMonth() + delta, 1));
+    setMonthDate((prev) => new Date(prev.getFullYear(), prev.getMonth() + delta, 1));
+  };
 
   // ---- Booking / edit modal — date-first availability flow ----
   // 1) pick date -> validate against branch working calendar (hours + holidays)
@@ -242,20 +255,21 @@ export const BranchCalendarPanel = ({ branchId }) => {
       <>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-base font-semibold text-slate-700" data-testid="cal-month-label">{monthLabel}</p>
-        {/* Month filter — the neighbouring months are one click away instead of being
-            reached by stepping through them one arrow press at a time. */}
-        <div className="flex max-w-full items-center gap-1.5 overflow-x-auto" data-testid="cal-month-filter">
-          <Button size="sm" variant="outline" className="shrink-0" onClick={() => shiftMonth(-1)} data-testid="cal-prev-month"><ChevronLeft className="h-4 w-4" /></Button>
-          {MONTH_WINDOW.map((offset) => {
-            const d = new Date(monthDate.getFullYear(), monthDate.getMonth() + offset, 1);
-            const isViewed = offset === 0;
-            const isCurrent = `${d.getFullYear()}-${d.getMonth()}` === currentMonthKey;
+        {/* Every chip is the same fixed width and always carries its year on a second
+            line, so the strip is exactly as wide with "September 2025" in it as with
+            "May" — it can't grow, reflow, or overflow as the months change. */}
+        <div className="flex shrink-0 items-center gap-1.5" data-testid="cal-month-filter">
+          <Button size="sm" variant="outline" className="shrink-0" onClick={() => shiftStrip(-1)} data-testid="cal-prev-month"><ChevronLeft className="h-4 w-4" /></Button>
+          {monthStrip.map((d) => {
+            const key = `${d.getFullYear()}-${d.getMonth()}`;
+            const isViewed = key === `${monthDate.getFullYear()}-${monthDate.getMonth()}`;
+            const isCurrent = key === currentMonthKey;
             return (
               <button
-                key={offset}
+                key={key}
                 type="button"
-                onClick={() => shiftMonth(offset)}
-                className={`shrink-0 rounded-md border px-3 py-1.5 text-sm font-semibold transition ${
+                onClick={() => setMonthDate(new Date(d.getFullYear(), d.getMonth(), 1))}
+                className={`w-24 shrink-0 rounded-md border py-1 text-center leading-tight transition ${
                   isViewed
                     ? "border-sky-600 bg-sky-600 text-white shadow-sm"
                     : isCurrent
@@ -265,14 +279,12 @@ export const BranchCalendarPanel = ({ branchId }) => {
                 title={isCurrent ? "Current month" : undefined}
                 data-testid={`cal-month-${d.getFullYear()}-${d.getMonth() + 1}`}
               >
-                {d.toLocaleDateString("en-US", { month: "long" })}
-                {d.getFullYear() !== monthDate.getFullYear() && (
-                  <span className={`ml-1 text-[10px] ${isViewed ? "text-sky-100" : "text-slate-400"}`}>{d.getFullYear()}</span>
-                )}
+                <span className="block truncate px-1 text-sm font-semibold">{d.toLocaleDateString("en-US", { month: "long" })}</span>
+                <span className={`block text-[10px] font-medium ${isViewed ? "text-sky-100" : "text-slate-400"}`}>{d.getFullYear()}</span>
               </button>
             );
           })}
-          <Button size="sm" variant="outline" className="shrink-0" onClick={() => shiftMonth(1)} data-testid="cal-next-month"><ChevronRight className="h-4 w-4" /></Button>
+          <Button size="sm" variant="outline" className="shrink-0" onClick={() => shiftStrip(1)} data-testid="cal-next-month"><ChevronRight className="h-4 w-4" /></Button>
         </div>
       </div>
 
