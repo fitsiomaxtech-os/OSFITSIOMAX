@@ -32,7 +32,10 @@ async def v3_get_leads(
     if source_tab:
         query["source_tab"] = source_tab
 
-    if user.role in ["branch_admin", "head_physio", "physio"] and user.branch_id:
+    # A Pre-Sales user only gets branch-scoped once a branch is actually assigned to
+    # them (Super Admin > Roles & Credentials) — one left unassigned still sees every
+    # branch's leads, same as before.
+    if user.role in ["branch_admin", "head_physio", "physio", "pre_sales"] and user.branch_id:
         query["branch_id"] = user.branch_id
     elif branch_id:
         query["branch_id"] = branch_id
