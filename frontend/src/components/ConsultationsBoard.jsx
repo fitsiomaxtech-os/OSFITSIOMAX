@@ -15,7 +15,7 @@ import {
   getLeadRemarks, getLeadActivity,
   saveConsultationDecision, markConsultationCompleted,
 } from "@/lib/api";
-import { slotTo12h, to12h } from "@/lib/time";
+import { endTime12h, to12h } from "@/lib/time";
 
 const CONSULTATION_FEE_PAYMENT_MODES = [
   { value: "cash", label: "Cash" },
@@ -45,7 +45,14 @@ const WEEKDAY_LABELS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 const pad2 = (n) => String(n).padStart(2, "0");
 const isoDate = (y, m, d) => `${y}-${pad2(m + 1)}-${pad2(d)}`;
 const longDate = (d) => new Date(`${d}T00:00:00`).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
-const shortDate = (d) => new Date(`${d}T00:00:00`).toLocaleDateString("en-US", { day: "numeric", month: "short" });
+/** "2026-08-03" -> "Monday, 3 Aug" — how a treatment day reads on the plan. */
+const dayLabel = (d) => new Date(`${d}T00:00:00`).toLocaleDateString("en-US", { weekday: "long", day: "numeric", month: "short" });
+/** Same week rule the backend stamps on each session: whole weeks from the first day. */
+const weekOf = (d, firstDay) => Math.floor((new Date(`${d}T00:00:00`) - new Date(`${firstDay}T00:00:00`)) / 604800000) + 1;
+// The treatment slot length is the one FITSIO STORE publishes for session packages —
+// the same value PHYSIO CALENDAR cuts a physio's day into, so one published slot is
+// always exactly one treatment session.
+const FALLBACK_SESSION_MINUTES = 30;
 
 // One distinct color per Treatment Package option (cycles if there are ever more than 5).
 const TREATMENT_PACKAGE_COLORS = ["#2563eb", "#059669", "#d97706", "#7c3aed", "#e11d48"];
@@ -137,6 +144,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   const [pickerMonth, setPickerMonth] = useState(new Date().getMonth());
   const [pickerYear, setPickerYear] = useState(new Date().getFullYear());
   const [pickerDate, setPickerDate] = useState(null); // "YYYY-MM-DD"
+  const [sessionMinutes, setSessionMinutes] = useState(FALLBACK_SESSION_MINUTES);
 
   // Treatment (Head Physio only) — "Save & Move": every patient goes on to treatment
   // sessions once Diagnosis Report + Treatment Summary are written; only the Treatment
@@ -814,6 +822,21 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     return () => { cancelled = true; };
   }, [showPhysioModal, physioPick]);
 
+  // How long one treatment session runs. Read from FITSIO STORE exactly the way PHYSIO
+  // CALENDAR reads it, so the length shown here is always the length of the slots that
+  // calendar actually publishes — one published slot is one treatment session.
+  useEffect(() => {
+    if (!showPhysioModal) return;
+    let cancelled = false;
+    listStoreItems(undefined, "session")
+      .then((items) => {
+        const configured = (items || []).map((i) => i.duration_minutes).find((d) => Number(d) > 0);
+        if (!cancelled && configured) setSessionMinutes(Number(configured));
+      })
+      .catch(() => { /* keep the fallback */ });
+    return () => { cancelled = true; };
+  }, [showPhysioModal]);
+
   const totalSessionsNeeded = selectedLead?.session_package_sessions || 0;
 
   // A slot this same lead already holds (re-opening this for the physio they're already
@@ -847,10 +870,20 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // that actually change.
   useEffect(() => {
     if (!physioCalendarData || !selectedLead || physioPick !== selectedLead.assigned_physio_id) return;
+    const seenDays = new Set();
     const mine = Object.entries(physioCalendarData.booked || {})
       .filter(([, b]) => b.lead_id === selectedLead.id)
       .map(([slot]) => slot)
-      .sort();
+      .sort()
+      // Keep one a day, matching the rule the picker now enforces. Sessions booked before
+      // that rule existed can sit several to a day; those extra days come back as unfixed
+      // rather than being carried forward as a plan that could no longer be built here.
+      .filter((slot) => {
+        const day = slot.split("T")[0];
+        if (seenDays.has(day)) return false;
+        seenDays.add(day);
+        return true;
+      });
     if (mine.length === 0) return;
     setPickedSessionSlots((prev) => (prev.length === 0 ? mine.slice(0, selectedLead.session_package_sessions || 0) : prev));
   }, [physioCalendarData, physioPick, selectedLead]);
@@ -858,12 +891,36 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   const sortedPickedSlots = useMemo(() => [...pickedSessionSlots].sort(), [pickedSessionSlots]);
   const allSessionsPicked = totalSessionsNeeded > 0 && sortedPickedSlots.length === totalSessionsNeeded;
 
+  // The plan itself: one treatment session per day, numbered Day 1, Day 2 … in date order
+  // and stamped with the week it falls in — the same week rule the backend records, so a
+  // "03 Week · 9 sessions" package reads as 3 weeks of 3 treatment days.
+  const treatmentPlan = useMemo(() => {
+    if (sortedPickedSlots.length === 0) return [];
+    const firstDay = sortedPickedSlots[0].split("T")[0];
+    return sortedPickedSlots.map((slot, i) => {
+      const [date, time] = slot.split("T");
+      return { slot, date, time, day: i + 1, week: weekOf(date, firstDay) };
+    });
+  }, [sortedPickedSlots]);
+
+  const planByDate = useMemo(() => {
+    const map = {};
+    treatmentPlan.forEach((p) => { map[p.date] = p; });
+    return map;
+  }, [treatmentPlan]);
+
   const togglePickedSlot = (slot) => {
     if (slotTakenByOther(slot)) return;
+    const day = slot.split("T")[0];
     setPickedSessionSlots((prev) => {
       if (prev.includes(slot)) return prev.filter((s) => s !== slot);
+      // One treatment session a day — a 9-session package is 9 separate treatment days,
+      // not 9 back-to-back slots. Picking another time on a day that already holds a
+      // session moves that day's session rather than stacking a second one onto it.
+      const sameDay = prev.find((s) => s.startsWith(`${day}T`));
+      if (sameDay) return [...prev.filter((s) => s !== sameDay), slot];
       if (prev.length >= totalSessionsNeeded) {
-        toast.error(`All ${totalSessionsNeeded} sessions are already placed — remove one first`);
+        toast.error(`All ${totalSessionsNeeded} treatment days are already fixed — remove one first`);
         return prev;
       }
       return [...prev, slot];
@@ -2278,7 +2335,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                   {physioPick && sortedPickedSlots.length > 0 && (
                     <div className="rounded-lg border border-violet-200 bg-violet-50 p-3" data-testid="cons-physio-sessions-preview">
                       <div className="mb-1.5 flex items-center justify-between">
-                        <p className="text-[11px] font-semibold uppercase tracking-wider text-violet-700">Treatment dates chosen</p>
+                        <p className="text-[11px] font-semibold uppercase tracking-wider text-violet-700">Treatment days fixed</p>
                         <button
                           type="button"
                           onClick={() => setShowSlotPicker(true)}
@@ -2289,8 +2346,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         </button>
                       </div>
                       <div className="max-h-28 space-y-1 overflow-y-auto text-xs text-violet-800" data-testid="cons-physio-sessions-list">
-                        {sortedPickedSlots.map((slot, i) => (
-                          <p key={slot}>#{i + 1} · {longDate(slot.split("T")[0])} · {slotTo12h(slot)}</p>
+                        {treatmentPlan.map((p) => (
+                          <p key={p.slot}>
+                            <b>Day {p.day}</b> · {dayLabel(p.date)} · {to12h(p.time)} – {endTime12h(p.time, sessionMinutes)}
+                          </p>
                         ))}
                       </div>
                     </div>
@@ -2329,7 +2388,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           {physioCalendarData?.doctor_name || physioOptions.find((p) => p.id === physioPick)?.full_name || "Physio"}
                         </p>
                         <p className="text-[11px] text-slate-400">
-                          Treatment Sessions · {selectedLead.session_package_name || "Session package"} · {openSlotCount} slots open
+                          {selectedLead.session_package_name || "Session package"} · {totalSessionsNeeded} sessions ·
+                          {" "}one session a day · {sessionMinutes} min each · {openSlotCount} slots open
                         </p>
                       </div>
                     </div>
@@ -2338,7 +2398,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${allSessionsPicked ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}
                         data-testid="cons-slot-picker-count"
                       >
-                        {sortedPickedSlots.length} of {totalSessionsNeeded} sessions placed
+                        {sortedPickedSlots.length} of {totalSessionsNeeded} treatment days fixed
                       </span>
                       <button onClick={() => setShowSlotPicker(false)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-slot-picker-close">
                         <X className="h-4 w-4" />
@@ -2386,30 +2446,32 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             const day = i + 1;
                             const d = isoDate(pickerYear, pickerMonth, day);
                             const dayOpen = (physioSlotsByDate[d] || []).filter((t) => !slotTakenByOther(`${d}T${t}`)).length;
-                            const dayPicked = sortedPickedSlots.filter((s) => s.startsWith(`${d}T`)).length;
+                            const planned = planByDate[d];
                             const isFocused = pickerDate === d;
                             return (
                               <button
                                 key={day}
                                 type="button"
                                 onClick={() => setPickerDate(d)}
-                                disabled={dayOpen === 0 && dayPicked === 0}
+                                disabled={dayOpen === 0 && !planned}
                                 className={`relative h-10 rounded-lg text-sm font-medium transition-all ${
                                   isFocused
                                     ? "bg-violet-600 text-white shadow-sm"
-                                    : dayPicked > 0
+                                    : planned
                                     ? "bg-violet-100 text-violet-700"
                                     : dayOpen > 0
                                     ? "text-slate-600 hover:bg-slate-100"
                                     : "cursor-not-allowed text-slate-300"
                                 }`}
-                                title={dayOpen > 0 ? `${dayOpen} slot${dayOpen > 1 ? "s" : ""} open` : "No slots published"}
+                                title={planned
+                                  ? `Day ${planned.day} · ${to12h(planned.time)}`
+                                  : dayOpen > 0 ? `${dayOpen} slot${dayOpen > 1 ? "s" : ""} open` : "No slots published"}
                                 data-testid={`cons-slot-day-${day}`}
                               >
                                 {day}
-                                {dayPicked > 0 ? (
-                                  <span className={`absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-bold ${isFocused ? "bg-white text-violet-700" : "bg-violet-600 text-white"}`}>
-                                    {dayPicked}
+                                {planned ? (
+                                  <span className={`absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full px-0.5 text-[9px] font-bold ${isFocused ? "bg-white text-violet-700" : "bg-violet-600 text-white"}`}>
+                                    {planned.day}
                                   </span>
                                 ) : dayOpen > 0 && !isFocused ? (
                                   <span className="absolute bottom-0.5 left-1/2 h-1 w-1 -translate-x-1/2 rounded-full bg-emerald-400" />
@@ -2420,9 +2482,9 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         </div>
 
                         <p className="mt-3 border-t border-slate-100 pt-3 text-[11px] text-slate-400">
-                          Only days this physio has opened in <b>PHYSIO CALENDAR</b> can be picked. Choose a
-                          date, then the exact time for each treatment session — spread them across as many
-                          days as the plan needs.
+                          One treatment session a day — {totalSessionsNeeded} sessions means {totalSessionsNeeded} separate
+                          days. Only days this physio has opened in <b>PHYSIO CALENDAR</b> can be picked. Picking
+                          another time on a day already fixed <b>moves</b> that day's session.
                         </p>
                       </div>
 
@@ -2446,6 +2508,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                               </div>
                             </div>
 
+                            {planByDate[pickerDate] && (
+                              <p className="mb-3 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-[11px] text-violet-700" data-testid="cons-slot-day-fixed">
+                                <b>Day {planByDate[pickerDate].day}</b> is fixed for {to12h(planByDate[pickerDate].time)} – {endTime12h(planByDate[pickerDate].time, sessionMinutes)}.
+                                Pick another time to move it, or click it again to free the day.
+                              </p>
+                            )}
+
                             {(physioSlotsByDate[pickerDate] || []).length === 0 ? (
                               <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-8 text-center text-xs text-slate-400">
                                 Nothing published on this day — open it in MANAGEMENT → PHYSIO CALENDAR first.
@@ -2455,8 +2524,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                                 {(physioSlotsByDate[pickerDate] || []).map((time) => {
                                   const slot = `${pickerDate}T${time}`;
                                   const taken = slotTakenByOther(slot);
-                                  const picked = sortedPickedSlots.includes(slot);
-                                  const sessionNo = picked ? sortedPickedSlots.indexOf(slot) + 1 : null;
+                                  const picked = planByDate[pickerDate]?.slot === slot;
                                   return (
                                     <button
                                       key={time}
@@ -2477,20 +2545,22 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                                           {to12h(time)}
                                         </span>
                                         {picked && (
-                                          <span className="rounded-full bg-violet-600 px-1.5 py-0.5 text-[9px] font-bold text-white">#{sessionNo}</span>
+                                          <span className="rounded-full bg-violet-600 px-1.5 py-0.5 text-[9px] font-bold text-white">Day {planByDate[pickerDate].day}</span>
                                         )}
                                       </div>
-                                      {taken && (
-                                        <p className="mt-0.5 truncate text-[10px] text-amber-600">Booked · {physioCalendarData?.booked?.[slot]?.lead_name || "—"}</p>
-                                      )}
+                                      <p className={`mt-0.5 text-[10px] ${taken ? "truncate text-amber-600" : picked ? "text-violet-600" : "text-emerald-600"}`}>
+                                        {taken
+                                          ? `Booked · ${physioCalendarData?.booked?.[slot]?.lead_name || "—"}`
+                                          : `ends ${endTime12h(time, sessionMinutes)}`}
+                                      </p>
                                     </button>
                                   );
                                 })}
                               </div>
                             )}
 
-                            {sortedPickedSlots.length > 0 && (
-                              <div className="mt-4 rounded-lg border border-violet-200 bg-violet-50 p-3">
+                            {treatmentPlan.length > 0 && (
+                              <div className="mt-4 rounded-lg border border-violet-200 bg-violet-50 p-3" data-testid="cons-treatment-plan">
                                 <div className="mb-1.5 flex items-center justify-between">
                                   <p className="text-[11px] font-semibold uppercase tracking-wider text-violet-700">Treatment plan</p>
                                   <button
@@ -2502,19 +2572,28 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                                     Clear all
                                   </button>
                                 </div>
-                                <div className="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto">
-                                  {sortedPickedSlots.map((slot, i) => (
-                                    <button
-                                      key={slot}
-                                      type="button"
-                                      onClick={() => togglePickedSlot(slot)}
-                                      className="flex items-center gap-1 rounded-full border border-violet-300 bg-white px-2 py-1 text-[10px] font-semibold text-violet-700 hover:border-rose-300 hover:text-rose-600"
-                                      title="Remove this session"
-                                      data-testid={`cons-slot-picked-${slot}`}
-                                    >
-                                      #{i + 1} · {shortDate(slot.split("T")[0])} · {slotTo12h(slot)}
-                                      <X className="h-3 w-3" />
-                                    </button>
+                                {/* Grouped the way the package is sold — "03 Week · 9 sessions" reads back
+                                    as 3 weeks of treatment days, each day one session. */}
+                                <div className="max-h-40 space-y-2 overflow-y-auto">
+                                  {[...new Set(treatmentPlan.map((p) => p.week))].map((week) => (
+                                    <div key={week}>
+                                      <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-violet-500">Week {week}</p>
+                                      <div className="flex flex-wrap gap-1.5">
+                                        {treatmentPlan.filter((p) => p.week === week).map((p) => (
+                                          <button
+                                            key={p.slot}
+                                            type="button"
+                                            onClick={() => togglePickedSlot(p.slot)}
+                                            className="flex items-center gap-1 rounded-full border border-violet-300 bg-white px-2 py-1 text-[10px] font-semibold text-violet-700 hover:border-rose-300 hover:text-rose-600"
+                                            title="Remove this treatment day"
+                                            data-testid={`cons-slot-picked-${p.slot}`}
+                                          >
+                                            Day {p.day} · {dayLabel(p.date)} · {to12h(p.time)} – {endTime12h(p.time, sessionMinutes)}
+                                            <X className="h-3 w-3" />
+                                          </button>
+                                        ))}
+                                      </div>
+                                    </div>
                                   ))}
                                 </div>
                               </div>
@@ -2528,8 +2607,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                   <div className="flex items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/70 px-5 py-3">
                     <p className="text-[11px] text-slate-500">
                       {allSessionsPicked
-                        ? "All sessions have a fixed date and time."
-                        : `${totalSessionsNeeded - sortedPickedSlots.length} more session${totalSessionsNeeded - sortedPickedSlots.length === 1 ? "" : "s"} still need a date and time.`}
+                        ? `All ${totalSessionsNeeded} treatment days are fixed${treatmentPlan.length > 0 ? ` · ${dayLabel(treatmentPlan[0].date)} to ${dayLabel(treatmentPlan[treatmentPlan.length - 1].date)}` : ""}.`
+                        : `${totalSessionsNeeded - sortedPickedSlots.length} more treatment day${totalSessionsNeeded - sortedPickedSlots.length === 1 ? "" : "s"} still need a date and time.`}
                     </p>
                     <div className="flex items-center gap-2">
                       <Button size="sm" variant="outline" className="text-xs" onClick={() => setShowSlotPicker(false)} data-testid="cons-slot-picker-back">
