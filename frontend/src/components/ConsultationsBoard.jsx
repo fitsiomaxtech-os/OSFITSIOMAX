@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Calendar, CheckCircle2, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2, Ban, ClipboardCheck, IndianRupee } from "lucide-react";
+import { Calendar, CheckCircle2, ChevronLeft, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2, Ban, ClipboardCheck, IndianRupee } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,7 +15,7 @@ import {
   getLeadRemarks, getLeadActivity,
   saveConsultationDecision, markConsultationCompleted,
 } from "@/lib/api";
-import { to12h } from "@/lib/time";
+import { slotTo12h, to12h } from "@/lib/time";
 
 const CONSULTATION_FEE_PAYMENT_MODES = [
   { value: "cash", label: "Cash" },
@@ -37,6 +37,15 @@ const INSTALLMENT_PAYMENT_MODES = [
 ];
 const PARTIAL_ORDINALS = ["First", "Second", "Third", "Fourth", "Fifth", "Sixth", "Seventh", "Eighth", "Ninth", "Tenth"];
 const partialInstallmentLabel = (idx) => `${PARTIAL_ORDINALS[idx] || `#${idx + 1}`} Payment`;
+
+// Month-grid helpers for the treatment-session slot picker — the same shape the PHYSIO
+// CALENDAR itself uses, so the two read as one workflow.
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const WEEKDAY_LABELS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+const pad2 = (n) => String(n).padStart(2, "0");
+const isoDate = (y, m, d) => `${y}-${pad2(m + 1)}-${pad2(d)}`;
+const longDate = (d) => new Date(`${d}T00:00:00`).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+const shortDate = (d) => new Date(`${d}T00:00:00`).toLocaleDateString("en-US", { day: "numeric", month: "short" });
 
 // One distinct color per Treatment Package option (cycles if there are ever more than 5).
 const TREATMENT_PACKAGE_COLORS = ["#2563eb", "#059669", "#d97706", "#7c3aed", "#e11d48"];
@@ -111,15 +120,23 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // same as every other Treatment Fee mode, not just a bare "mark paid" flip.
   const [partialCollectDraft, setPartialCollectDraft] = useState(null); // { idx, amount, payment_mode, ... } | null
 
-  // Physio Assign popup (Branch Admin only) — pick an available Jr. Physio, then book all
-  // of the paid session package's sessions against that physio's own calendar (Consultations
-  // > Physio Calendar) in the same step.
+  // Physio Assign (Branch Admin only) — two steps. Step 1 picks an available Jr. Physio;
+  // clicking one opens step 2, the slot picker, where every session of the paid package is
+  // placed on a *chosen* date and time from that physio's own PHYSIO CALENDAR. The dates
+  // are never auto-filled: a treatment plan is spread across days deliberately, so the
+  // Branch Admin fixes each session's date and time themselves.
   const [showPhysioModal, setShowPhysioModal] = useState(false);
   const [physioOptions, setPhysioOptions] = useState([]);
   const [physioPick, setPhysioPick] = useState("");
   const [assigningPhysio, setAssigningPhysio] = useState(false);
   const [physioCalendarData, setPhysioCalendarData] = useState(null);
   const [loadingPhysioCalendar, setLoadingPhysioCalendar] = useState(false);
+  // Step 2 — the "pick the treatment dates and times" popup.
+  const [showSlotPicker, setShowSlotPicker] = useState(false);
+  const [pickedSessionSlots, setPickedSessionSlots] = useState([]); // ["YYYY-MM-DDTHH:MM", ...]
+  const [pickerMonth, setPickerMonth] = useState(new Date().getMonth());
+  const [pickerYear, setPickerYear] = useState(new Date().getFullYear());
+  const [pickerDate, setPickerDate] = useState(null); // "YYYY-MM-DD"
 
   // Treatment (Head Physio only) — "Save & Move": every patient goes on to treatment
   // sessions once Diagnosis Report + Treatment Summary are written; only the Treatment
@@ -768,8 +785,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // ---- Physio Assign (Branch Admin) — after fees are collected ----
   const openPhysioModal = async () => {
     setShowPhysioModal(true);
+    setShowSlotPicker(false);
     setPhysioPick(selectedLead.assigned_physio_id || "");
     setPhysioCalendarData(null);
+    setPickedSessionSlots([]);
+    setPickerDate(null);
+    setPickerMonth(new Date().getMonth());
+    setPickerYear(new Date().getFullYear());
     try {
       const rows = await getDoctors({ branch_id: branchId });
       setPhysioOptions((rows || []).filter((d) => d.profile_type === "physio"));
@@ -778,9 +800,9 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     }
   };
 
-  // Load the picked physio's own calendar (same one managed at Consultations > Physio
-  // Calendar) so we can propose enough of their already-available, not-yet-booked slots
-  // to cover every session in the patient's paid package.
+  // Load the picked physio's own calendar (same one managed at MANAGEMENT > PHYSIO
+  // CALENDAR) so the slot picker can only ever offer times that physio has actually
+  // published, and can grey out the ones another patient already holds.
   useEffect(() => {
     if (!showPhysioModal || !physioPick) { setPhysioCalendarData(null); return; }
     let cancelled = false;
@@ -793,27 +815,81 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   }, [showPhysioModal, physioPick]);
 
   const totalSessionsNeeded = selectedLead?.session_package_sessions || 0;
-  const availablePhysioSlots = physioCalendarData
-    ? [...(physioCalendarData.slots || [])]
-        // A slot already booked by this same lead (e.g. re-opening this modal for the
-        // physio they're already assigned to) is fine to re-propose — it'll just be
-        // replaced with itself. Only someone else's booking makes a slot unavailable.
-        .filter((s) => !physioCalendarData.booked?.[s] || physioCalendarData.booked[s].lead_id === selectedLead?.id)
-        .sort()
-    : [];
-  const proposedSessionSlots = availablePhysioSlots.slice(0, totalSessionsNeeded);
-  const hasEnoughPhysioSlots = totalSessionsNeeded > 0 && proposedSessionSlots.length === totalSessionsNeeded;
+
+  // A slot this same lead already holds (re-opening this for the physio they're already
+  // assigned to) is still selectable — it'd just be re-booked as itself. Only someone
+  // else's booking genuinely takes a slot off the table.
+  const slotTakenByOther = useCallback((slot) => {
+    const b = physioCalendarData?.booked?.[slot];
+    return !!b && b.lead_id !== selectedLead?.id;
+  }, [physioCalendarData, selectedLead]);
+
+  // Every published slot of the picked physio, grouped by date, so the picker's month grid
+  // can flag which days actually have availability and the day panel can list its times.
+  const physioSlotsByDate = useMemo(() => {
+    const map = {};
+    for (const slot of physioCalendarData?.slots || []) {
+      const [d, t] = slot.split("T");
+      if (!d || !t) continue;
+      (map[d] = map[d] || []).push(t);
+    }
+    Object.values(map).forEach((times) => times.sort());
+    return map;
+  }, [physioCalendarData]);
+
+  const openSlotCount = useMemo(
+    () => (physioCalendarData?.slots || []).filter((s) => !slotTakenByOther(s)).length,
+    [physioCalendarData, slotTakenByOther],
+  );
+
+  // Re-opening this for the physio the lead is already with: start from the sessions they
+  // already hold rather than a blank picker, so a reschedule only means moving the few
+  // that actually change.
+  useEffect(() => {
+    if (!physioCalendarData || !selectedLead || physioPick !== selectedLead.assigned_physio_id) return;
+    const mine = Object.entries(physioCalendarData.booked || {})
+      .filter(([, b]) => b.lead_id === selectedLead.id)
+      .map(([slot]) => slot)
+      .sort();
+    if (mine.length === 0) return;
+    setPickedSessionSlots((prev) => (prev.length === 0 ? mine.slice(0, selectedLead.session_package_sessions || 0) : prev));
+  }, [physioCalendarData, physioPick, selectedLead]);
+
+  const sortedPickedSlots = useMemo(() => [...pickedSessionSlots].sort(), [pickedSessionSlots]);
+  const allSessionsPicked = totalSessionsNeeded > 0 && sortedPickedSlots.length === totalSessionsNeeded;
+
+  const togglePickedSlot = (slot) => {
+    if (slotTakenByOther(slot)) return;
+    setPickedSessionSlots((prev) => {
+      if (prev.includes(slot)) return prev.filter((s) => s !== slot);
+      if (prev.length >= totalSessionsNeeded) {
+        toast.error(`All ${totalSessionsNeeded} sessions are already placed — remove one first`);
+        return prev;
+      }
+      return [...prev, slot];
+    });
+  };
+
+  // Opening the picker for the physio this lead is already with pre-loads the sessions
+  // they already hold, so a reschedule starts from what's booked instead of a blank slate.
+  const openSlotPickerFor = (physioId) => {
+    setPhysioPick(physioId);
+    setPickedSessionSlots(physioId === selectedLead?.assigned_physio_id ? pickedSessionSlots : []);
+    setPickerDate(null);
+    setShowSlotPicker(true);
+  };
 
   const submitPhysioAssign = async () => {
     if (!physioPick) { toast.error("Choose a physio"); return; }
-    if (!hasEnoughPhysioSlots) {
-      toast.error(`This physio only has ${proposedSessionSlots.length} of the ${totalSessionsNeeded} needed slots open — add more in Physio Calendar first`);
+    if (!allSessionsPicked) {
+      toast.error(`Pick a date and time for all ${totalSessionsNeeded} sessions (${sortedPickedSlots.length} placed so far)`);
       return;
     }
     setAssigningPhysio(true);
     try {
-      const res = await assignPhysioWithSessions(selectedLead.id, { physio_id: physioPick, slot_times: proposedSessionSlots });
+      const res = await assignPhysioWithSessions(selectedLead.id, { physio_id: physioPick, slot_times: sortedPickedSlots });
       toast.success(`Physio assigned — ${res.sessions_booked} sessions booked`);
+      setShowSlotPicker(false);
       setShowPhysioModal(false);
       // Close the lead card instantly, same as a plain stage move.
       setSelectedLead(null);
@@ -2173,7 +2249,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     </p>
                   </div>
 
-                  <p className="text-[11px] text-slate-500">Available physios in this branch</p>
+                  <p className="text-[11px] text-slate-500">Available physios in this branch — pick one to choose their treatment dates</p>
 
                   {physioOptions.length === 0 ? (
                     <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-4 text-center text-xs text-slate-400">No physios found for this branch yet.</p>
@@ -2183,47 +2259,293 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         <button
                           key={p.id}
                           type="button"
-                          onClick={() => setPhysioPick(p.id)}
+                          onClick={() => openSlotPickerFor(p.id)}
                           className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-xs font-semibold transition ${
                             physioPick === p.id ? "border-emerald-500 bg-emerald-50 text-emerald-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"
                           }`}
                           data-testid={`cons-physio-option-${p.id}`}
                         >
                           <span>{p.full_name}{p.specialization ? ` · ${p.specialization}` : ""}</span>
-                          {physioPick === p.id && <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />}
+                          <span className="flex items-center gap-1.5 shrink-0">
+                            {physioPick === p.id && <CheckCircle2 className="h-3.5 w-3.5" />}
+                            <ChevronRight className="h-3.5 w-3.5 text-slate-400" />
+                          </span>
                         </button>
                       ))}
                     </div>
                   )}
 
-                  {physioPick && (
+                  {physioPick && sortedPickedSlots.length > 0 && (
                     <div className="rounded-lg border border-violet-200 bg-violet-50 p-3" data-testid="cons-physio-sessions-preview">
-                      <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-violet-700">Sessions to be booked</p>
-                      {loadingPhysioCalendar ? (
-                        <p className="text-xs text-violet-500">Loading this physio's calendar...</p>
-                      ) : !hasEnoughPhysioSlots ? (
-                        <p className="text-xs text-amber-700">
-                          Only {proposedSessionSlots.length} of {totalSessionsNeeded} needed slots are open on this physio's calendar.
-                          Add more in Consultations → Physio Calendar first.
-                        </p>
-                      ) : (
-                        <div className="max-h-28 space-y-1 overflow-y-auto text-xs text-violet-800" data-testid="cons-physio-sessions-list">
-                          {proposedSessionSlots.map((slot, i) => (
-                            <p key={slot}>#{i + 1} · {slot.replace("T", " ")}</p>
-                          ))}
-                        </div>
-                      )}
+                      <div className="mb-1.5 flex items-center justify-between">
+                        <p className="text-[11px] font-semibold uppercase tracking-wider text-violet-700">Treatment dates chosen</p>
+                        <button
+                          type="button"
+                          onClick={() => setShowSlotPicker(true)}
+                          className="text-[11px] font-semibold text-violet-600 underline underline-offset-2 hover:text-violet-800"
+                          data-testid="cons-physio-change-slots"
+                        >
+                          Change
+                        </button>
+                      </div>
+                      <div className="max-h-28 space-y-1 overflow-y-auto text-xs text-violet-800" data-testid="cons-physio-sessions-list">
+                        {sortedPickedSlots.map((slot, i) => (
+                          <p key={slot}>#{i + 1} · {longDate(slot.split("T")[0])} · {slotTo12h(slot)}</p>
+                        ))}
+                      </div>
                     </div>
                   )}
 
                   <Button
                     className="w-full bg-emerald-600 hover:bg-emerald-700 text-xs"
-                    onClick={submitPhysioAssign}
-                    disabled={assigningPhysio || !physioPick || loadingPhysioCalendar || !hasEnoughPhysioSlots}
+                    onClick={() => (allSessionsPicked ? submitPhysioAssign() : setShowSlotPicker(true))}
+                    disabled={assigningPhysio || !physioPick}
                     data-testid="cons-physio-submit"
                   >
-                    {assigningPhysio ? "Assigning..." : "Assign & Book Sessions"}
+                    {assigningPhysio
+                      ? "Assigning..."
+                      : allSessionsPicked
+                      ? `Assign & Book ${totalSessionsNeeded} Sessions`
+                      : "Choose Treatment Dates & Times"}
                   </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Step 2 — Treatment date & time picker, driven entirely by the picked physio's
+                own PHYSIO CALENDAR. Every session of the package gets a date and a time the
+                Branch Admin fixes by hand; nothing is auto-filled, and only slots that physio
+                has actually published are offered. */}
+            {showPhysioModal && showSlotPicker && physioPick && (
+              <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" data-testid="cons-slot-picker-modal">
+                <div className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+                  <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/70 px-5 py-3.5">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-violet-100 text-sm font-bold text-violet-700">
+                        {(physioCalendarData?.doctor_name || physioOptions.find((p) => p.id === physioPick)?.full_name || "P").charAt(0).toUpperCase()}
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-slate-800" data-testid="cons-slot-picker-physio">
+                          {physioCalendarData?.doctor_name || physioOptions.find((p) => p.id === physioPick)?.full_name || "Physio"}
+                        </p>
+                        <p className="text-[11px] text-slate-400">
+                          Treatment Sessions · {selectedLead.session_package_name || "Session package"} · {openSlotCount} slots open
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span
+                        className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${allSessionsPicked ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}
+                        data-testid="cons-slot-picker-count"
+                      >
+                        {sortedPickedSlots.length} of {totalSessionsNeeded} sessions placed
+                      </span>
+                      <button onClick={() => setShowSlotPicker(false)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-slot-picker-close">
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {loadingPhysioCalendar ? (
+                    <p className="px-5 py-14 text-center text-xs text-slate-400">Loading this physio's calendar...</p>
+                  ) : (
+                    <div className="flex flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
+                      {/* Month grid — a dot marks a day this physio has published slots on */}
+                      <div className="w-full flex-shrink-0 border-b border-slate-100 p-4 lg:w-[21rem] lg:border-b-0 lg:border-r lg:overflow-y-auto">
+                        <div className="mb-3 flex items-center justify-between">
+                          <button
+                            type="button"
+                            onClick={() => (pickerMonth === 0 ? (setPickerMonth(11), setPickerYear(pickerYear - 1)) : setPickerMonth(pickerMonth - 1))}
+                            className="rounded p-1 hover:bg-slate-100"
+                            data-testid="cons-slot-prev-month"
+                          >
+                            <ChevronLeft className="h-4 w-4 text-slate-500" />
+                          </button>
+                          <h4 className="text-sm font-semibold text-slate-700">{MONTH_NAMES[pickerMonth]} {pickerYear}</h4>
+                          <button
+                            type="button"
+                            onClick={() => (pickerMonth === 11 ? (setPickerMonth(0), setPickerYear(pickerYear + 1)) : setPickerMonth(pickerMonth + 1))}
+                            className="rounded p-1 hover:bg-slate-100"
+                            data-testid="cons-slot-next-month"
+                          >
+                            <ChevronRight className="h-4 w-4 text-slate-500" />
+                          </button>
+                        </div>
+
+                        <div className="mb-1 grid grid-cols-7 gap-1">
+                          {WEEKDAY_LABELS.map((d) => (
+                            <div key={d} className="py-1 text-center text-[11px] font-semibold text-slate-400">{d}</div>
+                          ))}
+                        </div>
+
+                        <div className="grid grid-cols-7 gap-1">
+                          {Array.from({ length: new Date(pickerYear, pickerMonth, 1).getDay() }, (_, i) => (
+                            <div key={`pad-${i}`} className="h-10" />
+                          ))}
+                          {Array.from({ length: new Date(pickerYear, pickerMonth + 1, 0).getDate() }, (_, i) => {
+                            const day = i + 1;
+                            const d = isoDate(pickerYear, pickerMonth, day);
+                            const dayOpen = (physioSlotsByDate[d] || []).filter((t) => !slotTakenByOther(`${d}T${t}`)).length;
+                            const dayPicked = sortedPickedSlots.filter((s) => s.startsWith(`${d}T`)).length;
+                            const isFocused = pickerDate === d;
+                            return (
+                              <button
+                                key={day}
+                                type="button"
+                                onClick={() => setPickerDate(d)}
+                                disabled={dayOpen === 0 && dayPicked === 0}
+                                className={`relative h-10 rounded-lg text-sm font-medium transition-all ${
+                                  isFocused
+                                    ? "bg-violet-600 text-white shadow-sm"
+                                    : dayPicked > 0
+                                    ? "bg-violet-100 text-violet-700"
+                                    : dayOpen > 0
+                                    ? "text-slate-600 hover:bg-slate-100"
+                                    : "cursor-not-allowed text-slate-300"
+                                }`}
+                                title={dayOpen > 0 ? `${dayOpen} slot${dayOpen > 1 ? "s" : ""} open` : "No slots published"}
+                                data-testid={`cons-slot-day-${day}`}
+                              >
+                                {day}
+                                {dayPicked > 0 ? (
+                                  <span className={`absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-bold ${isFocused ? "bg-white text-violet-700" : "bg-violet-600 text-white"}`}>
+                                    {dayPicked}
+                                  </span>
+                                ) : dayOpen > 0 && !isFocused ? (
+                                  <span className="absolute bottom-0.5 left-1/2 h-1 w-1 -translate-x-1/2 rounded-full bg-emerald-400" />
+                                ) : null}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        <p className="mt-3 border-t border-slate-100 pt-3 text-[11px] text-slate-400">
+                          Only days this physio has opened in <b>PHYSIO CALENDAR</b> can be picked. Choose a
+                          date, then the exact time for each treatment session — spread them across as many
+                          days as the plan needs.
+                        </p>
+                      </div>
+
+                      {/* Times published on the focused date */}
+                      <div className="flex-1 overflow-y-auto p-4">
+                        {!pickerDate ? (
+                          <div className="flex h-full items-center justify-center">
+                            <div className="text-center">
+                              <Calendar className="mx-auto mb-2 h-8 w-8 text-slate-200" />
+                              <p className="text-xs text-slate-400">Pick a treatment date to see this physio's open times</p>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                              <h4 className="text-sm font-semibold text-slate-700" data-testid="cons-slot-picker-date">{longDate(pickerDate)}</h4>
+                              <div className="flex flex-wrap items-center gap-3 text-[10px] text-slate-400">
+                                <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-emerald-400" /> Open</span>
+                                <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-violet-500" /> This patient</span>
+                                <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-amber-400" /> Booked</span>
+                              </div>
+                            </div>
+
+                            {(physioSlotsByDate[pickerDate] || []).length === 0 ? (
+                              <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-8 text-center text-xs text-slate-400">
+                                Nothing published on this day — open it in MANAGEMENT → PHYSIO CALENDAR first.
+                              </p>
+                            ) : (
+                              <div className="grid grid-cols-2 gap-2 lg:grid-cols-3" data-testid="cons-slot-picker-grid">
+                                {(physioSlotsByDate[pickerDate] || []).map((time) => {
+                                  const slot = `${pickerDate}T${time}`;
+                                  const taken = slotTakenByOther(slot);
+                                  const picked = sortedPickedSlots.includes(slot);
+                                  const sessionNo = picked ? sortedPickedSlots.indexOf(slot) + 1 : null;
+                                  return (
+                                    <button
+                                      key={time}
+                                      type="button"
+                                      onClick={() => togglePickedSlot(slot)}
+                                      disabled={taken}
+                                      className={`rounded-lg border p-3 text-left transition-all ${
+                                        taken
+                                          ? "cursor-not-allowed border-amber-300 bg-amber-50 opacity-70"
+                                          : picked
+                                          ? "border-violet-400 bg-violet-50 shadow-sm"
+                                          : "border-emerald-300 bg-emerald-50 hover:shadow-sm"
+                                      }`}
+                                      data-testid={`cons-slot-pick-${time}`}
+                                    >
+                                      <div className="flex items-center justify-between">
+                                        <span className={`text-sm font-semibold ${taken ? "text-amber-800" : picked ? "text-violet-800" : "text-emerald-800"}`}>
+                                          {to12h(time)}
+                                        </span>
+                                        {picked && (
+                                          <span className="rounded-full bg-violet-600 px-1.5 py-0.5 text-[9px] font-bold text-white">#{sessionNo}</span>
+                                        )}
+                                      </div>
+                                      {taken && (
+                                        <p className="mt-0.5 truncate text-[10px] text-amber-600">Booked · {physioCalendarData?.booked?.[slot]?.lead_name || "—"}</p>
+                                      )}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
+
+                            {sortedPickedSlots.length > 0 && (
+                              <div className="mt-4 rounded-lg border border-violet-200 bg-violet-50 p-3">
+                                <div className="mb-1.5 flex items-center justify-between">
+                                  <p className="text-[11px] font-semibold uppercase tracking-wider text-violet-700">Treatment plan</p>
+                                  <button
+                                    type="button"
+                                    onClick={() => setPickedSessionSlots([])}
+                                    className="text-[11px] font-semibold text-rose-600 hover:text-rose-800"
+                                    data-testid="cons-slot-picker-clear"
+                                  >
+                                    Clear all
+                                  </button>
+                                </div>
+                                <div className="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto">
+                                  {sortedPickedSlots.map((slot, i) => (
+                                    <button
+                                      key={slot}
+                                      type="button"
+                                      onClick={() => togglePickedSlot(slot)}
+                                      className="flex items-center gap-1 rounded-full border border-violet-300 bg-white px-2 py-1 text-[10px] font-semibold text-violet-700 hover:border-rose-300 hover:text-rose-600"
+                                      title="Remove this session"
+                                      data-testid={`cons-slot-picked-${slot}`}
+                                    >
+                                      #{i + 1} · {shortDate(slot.split("T")[0])} · {slotTo12h(slot)}
+                                      <X className="h-3 w-3" />
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/70 px-5 py-3">
+                    <p className="text-[11px] text-slate-500">
+                      {allSessionsPicked
+                        ? "All sessions have a fixed date and time."
+                        : `${totalSessionsNeeded - sortedPickedSlots.length} more session${totalSessionsNeeded - sortedPickedSlots.length === 1 ? "" : "s"} still need a date and time.`}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <Button size="sm" variant="outline" className="text-xs" onClick={() => setShowSlotPicker(false)} data-testid="cons-slot-picker-back">
+                        Back
+                      </Button>
+                      <Button
+                        size="sm"
+                        className="bg-emerald-600 text-xs hover:bg-emerald-700"
+                        onClick={submitPhysioAssign}
+                        disabled={assigningPhysio || !allSessionsPicked}
+                        data-testid="cons-slot-picker-submit"
+                      >
+                        {assigningPhysio ? "Assigning..." : `Assign & Book ${totalSessionsNeeded} Sessions`}
+                      </Button>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
