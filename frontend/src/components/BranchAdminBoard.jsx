@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Calendar,
-  Check,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -1039,7 +1038,7 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                   <button
                     type="button"
                     onClick={() => setApptDraft({ ...apptDraft, final_stage: cancelled ? "Appointment Date & Time" : "Cancelled" })}
-                    className={`flex items-center gap-2.5 rounded-lg border-2 px-4 py-2 text-sm font-bold transition ${
+                    className={`rounded-lg border-2 px-6 py-2.5 text-sm font-bold uppercase tracking-wide transition ${
                       cancelled
                         ? "border-rose-700 bg-rose-600 text-white shadow-sm"
                         : "border-rose-200 bg-white text-rose-600 hover:border-rose-400 hover:bg-rose-50"
@@ -1047,10 +1046,7 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                     data-testid="branch-appt-cancel-toggle"
                     aria-pressed={cancelled}
                   >
-                    <span className={`flex h-4 w-4 items-center justify-center rounded border-2 ${cancelled ? "border-white bg-white" : "border-rose-300"}`}>
-                      {cancelled && <Check className="h-3 w-3 text-rose-600" />}
-                    </span>
-                    CANCELLED
+                    Cancelled
                   </button>
                 );
               })()}
