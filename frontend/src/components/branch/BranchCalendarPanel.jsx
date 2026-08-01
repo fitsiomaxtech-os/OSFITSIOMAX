@@ -16,6 +16,11 @@ import { to12h } from "@/lib/time";
 // weekly_hours is keyed mon..sun; JS getDay() is 0=Sun..6=Sat.
 const DAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+/** "2026-08-02" -> "02 - 08 - 2026". Day-first, so the day of the month reads first. */
+const ddmmyyyy = (dateStr) => {
+  const [y, m, d] = (dateStr || "").split("-");
+  return y && m && d ? `${d} - ${m} - ${y}` : dateStr || "—";
+};
 
 // Month filter — six months at a time, opening on three back / current / two ahead. The
 // strip only moves when its arrows are pressed: clicking a month inside it just changes
@@ -304,15 +309,24 @@ export const BranchCalendarPanel = ({ branchId }) => {
                 data-testid={`cal-day-${date}`}
               >
                 <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/70 px-4 py-2.5">
-                  <div>
-                    <p className={`text-base font-bold ${isToday ? "text-sky-700" : "text-slate-800"}`}>
-                      {d.toLocaleDateString("en-US", { weekday: "long" })}
-                    </p>
-                    <p className="text-xs font-medium text-slate-500">
-                      {d.toLocaleDateString("en-US", { day: "numeric", month: "long", year: "numeric" })}
-                      {isToday && <span className="ml-1.5 font-bold text-sky-600">· Today</span>}
-                      {isHoliday && <span className="ml-1.5 font-bold text-rose-500">· Holiday</span>}
-                    </p>
+                  <div className="min-w-0">
+                    {/* Weekday, then the date day-first in its own light-shaded chip so the
+                        numbers read as one unit rather than running into the weekday. */}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className={`text-base font-bold ${isToday ? "text-sky-700" : "text-slate-800"}`}>
+                        {d.toLocaleDateString("en-US", { weekday: "long" })}
+                      </p>
+                      <span className="rounded-md bg-sky-50 px-2 py-0.5 text-sm font-semibold tracking-wide text-sky-700" data-testid={`cal-day-label-${date}`}>
+                        {ddmmyyyy(date)}
+                      </span>
+                    </div>
+                    {(isToday || isHoliday) && (
+                      <p className="mt-0.5 text-xs font-bold">
+                        {isToday && <span className="text-sky-600">Today</span>}
+                        {isToday && isHoliday && <span className="text-slate-300"> · </span>}
+                        {isHoliday && <span className="text-rose-500">Holiday</span>}
+                      </p>
+                    )}
                   </div>
                   <span className="shrink-0 rounded-lg border-2 border-sky-300 bg-sky-50 px-2.5 py-1 text-xs font-bold text-sky-700">
                     {items.length} booked
@@ -358,8 +372,9 @@ export const BranchCalendarPanel = ({ branchId }) => {
               {/* min-w-0 lets the address wrap instead of squeezing the badge into two
                   lines — the badge and the close button stay on one row, top-aligned. */}
               <div className="min-w-0">
-                <p className="text-lg font-bold" data-testid="cal-day-modal-date">
-                  {new Date(`${dayView.date}T00:00:00`).toLocaleDateString("en-US", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+                <p className="flex flex-wrap items-center gap-2 text-lg font-bold" data-testid="cal-day-modal-date">
+                  {new Date(`${dayView.date}T00:00:00`).toLocaleDateString("en-US", { weekday: "long" })}
+                  <span className="rounded-md bg-white/20 px-2 py-0.5 text-base font-semibold tracking-wide">{ddmmyyyy(dayView.date)}</span>
                 </p>
                 <p className="text-xs text-white/80">
                   {branch?.branch_name || "Branch"}
