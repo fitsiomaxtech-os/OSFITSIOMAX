@@ -386,11 +386,16 @@ const RolesTab = ({ meta, reloadMeta }) => {
   const [users, setUsers] = useState([]);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
+  const [sortAZ, setSortAZ] = useState(null); // null = as-loaded | "asc" | "desc"
   const [showCreate, setShowCreate] = useState(false);
   const [actionTarget, setActionTarget] = useState(null);
 
   const load = useCallback(() => hrUsers({ search, role: roleFilter !== "all" ? roleFilter : undefined }).then(setUsers).catch((e) => console.warn("[load failed]", e?.message || e)), [search, roleFilter]);
   useEffect(() => { load(); }, [load]);
+
+  const sortedUsers = sortAZ
+    ? [...users].sort((a, b) => (a.full_name || "").localeCompare(b.full_name || "") * (sortAZ === "asc" ? 1 : -1))
+    : users;
 
   const changeRole = async (u, role) => {
     try { await hrUpdateUserRole(u.id, role); toast.success("Role updated"); load(); }
@@ -403,6 +408,13 @@ const RolesTab = ({ meta, reloadMeta }) => {
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-base">User Roles & Credentials</CardTitle>
           <div className="flex gap-2">
+            <button
+              onClick={() => setSortAZ((s) => (s === "asc" ? "desc" : "asc"))}
+              className={`rounded-md px-3 py-2 text-sm font-medium ${sortAZ ? "bg-sky-600 text-white" : "bg-slate-100 text-slate-600"}`}
+              data-testid="hr-roles-sort-az"
+            >
+              {sortAZ === "desc" ? "Z → A" : "A → Z"}
+            </button>
             <Input placeholder="Search name or email..." value={search} onChange={(e) => setSearch(e.target.value)} className="w-64" data-testid="hr-roles-search" />
             <RoleFilterDropdown value={roleFilter} options={meta.roles} onChange={setRoleFilter} />
             <Button onClick={() => setShowCreate(true)} className="bg-sky-600 hover:bg-sky-700" data-testid="hr-roles-create-btn"><UserPlus className="h-4 w-4 mr-1" />Create User</Button>
@@ -411,10 +423,11 @@ const RolesTab = ({ meta, reloadMeta }) => {
         <CardContent className="p-0">
           <div className="overflow-auto">
             <table className="min-w-full text-sm">
-              <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th className="px-3 py-2">User</th><th className="px-3 py-2">Email</th><th className="px-3 py-2">Role</th><th className="px-3 py-2">Linked Employee</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Actions</th></tr></thead>
+              <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th className="px-3 py-2">S.No</th><th className="px-3 py-2">User</th><th className="px-3 py-2">Email</th><th className="px-3 py-2">Role</th><th className="px-3 py-2">Linked Employee</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Actions</th></tr></thead>
               <tbody>
-                {users.map((u) => (
+                {sortedUsers.map((u, i) => (
                   <tr key={u.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`hr-user-row-${u.id}`}>
+                    <td className="px-3 py-2 text-slate-500">{i + 1}</td>
                     <td className="px-3 py-2 font-medium text-slate-800">{u.full_name}</td>
                     <td className="px-3 py-2 text-slate-600">{u.email}</td>
                     <td className="px-3 py-2">
@@ -441,7 +454,7 @@ const RolesTab = ({ meta, reloadMeta }) => {
                     </td>
                   </tr>
                 ))}
-                {users.length === 0 && <tr><td colSpan="6" className="px-3 py-6 text-center text-slate-400">No users.</td></tr>}
+                {sortedUsers.length === 0 && <tr><td colSpan="7" className="px-3 py-6 text-center text-slate-400">No users.</td></tr>}
               </tbody>
             </table>
           </div>
