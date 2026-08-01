@@ -201,7 +201,7 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser }) => {
           <div className="overflow-auto">
             <table className="min-w-full border-separate border-spacing-x-0 border-spacing-y-2 text-sm">
               <thead className="text-center text-xs text-slate-500">
-                <tr><th className="px-3 py-2 text-left">LEAD</th><th className="px-3 py-2">PHONE</th><th className="px-3 py-2">EMAIL</th><th className="px-3 py-2">SOURCE</th><th className="px-3 py-2">STAGE</th>{stageFilter === "Appointment" && <th className="px-3 py-2">BRANCH ADMIN STATUS</th>}<th className="px-3 py-2">CREATED</th><th className="px-3 py-2">ACTIONS</th></tr>
+                <tr><th className="px-3 py-2 text-left">LEAD</th><th className="px-3 py-2">PHONE</th><th className="px-3 py-2">EMAIL</th><th className="px-3 py-2">SOURCE</th><th className="px-3 py-2">STAGE</th>{stageFilter === "Appointment" && <th className="px-3 py-2">BRANCH ADMIN STATUS</th>}<th className="px-3 py-2">CREATED</th><th className="px-3 py-2">ASSIGNED TO</th><th className="px-3 py-2">ACTIONS</th></tr>
               </thead>
               <tbody>
                 {visibleLeads.map((l) => {
@@ -271,6 +271,27 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser }) => {
                         );
                       })()}
                       <td className="border-y border-slate-200 bg-white px-3 py-3 text-center text-xs text-slate-400 transition-colors group-hover:bg-slate-50">{(l.created_at || "").slice(0, 10)}</td>
+                      <td className="border-y border-slate-200 bg-white px-3 py-3 text-center transition-colors group-hover:bg-slate-50" onClick={(e) => e.stopPropagation()}>
+                        <select
+                          value={l.branch_id || ""}
+                          onChange={async (e) => {
+                            const branchId = e.target.value;
+                            if (!branchId) return;
+                            try {
+                              await scheduleAppointment(l.id, { department: "physio", mode: "offline", branch_id: branchId });
+                              toast.success(`Assigned to ${branches.find((b) => b.id === branchId)?.branch_name || branches.find((b) => b.id === branchId)?.name || "branch"}`);
+                              load();
+                            } catch (err) { toast.error(err?.response?.data?.detail || "Failed to assign branch"); }
+                          }}
+                          className="h-8 rounded-md border border-slate-200 px-2 text-xs focus:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                          data-testid={`presales-assign-branch-${l.id}`}
+                        >
+                          <option value="">— Assign —</option>
+                          {branches.map((b) => (
+                            <option key={b.id} value={b.id}>{b.branch_name || b.name}</option>
+                          ))}
+                        </select>
+                      </td>
                       <td className="rounded-r-[5px] border-y border-r border-slate-200 bg-white px-3 py-3 text-center transition-colors group-hover:bg-slate-50">
                         <div className="flex items-center justify-center gap-1">
                           <button onClick={(e) => { e.stopPropagation(); setEditing(l); }} className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-sky-600" data-testid={`presales-lead-view-${l.id}`} title="View / Edit">
@@ -286,7 +307,7 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser }) => {
                     </tr>
                   );
                 })}
-                {filtered.length === 0 && <tr><td colSpan={stageFilter === "Appointment" ? 8 : 7} className="px-3 py-8 text-center text-slate-400">{loading ? "Loading..." : "No leads match."}</td></tr>}
+                {filtered.length === 0 && <tr><td colSpan={stageFilter === "Appointment" ? 9 : 8} className="px-3 py-8 text-center text-slate-400">{loading ? "Loading..." : "No leads match."}</td></tr>}
               </tbody>
             </table>
           </div>
