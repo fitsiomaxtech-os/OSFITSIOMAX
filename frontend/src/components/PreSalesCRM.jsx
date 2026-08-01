@@ -61,8 +61,6 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
   const [branches, setBranches] = useState([]);
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState("All");
-  const [apptMode, setApptMode] = useState("offline"); // "offline" | "online"
-  const [apptBranchFilter, setApptBranchFilter] = useState(""); // "" = all branches for offline
   const [sourceFilter, setSourceFilter] = useState("");
   const [dateFilter, setDateFilter] = useState(null);
   const [editing, setEditing] = useState(null);
@@ -114,18 +112,6 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
     return map;
   }, [dateSourceFiltered, stages]);
 
-  const apptCounts = useMemo(() => {
-    const appts = dateSourceFiltered.filter((l) => l.stage === "Appointment");
-    const offline = appts.filter((l) => (l.appointment_mode || "offline") === "offline");
-    const online = appts.filter((l) => l.appointment_mode === "online");
-    const byBranch = {};
-    offline.forEach((l) => {
-      const key = l.branch_id || "__unassigned__";
-      byBranch[key] = (byBranch[key] || 0) + 1;
-    });
-    return { offlineTotal: offline.length, onlineTotal: online.length, byBranch };
-  }, [dateSourceFiltered]);
-
   const sourceOptions = useMemo(() => {
     const set = new Set();
     leads.forEach((l) => { const s = l.source_tab || l.source_type; if (s) set.add(s); });
@@ -135,27 +121,16 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
   const filtered = useMemo(() => {
     let rows = dateSourceFiltered;
     if (stageFilter !== "All") rows = rows.filter((l) => l.stage === stageFilter);
-    // When viewing Appointment stage, further filter by mode and (if offline) selected branch
-    if (stageFilter === "Appointment") {
-      rows = rows.filter((l) => (l.appointment_mode || "offline") === apptMode);
-      if (apptMode === "offline" && apptBranchFilter) {
-        if (apptBranchFilter === "__unassigned__") {
-          rows = rows.filter((l) => !l.branch_id);
-        } else {
-          rows = rows.filter((l) => l.branch_id === apptBranchFilter);
-        }
-      }
-    }
     if (search) {
       const q = search.toLowerCase();
       rows = rows.filter((l) => (l.name || "").toLowerCase().includes(q) || (l.phone || "").includes(q) || (l.email || "").toLowerCase().includes(q));
     }
     return rows.slice().sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
-  }, [dateSourceFiltered, stageFilter, apptMode, apptBranchFilter, search]);
+  }, [dateSourceFiltered, stageFilter, search]);
 
   // Rendering thousands of rows at once is fine on desktop but chokes mobile
   // devices, so re-page back to 50 whenever the filtered set changes.
-  useEffect(() => { setVisibleCount(50); }, [stageFilter, apptMode, apptBranchFilter, sourceFilter, search, dateFilter]);
+  useEffect(() => { setVisibleCount(50); }, [stageFilter, sourceFilter, search, dateFilter]);
   const visibleLeads = filtered.slice(0, visibleCount);
 
   const moveToStage = async (leadId, stageName) => {
@@ -219,70 +194,6 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
           ))}
         </div>
       </div>
-
-      {/* Appointment sub-tabs: Offline / Online + branch chips (offline only) */}
-      {stageFilter === "Appointment" && (
-        <div className="space-y-2 rounded-xl border border-slate-200 bg-white p-3" data-testid="presales-appointment-substages">
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => { setApptMode("offline"); setApptBranchFilter(""); }}
-              className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition ${apptMode === "offline" ? "bg-emerald-500 text-white shadow" : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"}`}
-              data-testid="appt-mode-offline"
-            >
-              Offline
-              <span className={`rounded-full px-1.5 text-[11px] font-bold ${apptMode === "offline" ? "bg-white/25 text-white" : "bg-emerald-200 text-emerald-800"}`}>{apptCounts.offlineTotal}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => { setApptMode("online"); setApptBranchFilter(""); }}
-              className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition ${apptMode === "online" ? "bg-sky-500 text-white shadow" : "bg-sky-50 text-sky-700 hover:bg-sky-100"}`}
-              data-testid="appt-mode-online"
-            >
-              Online
-              <span className={`rounded-full px-1.5 text-[11px] font-bold ${apptMode === "online" ? "bg-white/25 text-white" : "bg-sky-200 text-sky-800"}`}>{apptCounts.onlineTotal}</span>
-            </button>
-          </div>
-
-          {apptMode === "offline" && (
-            <div className="flex flex-wrap gap-1.5 border-t border-slate-100 pt-2" data-testid="appt-branch-chips">
-              <button
-                type="button"
-                onClick={() => setApptBranchFilter("")}
-                className={`rounded-full px-3 py-1 text-xs font-semibold transition ${apptBranchFilter === "" ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}
-                data-testid="appt-branch-all"
-              >
-                All Branches <span className="opacity-70">({apptCounts.offlineTotal})</span>
-              </button>
-              {branches.map((b) => {
-                const count = apptCounts.byBranch[b.id] || 0;
-                const isActive = apptBranchFilter === b.id;
-                return (
-                  <button
-                    key={b.id}
-                    type="button"
-                    onClick={() => setApptBranchFilter(isActive ? "" : b.id)}
-                    className={`rounded-full px-3 py-1 text-xs font-semibold transition ${isActive ? "bg-emerald-500 text-white" : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"}`}
-                    data-testid={`appt-branch-${b.id}`}
-                  >
-                    {b.branch_name || b.name} <span className="opacity-70">({count})</span>
-                  </button>
-                );
-              })}
-              {apptCounts.byBranch.__unassigned__ > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setApptBranchFilter("__unassigned__")}
-                  className={`rounded-full px-3 py-1 text-xs font-semibold transition ${apptBranchFilter === "__unassigned__" ? "bg-rose-500 text-white" : "bg-rose-50 text-rose-700 hover:bg-rose-100"}`}
-                  data-testid="appt-branch-unassigned"
-                >
-                  Unassigned <span className="opacity-70">({apptCounts.byBranch.__unassigned__})</span>
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-      )}
 
       {/* Leads table */}
       <Card data-testid="presales-leads-card">
