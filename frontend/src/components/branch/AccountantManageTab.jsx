@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Eye } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { getBranches, getRevenueOverview } from "@/lib/api";
@@ -7,14 +7,26 @@ import { OutstandingAmountBoard } from "@/components/branch/OutstandingAmountBoa
 import { PaymentSchedulesBoard } from "@/components/branch/PaymentSchedulesBoard";
 import { ConsultationCollectionsBoard } from "@/components/branch/ConsultationCollectionsBoard";
 import { SessionCollectionsBoard } from "@/components/branch/SessionCollectionsBoard";
+import { PaymentPaidBoard } from "@/components/branch/PaymentPaidBoard";
 
+// `tone: "paid"` is Payment Paid's alone — it carries the same green the OS uses for a
+// settled payment everywhere else, so the settled tab is recognisable without reading it.
+// Every other tab keeps the shared sky styling.
 const SUB_TABS = [
   { key: "total_revenue", label: "Total Revenue" },
   { key: "consultation", label: "Consultation Collections" },
   { key: "session", label: "Session Collections" },
   { key: "outstanding", label: "Outstanding Amount" },
   { key: "schedules", label: "Payment Schedules" },
+  { key: "paid", label: "Payment Paid", tone: "paid" },
 ];
+
+const subTabClasses = (tab, active) => {
+  if (tab.tone === "paid") {
+    return active ? "bg-emerald-600 text-white shadow-sm" : "text-emerald-700 hover:bg-emerald-50";
+  }
+  return active ? "bg-sky-50 text-sky-700" : "text-slate-600 hover:bg-slate-50";
+};
 
 const REVENUE_VIEWS = [
   { key: "collected", label: "Total Collected", color: "#059669" },
@@ -78,6 +90,35 @@ export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
   const outstanding = data?.outstanding_clients || [];
   const schedule = data?.payment_schedule || [];
 
+  // Payment Paid — clients with nothing left owing, rolled up from their own
+  // transactions. Anyone still carrying a balance belongs to Outstanding Amount, so they
+  // are excluded outright; what remains is every client whose money is fully in,
+  // including those who paid the whole package up front and so never had a schedule.
+  const paidClients = useMemo(() => {
+    const owing = new Set(outstanding.map((o) => o.lead_id));
+    const map = {};
+    transactions.forEach((t) => {
+      if (!t.lead_id || owing.has(t.lead_id)) return;
+      const r = map[t.lead_id] || (map[t.lead_id] = {
+        lead_id: t.lead_id,
+        client_name: t.client_name || "Unknown",
+        phone: t.phone || "",
+        branch_name: t.branch_name || "",
+        consultation_paid: 0, session_paid: 0, total_paid: 0,
+        last_date: "", modes: [], txns: [],
+      });
+      const amount = Number(t.gross) || 0;
+      r.total_paid += amount;
+      if (t.source === "consultation") r.consultation_paid += amount;
+      else r.session_paid += amount;
+      const day = (t.date || "").slice(0, 10);
+      if (day > r.last_date) r.last_date = day;
+      if (t.payment_mode && !r.modes.includes(t.payment_mode)) r.modes.push(t.payment_mode);
+      r.txns.push(t);
+    });
+    return Object.values(map).sort((a, b) => b.total_paid - a.total_paid);
+  }, [transactions, outstanding]);
+
   return (
     <div className="space-y-4" data-testid="accountant-manage-tab">
       {!fixedBranchId && (
@@ -100,7 +141,7 @@ export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
           <button
             key={t.key}
             onClick={() => setSubTab(t.key)}
-            className={`rounded-md px-3 py-2 text-sm font-medium transition ${subTab === t.key ? "bg-sky-50 text-sky-700" : "text-slate-600 hover:bg-slate-50"}`}
+            className={`rounded-md px-3 py-2 text-sm font-medium transition ${subTabClasses(t, subTab === t.key)}`}
             data-testid={`accountant-manage-subtab-${t.key}`}
           >
             {t.label}
@@ -139,6 +180,8 @@ export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
         <SessionCollectionsBoard rows={transactions.filter((t) => t.source === "session")} onView={setViewingLeadId} />
       ) : subTab === "outstanding" ? (
         <OutstandingAmountBoard rows={outstanding} onView={setViewingLeadId} onChanged={load} />
+      ) : subTab === "paid" ? (
+        <PaymentPaidBoard rows={paidClients} onView={setViewingLeadId} />
       ) : (
         <PaymentSchedulesBoard rows={schedule} onView={setViewingLeadId} onChanged={load} />
       )}
