@@ -553,21 +553,22 @@ export const CRMPage = ({ auth, onLogout }) => {
               </div>
             </div>
             <div className="flex items-center gap-2 sm:gap-3">
-              <span className="hidden text-sm font-medium text-sky-700 sm:inline" data-testid="role-board-user-greeting">
-                {(showPreSalesBoard || showBranchBoard || showHeadPhysioBoard) ? auth.user.full_name : auth.user.full_name?.split(" ")[0]}
-                {myBranchName && <span className="ml-1.5 font-normal text-slate-400" data-testid="role-board-user-branch">· {myBranchName}</span>}
-              </span>
-              {(showPreSalesBoard || showBranchBoard || showHeadPhysioBoard) && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowProfile(true)}
-                  className="border-slate-200 px-2 text-slate-600 hover:bg-slate-50 sm:px-3"
-                  data-testid="role-board-profile-button"
-                >
-                  <UserCircle className="h-4 w-4 sm:mr-1.5" /><span className="hidden sm:inline">My Profile</span>
-                </Button>
-              )}
+              <button
+                type="button"
+                onClick={() => setShowProfile(true)}
+                className="flex items-center gap-2 rounded-md px-1 py-1 text-left hover:bg-slate-50"
+                data-testid="role-board-profile-button"
+              >
+                <UserCircle className="h-7 w-7 shrink-0 text-slate-300 sm:h-8 sm:w-8" />
+                <span className="hidden sm:block">
+                  <span className="block text-sm font-semibold leading-tight text-slate-900" data-testid="role-board-user-greeting">
+                    {auth.user.full_name}
+                  </span>
+                  <span className="block text-[10px] font-medium uppercase tracking-wide text-slate-400" data-testid="role-board-user-subtitle">
+                    {roleLabel}{myBranchName && ` · ${myBranchName}`}
+                  </span>
+                </span>
+              </button>
               <Button
                 variant="outline"
                 size="sm"
