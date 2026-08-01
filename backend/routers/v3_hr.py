@@ -193,6 +193,13 @@ async def list_employees(status: Optional[str] = None, _: V3UserOut = Depends(v3
 
 @router.post("/employees")
 async def create_employee(payload: EmployeeCreate, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    # Department and Designation are what every downstream view groups and colour-codes
+    # employees by, so an employee without them is unusable — required at the API too,
+    # not just in the form.
+    if not (payload.department or "").strip():
+        raise HTTPException(status_code=400, detail="Department is required")
+    if not (payload.designation or "").strip():
+        raise HTTPException(status_code=400, detail="Designation is required")
     doc = payload.model_dump()
     doc["id"] = str(uuid.uuid4())
     doc["employee_code"] = doc.get("employee_code") or await _next_emp_code()
@@ -208,6 +215,11 @@ async def update_employee(emp_id: str, payload: EmployeeUpdate, _: V3UserOut = D
     updates = {k: v for k, v in payload.model_dump().items() if v is not None}
     if not updates:
         raise HTTPException(status_code=400, detail="No updates")
+    # Omitting these on a partial update is fine; explicitly clearing them is not — an
+    # existing employee must not be left without a department or designation.
+    for field, label in (("department", "Department"), ("designation", "Designation")):
+        if field in updates and not str(updates[field]).strip():
+            raise HTTPException(status_code=400, detail=f"{label} is required")
     updates["updated_at"] = now_iso()
     res = await v3_col("employees").update_one({"id": emp_id}, {"$set": updates})
     if res.matched_count == 0:

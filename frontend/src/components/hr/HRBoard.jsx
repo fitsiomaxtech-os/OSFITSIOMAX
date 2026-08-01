@@ -215,6 +215,8 @@ const AddEmployeeModal = ({ employee, meta, onClose, onSaved }) => {
 
   const submit = async () => {
     if (!form.full_name.trim()) { toast.error("Full name required"); setTab("personal"); return; }
+    if (!form.department) { toast.error("Pick a Department"); setTab("employment"); return; }
+    if (!form.designation) { toast.error("Pick a Designation"); setTab("employment"); return; }
     const payload = { ...form };
     payload.net_salary = Number(payload.net_salary) || 0;
     payload.gross_salary = Number(payload.gross_salary) || 0;
@@ -258,8 +260,8 @@ const AddEmployeeModal = ({ employee, meta, onClose, onSaved }) => {
           {tab === "employment" && (
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Employee Code"><Input value={form.employee_code} onChange={(e) => set("employee_code", e.target.value)} placeholder="Auto-generated" data-testid="hr-emp-code" /></Field>
-              <Field label="Department"><Select value={form.department} onChange={(v) => set("department", v)} options={["", ...meta.departments]} testid="hr-emp-dept" uppercase /></Field>
-              <Field label="Designation"><Select value={form.designation} onChange={(v) => set("designation", v)} options={designationOptions} testid="hr-emp-designation" uppercase /></Field>
+              <Field label="Department *"><Select value={form.department} onChange={(v) => set("department", v)} options={["", ...meta.departments]} testid="hr-emp-dept" uppercase /></Field>
+              <Field label="Designation *"><Select value={form.designation} onChange={(v) => set("designation", v)} options={designationOptions} testid="hr-emp-designation" uppercase /></Field>
               <Field label="Joining Date"><Input type="date" value={form.joining_date} onChange={(e) => set("joining_date", e.target.value)} data-testid="hr-emp-joining" /></Field>
               <Field label="Reporting To"><Input value={form.reporting_to} onChange={(e) => set("reporting_to", e.target.value)} data-testid="hr-emp-reporting" /></Field>
               <Field label="Status"><Select value={form.status} onChange={(v) => set("status", v)} options={["active", "left", "on_leave"]} testid="hr-emp-status" /></Field>
