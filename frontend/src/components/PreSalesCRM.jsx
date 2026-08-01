@@ -209,10 +209,9 @@ export const PreSalesCRM = ({ onManageStages, role }) => {
         )}
       </div>
 
-      {/* Stage Tabs — sticky below the page header when scrolling. One continuous
-          strip (divide-x between segments, rounding only on the outer edges) rather
-          than separate gapped pills. */}
-      <div className="sticky top-[88px] z-10 -mx-1 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/80" data-testid="presales-stage-tabs">
+      {/* Stage Tabs — one continuous strip (divide-x between segments, rounding only
+          on the outer edges) rather than separate gapped pills. */}
+      <div className="-mx-1" data-testid="presales-stage-tabs">
         <div className="flex flex-wrap divide-x divide-slate-200 overflow-hidden rounded-xl border border-slate-200 bg-white/95">
           <StageTab label="All" active={stageFilter === "All"} onClick={() => setStageFilter("All")} color="#0ea5e9" testid="presales-chip-all" />
           {stages.map((s) => (
