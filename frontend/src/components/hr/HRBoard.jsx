@@ -103,6 +103,7 @@ const EmployeesTab = ({ meta }) => {
   const [employees, setEmployees] = useState([]);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("active");
+  const [sortAZ, setSortAZ] = useState(null); // null = as-loaded | "asc" | "desc"
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
 
@@ -114,6 +115,9 @@ const EmployeesTab = ({ meta }) => {
     const q = search.toLowerCase();
     return (e.full_name || "").toLowerCase().includes(q) || (e.email || "").toLowerCase().includes(q) || (e.employee_code || "").toLowerCase().includes(q);
   });
+  if (sortAZ) {
+    filtered.sort((a, b) => (a.full_name || "").localeCompare(b.full_name || "") * (sortAZ === "asc" ? 1 : -1));
+  }
 
   const remove = async (emp) => {
     if (!window.confirm(`Delete employee ${emp.full_name}?`)) return;
@@ -130,6 +134,13 @@ const EmployeesTab = ({ meta }) => {
         <button onClick={() => setFilterStatus("active")} className={`rounded-md px-3 py-2 text-sm font-medium ${filterStatus === "active" ? "bg-orange-500 text-white" : "bg-slate-100 text-slate-600"}`} data-testid="hr-emp-tab-active">Active Employees ({active})</button>
         <button onClick={() => setFilterStatus("left")} className={`rounded-md px-3 py-2 text-sm font-medium ${filterStatus === "left" ? "bg-slate-700 text-white" : "bg-slate-100 text-slate-600"}`} data-testid="hr-emp-tab-left">Left ({left})</button>
         <div className="flex-1" />
+        <button
+          onClick={() => setSortAZ((s) => (s === "asc" ? "desc" : "asc"))}
+          className={`rounded-md px-3 py-2 text-sm font-medium ${sortAZ ? "bg-orange-500 text-white" : "bg-slate-100 text-slate-600"}`}
+          data-testid="hr-emp-sort-az"
+        >
+          {sortAZ === "desc" ? "Z → A" : "A → Z"}
+        </button>
         <Input placeholder="Search employee..." value={search} onChange={(e) => setSearch(e.target.value)} className="w-64" data-testid="hr-emp-search" />
         <Button onClick={() => { setEditing(null); setShowAdd(true); }} className="bg-orange-500 hover:bg-orange-600" data-testid="hr-emp-add-btn"><Plus className="h-4 w-4 mr-1" />Add Employee</Button>
       </div>
@@ -140,11 +151,12 @@ const EmployeesTab = ({ meta }) => {
           <div className="overflow-auto">
             <table className="min-w-full text-sm">
               <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-                <tr><th className="px-3 py-2">Employee</th><th className="px-3 py-2">Dept</th><th className="px-3 py-2">Designation</th><th className="px-3 py-2">Contact</th><th className="px-3 py-2">Joining</th><th className="px-3 py-2">Net Salary</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Actions</th></tr>
+                <tr><th className="px-3 py-2">S.No</th><th className="px-3 py-2">Employee</th><th className="px-3 py-2">Dept</th><th className="px-3 py-2">Designation</th><th className="px-3 py-2">Contact</th><th className="px-3 py-2">Joining</th><th className="px-3 py-2">Net Salary</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Actions</th></tr>
               </thead>
               <tbody>
-                {filtered.map((e) => (
+                {filtered.map((e, i) => (
                   <tr key={e.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`hr-emp-row-${e.id}`}>
+                    <td className="px-3 py-2 text-slate-500">{i + 1}</td>
                     <td className="px-3 py-2">
                       <p className="font-medium text-slate-800">{e.full_name}</p>
                       <p className="text-xs text-slate-400">{e.employee_code}</p>
@@ -164,7 +176,7 @@ const EmployeesTab = ({ meta }) => {
                     </td>
                   </tr>
                 ))}
-                {filtered.length === 0 && <tr><td colSpan="8" className="px-3 py-6 text-center text-slate-400">No employees.</td></tr>}
+                {filtered.length === 0 && <tr><td colSpan="9" className="px-3 py-6 text-center text-slate-400">No employees.</td></tr>}
               </tbody>
             </table>
           </div>
