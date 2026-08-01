@@ -13,6 +13,7 @@ import {
   addCalendarSlots,
   getDoctorCalendar,
   getDoctors,
+  listStoreItems,
   removeCalendarSlots,
 } from "@/lib/api";
 import { to12h } from "@/lib/time";
@@ -27,9 +28,10 @@ const SESSION_TYPES = [
   { value: "session", label: "Treatment Session", color: "bg-sky-100 text-sky-700 border-sky-300" },
 ];
 
-// Every consultation slot is 30 minutes. Picking a date opens the whole working day at
-// this length, so there's no per-day duration choice to make.
-const SLOT_MINUTES = 30;
+// Slot length comes from FITSIO STORE — the Consultation Duration on the consultation
+// item for Consultant Calendar, and on the session item for Physio Calendar. Only used
+// if the store hasn't been configured yet.
+const FALLBACK_SLOT_MINUTES = 30;
 
 function getDaysInMonth(year, month) {
   return new Date(year, month + 1, 0).getDate();
@@ -56,10 +58,23 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
   const [selectedDate, setSelectedDate] = useState(null);
 
-  const slotDuration = SLOT_MINUTES;
+  const [slotDuration, setSlotDuration] = useState(FALLBACK_SLOT_MINUTES);
   const slotType = SLOT_TYPES[0].value;
   const [pendingSlots, setPendingSlots] = useState([]);
   const [saving, setSaving] = useState(false);
+
+  // Keep the calendar honest against FITSIO STORE: a Consultation Duration of 45 mins
+  // there must produce 45-minute slots here, not a hardcoded 30.
+  useEffect(() => {
+    let cancelled = false;
+    listStoreItems(undefined, isPhysio ? "session" : "consultation")
+      .then((items) => {
+        const configured = (items || []).map((i) => i.duration_minutes).find((d) => Number(d) > 0);
+        if (!cancelled && configured) setSlotDuration(Number(configured));
+      })
+      .catch(() => { /* keep the fallback */ });
+    return () => { cancelled = true; };
+  }, [isPhysio]);
 
   const loadDoctors = useCallback(async () => {
     if (!branchId) return;
@@ -86,6 +101,14 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
     setSelectedDate(null);
     setPendingSlots([]);
   };
+
+  // If the store's duration arrives (or is changed) after a day was already filled in,
+  // those staged slots were built on the old length — drop them rather than saving a
+  // day that's half 30-minute and half 45-minute.
+  useEffect(() => {
+    setSelectedDate(null);
+    setPendingSlots([]);
+  }, [slotDuration]);
 
   // Picking a date IS the availability confirmation — the whole working day fills in
   // straight away rather than making the Branch Admin click 28 slots by hand. They land
@@ -358,7 +381,7 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
 
                 {selectedDate && (
                   <p className="mt-4 border-t border-slate-100 pt-3 text-[11px] text-slate-400" data-testid="calendar-day-hint">
-                    Whole day opened at {SLOT_MINUTES}-minute slots. Click any slot to drop it,
+                    Whole day opened at {slotDuration}-minute slots, per FITSIO STORE. Click any slot to drop it,
                     then Save Changes.
                   </p>
                 )}
