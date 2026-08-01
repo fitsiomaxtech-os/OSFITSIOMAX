@@ -19,6 +19,11 @@ const DAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
+// Month filter window — three months back, the month being viewed, two ahead. The viewed
+// month always sits in the same (4th) position, so the strip's shape never shifts under
+// the cursor no matter which month is open.
+const MONTH_WINDOW = [-3, -2, -1, 0, 1, 2];
+
 
 const emptyDraft = () => ({ patient_name: "", doctor_id: "", date: iso(new Date()), time: "", notes: "", cancelled: false });
 
@@ -101,8 +106,8 @@ export const BranchCalendarPanel = ({ branchId }) => {
 
   const todayIso = iso(new Date());
   const shiftMonth = (delta) => setMonthDate((prev) => { const d = new Date(prev); d.setMonth(d.getMonth() + delta); return d; });
-  const thisMonth = () => { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); setMonthDate(d); };
   const monthLabel = monthDate.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  const currentMonthKey = `${new Date().getFullYear()}-${new Date().getMonth()}`;
 
   // ---- Booking / edit modal — date-first availability flow ----
   // 1) pick date -> validate against branch working calendar (hours + holidays)
@@ -181,20 +186,10 @@ export const BranchCalendarPanel = ({ branchId }) => {
 
   return (
     <div className="space-y-4" data-testid="branch-calendar-panel">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h2 className="flex items-center gap-2 text-2xl font-bold text-slate-900"><CalendarIcon className="h-6 w-6 text-sky-600" /> Calendar</h2>
-          <p className="text-sm text-slate-500">Schedule consultations between clients and Head Physios, based on the branch working hours set in Branch Management.</p>
-        </div>
-        <Button onClick={() => openCreate()} className="bg-sky-600 hover:bg-sky-700" data-testid="cal-book-btn">
-          <Plus className="mr-1.5 h-4 w-4" />Book Consultation
-        </Button>
-      </div>
-
       {/* Sub-tabs */}
       <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="cal-subtabs">
         <button type="button" onClick={() => setSubTab("schedule")} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${subTab === "schedule" ? "bg-sky-50 text-sky-600" : "text-slate-600 hover:bg-slate-50"}`} data-testid="cal-subtab-schedule">
-          <CalendarIcon className="h-4 w-4" />Schedule
+          <CalendarIcon className="h-4 w-4" />Calendar by Booked Lists
         </button>
         <button type="button" onClick={() => setSubTab("upcoming")} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${subTab === "upcoming" ? "bg-sky-50 text-sky-600" : "text-slate-600 hover:bg-slate-50"}`} data-testid="cal-subtab-upcoming">
           <Clock className="h-4 w-4" />Upcoming Appointments
@@ -203,12 +198,39 @@ export const BranchCalendarPanel = ({ branchId }) => {
 
       {subTab === "schedule" && (
       <>
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-base font-semibold text-slate-700" data-testid="cal-month-label">{monthLabel}</p>
-        <div className="flex items-center gap-2">
-          <Button size="sm" variant="outline" onClick={() => shiftMonth(-1)} data-testid="cal-prev-month"><ChevronLeft className="h-4 w-4" /></Button>
-          <Button size="sm" variant="outline" onClick={thisMonth} data-testid="cal-this-month">This Month</Button>
-          <Button size="sm" variant="outline" onClick={() => shiftMonth(1)} data-testid="cal-next-month"><ChevronRight className="h-4 w-4" /></Button>
+        {/* Month filter — the neighbouring months are one click away instead of being
+            reached by stepping through them one arrow press at a time. */}
+        <div className="flex max-w-full items-center gap-1.5 overflow-x-auto" data-testid="cal-month-filter">
+          <Button size="sm" variant="outline" className="shrink-0" onClick={() => shiftMonth(-1)} data-testid="cal-prev-month"><ChevronLeft className="h-4 w-4" /></Button>
+          {MONTH_WINDOW.map((offset) => {
+            const d = new Date(monthDate.getFullYear(), monthDate.getMonth() + offset, 1);
+            const isViewed = offset === 0;
+            const isCurrent = `${d.getFullYear()}-${d.getMonth()}` === currentMonthKey;
+            return (
+              <button
+                key={offset}
+                type="button"
+                onClick={() => shiftMonth(offset)}
+                className={`shrink-0 rounded-md border px-3 py-1.5 text-sm font-semibold transition ${
+                  isViewed
+                    ? "border-sky-600 bg-sky-600 text-white shadow-sm"
+                    : isCurrent
+                    ? "border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100"
+                    : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                }`}
+                title={isCurrent ? "Current month" : undefined}
+                data-testid={`cal-month-${d.getFullYear()}-${d.getMonth() + 1}`}
+              >
+                {d.toLocaleDateString("en-US", { month: "long" })}
+                {d.getFullYear() !== monthDate.getFullYear() && (
+                  <span className={`ml-1 text-[10px] ${isViewed ? "text-sky-100" : "text-slate-400"}`}>{d.getFullYear()}</span>
+                )}
+              </button>
+            );
+          })}
+          <Button size="sm" variant="outline" className="shrink-0" onClick={() => shiftMonth(1)} data-testid="cal-next-month"><ChevronRight className="h-4 w-4" /></Button>
         </div>
       </div>
 
@@ -289,7 +311,7 @@ export const BranchCalendarPanel = ({ branchId }) => {
       {subTab === "upcoming" && (
       <div className="space-y-4" data-testid="cal-upcoming-list">
         {upcomingGroups.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-slate-200 px-3 py-8 text-center text-sm text-slate-400">No upcoming consultations. Use “Book Consultation” to schedule one.</p>
+          <p className="rounded-lg border border-dashed border-slate-200 px-3 py-8 text-center text-sm text-slate-400">No upcoming consultations. Use the + on a day in Calendar by Booked Lists to schedule one.</p>
         ) : (
           upcomingGroups.map((g) => (
             <div key={g.date} data-testid={`cal-upcoming-${g.date}`}>
