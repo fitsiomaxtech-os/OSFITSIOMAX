@@ -5,11 +5,9 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  ClipboardCheck,
   ClipboardList,
-  Clock,
-  MessageSquare,
   Send,
-  User,
   Users,
   X,
 } from "lucide-react";
@@ -18,7 +16,6 @@ import { toast } from "@/components/ui/sonner";
 import {
   physioConsultations,
   physioCompleteConsultation,
-  physioToday,
   physioCalendar,
   physioPatients,
   physioSessions,
@@ -28,14 +25,14 @@ import {
 import { to12h, slotTo12h } from "@/lib/time";
 
 const TABS = [
-  { key: "consultations", label: "Consultations", icon: ClipboardList },
-  { key: "today", label: "Today", icon: Clock },
-  { key: "calendar", label: "Full Calendar", icon: CalendarDays },
+  { key: "treatment", label: "Treatment", icon: ClipboardList },
+  { key: "review", label: "Review", icon: ClipboardCheck },
+  { key: "calendar", label: "Calendar", icon: CalendarDays },
   { key: "patients", label: "Patients History", icon: Users },
 ];
 
 export const PhysioBoard = ({ physioId } = {}) => {
-  const [activeTab, setActiveTab] = useState("consultations");
+  const [activeTab, setActiveTab] = useState("treatment");
 
   return (
     <div className="space-y-4" data-testid="physio-board-root">
@@ -60,18 +57,19 @@ export const PhysioBoard = ({ physioId } = {}) => {
         })}
       </div>
 
-      {activeTab === "consultations" && <ConsultationsTab physioId={physioId} />}
-      {activeTab === "today" && <TodayTab physioId={physioId} />}
+      {activeTab === "treatment" && <TreatmentTab physioId={physioId} />}
+      {activeTab === "review" && <ReviewTab physioId={physioId} />}
       {activeTab === "calendar" && <CalendarTab physioId={physioId} />}
       {activeTab === "patients" && <PatientsTab physioId={physioId} />}
     </div>
   );
 };
 
-function ConsultationsTab({ physioId }) {
+function TreatmentTab({ physioId }) {
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedLead, setSelectedLead] = useState(null);
+  const [subTab, setSubTab] = useState("new"); // "new" | "completed"
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -90,21 +88,37 @@ function ConsultationsTab({ physioId }) {
     return `${lead.appointment_date}${time}`;
   };
 
+  const isCompleted = (l) => l.physio_stage === "Complete";
+  const newCount = leads.filter((l) => !isCompleted(l)).length;
+  const completedCount = leads.filter(isCompleted).length;
+  const visibleLeads = leads.filter((l) => (subTab === "completed" ? isCompleted(l) : !isCompleted(l)));
+
   return (
-    <div data-testid="physio-consultations-tab">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-sm font-semibold text-slate-700">Assigned Consultations</h3>
-        <span className="rounded-full bg-sky-100 px-2.5 py-0.5 text-[10px] font-semibold text-sky-700">{leads.length} assigned</span>
+    <div data-testid="physio-treatment-tab">
+      <div className="mb-4 flex gap-1 rounded-lg border border-slate-200 bg-white p-1 w-fit">
+        {[{ key: "new", label: "New Appointment", count: newCount }, { key: "completed", label: "Completed", count: completedCount }].map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            onClick={() => setSubTab(t.key)}
+            className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
+              subTab === t.key ? "bg-sky-100 text-sky-700" : "text-slate-500 hover:bg-slate-50"
+            }`}
+            data-testid={`physio-treatment-subtab-${t.key}`}
+          >
+            {t.label} <span className="text-[10px] text-slate-400">({t.count})</span>
+          </button>
+        ))}
       </div>
 
-      {leads.length === 0 && !loading ? (
+      {visibleLeads.length === 0 && !loading ? (
         <div className="text-center py-16">
           <ClipboardList className="h-10 w-10 text-slate-200 mx-auto mb-3" />
-          <p className="text-sm text-slate-400">No consultations assigned to you yet</p>
+          <p className="text-sm text-slate-400">{subTab === "completed" ? "No completed treatments yet" : "No new appointments assigned yet"}</p>
         </div>
       ) : (
         <div className="space-y-2">
-          {leads.map((l) => (
+          {visibleLeads.map((l) => (
             <button
               type="button"
               key={l.id}
@@ -142,6 +156,78 @@ function ConsultationsTab({ physioId }) {
           physioId={physioId}
           onClose={() => setSelectedLead(null)}
           onDone={(updated) => { setSelectedLead(null); setLeads((prev) => prev.map((l) => (l.id === updated.id ? updated : l))); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function ReviewTab({ physioId }) {
+  const [patients, setPatients] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [assessmentTarget, setAssessmentTarget] = useState(null); // { leadId, leadName, week } | null
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await physioPatients(physioId);
+      setPatients((data.patients || []).filter((p) => (p.package_weeks || 0) > 0));
+    } catch { /* silent */ }
+    setLoading(false);
+  }, [physioId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  return (
+    <div data-testid="physio-review-tab">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-semibold text-slate-700">Weekly Reviews</h3>
+        <span className="rounded-full bg-sky-100 px-2.5 py-0.5 text-[10px] font-semibold text-sky-700">{patients.length} patients</span>
+      </div>
+
+      {patients.length === 0 && !loading ? (
+        <div className="text-center py-16">
+          <ClipboardCheck className="h-10 w-10 text-slate-200 mx-auto mb-3" />
+          <p className="text-sm text-slate-400">No active treatment plans to review yet</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {patients.map((p) => (
+            <div key={p.lead_id} className="rounded-xl border border-slate-200 bg-white p-4" data-testid={`physio-review-patient-${p.lead_id}`}>
+              <div className="flex items-center gap-3 mb-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-sky-50 text-xs font-bold text-sky-700">
+                  {p.lead_name?.charAt(0)?.toUpperCase()}
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-slate-800">{p.lead_name}</p>
+                  <p className="text-[10px] text-slate-400">{p.package_weeks} week program</p>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {Array.from({ length: p.package_weeks || 0 }, (_, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => setAssessmentTarget({ leadId: p.lead_id, leadName: p.lead_name, week: i + 1 })}
+                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-[11px] font-medium text-slate-600 transition-all hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700"
+                    data-testid={`physio-review-week-${p.lead_id}-${i + 1}`}
+                  >
+                    Week {i + 1}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {assessmentTarget && (
+        <WeeklyAssessmentModal
+          leadId={assessmentTarget.leadId}
+          week={assessmentTarget.week}
+          physioId={physioId}
+          onClose={() => setAssessmentTarget(null)}
+          onDone={() => setAssessmentTarget(null)}
         />
       )}
     </div>
@@ -238,109 +324,16 @@ function ConsultationDetailModal({ lead, physioId, onClose, onDone }) {
   );
 }
 
-function TodayTab({ physioId }) {
-  const [data, setData] = useState({ sessions: [], new_assigned: [], date: "" });
-  const [loading, setLoading] = useState(false);
-  const [completeModal, setCompleteModal] = useState(null);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try { setData(await physioToday(physioId)); } catch { /* silent */ }
-    setLoading(false);
-  }, [physioId]);
-
-  useEffect(() => { load(); }, [load]);
-
-  const formatTime = (iso) => (iso ? slotTo12h(iso) : "");
-
-  return (
-    <div data-testid="physio-today-tab">
-      {(data.new_assigned || []).length > 0 && (
-        <div className="mb-6">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold text-slate-700">Newly Assigned Today</h3>
-            <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-[10px] font-semibold text-amber-700">{data.new_assigned.length} new</span>
-          </div>
-          <div className="space-y-2">
-            {data.new_assigned.map((l) => (
-              <div key={l.id} className="rounded-xl border border-amber-200 bg-amber-50/50 p-4" data-testid={`today-new-assigned-${l.id}`}>
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-semibold text-slate-800">{l.name}</p>
-                  <span className="text-[10px] text-slate-400">{l.phone}</span>
-                </div>
-                <div className="mt-1 flex flex-wrap gap-x-3 text-[10px] text-slate-500">
-                  {l.age && <span>Age: {l.age}</span>}
-                  {l.gender && <span>{l.gender}</span>}
-                  {l.condition && <span>Condition: {l.condition}</span>}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-sm font-semibold text-slate-700">
-          Today's Sessions — {new Date().toLocaleDateString("en-IN", { weekday: "long", month: "long", day: "numeric" })}
-        </h3>
-        <span className="rounded-full bg-sky-100 px-2.5 py-0.5 text-[10px] font-semibold text-sky-700">{data.sessions?.length || 0} sessions</span>
-      </div>
-
-      {(!data.sessions || data.sessions.length === 0) && !loading ? (
-        <div className="text-center py-16">
-          <Calendar className="h-10 w-10 text-slate-200 mx-auto mb-3" />
-          <p className="text-sm text-slate-400">No sessions scheduled for today</p>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {(data.sessions || []).map((s) => (
-            <div
-              key={s.id}
-              className={`rounded-xl border p-4 flex items-center gap-4 ${
-                s.status === "completed"
-                  ? "border-emerald-200 bg-emerald-50/50"
-                  : "border-slate-200 bg-white"
-              }`}
-              data-testid={`today-session-${s.id}`}
-            >
-              <div className={`h-12 w-12 rounded-xl flex items-center justify-center text-lg font-bold ${
-                s.status === "completed" ? "bg-emerald-200 text-emerald-800" : "bg-sky-100 text-sky-700"
-              }`}>
-                {formatTime(s.slot_time)}
-              </div>
-              <div className="flex-1">
-                <p className="text-sm font-semibold text-slate-800">{s.lead_name}</p>
-                <p className="text-[10px] text-slate-400">Session #{s.session_number} of {s.total_sessions} · Week {s.week_number}</p>
-                {s.jr_physio_remarks && <p className="text-[10px] text-emerald-600 mt-0.5">{s.jr_physio_remarks}</p>}
-              </div>
-              {s.status === "upcoming" ? (
-                <Button size="sm" className="bg-sky-600 hover:bg-sky-700 text-white text-xs" onClick={() => setCompleteModal(s)} data-testid={`complete-session-${s.id}`}>
-                  <Check className="h-3 w-3 mr-1" /> Complete
-                </Button>
-              ) : (
-                <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-semibold text-emerald-700">Done</span>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {completeModal && (
-        <CompleteSessionModal
-          session={completeModal}
-          onClose={() => setCompleteModal(null)}
-          onDone={() => { setCompleteModal(null); load(); }}
-        />
-      )}
-    </div>
-  );
-}
-
 function CalendarTab({ physioId }) {
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth() + 1);
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
   const [data, setData] = useState({ sessions: [] });
-  const [selectedDate, setSelectedDate] = useState(null);
+  // Opens on today's date so the day detail panel doubles as the old "Today" tab —
+  // no extra click needed to see today's sessions.
+  const [selectedDate, setSelectedDate] = useState(() => {
+    const t = new Date();
+    return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`;
+  });
 
   const load = useCallback(async () => {
     try { setData(await physioCalendar(currentMonth, currentYear, physioId)); } catch { /* silent */ }
