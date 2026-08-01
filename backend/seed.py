@@ -437,7 +437,11 @@ async def backfill_login_history_from_sessions() -> None:
     current active session (sessions holds one row per user, its created_at is their
     last real login time). Only touches users with zero login_history rows — once a
     user has a real tracked login, this never overwrites or duplicates it. Safe to re-run."""
-    sessions = await v3_col("sessions").find({}, {"_id": 0}).to_list(2000)
+    # The "sessions" collection holds two unrelated shapes: auth login tokens
+    # ({token, user_id, created_at}) and treatment sessions ({lead_id, physio_id,
+    # slot_time, ...}). Only the login tokens carry user_id — reading the treatment ones
+    # here raised KeyError and killed the app at startup, so filter to the auth shape.
+    sessions = await v3_col("sessions").find({"user_id": {"$exists": True}}, {"_id": 0}).to_list(2000)
     if not sessions:
         return
     session_user_ids = list({s["user_id"] for s in sessions})
