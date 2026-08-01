@@ -387,6 +387,53 @@ async def v3_available_experts(
 
 
 
+@router.get("/branch-admin/available-dates/{branch_id}")
+async def v3_available_dates(
+    branch_id: str,
+    month: str = Query(..., description="YYYY-MM"),
+    lead_id: Optional[str] = None,
+    _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio")),
+):
+    """Every date in `month` that still has a free published Head Physio slot, and how many.
+
+    Read from the same two places as available-experts — doctors.slots minus live
+    appointments — so the booking calendar can only ever highlight a day its own expert
+    and slot columns will actually be able to fill. (The older calendar-availability
+    endpoint can't be used for this: it ignores the date when reading an expert's slots
+    and falls back to a default 09:00-17:30 grid, so it reports every day as open.)
+    """
+    branch_experts = await v3_col("doctors").find(
+        {"branch_id": branch_id, "profile_type": "head_physio"}, {"_id": 0, "id": 1, "slots": 1}
+    ).to_list(500)
+    if not branch_experts:
+        branch_experts = await v3_col("doctors").find(
+            {"profile_type": "head_physio"}, {"_id": 0, "id": 1, "slots": 1}
+        ).to_list(500)
+
+    booked_rows = await v3_col("appointments").find(
+        {"status": "new_appointment", "slot_time": {"$regex": f"^{month}-"}},
+        {"_id": 0, "doctor_id": 1, "slot_time": 1, "lead_id": 1},
+    ).to_list(5000)
+    # This lead's own bookings don't count against it — the day it already sits on has to
+    # stay reachable so the appointment can be seen and moved.
+    taken = {
+        (r.get("doctor_id"), r.get("slot_time"))
+        for r in booked_rows
+        if not (lead_id and r.get("lead_id") == lead_id)
+    }
+
+    dates: Dict[str, int] = {}
+    for d in branch_experts:
+        for s in (d.get("slots") or []):
+            if not isinstance(s, str) or not s.startswith(f"{month}-") or "T" not in s:
+                continue
+            if (d["id"], s) in taken:
+                continue
+            day = s.split("T")[0]
+            dates[day] = dates.get(day, 0) + 1
+    return {"month": month, "branch_id": branch_id, "dates": dates}
+
+
 @router.get("/branch-admin/consultations/{branch_id}/board")
 async def v3_consultations_board(branch_id: str, pipeline: Optional[str] = None, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio"))):
     """Return leads in the Consultations pipeline for a branch, grouped by the caller's own

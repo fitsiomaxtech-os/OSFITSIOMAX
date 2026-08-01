@@ -30,6 +30,7 @@ import {
   scheduleBranchAppointment,
   getBranchBoard,
   getAvailableExperts,
+  getAvailableDates,
   getLeadActivity,
   getLeadRemarks,
   moveBranchStage,
@@ -424,6 +425,9 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
   // Month shown by the popup's own calendar. Held apart from the picked date so paging
   // through months doesn't disturb the booking being built.
   const [apptMonth, setApptMonth] = useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() }; });
+  // { "YYYY-MM-DD": free slot count } for the shown month — drives the purple marking so
+  // the days worth clicking are visible without opening each one.
+  const [apptOpenDates, setApptOpenDates] = useState({});
 
   // Follow-up scheduling
   const tomorrowIso = () => new Date(Date.now() + 86400000).toISOString().slice(0, 10);
@@ -468,6 +472,18 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
     if (!apptDraft || !apptDraft.appointment_date || !branchId) return;
     fetchAvailableExperts(branchId, apptDraft.appointment_date, lead.id);
   }, [apptDraft?.appointment_date, branchId, lead.id, fetchAvailableExperts]);
+
+  // Which days of the shown month have a free slot, refreshed whenever the popup pages to
+  // another month.
+  useEffect(() => {
+    if (!apptDraft || !branchId) { return; }
+    const month = `${apptMonth.y}-${String(apptMonth.m + 1).padStart(2, "0")}`;
+    let cancelled = false;
+    getAvailableDates(branchId, month, lead.id)
+      .then((res) => { if (!cancelled) setApptOpenDates(res?.dates || {}); })
+      .catch(() => { if (!cancelled) setApptOpenDates({}); });
+    return () => { cancelled = true; };
+  }, [apptDraft ? true : false, apptMonth.y, apptMonth.m, branchId, lead.id]);
 
   // Open the popup's calendar on the month the booking already sits in — reopening an
   // appointment made for next month shouldn't land on today's page with nothing selected.
@@ -833,7 +849,7 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                   <p className="text-xs text-slate-500">{lead.name} · pick a date, then the Head Physio, then their time</p>
                 </div>
               </div>
-              <button onClick={() => setApptDraft(null)} className="rounded-full p-1.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700" data-testid="branch-appt-close">
+              <button onClick={() => setApptDraft(null)} className="rounded-lg border-2 border-orange-200 bg-orange-100 p-2 text-orange-600 transition hover:border-orange-300 hover:bg-orange-200 hover:text-orange-700" data-testid="branch-appt-close">
                 <X className="h-5 w-5" />
               </button>
             </div>
@@ -879,6 +895,8 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                           const isPast = dateStr < todayStr;
                           const isPicked = apptDraft.appointment_date === dateStr;
                           const isToday = dateStr === todayStr;
+                          const openSlots = apptOpenDates[dateStr] || 0;
+                          const hasSlots = !isPast && openSlots > 0;
                           return (
                             <button
                               key={day}
@@ -892,10 +910,15 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                                   ? "bg-teal-600 text-white shadow-sm ring-2 ring-teal-200"
                                   : isPast
                                   ? "cursor-not-allowed text-slate-300"
+                                  : hasSlots
+                                  // Purple marks a day that actually has a slot free, so the
+                                  // days worth clicking are visible without opening each one.
+                                  ? "bg-violet-300 text-white shadow-sm hover:bg-violet-400"
                                   : isToday
                                   ? "border border-teal-300 bg-teal-50 text-teal-700 hover:bg-teal-100"
                                   : "text-slate-600 hover:bg-slate-100"
                               }`}
+                              title={hasSlots ? `${openSlots} slot${openSlots === 1 ? "" : "s"} open` : undefined}
                               data-testid={`branch-appt-day-${day}`}
                             >
                               {day}
@@ -903,13 +926,9 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                           );
                         })}
                       </div>
-                      <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
-                        <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Selected</p>
-                        <p className="mt-0.5 text-sm font-bold text-slate-700" data-testid="branch-appt-selected-date">
-                          {apptDraft.appointment_date
-                            ? new Date(`${apptDraft.appointment_date}T00:00:00`).toLocaleDateString("en-US", { weekday: "long", day: "numeric", month: "long", year: "numeric" })
-                            : "No date picked yet"}
-                        </p>
+                      <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-3 text-xs font-semibold text-slate-400">
+                        <span className="flex items-center gap-1.5"><span className="inline-block h-3.5 w-3.5 rounded bg-violet-300" /> Slots open</span>
+                        <span className="flex items-center gap-1.5"><span className="inline-block h-3.5 w-3.5 rounded bg-teal-600" /> Picked</span>
                       </div>
                     </>
                   );
