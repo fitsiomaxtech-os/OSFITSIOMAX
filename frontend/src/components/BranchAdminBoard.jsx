@@ -171,8 +171,8 @@ export const BranchAdminBoard = ({ branchId }) => {
     { key: "head_physio", label: "HEAD PHYSIO CALENDAR", icon: Calendar },
     { key: "physio", label: "PHYSIO CALENDAR", icon: Activity },
     { key: "experts", label: "EXPERTS", icon: Stethoscope },
-    { key: "manager", label: "Manager", icon: UserCog },
-    { key: "calendar", label: "Calendar", icon: Calendar },
+    { key: "manager", label: "MANAGER", icon: UserCog },
+    { key: "calendar", label: "CALENDAR", icon: Calendar },
   ];
 
   return (
