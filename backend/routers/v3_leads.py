@@ -365,48 +365,63 @@ class V3FollowUpInput(BaseModel):
 class V3AppointmentScheduleInput(BaseModel):
     mode: str  # "offline" | "online"
     department: str = "physio"  # "physio" | "fitness" — chosen first, before mode
-    branch_id: Optional[str] = None
+    branch_id: Optional[str] = None  # omitted for offline => defaults to the Pre-Sales user's own branch
     diagnosis: Optional[str] = None  # basic diagnosis captured at Pre-Sales for the Physio/Offline path
+    appointment_date: Optional[str] = None  # YYYY-MM-DD — Pre-Sales' requested slot
+    appointment_time: Optional[str] = None  # HH:MM
+    remarks: Optional[str] = None
 
 
 @router.post("/leads/{lead_id}/schedule-appointment", response_model=V3LeadOut)
 async def v3_schedule_appointment(lead_id: str, payload: V3AppointmentScheduleInput, user: V3UserOut = Depends(v3_require_roles("pre_sales", "business_dev", "super_admin", "branch_admin"))):
     """Move lead to Appointment stage with department (physio/fitness), mode (offline/online),
-    and branch (offline only). Pre-Sales only assigns the branch (+ a basic diagnosis for
-    Physio/Offline); the Branch Admin assigns the Fitsiomax Expert and appointment time later."""
+    and branch (offline only — defaults to the calling Pre-Sales user's own assigned branch when
+    not given explicitly). Pre-Sales assigns the branch, a requested date/time, and remarks; the
+    Branch Admin still assigns the Fitsiomax Expert, using this date/time as the starting point."""
     if payload.department not in ("physio", "fitness"):
         raise HTTPException(status_code=400, detail="department must be 'physio' or 'fitness'")
     if payload.mode not in ("offline", "online"):
         raise HTTPException(status_code=400, detail="mode must be 'offline' or 'online'")
-    if payload.mode == "offline" and not payload.branch_id:
+    branch_id = payload.branch_id or (user.branch_id if payload.mode == "offline" else None)
+    if payload.mode == "offline" and not branch_id:
         raise HTTPException(status_code=400, detail="Branch is required for offline appointments")
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     branch_name = None
-    if payload.branch_id:
-        b = await v3_col("branches").find_one({"id": payload.branch_id}, {"_id": 0, "branch_name": 1, "name": 1})
+    if branch_id:
+        b = await v3_col("branches").find_one({"id": branch_id}, {"_id": 0, "branch_name": 1, "name": 1})
         if not b:
             raise HTTPException(status_code=404, detail="Branch not found")
         branch_name = b.get("branch_name") or b.get("name")
     # Online appointments have no branch, so there's no branch board for them to sit in.
-    new_branch_stage = await get_first_stage_name("sales", "New Appointment") if payload.branch_id else None
+    new_branch_stage = await get_first_stage_name("sales", "New Appointment") if branch_id else None
     updates = {
         "stage": "Appointment",
         "appointment_mode": payload.mode,
         "appointment_department": payload.department,
-        "branch_id": payload.branch_id,
+        "branch_id": branch_id,
         "branch_stage": new_branch_stage,
         "updated_at": now_iso(),
     }
     if payload.diagnosis:
         updates["diagnosis"] = payload.diagnosis
+    if payload.appointment_date:
+        updates["appointment_date"] = payload.appointment_date
+    if payload.appointment_time:
+        updates["appointment_time"] = payload.appointment_time
+    if payload.remarks:
+        updates["notes"] = payload.remarks
     await v3_col("leads").update_one({"id": lead_id}, {"$set": updates})
     details = f"Appointment scheduled · {payload.department} · mode={payload.mode}"
     if branch_name:
         details += f" · branch={branch_name}"
+    if payload.appointment_date and payload.appointment_time:
+        details += f" · requested {payload.appointment_date} {payload.appointment_time}"
     if payload.diagnosis:
         details += f" · diagnosis={payload.diagnosis}"
+    if payload.remarks:
+        details += f" · remarks={payload.remarks}"
     await v3_col("lead_activity").insert_one({
         "id": str(uuid.uuid4()),
         "lead_id": lead_id,
