@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Users, ShieldCheck, BarChart3, Plus, Pencil, Trash2, Eye, KeyRound, X, UserPlus, Stethoscope, MoreVertical, CheckCircle2, XCircle, AlertOctagon, ChevronDown } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -201,6 +201,18 @@ const AddEmployeeModal = ({ employee, meta, onClose, onSaved }) => {
   const [form, setForm] = useState(employee ? { ...blankEmployee, ...employee } : blankEmployee);
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
+  // Designation is the person's role, so it's picked from the same role list HR uses
+  // everywhere else rather than typed freehand. Stored as the display label
+  // ("HEAD PHYSIO"), which is what existing employee records already hold. An employee
+  // whose designation predates this list keeps it as an option so editing them never
+  // silently blanks the field.
+  const designationOptions = useMemo(() => {
+    const fromRoles = (meta.roles || []).map(roleLabel);
+    const current = (form.designation || "").trim();
+    const all = current && !fromRoles.includes(current) ? [...fromRoles, current] : fromRoles;
+    return ["", ...all];
+  }, [meta.roles, form.designation]);
+
   const submit = async () => {
     if (!form.full_name.trim()) { toast.error("Full name required"); setTab("personal"); return; }
     const payload = { ...form };
@@ -246,8 +258,8 @@ const AddEmployeeModal = ({ employee, meta, onClose, onSaved }) => {
           {tab === "employment" && (
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Employee Code"><Input value={form.employee_code} onChange={(e) => set("employee_code", e.target.value)} placeholder="Auto-generated" data-testid="hr-emp-code" /></Field>
-              <Field label="Department"><Select value={form.department} onChange={(v) => set("department", v)} options={["", ...meta.departments]} testid="hr-emp-dept" /></Field>
-              <Field label="Designation"><Input value={form.designation} onChange={(e) => set("designation", e.target.value)} data-testid="hr-emp-designation" /></Field>
+              <Field label="Department"><Select value={form.department} onChange={(v) => set("department", v)} options={["", ...meta.departments]} testid="hr-emp-dept" uppercase /></Field>
+              <Field label="Designation"><Select value={form.designation} onChange={(v) => set("designation", v)} options={designationOptions} testid="hr-emp-designation" uppercase /></Field>
               <Field label="Joining Date"><Input type="date" value={form.joining_date} onChange={(e) => set("joining_date", e.target.value)} data-testid="hr-emp-joining" /></Field>
               <Field label="Reporting To"><Input value={form.reporting_to} onChange={(e) => set("reporting_to", e.target.value)} data-testid="hr-emp-reporting" /></Field>
               <Field label="Status"><Select value={form.status} onChange={(v) => set("status", v)} options={["active", "left", "on_leave"]} testid="hr-emp-status" /></Field>
@@ -987,8 +999,15 @@ const Field = ({ label, children, className = "" }) => (
   </div>
 );
 
-const Select = ({ value, onChange, options = [], testid }) => (
-  <select value={value} onChange={(e) => onChange(e.target.value)} className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm" data-testid={testid}>
+// `uppercase` styles the displayed text only — the stored value is untouched, so
+// existing records and the backend's department list keep matching.
+const Select = ({ value, onChange, options = [], testid, uppercase = false }) => (
+  <select
+    value={value}
+    onChange={(e) => onChange(e.target.value)}
+    className={`h-10 w-full rounded-md border border-slate-200 px-3 text-sm${uppercase ? " uppercase" : ""}`}
+    data-testid={testid}
+  >
     {options.map((o) => <option key={o} value={o}>{o || "Select"}</option>)}
   </select>
 );
