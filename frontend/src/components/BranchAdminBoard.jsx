@@ -43,7 +43,6 @@ import { FitsiomaxStorePanel } from "@/components/BranchStoreBoard";
 import { PullFromSheetButton } from "@/components/PullFromSheetButton";
 import { PlaceholderPanel } from "@/components/PackagesBoard";
 import { AccountantManageTab } from "@/components/branch/AccountantManageTab";
-import { BranchExpertsTab } from "@/components/branch/BranchExpertsTab";
 import { BranchCalendarPanel } from "@/components/branch/BranchCalendarPanel";
 import { BranchDetailPage } from "@/components/branch/BranchDetailPage";
 import { CreateLeadModal } from "@/components/CreateLeadModal";
@@ -170,7 +169,6 @@ export const BranchAdminBoard = ({ branchId }) => {
   const MANAGEMENT_SUB_TABS = [
     { key: "head_physio", label: "HEAD PHYSIO CALENDAR", icon: Calendar },
     { key: "physio", label: "PHYSIO CALENDAR", icon: Activity },
-    { key: "experts", label: "EXPERTS", icon: Stethoscope },
     { key: "manager", label: "MANAGER", icon: UserCog },
     { key: "calendar", label: "CALENDAR", icon: Calendar },
   ];
@@ -219,8 +217,6 @@ export const BranchAdminBoard = ({ branchId }) => {
           </div>
           {consultationsSubTab === "physio" ? (
             <HeadPhysioCalendar branchId={branchId} profileType="physio" />
-          ) : consultationsSubTab === "experts" ? (
-            <BranchExpertsTab />
           ) : consultationsSubTab === "manager" ? (
             <BranchDetailPage branchId={branchId} readOnly />
           ) : consultationsSubTab === "calendar" ? (
