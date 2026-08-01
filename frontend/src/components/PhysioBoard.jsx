@@ -87,13 +87,10 @@ function TreatmentTab({ physioId }) {
   const completedCount = leads.filter(isCompleted).length;
   const visibleLeads = leads.filter((l) => (subTab === "completed" ? isCompleted(l) : !isCompleted(l)));
 
-  // Days since Branch Admin assigned this patient — a queue-age indicator for how
-  // long a "New Appointment" has been sitting unattended.
-  const daysSinceAssigned = (lead) => {
-    if (!lead.physio_assigned_at) return null;
-    const days = Math.max(0, Math.floor((Date.now() - new Date(lead.physio_assigned_at).getTime()) / 86400000));
-    return `${days} day${days === 1 ? "" : "s"}`;
-  };
+  // Treatment days ticked off out of however many were booked for this patient.
+  const completeDays = (lead) => (
+    lead.total_sessions ? `${lead.completed_sessions || 0} of ${lead.total_sessions}` : null
+  );
 
   return (
     <div data-testid="physio-treatment-tab">
@@ -155,7 +152,7 @@ function TreatmentTab({ physioId }) {
                       {l.physio_stage === "Complete" ? "Complete" : (l.consultation_stage || "New Appointment")}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-slate-600">{daysSinceAssigned(l) || "—"}</td>
+                  <td className="px-4 py-3 text-slate-600">{completeDays(l) || "—"}</td>
                   <td className="px-4 py-3 text-slate-500">{(l.updated_at || "").slice(0, 10) || "—"}</td>
                   <td className="px-4 py-3 text-slate-600">{l.appointment_time ? to12h(l.appointment_time) : "—"}</td>
                 </tr>
@@ -169,8 +166,9 @@ function TreatmentTab({ physioId }) {
         <ConsultationDetailModal
           lead={selectedLead}
           physioId={physioId}
-          onClose={() => setSelectedLead(null)}
-          onDone={(updated) => { setSelectedLead(null); setLeads((prev) => prev.map((l) => (l.id === updated.id ? updated : l))); }}
+          // Days are completed inside the popup, so re-pull on close to refresh the counts.
+          onClose={() => { setSelectedLead(null); load(); }}
+          onDone={() => { setSelectedLead(null); load(); }}
         />
       )}
     </div>
@@ -180,6 +178,7 @@ function TreatmentTab({ physioId }) {
 function ReviewTab({ physioId }) {
   const [patients, setPatients] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [weeksTarget, setWeeksTarget] = useState(null); // patient whose weeks are being picked
   const [assessmentTarget, setAssessmentTarget] = useState(null); // { leadId, leadName, week } | null
 
   const load = useCallback(async () => {
@@ -208,38 +207,81 @@ function ReviewTab({ physioId }) {
           <p className="text-sm text-slate-400">Nothing to review yet — complete a treatment day first</p>
         </div>
       ) : (
-        <div className="space-y-3">
-          {patients.map((p) => {
-            const weeks = p.weeks || p.package_weeks || 0;
-            return (
-              <div key={p.lead_id} className="rounded-xl border border-slate-200 bg-white p-4" data-testid={`physio-review-patient-${p.lead_id}`}>
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-sky-50 text-xs font-bold text-sky-700">
-                    {p.lead_name?.charAt(0)?.toUpperCase()}
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-slate-800">{p.lead_name}</p>
-                    <p className="text-[10px] text-slate-400">
-                      {p.completed_sessions} of {p.total_sessions} days complete{weeks ? ` · ${weeks} week${weeks === 1 ? "" : "s"}` : ""}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {Array.from({ length: weeks }, (_, i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() => setAssessmentTarget({ leadId: p.lead_id, leadName: p.lead_name, week: i + 1 })}
-                      className="rounded-lg border border-slate-200 px-3 py-1.5 text-[11px] font-medium text-slate-600 transition-all hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700"
-                      data-testid={`physio-review-week-${p.lead_id}-${i + 1}`}
-                    >
-                      Week {i + 1}
-                    </button>
-                  ))}
-                </div>
+        <div className="overflow-auto rounded-xl border border-slate-200 bg-white">
+          <table className="min-w-full text-sm">
+            <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+              <tr>
+                <th className="px-4 py-2.5">Patient</th>
+                <th className="px-4 py-2.5">Phone</th>
+                <th className="px-4 py-2.5">Stage</th>
+                <th className="px-4 py-2.5">Complete Days</th>
+                <th className="px-4 py-2.5">Updated</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {patients.map((p) => (
+                <tr
+                  key={p.lead_id}
+                  onClick={() => setWeeksTarget(p)}
+                  className="cursor-pointer transition-colors hover:bg-slate-50"
+                  data-testid={`physio-review-patient-${p.lead_id}`}
+                >
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2.5">
+                      <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-sky-50 text-xs font-bold text-sky-700">
+                        {p.lead_name?.charAt(0)?.toUpperCase() || "?"}
+                      </span>
+                      <span className="font-medium text-slate-800">{p.lead_name}</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-slate-600">{p.phone || "—"}</td>
+                  <td className="px-4 py-3">
+                    <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-semibold ${
+                      p.physio_stage === "Complete" ? "bg-emerald-100 text-emerald-700" : "bg-sky-100 text-sky-700"
+                    }`}>
+                      {p.physio_stage === "Complete" ? "Complete" : (p.consultation_stage || "In Treatment")}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-slate-600">{p.completed_sessions} of {p.total_sessions}</td>
+                  <td className="px-4 py-3 text-slate-500">{(p.updated_at || "").slice(0, 10) || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Row click opens that patient's weeks — the write-up itself is the same
+          WeeklyAssessmentModal the per-patient detail view uses. */}
+      {weeksTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) setWeeksTarget(null); }}>
+          <div className="w-full max-w-md overflow-hidden rounded-xl bg-white shadow-2xl" data-testid="physio-review-weeks-modal">
+            <div className="flex items-start justify-between gap-3 bg-slate-500 px-5 py-4 text-white">
+              <div className="min-w-0">
+                <h3 className="text-base font-bold">{weeksTarget.lead_name}</h3>
+                <p className="text-xs text-white/80">
+                  {weeksTarget.completed_sessions} of {weeksTarget.total_sessions} days complete
+                </p>
               </div>
-            );
-          })}
+              <button type="button" onClick={() => setWeeksTarget(null)} className="rounded-full p-1.5 text-white/80 hover:bg-white/20"><X className="h-5 w-5" /></button>
+            </div>
+            <div className="p-5">
+              <p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Pick a week to write up</p>
+              <div className="flex flex-wrap gap-2">
+                {Array.from({ length: weeksTarget.weeks || weeksTarget.package_weeks || 0 }, (_, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => setAssessmentTarget({ leadId: weeksTarget.lead_id, leadName: weeksTarget.lead_name, week: i + 1 })}
+                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-[11px] font-medium text-slate-600 transition-all hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700"
+                    data-testid={`physio-review-week-${weeksTarget.lead_id}-${i + 1}`}
+                  >
+                    Week {i + 1}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

@@ -190,6 +190,8 @@ async def physio_patients(physio_id: Optional[str] = None, user: V3UserOut = Dep
             "package_weeks": lead.get("package_weeks"),
             "weeks": weeks,
             "physio_stage": lead.get("physio_stage"),
+            "consultation_stage": lead.get("consultation_stage"),
+            "updated_at": lead.get("updated_at"),
         })
 
     return {"patients": patients}
@@ -207,8 +209,31 @@ async def physio_consultations(physio_id: Optional[str] = None, user: V3UserOut 
         {"_id": 0},
     ).sort("appointment_datetime", -1).to_list(500)
 
+    # Treatment-day tallies, so the board can show "3 of 8 days" per patient without
+    # a follow-up request for each one. Carried alongside the lead's own fields
+    # (V3LeadOut ignores extras, so these are attached after dumping).
+    lead_ids = [l["id"] for l in leads]
+    day_rows = await v3_col("sessions").find(
+        {"physio_id": doctor["id"], "lead_id": {"$in": lead_ids}},
+        {"_id": 0, "lead_id": 1, "status": 1},
+    ).to_list(5000)
+    tallies: dict = {}
+    for row in day_rows:
+        t = tallies.setdefault(row["lead_id"], {"total": 0, "completed": 0})
+        t["total"] += 1
+        if row.get("status") == "completed":
+            t["completed"] += 1
+
+    out = []
+    for ld in leads:
+        dumped = V3LeadOut(**ld).model_dump()
+        t = tallies.get(ld["id"], {"total": 0, "completed": 0})
+        dumped["total_sessions"] = t["total"]
+        dumped["completed_sessions"] = t["completed"]
+        out.append(dumped)
+
     return {
-        "leads": [V3LeadOut(**ld).model_dump() for ld in leads],
+        "leads": out,
         "doctor_id": doctor["id"],
         "doctor_name": doctor["full_name"],
     }
