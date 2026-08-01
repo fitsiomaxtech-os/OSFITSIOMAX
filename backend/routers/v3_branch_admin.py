@@ -311,24 +311,22 @@ async def v3_available_experts(
     time: Optional[str] = None,
     _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio")),
 ):
-    """Return only branch experts who have NO consultation booked at the given date (optionally
-    narrowed to an exact time).
+    """Head Physios at this branch who can take a consultation on the given date
+    (optionally narrowed to an exact time).
 
-    A physio is considered booked when another lead in this branch has the same appointment_date
-    (and, if `time` is given, the same appointment_time too) and is not in a final-cancelled state.
-    Omitting `time` checks availability for the whole day, not one specific slot.
+    Consultations are conducted by Head Physios only — regular Physios run treatment
+    sessions, which are booked separately once a package is sold — so this never offers
+    a Physio. A Head Physio assigned to several branches has one doctors record per
+    branch, so they appear only in the branches they're actually assigned to.
     """
     if not date:
         raise HTTPException(status_code=400, detail="date is required")
-    # All experts at this branch — a Head Physio/Physio assigned to several branches has
-    # one doctors record per branch, so they only show up in the branches they're
-    # actually assigned to, not every branch in the org.
     branch_experts = await v3_col("doctors").find(
-        {"branch_id": branch_id}, {"_id": 0}
+        {"branch_id": branch_id, "profile_type": "head_physio"}, {"_id": 0}
     ).to_list(500)
-    # All experts (fallback when no branch-mapped experts)
+    # Fallback for a branch with no Head Physio mapped to it yet.
     if not branch_experts:
-        branch_experts = await v3_col("doctors").find({}, {"_id": 0}).to_list(500)
+        branch_experts = await v3_col("doctors").find({"profile_type": "head_physio"}, {"_id": 0}).to_list(500)
 
     # Availability is decided per slot, not per day: an expert with a 9:30 booking is
     # still free at 10:00. So a same-day booking no longer hides them — only being

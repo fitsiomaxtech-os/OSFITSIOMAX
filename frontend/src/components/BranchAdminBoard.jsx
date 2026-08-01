@@ -863,8 +863,8 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                 <Input type="date" value={apptDraft.appointment_date} min={new Date().toISOString().slice(0, 10)} onChange={(e) => setApptDraft({ ...apptDraft, appointment_date: e.target.value })} data-testid="branch-appt-date" />
               </div>
               <div>
-                <label className="mb-1 block text-xs font-semibold text-slate-600">Experts *</label>
-                <p className="mb-1.5 text-[11px] text-slate-400">Showing experts available on this date.</p>
+                <label className="mb-1 block text-xs font-semibold text-slate-600">Head Physio *</label>
+                <p className="mb-1.5 text-[11px] text-slate-400">Showing Head Physios available on this date.</p>
                 {apptExperts.loading ? (
                   <p className="text-xs text-slate-400">Checking availability...</p>
                 ) : apptExperts.experts.length === 0 ? (
