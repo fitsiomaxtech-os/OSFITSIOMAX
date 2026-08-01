@@ -29,8 +29,8 @@ const SESSION_TYPES = [
 ];
 
 // Slot length comes from FITSIO STORE — the Consultation Duration on the consultation
-// item for Consultant Calendar, and on the session item for Physio Calendar. Only used
-// if the store hasn't been configured yet.
+// item for the Head Physio calendar, and on the session item for the Physio calendar.
+// Only used if the store hasn't been configured yet.
 const FALLBACK_SLOT_MINUTES = 30;
 
 function getDaysInMonth(year, month) {
@@ -41,14 +41,29 @@ function getFirstDayOfMonth(year, month) {
   return new Date(year, month, 1).getDay();
 }
 
-// `profileType`: "head_physio" (default) manages Head Physios' consultation calendars;
-// "physio" manages regular Physios' treatment-session calendars. Same UI and backend
-// endpoints either way — only the doctor filter, labels, and slot-type options differ.
+// Two distinct scheduling workflows share this shell, and they are NOT interchangeable:
+//
+//   profileType "head_physio"  ->  HEAD PHYSIO CALENDAR  — consultations only. Booked
+//                                  from Branch Leads -> Appointment, one per lead, and
+//                                  the day is cut at the store's Consultation Duration.
+//   profileType "physio"       ->  PHYSIO CALENDAR       — treatment sessions only.
+//                                  Booked against a patient's session package (many per
+//                                  lead), cut at the session item's duration.
+//
+// What varies with it: which experts are listed, where slot length comes from, and the
+// language throughout. Publishing availability is the one step both genuinely share.
 export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) => {
   const isPhysio = profileType === "physio";
   const roleLabel = isPhysio ? "Physio" : "Head Physio";
   const roleLabelPlural = isPhysio ? "Physios" : "Head Physios";
   const SLOT_TYPES = isPhysio ? SESSION_TYPES : CONSULTATION_TYPES;
+  // The two calendars schedule different things and must not be read as interchangeable:
+  // a Head Physio's day holds consultations (booked from Branch Leads → Appointment);
+  // a Physio's day holds treatment sessions (booked when a package is assigned).
+  const purpose = isPhysio ? "Treatment Sessions" : "Consultations";
+  const purposeLine = isPhysio
+    ? "Treatment sessions only — booked against a patient's session package."
+    : "Consultations only — booked from Branch Leads → Appointment.";
 
   const [doctors, setDoctors] = useState([]);
   const [selectedDoctor, setSelectedDoctor] = useState(null);
@@ -304,7 +319,8 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
             </h3>
             <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-semibold text-violet-700">{doctors.length}</span>
           </div>
-          <p className="mt-1 text-[10px] text-slate-400">Managed by HR Admin</p>
+          <p className="mt-1 text-[10px] font-medium text-violet-500">{purposeLine}</p>
+          <p className="mt-0.5 text-[10px] text-slate-400">Managed by HR Admin</p>
         </div>
 
         <div className="flex-1 overflow-y-auto p-2 space-y-1.5" data-testid="doctor-list">
@@ -350,7 +366,7 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
           <div className="flex-1 flex items-center justify-center" data-testid="calendar-empty-state">
             <div className="text-center">
               <CalendarIcon className="h-12 w-12 text-slate-200 mx-auto mb-3" />
-              <p className="text-sm text-slate-400">Select a {roleLabel} to manage their calendar</p>
+              <p className="text-sm text-slate-400">Select a {roleLabel} to open their {purpose.toLowerCase()} calendar</p>
             </div>
           </div>
         ) : (
@@ -363,7 +379,9 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
                 </div>
                 <div>
                   <h3 className="text-sm font-semibold text-slate-800">{selectedDoctor.full_name}</h3>
-                  <p className="text-[11px] text-slate-400">{selectedDoctor.specialization || "Physiotherapist"} · {(calendarData?.slots || []).length} slots</p>
+                  <p className="text-[11px] text-slate-400">
+                    {purpose} · {slotDuration} min · {(calendarData?.slots || []).length} slots open
+                  </p>
                 </div>
               </div>
               <div className="flex flex-wrap items-center justify-end gap-2">
@@ -469,7 +487,7 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
                   <div className="flex items-center justify-center h-full">
                     <div className="text-center">
                       <Clock className="h-8 w-8 text-slate-200 mx-auto mb-2" />
-                      <p className="text-xs text-slate-400">Select a date to manage time slots</p>
+                      <p className="text-xs text-slate-400">Pick a date to open the day for {purpose.toLowerCase()}</p>
                     </div>
                   </div>
                 ) : (

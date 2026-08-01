@@ -168,8 +168,8 @@ export const BranchAdminBoard = ({ branchId }) => {
   // top-level tabs, and Manager used to sit one level deeper inside Calendar;
   // all three now live here alongside the two calendars.
   const MANAGEMENT_SUB_TABS = [
-    { key: "head_physio", label: "Consultant Calendar", icon: Calendar },
-    { key: "physio", label: "Physio Calendar", icon: Activity },
+    { key: "head_physio", label: "HEAD PHYSIO CALENDAR", icon: Calendar },
+    { key: "physio", label: "PHYSIO CALENDAR", icon: Activity },
     { key: "experts", label: "EXPERTS", icon: Stethoscope },
     { key: "manager", label: "Manager", icon: UserCog },
     { key: "calendar", label: "Calendar", icon: Calendar },
