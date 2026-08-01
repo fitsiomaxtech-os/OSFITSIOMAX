@@ -16,7 +16,6 @@ import { to12h } from "@/lib/time";
 
 // weekly_hours is keyed mon..sun; JS getDay() is 0=Sun..6=Sat.
 const DAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
-const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
 // Month filter window — three months back, the month being viewed, two ahead. The viewed
@@ -43,6 +42,8 @@ export const BranchCalendarPanel = ({ branchId }) => {
   const [editingId, setEditingId] = useState(null);
   const [draft, setDraft] = useState(emptyDraft());
   const [dayInfo, setDayInfo] = useState(null);
+  // The day a booked card was clicked into — its full list, with payments and next visits.
+  const [dayView, setDayView] = useState(null); // { date, items } | null
   const [dayLoading, setDayLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -67,34 +68,6 @@ export const BranchCalendarPanel = ({ branchId }) => {
   const weekly = branch?.weekly_hours || {};
   const holidays = branch?.holidays || [];
 
-  const monthCells = useMemo(() => {
-    const year = monthDate.getFullYear();
-    const month = monthDate.getMonth();
-    const firstDow = new Date(year, month, 1).getDay();  // 0 Sun..6 Sat
-    const lead = firstDow === 0 ? 6 : firstDow - 1;       // Monday-based leading blanks
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-    const cells = [];
-    for (let i = 0; i < lead; i++) cells.push(null);
-    for (let day = 1; day <= daysInMonth; day++) cells.push(new Date(year, month, day));
-    while (cells.length % 7 !== 0) cells.push(null);
-    return cells;
-  }, [monthDate]);
-
-  // Consultation appointments grouped by date (the schedulable, editable events).
-  const apptsByDate = useMemo(() => {
-    const map = {};
-    (appts || []).forEach((a) => { (map[a.appointment_date] = map[a.appointment_date] || []).push(a); });
-    Object.values(map).forEach((arr) => arr.sort((a, b) => (a.appointment_time || "").localeCompare(b.appointment_time || "")));
-    return map;
-  }, [appts]);
-
-  // Lead branch appointments (read-only overlay), grouped by date.
-  const leadApptsByDate = useMemo(() => {
-    const map = {};
-    (leads || []).forEach((l) => { if (l.appointment_date) (map[l.appointment_date] = map[l.appointment_date] || []).push(l); });
-    return map;
-  }, [leads]);
-
   const upcomingGroups = useMemo(() => {
     const today = iso(new Date());
     const map = {};
@@ -105,6 +78,75 @@ export const BranchCalendarPanel = ({ branchId }) => {
   }, [appts]);
 
   const todayIso = iso(new Date());
+
+  // One row per booking, carrying everything the calendar shows about it. The Head Physio
+  // comes off the appointment itself; the Physio and the payment standing come off the
+  // client's lead record, which the appointment is matched to by lead_id (falling back to
+  // the name for rows booked before lead_id was recorded).
+  const bookingRows = useMemo(() => {
+    const leadById = {};
+    const leadByName = {};
+    (leads || []).forEach((l) => {
+      leadById[l.id] = l;
+      if (l.name) leadByName[l.name.trim().toLowerCase()] = l;
+    });
+    const rowFor = (lead) => ({
+      physio: lead?.assigned_physio_name || "—",
+      stage: lead?.consultation_stage || lead?.branch_stage || "",
+      lead: lead || null,
+    });
+
+    const seen = new Set();
+    const rows = [];
+    (appts || []).forEach((a) => {
+      const name = a.patient_name || a.lead_name || "—";
+      const lead = (a.lead_id && leadById[a.lead_id]) || leadByName[name.trim().toLowerCase()] || null;
+      seen.add(`${a.appointment_date}|${a.appointment_time || ""}|${name.trim().toLowerCase()}`);
+      rows.push({
+        id: a.id, appt: a, date: a.appointment_date, time: a.appointment_time || "",
+        name, headPhysio: a.doctor_name || "—", ...rowFor(lead),
+      });
+    });
+    // A lead carrying an appointment that never made it into `appointments` — booked
+    // before Branch Leads started writing one. Kept so nothing silently disappears.
+    (leads || []).forEach((l) => {
+      if (!l.appointment_date) return;
+      const key = `${l.appointment_date}|${l.appointment_time || ""}|${(l.name || "").trim().toLowerCase()}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      rows.push({
+        id: `lead-${l.id}`, appt: null, date: l.appointment_date, time: l.appointment_time || "",
+        name: l.name || "—", headPhysio: l.appointment_expert_name || l.appointment_doctor_name || "—", ...rowFor(l),
+      });
+    });
+    return rows;
+  }, [appts, leads]);
+
+  // Only days that actually have a booking, in date order — the calendar lists what is
+  // booked rather than painting every square of the month.
+  const bookedDays = useMemo(() => {
+    const prefix = `${monthDate.getFullYear()}-${String(monthDate.getMonth() + 1).padStart(2, "0")}-`;
+    const map = {};
+    bookingRows.forEach((r) => { if ((r.date || "").startsWith(prefix)) (map[r.date] = map[r.date] || []).push(r); });
+    return Object.keys(map).sort().map((date) => ({
+      date,
+      items: map[date].sort((a, b) => (a.time || "").localeCompare(b.time || "")),
+    }));
+  }, [bookingRows, monthDate]);
+
+  /** Next unpaid Treatment Fee installment on this client's record, if any. */
+  const paymentDue = (lead) => {
+    const next = ((lead?.treatment_fee_payment_details?.installments) || [])
+      .filter((i) => !i.paid)
+      .sort((a, b) => (a.due_date || "").localeCompare(b.due_date || ""))[0];
+    return next ? { date: next.due_date, amount: next.amount } : null;
+  };
+
+  /** This client's next booking from today onward — their upcoming visit. */
+  const upcomingFor = (name) => bookingRows
+    .filter((r) => r.name.trim().toLowerCase() === (name || "").trim().toLowerCase() && r.date >= todayIso)
+    .sort((a, b) => `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`))[0] || null;
+
   const shiftMonth = (delta) => setMonthDate((prev) => { const d = new Date(prev); d.setMonth(d.getMonth() + delta); return d; });
   const monthLabel = monthDate.toLocaleDateString("en-US", { month: "long", year: "numeric" });
   const currentMonthKey = `${new Date().getFullYear()}-${new Date().getMonth()}`;
@@ -234,78 +276,184 @@ export const BranchCalendarPanel = ({ branchId }) => {
         </div>
       </div>
 
-      {/* Weekday headers (desktop) */}
-      <div className="hidden grid-cols-7 gap-2 sm:grid" data-testid="cal-weekday-headers">
-        {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((w) => (
-          <p key={w} className="text-center text-[11px] font-semibold uppercase tracking-wider text-slate-400">{w}</p>
-        ))}
-      </div>
-
-      {/* Month grid */}
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-7" data-testid="cal-month-grid">
-        {monthCells.map((d, idx) => {
-          if (!d) return <div key={`empty-${idx}`} className="hidden rounded-lg border border-transparent sm:block" />;
-          const dateStr = iso(d);
-          const dowIdx = d.getDay();
-          const cfg = weekly[DAY_KEYS[dowIdx]];
-          const isHoliday = holidays.includes(dateStr);
-          const isOpen = cfg ? cfg.is_open !== false : true;
-          const isToday = dateStr === todayIso;
-          const dayAppts = apptsByDate[dateStr] || [];
-          const dayLeadAppts = leadApptsByDate[dateStr] || [];
-          const bookable = !isHoliday && isOpen;
-          const shown = dayAppts.slice(0, 3);
-          const moreCount = dayAppts.length - shown.length;
-          return (
-            <div
-              key={dateStr}
-              className={`flex min-h-[104px] flex-col overflow-hidden rounded-lg border ${isToday ? "border-sky-400 ring-1 ring-sky-200" : "border-slate-200"} ${isHoliday ? "bg-rose-50/40" : isOpen ? "bg-white" : "bg-slate-50"}`}
-              data-testid={`cal-day-${dateStr}`}
-            >
-              <div className="flex items-center justify-between px-2 py-1">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] font-semibold uppercase text-slate-400 sm:hidden">{DAY_LABELS[dowIdx]}</span>
-                  <span className={`text-sm font-bold ${isToday ? "text-sky-700" : "text-slate-700"}`}>{d.getDate()}</span>
+      {/* Booked days only, three to a row. A day with nothing on it isn't drawn at all —
+          this is a list of what's booked, not a painting of the month. */}
+      {bookedDays.length === 0 ? (
+        <p className="rounded-lg border border-dashed border-slate-200 px-3 py-12 text-center text-sm text-slate-400" data-testid="cal-no-bookings">
+          Nothing booked in {monthLabel}.
+        </p>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3" data-testid="cal-booked-grid">
+          {bookedDays.map(({ date, items }) => {
+            const d = new Date(`${date}T00:00:00`);
+            const isToday = date === todayIso;
+            const isHoliday = holidays.includes(date);
+            const shown = items.slice(0, 4);
+            return (
+              <button
+                key={date}
+                type="button"
+                onClick={() => setDayView({ date, items })}
+                className={`flex min-h-[13rem] flex-col overflow-hidden rounded-xl border-2 text-left transition hover:shadow-md ${
+                  isToday ? "border-sky-400 ring-2 ring-sky-100" : "border-slate-200 hover:border-sky-300"
+                } ${isHoliday ? "bg-rose-50/40" : "bg-white"}`}
+                data-testid={`cal-day-${date}`}
+              >
+                <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/70 px-4 py-2.5">
+                  <div>
+                    <p className={`text-base font-bold ${isToday ? "text-sky-700" : "text-slate-800"}`}>
+                      {d.toLocaleDateString("en-US", { weekday: "long" })}
+                    </p>
+                    <p className="text-xs font-medium text-slate-500">
+                      {d.toLocaleDateString("en-US", { day: "numeric", month: "long", year: "numeric" })}
+                      {isToday && <span className="ml-1.5 font-bold text-sky-600">· Today</span>}
+                      {isHoliday && <span className="ml-1.5 font-bold text-rose-500">· Holiday</span>}
+                    </p>
+                  </div>
+                  <span className="shrink-0 rounded-lg border-2 border-sky-300 bg-sky-50 px-2.5 py-1 text-xs font-bold text-sky-700">
+                    {items.length} booked
+                  </span>
                 </div>
-                {bookable && (
-                  <button type="button" onClick={() => openCreate(dateStr)} className="rounded p-0.5 text-slate-300 hover:bg-slate-100 hover:text-sky-600" title="Book consultation" data-testid={`cal-day-add-${dateStr}`}>
-                    <Plus className="h-3.5 w-3.5" />
-                  </button>
-                )}
-              </div>
-              <div className="flex-1 space-y-1 px-1.5 pb-1.5">
-                {isHoliday ? (
-                  <p className="rounded bg-rose-100/70 px-1.5 py-0.5 text-center text-[10px] font-semibold text-rose-500">Holiday</p>
-                ) : !isOpen ? (
-                  <p className="rounded bg-slate-100 px-1.5 py-0.5 text-center text-[10px] font-medium text-slate-400">Closed</p>
-                ) : (
-                  <>
-                    {shown.map((a) => (
-                      <button
-                        key={a.id}
-                        type="button"
-                        onClick={() => openEdit(a)}
-                        className="block w-full truncate rounded border border-violet-200 bg-violet-50 px-1.5 py-0.5 text-left text-[10px] font-medium text-violet-700 hover:bg-violet-100"
-                        title={`${to12h(a.appointment_time)} · ${a.patient_name || a.lead_name || ""}${a.doctor_name ? " · " + a.doctor_name : ""}`}
-                        data-testid={`cal-appt-${a.id}`}
-                      >
-                        <span className="font-bold">{to12h(a.appointment_time)}</span> {a.patient_name || a.lead_name || "—"}
-                      </button>
-                    ))}
-                    {moreCount > 0 && <p className="px-1 text-[10px] font-medium text-slate-400">+{moreCount} more</p>}
-                    {dayLeadAppts.slice(0, 2).map((a) => (
-                      <div key={a.id} className="truncate rounded border border-sky-100 bg-sky-50/60 px-1.5 py-0.5 text-[10px] text-slate-500" title={`${to12h(a.appointment_time)} · ${a.name || ""}`} data-testid={`cal-lead-appt-${a.id}`}>
-                        <span className="font-semibold text-sky-600">{to12h(a.appointment_time)}</span> {a.name || "—"}
+
+                <div className="flex-1 divide-y divide-slate-100 px-4">
+                  {shown.map((r) => (
+                    <div key={r.id} className="py-2.5" data-testid={`cal-booking-${r.id}`}>
+                      <div className="flex items-baseline justify-between gap-2">
+                        <p className="truncate text-sm font-bold text-slate-800">{r.name}</p>
+                        <span className="shrink-0 text-xs font-bold text-violet-600">{r.time ? to12h(r.time) : "—"}</span>
                       </div>
-                    ))}
-                  </>
+                      <p className="mt-0.5 truncate text-xs text-slate-500">
+                        <span className="font-semibold text-slate-400">Head Physio</span> {r.headPhysio}
+                      </p>
+                      <p className="truncate text-xs text-slate-500">
+                        <span className="font-semibold text-slate-400">Physio</span> {r.physio}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+
+                {items.length > shown.length && (
+                  <p className="border-t border-slate-100 px-4 py-2 text-xs font-semibold text-sky-600">
+                    +{items.length - shown.length} more · click to see the full list
+                  </p>
                 )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      </>
+      )}
+
+      {/* One booked day in full — every client on it, with what they still owe and when
+          they're next in, so the day can be worked from a single screen. */}
+      {dayView && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-3" data-testid="cal-day-modal">
+          <div className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between bg-gradient-to-r from-sky-600 to-blue-600 px-6 py-4 text-white">
+              <div>
+                <p className="text-lg font-bold" data-testid="cal-day-modal-date">
+                  {new Date(`${dayView.date}T00:00:00`).toLocaleDateString("en-US", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+                </p>
+                <p className="text-xs text-white/80">
+                  {branch?.branch_name || "Branch"}
+                  {branch?.address ? ` · ${branch.address}` : ""}
+                  {(() => {
+                    // weekly_hours keys a day as { is_open, open, close }; no entry at all
+                    // means the branch defaults to open 09:00–20:00, same as the backend.
+                    const cfg = weekly[DAY_KEYS[new Date(`${dayView.date}T00:00:00`).getDay()]];
+                    if (holidays.includes(dayView.date)) return " · Holiday";
+                    if (cfg && cfg.is_open === false) return " · Closed";
+                    return ` · ${to12h(cfg?.open || "09:00")} – ${to12h(cfg?.close || "20:00")}`;
+                  })()}
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="rounded-lg border-2 border-white/40 bg-white/15 px-3 py-1.5 text-sm font-bold">
+                  {dayView.items.length} booked
+                </span>
+                <button onClick={() => setDayView(null)} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="cal-day-modal-close">
+                  <X className="h-5 w-5" />
+                </button>
               </div>
             </div>
-          );
-        })}
-      </div>
-      </>
+
+            <div className="flex-1 overflow-y-auto p-4">
+              <div className="space-y-2.5">
+                {dayView.items.map((r) => {
+                  const due = paymentDue(r.lead);
+                  const overdue = due && due.date < todayIso;
+                  const next = upcomingFor(r.name);
+                  return (
+                    <div key={r.id} className="rounded-xl border-2 border-slate-200 bg-white p-4" data-testid={`cal-day-modal-row-${r.id}`}>
+                      <div className="flex flex-wrap items-baseline justify-between gap-2">
+                        <p className="text-base font-bold text-slate-800">{r.name}</p>
+                        <span className="rounded-md border-2 border-violet-300 bg-violet-50 px-2.5 py-1 text-sm font-bold text-violet-700">
+                          {r.time ? to12h(r.time) : "—"}
+                        </span>
+                      </div>
+
+                      <div className="mt-2.5 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        <p className="text-sm text-slate-600">
+                          <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Head Physio</span><br />
+                          {r.headPhysio}
+                        </p>
+                        <p className="text-sm text-slate-600">
+                          <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Physio</span><br />
+                          {r.physio}
+                        </p>
+                        <p className="text-sm">
+                          <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Payment Due</span><br />
+                          {due ? (
+                            <span className={overdue ? "font-bold text-rose-600" : "font-bold text-amber-600"}>
+                              Rs.{due.amount} · {new Date(`${due.date}T00:00:00`).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" })}
+                              {overdue && " · OVERDUE"}
+                            </span>
+                          ) : (
+                            <span className="font-semibold text-emerald-600">Nothing due</span>
+                          )}
+                        </p>
+                        <p className="text-sm">
+                          <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Upcoming</span><br />
+                          {next ? (
+                            <span className="font-semibold text-sky-700">
+                              {new Date(`${next.date}T00:00:00`).toLocaleDateString("en-US", { weekday: "short", day: "numeric", month: "short" })}
+                              {next.time ? ` · ${to12h(next.time)}` : ""}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">No future visit booked</span>
+                          )}
+                        </p>
+                      </div>
+
+                      {r.stage && <p className="mt-2 text-xs font-semibold text-slate-400">Stage · {r.stage}</p>}
+
+                      {r.appt && (
+                        <div className="mt-3 flex justify-end">
+                          <Button size="sm" variant="outline" className="text-xs" onClick={() => { setDayView(null); openEdit(r.appt); }} data-testid={`cal-day-modal-edit-${r.id}`}>
+                            <Pencil className="mr-1.5 h-3 w-3" />Edit / Reschedule
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-3 border-t-2 border-slate-200 bg-slate-100 px-6 py-3.5">
+              <p className="text-xs text-slate-500">Payment Due is the next unpaid Treatment Fee installment on the client's record.</p>
+              <div className="flex items-center gap-2">
+                {/* The only booking path left on this panel now that the header button is
+                    gone — the day is already chosen, so it opens straight onto slots. */}
+                <Button variant="outline" onClick={() => { const d = dayView.date; setDayView(null); openCreate(d); }} data-testid="cal-day-modal-add">
+                  <Plus className="mr-1.5 h-4 w-4" />Book on this day
+                </Button>
+                <Button variant="outline" onClick={() => setDayView(null)} data-testid="cal-day-modal-back">Close</Button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {subTab === "upcoming" && (
