@@ -56,12 +56,17 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
 
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth());
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
+  // Several days can be opened in one go. `selectedDates` is every day picked; the last
+  // one clicked is the "focused" day whose slot grid is shown on the right, so a single
+  // day out of the batch can still be fine-tuned before saving.
+  const [selectedDates, setSelectedDates] = useState([]);
   const [selectedDate, setSelectedDate] = useState(null);
 
   const [slotDuration, setSlotDuration] = useState(FALLBACK_SLOT_MINUTES);
   const slotType = SLOT_TYPES[0].value;
   const [pendingSlots, setPendingSlots] = useState([]);
   const [saving, setSaving] = useState(false);
+  const [unsaving, setUnsaving] = useState(false);
 
   // Keep the calendar honest against FITSIO STORE: a Consultation Duration of 45 mins
   // there must produce 45-minute slots here, not a hardcoded 30.
@@ -99,6 +104,7 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
   const selectDoctor = (doc) => {
     setSelectedDoctor(doc);
     setSelectedDate(null);
+    setSelectedDates([]);
     setPendingSlots([]);
   };
 
@@ -107,25 +113,37 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
   // day that's half 30-minute and half 45-minute.
   useEffect(() => {
     setSelectedDate(null);
+    setSelectedDates([]);
     setPendingSlots([]);
   }, [slotDuration]);
 
-  // Picking a date IS the availability confirmation — the whole working day fills in
-  // straight away rather than making the Branch Admin click 28 slots by hand. They land
-  // as staged additions (not saved), so an accidental date click costs nothing and the
-  // existing Save Changes / Discard pair still governs what actually gets published.
-  // Slots already published for that date, and anything booked, are left untouched.
-  const selectDate = (d) => {
-    setSelectedDate(d);
+  // Every free slot of a day, staged as an addition. Anything already published for that
+  // date, and anything booked, is skipped so this never duplicates or disturbs a booking.
+  const stagedSlotsForDay = (d) => {
     const alreadyOpen = new Set((calendarData?.slots || []).filter((s) => s.startsWith(`${d}T`)));
-    setPendingSlots(
-      generateTimeGrid()
-        .filter((time) => {
-          const full = `${d}T${time}`;
-          return !alreadyOpen.has(full) && !calendarData?.booked?.[full];
-        })
-        .map((time) => ({ slot_time: `${d}T${time}`, duration: slotDuration, consultation_type: slotType })),
-    );
+    return generateTimeGrid()
+      .filter((time) => {
+        const full = `${d}T${time}`;
+        return !alreadyOpen.has(full) && !calendarData?.booked?.[full];
+      })
+      .map((time) => ({ slot_time: `${d}T${time}`, duration: slotDuration, consultation_type: slotType }));
+  };
+
+  // Picking a date IS the availability confirmation — the whole working day fills in
+  // straight away rather than making the Branch Admin click every slot by hand. Clicking
+  // it again deselects that day and drops its staged slots. Everything lands staged, not
+  // saved, so the Save / Unsave pair still governs what actually reaches the calendar.
+  const toggleDate = (d) => {
+    const already = selectedDates.includes(d);
+    if (already) {
+      setSelectedDates((prev) => prev.filter((x) => x !== d));
+      setPendingSlots((prev) => prev.filter((s) => !s.slot_time.startsWith(`${d}T`)));
+      setSelectedDate((curr) => (curr === d ? selectedDates.filter((x) => x !== d).slice(-1)[0] || null : curr));
+      return;
+    }
+    setSelectedDates((prev) => [...prev, d]);
+    setSelectedDate(d);
+    setPendingSlots((prev) => [...prev.filter((s) => !s.slot_time.startsWith(`${d}T`)), ...stagedSlotsForDay(d)]);
   };
 
   const prevMonth = () => {
@@ -208,6 +226,40 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
       return calendarData.slot_details.find((s) => s.slot_time === full);
     }
     return null;
+  };
+
+  // Closes the selected days back down: every published slot on them is removed. Booked
+  // slots are deliberately left alone — the backend refuses to drop them anyway, and a
+  // patient's appointment shouldn't disappear because the day was closed.
+  const unsaveDays = async () => {
+    if (!selectedDoctor || selectedDates.length === 0) return;
+    const published = (calendarData?.slots || []).filter((s) => selectedDates.some((d) => s.startsWith(`${d}T`)));
+    const bookedCount = published.filter((s) => calendarData?.booked?.[s]).length;
+    const removable = published.filter((s) => !calendarData?.booked?.[s]);
+
+    if (removable.length === 0) {
+      toast.info(bookedCount > 0 ? "Only booked slots remain — those can't be removed" : "Nothing published on these days yet");
+      return;
+    }
+    const dayLabel = selectedDates.length === 1 ? "this day" : `these ${selectedDates.length} days`;
+    if (!window.confirm(`Remove ${removable.length} open slot${removable.length > 1 ? "s" : ""} from ${dayLabel}?`)) return;
+
+    setUnsaving(true);
+    try {
+      await removeCalendarSlots(selectedDoctor.id, { slot_times: removable });
+      toast.success(
+        `Removed ${removable.length} slot${removable.length > 1 ? "s" : ""}`
+        + (bookedCount > 0 ? ` · ${bookedCount} booked slot${bookedCount > 1 ? "s" : ""} kept` : ""),
+      );
+      setPendingSlots([]);
+      setSelectedDates([]);
+      setSelectedDate(null);
+      await loadCalendar();
+      await loadDoctors();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to remove slots");
+    }
+    setUnsaving(false);
   };
 
   const saveChanges = async () => {
@@ -314,15 +366,36 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
                   <p className="text-[11px] text-slate-400">{selectedDoctor.specialization || "Physiotherapist"} · {(calendarData?.slots || []).length} slots</p>
                 </div>
               </div>
-              {pendingSlots.length > 0 && (
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-amber-600 font-medium">{pendingSlots.length} unsaved changes</span>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {selectedDates.length > 0 && (
+                  <span className="text-xs font-medium text-slate-500" data-testid="selected-days-count">
+                    {selectedDates.length} day{selectedDates.length > 1 ? "s" : ""} selected
+                  </span>
+                )}
+                {pendingSlots.length > 0 && (
+                  <span className="text-xs text-amber-600 font-medium">{pendingSlots.length} unsaved</span>
+                )}
+                {pendingSlots.length > 0 && (
                   <Button size="sm" variant="outline" onClick={() => setPendingSlots([])} className="text-xs" data-testid="discard-changes-btn">Discard</Button>
+                )}
+                {selectedDates.length > 0 && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={unsaveDays}
+                    disabled={unsaving}
+                    className="border-rose-200 text-rose-600 hover:bg-rose-50 text-xs"
+                    data-testid="unsave-slots-btn"
+                  >
+                    {unsaving ? "Removing..." : "Unsave"}
+                  </Button>
+                )}
+                {pendingSlots.length > 0 && (
                   <Button size="sm" onClick={saveChanges} disabled={saving} className="bg-violet-600 hover:bg-violet-700 text-white text-xs" data-testid="save-slots-btn">
                     {saving ? "Saving..." : "Save Changes"}
                   </Button>
-                </div>
-              )}
+                )}
+              </div>
             </div>
 
             <div className="flex flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
@@ -353,25 +426,27 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
                   {Array.from({ length: daysInMonth }, (_, i) => {
                     const day = i + 1;
                     const d = dateStr(day);
-                    const isSelected = selectedDate === d;
+                    const isPicked = selectedDates.includes(d);
+                    const isFocused = selectedDate === d;
                     const isToday = d === todayStr;
                     const slotCount = countSlotsForDay(day);
                     return (
                       <button
                         key={day}
                         type="button"
-                        onClick={() => selectDate(d)}
+                        onClick={() => toggleDate(d)}
                         className={`h-11 rounded-lg text-sm font-medium relative transition-all ${
-                          isSelected
-                            ? "bg-violet-600 text-white shadow-sm"
+                          isPicked
+                            ? `bg-violet-600 text-white shadow-sm${isFocused ? " ring-2 ring-violet-300 ring-offset-1" : ""}`
                             : isToday
                             ? "bg-violet-50 text-violet-700 border border-violet-200"
                             : "text-slate-600 hover:bg-slate-100"
                         }`}
+                        title={isPicked ? "Click again to deselect" : undefined}
                         data-testid={`cal-day-${day}`}
                       >
                         {day}
-                        {slotCount > 0 && !isSelected && (
+                        {slotCount > 0 && !isPicked && (
                           <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 h-1 w-1 rounded-full bg-emerald-400" />
                         )}
                       </button>
@@ -381,8 +456,9 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
 
                 {selectedDate && (
                   <p className="mt-4 border-t border-slate-100 pt-3 text-[11px] text-slate-400" data-testid="calendar-day-hint">
-                    Whole day opened at {slotDuration}-minute slots, per FITSIO STORE. Click any slot to drop it,
-                    then Save Changes.
+                    Whole day opened at {slotDuration}-minute slots, per FITSIO STORE. Pick more dates to
+                    open several at once, or click a date again to deselect it. <b>Save Changes</b> publishes
+                    them; <b>Unsave</b> closes the selected days back down.
                   </p>
                 )}
               </div>
@@ -427,21 +503,15 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
                           textColor = "text-amber-800";
                           badge = <span className="text-[9px] bg-amber-100 text-amber-600 rounded px-1.5 py-0.5">Booked</span>;
                         } else if (state === "existing") {
+                          // An open slot carries no label — only a booked one is annotated.
                           borderColor = "border-emerald-300";
                           bgColor = "bg-emerald-50";
                           textColor = "text-emerald-800";
-                          const ct = SLOT_TYPES.find((c) => c.value === detail?.consultation_type);
-                          badge = (
-                            <div className="flex items-center gap-1">
-                              <span className="text-[9px] bg-emerald-100 text-emerald-600 rounded px-1.5 py-0.5">{detail?.duration || 30}m</span>
-                              {ct && <span className={`text-[9px] rounded px-1.5 py-0.5 ${ct.color}`}>{ct.label}</span>}
-                            </div>
-                          );
                         } else if (state === "adding") {
                           borderColor = "border-violet-300";
                           bgColor = "bg-violet-50";
                           textColor = "text-violet-800";
-                          badge = <span className="text-[9px] bg-violet-100 text-violet-600 rounded px-1.5 py-0.5">+ Adding {detail?.duration}m</span>;
+                          badge = <span className="text-[9px] bg-violet-100 text-violet-600 rounded px-1.5 py-0.5">+ Adding</span>;
                         } else if (state === "removing") {
                           borderColor = "border-red-300";
                           bgColor = "bg-red-50";
