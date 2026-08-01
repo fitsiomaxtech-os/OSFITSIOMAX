@@ -21,11 +21,10 @@ _LEGACY_BRANCH_STAGE_MAP = {
     "Branch": "Appointment Date & Time",
 }
 
-# Maps deprecated pre-sales stage labels → new 3-stage flow (RNR retired — folded
-# into Follow Up).
+# Maps deprecated pre-sales stage labels → new 4-stage flow. RNR is its own stage
+# again (see ensure_rnr_stage below) — no longer mapped away to Follow Up.
 _LEGACY_PRESALES_STAGE_MAP = {
     "New Lead": "New Leads",
-    "RNR": "Follow Up",
     "Pre-sales Qualified": "Follow Up",
     "Assigned to Branch": "Appointment",
     "Branch Confirmed": "Appointment",
@@ -115,6 +114,34 @@ async def migrate_branch_stages() -> None:
             })
         if docs:
             await v3_col("pipeline_stages").insert_many(docs)
+
+
+async def ensure_rnr_stage() -> None:
+    """RNR was folded into Follow Up when the pre-sales pipeline was cut down to 3 stages;
+    it's back as its own stage between New Leads and Follow Up. Idempotent: only inserts it
+    once, shifting every later pre-sales stage's order forward by one to make room. A no-op
+    if pre-sales stages haven't been seeded yet (migrate_branch_stages/_ensure_seed already
+    build the full V3_STAGES list, RNR included, in that case)."""
+    existing = await v3_col("pipeline_stages").find_one({"type": "pre_sales", "name": "RNR"}, {"_id": 0, "id": 1})
+    if existing:
+        return
+    new_leads = await v3_col("pipeline_stages").find_one({"type": "pre_sales", "name": "New Leads"}, {"_id": 0, "order": 1})
+    if not new_leads:
+        return
+    insert_order = new_leads["order"] + 1
+    await v3_col("pipeline_stages").update_many(
+        {"type": "pre_sales", "order": {"$gte": insert_order}},
+        {"$inc": {"order": 1}},
+    )
+    await v3_col("pipeline_stages").insert_one({
+        "id": str(uuid.uuid4()),
+        "name": "RNR",
+        "color": "#ef4444",
+        "type": "pre_sales",
+        "order": insert_order,
+        "is_final": False,
+        "created_at": now_iso(),
+    })
 
 
 # Maps deprecated consultation_stage labels (legacy 6-stage flow) to the new 7-stage flow.

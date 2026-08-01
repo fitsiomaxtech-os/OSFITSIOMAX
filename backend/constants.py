@@ -16,6 +16,7 @@ V3_VERTICALS = [
 
 V3_STAGES = [
     "New Leads",
+    "RNR",
     "Follow Up",
     "Appointment",
 ]
