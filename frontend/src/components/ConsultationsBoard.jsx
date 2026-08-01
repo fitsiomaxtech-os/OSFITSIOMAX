@@ -2413,33 +2413,35 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 Branch Admin fixes by hand; nothing is auto-filled, and only slots that physio
                 has actually published are offered. */}
             {showPhysioModal && showSlotPicker && physioPick && (
-              <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" data-testid="cons-slot-picker-modal">
-                <div className="flex max-h-[95vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+              <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-2" data-testid="cons-slot-picker-modal">
+                <div className="flex h-[calc(100vh-1rem)] max-h-[calc(100vh-1rem)] w-full max-w-7xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
                   <div className="flex items-center justify-between bg-gradient-to-r from-violet-600 to-indigo-600 px-6 py-4 text-white">
                     <div className="flex items-center gap-3">
-                      <div className="flex h-11 w-11 items-center justify-center rounded-full bg-white/20 text-base font-bold text-white">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white/20 text-lg font-bold text-white">
                         {(physioCalendarData?.doctor_name || physioOptions.find((p) => p.id === physioPick)?.full_name || "P").charAt(0).toUpperCase()}
                       </div>
                       <div>
-                        <p className="text-base font-semibold" data-testid="cons-slot-picker-physio">
+                        <p className="text-lg font-semibold" data-testid="cons-slot-picker-physio">
                           {selectedLead.name} <span className="font-normal text-white/70">with</span>{" "}
                           {physioCalendarData?.doctor_name || physioOptions.find((p) => p.id === physioPick)?.full_name || "Physio"}
                         </p>
-                        <p className="text-[11px] text-white/75">
+                        <p className="text-[13px] text-white/75">
                           {selectedLead.session_package_name || "Session package"} · {totalSessionsNeeded} sessions ·
                           {" "}one session a day · {sessionMinutes} min each · {openSlotCount} slots open
                         </p>
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
+                      {/* Same bordered-box treatment as the PAID / UNPAID status badges below,
+                          in dark green so it reads as the popup's headline status. */}
                       <span
-                        className={`rounded-full px-3 py-1.5 text-xs font-bold shadow-sm ${allSessionsPicked ? "bg-emerald-400 text-emerald-950" : "bg-amber-300 text-amber-950"}`}
+                        className="rounded-lg border-2 border-emerald-900 bg-emerald-700 px-4 py-2 text-sm font-bold text-white shadow-sm"
                         data-testid="cons-slot-picker-count"
                       >
                         {sortedPickedSlots.length} of {totalSessionsNeeded} treatment days fixed
                       </span>
                       <button onClick={() => setShowSlotPicker(false)} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="cons-slot-picker-close">
-                        <X className="h-4 w-4" />
+                        <X className="h-5 w-5" />
                       </button>
                     </div>
                   </div>
@@ -2447,36 +2449,36 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                   {/* Treatment Fee standing — which of these treatment days are actually paid
                       for. The balance sessions still get scheduled, but they're marked unpaid
                       so nobody books them believing the money is in. */}
-                  <div className="flex flex-wrap items-center gap-2.5 border-b border-slate-200 bg-slate-50 px-6 py-3" data-testid="cons-slot-picker-payment">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Treatment Fee</span>
-                    <span className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700" data-testid="cons-payment-paid">
+                  <div className="flex flex-wrap items-center gap-3 border-b-2 border-slate-200 bg-slate-100 px-6 py-3.5" data-testid="cons-slot-picker-payment">
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Treatment Fee</span>
+                    <span className="rounded-lg border-2 border-emerald-400 bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-700 shadow-sm" data-testid="cons-payment-paid">
                       {sessionPayment.paid} session{sessionPayment.paid === 1 ? "" : "s"} PAID
-                      {sessionPayment.paidAmount > 0 && <span className="ml-1.5 font-semibold text-emerald-600">Rs.{sessionPayment.paidAmount}</span>}
-                      {sessionPayment.paid > 0 && <span className="ml-1.5 font-medium text-emerald-500">Day 1–{sessionPayment.paid}</span>}
+                      {sessionPayment.paidAmount > 0 && <span className="ml-2 font-semibold text-emerald-600">Rs.{sessionPayment.paidAmount}</span>}
+                      {sessionPayment.paid > 0 && <span className="ml-2 font-medium text-emerald-500">Day 1–{sessionPayment.paid}</span>}
                     </span>
                     {sessionPayment.unpaid > 0 ? (
-                      <span className="rounded-lg border border-rose-300 bg-rose-50 px-3 py-1.5 text-xs font-bold text-rose-700" data-testid="cons-payment-unpaid">
+                      <span className="rounded-lg border-2 border-rose-400 bg-rose-50 px-4 py-2 text-sm font-bold text-rose-700 shadow-sm" data-testid="cons-payment-unpaid">
                         {sessionPayment.unpaid} session{sessionPayment.unpaid === 1 ? "" : "s"} UNPAID
-                        {sessionPayment.dueAmount > 0 && <span className="ml-1.5 font-semibold text-rose-600">Rs.{sessionPayment.dueAmount}</span>}
-                        <span className="ml-1.5 font-medium text-rose-500">
+                        {sessionPayment.dueAmount > 0 && <span className="ml-2 font-semibold text-rose-600">Rs.{sessionPayment.dueAmount}</span>}
+                        <span className="ml-2 font-medium text-rose-500">
                           Day {sessionPayment.paid + 1}–{sessionPayment.total}
                           {sessionPayment.dueDate ? ` · due ${dayLabel(sessionPayment.dueDate)}` : ""}
                         </span>
                       </span>
                     ) : (
-                      <span className="rounded-lg border border-emerald-300 bg-emerald-100 px-3 py-1.5 text-xs font-bold text-emerald-800">
+                      <span className="rounded-lg border-2 border-emerald-400 bg-emerald-100 px-4 py-2 text-sm font-bold text-emerald-800 shadow-sm">
                         Package fully paid
                       </span>
                     )}
                     {sessionPayment.price > 0 && (
-                      <span className="ml-auto text-[11px] font-semibold text-slate-500">
+                      <span className="ml-auto text-[13px] font-bold text-slate-600">
                         Rs.{sessionPayment.paidAmount} of Rs.{sessionPayment.price} collected
                       </span>
                     )}
                   </div>
 
                   {loadingPhysioCalendar ? (
-                    <p className="px-5 py-14 text-center text-xs text-slate-400">Loading this physio's calendar...</p>
+                    <p className="px-5 py-14 text-center text-sm text-slate-400">Loading this physio's calendar...</p>
                   ) : (
                     <div className="flex flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
                       {/* Month grid — a dot marks a day this physio has published slots on */}
@@ -2488,22 +2490,22 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             className="rounded p-1 hover:bg-slate-100"
                             data-testid="cons-slot-prev-month"
                           >
-                            <ChevronLeft className="h-4 w-4 text-slate-500" />
+                            <ChevronLeft className="h-5 w-5 text-slate-500" />
                           </button>
-                          <h4 className="text-sm font-semibold text-slate-700">{MONTH_NAMES[pickerMonth]} {pickerYear}</h4>
+                          <h4 className="text-base font-bold text-slate-700">{MONTH_NAMES[pickerMonth]} {pickerYear}</h4>
                           <button
                             type="button"
                             onClick={() => (pickerMonth === 11 ? (setPickerMonth(0), setPickerYear(pickerYear + 1)) : setPickerMonth(pickerMonth + 1))}
                             className="rounded p-1 hover:bg-slate-100"
                             data-testid="cons-slot-next-month"
                           >
-                            <ChevronRight className="h-4 w-4 text-slate-500" />
+                            <ChevronRight className="h-5 w-5 text-slate-500" />
                           </button>
                         </div>
 
                         <div className="mb-1 grid grid-cols-7 gap-1">
                           {WEEKDAY_LABELS.map((d) => (
-                            <div key={d} className="py-1 text-center text-[11px] font-semibold text-slate-400">{d}</div>
+                            <div key={d} className="py-1 text-center text-[13px] font-semibold text-slate-400">{d}</div>
                           ))}
                         </div>
 
@@ -2523,7 +2525,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                                 type="button"
                                 onClick={() => setPickerDate(d)}
                                 disabled={dayOpen === 0 && !planned}
-                                className={`relative h-12 rounded-lg text-sm font-semibold transition-all ${
+                                className={`relative h-12 rounded-lg text-base font-semibold transition-all ${
                                   isFocused
                                     ? "bg-violet-600 text-white shadow-md ring-2 ring-violet-300 ring-offset-1"
                                     : planned
@@ -2541,7 +2543,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                               >
                                 {day}
                                 {planned ? (
-                                  <span className={`absolute -right-1 -top-1 flex h-[1.15rem] min-w-[1.15rem] items-center justify-center rounded-full px-1 text-[9px] font-bold shadow-sm ${
+                                  <span className={`absolute -right-1 -top-1 flex h-[1.3rem] min-w-[1.3rem] items-center justify-center rounded-full px-1 text-[11px] font-bold shadow-sm ${
                                     isPaidSession(planned.day) ? "bg-emerald-500 text-white" : "bg-rose-500 text-white"
                                   }`}>
                                     {planned.day}
@@ -2555,12 +2557,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         </div>
 
                         <div className="mt-4 space-y-2 border-t border-slate-100 pt-3">
-                          <div className="flex flex-wrap items-center gap-3 text-[10px] font-semibold text-slate-500">
+                          <div className="flex flex-wrap items-center gap-3 text-xs font-semibold text-slate-500">
                             <span className="flex items-center gap-1"><span className="inline-block h-3 w-3 rounded-full bg-emerald-500" /> Paid day</span>
                             <span className="flex items-center gap-1"><span className="inline-block h-3 w-3 rounded-full bg-rose-500" /> Unpaid day</span>
                             <span className="flex items-center gap-1"><span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400" /> Slots open</span>
                           </div>
-                          <p className="text-[11px] text-slate-400">
+                          <p className="text-[13px] text-slate-400">
                             One treatment session a day — {totalSessionsNeeded} sessions means {totalSessionsNeeded} separate
                             days. Only days this physio has opened in <b>PHYSIO CALENDAR</b> can be picked. Picking
                             another time on a day already fixed <b>moves</b> that day's session.
@@ -2573,15 +2575,15 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         {!pickerDate ? (
                           <div className="flex h-full items-center justify-center">
                             <div className="text-center">
-                              <Calendar className="mx-auto mb-2 h-8 w-8 text-slate-200" />
-                              <p className="text-xs text-slate-400">Pick a treatment date to see this physio's open times</p>
+                              <Calendar className="mx-auto mb-2 h-10 w-10 text-slate-200" />
+                              <p className="text-sm text-slate-400">Pick a treatment date to see this physio's open times</p>
                             </div>
                           </div>
                         ) : (
                           <>
                             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                              <h4 className="text-base font-bold text-slate-800" data-testid="cons-slot-picker-date">{longDate(pickerDate)}</h4>
-                              <div className="flex flex-wrap items-center gap-3 text-[10px] font-semibold text-slate-400">
+                              <h4 className="text-lg font-bold text-slate-800" data-testid="cons-slot-picker-date">{longDate(pickerDate)}</h4>
+                              <div className="flex flex-wrap items-center gap-3 text-xs font-semibold text-slate-400">
                                 <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-emerald-400" /> Open</span>
                                 <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-emerald-600" /> Paid day</span>
                                 <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-rose-500" /> Unpaid day</span>
@@ -2591,10 +2593,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
 
                             {planByDate[pickerDate] && (
                               <p
-                                className={`mb-3 rounded-lg border px-3 py-2 text-xs font-semibold ${
+                                className={`mb-3 rounded-lg border-2 px-4 py-2.5 text-sm font-semibold shadow-sm ${
                                   isPaidSession(planByDate[pickerDate].day)
-                                    ? "border-emerald-300 bg-emerald-50 text-emerald-800"
-                                    : "border-rose-300 bg-rose-50 text-rose-800"
+                                    ? "border-emerald-400 bg-emerald-50 text-emerald-800"
+                                    : "border-rose-400 bg-rose-50 text-rose-800"
                                 }`}
                                 data-testid="cons-slot-day-fixed"
                               >
@@ -2605,7 +2607,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             )}
 
                             {(physioSlotsByDate[pickerDate] || []).length === 0 ? (
-                              <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-8 text-center text-xs text-slate-400">
+                              <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-8 text-center text-sm text-slate-400">
                                 Nothing published on this day — open it in MANAGEMENT → PHYSIO CALENDAR first.
                               </p>
                             ) : (
@@ -2633,16 +2635,16 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                                       data-testid={`cons-slot-pick-${time}`}
                                     >
                                       <div className="flex items-center justify-between gap-1">
-                                        <span className={`text-sm font-bold ${taken ? "text-amber-800" : picked ? (pickedPaid ? "text-emerald-900" : "text-rose-900") : "text-emerald-800"}`}>
+                                        <span className={`text-base font-bold ${taken ? "text-amber-800" : picked ? (pickedPaid ? "text-emerald-900" : "text-rose-900") : "text-emerald-800"}`}>
                                           {to12h(time)}
                                         </span>
                                         {picked && (
-                                          <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold text-white ${pickedPaid ? "bg-emerald-600" : "bg-rose-600"}`}>
+                                          <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold text-white ${pickedPaid ? "bg-emerald-600" : "bg-rose-600"}`}>
                                             Day {planByDate[pickerDate].day}
                                           </span>
                                         )}
                                       </div>
-                                      <p className={`mt-0.5 text-[10px] font-medium ${taken ? "truncate text-amber-600" : picked ? (pickedPaid ? "text-emerald-700" : "text-rose-700") : "text-emerald-600"}`}>
+                                      <p className={`mt-0.5 text-xs font-medium ${taken ? "truncate text-amber-600" : picked ? (pickedPaid ? "text-emerald-700" : "text-rose-700") : "text-emerald-600"}`}>
                                         {taken
                                           ? `Booked · ${physioCalendarData?.booked?.[slot]?.lead_name || "—"}`
                                           : picked
@@ -2658,11 +2660,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             {treatmentPlan.length > 0 && (
                               <div className="mt-4 rounded-xl border-2 border-violet-200 bg-violet-50/70 p-4" data-testid="cons-treatment-plan">
                                 <div className="mb-2 flex items-center justify-between">
-                                  <p className="text-xs font-bold uppercase tracking-wider text-violet-700">Treatment plan</p>
+                                  <p className="text-sm font-bold uppercase tracking-wider text-violet-700">Treatment plan</p>
                                   <button
                                     type="button"
                                     onClick={() => setPickedSessionSlots([])}
-                                    className="text-[11px] font-bold text-rose-600 hover:text-rose-800"
+                                    className="text-[13px] font-bold text-rose-600 hover:text-rose-800"
                                     data-testid="cons-slot-picker-clear"
                                   >
                                     Clear all
@@ -2674,7 +2676,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                                 <div className="max-h-48 space-y-2.5 overflow-y-auto">
                                   {[...new Set(treatmentPlan.map((p) => p.week))].map((week) => (
                                     <div key={week}>
-                                      <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-violet-500">Week {week}</p>
+                                      <p className="mb-1 text-xs font-bold uppercase tracking-wider text-violet-500">Week {week}</p>
                                       <div className="flex flex-wrap gap-1.5">
                                         {treatmentPlan.filter((p) => p.week === week).map((p) => {
                                           const paid = isPaidSession(p.day);
@@ -2683,7 +2685,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                                               key={p.slot}
                                               type="button"
                                               onClick={() => togglePickedSlot(p.slot)}
-                                              className={`flex items-center gap-1.5 rounded-full border-2 bg-white px-2.5 py-1 text-[10px] font-bold transition ${
+                                              className={`flex items-center gap-1.5 rounded-full border-2 bg-white px-3 py-1.5 text-xs font-bold transition ${
                                                 paid
                                                   ? "border-emerald-300 text-emerald-700 hover:border-emerald-500"
                                                   : "border-rose-300 text-rose-700 hover:border-rose-500"
@@ -2691,10 +2693,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                                               title={`Remove this treatment day · ${paid ? "paid" : "unpaid"}`}
                                               data-testid={`cons-slot-picked-${p.slot}`}
                                             >
-                                              <span className={`rounded-full px-1.5 py-0.5 text-[9px] text-white ${paid ? "bg-emerald-600" : "bg-rose-600"}`}>Day {p.day}</span>
+                                              <span className={`rounded-full px-2 py-0.5 text-[11px] text-white ${paid ? "bg-emerald-600" : "bg-rose-600"}`}>Day {p.day}</span>
                                               {dayLabel(p.date)} · {to12h(p.time)} – {endTime12h(p.time, sessionMinutes)}
                                               <span className={`font-extrabold ${paid ? "text-emerald-600" : "text-rose-600"}`}>{paid ? "PAID" : "UNPAID"}</span>
-                                              <X className="h-3 w-3" />
+                                              <X className="h-3.5 w-3.5" />
                                             </button>
                                           );
                                         })}
@@ -2710,27 +2712,26 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     </div>
                   )}
 
-                  <div className="flex items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-6 py-3.5">
-                    <div className="text-[11px] text-slate-500">
-                      <p className="font-semibold text-slate-700">
+                  <div className="flex items-center justify-between gap-3 border-t-2 border-slate-200 bg-slate-100 px-6 py-4">
+                    <div className="text-[13px] text-slate-500">
+                      <p className="font-bold text-slate-700">
                         {allSessionsPicked
                           ? `All ${totalSessionsNeeded} treatment days are fixed${treatmentPlan.length > 0 ? ` · ${dayLabel(treatmentPlan[0].date)} to ${dayLabel(treatmentPlan[treatmentPlan.length - 1].date)}` : ""}.`
                           : `${totalSessionsNeeded - sortedPickedSlots.length} more treatment day${totalSessionsNeeded - sortedPickedSlots.length === 1 ? "" : "s"} still need a date and time.`}
                       </p>
                       {sessionPayment.unpaid > 0 && (
-                        <p className="mt-0.5 font-semibold text-rose-600" data-testid="cons-slot-picker-unpaid-note">
+                        <p className="mt-1 font-bold text-rose-600" data-testid="cons-slot-picker-unpaid-note">
                           Day {sessionPayment.paid + 1}–{sessionPayment.total} are booked against an unpaid balance of Rs.{sessionPayment.dueAmount}
                           {sessionPayment.dueDate ? ` · due ${dayLabel(sessionPayment.dueDate)}` : ""}.
                         </p>
                       )}
                     </div>
                     <div className="flex items-center gap-2">
-                      <Button size="sm" variant="outline" className="text-xs" onClick={() => setShowSlotPicker(false)} data-testid="cons-slot-picker-back">
+                      <Button variant="outline" className="text-sm" onClick={() => setShowSlotPicker(false)} data-testid="cons-slot-picker-back">
                         Back
                       </Button>
                       <Button
-                        size="sm"
-                        className="bg-emerald-600 text-xs hover:bg-emerald-700"
+                        className="bg-emerald-600 text-sm hover:bg-emerald-700"
                         onClick={submitPhysioAssign}
                         disabled={assigningPhysio || !allSessionsPicked}
                         data-testid="cons-slot-picker-submit"
