@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Eye, Plus, Search, Settings as Cog, Calendar as CalendarIcon, Phone, FileText, StickyNote, ArrowRight, ArrowLeft, CheckCircle2, X, Pencil, PhoneOff, Clock, Bell, Building2, Trash2, Dumbbell, Stethoscope, Lock } from "lucide-react";
+import { Eye, Plus, Search, Settings as Cog, Calendar as CalendarIcon, Phone, FileText, StickyNote, ArrowRight, CheckCircle2, X, Pencil, PhoneOff, Clock, Bell, Building2, Trash2, Lock } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -614,7 +614,7 @@ const LeadDetailDialog = ({ lead, stages, currentUser, onClose, onSaved, onMoveS
                 }
                 if (s.name === "Appointment") {
                   const tmrw = new Date(Date.now() + 24 * 60 * 60 * 1000);
-                  setAppointmentDraft({ department: "", appointment_date: tmrw.toISOString().slice(0, 10), appointment_time: "10:00", remarks: "" });
+                  setAppointmentDraft({ department: "physio", appointment_date: tmrw.toISOString().slice(0, 10), appointment_time: "10:00", remarks: "" });
                   return;
                 }
                 await onMoveStage(currentLead.id, s.name);
@@ -822,7 +822,6 @@ const LeadDetailDialog = ({ lead, stages, currentUser, onClose, onSaved, onMoveS
       )}
 
       {appointmentDraft && !showEdit && (() => {
-        const step = !appointmentDraft.department ? "department" : "details";
         const myBranchName = branches.find((b) => b.id === currentUser?.branch_id)?.branch_name || branches.find((b) => b.id === currentUser?.branch_id)?.name || "";
         const resolvedBranchName = () => myBranchName || branches.find((b) => b.id === appointmentDraft.branch_id)?.branch_name || branches.find((b) => b.id === appointmentDraft.branch_id)?.name || "your branch";
         const closeAll = () => { setAppointmentDraft(null); setAppointmentResult(null); };
@@ -875,144 +874,99 @@ const LeadDetailDialog = ({ lead, stages, currentUser, onClose, onSaved, onMoveS
             ) : (
             <>
             <div className="space-y-4 p-5">
-              {step === "department" && (
-                <div>
-                  <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-600">Which service?</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setAppointmentDraft({ ...appointmentDraft, department: "physio" })}
-                      className="flex items-center justify-center gap-2 rounded-lg border-2 border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-600 transition-all hover:border-emerald-300 hover:text-emerald-700"
-                      data-testid="presales-appointment-dept-physio"
+              <div className="space-y-3">
+                {myBranchName ? (
+                  <div className="flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">
+                    <Building2 className="h-3.5 w-3.5" /> {myBranchName}
+                  </div>
+                ) : (
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-600">Select Branch *</label>
+                    <select
+                      value={appointmentDraft.branch_id || ""}
+                      onChange={(e) => setAppointmentDraft({ ...appointmentDraft, branch_id: e.target.value })}
+                      className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm focus:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                      data-testid="presales-appointment-branch"
                     >
-                      <Stethoscope className="h-4 w-4" /> Physiotherapy
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setAppointmentDraft({ ...appointmentDraft, department: "fitness" })}
-                      className="flex items-center justify-center gap-2 rounded-lg border-2 border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-600 transition-all hover:border-teal-300 hover:text-teal-700"
-                      data-testid="presales-appointment-dept-fitness"
-                    >
-                      <Dumbbell className="h-4 w-4" /> Fitness
-                    </button>
+                      <option value="">-- choose a branch --</option>
+                      {branches.map((b) => (
+                        <option key={b.id} value={b.id}>{b.branch_name || b.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-600">Date *</label>
+                    <Input
+                      type="date"
+                      value={appointmentDraft.appointment_date}
+                      min={new Date().toISOString().slice(0, 10)}
+                      onChange={(e) => setAppointmentDraft({ ...appointmentDraft, appointment_date: e.target.value })}
+                      data-testid="presales-appointment-date"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-600">Time *</label>
+                    <Input
+                      type="time"
+                      value={appointmentDraft.appointment_time}
+                      onChange={(e) => setAppointmentDraft({ ...appointmentDraft, appointment_time: e.target.value })}
+                      data-testid="presales-appointment-time"
+                    />
                   </div>
                 </div>
-              )}
-
-              {step === "details" && (
                 <div>
-                  <button
-                    type="button"
-                    onClick={() => setAppointmentDraft({ ...appointmentDraft, department: "" })}
-                    className="mb-2 flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-slate-700"
-                    data-testid="presales-appointment-back-department"
-                  >
-                    <ArrowLeft className="h-3.5 w-3.5" /> {appointmentDraft.department === "physio" ? "Physiotherapy" : "Fitness"}
-                  </button>
-
-                  {appointmentDraft.department === "fitness" ? (
-                    <div className="rounded-lg border border-teal-200 bg-teal-50 p-3 text-xs text-teal-700">
-                      Fitness scheduling is coming soon — for now, Physiotherapy appointments can be scheduled end-to-end.
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      {myBranchName ? (
-                        <div className="flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">
-                          <Building2 className="h-3.5 w-3.5" /> {myBranchName}
-                        </div>
-                      ) : (
-                        <div>
-                          <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-600">Select Branch *</label>
-                          <select
-                            value={appointmentDraft.branch_id || ""}
-                            onChange={(e) => setAppointmentDraft({ ...appointmentDraft, branch_id: e.target.value })}
-                            className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm focus:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-400"
-                            data-testid="presales-appointment-branch"
-                          >
-                            <option value="">-- choose a branch --</option>
-                            {branches.map((b) => (
-                              <option key={b.id} value={b.id}>{b.branch_name || b.name}</option>
-                            ))}
-                          </select>
-                        </div>
-                      )}
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-600">Date *</label>
-                          <Input
-                            type="date"
-                            value={appointmentDraft.appointment_date}
-                            min={new Date().toISOString().slice(0, 10)}
-                            onChange={(e) => setAppointmentDraft({ ...appointmentDraft, appointment_date: e.target.value })}
-                            data-testid="presales-appointment-date"
-                          />
-                        </div>
-                        <div>
-                          <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-600">Time *</label>
-                          <Input
-                            type="time"
-                            value={appointmentDraft.appointment_time}
-                            onChange={(e) => setAppointmentDraft({ ...appointmentDraft, appointment_time: e.target.value })}
-                            data-testid="presales-appointment-time"
-                          />
-                        </div>
-                      </div>
-                      <div>
-                        <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-600">Remarks</label>
-                        <textarea
-                          rows={3}
-                          className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-400"
-                          placeholder="e.g. Lower back pain, 3 months"
-                          value={appointmentDraft.remarks}
-                          onChange={(e) => setAppointmentDraft({ ...appointmentDraft, remarks: e.target.value })}
-                          data-testid="presales-appointment-remarks"
-                        />
-                      </div>
-                    </div>
-                  )}
+                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-600">Remarks</label>
+                  <textarea
+                    rows={3}
+                    className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                    placeholder="e.g. Lower back pain, 3 months"
+                    value={appointmentDraft.remarks}
+                    onChange={(e) => setAppointmentDraft({ ...appointmentDraft, remarks: e.target.value })}
+                    data-testid="presales-appointment-remarks"
+                  />
                 </div>
-              )}
+              </div>
             </div>
             <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/40 px-5 py-3">
               <Button variant="outline" onClick={closeAll} data-testid="presales-appointment-cancel">Cancel</Button>
-              {step === "details" && appointmentDraft.department === "physio" && (
-                <Button
-                  className="bg-emerald-500 text-white hover:bg-emerald-600"
-                  onClick={async () => {
-                    if (!myBranchName && !appointmentDraft.branch_id) {
-                      toast.error("Please select a branch");
-                      return;
-                    }
-                    if (!appointmentDraft.appointment_date || !appointmentDraft.appointment_time) {
-                      toast.error("Pick a date and time");
-                      return;
-                    }
-                    try {
-                      const payload = {
-                        department: appointmentDraft.department,
-                        mode: "offline",
-                        appointment_date: appointmentDraft.appointment_date,
-                        appointment_time: appointmentDraft.appointment_time,
-                        remarks: appointmentDraft.remarks,
-                      };
-                      if (!myBranchName) payload.branch_id = appointmentDraft.branch_id;
-                      const updated = await scheduleAppointment(currentLead.id, payload);
-                      setCurrentLead(updated);
-                      setAppointmentResult({
-                        department: appointmentDraft.department,
-                        branchName: resolvedBranchName(),
-                        appointment_date: appointmentDraft.appointment_date,
-                        appointment_time: appointmentDraft.appointment_time,
-                        remarks: appointmentDraft.remarks,
-                      });
-                      onSaved && onSaved();
-                    } catch (e) { toast.error(e?.response?.data?.detail || "Failed to schedule appointment"); }
-                  }}
-                  data-testid="presales-appointment-save"
-                >
-                  <CheckCircle2 className="mr-1 h-4 w-4" /> Move to Branch Admin
-                </Button>
-              )}
+              <Button
+                className="bg-emerald-500 text-white hover:bg-emerald-600"
+                onClick={async () => {
+                  if (!myBranchName && !appointmentDraft.branch_id) {
+                    toast.error("Please select a branch");
+                    return;
+                  }
+                  if (!appointmentDraft.appointment_date || !appointmentDraft.appointment_time) {
+                    toast.error("Pick a date and time");
+                    return;
+                  }
+                  try {
+                    const payload = {
+                      department: appointmentDraft.department,
+                      mode: "offline",
+                      appointment_date: appointmentDraft.appointment_date,
+                      appointment_time: appointmentDraft.appointment_time,
+                      remarks: appointmentDraft.remarks,
+                    };
+                    if (!myBranchName) payload.branch_id = appointmentDraft.branch_id;
+                    const updated = await scheduleAppointment(currentLead.id, payload);
+                    setCurrentLead(updated);
+                    setAppointmentResult({
+                      department: appointmentDraft.department,
+                      branchName: resolvedBranchName(),
+                      appointment_date: appointmentDraft.appointment_date,
+                      appointment_time: appointmentDraft.appointment_time,
+                      remarks: appointmentDraft.remarks,
+                    });
+                    onSaved && onSaved();
+                  } catch (e) { toast.error(e?.response?.data?.detail || "Failed to schedule appointment"); }
+                }}
+                data-testid="presales-appointment-save"
+              >
+                <CheckCircle2 className="mr-1 h-4 w-4" /> Move to Branch Admin
+              </Button>
             </div>
             </>
             )}
