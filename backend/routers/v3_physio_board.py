@@ -174,6 +174,10 @@ async def physio_patients(physio_id: Optional[str] = None, user: V3UserOut = Dep
         completed = sum(1 for s in patient_sessions if s["status"] == "completed")
         total = len(patient_sessions)
         next_session = next((s for s in patient_sessions if s["status"] == "upcoming"), None)
+        # Weeks the booked sessions actually span — package_weeks is only set when a Head
+        # Physio recommended a package, so the Review tab falls back to this to know how
+        # many weeks it can offer an assessment for.
+        weeks = max((s.get("week_number") or 1) for s in patient_sessions) if patient_sessions else 0
 
         patients.append({
             "lead_id": lead["id"],
@@ -184,6 +188,7 @@ async def physio_patients(physio_id: Optional[str] = None, user: V3UserOut = Dep
             "remaining_sessions": total - completed,
             "next_session": next_session,
             "package_weeks": lead.get("package_weeks"),
+            "weeks": weeks,
             "physio_stage": lead.get("physio_stage"),
         })
 

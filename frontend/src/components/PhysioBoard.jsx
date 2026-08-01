@@ -186,7 +186,9 @@ function ReviewTab({ physioId }) {
     setLoading(true);
     try {
       const data = await physioPatients(physioId);
-      setPatients((data.patients || []).filter((p) => (p.package_weeks || 0) > 0));
+      // A patient only reaches Review once at least one treatment day has been
+      // completed in Treatment — that completed day is what there is to write up.
+      setPatients((data.patients || []).filter((p) => (p.completed_sessions || 0) > 0));
     } catch { /* silent */ }
     setLoading(false);
   }, [physioId]);
@@ -203,36 +205,41 @@ function ReviewTab({ physioId }) {
       {patients.length === 0 && !loading ? (
         <div className="text-center py-16">
           <ClipboardCheck className="h-10 w-10 text-slate-200 mx-auto mb-3" />
-          <p className="text-sm text-slate-400">No active treatment plans to review yet</p>
+          <p className="text-sm text-slate-400">Nothing to review yet — complete a treatment day first</p>
         </div>
       ) : (
         <div className="space-y-3">
-          {patients.map((p) => (
-            <div key={p.lead_id} className="rounded-xl border border-slate-200 bg-white p-4" data-testid={`physio-review-patient-${p.lead_id}`}>
-              <div className="flex items-center gap-3 mb-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-sky-50 text-xs font-bold text-sky-700">
-                  {p.lead_name?.charAt(0)?.toUpperCase()}
+          {patients.map((p) => {
+            const weeks = p.weeks || p.package_weeks || 0;
+            return (
+              <div key={p.lead_id} className="rounded-xl border border-slate-200 bg-white p-4" data-testid={`physio-review-patient-${p.lead_id}`}>
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-sky-50 text-xs font-bold text-sky-700">
+                    {p.lead_name?.charAt(0)?.toUpperCase()}
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-slate-800">{p.lead_name}</p>
+                    <p className="text-[10px] text-slate-400">
+                      {p.completed_sessions} of {p.total_sessions} days complete{weeks ? ` · ${weeks} week${weeks === 1 ? "" : "s"}` : ""}
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-sm font-semibold text-slate-800">{p.lead_name}</p>
-                  <p className="text-[10px] text-slate-400">{p.package_weeks} week program</p>
+                <div className="flex flex-wrap gap-2">
+                  {Array.from({ length: weeks }, (_, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => setAssessmentTarget({ leadId: p.lead_id, leadName: p.lead_name, week: i + 1 })}
+                      className="rounded-lg border border-slate-200 px-3 py-1.5 text-[11px] font-medium text-slate-600 transition-all hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700"
+                      data-testid={`physio-review-week-${p.lead_id}-${i + 1}`}
+                    >
+                      Week {i + 1}
+                    </button>
+                  ))}
                 </div>
               </div>
-              <div className="flex flex-wrap gap-2">
-                {Array.from({ length: p.package_weeks || 0 }, (_, i) => (
-                  <button
-                    key={i}
-                    type="button"
-                    onClick={() => setAssessmentTarget({ leadId: p.lead_id, leadName: p.lead_name, week: i + 1 })}
-                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-[11px] font-medium text-slate-600 transition-all hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700"
-                    data-testid={`physio-review-week-${p.lead_id}-${i + 1}`}
-                  >
-                    Week {i + 1}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -251,7 +258,18 @@ function ReviewTab({ physioId }) {
 
 function ConsultationDetailModal({ lead, physioId, onClose, onDone }) {
   const [submitting, setSubmitting] = useState(false);
+  const [sessions, setSessions] = useState([]);
+  const [completeTarget, setCompleteTarget] = useState(null);
   const isComplete = lead.physio_stage === "Complete";
+
+  const loadSessions = useCallback(async () => {
+    try {
+      const data = await physioSessions(lead.id);
+      setSessions(data.sessions || []);
+    } catch { /* silent */ }
+  }, [lead.id]);
+
+  useEffect(() => { loadSessions(); }, [loadSessions]);
 
   const markComplete = async () => {
     setSubmitting(true);
@@ -265,6 +283,26 @@ function ConsultationDetailModal({ lead, physioId, onClose, onDone }) {
     setSubmitting(false);
   };
 
+  const todayIso = new Date().toISOString().slice(0, 10);
+  // Next unpaid Treatment Fee installment on this client's record, if any.
+  const paymentDue = ((lead.treatment_fee_payment_details?.installments) || [])
+    .filter((i) => !i.paid)
+    .sort((a, b) => (a.due_date || "").localeCompare(b.due_date || ""))[0] || null;
+  const overdue = paymentDue && paymentDue.due_date < todayIso;
+
+  const completedSessions = sessions.filter((s) => s.status === "completed");
+  const upcomingSession = sessions.find((s) => s.status === "upcoming") || null;
+  const lastCompleted = completedSessions[completedSessions.length - 1] || null;
+
+  const fmtDate = (iso) => (iso ? new Date(`${iso.slice(0, 10)}T00:00:00`).toLocaleDateString("en-US", { weekday: "short", day: "numeric", month: "short" }) : null);
+
+  const Stat = ({ label, children }) => (
+    <p className="text-sm">
+      <span className="text-xs font-bold uppercase tracking-wider text-slate-400">{label}</span><br />
+      {children}
+    </p>
+  );
+
   const Row = ({ label, value }) => (
     !value ? null : (
       <div>
@@ -275,17 +313,111 @@ function ConsultationDetailModal({ lead, physioId, onClose, onDone }) {
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="w-full max-w-2xl rounded-xl bg-white shadow-2xl max-h-[85vh] flex flex-col" data-testid="physio-consultation-detail-modal">
-        <div className="flex items-center justify-between border-b p-5">
-          <div>
-            <h3 className="text-base font-semibold text-slate-800">{lead.name}</h3>
-            <p className="text-[10px] text-slate-400">{lead.phone}{lead.email ? ` · ${lead.email}` : ""}</p>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="w-full max-w-3xl overflow-hidden rounded-xl bg-white shadow-2xl max-h-[90vh] flex flex-col" data-testid="physio-consultation-detail-modal">
+        <div className="flex items-start justify-between gap-3 bg-slate-500 px-6 py-4 text-white">
+          <div className="min-w-0">
+            <h3 className="text-lg font-bold">{lead.name}</h3>
+            <p className="text-xs text-white/80">{lead.phone}{lead.email ? ` · ${lead.email}` : ""}</p>
           </div>
-          <button type="button" onClick={onClose} className="p-1 rounded hover:bg-slate-100"><X className="h-5 w-5 text-slate-400" /></button>
+          <div className="flex shrink-0 items-center gap-3">
+            <span className="whitespace-nowrap rounded-lg border-2 border-white/40 bg-white/15 px-3 py-1.5 text-sm font-bold">
+              {completedSessions.length}/{sessions.length} days
+            </span>
+            <button type="button" onClick={onClose} className="rounded-full p-1.5 text-white/80 hover:bg-white/20"><X className="h-5 w-5" /></button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto p-5 space-y-5">
+          <div className="rounded-xl border-2 border-slate-200 bg-white p-4">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Stat label="Physio">
+                <span className="text-slate-700">{lead.assigned_physio_name || "—"}</span>
+              </Stat>
+              <Stat label="Time">
+                <span className="font-semibold text-violet-700">{lead.appointment_time ? to12h(lead.appointment_time) : "—"}</span>
+              </Stat>
+              <Stat label="Payment Due">
+                {paymentDue ? (
+                  <span className={overdue ? "font-bold text-rose-600" : "font-bold text-amber-600"}>
+                    Rs.{paymentDue.amount} · {fmtDate(paymentDue.due_date)}{overdue && " · OVERDUE"}
+                  </span>
+                ) : (
+                  <span className="font-semibold text-emerald-600">Nothing due</span>
+                )}
+              </Stat>
+              <Stat label="Upcoming">
+                {upcomingSession ? (
+                  <span className="font-semibold text-sky-700">
+                    {fmtDate(upcomingSession.slot_time)} · {slotTo12h(upcomingSession.slot_time)}
+                  </span>
+                ) : (
+                  <span className="text-slate-400">No future session booked</span>
+                )}
+              </Stat>
+              <Stat label="Last Completed">
+                {lastCompleted ? (
+                  <span className="font-semibold text-emerald-600">
+                    Day {lastCompleted.session_number} · {fmtDate(lastCompleted.completed_at || lastCompleted.slot_time)}
+                  </span>
+                ) : (
+                  <span className="text-slate-400">None yet</span>
+                )}
+              </Stat>
+              <Stat label="Stage">
+                <span className="text-slate-700">{lead.physio_stage === "Complete" ? "Complete" : (lead.consultation_stage || "New Appointment")}</span>
+              </Stat>
+            </div>
+          </div>
+
+          {/* Treatment days — one row per booked session, completed in order */}
+          <div>
+            <p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">
+              Treatment Days {sessions.length > 0 && <span className="text-slate-400">({completedSessions.length} of {sessions.length} complete)</span>}
+            </p>
+            {sessions.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-slate-200 p-6 text-center text-xs text-slate-400">
+                No treatment days booked yet — Branch Admin assigns these once the Treatment Fee is collected.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {sessions.map((s) => {
+                  const done = s.status === "completed";
+                  return (
+                    <div
+                      key={s.id}
+                      className={`flex items-center gap-3 rounded-lg border p-3 ${done ? "border-emerald-200 bg-emerald-50/50" : "border-slate-200 bg-white"}`}
+                      data-testid={`physio-treatment-day-${s.id}`}
+                    >
+                      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold ${done ? "bg-emerald-200 text-emerald-800" : "bg-slate-100 text-slate-500"}`}>
+                        {s.session_number}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-semibold text-slate-700">Day {s.session_number} of {s.total_sessions} · Week {s.week_number}</p>
+                        <p className="text-[10px] text-slate-400">
+                          {s.slot_time ? `${fmtDate(s.slot_time)} at ${slotTo12h(s.slot_time)}` : "—"}
+                        </p>
+                        {s.jr_physio_remarks && <p className="mt-0.5 text-[10px] text-emerald-600">Remarks: {s.jr_physio_remarks}</p>}
+                      </div>
+                      {done ? (
+                        <span className="shrink-0 rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-semibold text-emerald-700">Complete</span>
+                      ) : (
+                        <Button
+                          size="sm"
+                          className="shrink-0 bg-sky-600 text-xs text-white hover:bg-sky-700"
+                          onClick={() => setCompleteTarget(s)}
+                          data-testid={`physio-complete-day-${s.id}`}
+                        >
+                          <Check className="mr-1 h-3 w-3" /> Complete
+                        </Button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
           <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
             <Row label="Alternative Phone" value={lead.alternative_phone} />
             <Row label="Address" value={lead.address} />
@@ -316,24 +448,32 @@ function ConsultationDetailModal({ lead, physioId, onClose, onDone }) {
               <p className="text-xs text-violet-900 whitespace-pre-wrap">{lead.treatment_summary}</p>
             </div>
           )}
-
-          <div>
-            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-600">Move to Stage</p>
-            <button
-              type="button"
-              onClick={markComplete}
-              disabled={isComplete || submitting}
-              className={`flex items-center gap-1.5 rounded-lg border px-4 py-2 text-xs font-semibold transition ${
-                isComplete
-                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                  : "border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100"
-              }`}
-              data-testid="physio-consultation-complete"
-            >
-              <Check className="h-3.5 w-3.5" /> {isComplete ? "Complete" : submitting ? "Marking..." : "Mark Complete"}
-            </button>
-          </div>
         </div>
+
+        <div className="flex items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-6 py-3.5">
+          <p className="text-[11px] text-slate-500">Completing a day sends that week's session to Review for a weekly write-up.</p>
+          <button
+            type="button"
+            onClick={markComplete}
+            disabled={isComplete || submitting}
+            className={`flex items-center gap-1.5 rounded-lg border px-4 py-2 text-xs font-semibold transition ${
+              isComplete
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                : "border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100"
+            }`}
+            data-testid="physio-consultation-complete"
+          >
+            <Check className="h-3.5 w-3.5" /> {isComplete ? "Complete" : submitting ? "Marking..." : "Mark Treatment Complete"}
+          </button>
+        </div>
+
+        {completeTarget && (
+          <CompleteSessionModal
+            session={completeTarget}
+            onClose={() => setCompleteTarget(null)}
+            onDone={() => { setCompleteTarget(null); loadSessions(); }}
+          />
+        )}
       </div>
     </div>
   );
