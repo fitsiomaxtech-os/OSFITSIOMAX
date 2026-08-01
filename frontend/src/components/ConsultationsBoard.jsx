@@ -945,22 +945,47 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     return map;
   }, [treatmentPlan]);
 
+  /** The next date after `after` that still has an open slot and no session on it yet. */
+  const nextOpenDateAfter = (after, alreadyFixed) => Object.keys(physioSlotsByDate)
+    .filter((d) => d > after
+      && !alreadyFixed.has(d)
+      && physioSlotsByDate[d].some((t) => !slotTakenByOther(`${d}T${t}`)))
+    .sort()[0];
+
   const togglePickedSlot = (slot) => {
     if (slotTakenByOther(slot)) return;
     const day = slot.split("T")[0];
-    setPickedSessionSlots((prev) => {
-      if (prev.includes(slot)) return prev.filter((s) => s !== slot);
-      // One treatment session a day — a 9-session package is 9 separate treatment days,
-      // not 9 back-to-back slots. Picking another time on a day that already holds a
-      // session moves that day's session rather than stacking a second one onto it.
-      const sameDay = prev.find((s) => s.startsWith(`${day}T`));
-      if (sameDay) return [...prev.filter((s) => s !== sameDay), slot];
-      if (prev.length >= totalSessionsNeeded) {
-        toast.error(`All ${totalSessionsNeeded} treatment days are already fixed — remove one first`);
-        return prev;
+    const prev = pickedSessionSlots;
+
+    if (prev.includes(slot)) { setPickedSessionSlots(prev.filter((s) => s !== slot)); return; }
+
+    // One treatment session a day — a 9-session package is 9 separate treatment days, not
+    // 9 back-to-back slots. Picking another time on a day that already holds a session
+    // moves that day's session rather than stacking a second one onto it.
+    const sameDay = prev.find((s) => s.startsWith(`${day}T`));
+    if (sameDay) { setPickedSessionSlots([...prev.filter((s) => s !== sameDay), slot]); return; }
+
+    if (prev.length >= totalSessionsNeeded) {
+      toast.error(`All ${totalSessionsNeeded} treatment days are already fixed — remove one first`);
+      return;
+    }
+    const next = [...prev, slot];
+    setPickedSessionSlots(next);
+
+    // Fixing a day's time settles that day, so jump straight to the next date still
+    // needing one — the whole plan gets laid out in a single run of clicks instead of
+    // going back to the calendar between every session. Moving an already-fixed day
+    // deliberately doesn't advance: that's a correction, and the result should stay in
+    // view. Neither does the last one, so the finished plan can be checked over.
+    if (next.length < totalSessionsNeeded) {
+      const nextDate = nextOpenDateAfter(day, new Set(next.map((s) => s.split("T")[0])));
+      if (nextDate) {
+        const [y, m] = nextDate.split("-").map(Number);
+        setPickerYear(y);
+        setPickerMonth(m - 1);
+        setPickerDate(nextDate);
       }
-      return [...prev, slot];
-    });
+    }
   };
 
   // Opening the picker for the physio this lead is already with pre-loads the sessions
@@ -2564,8 +2589,9 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           </div>
                           <p className="text-[13px] text-slate-400">
                             One treatment session a day — {totalSessionsNeeded} sessions means {totalSessionsNeeded} separate
-                            days. Only days this physio has opened in <b>PHYSIO CALENDAR</b> can be picked. Picking
-                            another time on a day already fixed <b>moves</b> that day's session.
+                            days. Only days this physio has opened in <b>PHYSIO CALENDAR</b> can be picked. Pick a
+                            time and it <b>jumps to the next open date</b> on its own, so the plan is laid out in one
+                            run. Picking another time on a day already fixed <b>moves</b> that day's session and stays put.
                           </p>
                         </div>
                       </div>
