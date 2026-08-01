@@ -36,7 +36,6 @@ import {
   stagesList,
   scheduleBranchFollowUp,
   rescheduleBranchFollowUp,
-  getDoctorCalendar,
 } from "@/lib/api";
 import { to12h, endTime12h } from "@/lib/time";
 import { HeadPhysioCalendar } from "@/components/HeadPhysioCalendar";
@@ -422,9 +421,6 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
 
   const [apptDraft, setApptDraft] = useState(null); // { appointment_date, appointment_time, physio_id, notes, final_stage, duration } | null
   const [apptExperts, setApptExperts] = useState({ experts: [], available_count: 0, busy_count: 0, loading: false });
-  // The picked expert's published availability for the picked date — the only times the
-  // Branch Admin can book into. Empty means the expert hasn't confirmed that day yet.
-  const [apptSlots, setApptSlots] = useState({ slots: [], loading: false });
   // Month shown by the popup's own calendar. Held apart from the picked date so paging
   // through months doesn't disturb the booking being built.
   const [apptMonth, setApptMonth] = useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() }; });
@@ -439,11 +435,11 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
   const [followUpMoveDraft, setFollowUpMoveDraft] = useState(null); // { date, time, remarks } | null
   const [followUpMoveBusy, setFollowUpMoveBusy] = useState(false);
 
-  const fetchAvailableExperts = useCallback(async (branch, dateStr) => {
+  const fetchAvailableExperts = useCallback(async (branch, dateStr, leadId) => {
     if (!branch || !dateStr) return;
     setApptExperts((p) => ({ ...p, loading: true }));
     try {
-      const res = await getAvailableExperts(branch, dateStr);
+      const res = await getAvailableExperts(branch, dateStr, undefined, leadId);
       setApptExperts({
         experts: res.experts || [],
         available_count: res.available_count || 0,
@@ -460,42 +456,31 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
     }
   }, []);
 
-  // Pulls the expert's own calendar and keeps only this date's slots that nobody has
-  // taken yet. A slot booked by THIS lead stays selectable so reopening the popup shows
-  // the current booking rather than hiding it.
-  const fetchExpertSlots = useCallback(async (physioId, dateStr, leadId) => {
-    if (!physioId || !dateStr) { setApptSlots({ slots: [], loading: false }); return; }
-    setApptSlots({ slots: [], loading: true });
-    try {
-      const cal = await getDoctorCalendar(physioId);
-      const booked = cal.booked || {};
-      const details = cal.slot_details || [];
-      const detailByTime = new Map(details.map((d) => [d.slot_time, d]));
-      const slots = (cal.slots || [])
-        .filter((s) => s.startsWith(`${dateStr}T`))
-        .filter((s) => !booked[s] || booked[s].lead_id === leadId)
-        .sort()
-        .map((s) => {
-          const time = s.split("T")[1];
-          const detail = detailByTime.get(s);
-          return {
-            time,
-            slot_time: s,
-            duration: detail?.duration || 30,
-            consultation_type: detail?.consultation_type || null,
-            mine: !!booked[s],
-          };
-        });
-      setApptSlots({ slots, loading: false });
-    } catch {
-      setApptSlots({ slots: [], loading: false });
-    }
-  }, []);
+  // The date's open times, pooled across every Head Physio, each carrying the experts
+  // who can actually take it. Booking runs time-first — a client asks for 10:00, not for
+  // a particular expert — so the popup offers the day's times and only then who's free.
+  const apptDaySlots = useMemo(() => {
+    const byTime = new Map();
+    (apptExperts.experts || []).forEach((doc) => {
+      (doc.free_slots || []).forEach((s) => {
+        const row = byTime.get(s.time) || { time: s.time, duration: s.duration, experts: [] };
+        row.duration = Math.max(row.duration, s.duration);
+        row.experts.push(doc);
+        byTime.set(s.time, row);
+      });
+    });
+    return [...byTime.values()].sort((a, b) => a.time.localeCompare(b.time));
+  }, [apptExperts.experts]);
+
+  const apptExpertsAtTime = useMemo(() => {
+    if (!apptDraft?.appointment_time) return [];
+    return apptDaySlots.find((s) => s.time === apptDraft.appointment_time)?.experts || [];
+  }, [apptDaySlots, apptDraft?.appointment_time]);
 
   useEffect(() => {
     if (!apptDraft || !apptDraft.appointment_date || !branchId) return;
-    fetchAvailableExperts(branchId, apptDraft.appointment_date);
-  }, [apptDraft?.appointment_date, branchId, fetchAvailableExperts]);
+    fetchAvailableExperts(branchId, apptDraft.appointment_date, lead.id);
+  }, [apptDraft?.appointment_date, branchId, lead.id, fetchAvailableExperts]);
 
   // Open the popup's calendar on the month the booking already sits in — reopening an
   // appointment made for next month shouldn't land on today's page with nothing selected.
@@ -505,11 +490,6 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
     const [y, m] = d.split("-").map(Number);
     setApptMonth((prev) => (prev.y === y && prev.m === m - 1 ? prev : { y, m: m - 1 }));
   }, [apptDraft?.appointment_date]);
-
-  useEffect(() => {
-    if (!apptDraft) { setApptSlots({ slots: [], loading: false }); return; }
-    fetchExpertSlots(apptDraft.physio_id, apptDraft.appointment_date, lead.id);
-  }, [apptDraft?.physio_id, apptDraft?.appointment_date, lead.id, fetchExpertSlots]);
 
   useEffect(() => {
     if (activeTab === "timeline") { loadRemarks(); loadActivity(); }
@@ -857,7 +837,7 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
       {/* Appointment Date & Time Popup */}
       {apptDraft && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-2 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) setApptDraft(null); }} data-testid="branch-appt-modal">
-          <div className="flex h-[calc(100vh-1rem)] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+          <div className="flex h-[calc(100vh-1rem)] w-full max-w-7xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-200 bg-slate-100 px-6 py-4">
               <div className="flex items-center gap-2.5">
                 <Calendar className="h-5 w-5 text-slate-500" />
@@ -876,7 +856,7 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                 one before it has an answer. */}
             <div className="flex flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
               {/* STEP 1 — Date */}
-              <div className="w-full flex-shrink-0 border-b border-slate-200 p-5 lg:w-[22rem] lg:border-b-0 lg:border-r lg:overflow-y-auto" data-testid="branch-appt-date-panel">
+              <div className="w-full flex-shrink-0 border-b border-slate-200 p-6 lg:w-[28rem] lg:border-b-0 lg:border-r lg:overflow-y-auto" data-testid="branch-appt-date-panel">
                 <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-400">1 · Date</p>
                 {(() => {
                   const todayStr = new Date().toISOString().slice(0, 10);
@@ -905,7 +885,7 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                         ))}
                       </div>
                       <div className="grid grid-cols-7 gap-1">
-                        {Array.from({ length: firstDow }, (_, i) => <div key={`pad-${i}`} className="h-11" />)}
+                        {Array.from({ length: firstDow }, (_, i) => <div key={`pad-${i}`} className="h-14" />)}
                         {Array.from({ length: daysInMonth }, (_, i) => {
                           const day = i + 1;
                           const dateStr = `${apptMonth.y}-${pad(apptMonth.m + 1)}-${pad(day)}`;
@@ -920,7 +900,7 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                               // A new date invalidates the expert and slot chosen under the
                               // old one — availability is per-day, so both are cleared.
                               onClick={() => setApptDraft({ ...apptDraft, appointment_date: dateStr, physio_id: "", appointment_time: "", duration: null })}
-                              className={`h-11 rounded-lg text-base font-semibold transition ${
+                              className={`h-14 rounded-lg text-lg font-semibold transition ${
                                 isPicked
                                   ? "bg-teal-600 text-white shadow-sm ring-2 ring-teal-200"
                                   : isPast
@@ -949,74 +929,42 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                 })()}
               </div>
 
-              {/* STEP 2 — Head Physio */}
-              <div className="w-full flex-shrink-0 border-b border-slate-200 p-5 lg:w-[20rem] lg:border-b-0 lg:border-r lg:overflow-y-auto" data-testid="branch-appt-expert-panel">
-                <p className="mb-1 text-xs font-bold uppercase tracking-wider text-slate-400">2 · Head Physio</p>
-                <p className="mb-3 text-xs text-slate-400">Only those with availability on the picked date.</p>
-                {!apptDraft.appointment_date ? (
-                  <p className="rounded-lg border border-dashed border-slate-200 px-3 py-8 text-center text-xs text-slate-400">Pick a date first.</p>
-                ) : apptExperts.loading ? (
-                  <p className="text-xs text-slate-400">Checking availability...</p>
-                ) : apptExperts.experts.length === 0 ? (
-                  <p className="rounded-lg border border-dashed border-slate-200 px-3 py-8 text-center text-xs text-slate-400">No Head Physio is available on this date.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {apptExperts.experts.map((doc) => {
-                      const active = apptDraft.physio_id === doc.id;
-                      return (
-                        <button
-                          key={doc.id}
-                          type="button"
-                          onClick={() => setApptDraft({ ...apptDraft, physio_id: doc.id, appointment_time: "", duration: null })}
-                          className={`flex w-full items-center gap-3 rounded-lg border-2 p-3 text-left transition ${active ? "border-teal-500 bg-teal-50 shadow-sm" : "border-slate-200 bg-white hover:border-teal-300 hover:bg-slate-50"}`}
-                          data-testid={`branch-appt-expert-${doc.id}`}
-                        >
-                          <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-bold ${active ? "bg-teal-600 text-white" : "bg-teal-100 text-teal-700"}`}>
-                            {doc.full_name?.charAt(0) || "E"}
-                          </div>
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-bold text-slate-800">{doc.full_name}</p>
-                            <p className="truncate text-xs text-slate-400">{doc.specialization || "Head Physio"}</p>
-                          </div>
-                          {active && <CheckCircle2 className="ml-auto h-4 w-4 shrink-0 text-teal-600" />}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* STEP 3 — Time slot. Times come only from what the expert has actually
+              {/* STEP 2 — Time slot. Times come only from what the experts have actually
                   confirmed on HEAD PHYSIO CALENDAR — no free typing, so nothing gets booked
-                  into a slot the Head Physio never agreed to. */}
-              <div className="flex-1 overflow-y-auto p-5" data-testid="branch-appt-slot-panel">
-                <p className="mb-1 text-xs font-bold uppercase tracking-wider text-slate-400">3 · Time Slot</p>
-                <p className="mb-3 text-xs text-slate-400">Published availability only.</p>
-                {!apptDraft.physio_id ? (
-                  <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-xs text-slate-400">Select a Head Physio to see their available times.</p>
-                ) : apptSlots.loading ? (
-                  <p className="text-xs text-slate-400">Loading available slots...</p>
-                ) : apptSlots.slots.length === 0 ? (
+                  into a slot no Head Physio ever agreed to. */}
+              <div className="w-full flex-shrink-0 border-b border-slate-200 p-5 lg:w-[24rem] lg:border-b-0 lg:border-r lg:overflow-y-auto" data-testid="branch-appt-slot-panel">
+                <p className="mb-1 text-xs font-bold uppercase tracking-wider text-slate-400">2 · Time Slot</p>
+                <p className="mb-3 text-xs text-slate-400">Open times on this date, across every Head Physio.</p>
+                {!apptDraft.appointment_date ? (
+                  <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">Pick a date first.</p>
+                ) : apptExperts.loading ? (
+                  <p className="text-sm text-slate-400">Checking availability...</p>
+                ) : apptDaySlots.length === 0 ? (
                   <div className="rounded-lg border-2 border-amber-200 bg-amber-50 px-4 py-3" data-testid="branch-appt-no-slots">
                     <p className="text-sm font-semibold text-amber-800">No availability published for this date.</p>
                     <p className="mt-0.5 text-xs text-amber-700">
-                      Confirm with the expert, then open MANAGEMENT → HEAD PHYSIO CALENDAR and mark them available.
+                      Confirm with a Head Physio, then open MANAGEMENT → HEAD PHYSIO CALENDAR and mark them available.
                     </p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4" data-testid="branch-appt-slots">
-                    {apptSlots.slots.map((s) => {
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3" data-testid="branch-appt-slots">
+                    {apptDaySlots.map((s) => {
                       const active = apptDraft.appointment_time === s.time;
                       return (
                         <button
-                          key={s.slot_time}
+                          key={s.time}
                           type="button"
-                          onClick={() => setApptDraft({ ...apptDraft, appointment_time: s.time, duration: s.duration })}
+                          // A different time can have a different set of experts free, so
+                          // the one picked under the old time is dropped rather than
+                          // silently carried onto a slot they may not have open.
+                          onClick={() => setApptDraft({ ...apptDraft, appointment_time: s.time, duration: s.duration, physio_id: s.experts.some((e) => e.id === apptDraft.physio_id) ? apptDraft.physio_id : "" })}
                           className={`rounded-lg border-2 px-2 py-2.5 text-center transition ${active ? "border-teal-500 bg-teal-50 text-teal-700 shadow-sm ring-2 ring-teal-100" : "border-slate-200 bg-white text-slate-600 hover:border-teal-300 hover:bg-slate-50"}`}
                           data-testid={`branch-appt-slot-${s.time}`}
                         >
-                          <span className="block text-sm font-bold">{to12h(s.time)}</span>
-                          <span className="block text-[11px] text-slate-400">{s.duration} min</span>
+                          <span className="block text-base font-bold">{to12h(s.time)}</span>
+                          <span className={`block text-[11px] font-semibold ${active ? "text-teal-600" : "text-slate-400"}`}>
+                            {s.experts.length} expert{s.experts.length === 1 ? "" : "s"}
+                          </span>
                         </button>
                       );
                     })}
@@ -1026,6 +974,43 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                   <p className="mt-4 rounded-lg border-2 border-teal-300 bg-teal-50 px-4 py-2.5 text-sm font-bold text-teal-700" data-testid="branch-appt-slot-summary">
                     {to12h(apptDraft.appointment_time)} – {endTime12h(apptDraft.appointment_time, apptDraft.duration)} · {apptDraft.duration} minute consultation
                   </p>
+                )}
+              </div>
+
+              {/* STEP 3 — Head Physio, narrowed to whoever is free at the picked time */}
+              <div className="flex-1 overflow-y-auto p-5" data-testid="branch-appt-expert-panel">
+                <p className="mb-1 text-xs font-bold uppercase tracking-wider text-slate-400">3 · Head Physio</p>
+                <p className="mb-3 text-xs text-slate-400">Free at the picked time.</p>
+                {!apptDraft.appointment_time ? (
+                  <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">Pick a time slot to see who's free.</p>
+                ) : apptExpertsAtTime.length === 0 ? (
+                  <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">No Head Physio is free at this time.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {apptExpertsAtTime.map((doc) => {
+                      const active = apptDraft.physio_id === doc.id;
+                      return (
+                        <button
+                          key={doc.id}
+                          type="button"
+                          onClick={() => setApptDraft({ ...apptDraft, physio_id: doc.id })}
+                          className={`flex w-full items-center gap-3 rounded-lg border-2 p-3.5 text-left transition ${active ? "border-teal-500 bg-teal-50 shadow-sm" : "border-slate-200 bg-white hover:border-teal-300 hover:bg-slate-50"}`}
+                          data-testid={`branch-appt-expert-${doc.id}`}
+                        >
+                          <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-base font-bold ${active ? "bg-teal-600 text-white" : "bg-teal-100 text-teal-700"}`}>
+                            {doc.full_name?.charAt(0) || "E"}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-bold text-slate-800">{doc.full_name}</p>
+                            <p className="truncate text-xs text-slate-400">
+                              {doc.specialization || "Head Physio"} · {doc.free_slot_count} slot{doc.free_slot_count === 1 ? "" : "s"} open today
+                            </p>
+                          </div>
+                          {active && <CheckCircle2 className="ml-auto h-5 w-5 shrink-0 text-teal-600" />}
+                        </button>
+                      );
+                    })}
+                  </div>
                 )}
 
                 <div className="mt-5">

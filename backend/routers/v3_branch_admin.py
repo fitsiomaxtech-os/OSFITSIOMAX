@@ -309,6 +309,7 @@ async def v3_available_experts(
     branch_id: str,
     date: str,
     time: Optional[str] = None,
+    lead_id: Optional[str] = None,
     _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio")),
 ):
     """Head Physios at this branch who can take a consultation on the given date
@@ -335,10 +336,15 @@ async def v3_available_experts(
     # the Consultant Calendar instead of silently offering no one.
     booked_rows = await v3_col("appointments").find(
         {"status": "new_appointment", "slot_time": {"$regex": f"^{date}T"}},
-        {"_id": 0, "doctor_id": 1, "slot_time": 1},
+        {"_id": 0, "doctor_id": 1, "slot_time": 1, "lead_id": 1},
     ).to_list(2000)
     booked_by_doc: Dict[str, set] = {}
     for r in booked_rows:
+        # A slot this same lead already holds isn't "taken" as far as they're concerned —
+        # reopening their own booking has to keep offering the slot they're sitting in,
+        # otherwise the popup can't show the current appointment or reschedule off it.
+        if lead_id and r.get("lead_id") == lead_id:
+            continue
         booked_by_doc.setdefault(r.get("doctor_id"), set()).add(r.get("slot_time"))
 
     available = []
@@ -352,7 +358,23 @@ async def v3_available_experts(
                 continue
         elif published and not free:
             continue  # fully booked for the day
-        available.append({**d, "free_slot_count": len(free), "published_slot_count": len(published)})
+        # The free slots themselves, not just how many — the booking popup lists the
+        # date's open times first and only then who can take each one, so it needs to
+        # know which times each expert actually has open.
+        detail_by_slot = {x.get("slot_time"): x for x in (d.get("slot_details") or [])}
+        available.append({
+            **d,
+            "free_slot_count": len(free),
+            "published_slot_count": len(published),
+            "free_slots": [
+                {
+                    "slot_time": s,
+                    "time": s.split("T")[1],
+                    "duration": (detail_by_slot.get(s) or {}).get("duration") or 30,
+                }
+                for s in sorted(free)
+            ],
+        })
     return {
         "date": date,
         "time": time,

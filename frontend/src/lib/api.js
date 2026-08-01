@@ -145,7 +145,7 @@ export const getConsultDay = async (branchId, date) => (await api.get(`/branch-a
 export const createConsultAppointment = async (branchId, payload) => (await api.post(`/branch-admin/${branchId}/consult-appointments`, payload)).data;
 export const updateConsultAppointment = async (apptId, payload) => (await api.patch(`/branch-admin/consult-appointments/${apptId}`, payload)).data;
 export const cancelConsultAppointment = async (apptId) => (await api.post(`/branch-admin/consult-appointments/${apptId}/cancel`)).data;
-export const getAvailableExperts = async (branchId, date, time) => (await api.get(`/branch-admin/available-experts/${branchId}`, { params: time ? { date, time } : { date } })).data;
+export const getAvailableExperts = async (branchId, date, time, leadId) => (await api.get(`/branch-admin/available-experts/${branchId}`, { params: { date, ...(time ? { time } : {}), ...(leadId ? { lead_id: leadId } : {}) } })).data;
 export const getCalendarAvailability = async (branchId, month) => (await api.get(`/branch-admin/calendar-availability/${branchId}`, { params: { month } })).data;
 export const getDaySlots = async (branchId, date) => (await api.get(`/branch-admin/day-slots/${branchId}`, { params: { date } })).data;
 export const getExpertCalendar = async (expertId, month) => (await api.get(`/branch-admin/expert-calendar/${expertId}`, { params: { month } })).data;
