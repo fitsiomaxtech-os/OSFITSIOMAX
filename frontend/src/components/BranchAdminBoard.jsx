@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Calendar,
   Check,
+  CheckCircle2,
+  ChevronLeft,
   ChevronRight,
   Phone,
   Mail,
@@ -423,6 +425,9 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
   // The picked expert's published availability for the picked date — the only times the
   // Branch Admin can book into. Empty means the expert hasn't confirmed that day yet.
   const [apptSlots, setApptSlots] = useState({ slots: [], loading: false });
+  // Month shown by the popup's own calendar. Held apart from the picked date so paging
+  // through months doesn't disturb the booking being built.
+  const [apptMonth, setApptMonth] = useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() }; });
 
   // Follow-up scheduling
   const tomorrowIso = () => new Date(Date.now() + 86400000).toISOString().slice(0, 10);
@@ -491,6 +496,15 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
     if (!apptDraft || !apptDraft.appointment_date || !branchId) return;
     fetchAvailableExperts(branchId, apptDraft.appointment_date);
   }, [apptDraft?.appointment_date, branchId, fetchAvailableExperts]);
+
+  // Open the popup's calendar on the month the booking already sits in — reopening an
+  // appointment made for next month shouldn't land on today's page with nothing selected.
+  useEffect(() => {
+    const d = apptDraft?.appointment_date;
+    if (!d) return;
+    const [y, m] = d.split("-").map(Number);
+    setApptMonth((prev) => (prev.y === y && prev.m === m - 1 ? prev : { y, m: m - 1 }));
+  }, [apptDraft?.appointment_date]);
 
   useEffect(() => {
     if (!apptDraft) { setApptSlots({ slots: [], loading: false }); return; }
@@ -842,70 +856,155 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
 
       {/* Appointment Date & Time Popup */}
       {apptDraft && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) setApptDraft(null); }} data-testid="branch-appt-modal">
-          <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between bg-gradient-to-r from-teal-500 to-cyan-600 px-5 py-4 text-white">
-              <div className="flex items-center gap-2">
-                <Calendar className="h-5 w-5" />
-                <p className="text-base font-semibold">Appointment</p>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-2 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) setApptDraft(null); }} data-testid="branch-appt-modal">
+          <div className="flex h-[calc(100vh-1rem)] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 bg-slate-100 px-6 py-4">
+              <div className="flex items-center gap-2.5">
+                <Calendar className="h-5 w-5 text-slate-500" />
+                <div>
+                  <p className="text-lg font-bold text-slate-800">Appointment</p>
+                  <p className="text-xs text-slate-500">{lead.name} · pick a date, then the Head Physio, then their time</p>
+                </div>
               </div>
-              <button onClick={() => setApptDraft(null)} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="branch-appt-close">
-                <X className="h-4 w-4" />
+              <button onClick={() => setApptDraft(null)} className="rounded-full p-1.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700" data-testid="branch-appt-close">
+                <X className="h-5 w-5" />
               </button>
             </div>
-            <div className="space-y-4 p-5">
-              <div>
-                <label className="mb-1 block text-xs font-semibold text-slate-600">Date *</label>
-                <Input type="date" value={apptDraft.appointment_date} min={new Date().toISOString().slice(0, 10)} onChange={(e) => setApptDraft({ ...apptDraft, appointment_date: e.target.value })} data-testid="branch-appt-date" />
+
+            {/* Three steps left to right: the date narrows who's available, the chosen
+                Head Physio narrows which times exist. Each column only fills in once the
+                one before it has an answer. */}
+            <div className="flex flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
+              {/* STEP 1 — Date */}
+              <div className="w-full flex-shrink-0 border-b border-slate-200 p-5 lg:w-[22rem] lg:border-b-0 lg:border-r lg:overflow-y-auto" data-testid="branch-appt-date-panel">
+                <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-400">1 · Date</p>
+                {(() => {
+                  const todayStr = new Date().toISOString().slice(0, 10);
+                  const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+                  const firstDow = new Date(apptMonth.y, apptMonth.m, 1).getDay();
+                  const daysInMonth = new Date(apptMonth.y, apptMonth.m + 1, 0).getDate();
+                  const pad = (n) => String(n).padStart(2, "0");
+                  const stepMonth = (delta) => setApptMonth(({ y, m }) => {
+                    const d = new Date(y, m + delta, 1);
+                    return { y: d.getFullYear(), m: d.getMonth() };
+                  });
+                  return (
+                    <>
+                      <div className="mb-3 flex items-center justify-between">
+                        <button type="button" onClick={() => stepMonth(-1)} className="rounded p-1 hover:bg-slate-100" data-testid="branch-appt-prev-month">
+                          <ChevronLeft className="h-5 w-5 text-slate-500" />
+                        </button>
+                        <h4 className="text-base font-bold text-slate-700">{monthNames[apptMonth.m]} {apptMonth.y}</h4>
+                        <button type="button" onClick={() => stepMonth(1)} className="rounded p-1 hover:bg-slate-100" data-testid="branch-appt-next-month">
+                          <ChevronRight className="h-5 w-5 text-slate-500" />
+                        </button>
+                      </div>
+                      <div className="mb-1 grid grid-cols-7 gap-1">
+                        {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((d) => (
+                          <div key={d} className="py-1 text-center text-xs font-semibold text-slate-400">{d}</div>
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-7 gap-1">
+                        {Array.from({ length: firstDow }, (_, i) => <div key={`pad-${i}`} className="h-11" />)}
+                        {Array.from({ length: daysInMonth }, (_, i) => {
+                          const day = i + 1;
+                          const dateStr = `${apptMonth.y}-${pad(apptMonth.m + 1)}-${pad(day)}`;
+                          const isPast = dateStr < todayStr;
+                          const isPicked = apptDraft.appointment_date === dateStr;
+                          const isToday = dateStr === todayStr;
+                          return (
+                            <button
+                              key={day}
+                              type="button"
+                              disabled={isPast}
+                              // A new date invalidates the expert and slot chosen under the
+                              // old one — availability is per-day, so both are cleared.
+                              onClick={() => setApptDraft({ ...apptDraft, appointment_date: dateStr, physio_id: "", appointment_time: "", duration: null })}
+                              className={`h-11 rounded-lg text-base font-semibold transition ${
+                                isPicked
+                                  ? "bg-teal-600 text-white shadow-sm ring-2 ring-teal-200"
+                                  : isPast
+                                  ? "cursor-not-allowed text-slate-300"
+                                  : isToday
+                                  ? "border border-teal-300 bg-teal-50 text-teal-700 hover:bg-teal-100"
+                                  : "text-slate-600 hover:bg-slate-100"
+                              }`}
+                              data-testid={`branch-appt-day-${day}`}
+                            >
+                              {day}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Selected</p>
+                        <p className="mt-0.5 text-sm font-bold text-slate-700" data-testid="branch-appt-selected-date">
+                          {apptDraft.appointment_date
+                            ? new Date(`${apptDraft.appointment_date}T00:00:00`).toLocaleDateString("en-US", { weekday: "long", day: "numeric", month: "long", year: "numeric" })
+                            : "No date picked yet"}
+                        </p>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
-              <div>
-                <label className="mb-1 block text-xs font-semibold text-slate-600">Head Physio *</label>
-                <p className="mb-1.5 text-[11px] text-slate-400">Showing Head Physios available on this date.</p>
-                {apptExperts.loading ? (
+
+              {/* STEP 2 — Head Physio */}
+              <div className="w-full flex-shrink-0 border-b border-slate-200 p-5 lg:w-[20rem] lg:border-b-0 lg:border-r lg:overflow-y-auto" data-testid="branch-appt-expert-panel">
+                <p className="mb-1 text-xs font-bold uppercase tracking-wider text-slate-400">2 · Head Physio</p>
+                <p className="mb-3 text-xs text-slate-400">Only those with availability on the picked date.</p>
+                {!apptDraft.appointment_date ? (
+                  <p className="rounded-lg border border-dashed border-slate-200 px-3 py-8 text-center text-xs text-slate-400">Pick a date first.</p>
+                ) : apptExperts.loading ? (
                   <p className="text-xs text-slate-400">Checking availability...</p>
                 ) : apptExperts.experts.length === 0 ? (
-                  <p className="text-xs text-slate-400">No experts available on this date.</p>
+                  <p className="rounded-lg border border-dashed border-slate-200 px-3 py-8 text-center text-xs text-slate-400">No Head Physio is available on this date.</p>
                 ) : (
-                  <div className="space-y-1.5">
-                    {apptExperts.experts.map((doc) => (
-                      <button
-                        key={doc.id}
-                        type="button"
-                        onClick={() => setApptDraft({ ...apptDraft, physio_id: doc.id, appointment_time: "", duration: null })}
-                        className={`flex w-full items-center gap-3 rounded-md border p-2.5 text-left ${apptDraft.physio_id === doc.id ? "border-teal-400 bg-teal-50" : "border-slate-200 bg-white hover:bg-slate-50"}`}
-                        data-testid={`branch-appt-expert-${doc.id}`}
-                      >
-                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-teal-100 text-xs font-bold text-teal-700">
-                          {doc.full_name?.charAt(0) || "E"}
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium text-slate-800">{doc.full_name}</p>
-                          <p className="text-[10px] text-slate-400">{doc.specialization || doc.profile_type || "Expert"}</p>
-                        </div>
-                      </button>
-                    ))}
+                  <div className="space-y-2">
+                    {apptExperts.experts.map((doc) => {
+                      const active = apptDraft.physio_id === doc.id;
+                      return (
+                        <button
+                          key={doc.id}
+                          type="button"
+                          onClick={() => setApptDraft({ ...apptDraft, physio_id: doc.id, appointment_time: "", duration: null })}
+                          className={`flex w-full items-center gap-3 rounded-lg border-2 p-3 text-left transition ${active ? "border-teal-500 bg-teal-50 shadow-sm" : "border-slate-200 bg-white hover:border-teal-300 hover:bg-slate-50"}`}
+                          data-testid={`branch-appt-expert-${doc.id}`}
+                        >
+                          <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-bold ${active ? "bg-teal-600 text-white" : "bg-teal-100 text-teal-700"}`}>
+                            {doc.full_name?.charAt(0) || "E"}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-bold text-slate-800">{doc.full_name}</p>
+                            <p className="truncate text-xs text-slate-400">{doc.specialization || "Head Physio"}</p>
+                          </div>
+                          {active && <CheckCircle2 className="ml-auto h-4 w-4 shrink-0 text-teal-600" />}
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>
 
-              {/* Time comes only from what the expert has actually confirmed on their
-                  Consultant Calendar — no free typing, so nothing gets booked into a
-                  slot the Head Physio never agreed to. */}
-              <div>
-                <label className="mb-1 block text-xs font-semibold text-slate-600">Time Slot *</label>
+              {/* STEP 3 — Time slot. Times come only from what the expert has actually
+                  confirmed on HEAD PHYSIO CALENDAR — no free typing, so nothing gets booked
+                  into a slot the Head Physio never agreed to. */}
+              <div className="flex-1 overflow-y-auto p-5" data-testid="branch-appt-slot-panel">
+                <p className="mb-1 text-xs font-bold uppercase tracking-wider text-slate-400">3 · Time Slot</p>
+                <p className="mb-3 text-xs text-slate-400">Published availability only.</p>
                 {!apptDraft.physio_id ? (
-                  <p className="text-xs text-slate-400">Select an expert to see their available times.</p>
+                  <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-xs text-slate-400">Select a Head Physio to see their available times.</p>
                 ) : apptSlots.loading ? (
                   <p className="text-xs text-slate-400">Loading available slots...</p>
                 ) : apptSlots.slots.length === 0 ? (
-                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5" data-testid="branch-appt-no-slots">
-                    <p className="text-[11px] font-medium text-amber-800">No availability published for this date.</p>
-                    <p className="mt-0.5 text-[11px] text-amber-700">
-                      Confirm with the expert, then open MANAGEMENT → Consultant Calendar and mark them available.
+                  <div className="rounded-lg border-2 border-amber-200 bg-amber-50 px-4 py-3" data-testid="branch-appt-no-slots">
+                    <p className="text-sm font-semibold text-amber-800">No availability published for this date.</p>
+                    <p className="mt-0.5 text-xs text-amber-700">
+                      Confirm with the expert, then open MANAGEMENT → HEAD PHYSIO CALENDAR and mark them available.
                     </p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-3 gap-1.5" data-testid="branch-appt-slots">
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4" data-testid="branch-appt-slots">
                     {apptSlots.slots.map((s) => {
                       const active = apptDraft.appointment_time === s.time;
                       return (
@@ -913,34 +1012,38 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                           key={s.slot_time}
                           type="button"
                           onClick={() => setApptDraft({ ...apptDraft, appointment_time: s.time, duration: s.duration })}
-                          className={`rounded-md border px-2 py-1.5 text-center transition ${active ? "border-teal-400 bg-teal-50 text-teal-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}
+                          className={`rounded-lg border-2 px-2 py-2.5 text-center transition ${active ? "border-teal-500 bg-teal-50 text-teal-700 shadow-sm ring-2 ring-teal-100" : "border-slate-200 bg-white text-slate-600 hover:border-teal-300 hover:bg-slate-50"}`}
                           data-testid={`branch-appt-slot-${s.time}`}
                         >
-                          <span className="block text-xs font-semibold">{to12h(s.time)}</span>
-                          <span className="block text-[9px] text-slate-400">{s.duration} min</span>
+                          <span className="block text-sm font-bold">{to12h(s.time)}</span>
+                          <span className="block text-[11px] text-slate-400">{s.duration} min</span>
                         </button>
                       );
                     })}
                   </div>
                 )}
                 {apptDraft.appointment_time && apptDraft.duration && (
-                  <p className="mt-2 text-[11px] font-medium text-teal-700" data-testid="branch-appt-slot-summary">
+                  <p className="mt-4 rounded-lg border-2 border-teal-300 bg-teal-50 px-4 py-2.5 text-sm font-bold text-teal-700" data-testid="branch-appt-slot-summary">
                     {to12h(apptDraft.appointment_time)} – {endTime12h(apptDraft.appointment_time, apptDraft.duration)} · {apptDraft.duration} minute consultation
                   </p>
                 )}
+
+                <div className="mt-5">
+                  <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-slate-400">Notes</label>
+                  <textarea
+                    rows={3}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-teal-400 focus:outline-none focus:ring-1 focus:ring-teal-400"
+                    placeholder="Optional notes about the appointment..."
+                    value={apptDraft.notes}
+                    onChange={(e) => setApptDraft({ ...apptDraft, notes: e.target.value })}
+                    data-testid="branch-appt-notes"
+                  />
+                </div>
               </div>
-              <div>
-                <label className="mb-1 block text-xs font-semibold text-slate-600">Notes</label>
-                <textarea
-                  rows={3}
-                  className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-teal-400 focus:outline-none focus:ring-1 focus:ring-teal-400"
-                  placeholder="Optional notes about the appointment..."
-                  value={apptDraft.notes}
-                  onChange={(e) => setApptDraft({ ...apptDraft, notes: e.target.value })}
-                  data-testid="branch-appt-notes"
-                />
-              </div>
-              <label className="flex items-center gap-2 text-sm text-slate-600">
+            </div>
+
+            <div className="flex items-center justify-between gap-3 border-t border-slate-200 bg-slate-100 px-6 py-3.5">
+              <label className="flex items-center gap-2 text-sm font-medium text-slate-600">
                 <input
                   type="checkbox"
                   checked={apptDraft.final_stage === "Cancelled"}
@@ -949,8 +1052,7 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                 />
                 Cancelled
               </label>
-            </div>
-            <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/40 px-5 py-3">
+              <div className="flex items-center gap-2">
               <Button variant="outline" onClick={() => setApptDraft(null)} data-testid="branch-appt-cancel">Cancel</Button>
               <Button
                 className="bg-teal-600 text-white hover:bg-teal-700"
@@ -969,6 +1071,7 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
               >
                 Confirm
               </Button>
+              </div>
             </div>
           </div>
         </div>
