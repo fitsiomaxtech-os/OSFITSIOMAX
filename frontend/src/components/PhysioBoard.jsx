@@ -82,16 +82,18 @@ function TreatmentTab({ physioId }) {
 
   useEffect(() => { load(); }, [load]);
 
-  const formatDateTime = (lead) => {
-    if (!lead.appointment_date) return "No appointment scheduled yet";
-    const time = lead.appointment_time ? ` · ${to12h(lead.appointment_time)}` : "";
-    return `${lead.appointment_date}${time}`;
-  };
-
   const isCompleted = (l) => l.physio_stage === "Complete";
   const newCount = leads.filter((l) => !isCompleted(l)).length;
   const completedCount = leads.filter(isCompleted).length;
   const visibleLeads = leads.filter((l) => (subTab === "completed" ? isCompleted(l) : !isCompleted(l)));
+
+  // Days since Branch Admin assigned this patient — a queue-age indicator for how
+  // long a "New Appointment" has been sitting unattended.
+  const daysSinceAssigned = (lead) => {
+    if (!lead.physio_assigned_at) return null;
+    const days = Math.max(0, Math.floor((Date.now() - new Date(lead.physio_assigned_at).getTime()) / 86400000));
+    return `${days} day${days === 1 ? "" : "s"}`;
+  };
 
   return (
     <div data-testid="physio-treatment-tab">
@@ -117,36 +119,49 @@ function TreatmentTab({ physioId }) {
           <p className="text-sm text-slate-400">{subTab === "completed" ? "No completed treatments yet" : "No new appointments assigned yet"}</p>
         </div>
       ) : (
-        <div className="space-y-2">
-          {visibleLeads.map((l) => (
-            <button
-              type="button"
-              key={l.id}
-              onClick={() => setSelectedLead(l)}
-              className="w-full rounded-xl border border-slate-200 bg-white p-4 text-left transition hover:border-sky-200 hover:shadow-sm"
-              data-testid={`consultation-lead-${l.id}`}
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-semibold text-slate-800">{l.name}</p>
-                  <p className="text-[10px] text-slate-400">{l.phone}</p>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  {l.physio_stage === "Complete" && (
-                    <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-semibold text-emerald-700">Complete</span>
-                  )}
-                  {l.consultation_stage && (
-                    <span className="rounded-full bg-sky-100 px-2.5 py-1 text-[10px] font-semibold text-sky-700">{l.consultation_stage}</span>
-                  )}
-                </div>
-              </div>
-              <div className="mt-2 flex items-center gap-1.5 text-xs text-slate-600">
-                <Calendar className="h-3.5 w-3.5 text-slate-400" /> {formatDateTime(l)}
-              </div>
-              {l.condition && <p className="text-[10px] text-slate-400 mt-1">Condition: {l.condition}</p>}
-              {l.notes && <p className="text-[10px] text-slate-500 mt-1 whitespace-pre-wrap">{l.notes}</p>}
-            </button>
-          ))}
+        <div className="overflow-auto rounded-xl border border-slate-200 bg-white">
+          <table className="min-w-full text-sm">
+            <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+              <tr>
+                <th className="px-4 py-2.5">Patient</th>
+                <th className="px-4 py-2.5">Phone</th>
+                <th className="px-4 py-2.5">Stage</th>
+                <th className="px-4 py-2.5">Complete Days</th>
+                <th className="px-4 py-2.5">Updated</th>
+                <th className="px-4 py-2.5">Time</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {visibleLeads.map((l) => (
+                <tr
+                  key={l.id}
+                  onClick={() => setSelectedLead(l)}
+                  className="cursor-pointer transition-colors hover:bg-slate-50"
+                  data-testid={`consultation-lead-${l.id}`}
+                >
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2.5">
+                      <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-sky-50 text-xs font-bold text-sky-700">
+                        {l.name?.charAt(0)?.toUpperCase() || "?"}
+                      </span>
+                      <span className="font-medium text-slate-800">{l.name}</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-slate-600">{l.phone || "—"}</td>
+                  <td className="px-4 py-3">
+                    <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-semibold ${
+                      l.physio_stage === "Complete" ? "bg-emerald-100 text-emerald-700" : "bg-sky-100 text-sky-700"
+                    }`}>
+                      {l.physio_stage === "Complete" ? "Complete" : (l.consultation_stage || "New Appointment")}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-slate-600">{daysSinceAssigned(l) || "—"}</td>
+                  <td className="px-4 py-3 text-slate-500">{(l.updated_at || "").slice(0, 10) || "—"}</td>
+                  <td className="px-4 py-3 text-slate-600">{l.appointment_time ? to12h(l.appointment_time) : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 
