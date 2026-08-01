@@ -193,6 +193,7 @@ export const CRMPage = ({ auth, onLogout }) => {
   const role = auth.user.role;
   const roleLabel = ROLE_META[role]?.label || role;
   const boardTitle = role === "pre_sales" ? "Pre-sales Master View" : `${roleLabel} Master View`;
+  const myBranchName = branches.find((b) => b.id === auth.user.branch_id)?.branch_name || "";
 
   const [superAdminView, setSuperAdminView] = useState(() => {
     if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("sheets_connect")) {
@@ -554,6 +555,7 @@ export const CRMPage = ({ auth, onLogout }) => {
             <div className="flex items-center gap-2 sm:gap-3">
               <span className="hidden text-sm font-medium text-sky-700 sm:inline" data-testid="role-board-user-greeting">
                 {(showPreSalesBoard || showBranchBoard || showHeadPhysioBoard) ? auth.user.full_name : auth.user.full_name?.split(" ")[0]}
+                {myBranchName && <span className="ml-1.5 font-normal text-slate-400" data-testid="role-board-user-branch">· {myBranchName}</span>}
               </span>
               {(showPreSalesBoard || showBranchBoard || showHeadPhysioBoard) && (
                 <Button
@@ -580,7 +582,7 @@ export const CRMPage = ({ auth, onLogout }) => {
         </header>
 
         {showProfile && (
-          <MyProfileModal user={auth.user} roleLabel={roleLabel} onClose={() => setShowProfile(false)} />
+          <MyProfileModal user={auth.user} roleLabel={roleLabel} branchName={myBranchName} onClose={() => setShowProfile(false)} />
         )}
 
         <div className="w-full space-y-4 px-3 py-4 sm:space-y-6 sm:px-6 sm:py-6">
@@ -679,7 +681,7 @@ export const CRMPage = ({ auth, onLogout }) => {
   );
 };
 
-const MyProfileModal = ({ user, roleLabel, onClose }) => {
+const MyProfileModal = ({ user, roleLabel, branchName, onClose }) => {
   if (!user) return null;
   const joinedOn = user.created_at
     ? new Date(user.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })
@@ -687,6 +689,7 @@ const MyProfileModal = ({ user, roleLabel, onClose }) => {
   const fields = [
     { label: "Employee ID", value: user.id ? `#${user.id.slice(-8).toUpperCase()}` : "—" },
     { label: "Role", value: roleLabel || user.role },
+    ...(branchName ? [{ label: "Branch", value: branchName }] : []),
     { label: "Joined On", value: joinedOn },
   ];
 
