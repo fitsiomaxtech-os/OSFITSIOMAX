@@ -27,7 +27,9 @@ const SESSION_TYPES = [
   { value: "session", label: "Treatment Session", color: "bg-sky-100 text-sky-700 border-sky-300" },
 ];
 
-const DURATIONS = [15, 30, 45, 60];
+// Every consultation slot is 30 minutes. Picking a date opens the whole working day at
+// this length, so there's no per-day duration choice to make.
+const SLOT_MINUTES = 30;
 
 function getDaysInMonth(year, month) {
   return new Date(year, month + 1, 0).getDate();
@@ -54,14 +56,10 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
   const [selectedDate, setSelectedDate] = useState(null);
 
-  const [slotDuration, setSlotDuration] = useState(30);
-  const [slotType, setSlotType] = useState(SLOT_TYPES[0].value);
+  const slotDuration = SLOT_MINUTES;
+  const slotType = SLOT_TYPES[0].value;
   const [pendingSlots, setPendingSlots] = useState([]);
   const [saving, setSaving] = useState(false);
-
-  const [repeatDays, setRepeatDays] = useState([]);
-  const [repeatWeeks, setRepeatWeeks] = useState(4);
-  const [repeating, setRepeating] = useState(false);
 
   const loadDoctors = useCallback(async () => {
     if (!branchId) return;
@@ -89,6 +87,24 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
     setPendingSlots([]);
   };
 
+  // Picking a date IS the availability confirmation — the whole working day fills in
+  // straight away rather than making the Branch Admin click 28 slots by hand. They land
+  // as staged additions (not saved), so an accidental date click costs nothing and the
+  // existing Save Changes / Discard pair still governs what actually gets published.
+  // Slots already published for that date, and anything booked, are left untouched.
+  const selectDate = (d) => {
+    setSelectedDate(d);
+    const alreadyOpen = new Set((calendarData?.slots || []).filter((s) => s.startsWith(`${d}T`)));
+    setPendingSlots(
+      generateTimeGrid()
+        .filter((time) => {
+          const full = `${d}T${time}`;
+          return !alreadyOpen.has(full) && !calendarData?.booked?.[full];
+        })
+        .map((time) => ({ slot_time: `${d}T${time}`, duration: slotDuration, consultation_type: slotType })),
+    );
+  };
+
   const prevMonth = () => {
     if (currentMonth === 0) { setCurrentMonth(11); setCurrentYear(currentYear - 1); }
     else setCurrentMonth(currentMonth - 1);
@@ -105,11 +121,6 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
 
   const dateStr = (day) => `${currentYear}-${String(currentMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 
-  const getSlotsForDate = (date) => {
-    if (!calendarData) return [];
-    return (calendarData.slot_details || []).filter((s) => s.slot_time.startsWith(date));
-  };
-
   const getSimpleSlotsForDate = (date) => {
     if (!calendarData) return [];
     return (calendarData.slots || []).filter((s) => s.startsWith(date));
@@ -119,9 +130,8 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
     return calendarData?.booked?.[slotTime];
   };
 
-  // The working window a Head Physio can be marked available across: 08:00 to 22:00.
-  // Steps by the currently-selected duration, so a 30-min day yields 08:00…21:30 and a
-  // 45-min day yields 08:00…21:15 — every generated slot finishes by 22:00.
+  // The working window a day is opened across: 8:00 AM to 10:00 PM, in 30-minute steps,
+  // giving 8:00 AM … 9:30 PM — every generated slot finishes by 10:00 PM.
   const DAY_START_MIN = 8 * 60;
   const DAY_END_MIN = 22 * 60;
 
@@ -198,56 +208,6 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
       toast.error(err?.response?.data?.detail || "Save failed");
     }
     setSaving(false);
-  };
-
-  const toggleRepeatDay = (dow) => {
-    setRepeatDays((prev) => (prev.includes(dow) ? prev.filter((d) => d !== dow) : [...prev, dow]));
-  };
-
-  const getSourceSlotsForRepeat = () => {
-    if (!selectedDate) return [];
-    return generateTimeGrid()
-      .map((time) => ({ time, state: getSlotState(time), detail: getSlotDetail(time) }))
-      .filter((s) => s.state === "existing" || s.state === "adding")
-      .map((s) => ({ time: s.time, duration: s.detail?.duration || slotDuration, consultation_type: s.detail?.consultation_type || slotType }));
-  };
-
-  const getRepeatTargetDates = () => {
-    if (!selectedDate || repeatDays.length === 0) return [];
-    const start = new Date(selectedDate + "T00:00:00");
-    const end = new Date(start);
-    end.setDate(end.getDate() + repeatWeeks * 7);
-    const dates = [];
-    const cursor = new Date(start);
-    cursor.setDate(cursor.getDate() + 1);
-    while (cursor <= end) {
-      if (repeatDays.includes(cursor.getDay())) {
-        dates.push(`${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}-${String(cursor.getDate()).padStart(2, "0")}`);
-      }
-      cursor.setDate(cursor.getDate() + 1);
-    }
-    return dates;
-  };
-
-  const applyRepeat = async () => {
-    const sourceSlots = getSourceSlotsForRepeat();
-    if (sourceSlots.length === 0) { toast.error("No time slots configured on this day to repeat"); return; }
-    const targetDates = getRepeatTargetDates();
-    if (targetDates.length === 0) { toast.error("Pick at least one day of the week to repeat on"); return; }
-    setRepeating(true);
-    try {
-      if (pendingSlots.length > 0) await saveChanges();
-      const newSlots = targetDates.flatMap((date) =>
-        sourceSlots.map((s) => ({ slot_time: `${date}T${s.time}`, duration: s.duration, consultation_type: s.consultation_type }))
-      );
-      await addCalendarSlots(selectedDoctor.id, { slots: newSlots });
-      toast.success(`Applied ${sourceSlots.length} slot${sourceSlots.length > 1 ? "s" : ""} to ${targetDates.length} day${targetDates.length > 1 ? "s" : ""}`);
-      await loadCalendar();
-      await loadDoctors();
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || "Repeat failed");
-    }
-    setRepeating(false);
   };
 
   const countSlotsForDay = (day) => {
@@ -346,7 +306,7 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
               {/* Month Calendar — scrolls on its own, otherwise the controls below it
                   (duration, type, Mark Whole Day Available, Repeat) get clipped by the
                   row's lg:overflow-hidden with no way to reach them. */}
-              <div className="w-full flex-shrink-0 border-b border-slate-100 p-4 flex flex-col lg:w-80 lg:border-b-0 lg:border-r lg:overflow-y-auto">
+              <div className="w-full flex-shrink-0 border-b border-slate-100 p-5 flex flex-col lg:w-[26rem] lg:border-b-0 lg:border-r lg:overflow-y-auto">
                 <div className="flex items-center justify-between mb-4">
                   <button type="button" onClick={prevMonth} className="p-1 rounded hover:bg-slate-100" data-testid="cal-prev-month">
                     <ChevronLeft className="h-4 w-4 text-slate-500" />
@@ -357,15 +317,15 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
                   </button>
                 </div>
 
-                <div className="grid grid-cols-7 gap-0.5 mb-1">
+                <div className="grid grid-cols-7 gap-1 mb-1">
                   {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((d) => (
-                    <div key={d} className="text-center text-[10px] font-semibold text-slate-400 py-1">{d}</div>
+                    <div key={d} className="text-center text-[11px] font-semibold text-slate-400 py-1.5">{d}</div>
                   ))}
                 </div>
 
-                <div className="grid grid-cols-7 gap-0.5">
+                <div className="grid grid-cols-7 gap-1">
                   {Array.from({ length: firstDay }, (_, i) => (
-                    <div key={`empty-${i}`} className="h-9" />
+                    <div key={`empty-${i}`} className="h-11" />
                   ))}
                   {Array.from({ length: daysInMonth }, (_, i) => {
                     const day = i + 1;
@@ -377,8 +337,8 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
                       <button
                         key={day}
                         type="button"
-                        onClick={() => { setSelectedDate(d); setPendingSlots([]); setRepeatDays([new Date(d + "T00:00:00").getDay()]); }}
-                        className={`h-9 rounded-lg text-xs font-medium relative transition-all ${
+                        onClick={() => selectDate(d)}
+                        className={`h-11 rounded-lg text-sm font-medium relative transition-all ${
                           isSelected
                             ? "bg-violet-600 text-white shadow-sm"
                             : isToday
@@ -396,71 +356,12 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
                   })}
                 </div>
 
-                {/* Slot Config */}
-                <div className="mt-4 pt-4 border-t border-slate-100 space-y-3">
-                  <div>
-                    <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-1 block">Duration</label>
-                    <div className="flex gap-1.5" data-testid="duration-options">
-                      {DURATIONS.map((d) => (
-                        <button
-                          key={d}
-                          type="button"
-                          onClick={() => setSlotDuration(d)}
-                          className={`rounded-md border px-2.5 py-1.5 text-[11px] font-medium transition-all ${
-                            slotDuration === d ? "border-violet-400 bg-violet-50 text-violet-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"
-                          }`}
-                          data-testid={`duration-${d}`}
-                        >
-                          {d}m
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {selectedDate && (
-                    <div data-testid="repeat-schedule-panel">
-                      <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-1 block">Repeat Schedule</label>
-                      <p className="mb-2 text-[10px] text-slate-400">Copy this day's time slots to other days.</p>
-                      <div className="flex gap-1" data-testid="repeat-day-options">
-                        {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((lbl, dow) => (
-                          <button
-                            key={dow}
-                            type="button"
-                            onClick={() => toggleRepeatDay(dow)}
-                            className={`h-7 w-7 rounded-md border text-[10px] font-semibold transition-all ${
-                              repeatDays.includes(dow) ? "border-violet-400 bg-violet-50 text-violet-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"
-                            }`}
-                            data-testid={`repeat-day-${dow}`}
-                          >
-                            {lbl}
-                          </button>
-                        ))}
-                      </div>
-                      <div className="mt-2 flex items-center gap-2">
-                        <span className="text-[10px] text-slate-500">For next</span>
-                        <input
-                          type="number"
-                          min={1}
-                          max={12}
-                          value={repeatWeeks}
-                          onChange={(e) => setRepeatWeeks(Math.max(1, Math.min(12, Number(e.target.value) || 1)))}
-                          className="h-7 w-14 rounded-md border border-slate-200 px-2 text-[11px]"
-                          data-testid="repeat-weeks-input"
-                        />
-                        <span className="text-[10px] text-slate-500">week(s)</span>
-                      </div>
-                      <Button
-                        size="sm"
-                        onClick={applyRepeat}
-                        disabled={repeating}
-                        className="mt-2 w-full bg-violet-600 hover:bg-violet-700 text-white text-xs"
-                        data-testid="repeat-apply-btn"
-                      >
-                        {repeating ? "Applying..." : "Apply to Selected Days"}
-                      </Button>
-                    </div>
-                  )}
-                </div>
+                {selectedDate && (
+                  <p className="mt-4 border-t border-slate-100 pt-3 text-[11px] text-slate-400" data-testid="calendar-day-hint">
+                    Whole day opened at {SLOT_MINUTES}-minute slots. Click any slot to drop it,
+                    then Save Changes.
+                  </p>
+                )}
               </div>
 
               {/* Time Slots Grid */}
