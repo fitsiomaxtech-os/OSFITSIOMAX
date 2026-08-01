@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Clock, User, Plus, X, Pencil } from "lucide-react";
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Clock, User, X, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
@@ -8,7 +8,6 @@ import {
   getBranchBoard,
   getConsultDay,
   listConsultAppointments,
-  createConsultAppointment,
   updateConsultAppointment,
   cancelConsultAppointment,
 } from "@/lib/api";
@@ -180,11 +179,9 @@ export const BranchCalendarPanel = ({ branchId }) => {
     fetchDay(draft.date);
   }, [modalOpen, draft.date, fetchDay]);
 
-  const openCreate = (date) => {
-    setEditingId(null);
-    setDraft({ patient_name: "", doctor_id: "", date: date || iso(new Date()), time: "", notes: "", cancelled: false });
-    setModalOpen(true);
-  };
+  // No booking path on this panel any more — consultations are booked from Branch Leads →
+  // Appointment. The modal below only ever opens on an existing appointment, to reschedule
+  // or cancel it.
   const openEdit = (a) => {
     setEditingId(a.id);
     setDraft({ patient_name: a.patient_name || a.lead_name || "", doctor_id: a.doctor_id, date: a.appointment_date, time: a.appointment_time, notes: a.notes || "", cancelled: false });
@@ -210,13 +207,8 @@ export const BranchCalendarPanel = ({ branchId }) => {
     setSaving(true);
     try {
       const payload = { patient_name: draft.patient_name.trim(), doctor_id: draft.doctor_id, date: draft.date, time: draft.time, notes: draft.notes };
-      if (editingId) {
-        await updateConsultAppointment(editingId, payload);
-        toast.success("Appointment updated");
-      } else {
-        await createConsultAppointment(branchId, payload);
-        toast.success("Consultation booked");
-      }
+      await updateConsultAppointment(editingId, payload);
+      toast.success("Appointment updated");
       closeModal();
       await load();
     } catch (err) {
@@ -362,8 +354,10 @@ export const BranchCalendarPanel = ({ branchId }) => {
       {dayView && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-3" data-testid="cal-day-modal">
           <div className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-            <div className="flex items-start justify-between bg-gradient-to-r from-sky-600 to-blue-600 px-6 py-4 text-white">
-              <div>
+            <div className="flex items-start justify-between gap-4 bg-slate-500 px-6 py-4 text-white">
+              {/* min-w-0 lets the address wrap instead of squeezing the badge into two
+                  lines — the badge and the close button stay on one row, top-aligned. */}
+              <div className="min-w-0">
                 <p className="text-lg font-bold" data-testid="cal-day-modal-date">
                   {new Date(`${dayView.date}T00:00:00`).toLocaleDateString("en-US", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
                 </p>
@@ -380,8 +374,8 @@ export const BranchCalendarPanel = ({ branchId }) => {
                   })()}
                 </p>
               </div>
-              <div className="flex items-center gap-3">
-                <span className="rounded-lg border-2 border-white/40 bg-white/15 px-3 py-1.5 text-sm font-bold">
+              <div className="flex shrink-0 items-center gap-3">
+                <span className="whitespace-nowrap rounded-lg border-2 border-white/40 bg-white/15 px-3 py-1.5 text-sm font-bold">
                   {dayView.items.length} booked
                 </span>
                 <button onClick={() => setDayView(null)} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="cal-day-modal-close">
@@ -455,14 +449,7 @@ export const BranchCalendarPanel = ({ branchId }) => {
 
             <div className="flex items-center justify-between gap-3 border-t-2 border-slate-200 bg-slate-100 px-6 py-3.5">
               <p className="text-xs text-slate-500">Payment Due is the next unpaid Treatment Fee installment on the client's record.</p>
-              <div className="flex items-center gap-2">
-                {/* The only booking path left on this panel now that the header button is
-                    gone — the day is already chosen, so it opens straight onto slots. */}
-                <Button variant="outline" onClick={() => { const d = dayView.date; setDayView(null); openCreate(d); }} data-testid="cal-day-modal-add">
-                  <Plus className="mr-1.5 h-4 w-4" />Book on this day
-                </Button>
-                <Button variant="outline" onClick={() => setDayView(null)} data-testid="cal-day-modal-back">Close</Button>
-              </div>
+              <Button variant="outline" onClick={() => setDayView(null)} data-testid="cal-day-modal-back">Close</Button>
             </div>
           </div>
         </div>
