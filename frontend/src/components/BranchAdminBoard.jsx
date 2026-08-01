@@ -1043,19 +1043,36 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
             </div>
 
             <div className="flex items-center justify-between gap-3 border-t border-slate-200 bg-slate-100 px-6 py-3.5">
-              <label className="flex items-center gap-2 text-sm font-medium text-slate-600">
-                <input
-                  type="checkbox"
-                  checked={apptDraft.final_stage === "Cancelled"}
-                  onChange={(e) => setApptDraft({ ...apptDraft, final_stage: e.target.checked ? "Cancelled" : "Appointment Date & Time" })}
-                  data-testid="branch-appt-cancel-toggle"
-                />
-                Cancelled
-              </label>
+              {/* Marking the lead Cancelled is a destructive move — it frees the slot and
+                  drops the lead out of the consultation pipeline — so it reads red the
+                  moment it's ticked, and carries the primary button's colour with it. */}
+              {(() => {
+                const cancelled = apptDraft.final_stage === "Cancelled";
+                return (
+                  <button
+                    type="button"
+                    onClick={() => setApptDraft({ ...apptDraft, final_stage: cancelled ? "Appointment Date & Time" : "Cancelled" })}
+                    className={`flex items-center gap-2.5 rounded-lg border-2 px-4 py-2 text-sm font-bold transition ${
+                      cancelled
+                        ? "border-rose-700 bg-rose-600 text-white shadow-sm"
+                        : "border-rose-200 bg-white text-rose-600 hover:border-rose-400 hover:bg-rose-50"
+                    }`}
+                    data-testid="branch-appt-cancel-toggle"
+                    aria-pressed={cancelled}
+                  >
+                    <span className={`flex h-4 w-4 items-center justify-center rounded border-2 ${cancelled ? "border-white bg-white" : "border-rose-300"}`}>
+                      {cancelled && <Check className="h-3 w-3 text-rose-600" />}
+                    </span>
+                    CANCELLED
+                  </button>
+                );
+              })()}
               <div className="flex items-center gap-2">
               <Button variant="outline" onClick={() => setApptDraft(null)} data-testid="branch-appt-cancel">Cancel</Button>
               <Button
-                className="bg-teal-600 text-white hover:bg-teal-700"
+                className={apptDraft.final_stage === "Cancelled"
+                  ? "bg-rose-600 text-white hover:bg-rose-700"
+                  : "bg-teal-600 text-white hover:bg-teal-700"}
                 onClick={async () => {
                   if (!apptDraft.appointment_date) { toast.error("Pick a date"); return; }
                   if (!apptDraft.physio_id) { toast.error("Please select an expert"); return; }
@@ -1069,7 +1086,7 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                 }}
                 data-testid="branch-appt-save"
               >
-                Confirm
+                {apptDraft.final_stage === "Cancelled" ? "Confirm Cancellation" : "Confirm"}
               </Button>
               </div>
             </div>
