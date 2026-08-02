@@ -190,12 +190,77 @@ export const BranchReviewPanel = ({ branchId }) => {
     );
   };
 
+  // Same row as a card, for phones. Seven columns can't hold their width there — the
+  // table scrolled sideways and left Physio, Weeks, the Send button and View all
+  // off-screen, so the one thing this tab exists to do couldn't be reached.
+  const ReviewCard = ({ r }) => {
+    const overdue = r.status === "sent" && r.review_date && r.review_date < (data.today || "");
+    return (
+      <div className="rounded-xl border border-slate-200 bg-white p-3" data-testid={`branch-review-card-${r.id}`}>
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="truncate font-semibold text-slate-800">{r.lead_name}</p>
+            {r.patient_number && <p className="truncate font-mono text-[10px] text-slate-400">{r.patient_number}</p>}
+          </div>
+          {overdue && <span className="shrink-0 rounded-md bg-rose-100 px-2 py-0.5 text-[10px] font-bold text-rose-700">OVERDUE</span>}
+        </div>
+
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500">
+          <span className="rounded-md bg-slate-100 px-2 py-0.5 font-semibold text-slate-600">{r.treatment_days} treatment days</span>
+          {r.session_package_name && <span>{r.session_package_name}</span>}
+        </div>
+
+        <dl className="mt-2 space-y-1 border-t border-slate-100 pt-2 text-xs">
+          <div className="flex justify-between gap-2">
+            <dt className="text-slate-400">Phone</dt>
+            <dd className="truncate font-medium text-slate-700">{r.phone || "—"}</dd>
+          </div>
+          <div className="flex justify-between gap-2">
+            <dt className="text-slate-400">Physio</dt>
+            <dd className="truncate font-medium text-slate-700">{r.physio_name || "—"}</dd>
+          </div>
+          {sub !== "send" && (
+            <div className="flex justify-between gap-2">
+              <dt className="text-slate-400">Head Physio</dt>
+              <dd className="min-w-0 text-right">
+                <span className="truncate font-medium text-violet-700">{r.head_physio_name || "—"}</span>
+                <p className={`text-[10px] ${overdue ? "text-rose-600" : "text-slate-400"}`}>
+                  review {dmy(r.review_date)}{r.review_time ? ` · ${to12h(r.review_time)}` : ""}
+                  {r.status === "completed" && <span className="ml-1 font-semibold text-emerald-600">· completed</span>}
+                </p>
+              </dd>
+            </div>
+          )}
+        </dl>
+
+        {r.reason && <p className="mt-1.5 text-[10px] text-slate-400">{r.reason}</p>}
+
+        <div className="mt-2.5 flex gap-2 border-t border-slate-100 pt-2.5">
+          {r.status === "send_to_review" ? (
+            <Button size="sm" className="flex-1 bg-amber-600 text-xs text-white hover:bg-amber-700" onClick={() => openSend(r)} data-testid={`branch-review-card-send-${r.id}`}>
+              <Send className="mr-1.5 h-3.5 w-3.5" /> Send to Head Physio
+            </Button>
+          ) : r.status === "sent" ? (
+            <Button size="sm" variant="outline" className="flex-1 text-xs" onClick={() => openSend(r)} data-testid={`branch-review-card-reassign-${r.id}`}>
+              Reassign
+            </Button>
+          ) : null}
+          <Button size="sm" variant="outline" className={`text-xs ${r.status === "completed" ? "flex-1" : ""}`} onClick={() => setViewing(r)} data-testid={`branch-review-card-view-${r.id}`}>
+            View
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-4" data-testid="branch-review-panel">
       {/* Same coloured count pills the Branch Leads stage bar uses, so the three
           stages of the review pipeline read the same way as the lead stages above. */}
       <div className="-mx-1 rounded-xl border border-slate-200 bg-white/95 p-1 shadow-sm" data-testid="branch-review-subtabs">
-        <div className="flex flex-nowrap gap-1 overflow-x-auto sm:overflow-visible">
+        {/* Three across on a phone rather than a sideways scroll — they fit, and the
+            third was otherwise behind a swipe. One flex row from sm up, as before. */}
+        <div className="grid grid-cols-3 gap-1 sm:flex sm:flex-nowrap sm:overflow-visible">
           {SUB_TABS.map((t) => (
             <StageTab
               key={t.key}
@@ -205,19 +270,22 @@ export const BranchReviewPanel = ({ branchId }) => {
               onClick={() => setSub(t.key)}
               color={t.color}
               testid={`branch-review-subtab-${t.key}`}
+              gridded
             />
           ))}
         </div>
       </div>
 
       <Card>
-        <CardContent className="flex flex-wrap items-center gap-3 p-3">
-          <div className="relative min-w-[220px] flex-1">
+        <CardContent className="flex items-center gap-2 p-3 sm:gap-3">
+          <div className="relative min-w-0 flex-1">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search patient, number, phone or Head Physio..." className="pl-9" data-testid="branch-review-search" />
           </div>
-          <Button variant="outline" size="sm" onClick={load} disabled={loading} data-testid="branch-review-refresh">
-            <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} /> Refresh
+          {/* Icon-only on a phone: the word cost a whole second row under the search box. */}
+          <Button variant="outline" size="sm" className="shrink-0 px-2.5 sm:px-3" onClick={load} disabled={loading} data-testid="branch-review-refresh">
+            <RefreshCw className={`h-3.5 w-3.5 sm:mr-1.5 ${loading ? "animate-spin" : ""}`} />
+            <span className="hidden sm:inline">Refresh</span>
           </Button>
         </CardContent>
       </Card>
@@ -231,7 +299,12 @@ export const BranchReviewPanel = ({ branchId }) => {
             : "No completed reviews yet."}
         </Empty>
       ) : (
-        <div className="overflow-auto rounded-xl border border-slate-200 bg-white">
+        <>
+        <div className="space-y-2 md:hidden" data-testid="branch-review-mobile">
+          {rows.map((r) => <ReviewCard key={r.id} r={r} />)}
+        </div>
+
+        <div className="hidden overflow-auto rounded-xl border border-slate-200 bg-white md:block">
           <table className="min-w-full text-sm">
             <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
               <tr>
@@ -249,6 +322,7 @@ export const BranchReviewPanel = ({ branchId }) => {
             </tbody>
           </table>
         </div>
+        </>
       )}
 
       {/* Send to Head Physio — the same three-step booking the Appointment popup uses:
