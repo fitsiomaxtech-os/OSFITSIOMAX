@@ -137,9 +137,10 @@ export const rescheduleBranchFollowUp = async (leadId, followupId, payload) => (
 export const collectFee = async (leadId, payload) => (await api.post(`/leads/${leadId}/collect-fee`, payload)).data;
 export const assignPhysio = async (leadId, payload) => (await api.post(`/leads/${leadId}/assign-physio`, payload)).data;
 export const scheduleBranchAppointment = async (leadId, payload) => (await api.post(`/leads/${leadId}/schedule-branch-appointment`, payload)).data;
-// The patient's own confirmation link — no session, so it deliberately bypasses the
-// authenticated client and its 401-triggered logout.
-export const getPublicAppointment = async (token) => (await axios.get(`${BACKEND_URL}/api/v3/public/appointment/${token}`)).data;
+// The patient's own confirmation page. Server-rendered HTML rather than an SPA route:
+// chat apps fetch a shared link with a crawler that doesn't run JavaScript, and only
+// real HTML gets them to draw the preview card above the message.
+export const publicAppointmentUrl = (token) => `${BACKEND_URL}/api/v3/public/appointment/${token}`;
 export const getConsultationsBoard = async (branchId, pipeline) => (await api.get(`/branch-admin/consultations/${branchId}/board`, { params: pipeline ? { pipeline } : {} })).data;
 // Consultation Appointment Scheduling (Branch Admin > Calendar > Schedule)
 export const listConsultAppointments = async (branchId) => (await api.get(`/branch-admin/${branchId}/consult-appointments`)).data;

@@ -5,7 +5,6 @@ import { LoginPage } from "@/pages/LoginPage";
 import { CRMPage } from "@/pages/CRMPage";
 import { CreateSuperAdminPublicPage } from "@/pages/CreateSuperAdminPublicPage";
 import { ResetPasswordPage } from "@/pages/ResetPasswordPage";
-import { AppointmentPage } from "@/pages/AppointmentPage";
 import { clearSession, loadSession, saveSession } from "@/lib/session";
 import { apiMe } from "@/lib/api";
 
@@ -70,9 +69,6 @@ function App() {
         />
         <Route path="/createsuperadmin" element={<CreateSuperAdminPublicPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
-        {/* The patient's own confirmation link — public, since they have no login. Must
-            sit above the catch-all, which would otherwise bounce them to the login page. */}
-        <Route path="/appointment/:token" element={<AppointmentPage />} />
         <Route path="*" element={<Navigate to={isAuthenticated ? "/app" : "/"} replace />} />
       </Routes>
     </BrowserRouter>

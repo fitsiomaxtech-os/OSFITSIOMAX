@@ -32,6 +32,7 @@ import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { StageTabBar, stageDisplayLabel } from "@/components/ui/stage-tab";
 import {
   scheduleBranchAppointment,
+  publicAppointmentUrl,
   getBranchBoard,
   getAvailableExperts,
   getAvailableDates,
@@ -86,6 +87,14 @@ const apptRows = (a, { compact = false } = {}) => [
   ["Booked By", a.bookedBy],
 ];
 
+/** lucide has no WhatsApp glyph and the brand mark can't be approximated with a generic
+ *  chat bubble — staff scan for this exact shape. */
+const WhatsAppIcon = ({ className }) => (
+  <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51l-.57-.01c-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884a9.82 9.82 0 016.988 2.896 9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.885-9.885 9.885M20.52 3.449C18.24 1.245 15.24 0 12.045 0 5.463 0 .104 5.359.101 11.943c0 2.096.549 4.142 1.595 5.945L0 24l6.305-1.654a11.94 11.94 0 005.71 1.454h.005c6.585 0 11.946-5.359 11.949-11.945a11.87 11.87 0 00-3.44-8.406" />
+  </svg>
+);
+
 /** 128 bits from the platform CSPRNG — the share link's only key, so it can't be a
  *  counter or anything derived from the patient's own details. */
 const randomToken = () => {
@@ -97,7 +106,26 @@ const randomToken = () => {
 /** Where the patient opens their own copy of this confirmation. Keyed by an unguessable
  *  token rather than the reference number, which is printed on the sheet and derived
  *  from the patient number — guessable, and not something to hang access on. */
-const apptLink = (a) => (a.shareToken ? `${window.location.origin}/appointment/${a.shareToken}` : "");
+const apptLink = (a) => (a.shareToken ? publicAppointmentUrl(a.shareToken) : "");
+
+/** A stored phone in E.164 for wa.me, which takes digits only — no +, spaces or the
+ *  "p:" prefix some records carry. A bare 10-digit number is assumed Indian, matching
+ *  every other number in the system; anything already carrying a country code is left
+ *  alone. Returns "" when there's nothing dialable, so the button can hide itself. */
+const waNumber = (raw) => {
+  const digits = String(raw || "").replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.length === 10) return `91${digits}`;
+  if (digits.length === 11 && digits.startsWith("0")) return `91${digits.slice(1)}`;
+  return digits;
+};
+
+/** Opens WhatsApp on the patient's own number with the confirmation already typed. */
+const openWhatsApp = (a) => {
+  const num = waNumber(a.phone);
+  if (!num) { toast.error("This patient has no phone number on file"); return; }
+  window.open(`https://wa.me/${num}?text=${encodeURIComponent(apptMessage(a))}`, "_blank", "noopener,noreferrer");
+};
 
 /** The confirmation as a message addressed to the patient — short lines that survive
  *  WhatsApp and SMS, which is how it actually reaches them. */
@@ -1353,6 +1381,15 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                   and the browser's own Save-as-PDF lives behind that window's print. */}
               <Button className="w-full bg-teal-600 text-white hover:bg-teal-700" onClick={() => openPrintable(apptHtml(apptConfirm), { print: true })} data-testid="branch-appt-confirm-pdf">
                 <FileText className="mr-1.5 h-4 w-4" /> Open PDF
+              </Button>
+              {/* The one the branch actually reaches for: opens WhatsApp on the patient's
+                  own number with the confirmation and its link already typed. */}
+              <Button
+                className="w-full bg-[#25D366] text-white hover:bg-[#1da851]"
+                onClick={() => openWhatsApp(apptConfirm)}
+                data-testid="branch-appt-confirm-whatsapp"
+              >
+                <WhatsAppIcon className="mr-1.5 h-4 w-4" /> Send on WhatsApp
               </Button>
               {apptLink(apptConfirm) && (
                 <Button variant="outline" className="w-full" onClick={() => copyApptText(apptLink(apptConfirm), "Link copied")} data-testid="branch-appt-confirm-copy-link">
