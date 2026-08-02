@@ -7,6 +7,7 @@ import {
   ChevronRight,
   ClipboardCheck,
   ClipboardList,
+  PhoneCall,
   Search,
   Send,
   Users,
@@ -117,6 +118,26 @@ const weekDatesFor = (iso) => {
   return Array.from({ length: 7 }, (_, i) => shiftIso(sunday, i));
 };
 const DAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"];
+
+/** A stored phone in E.164 for wa.me, which takes digits only — no +, spaces or the
+ *  "p:" prefix some records carry. A bare 10-digit number is assumed Indian, matching
+ *  every other number in the system; anything already carrying a country code is left
+ *  alone. Returns "" when there's nothing dialable, so the button can hide itself. */
+const waNumber = (raw) => {
+  const digits = String(raw || "").replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.length === 10) return `91${digits}`;
+  if (digits.length === 11 && digits.startsWith("0")) return `91${digits.slice(1)}`;
+  return digits;
+};
+
+/** lucide has no WhatsApp glyph and the brand mark can't be approximated with a generic
+ *  chat bubble — staff scan for this exact shape. */
+const WhatsAppIcon = ({ className }) => (
+  <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884M20.52 3.449C18.24 1.245 15.24.03 12.045 0c-6.472 0-11.734 5.262-11.736 11.735a11.7 11.7 0 001.567 5.87L.057 24l6.607-1.732a11.7 11.7 0 005.376 1.37h.005c6.472 0 11.734-5.262 11.735-11.734a11.68 11.68 0 00-3.26-8.457" />
+  </svg>
+);
 
 // Summary tile. `solidClass` fills the tile — used on the one figure in each group
 // that the physio is actually acting on, so it carries the group rather than
@@ -1278,7 +1299,13 @@ function PatientsTab({ physioId, onCountChange }) {
       ) : (
         <div className="space-y-3">
           {visiblePatients.map((p) => (
-            <div key={p.lead_id} className="rounded-xl border border-slate-200 bg-white p-4 hover:shadow-sm transition-shadow" data-testid={`physio-patient-${p.lead_id}`}>
+            <button
+              type="button"
+              key={p.lead_id}
+              onClick={() => setSelectedPatient(p)}
+              className="block w-full rounded-xl border border-slate-200 bg-white p-4 text-left transition-shadow hover:shadow-sm"
+              data-testid={`physio-patient-${p.lead_id}`}
+            >
               <div className="flex items-center gap-3">
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-sky-50 text-sm font-bold text-sky-700">
                   {p.lead_name?.charAt(0)?.toUpperCase()}
@@ -1294,9 +1321,33 @@ function PatientsTab({ physioId, onCountChange }) {
                     )}
                   </div>
                 </div>
-                <Button size="sm" variant="outline" className="shrink-0 text-xs" onClick={() => setSelectedPatient(p)} data-testid={`physio-view-patient-${p.lead_id}`}>
-                  <ClipboardList className="h-3 w-3 sm:mr-1" /> <span className="hidden sm:inline">Details</span>
-                </Button>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => { e.stopPropagation(); if (p.phone) window.location.href = `tel:${p.phone.replace(/[^0-9+]/g, "")}`; }}
+                    onKeyDown={(e) => e.stopPropagation()}
+                    className={`flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 text-slate-500 ${p.phone ? "hover:bg-slate-50" : "cursor-not-allowed opacity-40"}`}
+                    data-testid={`physio-patient-call-${p.lead_id}`}
+                  >
+                    <PhoneCall className="h-3.5 w-3.5" />
+                  </span>
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const num = waNumber(p.phone);
+                      if (!num) { toast.error("This patient has no phone number on file"); return; }
+                      window.open(`https://wa.me/${num}`, "_blank", "noopener,noreferrer");
+                    }}
+                    onKeyDown={(e) => e.stopPropagation()}
+                    className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 text-[#25D366] hover:bg-slate-50"
+                    data-testid={`physio-patient-whatsapp-${p.lead_id}`}
+                  >
+                    <WhatsAppIcon className="h-4 w-4" />
+                  </span>
+                </div>
               </div>
               <div className="mt-3 flex items-center justify-around rounded-lg bg-slate-50 py-2 text-center sm:justify-start sm:gap-6 sm:bg-transparent sm:py-0">
                 <div>
@@ -1319,7 +1370,7 @@ function PatientsTab({ physioId, onCountChange }) {
                   style={{ width: `${p.total_sessions > 0 ? (p.completed_sessions / p.total_sessions) * 100 : 0}%` }}
                 />
               </div>
-            </div>
+            </button>
           ))}
         </div>
       )}
