@@ -16,6 +16,7 @@ import {
   saveConsultationDecision, markConsultationCompleted,
 } from "@/lib/api";
 import { endTime12h, to12h } from "@/lib/time";
+import { LOGO_URL, PRINTABLE_STYLES, escapeHtml, openPrintable, downloadPrintable, sharePrintable } from "@/lib/printable";
 
 const CONSULTATION_FEE_PAYMENT_MODES = [
   { value: "cash", label: "Cash" },
@@ -42,44 +43,8 @@ const partialInstallmentLabel = (idx) => `${PARTIAL_ORDINALS[idx] || `#${idx + 1
 // The receipt is built as a standalone HTML document rather than printed from the page:
 // window.print() here would send the whole board — modals, sidebar and all — to the
 // printer, and the same document is what gets downloaded, so paper and file always match.
-// Same mark the login page and CRM header use, so a printed bill is recognisably the OS's.
-const LOGO_URL =
-  "https://customer-assets.emergentagent.com/job_3d74aa9e-a241-4207-b148-2bbe29802707/artifacts/nozl77ti_Logo%20Icon.webp";
-
-const RECEIPT_STYLES = `
-  *{box-sizing:border-box}
-  body{margin:0;padding:28px;font-family:'Segoe UI',Arial,sans-serif;color:#0f172a;background:#fff}
-  .wrap{max-width:560px;margin:0 auto;border:1px solid #cbd5e1;border-radius:12px;padding:26px}
-  .head{display:flex;align-items:center;gap:14px}
-  .logo{width:52px;height:52px;object-fit:contain;border-radius:10px;flex:none}
-  .brand{font-size:22px;font-weight:800;letter-spacing:.5px}
-  .sub{font-size:12px;color:#64748b;margin-top:2px}
-  .tag{display:inline-block;margin-top:12px;padding:5px 12px;border-radius:6px;
-       background:#dcfce7;color:#15803d;font-size:12px;font-weight:800;letter-spacing:.6px}
-  .tag-sch{background:#fef3c7;color:#b45309}
-  .amt-sch{color:#b45309}
-  hr{border:0;border-top:1px dashed #cbd5e1;margin:18px 0}
-  .amt-label{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#64748b}
-  .amt{font-size:34px;font-weight:800;color:#15803d;margin-top:2px}
-  table{width:100%;border-collapse:collapse;font-size:13px;margin-top:6px}
-  td{padding:7px 0;vertical-align:top}
-  td.k{color:#64748b;width:45%}
-  td.v{text-align:right;font-weight:600}
-  .foot{margin-top:20px;font-size:11px;color:#94a3b8;text-align:center;line-height:1.6}
-  @media print{body{padding:0}.wrap{border:none;border-radius:0}}
-`;
-
-const ALL_PAYMENT_MODE_LABELS = { cash: "Cash", upi: "UPI", card: "Card", cheque: "Cheque", partial: "Partial Payment" };
-
-/** Whatever identifies this payment with the bank — the thing a dispute is traced by. */
-const paymentReference = (p) => p.upi_utr || p.upi_transaction_id
-  || (p.cheque_number ? `Cheque ${p.cheque_number}${p.bank_name ? ` · ${p.bank_name}` : ""}` : "")
-  || (p.account_number ? `Card ****${String(p.account_number).replace(/\D/g, "").slice(-4)}` : "");
-
-// `kind: "schedule"` is a Partial Payment plan — the installments are agreed but no money
-// has come in yet, so it must never print "Amount Paid" or "PAYMENT RECEIVED".
-const isSchedule = (r) => r.kind === "schedule";
-
+// The receipt's own document content. The branding, styles and the open/print/download/
+// share mechanics are shared with every other printable in lib/printable.js.
 const receiptRows = (r) => [
   [isSchedule(r) ? "Reference No." : "Receipt No.", r.receiptNo],
   ["Date", r.dateLabel],
@@ -98,12 +63,8 @@ const receiptRows = (r) => [
   [isSchedule(r) ? "Prepared By" : "Collected By", r.collectedBy],
 ].filter(Boolean);
 
-const escapeHtml = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => (
-  { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
-));
-
 const receiptHtml = (r) => `<!doctype html><html><head><meta charset="utf-8">
-<title>Receipt ${escapeHtml(r.receiptNo)}</title><style>${RECEIPT_STYLES}</style></head>
+<title>Receipt ${escapeHtml(r.receiptNo)}</title><style>${PRINTABLE_STYLES}</style></head>
 <body><div class="wrap">
   <div class="head">
     <img class="logo" src="${LOGO_URL}" alt="FITSIOMAX">
@@ -131,50 +92,9 @@ const receiptText = (r) => [
   ...receiptRows(r).map(([k, v]) => `${k}: ${v}`),
 ].join("\n");
 
-/** Opens the receipt in its own window and sends that window to the printer. */
-const printReceipt = (r) => {
-  const w = window.open("", "_blank", "width=680,height=800");
-  if (!w) { toast.error("Allow pop-ups to print the receipt"); return; }
-  w.document.write(receiptHtml(r));
-  w.document.close();
-  w.focus();
-  // Wait for the logo to finish loading — printing before it does drops it from the bill
-  // silently. `load` also fires if the image fails, and the timeout covers the case where
-  // it never resolves at all, so the dialog always opens either way.
-  let printed = false;
-  const go = () => {
-    if (printed) return;
-    printed = true;
-    try { w.print(); } catch { /* window was closed before printing */ }
-  };
-  if (w.document.readyState === "complete") go();
-  else w.addEventListener("load", go, { once: true });
-  setTimeout(go, 3000);
-};
-
-const downloadReceipt = (r) => {
-  const blob = new Blob([receiptHtml(r)], { type: "text/html;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `receipt-${r.receiptNo}.html`;
-  a.click();
-  URL.revokeObjectURL(url);
-};
-
-const shareReceipt = async (r) => {
-  const text = receiptText(r);
-  if (navigator.share) {
-    try { await navigator.share({ title: `FITSIOMAX Receipt ${r.receiptNo}`, text }); return; }
-    catch { return; } // user dismissed the share sheet — not an error worth reporting
-  }
-  try {
-    await navigator.clipboard.writeText(text);
-    toast.success("Receipt copied — paste it into WhatsApp or email");
-  } catch {
-    toast.error("Couldn't share the receipt on this device");
-  }
-};
+const printReceipt = (r) => openPrintable(receiptHtml(r), { print: true });
+const downloadReceipt = (r) => downloadPrintable(receiptHtml(r), `receipt-${r.receiptNo}.html`);
+const shareReceipt = (r) => sharePrintable(receiptText(r), `FITSIOMAX Receipt ${r.receiptNo}`);
 
 // Month-grid helpers for the treatment-session slot picker — the same shape the PHYSIO
 // CALENDAR itself uses, so the two read as one workflow.
