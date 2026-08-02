@@ -505,6 +505,7 @@ function ReviewTab({ physioId }) {
 function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }) {
   const [submitting, setSubmitting] = useState(false);
   const [sessions, setSessions] = useState([]);
+  const [assessments, setAssessments] = useState([]);
   const [completeTarget, setCompleteTarget] = useState(null);
   const isComplete = lead.physio_stage === "Complete";
 
@@ -512,6 +513,7 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
     try {
       const data = await physioSessions(lead.id);
       setSessions(data.sessions || []);
+      setAssessments(data.assessments || []);
     } catch { /* silent */ }
   }, [lead.id]);
 
@@ -539,6 +541,12 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
   const completedSessions = sessions.filter((s) => s.status === "completed");
   const upcomingSession = sessions.find((s) => s.status === "upcoming") || null;
   const lastCompleted = completedSessions[completedSessions.length - 1] || null;
+
+  // Each week of days goes to the Head Physio for a review appointment; that review
+  // is only "completed" once they've written it up (status flips to reviewed).
+  const totalWeeks = sessions.length ? Math.max(...sessions.map((s) => s.week_number || 1)) : 0;
+  const reviewedWeeks = assessments.filter((a) => a.status === "reviewed").length;
+  const allReviewed = totalWeeks > 0 && reviewedWeeks >= totalWeeks;
 
   const fmtDate = (iso) => (iso ? new Date(`${iso.slice(0, 10)}T00:00:00`).toLocaleDateString("en-US", { weekday: "short", day: "numeric", month: "short" }) : null);
 
@@ -612,6 +620,16 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
               </Stat>
               <Stat label="Stage">
                 <span className="text-slate-700">{lead.physio_stage === "Complete" ? "Complete" : (lead.consultation_stage || "New Appointment")}</span>
+              </Stat>
+              <Stat label="Review Completed">
+                {totalWeeks ? (
+                  <span className={allReviewed ? "font-semibold text-emerald-600" : "font-semibold text-amber-600"}>
+                    {reviewedWeeks} of {totalWeeks} week{totalWeeks === 1 ? "" : "s"}
+                    {!allReviewed && " · awaiting Head Physio"}
+                  </span>
+                ) : (
+                  <span className="text-slate-400">—</span>
+                )}
               </Stat>
             </div>
           </div>
