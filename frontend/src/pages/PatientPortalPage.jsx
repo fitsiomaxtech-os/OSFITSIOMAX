@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Calendar, Check, ClipboardCheck, ClipboardList, Clock, Eye, EyeOff, IndianRupee, LogOut, PhoneCall, UserRound } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -7,11 +7,15 @@ import { toast } from "@/components/ui/sonner";
 import { slotTo12h } from "@/lib/time";
 import {
   loadPortalSession, savePortalSession, clearPortalSession,
-  patientPortalLogin, patientPortalLogout, patientPortalMe,
+  patientPortalLogin, patientPortalLogout, patientPortalMe, patientPortalGoogleLogin,
 } from "@/lib/patientPortalApi";
 
 const LOGO_URL =
   "https://customer-assets.emergentagent.com/job_3d74aa9e-a241-4207-b148-2bbe29802707/artifacts/nozl77ti_Logo%20Icon.webp";
+
+// Unset until the clinic creates a Google Cloud OAuth Client ID and this env var is
+// set on the frontend build — until then the button below simply doesn't render.
+const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID;
 
 // Standalone route (/portal) — the patient's own login, entirely separate from the staff
 // CRM's auth. A Branch Admin generates these credentials from the Patients tab and shares
@@ -132,8 +136,67 @@ function PortalLogin({ onLogin }) {
               {loading ? "Signing in..." : "Sign In"}
             </Button>
           </form>
+          <GoogleSignInButton onLogin={onLogin} />
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+// Only account emails a Branch Admin already created get in this way — signing in with
+// Google links to an existing portal account by email, it never creates a new one.
+function GoogleSignInButton({ onLogin }) {
+  const buttonRef = useRef(null);
+
+  useEffect(() => {
+    if (!GOOGLE_CLIENT_ID) return;
+
+    const handleCredential = async (response) => {
+      try {
+        const data = await patientPortalGoogleLogin(response.credential);
+        onLogin(data);
+        toast.success("Login successful");
+      } catch (err) {
+        toast.error(err?.response?.data?.detail || "Google sign-in failed");
+      }
+    };
+
+    const init = () => {
+      if (!window.google?.accounts?.id || !buttonRef.current) return;
+      window.google.accounts.id.initialize({ client_id: GOOGLE_CLIENT_ID, callback: handleCredential });
+      window.google.accounts.id.renderButton(buttonRef.current, {
+        theme: "outline", size: "large", width: 280, text: "signin_with",
+      });
+    };
+
+    if (window.google?.accounts?.id) {
+      init();
+      return;
+    }
+    const existing = document.getElementById("google-identity-script");
+    if (existing) {
+      existing.addEventListener("load", init, { once: true });
+      return;
+    }
+    const script = document.createElement("script");
+    script.id = "google-identity-script";
+    script.src = "https://accounts.google.com/gsi/client";
+    script.async = true;
+    script.defer = true;
+    script.onload = init;
+    document.head.appendChild(script);
+  }, [onLogin]);
+
+  if (!GOOGLE_CLIENT_ID) return null;
+
+  return (
+    <div className="mt-4">
+      <div className="mb-3 flex items-center gap-3 text-xs text-slate-400">
+        <div className="h-px flex-1 bg-slate-200" />
+        <span>OR</span>
+        <div className="h-px flex-1 bg-slate-200" />
+      </div>
+      <div ref={buttonRef} className="flex justify-center" data-testid="patient-portal-google-button" />
     </div>
   );
 }

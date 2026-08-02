@@ -375,6 +375,12 @@ class V3PatientPortalLogin(BaseModel):
     password: str
 
 
+class V3PatientPortalGoogleLogin(BaseModel):
+    # The ID token JWT handed back by Google Identity Services' client-side button —
+    # verified server-side against GOOGLE_CLIENT_ID before it's trusted for anything.
+    credential: str
+
+
 class V3ConsultationDecisionInput(BaseModel):
     decision: Literal["consultation_only", "consultation_treatment"]
     # Required only when decision == "consultation_treatment" — the Treatment/Session

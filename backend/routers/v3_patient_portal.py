@@ -8,19 +8,25 @@ unrelated shape (treatment-session bookings, deliberately, per v3_reviews.py's d
 about what happened the last time this collection grew a second shape); a third shape on
 top of that is exactly the mistake to avoid, not repeat.
 """
+import os
 import random
 import string
 import uuid
 
 from fastapi import APIRouter, Depends, Header, HTTPException
+from google.auth.transport import requests as google_requests
+from google.oauth2 import id_token as google_id_token
 
 from database import v3_col
 from utils import now_iso
 from security import hash_password, verify_password
 from deps import v3_require_roles
-from schemas.v3 import V3UserOut, V3PortalAccountInput, V3PatientPortalLogin
+from schemas.v3 import V3UserOut, V3PortalAccountInput, V3PatientPortalLogin, V3PatientPortalGoogleLogin
 
 router = APIRouter(prefix="/api/v3")
+
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")
+_google_request = google_requests.Request()
 
 
 def _generate_password(length: int = 10) -> str:
@@ -111,13 +117,7 @@ async def create_or_reset_portal_account(
 
 # --------------------------------------------------------------------- Patient: log in
 
-@router.post("/patient-portal/login")
-async def patient_portal_login(payload: V3PatientPortalLogin):
-    email = payload.email.strip().lower()
-    account = await v3_col("patient_portal_accounts").find_one({"email": email}, {"_id": 0})
-    if not account or not verify_password(payload.password, account.get("password_hash", "")):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-
+async def _start_portal_session(account: dict) -> dict:
     token = str(uuid.uuid4())
     await v3_col("patient_portal_sessions").insert_one({
         "token": token,
@@ -127,6 +127,41 @@ async def patient_portal_login(payload: V3PatientPortalLogin):
     })
     lead = await v3_col("leads").find_one({"id": account["lead_id"]}, {"_id": 0, "name": 1})
     return {"token": token, "patient_name": (lead or {}).get("name", "")}
+
+
+@router.post("/patient-portal/login")
+async def patient_portal_login(payload: V3PatientPortalLogin):
+    email = payload.email.strip().lower()
+    account = await v3_col("patient_portal_accounts").find_one({"email": email}, {"_id": 0})
+    if not account or not verify_password(payload.password, account.get("password_hash", "")):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    return await _start_portal_session(account)
+
+
+@router.post("/patient-portal/google-login")
+async def patient_portal_google_login(payload: V3PatientPortalGoogleLogin):
+    """Sign-in with Google — does NOT create accounts. A patient only gets in this way
+    if their Google account's email already matches a portal account a Branch Admin
+    created for them; this keeps the "who can log in" decision where it already lives
+    (treatment_fee_paid + Branch Admin action), same as the email/password path."""
+    if not GOOGLE_CLIENT_ID:
+        raise HTTPException(status_code=503, detail="Google Sign-In is not configured for this clinic yet")
+    try:
+        claims = google_id_token.verify_oauth2_token(payload.credential, _google_request, GOOGLE_CLIENT_ID)
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Could not verify Google sign-in")
+
+    if not claims.get("email_verified"):
+        raise HTTPException(status_code=401, detail="Google account email is not verified")
+
+    email = claims["email"].strip().lower()
+    account = await v3_col("patient_portal_accounts").find_one({"email": email}, {"_id": 0})
+    if not account:
+        raise HTTPException(
+            status_code=404,
+            detail="No portal account found for this Google account. Ask your clinic to share your portal login.",
+        )
+    return await _start_portal_session(account)
 
 
 async def _current_patient_lead_id(authorization: str = Header(...)) -> str:

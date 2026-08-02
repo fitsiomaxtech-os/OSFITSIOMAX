@@ -36,6 +36,11 @@ export const patientPortalLogin = async (email, password) => {
   return data;
 };
 
+export const patientPortalGoogleLogin = async (credential) => {
+  const { data } = await portalApi.post("/patient-portal/google-login", { credential });
+  return data;
+};
+
 export const patientPortalLogout = async () => {
   try {
     await portalApi.post("/patient-portal/logout", null, { headers: authHeaders() });
