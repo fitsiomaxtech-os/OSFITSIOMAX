@@ -423,8 +423,17 @@ export const BranchAdminBoard = ({ branchId }) => {
   ];
 
   return (
+    // flex+gap rather than space-y: Tailwind's space-y keys off the `hidden` *attribute*,
+    // so the desk-only tab strip below — hidden by class — still counted as a sibling and
+    // pushed the stage bar down 16px for an element a phone never renders. A display:none
+    // child isn't a flex item at all, so its gap goes with it.
+    //
     // Bottom padding on a phone so the last row of a list clears the fixed nav below.
-    <div className="space-y-4 pb-20 md:pb-0" data-testid="branch-admin-board-root">
+    //
+    // min-w-0 on the children because a flex item defaults to min-width:auto, which would
+    // let the scrolling tab strip and the leads table widen the board instead of
+    // scrolling inside it.
+    <div className="flex flex-col gap-4 pb-20 [&>*]:min-w-0 md:pb-0" data-testid="branch-admin-board-root">
       {/* View Tabs — desk only; a phone gets the bottom nav at the end of this file. */}
       <div className="hidden items-center gap-1 overflow-x-auto border-b border-slate-200 pb-0 md:flex" data-testid="branch-view-tabs">
         {VIEW_TABS.map((tab) => {

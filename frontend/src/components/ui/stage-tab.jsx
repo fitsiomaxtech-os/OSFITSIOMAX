@@ -45,7 +45,10 @@ export const StageTab = ({ label, count, active, onClick, color, testid, gridded
 // off on a second click, so the filter can always be cleared).
 export const StageTabBar = ({ stages, stageFilter, setStageFilter, counts, totalCount, testid, hideAllStages = false }) => (
   <div
-    className="sticky top-[88px] z-10 -mx-1 rounded-xl border border-slate-200 bg-white/95 p-1 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/80"
+    // The offset has to clear the sticky page header, which is two different heights:
+    // 61px on a phone (py-3 + a 36px logo + border) and 89px from sm up (py-4 + 56px).
+    // A flat 88px left a white band under the header on a phone once scrolled.
+    className="sticky top-[61px] z-10 -mx-1 rounded-xl border border-slate-200 bg-white/95 p-1 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/80 sm:top-[88px]"
     data-testid={testid}
   >
     {/* Five to a row on a phone, so nine stages land as 5 + 4 and the whole bar is
