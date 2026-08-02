@@ -975,10 +975,12 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
   const avatarFirstChar = (lead.name?.trim()?.charAt(0) || "?").toUpperCase();
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-0 backdrop-blur-sm sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} data-testid="branch-lead-modal-overlay">
-      {/* Full-bleed on a phone — a centred card with margins wastes the little width
-          there is, and the stage stepper inside needs every pixel of it. */}
-      <div className="flex h-full max-h-full w-full flex-col overflow-hidden bg-white shadow-2xl ring-1 ring-slate-200 sm:h-auto sm:max-h-[90vh] sm:max-w-2xl sm:rounded-2xl" data-testid="branch-lead-modal">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-3 backdrop-blur-sm sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} data-testid="branch-lead-modal-overlay">
+      {/* A floating card on every size, not a full-bleed sheet on a phone. Edge to edge
+          reads as a page you navigated to — there's no backdrop left to show it sits on
+          top of the list, and nothing to tap beside it to dismiss. Height is capped so
+          the darkened list stays visible above and below; the body below scrolls. */}
+      <div className="flex max-h-[85dvh] w-full flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-slate-200 sm:max-h-[90vh] sm:max-w-2xl" data-testid="branch-lead-modal">
         {/* Gradient header */}
         <div className="relative bg-gradient-to-r from-sky-500 via-indigo-500 to-violet-500 px-5 py-4 text-white">
           <div className="flex items-start justify-between gap-3">
@@ -1243,13 +1245,13 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
 
       {/* Appointment Date & Time Popup */}
       {apptDraft && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-0 backdrop-blur-sm sm:p-2" onClick={(e) => { if (e.target === e.currentTarget) setApptDraft(null); }} data-testid="branch-appt-modal">
-          {/* Full-bleed on a phone — three booking steps need every pixel, and an inset
-              card just spends them on backdrop. max-h in dvh so the footer isn't left
-              under the browser's URL bar: 100vh on mobile measures the viewport as if
-              that bar were hidden, which pushes Confirm off the bottom. The vh height
-              stays as the fallback for anything without dvh. */}
-          <div className="flex h-full max-h-[100dvh] w-full max-w-7xl flex-col overflow-hidden bg-white shadow-2xl sm:h-[calc(100vh-1rem)] sm:max-h-[calc(100dvh-1rem)] sm:rounded-2xl">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-2 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) setApptDraft(null); }} data-testid="branch-appt-modal">
+          {/* A card, like every other popup here, but a tall one — three booking steps
+              need the height, so it takes what's left after the backdrop rather than a
+              fixed fraction. Heights in dvh: 100vh on mobile measures the viewport as if
+              the browser's URL bar were hidden, which pushed Confirm below the fold. The
+              vh values stay as the fallback for anything without dvh. */}
+          <div className="flex h-[calc(100vh-1rem)] max-h-[calc(100dvh-1rem)] w-full max-w-7xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-200 bg-slate-100 px-4 py-3 sm:px-6 sm:py-4">
               <div className="flex items-center gap-2.5">
                 <Calendar className="h-5 w-5 text-slate-500" />

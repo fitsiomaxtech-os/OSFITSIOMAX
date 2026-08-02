@@ -1356,8 +1356,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
 
       {/* Detail / move-stage dialog */}
       {selectedLead && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 sm:p-2" data-testid="cons-detail-dialog">
-          <div className="w-full h-full sm:w-[96vw] sm:max-w-5xl sm:h-[calc(100vh-1rem)] overflow-y-auto space-y-3 bg-white p-5 shadow-2xl sm:rounded-xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3 sm:p-2" onClick={(e) => { if (e.target === e.currentTarget) setSelectedLead(null); }} data-testid="cons-detail-dialog">
+          {/* A floating card rather than a full-bleed sheet on a phone: edge to edge reads
+              as a page you navigated to, with no backdrop to show it sits above the list
+              and nothing beside it to tap to dismiss. Capped height, and tapping the
+              backdrop closes — the same behaviour as every other popup on this board. */}
+          <div className="max-h-[85dvh] w-full space-y-3 overflow-y-auto rounded-xl bg-white p-4 shadow-2xl sm:max-h-[calc(100vh-1rem)] sm:w-[96vw] sm:max-w-5xl sm:p-5">
             <div className="flex items-start justify-between">
               <div>
                 <h3 className="flex items-center gap-2 text-base font-semibold text-slate-900" data-testid="cons-detail-title">
@@ -2285,7 +2289,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               const modeLabel = TREATMENT_FEE_PAYMENT_MODES.find((m) => m.value === mode)?.label || "";
               return (
                 <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" data-testid="cons-treatment-fee-confirm-modal">
-                  <div className="max-h-[110vh] w-full max-w-xl space-y-3 overflow-y-auto rounded-xl bg-white p-4 shadow-2xl">
+                  <div className="max-h-[85dvh] w-full max-w-xl space-y-3 overflow-y-auto rounded-xl bg-white p-4 shadow-2xl sm:max-h-[90vh]">
                     <div className="flex items-center justify-between">
                       <p className="text-sm font-semibold text-slate-800">{mode === "partial" ? "Partial Payment Schedule" : `Collect ${modeLabel} Payment`}</p>
                       <button onClick={() => setTreatmentConfirmDraft(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-treatment-fee-confirm-close"><X className="h-4 w-4" /></button>
