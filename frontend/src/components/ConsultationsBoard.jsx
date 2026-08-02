@@ -308,13 +308,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     return rows;
   }, [board.leads, dateFilter, search]);
 
-  // Lets a parent label its own cards without fetching the board's data a second time.
-  // The per-stage counts go up too, so a parent that has replaced this board's stage bar
-  // with its own controls can still say how many sit behind each one.
-  useEffect(() => {
-    if (onCountChange) onCountChange(dateAndSearchFiltered.length, derivedStageCounts);
-  }, [dateAndSearchFiltered.length, derivedStageCounts, onCountChange]);
-
   // "Treatments" (Head Physio's own board only) is a cross-cutting view, not a real
   // position in the head_consultation_stage pipeline — a lead shows up here the moment
   // any Treatment Fee amount is collected, while staying visible under "Consultation
@@ -338,6 +331,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     stages.forEach((s) => { counts[s.name] = dateAndSearchFiltered.filter((l) => matchesStage(l, s.name)).length; });
     return counts;
   }, [dateAndSearchFiltered, stages, matchesStage]);
+
+  // Lets a parent label its own cards without fetching the board's data a second time.
+  // The per-stage counts go up too, so a parent that has replaced this board's stage bar
+  // with its own controls can still say how many sit behind each one.
+  useEffect(() => {
+    if (onCountChange) onCountChange(dateAndSearchFiltered.length, derivedStageCounts);
+  }, [dateAndSearchFiltered.length, derivedStageCounts, onCountChange]);
 
   useEffect(() => {
     listStoreItems().then(setStoreItems).catch(() => setStoreItems([]));
