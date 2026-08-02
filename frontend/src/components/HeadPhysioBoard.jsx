@@ -102,7 +102,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
           day picker lives here rather than inside Consultations so it holds its place as
           the tabs change instead of the page reflowing under the cursor. */}
       <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-2 lg:flex-row lg:items-center lg:justify-between lg:gap-4 lg:p-3">
-        <div className="flex items-center gap-1 overflow-x-auto" data-testid="hp-tabs">
+        <div className="flex shrink-0 items-center gap-1 overflow-x-auto" data-testid="hp-tabs">
           {/* A Head Physio covering more than one branch still has to pick one — without
               it they'd be pinned to whichever came back first. Single-branch logins, the
               common case, never see it. */}
@@ -140,7 +140,9 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
           })}
         </div>
 
-        <div className="w-full shrink-0 border-t border-slate-100 pt-2 lg:w-[26rem] lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0" data-testid="hp-header-week">
+        {/* Takes whatever the tabs leave rather than a fixed column, so the seven days
+            are full-size targets instead of being squeezed into a corner. */}
+        <div className="w-full min-w-0 flex-1 border-t border-slate-100 pt-2 lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0" data-testid="hp-header-week">
           <WeekStrip value={workDate} onChange={setWorkDate} testid="hp-week-strip" bare />
         </div>
       </div>
