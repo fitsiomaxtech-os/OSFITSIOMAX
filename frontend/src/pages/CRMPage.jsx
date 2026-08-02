@@ -9,11 +9,16 @@ import {
   Headphones,
   LogOut,
   Mail,
+  Megaphone,
+  Menu,
+  Network,
   Search,
   ShieldCheck,
+  Store,
   Stethoscope,
   UserCircle,
   UserRound,
+  Users,
   X,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -71,6 +76,20 @@ const ROLE_META = {
   physio: { label: "Physio", icon: Activity },
   accountant: { label: "Accountant", icon: BadgeIndianRupee },
 };
+
+// Same 8 destinations as the desktop tab strip below — on a phone there isn't room
+// for 8 tabs, so this backs a bottom "Menu" trigger that opens a sheet listing them
+// instead (see super-admin-bottom-nav / super-admin-menu-sheet).
+const SUPER_ADMIN_TABS = [
+  { key: "master", label: "Master View", icon: Database },
+  { key: "marketing", label: "Marketing Board", icon: Megaphone },
+  { key: "stages", label: "Rehabilitation Phase", icon: Activity },
+  { key: "hr", label: "HR Admin", icon: Users },
+  { key: "presales", label: "Pre-Sales CRM", icon: Headphones },
+  { key: "branches", label: "Branch Management", icon: Building2 },
+  { key: "branch_wise", label: "Branch Wise", icon: Network },
+  { key: "packages", label: "FITSIO STORE", icon: Store },
+];
 
 
 const verticalDefaults = [
@@ -196,6 +215,7 @@ export const CRMPage = ({ auth, onLogout }) => {
   // and a search box inside it scrolls away the moment you start reading.
   const [showHPSearch, setShowHPSearch] = useState(false);
   const [hpSearch, setHpSearch] = useState("");
+  const [showSuperAdminMenu, setShowSuperAdminMenu] = useState(false);
 
   const role = auth.user.role;
   const roleLabel = ROLE_META[role]?.label || role;
@@ -686,18 +706,70 @@ export const CRMPage = ({ auth, onLogout }) => {
           <HeadPhysioCalendarModal branchId={auth?.user?.branch_id} onClose={() => setShowHPCalendar(false)} />
         )}
 
-        <div className="w-full space-y-4 px-3 py-4 sm:space-y-6 sm:px-6 sm:py-6">
+        <div className={`w-full space-y-4 px-3 py-4 sm:space-y-6 sm:px-6 sm:py-6 ${showSuperAdminBoard ? "pb-20 md:pb-6" : ""}`}>
 
         {showSuperAdminBoard && (
-          <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2" data-testid="super-admin-nav">
-            <button onClick={() => setSuperAdminView("master")} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${superAdminView === "master" ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"}`} data-testid="super-admin-tab-master">Master View</button>
-            <button onClick={() => setSuperAdminView("marketing")} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${superAdminView === "marketing" ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"}`} data-testid="super-admin-tab-marketing">Marketing Board</button>
-            <button onClick={() => setSuperAdminView("stages")} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${superAdminView === "stages" ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"}`} data-testid="super-admin-tab-stages">Rehabilitation Phase</button>
-            <button onClick={() => setSuperAdminView("hr")} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${superAdminView === "hr" ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"}`} data-testid="super-admin-tab-hr">HR Admin</button>
-            <button onClick={() => setSuperAdminView("presales")} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${superAdminView === "presales" ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"}`} data-testid="super-admin-tab-presales">Pre-Sales CRM</button>
-            <button onClick={() => setSuperAdminView("branches")} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${superAdminView === "branches" ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"}`} data-testid="super-admin-tab-branches">Branch Management</button>
-            <button onClick={() => setSuperAdminView("branch_wise")} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${superAdminView === "branch_wise" ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"}`} data-testid="super-admin-tab-branch-wise">Branch Wise</button>
-            <button onClick={() => setSuperAdminView("packages")} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${superAdminView === "packages" ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"}`} data-testid="super-admin-tab-packages">FITSIO STORE</button>
+          <div className="hidden flex-wrap gap-2 border-b border-slate-200 pb-2 md:flex" data-testid="super-admin-nav">
+            {SUPER_ADMIN_TABS.map((t) => (
+              <button
+                key={t.key}
+                onClick={() => setSuperAdminView(t.key)}
+                className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${superAdminView === t.key ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"}`}
+                data-testid={`super-admin-tab-${t.key === "branch_wise" ? "branch-wise" : t.key}`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Phone equivalent of the tab strip above: a bottom bar with one "Menu" trigger
+            (8 destinations don't fit as bottom-nav icons) that opens a sheet listing them,
+            same pattern as the Physio/Branch Admin/Pre-Sales bottom navs. */}
+        {showSuperAdminBoard && (
+          <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white md:hidden" data-testid="super-admin-bottom-nav">
+            <button
+              type="button"
+              onClick={() => setShowSuperAdminMenu(true)}
+              className="flex w-full items-center justify-center gap-2 py-3 text-sm font-semibold text-sky-600"
+              data-testid="super-admin-menu-trigger"
+            >
+              <Menu className="h-5 w-5" />
+              {SUPER_ADMIN_TABS.find((t) => t.key === superAdminView)?.label || "Menu"}
+            </button>
+          </div>
+        )}
+
+        {showSuperAdminBoard && showSuperAdminMenu && (
+          <div
+            className="fixed inset-0 z-50 flex items-end bg-slate-900/40 md:hidden"
+            onClick={() => setShowSuperAdminMenu(false)}
+            data-testid="super-admin-menu-sheet"
+          >
+            <div className="max-h-[75vh] w-full overflow-y-auto rounded-t-2xl bg-white p-2 pb-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between px-3 py-2">
+                <p className="text-sm font-semibold text-slate-700">Menu</p>
+                <button type="button" onClick={() => setShowSuperAdminMenu(false)} className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100" data-testid="super-admin-menu-close">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              {SUPER_ADMIN_TABS.map((t) => {
+                const Icon = t.icon;
+                const active = superAdminView === t.key;
+                return (
+                  <button
+                    key={t.key}
+                    type="button"
+                    onClick={() => { setSuperAdminView(t.key); setShowSuperAdminMenu(false); }}
+                    className={`flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left text-sm font-medium ${active ? "bg-sky-50 text-sky-700" : "text-slate-700 hover:bg-slate-50"}`}
+                    data-testid={`super-admin-menu-${t.key === "branch_wise" ? "branch-wise" : t.key}`}
+                  >
+                    <Icon className="h-4 w-4" />
+                    {t.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         )}
 
