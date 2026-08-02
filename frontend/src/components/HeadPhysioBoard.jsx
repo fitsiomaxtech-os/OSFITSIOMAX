@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Activity,
   Calendar,
@@ -46,6 +46,15 @@ import { to12h, slotTo12h } from "@/lib/time";
 // Appointment queue, All is the same board with no stage narrowing at all.
 const NEW_APPOINTMENT = "New Appointment";
 
+// Stage pill colours for the merged All list — the one thing that keeps a mixed list of
+// consultations, reviews and rehab patients readable.
+const STAGE_TONES = {
+  sky: "border-sky-200 bg-sky-50 text-sky-700",
+  violet: "border-violet-200 bg-violet-50 text-violet-700",
+  emerald: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  amber: "border-amber-200 bg-amber-50 text-amber-700",
+};
+
 const WORK_TABS = [
   { key: "consultations", label: "Consultations", icon: Calendar },
   { key: "review", label: "Review", icon: ClipboardCheck },
@@ -63,10 +72,50 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
   const [consultCount, setConsultCount] = useState(0);
   const [consultStages, setConsultStages] = useState({});
   const [reviewCount, setReviewCount] = useState(0);
+  // The rows behind those counts, so All can merge all three into one list.
+  const [consultRows, setConsultRows] = useState([]);
+  const [reviewRows, setReviewRows] = useState([]);
   const [patients, setPatients] = useState([]);
   // New Rehab is a patient with no package recommended yet — the same shape as the other
   // cards: what is still waiting on this Head Physio, not everything on their list.
   const newRehab = patients.filter((p) => !p.has_recommendation);
+
+  // All is one list, not three stacked sections — the same patient can be in more than one
+  // of them, and reading three tables to find the day's work defeats the point. Every row
+  // is flattened to the same shape and carries the stage it came from, so the mix stays
+  // legible.
+  const allRows = useMemo(() => [
+    ...consultRows.map((l) => ({
+      key: `c-${l.id}`,
+      name: l.name || "Unknown",
+      patientNo: l.patient_number || "",
+      phone: l.phone || "",
+      stage: l.head_consultation_stage || l.consultation_stage || "Consultation",
+      tone: "sky",
+      when: l.appointment_date ? `${l.appointment_date} ${to12h(l.appointment_time)}` : "",
+      who: l.assigned_physio_name || "",
+    })),
+    ...reviewRows.map((r) => ({
+      key: `r-${r.id}`,
+      name: r.lead_name || "Unknown",
+      patientNo: r.patient_number || "",
+      phone: r.phone || "",
+      stage: r.status === "completed" ? "Review · Completed" : "Review",
+      tone: r.status === "completed" ? "emerald" : "violet",
+      when: r.review_date || "",
+      who: r.physio_name || "",
+    })),
+    ...patients.map((p) => ({
+      key: `p-${p.lead_id}`,
+      name: p.lead_name || "Unknown",
+      patientNo: "",
+      phone: p.phone || "",
+      stage: p.has_recommendation ? "Rehab · Recommended" : "Rehab",
+      tone: p.has_recommendation ? "emerald" : "amber",
+      when: "",
+      who: p.branch_stage || "",
+    })),
+  ], [consultRows, reviewRows, patients]);
   const [loading, setLoading] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState(null);
   const [showRecommendModal, setShowRecommendModal] = useState(null);
@@ -142,12 +191,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
 
           {/* Both stay mounted and hidden rather than unmounted, so every card keeps a
               live count whichever one is open, and switching costs no refetch. */}
-          <div className={workTab === "consultations" || workTab === "all" ? "" : "hidden"} data-testid="hp-work-consultations">
-            {workTab === "all" && (
-              <p className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-400">
-                <Calendar className="h-3.5 w-3.5" /> Consultations
-              </p>
-            )}
+          <div className={workTab === "consultations" ? "" : "hidden"} data-testid="hp-work-consultations">
             <ConsultationsBoard
               branchId={effectiveBranchId}
               viewerRole="head_physio"
@@ -159,19 +203,17 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
               showOwnStageBar={false}
               externalStageFilter={workTab === "consultations" ? NEW_APPOINTMENT : null}
               onCountChange={(total, stages) => { setConsultCount(total); setConsultStages(stages || {}); }}
+              onRowsChange={setConsultRows}
             />
           </div>
 
-          <div
-            className={workTab === "review" ? "" : workTab === "all" ? "border-t border-slate-200 pt-4" : "hidden"}
-            data-testid="hp-work-review"
-          >
-            {workTab === "all" && (
-              <p className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-400">
-                <ClipboardCheck className="h-3.5 w-3.5" /> Review
-              </p>
-            )}
-            <HeadPhysioReviewTab selectedDate={workDate} compact={workTab === "all"} onCountChange={setReviewCount} />
+          <div className={workTab === "review" ? "" : "hidden"} data-testid="hp-work-review">
+            <HeadPhysioReviewTab
+              selectedDate={workDate}
+              compact={workTab === "all"}
+              onCountChange={setReviewCount}
+              onRowsChange={setReviewRows}
+            />
           </div>
 
           {/* Rehab is a patient list rather than a day's queue, so it isn't date-filtered.
@@ -179,15 +221,47 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
               every patient, matching how Consultations narrows and All doesn't. The
               weekly assessments sit under it — same patients, the per-week record rather
               than the dispatched reviews. */}
-          {(workTab === "rehab" || workTab === "all") && (
-            <div className="space-y-6 border-t border-slate-200 pt-4" data-testid="hp-work-rehab">
-              {workTab === "all" && (
-                <p className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-400">
-                  <Activity className="h-3.5 w-3.5" /> Rehab
-                </p>
-              )}
+          {workTab === "all" && (
+            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white" data-testid="hp-work-all">
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[720px] text-sm">
+                  <thead className="bg-slate-50 text-left text-[10px] uppercase tracking-wider text-slate-400">
+                    <tr>
+                      <th className="px-4 py-2.5 font-semibold">Patient</th>
+                      <th className="px-4 py-2.5 font-semibold">Patient No.</th>
+                      <th className="px-4 py-2.5 font-semibold">Phone</th>
+                      <th className="px-4 py-2.5 font-semibold">Stage</th>
+                      <th className="px-4 py-2.5 font-semibold">Expert / Branch</th>
+                      <th className="px-4 py-2.5 font-semibold">When</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {allRows.length === 0 ? (
+                      <tr><td colSpan={6} className="px-4 py-10 text-center text-sm text-slate-400">Nothing on this day.</td></tr>
+                    ) : allRows.map((r) => (
+                      <tr key={r.key} className="hover:bg-slate-50" data-testid={`hp-all-row-${r.key}`}>
+                        <td className="px-4 py-3 font-medium text-slate-800">{r.name}</td>
+                        <td className="px-4 py-3 font-mono text-[11px] text-slate-400">{r.patientNo || "—"}</td>
+                        <td className="px-4 py-3 text-slate-600">{r.phone || "—"}</td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex whitespace-nowrap rounded-[5px] border px-2 py-0.5 text-[10px] font-bold ${STAGE_TONES[r.tone]}`}>
+                            {r.stage}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">{r.who || "—"}</td>
+                        <td className="px-4 py-3 text-slate-500">{r.when || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {workTab === "rehab" && (
+            <div className="space-y-6" data-testid="hp-work-rehab">
               <PatientsTab
-                patients={workTab === "rehab" ? newRehab : patients}
+                patients={newRehab}
                 onRecommend={(p) => setShowRecommendModal(p)}
                 onSelect={(p) => setSelectedPatient(p)}
                 loading={loading}
