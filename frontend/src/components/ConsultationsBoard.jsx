@@ -45,6 +45,17 @@ const partialInstallmentLabel = (idx) => `${PARTIAL_ORDINALS[idx] || `#${idx + 1
 // The receipt is built as a standalone HTML document rather than printed from the page:
 // window.print() here would send the whole board — modals, sidebar and all — to the
 // printer, and the same document is what gets downloaded, so paper and file always match.
+const ALL_PAYMENT_MODE_LABELS = { cash: "Cash", upi: "UPI", card: "Card", cheque: "Cheque", partial: "Partial Payment" };
+
+/** Whatever identifies this payment with the bank — the thing a dispute is traced by. */
+const paymentReference = (p) => p.upi_utr || p.upi_transaction_id
+  || (p.cheque_number ? `Cheque ${p.cheque_number}${p.bank_name ? ` · ${p.bank_name}` : ""}` : "")
+  || (p.account_number ? `Card ****${String(p.account_number).replace(/\D/g, "").slice(-4)}` : "");
+
+// `kind: "schedule"` is a Partial Payment plan — the installments are agreed but no money
+// has come in yet, so it must never print "Amount Paid" or "PAYMENT RECEIVED".
+const isSchedule = (r) => r.kind === "schedule";
+
 // The receipt's own document content. The branding, styles and the open/print/download/
 // share mechanics are shared with every other printable in lib/printable.js.
 const receiptRows = (r) => [
@@ -209,6 +220,22 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       collectedBy: "Branch Admin",
       isCash: payload.payment_mode === "cash",
     };
+  };
+
+  /**
+   * Builds and shows a receipt for a payment that has already gone through.
+   *
+   * Guarded on its own because it runs after the money is collected: if building the
+   * document fails the payment still stands, so it says exactly that instead of letting
+   * the error reach the collect handler's catch, which would announce a failure to
+   * collect and invite a second charge.
+   */
+  const showReceipt = (build) => {
+    try {
+      setReceipt(build());
+    } catch {
+      toast.message("Payment saved — the receipt couldn't be produced. Find it under Accountant Manage.");
+    }
   };
 
   // Collect Treatment Fee popup (Branch Admin only) — at the Treatment Fee stage, any payment method
@@ -734,26 +761,33 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // untouched and open for its own button.
   const submitConsultationFee = async (payload) => {
     setCollectingFee(true);
+    // Only the call is guarded. Anything below runs after the money is already taken,
+    // and a failure there must never be reported as a failure to collect — that reads
+    // as "try again" and the branch collects a second time.
+    let res;
     try {
-      const res = await collectPackagePayment(selectedLead.id, payload);
-      toast.success(selectedLead.package_paid != null ? "Consultation Fee payment updated" : "Consultation Fee collected");
-      setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === res.lead.id ? res.lead : l) }));
-      setPackageConfirmDraft(null);
-      setReceipt(makeReceipt({
-        lead: selectedLead, payload, prefix: "CF",
-        paidFor: "Consultation Fee",
-        packageName: selectedLead.package_name || "",
-        assignedPrice: selectedLead.package_price,
-      }));
-      // The receipt closes on its own button; the patient stays open behind it so the
-      // Treatment Fee can be taken next without reopening them.
-      setCollectFeeDraft(null);
-      setTreatmentFeeDraft(null);
-      setSelectedLead(res.lead);
+      res = await collectPackagePayment(selectedLead.id, payload);
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed to collect Consultation Fee");
+      setCollectingFee(false);
+      return;
     }
     setCollectingFee(false);
+
+    toast.success(selectedLead.package_paid != null ? "Consultation Fee payment updated" : "Consultation Fee collected");
+    setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === res.lead.id ? res.lead : l) }));
+    setPackageConfirmDraft(null);
+    // The receipt closes on its own button; the patient stays open behind it so the
+    // Treatment Fee can be taken next without reopening them.
+    setCollectFeeDraft(null);
+    setTreatmentFeeDraft(null);
+    setSelectedLead(res.lead);
+    showReceipt(() => makeReceipt({
+      lead: selectedLead, payload, prefix: "CF",
+      paidFor: "Consultation Fee",
+      packageName: selectedLead.package_name || "",
+      assignedPrice: selectedLead.package_price,
+    }));
   };
 
   // Clicking one of the 5 Payment Mode buttons opens that mode's own dedicated
@@ -812,50 +846,56 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     const payload = directPayload || buildTreatmentFeePayload();
     if (!payload) return;
     setCollectingTreatmentFee(true);
+    // Only the call is guarded — see submitConsultationFee. A fault while building the
+    // receipt below must not be reported as a failure to collect.
+    let res;
     try {
-      const res = await collectTreatmentFee(selectedLead.id, payload);
-      toast.success(selectedLead.treatment_fee_paid != null ? "Treatment Fee payment updated" : "Treatment Fee collected");
-      setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === res.lead.id ? res.lead : l) }));
-      setTreatmentConfirmDraft(null);
-
-      const totalSessions = selectedLead.session_package_sessions || 0;
-      const savedInst = res.lead?.treatment_fee_payment_details?.installments || [];
-      const scheduleOnly = payload.payment_mode === "partial";
-      // Cash/UPI/Card/Cheque can cover only some of the package's sessions now, with the
-      // rest scheduled — the receipt has to say which sessions this money bought, or it
-      // reads as payment for the whole package.
-      const partOfPackage = !scheduleOnly && payload.sessions_now != null && totalSessions && payload.sessions_now < totalSessions;
-      const unpaid = savedInst.filter((i) => !i.paid);
-      setReceipt(makeReceipt({
-        lead: selectedLead, payload,
-        prefix: scheduleOnly ? "TS" : "TF",
-        kind: scheduleOnly ? "schedule" : "paid",
-        paidFor: "Treatment Fee",
-        packageName: selectedLead.session_package_name
-          ? `${selectedLead.session_package_name} · ${totalSessions} sessions`
-          : "",
-        // Against what these sessions should cost, not the whole package — collecting for
-        // fewer sessions must never be recorded as a discount.
-        assignedPrice: scheduleOnly
-          ? null
-          : partOfPackage
-          ? Math.round((selectedLead.session_package_price || 0) / totalSessions * payload.sessions_now)
-          : selectedLead.session_package_price,
-        sessionsCovered: partOfPackage ? `${payload.sessions_now} of ${totalSessions}` : "",
-        balanceDue: unpaid.length
-          ? `Rs.${unpaid.reduce((s, i) => s + (i.amount || 0), 0)}${unpaid[0]?.due_date ? ` · due ${unpaid[0].due_date}` : ""}`
-          : "",
-        installments: scheduleOnly ? savedInst : [],
-      }));
-      // Same as the installment path: the receipt is the confirmation and closes on
-      // its own button, so the patient stays open behind it rather than the whole
-      // stack vanishing the moment the money goes through.
-      setCollectFeeDraft(null);
-      setTreatmentFeeDraft(null);
-      setSelectedLead(res.lead);
+      res = await collectTreatmentFee(selectedLead.id, payload);
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed to collect Treatment Fee");
+      setCollectingTreatmentFee(false);
+      return;
     }
+
+    toast.success(selectedLead.treatment_fee_paid != null ? "Treatment Fee payment updated" : "Treatment Fee collected");
+    setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === res.lead.id ? res.lead : l) }));
+    setTreatmentConfirmDraft(null);
+
+    const totalSessions = selectedLead.session_package_sessions || 0;
+    const savedInst = res.lead?.treatment_fee_payment_details?.installments || [];
+    const scheduleOnly = payload.payment_mode === "partial";
+    // Cash/UPI/Card/Cheque can cover only some of the package's sessions now, with the
+    // rest scheduled — the receipt has to say which sessions this money bought, or it
+    // reads as payment for the whole package.
+    const partOfPackage = !scheduleOnly && payload.sessions_now != null && totalSessions && payload.sessions_now < totalSessions;
+    const unpaid = savedInst.filter((i) => !i.paid);
+    showReceipt(() => makeReceipt({
+      lead: selectedLead, payload,
+      prefix: scheduleOnly ? "TS" : "TF",
+      kind: scheduleOnly ? "schedule" : "paid",
+      paidFor: "Treatment Fee",
+      packageName: selectedLead.session_package_name
+        ? `${selectedLead.session_package_name} · ${totalSessions} sessions`
+        : "",
+      // Against what these sessions should cost, not the whole package — collecting for
+      // fewer sessions must never be recorded as a discount.
+      assignedPrice: scheduleOnly
+        ? null
+        : partOfPackage
+        ? Math.round((selectedLead.session_package_price || 0) / totalSessions * payload.sessions_now)
+        : selectedLead.session_package_price,
+      sessionsCovered: partOfPackage ? `${payload.sessions_now} of ${totalSessions}` : "",
+      balanceDue: unpaid.length
+        ? `Rs.${unpaid.reduce((s, i) => s + (i.amount || 0), 0)}${unpaid[0]?.due_date ? ` · due ${unpaid[0].due_date}` : ""}`
+        : "",
+      installments: scheduleOnly ? savedInst : [],
+    }));
+    // Same as the installment path: the receipt is the confirmation and closes on
+    // its own button, so the patient stays open behind it rather than the whole
+    // stack vanishing the moment the money goes through.
+    setCollectFeeDraft(null);
+    setTreatmentFeeDraft(null);
+    setSelectedLead(res.lead);
     setCollectingTreatmentFee(false);
   };
 
@@ -938,7 +978,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
 
       const stillOwed = installments.filter((i) => !i.paid);
       const thisInst = installments[draft.idx] || {};
-      setReceipt(makeReceipt({
+      showReceipt(() => makeReceipt({
         lead: updatedLead, payload, prefix: `TF${draft.idx + 1}`,
         paidFor: `Treatment Fee · Payment #${draft.idx + 1} of ${installments.length}`,
         packageName: updatedLead.session_package_name
