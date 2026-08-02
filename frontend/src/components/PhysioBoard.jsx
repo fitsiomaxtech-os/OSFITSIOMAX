@@ -41,10 +41,12 @@ const BOTTOM_TABS = [
 
 export const PhysioBoard = ({ physioId } = {}) => {
   const [activeTab, setActiveTab] = useState("treatment");
-  // Round badge counts on the bottom nav — Treatment's is today's filtered count
-  // (the date filter defaults to Today already), Review's is how many patients just
-  // reached a new milestone, Patients' is this physio's whole caseload. All three
-  // tabs stay mounted (hidden via CSS, not unmounted) so every badge stays live even
+  // Round badge counts on the bottom nav — every one of them is what's still
+  // outstanding, so it counts down as the physio works through it rather than
+  // holding at a fixed total: Treatment is today's pending sessions/appointments
+  // (the date filter defaults to Today already), Review is patients newly due (drops
+  // off the moment one is raised), Patients is who's still ongoing. All three tabs
+  // stay mounted (hidden via CSS, not unmounted) so every badge stays live even
   // while another tab is the one showing.
   const [treatmentCount, setTreatmentCount] = useState(0);
   const [reviewCount, setReviewCount] = useState(0);
@@ -295,7 +297,9 @@ function TreatmentTab({ physioId, onCountChange }) {
     return { total, completed, pending: total - completed };
   }, [filterValue, leads, filterSessions, overall]);
 
-  useEffect(() => { onCountChange?.(filterStats.total); }, [filterStats.total, onCountChange]);
+  // Badge is what's still outstanding today, not the whole day's total — it counts
+  // down to 0 as each session/appointment gets marked complete.
+  useEffect(() => { onCountChange?.(filterStats.pending); }, [filterStats.pending, onCountChange]);
 
   const [searchOpen, setSearchOpen] = useState(false);
 
@@ -1232,12 +1236,15 @@ function PatientsTab({ physioId, onCountChange }) {
   }, [physioId]);
 
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { onCountChange?.(patients.length); }, [patients.length, onCountChange]);
 
   const isCompleted = (p) => p.physio_stage === "Complete";
   const ongoingCount = patients.filter((p) => !isCompleted(p)).length;
   const completedCount = patients.filter(isCompleted).length;
   const visiblePatients = patients.filter((p) => (historyTab === "completed" ? isCompleted(p) : !isCompleted(p)));
+
+  // Badge is who's still ongoing, not the whole caseload — it counts down to 0 once
+  // every patient has finished their full treatment course.
+  useEffect(() => { onCountChange?.(ongoingCount); }, [ongoingCount, onCountChange]);
 
   return (
     <div data-testid="physio-patients-tab">
