@@ -64,6 +64,9 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
   const [consultStages, setConsultStages] = useState({});
   const [reviewCount, setReviewCount] = useState(0);
   const [patients, setPatients] = useState([]);
+  // New Rehab is a patient with no package recommended yet — the same shape as the other
+  // cards: what is still waiting on this Head Physio, not everything on their list.
+  const newRehab = patients.filter((p) => !p.has_recommendation);
   const [loading, setLoading] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState(null);
   const [showRecommendModal, setShowRecommendModal] = useState(null);
@@ -110,8 +113,9 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
               const active = workTab === t.key;
               const n = t.key === "consultations" ? (consultStages[NEW_APPOINTMENT] || 0)
                 : t.key === "review" ? reviewCount
-                : t.key === "rehab" ? patients.length
-                : consultCount + reviewCount;
+                : t.key === "rehab" ? newRehab.length
+                // All is the three of them together, every stage, nothing narrowed.
+                : consultCount + reviewCount + patients.length;
               return (
                 <button
                   key={t.key}
@@ -170,13 +174,20 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
             <HeadPhysioReviewTab selectedDate={workDate} compact={workTab === "all"} onCountChange={setReviewCount} />
           </div>
 
-          {/* Rehab is the patient list, not a day's queue, so it isn't date-filtered and
-              doesn't join All. The weekly assessments sit under it — same patients, the
-              per-week record rather than the dispatched reviews. */}
-          {workTab === "rehab" && (
-            <div className="space-y-6" data-testid="hp-work-rehab">
+          {/* Rehab is a patient list rather than a day's queue, so it isn't date-filtered.
+              Its own card narrows to the ones still needing a recommendation; All shows
+              every patient, matching how Consultations narrows and All doesn't. The
+              weekly assessments sit under it — same patients, the per-week record rather
+              than the dispatched reviews. */}
+          {(workTab === "rehab" || workTab === "all") && (
+            <div className="space-y-6 border-t border-slate-200 pt-4" data-testid="hp-work-rehab">
+              {workTab === "all" && (
+                <p className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-400">
+                  <Activity className="h-3.5 w-3.5" /> Rehab
+                </p>
+              )}
               <PatientsTab
-                patients={patients}
+                patients={workTab === "rehab" ? newRehab : patients}
                 onRecommend={(p) => setShowRecommendModal(p)}
                 onSelect={(p) => setSelectedPatient(p)}
                 loading={loading}
