@@ -41,6 +41,11 @@ import { to12h, slotTo12h } from "@/lib/time";
 // Calendar and My Profile used to sit alongside these. Both moved to the header beside the
 // avatar — neither is a list to work through, and keeping them here made five things look
 // like five queues.
+//
+// They also replaced the consultation board's own stage pills: Consultations is the New
+// Appointment queue, All is the same board with no stage narrowing at all.
+const NEW_APPOINTMENT = "New Appointment";
+
 const WORK_TABS = [
   { key: "consultations", label: "Consultations", icon: Calendar },
   { key: "review", label: "Review", icon: ClipboardCheck },
@@ -53,7 +58,10 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
   // The day every list under Consultations answers to. Starts on today.
   const [workDate, setWorkDate] = useState(todayIso());
   // Reported up by each list so the cards can be labelled without fetching twice.
+  // `consultStages` is the per-stage breakdown — the cards took over the board's own
+  // stage bar, so they need to know what sits behind each stage.
   const [consultCount, setConsultCount] = useState(0);
+  const [consultStages, setConsultStages] = useState({});
   const [reviewCount, setReviewCount] = useState(0);
   const [patients, setPatients] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -81,9 +89,6 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
     // Bottom padding on phones clears the fixed bottom bar, so the last row of any list
     // is still reachable instead of sitting underneath it.
     <div className="space-y-4 pb-20 sm:pb-0" data-testid="head-physio-board-root">
-      {/* The day picker is the whole header now — the branch filter is gone (Head
-          Physios cover every branch) and Calendar and My Profile moved to the app header
-          beside the avatar, leaving the summary cards below as the only navigation. */}
       {/* Two regions. The left is deliberately left empty — reserved space, not a gap to
           be filled later by whatever comes along. The day filter takes only the width it
           needs on the right, divided off from it. */}
@@ -95,15 +100,15 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
       </div>
 
       <div className="space-y-4" data-testid="hp-work-view">
-          {/* Summary cards, not a pill bar — these are the day's workload, so each one
-              carries its own count and reads at a glance from across a room. Three equal
-              columns at every width, so the row fits a phone without wrapping or
-              scrolling; the bottom bar is still there for thumb reach. */}
+          {/* The board's navigation and its stage filter in one. Each card carries the
+              count behind it, so the day's workload reads without opening anything.
+              Two-up on phones, four across from tablet; the bottom bar stays for
+              thumb reach. */}
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3" data-testid="hp-work-tabs">
             {WORK_TABS.map((t) => {
               const Icon = t.icon;
               const active = workTab === t.key;
-              const n = t.key === "consultations" ? consultCount
+              const n = t.key === "consultations" ? (consultStages[NEW_APPOINTMENT] || 0)
                 : t.key === "review" ? reviewCount
                 : t.key === "rehab" ? patients.length
                 : consultCount + reviewCount;
@@ -144,7 +149,12 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
               viewerRole="head_physio"
               externalDate={workDate}
               hideDateFilter
-              onCountChange={setConsultCount}
+              // The cards ARE the stage filter now: Consultations is the New Appointment
+              // queue, All drops the stage narrowing entirely. Keeping the board's own
+              // stage pills as well would be the same control offered twice.
+              showOwnStageBar={false}
+              externalStageFilter={workTab === "consultations" ? NEW_APPOINTMENT : null}
+              onCountChange={(total, stages) => { setConsultCount(total); setConsultStages(stages || {}); }}
             />
           </div>
 

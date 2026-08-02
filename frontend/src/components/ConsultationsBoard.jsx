@@ -308,11 +308,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     return rows;
   }, [board.leads, dateFilter, search]);
 
-  // Lets a parent label a tab with how many rows are behind it without fetching the
-  // board's data a second time.
+  // Lets a parent label its own cards without fetching the board's data a second time.
+  // The per-stage counts go up too, so a parent that has replaced this board's stage bar
+  // with its own controls can still say how many sit behind each one.
   useEffect(() => {
-    if (onCountChange) onCountChange(dateAndSearchFiltered.length);
-  }, [dateAndSearchFiltered.length, onCountChange]);
+    if (onCountChange) onCountChange(dateAndSearchFiltered.length, derivedStageCounts);
+  }, [dateAndSearchFiltered.length, derivedStageCounts, onCountChange]);
 
   // "Treatments" (Head Physio's own board only) is a cross-cutting view, not a real
   // position in the head_consultation_stage pipeline — a lead shows up here the moment
