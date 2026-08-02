@@ -294,7 +294,7 @@ export const BranchAdminBoard = ({ branchId }) => {
               key={tab.key}
               type="button"
               onClick={() => setActiveView(tab.key)}
-              className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
+              className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-2.5 py-2.5 text-xs font-medium transition-colors sm:px-4 sm:text-sm ${
                 activeView === tab.key
                   ? "border-sky-500 text-sky-700"
                   : "border-transparent text-slate-400 hover:text-slate-600"
@@ -369,14 +369,15 @@ export const BranchAdminBoard = ({ branchId }) => {
             />
           ) : (
           <>
-          {/* Toolbar */}
-          <div className="flex items-center gap-3" data-testid="branch-toolbar">
-            <div className="relative flex-1">
+          {/* Toolbar — search takes the whole first row on a phone, the actions sit
+              together underneath rather than all four squeezing onto one line. */}
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3" data-testid="branch-toolbar">
+            <div className="relative w-full sm:flex-1">
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
               <Input className="pl-9" placeholder="Search patients..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} data-testid="branch-search" />
             </div>
             <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="branch-date-filter" />
-            <Button onClick={() => setShowCreateLead(true)} className="bg-sky-600 hover:bg-sky-700" data-testid="branch-create-lead-btn">
+            <Button onClick={() => setShowCreateLead(true)} className="flex-1 bg-sky-600 hover:bg-sky-700 sm:flex-none" data-testid="branch-create-lead-btn">
               <UserPlus className="h-4 w-4 mr-1.5" />Create Lead
             </Button>
             <PullFromSheetButton
@@ -387,10 +388,62 @@ export const BranchAdminBoard = ({ branchId }) => {
             />
           </div>
 
+          {/* Phone list — six columns can't be read at 430px whichever way they're sized,
+              so below md the same rows are stacked as cards instead of being pushed off
+              the side of a horizontally-scrolling table. */}
+          <div className="space-y-2 md:hidden" data-testid="branch-list-mobile">
+            {(() => {
+              const visible = (stageFilter ? filteredLeads.filter((l) => l.branch_stage === stageFilter) : filteredLeads);
+              if (visible.length === 0) {
+                return (
+                  <p className="rounded-lg border border-slate-200 bg-white px-4 py-10 text-center text-sm text-slate-400" data-testid="branch-list-mobile-empty">
+                    No patients {stageFilter ? `in stage "${stageDisplayLabel(stageFilter)}"` : "yet"}.
+                  </p>
+                );
+              }
+              return visible.map((lead) => {
+                const hex = lead.branch_stage ? stageColor(lead.branch_stage) : null;
+                return (
+                  <button
+                    key={lead.id}
+                    type="button"
+                    onClick={() => setSelectedLead(lead)}
+                    className="w-full rounded-xl border border-slate-200 bg-white p-3 text-left transition active:bg-slate-50"
+                    data-testid={`branch-card-${lead.id}`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-violet-100 text-xs font-bold text-violet-700">
+                        {lead.name?.charAt(0)?.toUpperCase() || "?"}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="truncate font-semibold text-slate-800">{lead.name}</span>
+                          <span
+                            className="shrink-0 rounded-[5px] border px-2 py-0.5 text-[10px] font-medium"
+                            style={hex ? { background: `${hex}14`, color: hex, border: `1px solid ${hex}33` } : { background: "#f1f5f9", color: "#475569", border: "1px solid #e2e8f0" }}
+                          >
+                            {lead.branch_stage ? stageDisplayLabel(lead.branch_stage) : "—"}
+                          </span>
+                        </div>
+                        {lead.patient_number && <p className="truncate font-mono text-[10px] text-slate-400">{lead.patient_number}</p>}
+                        <p className="mt-1 truncate text-xs text-slate-600">{lead.phone || "—"}</p>
+                        {lead.email && <p className="truncate text-xs text-slate-500">{lead.email}</p>}
+                        <div className="mt-1 flex flex-wrap items-center gap-x-2 text-[10px] text-slate-400">
+                          {lead.assigned_physio_name && <span className="truncate">Physio: {lead.assigned_physio_name}</span>}
+                          <span>Updated {(lead.updated_at || "").slice(0, 10)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                );
+              });
+            })()}
+          </div>
+
           {/* List View (table) — its own scroll region so the sticky header can use top-0
               instead of guessing the page header's pixel height, which was colliding with
               the stat cards row as it scrolled past. */}
-          <div className="w-full max-h-[65vh] overflow-auto rounded-lg border border-slate-200 bg-white" data-testid="branch-list">
+          <div className="hidden w-full max-h-[65vh] overflow-auto rounded-lg border border-slate-200 bg-white md:block" data-testid="branch-list">
             <table className="w-full min-w-[640px] table-fixed divide-y divide-slate-200 text-sm">
               <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                 <tr>
@@ -686,8 +739,10 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
   const avatarFirstChar = (lead.name?.trim()?.charAt(0) || "?").toUpperCase();
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} data-testid="branch-lead-modal-overlay">
-      <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-slate-200" data-testid="branch-lead-modal">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-0 backdrop-blur-sm sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} data-testid="branch-lead-modal-overlay">
+      {/* Full-bleed on a phone — a centred card with margins wastes the little width
+          there is, and the stage stepper inside needs every pixel of it. */}
+      <div className="flex h-full max-h-full w-full flex-col overflow-hidden bg-white shadow-2xl ring-1 ring-slate-200 sm:h-auto sm:max-h-[90vh] sm:max-w-2xl sm:rounded-2xl" data-testid="branch-lead-modal">
         {/* Gradient header */}
         <div className="relative bg-gradient-to-r from-sky-500 via-indigo-500 to-violet-500 px-5 py-4 text-white">
           <div className="flex items-start justify-between gap-3">
@@ -1304,8 +1359,8 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
 
       {/* Follow Up Date & Time Popup (triggered from Move to Stage) */}
       {followUpMoveDraft && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) setFollowUpMoveDraft(null); }} data-testid="branch-followup-move-modal">
-          <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-3 backdrop-blur-sm sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) setFollowUpMoveDraft(null); }} data-testid="branch-followup-move-modal">
+          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white shadow-2xl">
             <div className="flex items-center justify-between bg-gradient-to-r from-amber-500 to-orange-500 px-5 py-4 text-white">
               <div className="flex items-center gap-2">
                 <Bell className="h-5 w-5" />
