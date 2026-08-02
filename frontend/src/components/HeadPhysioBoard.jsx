@@ -11,7 +11,6 @@ import {
   LayoutList,
   MessageSquare,
   Package,
-  Phone,
   Send,
   Stethoscope,
   User,
@@ -423,61 +422,77 @@ function PatientsTab({ patients, onRecommend, onSelect, loading }) {
     );
   }
 
+  // A list rather than a card grid: these are read down a column and compared — who has a
+  // package, who is still waiting — which a grid of three-across cards makes harder than
+  // it needs to be.
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3" data-testid="hp-patients-grid">
-      {patients.map((p) => (
-        <div
-          key={p.lead_id}
-          className="rounded-xl border border-slate-200 bg-white p-4 hover:shadow-sm transition-shadow"
-          data-testid={`hp-patient-${p.lead_id}`}
-        >
-          <div className="flex items-start gap-3 mb-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-teal-50 text-sm font-bold text-teal-700">
-              {p.lead_name?.charAt(0)?.toUpperCase()}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-slate-800 truncate">{p.lead_name}</p>
-              <p className="text-[10px] text-slate-400 flex items-center gap-1"><Phone className="h-3 w-3" />{p.phone}</p>
-            </div>
-            <span className={`rounded-full px-2 py-0.5 text-[9px] font-semibold ${
-              p.branch_stage === "Portfolio" ? "bg-emerald-100 text-emerald-700" :
-              p.has_recommendation ? "bg-violet-100 text-violet-700" :
-              "bg-slate-100 text-slate-500"
-            }`}>
-              {p.branch_stage || "—"}
-            </span>
-          </div>
-
-          {p.recommendation && (
-            <div className="rounded-lg bg-violet-50 border border-violet-100 p-2.5 mb-3">
-              <p className="text-[10px] font-semibold text-violet-600 uppercase mb-1">Package Recommended</p>
-              <p className="text-xs text-violet-800">
-                {p.recommendation.recommended_weeks}w × {p.recommendation.sessions_per_week}/week = {p.recommendation.total_sessions} sessions
-              </p>
-              {p.recommendation.notes && (
-                <p className="text-[10px] text-violet-500 mt-1">{p.recommendation.notes}</p>
-              )}
-              <span className={`mt-1 inline-block rounded-full px-2 py-0.5 text-[9px] font-semibold ${
-                p.recommendation.status === "assigned" ? "bg-emerald-100 text-emerald-700" :
-                "bg-amber-100 text-amber-700"
-              }`}>
-                {p.recommendation.status}
-              </span>
-            </div>
-          )}
-
-          <div className="flex gap-2">
-            <Button size="sm" variant="outline" className="flex-1 text-xs" onClick={() => onSelect(p)} data-testid={`hp-view-sessions-${p.lead_id}`}>
-              <Calendar className="h-3 w-3 mr-1" /> Sessions
-            </Button>
-            {!p.has_recommendation && (
-              <Button size="sm" className="flex-1 text-xs bg-teal-600 hover:bg-teal-700 text-white" onClick={() => onRecommend(p)} data-testid={`hp-recommend-${p.lead_id}`}>
-                <Package className="h-3 w-3 mr-1" /> Recommend
-              </Button>
-            )}
-          </div>
-        </div>
-      ))}
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white" data-testid="hp-patients-list">
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[760px] text-sm">
+          <thead className="bg-slate-50 text-left text-[10px] uppercase tracking-wider text-slate-400">
+            <tr>
+              <th className="px-4 py-2.5 font-semibold">Patient</th>
+              <th className="px-4 py-2.5 font-semibold">Phone</th>
+              <th className="px-4 py-2.5 font-semibold">Stage</th>
+              <th className="px-4 py-2.5 font-semibold">Recommendation</th>
+              <th className="px-4 py-2.5 text-right font-semibold">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {patients.map((p) => (
+              <tr key={p.lead_id} className="hover:bg-slate-50" data-testid={`hp-patient-${p.lead_id}`}>
+                <td className="px-4 py-3">
+                  <div className="flex items-center gap-2.5">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-teal-50 text-xs font-bold text-teal-700">
+                      {p.lead_name?.charAt(0)?.toUpperCase() || "?"}
+                    </span>
+                    <span className="font-medium text-slate-800">{p.lead_name}</span>
+                  </div>
+                </td>
+                <td className="px-4 py-3 text-slate-600">{p.phone || "—"}</td>
+                <td className="px-4 py-3">
+                  <span className={`inline-flex whitespace-nowrap rounded-[5px] px-2 py-0.5 text-[10px] font-bold ${
+                    p.branch_stage === "Portfolio" ? "bg-emerald-100 text-emerald-700"
+                      : p.has_recommendation ? "bg-violet-100 text-violet-700"
+                      : "bg-slate-100 text-slate-500"
+                  }`}>
+                    {p.branch_stage || "—"}
+                  </span>
+                </td>
+                <td className="px-4 py-3">
+                  {p.recommendation ? (
+                    <div>
+                      <p className="text-xs font-semibold text-violet-800">
+                        {p.recommendation.recommended_weeks}w × {p.recommendation.sessions_per_week}/week
+                        {" = "}{p.recommendation.total_sessions} sessions
+                      </p>
+                      <span className={`mt-0.5 inline-block rounded-full px-2 py-0.5 text-[9px] font-semibold ${
+                        p.recommendation.status === "assigned" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
+                      }`}>
+                        {p.recommendation.status}
+                      </span>
+                    </div>
+                  ) : (
+                    <span className="text-xs text-slate-400">Not recommended yet</span>
+                  )}
+                </td>
+                <td className="px-4 py-3">
+                  <div className="flex items-center justify-end gap-2">
+                    <Button size="sm" variant="outline" className="text-xs" onClick={() => onSelect(p)} data-testid={`hp-view-sessions-${p.lead_id}`}>
+                      <Calendar className="mr-1 h-3 w-3" /> Sessions
+                    </Button>
+                    {!p.has_recommendation && (
+                      <Button size="sm" className="bg-teal-600 text-xs text-white hover:bg-teal-700" onClick={() => onRecommend(p)} data-testid={`hp-recommend-${p.lead_id}`}>
+                        <Package className="mr-1 h-3 w-3" /> Recommend
+                      </Button>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
