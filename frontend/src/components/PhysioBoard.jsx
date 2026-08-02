@@ -90,21 +90,29 @@ const DAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"];
 // Summary tile. `solidClass` fills the tile — used on the one figure in each group
 // that the physio is actually acting on, so it carries the group rather than
 // sitting level with the counts either side of it.
-const StatTile = ({ label, value, sub, valueClass, solidClass }) => (
-  solidClass ? (
-    <div className={`rounded-lg px-3 py-2.5 ${solidClass}`}>
+const StatTile = ({ label, value, sub, valueClass, solidClass, onClick, active, testid }) => {
+  const Tag = onClick ? "button" : "div";
+  const tagProps = onClick ? { type: "button", onClick, "data-testid": testid } : { "data-testid": testid };
+  return solidClass ? (
+    <Tag
+      {...tagProps}
+      className={`w-full text-left rounded-lg px-3 py-2.5 transition ${solidClass} ${active ? "ring-2 ring-white/70" : ""} ${onClick ? "hover:opacity-90" : ""}`}
+    >
       <p className="text-[10px] font-semibold uppercase tracking-wider text-white/75">{label}</p>
       <p className="text-xl font-bold text-white">{value}</p>
       {sub && <p className="text-[10px] text-white/70">{sub}</p>}
-    </div>
+    </Tag>
   ) : (
-    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2.5">
+    <Tag
+      {...tagProps}
+      className={`w-full text-left rounded-lg border px-3 py-2.5 transition ${active ? "border-sky-400 bg-sky-50" : "border-slate-200 bg-white"} ${onClick ? "hover:border-sky-300" : ""}`}
+    >
       <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{label}</p>
       <p className={`text-xl font-bold ${valueClass || "text-slate-700"}`}>{value}</p>
       {sub && <p className="text-[10px] text-slate-400">{sub}</p>}
-    </div>
-  )
-);
+    </Tag>
+  );
+};
 
 function TreatmentTab({ physioId }) {
   const [leads, setLeads] = useState([]);
@@ -170,13 +178,27 @@ function TreatmentTab({ physioId }) {
 
   const dayRows = useMemo(() => rowsFor(selectedDate), [rowsFor, selectedDate]);
 
+  // Which of the three summary tiles is narrowing the day's list — "all" (the
+  // default, tapping "Total Days") shows everything; "completed"/"pending" isolate
+  // just that group. Tapping an already-active tile clears back to "all".
+  const [rowFilter, setRowFilter] = useState("all");
+
   const visibleRows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return dayRows;
-    return dayRows.filter((r) => (
-      (r.lead.name || "").toLowerCase().includes(q) || (r.lead.phone || "").toLowerCase().includes(q)
-    ));
-  }, [dayRows, search]);
+    let rows = dayRows;
+    if (q) {
+      rows = rows.filter((r) => (
+        (r.lead.name || "").toLowerCase().includes(q) || (r.lead.phone || "").toLowerCase().includes(q)
+      ));
+    }
+    if (rowFilter === "completed") rows = rows.filter((r) => r.done);
+    else if (rowFilter === "pending") rows = rows.filter((r) => !r.done);
+    // Incomplete cards always show first, completed (green) cards always last —
+    // each group keeps its own time order from rowsFor's sort.
+    const incomplete = rows.filter((r) => !r.done);
+    const completed = rows.filter((r) => r.done);
+    return [...incomplete, ...completed];
+  }, [dayRows, search, rowFilter]);
 
   // Every treatment day this physio holds, regardless of date — the default when
   // no Meta-style date filter is active.
@@ -253,9 +275,19 @@ function TreatmentTab({ physioId }) {
       <div className="mb-4 rounded-xl border border-sky-100 bg-sky-50/40 p-3" data-testid="physio-treatment-summary">
         <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-sky-700">{filterValue ? filterValue.label : "Overall Treatment"}</p>
         <div className="grid grid-cols-3 gap-2">
-          <StatTile label="Total Days" value={filterStats.total} valueClass="text-sky-700" />
-          <StatTile label="Completed" value={filterStats.completed} valueClass="text-emerald-600" sub={filterStats.total ? `${Math.round((filterStats.completed / filterStats.total) * 100)}% done` : null} />
-          <StatTile label="Pending" value={filterStats.pending} solidClass="bg-violet-600" sub="Days left" />
+          <StatTile
+            label="Total Days" value={filterStats.total} valueClass="text-sky-700"
+            onClick={() => setRowFilter("all")} active={rowFilter === "all"} testid="physio-stat-total"
+          />
+          <StatTile
+            label="Completed" value={filterStats.completed} valueClass="text-emerald-600"
+            sub={filterStats.total ? `${Math.round((filterStats.completed / filterStats.total) * 100)}% done` : null}
+            onClick={() => setRowFilter(rowFilter === "completed" ? "all" : "completed")} active={rowFilter === "completed"} testid="physio-stat-completed"
+          />
+          <StatTile
+            label="Pending" value={filterStats.pending} solidClass="bg-violet-600" sub="Days left"
+            onClick={() => setRowFilter(rowFilter === "pending" ? "all" : "pending")} active={rowFilter === "pending"} testid="physio-stat-pending"
+          />
         </div>
       </div>
 
