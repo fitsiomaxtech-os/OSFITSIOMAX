@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { bmCreateWithExistingAdmin, updateBranch, hrBranchAdminCandidates, bmPerformance, bmHeadPhysioCandidates, bmAssignHeadPhysio } from "@/lib/api";
-import { MilkDateInput } from "@/components/ui/milk-calendar";
+import { MilkDateInput, MilkTimeInput } from "@/components/ui/milk-calendar";
 
 const TABS = [
   { key: "details", label: "Branch Details", icon: MapPin },
@@ -187,9 +187,11 @@ export const BranchFormDialogV2 = ({ branch, onClose, onSaved }) => {
                       <span className={v.is_open ? "text-emerald-600 font-semibold" : "text-slate-400"}>{v.is_open ? "Open" : "Closed"}</span>
                     </label>
                     <div className={`flex items-center gap-2 ${v.is_open ? "" : "opacity-30 pointer-events-none"}`}>
-                      <Input type="time" value={v.open} onChange={(e) => setDay(d.key, { open: e.target.value })} className="w-32" data-testid={`bf2-day-${d.key}-open`} />
+                      {/* Wider than the 10–22 booking window: a branch opens before and
+                          closes after the hours it takes appointments in. */}
+                      <MilkTimeInput from="06:00" to="23:30" accent="sky" value={v.open} onChange={(e) => setDay(d.key, { open: e.target.value })} className="w-32" data-testid={`bf2-day-${d.key}-open`} />
                       <span className="text-slate-400">→</span>
-                      <Input type="time" value={v.close} onChange={(e) => setDay(d.key, { close: e.target.value })} className="w-32" data-testid={`bf2-day-${d.key}-close`} />
+                      <MilkTimeInput from="06:00" to="23:30" accent="sky" value={v.close} onChange={(e) => setDay(d.key, { close: e.target.value })} className="w-32" data-testid={`bf2-day-${d.key}-close`} />
                     </div>
                   </div>
                 );

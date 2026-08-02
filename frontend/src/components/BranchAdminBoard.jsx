@@ -57,7 +57,7 @@ import { BranchDetailPage } from "@/components/branch/BranchDetailPage";
 import { BranchReviewPanel } from "@/components/branch/BranchReviewPanel";
 import { PatientsPortalPanel } from "@/components/branch/PatientsPortalPanel";
 import { CreateLeadModal } from "@/components/CreateLeadModal";
-import { MilkCalendar } from "@/components/ui/milk-calendar";
+import { MilkCalendar, MilkDateInput, MilkTimeInput } from "@/components/ui/milk-calendar";
 import { LOGO_URL, PRINTABLE_STYLES, escapeHtml, rowsHtml, openPrintable } from "@/lib/printable";
 
 // ---- Appointment confirmation -------------------------------------------------------
@@ -1150,7 +1150,7 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                   </div>
                   <div>
                     <label className="mb-1 block text-[11px] font-medium text-slate-500">Time</label>
-                    <Input type="time" value={followUpForm.time} onChange={(e) => setFollowUpForm({ ...followUpForm, time: e.target.value })} className="w-32" data-testid="branch-followup-time" />
+                    <MilkTimeInput value={followUpForm.time} onChange={(e) => setFollowUpForm({ ...followUpForm, time: e.target.value })} className="w-32" data-testid="branch-followup-time" />
                   </div>
                   <Input value={followUpForm.remarks} onChange={(e) => setFollowUpForm({ ...followUpForm, remarks: e.target.value })} placeholder="Remarks (optional)" className="min-w-[10rem] flex-1" data-testid="branch-followup-remarks" />
                   <Button size="sm" onClick={submitFollowUp} disabled={followUpBusy} className="bg-amber-600 text-white hover:bg-amber-700" data-testid="branch-followup-submit">Schedule</Button>
@@ -1206,7 +1206,7 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                     </div>
                     <div>
                       <label className="mb-1 block text-[11px] font-medium text-slate-500">New Time</label>
-                      <Input type="time" value={rescheduleDraft.time} onChange={(e) => setRescheduleDraft({ ...rescheduleDraft, time: e.target.value })} className="w-32" data-testid="branch-followup-reschedule-time" />
+                      <MilkTimeInput value={rescheduleDraft.time} onChange={(e) => setRescheduleDraft({ ...rescheduleDraft, time: e.target.value })} className="w-32" data-testid="branch-followup-reschedule-time" />
                     </div>
                     <Input value={rescheduleDraft.reason} onChange={(e) => setRescheduleDraft({ ...rescheduleDraft, reason: e.target.value })} placeholder="Reason (optional)" className="min-w-[10rem] flex-1" data-testid="branch-followup-reschedule-reason" />
                     <Button size="sm" variant="outline" onClick={() => setRescheduleDraft(null)} data-testid="branch-followup-reschedule-cancel">Cancel</Button>
@@ -1673,7 +1673,7 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600">Time *</label>
-                <Input type="time" value={followUpMoveDraft.time} onChange={(e) => setFollowUpMoveDraft({ ...followUpMoveDraft, time: e.target.value })} data-testid="branch-followup-move-time" />
+                <MilkTimeInput value={followUpMoveDraft.time} onChange={(e) => setFollowUpMoveDraft({ ...followUpMoveDraft, time: e.target.value })} data-testid="branch-followup-move-time" />
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600">Remarks</label>

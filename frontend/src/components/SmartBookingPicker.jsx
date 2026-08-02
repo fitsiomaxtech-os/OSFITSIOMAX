@@ -95,7 +95,6 @@ const DateFirstPicker = ({ branchId, value, onChange }) => {
       <div>
         <label className="mb-1 block text-xs font-semibold text-slate-600">Date</label>
         <MilkDateInput
-          
           min={todayStr()}
           value={value?.appointment_date || ""}
           onChange={(e) => onPickDate(e.target.value)}

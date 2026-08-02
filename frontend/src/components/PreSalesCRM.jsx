@@ -14,7 +14,7 @@ import { SourcePill } from "@/components/marketing/SourcePill";
 import { PullFromSheetButton } from "@/components/PullFromSheetButton";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { StageTabBar } from "@/components/ui/stage-tab";
-import { MilkDateInput } from "@/components/ui/milk-calendar";
+import { MilkDateInput, MilkTimeInput } from "@/components/ui/milk-calendar";
 
 const initials = (name) => (name || "?").split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
 
@@ -1167,7 +1167,6 @@ const LeadDetailDialog = ({ lead, stages, currentUser, onClose, onSaved, onMoveS
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600">Date *</label>
                 <MilkDateInput
-                  
                   value={followUpDraft.date}
                   min={new Date().toISOString().slice(0, 10)}
                   onChange={(e) => setFollowUpDraft({ ...followUpDraft, date: e.target.value })}
@@ -1176,8 +1175,7 @@ const LeadDetailDialog = ({ lead, stages, currentUser, onClose, onSaved, onMoveS
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600">Time *</label>
-                <Input
-                  type="time"
+                <MilkTimeInput
                   value={followUpDraft.time}
                   onChange={(e) => setFollowUpDraft({ ...followUpDraft, time: e.target.value })}
                   data-testid="presales-followup-time"
@@ -1237,7 +1235,6 @@ const LeadDetailDialog = ({ lead, stages, currentUser, onClose, onSaved, onMoveS
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600">New Date *</label>
                 <MilkDateInput
-                  
                   value={rescheduleDraft.date}
                   min={new Date().toISOString().slice(0, 10)}
                   onChange={(e) => setRescheduleDraft({ ...rescheduleDraft, date: e.target.value })}
@@ -1246,8 +1243,7 @@ const LeadDetailDialog = ({ lead, stages, currentUser, onClose, onSaved, onMoveS
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600">New Time *</label>
-                <Input
-                  type="time"
+                <MilkTimeInput
                   value={rescheduleDraft.time}
                   onChange={(e) => setRescheduleDraft({ ...rescheduleDraft, time: e.target.value })}
                   data-testid="presales-reschedule-time"
@@ -1371,7 +1367,6 @@ const LeadDetailDialog = ({ lead, stages, currentUser, onClose, onSaved, onMoveS
                   <div>
                     <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-600">Date *</label>
                     <MilkDateInput
-                      
                       value={appointmentDraft.appointment_date}
                       min={new Date().toISOString().slice(0, 10)}
                       onChange={(e) => setAppointmentDraft({ ...appointmentDraft, appointment_date: e.target.value })}
@@ -1380,8 +1375,7 @@ const LeadDetailDialog = ({ lead, stages, currentUser, onClose, onSaved, onMoveS
                   </div>
                   <div>
                     <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-600">Time *</label>
-                    <Input
-                      type="time"
+                    <MilkTimeInput
                       value={appointmentDraft.appointment_time}
                       onChange={(e) => setAppointmentDraft({ ...appointmentDraft, appointment_time: e.target.value })}
                       data-testid="presales-appointment-time"

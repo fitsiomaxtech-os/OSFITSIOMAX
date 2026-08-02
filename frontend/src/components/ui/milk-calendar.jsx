@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { CalendarDays, ChevronLeft, ChevronRight, Clock } from "lucide-react";
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const DOW = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
@@ -8,6 +8,26 @@ const iso = (y, m, d) => `${y}-${pad(m + 1)}-${pad(d)}`;
 const todayIso = () => {
   const d = new Date();
   return iso(d.getFullYear(), d.getMonth(), d.getDate());
+};
+
+// Shared by the date and time pickers so a popup carries one colour through both.
+const TONES = {
+  amber: { on: "bg-amber-500 text-white shadow-sm", today: "border border-amber-300 text-amber-700", link: "text-amber-700 hover:bg-amber-100" },
+  teal: { on: "bg-teal-600 text-white shadow-sm", today: "border border-teal-300 text-teal-700", link: "text-teal-700 hover:bg-teal-100" },
+  sky: { on: "bg-sky-600 text-white shadow-sm", today: "border border-sky-300 text-sky-700", link: "text-sky-700 hover:bg-sky-100" },
+};
+
+const minutesOf = (hhmm) => {
+  const [h, m] = String(hhmm || "").split(":").map(Number);
+  return Number.isFinite(h) ? h * 60 + (m || 0) : null;
+};
+
+/** "14:30" → "2:30 PM". Values stay 24h `HH:MM` on the wire; only the label is 12h. */
+export const formatSlotLabel = (hhmm) => {
+  const mins = minutesOf(hhmm);
+  if (mins == null) return "";
+  const h = Math.floor(mins / 60);
+  return `${h % 12 === 0 ? 12 : h % 12}:${pad(mins % 60)} ${h >= 12 ? "PM" : "AM"}`;
 };
 
 /**
@@ -34,11 +54,7 @@ export const MilkCalendar = ({ value, onChange, min, accent = "amber", testid = 
     return { y: d.getFullYear(), m: d.getMonth() };
   });
 
-  const TONE = {
-    amber: { on: "bg-amber-500 text-white shadow-sm", today: "border border-amber-300 text-amber-700", link: "text-amber-700 hover:bg-amber-100" },
-    teal: { on: "bg-teal-600 text-white shadow-sm", today: "border border-teal-300 text-teal-700", link: "text-teal-700 hover:bg-teal-100" },
-    sky: { on: "bg-sky-600 text-white shadow-sm", today: "border border-sky-300 text-sky-700", link: "text-sky-700 hover:bg-sky-100" },
-  }[accent] || {};
+  const TONE = TONES[accent] || TONES.amber;
 
   return (
     <div className="rounded-xl border border-[#EFEAE0] bg-[#FDFCF8] p-3 shadow-sm" data-testid={testid}>
@@ -154,6 +170,145 @@ export const MilkDateInput = ({
             max={max}
             accent={accent}
             onChange={(d) => { onChange?.({ target: { value: d } }); setOpen(false); }}
+          />
+        </div>
+      )}
+    </div>
+  );
+};
+
+
+/** Clinic hours. Appointments are taken between these, in half-hour slots. */
+export const SLOT_DAY_START = "10:00";
+export const SLOT_DAY_END = "22:00";
+
+/**
+ * The bookable half-hours of a day as chips, in the OS's palette.
+ *
+ * A free-text clock let anyone type 03:17, or 4am — times no branch is open for. Slots
+ * make the answer a pick from what the clinic actually offers, and the grid reads at a
+ * glance in a way a stepper never does.
+ *
+ * A `value` outside the range still shows, as its own chip ahead of the grid: older
+ * bookings and branch hours predate these limits and must not be silently rewritten by
+ * merely opening the picker.
+ */
+export const MilkTimeSlots = ({
+  value, onChange, from = SLOT_DAY_START, to = SLOT_DAY_END, step = 30,
+  accent = "amber", testid = "milk-time",
+}) => {
+  const TONE = TONES[accent] || TONES.amber;
+  const slots = useMemo(() => {
+    const start = minutesOf(from) ?? 600;
+    const end = minutesOf(to) ?? 1320;
+    const out = [];
+    for (let t = start; t <= end; t += step) out.push(`${pad(Math.floor(t / 60))}:${pad(t % 60)}`);
+    return out;
+  }, [from, to, step]);
+
+  const offGrid = value && !slots.includes(value) ? value : null;
+
+  return (
+    <div className="rounded-xl border border-[#EFEAE0] bg-[#FDFCF8] p-3 shadow-sm" data-testid={testid}>
+      <div className="mb-2 flex items-center justify-between">
+        <p className="text-sm font-bold text-slate-800">Pick a Slot</p>
+        <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+          {formatSlotLabel(slots[0])} – {formatSlotLabel(slots[slots.length - 1])}
+        </p>
+      </div>
+
+      {offGrid && (
+        <button
+          type="button"
+          onClick={() => onChange(offGrid)}
+          className={`mb-2 w-full rounded-lg px-2 py-1.5 text-[12px] font-semibold ${TONE.on}`}
+          data-testid={`${testid}-offgrid`}
+        >
+          {formatSlotLabel(offGrid)} <span className="font-medium opacity-80">· outside clinic hours</span>
+        </button>
+      )}
+
+      <div className="grid max-h-[240px] grid-cols-3 gap-1 overflow-y-auto sm:grid-cols-4" data-testid={`${testid}-grid`}>
+        {slots.map((s) => (
+          <button
+            key={s}
+            type="button"
+            onClick={() => onChange(s)}
+            className={`h-8 rounded-lg px-1 text-[12px] font-semibold transition ${
+              s === value ? TONE.on : "text-slate-600 hover:bg-[#F3EFE6]"
+            }`}
+            data-testid={`${testid}-slot-${s}`}
+          >
+            {formatSlotLabel(s)}
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-2 flex items-center justify-between border-t border-[#EFEAE0] pt-2">
+        <p className="text-[11px] font-bold text-slate-400">{slots.length} slots</p>
+        <p className="text-[11px] font-medium text-slate-500" data-testid={`${testid}-selected`}>
+          {value ? formatSlotLabel(value) : "No time picked"}
+        </p>
+      </div>
+    </div>
+  );
+};
+
+/**
+ * A time field that opens the slot grid above, replacing `<input type="time">` — whose
+ * picker is the browser's spinner column, unstyleable and happy to accept any minute of
+ * the night.
+ *
+ * Drop-in: the value stays 24h `HH:MM` and onChange receives `{ target: { value } }`, so
+ * existing handlers and everything downstream are untouched.
+ */
+export const MilkTimeInput = ({
+  value, onChange, disabled, className = "", accent = "amber",
+  from = SLOT_DAY_START, to = SLOT_DAY_END, step = 30,
+  placeholder = "Select time", ...rest
+}) => {
+  const [open, setOpen] = useState(false);
+  const [drop, setDrop] = useState("down");
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDocClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
+  // These sit low in tall popups (Follow Up puts Time under a full month grid), where a
+  // downward panel would open past the bottom of the screen.
+  const toggle = () => {
+    if (!open && ref.current) {
+      const box = ref.current.getBoundingClientRect();
+      setDrop(window.innerHeight - box.bottom < 340 && box.top > 340 ? "up" : "down");
+    }
+    setOpen((o) => !o);
+  };
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={toggle}
+        className={`flex h-9 w-full items-center justify-between gap-2 rounded-md border border-input bg-transparent px-3 text-left text-sm shadow-sm disabled:cursor-not-allowed disabled:opacity-50 ${value ? "text-slate-800" : "text-muted-foreground"} ${className}`}
+        {...rest}
+      >
+        <span className="truncate">{value ? formatSlotLabel(value) : placeholder}</span>
+        <Clock className="h-4 w-4 shrink-0 text-slate-400" />
+      </button>
+      {open && (
+        <div className={`absolute left-0 z-50 w-max min-w-full ${drop === "up" ? "bottom-full mb-1" : "mt-1"}`}>
+          <MilkTimeSlots
+            value={value}
+            from={from}
+            to={to}
+            step={step}
+            accent={accent}
+            onChange={(t) => { onChange?.({ target: { value: t } }); setOpen(false); }}
           />
         </div>
       )}

@@ -204,7 +204,6 @@ export const FinanceBoard = ({ branchId } = {}) => {
         <div className="flex items-center gap-1.5 text-xs text-slate-500">
           <CalendarDays className="h-3.5 w-3.5" />
           <MilkDateInput
-            
             value={startDate}
             onChange={(e) => setStartDate(e.target.value)}
             className="h-8 rounded-md border border-slate-200 px-2 text-xs"
@@ -212,7 +211,6 @@ export const FinanceBoard = ({ branchId } = {}) => {
           />
           <span>to</span>
           <MilkDateInput
-            
             value={endDate}
             onChange={(e) => setEndDate(e.target.value)}
             className="h-8 rounded-md border border-slate-200 px-2 text-xs"
