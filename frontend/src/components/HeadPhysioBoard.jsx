@@ -41,9 +41,10 @@ import { to12h, slotTo12h } from "@/lib/time";
 // avatar — neither is a list to work through, and keeping them here made five things look
 // like five queues.
 //
-// They also replaced the consultation board's own stage pills: Consultations is the New
-// Appointment queue, All is the same board with no stage narrowing at all.
-const NEW_APPOINTMENT = "New Appointment";
+// They also replaced the consultation board's own stage pills: Consultations is the first
+// stage of the head-consultation pipeline, All is the same board with no stage narrowing.
+// The stage's *name* is never assumed — it's configured in Pipeline Stage Management and
+// gets renamed, so it's read from the board rather than written down here.
 
 // Stage pill colours for the merged All list — the one thing that keeps a mixed list of
 // consultations, reviews and rehab patients readable.
@@ -70,6 +71,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "" }) => {
   // stage bar, so they need to know what sits behind each stage.
   const [consultCount, setConsultCount] = useState(0);
   const [consultStages, setConsultStages] = useState({});
+  const [consultStageNames, setConsultStageNames] = useState([]);
   const [reviewCount, setReviewCount] = useState(0);
   // The rows behind those counts, so All can merge all three into one list.
   const [consultRows, setConsultRows] = useState([]);
@@ -77,6 +79,9 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "" }) => {
   const [patients, setPatients] = useState([]);
   // New Rehab is a patient with no package recommended yet — the same shape as the other
   // cards: what is still waiting on this Head Physio, not everything on their list.
+  // Whatever the first head-consultation stage is currently called.
+  const firstStage = consultStageNames[0] || null;
+
   const q = search.trim().toLowerCase();
   const matches = (...fields) => !q || fields.some((f) => String(f || "").toLowerCase().includes(q));
   const visiblePatients = patients.filter((p) => matches(p.lead_name, p.phone));
@@ -163,7 +168,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "" }) => {
             {WORK_TABS.map((t) => {
               const Icon = t.icon;
               const active = workTab === t.key;
-              const n = t.key === "consultations" ? (consultStages[NEW_APPOINTMENT] || 0)
+              const n = t.key === "consultations" ? (consultStages[firstStage] || 0)
                 : t.key === "review" ? reviewCount
                 : t.key === "rehab" ? newRehab.length
                 // All is the three of them together, every stage, nothing narrowed.
@@ -206,8 +211,8 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "" }) => {
               // queue, All drops the stage narrowing entirely. Keeping the board's own
               // stage pills as well would be the same control offered twice.
               showOwnStageBar={false}
-              externalStageFilter={workTab === "consultations" ? NEW_APPOINTMENT : null}
-              onCountChange={(total, stages) => { setConsultCount(total); setConsultStages(stages || {}); }}
+              externalStageFilter={workTab === "consultations" ? firstStage : null}
+              onCountChange={(total, stages, names) => { setConsultCount(total); setConsultStages(stages || {}); setConsultStageNames(names || []); }}
               onRowsChange={setConsultRows}
             />
           </div>

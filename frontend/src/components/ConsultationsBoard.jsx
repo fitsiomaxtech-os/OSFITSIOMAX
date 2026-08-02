@@ -335,9 +335,14 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // Lets a parent label its own cards without fetching the board's data a second time.
   // The per-stage counts go up too, so a parent that has replaced this board's stage bar
   // with its own controls can still say how many sit behind each one.
+  // The stage names go up in pipeline order as well. They're configured in Pipeline Stage
+  // Management and get renamed, so a parent driving its own controls has to read them from
+  // here rather than hardcoding what they were called when it was written.
+  const stageNames = useMemo(() => stages.map((st) => st.name), [stages]);
+
   useEffect(() => {
-    if (onCountChange) onCountChange(dateAndSearchFiltered.length, derivedStageCounts);
-  }, [dateAndSearchFiltered.length, derivedStageCounts, onCountChange]);
+    if (onCountChange) onCountChange(dateAndSearchFiltered.length, derivedStageCounts, stageNames);
+  }, [dateAndSearchFiltered.length, derivedStageCounts, stageNames, onCountChange]);
 
   // The rows themselves, for a parent that merges this board's leads into a list of its
   // own. Safe to depend on directly: it's a useMemo, so its identity only changes when
