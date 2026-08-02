@@ -235,11 +235,11 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
     );
   }
 
+  // flex+gap, not space-y — space-y's sibling selector keys off the `hidden` HTML
+  // attribute, not the `hidden` class, so the desktop leads block (hidden by class
+  // on mobile, not attribute) would still count as a sibling and hand the next
+  // block phantom top margin for content a phone never draws.
   return (
-    {/* flex+gap, not space-y — space-y's sibling selector keys off the `hidden`
-        HTML attribute, not the `hidden` class, so the desktop leads block (hidden
-        by class on mobile, not attribute) would still count as a sibling and hand
-        the next block phantom top margin for content a phone never draws. */}
     <div className={`flex flex-col gap-5 ${role === "pre_sales" ? "pb-20 md:pb-0" : ""}`} data-testid="presales-crm-page">
     <div className={role === "pre_sales" ? "hidden space-y-5 md:block" : "space-y-5"} data-testid="presales-leads-tab">
       {/* KPI Cards */}
