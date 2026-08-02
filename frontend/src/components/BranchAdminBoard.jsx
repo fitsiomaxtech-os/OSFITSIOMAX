@@ -540,12 +540,20 @@ export const BranchAdminBoard = ({ branchId }) => {
               }
               return visible.map((lead) => {
                 const hex = lead.branch_stage ? stageColor(lead.branch_stage) : null;
+                const wa = waNumber(lead.phone);
                 return (
-                  <button
+                  // A div, not a button: the Call and WhatsApp actions below are
+                  // themselves interactive, and a button inside a button is invalid
+                  // markup that browsers resolve by dropping one of them.
+                  <div
                     key={lead.id}
-                    type="button"
+                    role="button"
+                    tabIndex={0}
                     onClick={() => setSelectedLead(lead)}
-                    className="w-full rounded-xl border border-slate-200 bg-white p-3 text-left transition active:bg-slate-50"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelectedLead(lead); }
+                    }}
+                    className="w-full cursor-pointer rounded-xl border border-slate-200 bg-white p-3 text-left transition active:bg-slate-50"
                     data-testid={`branch-card-${lead.id}`}
                   >
                     <div className="flex items-start gap-3">
@@ -571,7 +579,34 @@ export const BranchAdminBoard = ({ branchId }) => {
                         </div>
                       </div>
                     </div>
-                  </button>
+                    {/* Reaching the patient is the commonest thing done from this list, and
+                        on a phone it was three taps deep behind the lead popup. Anchors
+                        rather than buttons so tel: and the WhatsApp handoff are the
+                        browser's own — and stopPropagation so tapping one doesn't also
+                        open the lead behind it. */}
+                    {wa && (
+                      <div className="mt-2.5 flex gap-2 border-t border-slate-100 pt-2.5">
+                        <a
+                          href={`tel:${wa}`}
+                          onClick={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => e.stopPropagation()}
+                          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-200 py-2 text-xs font-semibold text-slate-700 active:bg-slate-100"
+                          data-testid={`branch-card-call-${lead.id}`}
+                        >
+                          <Phone className="h-3.5 w-3.5" /> Call
+                        </a>
+                        <a
+                          href={`https://wa.me/${wa}`}
+                          onClick={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => e.stopPropagation()}
+                          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-[#25D366]/40 bg-[#25D366]/10 py-2 text-xs font-semibold text-[#128C7E] active:bg-[#25D366]/20"
+                          data-testid={`branch-card-whatsapp-${lead.id}`}
+                        >
+                          <WhatsAppIcon className="h-3.5 w-3.5" /> WhatsApp
+                        </a>
+                      </div>
+                    )}
+                  </div>
                 );
               });
             })()}

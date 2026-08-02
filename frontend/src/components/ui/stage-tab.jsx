@@ -5,22 +5,38 @@ export const stageDisplayLabel = (name) => STAGE_DISPLAY_LABELS[name] || name;
 
 // Sticky segmented pill tab used to filter a leads list by stage — shared between
 // Branch Admin's Branch Leads pipeline and Consultations boards.
-export const StageTab = ({ label, count, active, onClick, color, testid }) => {
+//
+// `gridded` sizes the pill to fill a grid cell instead of holding a fixed width inside
+// a scrolling row. It's opt-in because the fixed width is what makes the scrolling
+// variant work — dropping it there would collapse the pills to nothing. Bars that lay
+// their own pills out (Physio Review, Branch Review, Pre-Sales) get the scrolling
+// sizing untouched.
+export const StageTab = ({ label, count, active, onClick, color, testid, gridded = false }) => {
   const tint = color || "#0ea5e9";
   return (
     <button
       onClick={onClick}
       data-testid={testid}
       type="button"
-      className="relative flex min-w-[86px] shrink-0 flex-col items-center justify-center rounded-lg px-3 py-2.5 text-center transition-all hover:shadow-sm sm:min-w-0 sm:flex-1 sm:shrink"
+      className={`relative flex flex-col items-center justify-center rounded-lg text-center transition-all hover:shadow-sm sm:min-w-0 sm:flex-1 sm:shrink sm:px-3 sm:py-2.5 ${
+        gridded
+          ? "w-full min-w-0 px-1 py-2"
+          : "min-w-[86px] shrink-0 px-3 py-2.5"
+      }`}
       style={
         active
           ? { background: tint, color: "#ffffff", boxShadow: `0 2px 8px ${tint}40` }
           : { background: `${tint}14`, color: tint, border: `1px solid ${tint}33` }
       }
     >
-      <span className="text-[11px] font-semibold uppercase tracking-wider leading-tight">{label}</span>
-      <span className="mt-0.5 text-lg font-bold leading-none">{count}</span>
+      {/* In a grid cell the type has to be tighter, so a long stage name ("Consultation
+          Completed") wraps inside its column rather than widening it. */}
+      <span className={`font-semibold uppercase sm:text-[11px] sm:leading-tight sm:tracking-wider ${
+        gridded
+          ? "text-[9px] leading-[1.2] tracking-tight [hyphens:auto]"
+          : "text-[11px] leading-tight tracking-wider"
+      }`}>{label}</span>
+      <span className={`mt-0.5 font-bold leading-none sm:text-lg ${gridded ? "text-base" : "text-lg"}`}>{count}</span>
     </button>
   );
 };
@@ -32,7 +48,10 @@ export const StageTabBar = ({ stages, stageFilter, setStageFilter, counts, total
     className="sticky top-[88px] z-10 -mx-1 rounded-xl border border-slate-200 bg-white/95 p-1 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/80"
     data-testid={testid}
   >
-    <div className="flex flex-nowrap gap-1 overflow-x-auto sm:overflow-visible">
+    {/* Five to a row on a phone, so nine stages land as 5 + 4 and the whole bar is
+        visible at once — it used to be a horizontal scroll, which hid the later stages
+        behind a swipe nobody knew to make. Back to a single flex row from sm up. */}
+    <div className="grid grid-cols-5 gap-1 sm:flex sm:flex-nowrap sm:overflow-visible">
       {!hideAllStages && (
         <StageTab
           label="All Stages"
@@ -41,6 +60,7 @@ export const StageTabBar = ({ stages, stageFilter, setStageFilter, counts, total
           onClick={() => setStageFilter(null)}
           color="#0ea5e9"
           testid={`${testid}-total`}
+          gridded
         />
       )}
       {stages.map((s) => (
@@ -52,6 +72,7 @@ export const StageTabBar = ({ stages, stageFilter, setStageFilter, counts, total
           onClick={() => setStageFilter(stageFilter === s.name ? null : s.name)}
           color={s.color || "#64748b"}
           testid={`${testid}-${s.name}`}
+          gridded
         />
       ))}
     </div>
