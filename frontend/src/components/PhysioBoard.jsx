@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Calendar,
   CalendarDays,
@@ -65,55 +65,130 @@ export const PhysioBoard = ({ physioId } = {}) => {
   );
 };
 
+const isoOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const shiftIso = (iso, days) => {
+  const d = new Date(`${iso}T00:00:00`);
+  d.setDate(d.getDate() + days);
+  return isoOf(d);
+};
+// Seven days at a time, newest on the left, with the anchored day in the middle.
+const DAY_STRIP_LENGTH = 7;
+const DAY_STRIP_HALF = Math.floor(DAY_STRIP_LENGTH / 2);
+
 function TreatmentTab({ physioId }) {
   const [leads, setLeads] = useState([]);
+  const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedLead, setSelectedLead] = useState(null);
-  const [subTab, setSubTab] = useState("new"); // "new" | "completed"
+
+  const todayIso = isoOf(new Date());
+  const [selectedDate, setSelectedDate] = useState(todayIso);
+  // Held apart from the selected day so clicking a chip only moves the highlight —
+  // the arrows are the only thing that slides the seven-day window.
+  const [stripCentre, setStripCentre] = useState(todayIso);
+
+  const stripDates = useMemo(
+    () => Array.from({ length: DAY_STRIP_LENGTH }, (_, i) => shiftIso(stripCentre, DAY_STRIP_HALF - i)),
+    [stripCentre],
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await physioConsultations(physioId);
-      setLeads(data.leads || []);
+      // Leads carry the appointment Branch Admin booked; the calendar carries the
+      // treatment days booked against this physio. Both are appointments for the day.
+      const months = [...new Set(stripDates.map((d) => d.slice(0, 7)))];
+      const [consults, ...calendars] = await Promise.all([
+        physioConsultations(physioId),
+        ...months.map((m) => physioCalendar(Number(m.slice(5, 7)), Number(m.slice(0, 4)), physioId)),
+      ]);
+      setLeads(consults.leads || []);
+      setSessions(calendars.flatMap((c) => c.sessions || []));
     } catch { /* silent */ }
     setLoading(false);
-  }, [physioId]);
+  }, [physioId, stripDates.join(",")]);
 
   useEffect(() => { load(); }, [load]);
 
-  const isCompleted = (l) => l.physio_stage === "Complete";
-  const newCount = leads.filter((l) => !isCompleted(l)).length;
-  const completedCount = leads.filter(isCompleted).length;
-  const visibleLeads = leads.filter((l) => (subTab === "completed" ? isCompleted(l) : !isCompleted(l)));
-
   // Treatment days ticked off out of however many were booked for this patient.
   const completeDays = (lead) => (
-    lead.total_sessions ? `${lead.completed_sessions || 0} of ${lead.total_sessions}` : null
+    lead?.total_sessions ? `${lead.completed_sessions || 0} of ${lead.total_sessions}` : null
+  );
+
+  const leadById = useMemo(() => Object.fromEntries(leads.map((l) => [l.id, l])), [leads]);
+
+  // Everything on the selected day: the branch-booked appointment, plus any treatment
+  // day scheduled that date. Both land in the same list, earliest time first.
+  const dayRows = useMemo(() => {
+    const rows = leads
+      .filter((l) => l.appointment_date === selectedDate)
+      .map((l) => ({ key: `appt-${l.id}`, lead: l, time: l.appointment_time || "", label: "Appointment" }));
+    sessions
+      .filter((s) => (s.slot_time || "").startsWith(selectedDate))
+      .forEach((s) => {
+        const lead = leadById[s.lead_id];
+        rows.push({
+          key: `day-${s.id}`,
+          lead: lead || { id: s.lead_id, name: s.lead_name },
+          time: (s.slot_time.split("T")[1] || "").slice(0, 5),
+          label: `Day ${s.session_number} of ${s.total_sessions}`,
+        });
+      });
+    return rows.sort((a, b) => (a.time || "").localeCompare(b.time || ""));
+  }, [leads, sessions, leadById, selectedDate]);
+
+  const countFor = (date) => (
+    leads.filter((l) => l.appointment_date === date).length
+    + sessions.filter((s) => (s.slot_time || "").startsWith(date)).length
   );
 
   return (
     <div data-testid="physio-treatment-tab">
-      <div className="mb-4 flex gap-1 rounded-lg border border-slate-200 bg-white p-1 w-fit">
-        {[{ key: "new", label: "New Appointment", count: newCount }, { key: "completed", label: "Completed", count: completedCount }].map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            onClick={() => setSubTab(t.key)}
-            className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
-              subTab === t.key ? "bg-sky-100 text-sky-700" : "text-slate-500 hover:bg-slate-50"
-            }`}
-            data-testid={`physio-treatment-subtab-${t.key}`}
-          >
-            {t.label} <span className="text-[10px] text-slate-400">({t.count})</span>
-          </button>
-        ))}
+      {/* Day strip — newest on the left, today anchored in the middle on first load. */}
+      <div className="mb-4 flex items-center gap-1.5 overflow-x-auto rounded-lg border border-slate-200 bg-white p-1.5" data-testid="physio-treatment-day-strip">
+        <Button size="sm" variant="outline" className="shrink-0" onClick={() => setStripCentre((c) => shiftIso(c, 1))} data-testid="physio-day-strip-newer">
+          <ChevronLeft className="h-4 w-4" />
+        </Button>
+        {stripDates.map((date) => {
+          const d = new Date(`${date}T00:00:00`);
+          const isSelected = date === selectedDate;
+          const isToday = date === todayIso;
+          const n = countFor(date);
+          return (
+            <button
+              key={date}
+              type="button"
+              onClick={() => setSelectedDate(date)}
+              className={`w-24 shrink-0 rounded-md border py-1 text-center leading-tight transition ${
+                isSelected
+                  ? "border-sky-600 bg-sky-600 text-white shadow-sm"
+                  : isToday
+                  ? "border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100"
+                  : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+              }`}
+              title={isToday ? "Today" : undefined}
+              data-testid={`physio-day-${date}`}
+            >
+              <span className="block truncate px-1 text-sm font-semibold">
+                {d.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+              </span>
+              <span className={`block text-[10px] font-medium ${isSelected ? "text-sky-100" : "text-slate-400"}`}>
+                {d.toLocaleDateString("en-US", { weekday: "short" })}{n > 0 ? ` · ${n}` : ""}
+              </span>
+            </button>
+          );
+        })}
+        <Button size="sm" variant="outline" className="shrink-0" onClick={() => setStripCentre((c) => shiftIso(c, -1))} data-testid="physio-day-strip-older">
+          <ChevronRight className="h-4 w-4" />
+        </Button>
       </div>
 
-      {visibleLeads.length === 0 && !loading ? (
+      {dayRows.length === 0 && !loading ? (
         <div className="text-center py-16">
           <ClipboardList className="h-10 w-10 text-slate-200 mx-auto mb-3" />
-          <p className="text-sm text-slate-400">{subTab === "completed" ? "No completed treatments yet" : "No new appointments assigned yet"}</p>
+          <p className="text-sm text-slate-400">
+            Nothing booked for {new Date(`${selectedDate}T00:00:00`).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
+          </p>
         </div>
       ) : (
         <div className="overflow-auto rounded-xl border border-slate-200 bg-white">
@@ -129,34 +204,40 @@ function TreatmentTab({ physioId }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {visibleLeads.map((l) => (
-                <tr
-                  key={l.id}
-                  onClick={() => setSelectedLead(l)}
-                  className="cursor-pointer transition-colors hover:bg-slate-50"
-                  data-testid={`consultation-lead-${l.id}`}
-                >
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2.5">
-                      <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-sky-50 text-xs font-bold text-sky-700">
-                        {l.name?.charAt(0)?.toUpperCase() || "?"}
+              {dayRows.map((r) => {
+                const l = r.lead;
+                return (
+                  <tr
+                    key={r.key}
+                    onClick={() => l?.phone !== undefined && setSelectedLead(l)}
+                    className="cursor-pointer transition-colors hover:bg-slate-50"
+                    data-testid={`consultation-lead-${l.id}`}
+                  >
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2.5">
+                        <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-sky-50 text-xs font-bold text-sky-700">
+                          {l.name?.charAt(0)?.toUpperCase() || "?"}
+                        </span>
+                        <div className="min-w-0">
+                          <span className="block font-medium text-slate-800">{l.name}</span>
+                          <span className="block text-[10px] text-slate-400">{r.label}</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">{l.phone || "—"}</td>
+                    <td className="px-4 py-3">
+                      <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-semibold ${
+                        l.physio_stage === "Complete" ? "bg-emerald-100 text-emerald-700" : "bg-sky-100 text-sky-700"
+                      }`}>
+                        {l.physio_stage === "Complete" ? "Complete" : (l.consultation_stage || "New Appointment")}
                       </span>
-                      <span className="font-medium text-slate-800">{l.name}</span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-slate-600">{l.phone || "—"}</td>
-                  <td className="px-4 py-3">
-                    <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-semibold ${
-                      l.physio_stage === "Complete" ? "bg-emerald-100 text-emerald-700" : "bg-sky-100 text-sky-700"
-                    }`}>
-                      {l.physio_stage === "Complete" ? "Complete" : (l.consultation_stage || "New Appointment")}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-slate-600">{completeDays(l) || "—"}</td>
-                  <td className="px-4 py-3 text-slate-500">{(l.updated_at || "").slice(0, 10) || "—"}</td>
-                  <td className="px-4 py-3 text-slate-600">{l.appointment_time ? to12h(l.appointment_time) : "—"}</td>
-                </tr>
-              ))}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">{completeDays(l) || "—"}</td>
+                    <td className="px-4 py-3 text-slate-500">{(l.updated_at || "").slice(0, 10) || "—"}</td>
+                    <td className="px-4 py-3 text-slate-600">{r.time ? to12h(r.time) : "—"}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
