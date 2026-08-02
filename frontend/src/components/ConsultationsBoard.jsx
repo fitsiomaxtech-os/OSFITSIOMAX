@@ -212,7 +212,7 @@ const PAYMENT_MODE_COLORS = {
   partial: "#e11d48",
 };
 
-export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened, externalDate, hideDateFilter = false }) => {
+export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened, externalDate, hideDateFilter = false, onCountChange }) => {
   const isConsultant = viewerRole === "head_physio";
   // Head Physio tracks progress on their own independent pipeline (head_consultation_stage),
   // fully separate from Branch's own consultation_stage pipeline.
@@ -387,6 +387,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     }
     return rows;
   }, [board.leads, dateFilter, search]);
+
+  // Lets a parent label a tab with how many rows are behind it without fetching the
+  // board's data a second time.
+  useEffect(() => {
+    if (onCountChange) onCountChange(dateAndSearchFiltered.length);
+  }, [dateAndSearchFiltered.length, onCountChange]);
 
   // "Treatments" (Head Physio's own board only) is a cross-cutting view, not a real
   // position in the head_consultation_stage pipeline — a lead shows up here the moment

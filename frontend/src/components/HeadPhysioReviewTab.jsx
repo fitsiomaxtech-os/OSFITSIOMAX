@@ -20,7 +20,7 @@ const dmy = (d) => {
  * an overdue review that fell out of Today would sit in a list nobody opens, which is
  * exactly how a patient's week-one review gets missed.
  */
-export const HeadPhysioReviewTab = ({ selectedDate, compact = false }) => {
+export const HeadPhysioReviewTab = ({ selectedDate, compact = false, onCountChange }) => {
   const [sub, setSub] = useState("today");
   const [data, setData] = useState({ today: [], upcoming: [], overdue: [], completed: [], today_date: "" });
   const [loading, setLoading] = useState(false);
@@ -55,6 +55,12 @@ export const HeadPhysioReviewTab = ({ selectedDate, compact = false }) => {
     const q = search.toLowerCase();
     return list.filter((r) => (r.lead_name || "").toLowerCase().includes(q) || (r.patient_number || "").toLowerCase().includes(q));
   }, [sub, dueList, completedList, search]);
+
+  // Outstanding reviews only — a tab labelled "Review 2" means two still to write, not
+  // two that exist.
+  useEffect(() => {
+    if (onCountChange) onCountChange(dueList.length);
+  }, [dueList.length, onCountChange]);
 
   const submit = async () => {
     if (!draft.head_physio_notes.trim()) { toast.error("Write the review notes"); return; }
