@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Send, CheckCircle2, X, Search, RefreshCw } from "lucide-react";
+import { Send, CheckCircle2, X, Search, RefreshCw, ChevronLeft, ChevronRight, Calendar as CalendarIcon } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { StageTab } from "@/components/ui/stage-tab";
-import { branchReviews, branchSendReview } from "@/lib/api";
+import { branchReviews, branchSendReview, getAvailableExperts, getAvailableDates } from "@/lib/api";
+import { to12h, endTime12h } from "@/lib/time";
 
 // Three views onto one pipeline: waiting to be sent, sent and still outstanding, done.
 // Each row already names the Head Physio it went to, so the branch can see who has what
@@ -37,9 +38,14 @@ export const BranchReviewPanel = ({ branchId }) => {
   const [data, setData] = useState({ reviews: [], counts: {}, head_physios: [], today: "" });
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
-  const [sendDraft, setSendDraft] = useState(null); // { review, head_physio_id, review_date }
+  const [sendDraft, setSendDraft] = useState(null); // { review, head_physio_id, review_date, review_time, duration, notes }
   const [sending, setSending] = useState(false);
   const [viewing, setViewing] = useState(null);
+  // Booking flow state, mirroring the Appointment popup: which month the calendar is on,
+  // which days that month have a free slot, and who is free on the picked day.
+  const [sendMonth, setSendMonth] = useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() }; });
+  const [openDates, setOpenDates] = useState({});
+  const [hpAvail, setHpAvail] = useState({ experts: [], loading: false });
 
   const load = useCallback(async () => {
     if (!branchId) return;
@@ -72,11 +78,48 @@ export const BranchReviewPanel = ({ branchId }) => {
       || (r.head_physio_name || "").toLowerCase().includes(q));
   }, [data.reviews, sub, search]);
 
-  const openSend = (review) => setSendDraft({
-    review,
-    head_physio_id: review.head_physio_id || (data.head_physios[0] || {}).id || "",
-    review_date: review.review_date || data.today || new Date().toISOString().slice(0, 10),
-  });
+  const openSend = (review) => {
+    const startDate = review.review_date || data.today || new Date().toISOString().slice(0, 10);
+    const [y, m] = startDate.split("-").map(Number);
+    setSendMonth({ y, m: m - 1 });
+    setSendDraft({
+      review,
+      head_physio_id: review.head_physio_id || "",
+      review_date: startDate,
+      review_time: review.review_time || "",
+      duration: review.review_duration || null,
+      notes: review.branch_notes || "",
+    });
+  };
+
+  // Which days of the shown month have a Head Physio slot free, refreshed as the popup
+  // pages between months.
+  useEffect(() => {
+    if (!sendDraft || !branchId) return;
+    const month = `${sendMonth.y}-${String(sendMonth.m + 1).padStart(2, "0")}`;
+    let cancelled = false;
+    getAvailableDates(branchId, month)
+      .then((res) => { if (!cancelled) setOpenDates(res?.dates || {}); })
+      .catch(() => { if (!cancelled) setOpenDates({}); });
+    return () => { cancelled = true; };
+  }, [sendDraft ? true : false, sendMonth.y, sendMonth.m, branchId]);
+
+  // Head Physios free on the picked date, each carrying their own open times — so
+  // choosing one reveals their slots without a second request.
+  useEffect(() => {
+    if (!sendDraft?.review_date || !branchId) return;
+    let cancelled = false;
+    setHpAvail((p) => ({ ...p, loading: true }));
+    getAvailableExperts(branchId, sendDraft.review_date)
+      .then((res) => { if (!cancelled) setHpAvail({ experts: res?.experts || [], loading: false }); })
+      .catch(() => { if (!cancelled) setHpAvail({ experts: [], loading: false }); });
+    return () => { cancelled = true; };
+  }, [sendDraft?.review_date, branchId]);
+
+  const sendSlots = useMemo(() => {
+    if (!sendDraft?.head_physio_id) return [];
+    return (hpAvail.experts.find((d) => d.id === sendDraft.head_physio_id)?.free_slots) || [];
+  }, [hpAvail.experts, sendDraft?.head_physio_id]);
 
   const submitSend = async () => {
     if (!sendDraft.head_physio_id) { toast.error("Pick a Head Physio"); return; }
@@ -86,6 +129,9 @@ export const BranchReviewPanel = ({ branchId }) => {
       await branchSendReview(sendDraft.review.id, {
         head_physio_id: sendDraft.head_physio_id,
         review_date: sendDraft.review_date,
+        review_time: sendDraft.review_time || null,
+        review_duration: sendDraft.duration || null,
+        notes: sendDraft.notes || null,
       });
       toast.success("Review sent to the Head Physio");
       setSendDraft(null);
@@ -117,7 +163,7 @@ export const BranchReviewPanel = ({ branchId }) => {
           <td className="whitespace-nowrap px-4 py-3 align-middle">
             <span className="font-medium text-violet-700">{r.head_physio_name || "—"}</span>
             <p className={`text-[10px] ${overdue ? "text-rose-600" : "text-slate-400"}`}>
-              review {dmy(r.review_date)}
+              review {dmy(r.review_date)}{r.review_time ? ` · ${to12h(r.review_time)}` : ""}
               {r.status === "completed" && <span className="ml-1 font-semibold text-emerald-600">· completed</span>}
             </p>
           </td>
@@ -205,69 +251,207 @@ export const BranchReviewPanel = ({ branchId }) => {
         </div>
       )}
 
-      {/* Send to Head Physio */}
+      {/* Send to Head Physio — the same three-step booking the Appointment popup uses:
+          the date narrows who's free, the chosen Head Physio narrows which times exist.
+          A review is an appointment with a Head Physio, so it's booked like one rather
+          than typed into a bare date field. */}
       {sendDraft && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-3" data-testid="branch-review-send-modal">
-          <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between bg-slate-500 px-6 py-4 text-white">
-              <div>
-                <p className="text-lg font-bold">Send to Head Physio</p>
-                <p className="text-xs text-white/80">{sendDraft.review.lead_name} · {sendDraft.review.treatment_days} treatment days</p>
+          <div className="flex h-[calc(100vh-1rem)] w-full max-w-7xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-3 border-b border-slate-200 bg-slate-100 px-6 py-4">
+              <div className="flex min-w-0 items-center gap-3">
+                <CalendarIcon className="h-6 w-6 shrink-0 text-slate-500" />
+                <div className="min-w-0">
+                  <p className="text-lg font-bold text-slate-800">Send to Head Physio</p>
+                  <p className="truncate text-xs text-slate-500">
+                    {sendDraft.review.lead_name} · {sendDraft.review.treatment_days} treatment days · pick a date, then the Head Physio, then their time
+                  </p>
+                </div>
               </div>
-              <button onClick={() => setSendDraft(null)} className="rounded-lg border-2 border-orange-200 bg-orange-100 p-2 text-orange-600 hover:bg-orange-200" data-testid="branch-review-send-close">
-                <X className="h-4 w-4" />
+              <button onClick={() => setSendDraft(null)} className="shrink-0 rounded-lg border-2 border-orange-200 bg-orange-100 p-2 text-orange-600 transition hover:border-orange-300 hover:bg-orange-200" data-testid="branch-review-send-close">
+                <X className="h-5 w-5" />
               </button>
             </div>
-            <div className="space-y-4 p-5">
-              <div>
-                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">Head Physio *</label>
-                {data.head_physios.length === 0 ? (
-                  <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-                    No Head Physio on this branch — add one in HR → Roles &amp; Credentials.
-                  </p>
+
+            <div className="flex flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
+              {/* STEP 1 — Date */}
+              <div className="w-full flex-shrink-0 border-b border-slate-200 p-6 lg:w-[28rem] lg:border-b-0 lg:border-r lg:overflow-y-auto" data-testid="branch-review-date-panel">
+                <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-400">1 · Date</p>
+                {(() => {
+                  const todayStr = new Date().toISOString().slice(0, 10);
+                  const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+                  const firstDow = new Date(sendMonth.y, sendMonth.m, 1).getDay();
+                  const daysInMonth = new Date(sendMonth.y, sendMonth.m + 1, 0).getDate();
+                  const pad = (n) => String(n).padStart(2, "0");
+                  const stepMonth = (delta) => setSendMonth(({ y, m }) => {
+                    const d = new Date(y, m + delta, 1);
+                    return { y: d.getFullYear(), m: d.getMonth() };
+                  });
+                  return (
+                    <>
+                      <div className="mb-3 flex items-center justify-between">
+                        <button type="button" onClick={() => stepMonth(-1)} className="rounded p-1 hover:bg-slate-100" data-testid="branch-review-prev-month">
+                          <ChevronLeft className="h-5 w-5 text-slate-500" />
+                        </button>
+                        <h4 className="text-base font-bold text-slate-700">{monthNames[sendMonth.m]} {sendMonth.y}</h4>
+                        <button type="button" onClick={() => stepMonth(1)} className="rounded p-1 hover:bg-slate-100" data-testid="branch-review-next-month">
+                          <ChevronRight className="h-5 w-5 text-slate-500" />
+                        </button>
+                      </div>
+                      <div className="mb-1 grid grid-cols-7 gap-1">
+                        {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((d) => (
+                          <div key={d} className="py-1 text-center text-xs font-semibold text-slate-400">{d}</div>
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-7 gap-1">
+                        {Array.from({ length: firstDow }, (_, i) => <div key={`pad-${i}`} className="h-14" />)}
+                        {Array.from({ length: daysInMonth }, (_, i) => {
+                          const day = i + 1;
+                          const dateStr = `${sendMonth.y}-${pad(sendMonth.m + 1)}-${pad(day)}`;
+                          const isPast = dateStr < todayStr;
+                          const isPicked = sendDraft.review_date === dateStr;
+                          const isToday = dateStr === todayStr;
+                          const openSlots = openDates[dateStr] || 0;
+                          const hasSlots = !isPast && openSlots > 0;
+                          return (
+                            <button
+                              key={day}
+                              type="button"
+                              disabled={isPast}
+                              // Availability is per-day, so a new date drops the Head Physio
+                              // and slot chosen under the old one.
+                              onClick={() => setSendDraft({ ...sendDraft, review_date: dateStr, head_physio_id: "", review_time: "", duration: null })}
+                              className={`h-14 rounded-lg text-lg font-semibold transition ${
+                                isPicked
+                                  ? "bg-teal-600 text-white shadow-sm ring-2 ring-teal-200"
+                                  : isPast
+                                  ? "cursor-not-allowed text-slate-300"
+                                  : hasSlots
+                                  ? "bg-violet-300 text-white shadow-sm hover:bg-violet-400"
+                                  : isToday
+                                  ? "border border-teal-300 bg-teal-50 text-teal-700 hover:bg-teal-100"
+                                  : "text-slate-600 hover:bg-slate-100"
+                              }`}
+                              title={hasSlots ? `${openSlots} slot${openSlots === 1 ? "" : "s"} open` : undefined}
+                              data-testid={`branch-review-day-${day}`}
+                            >
+                              {day}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-3 text-xs font-semibold text-slate-400">
+                        <span className="flex items-center gap-1.5"><span className="inline-block h-3.5 w-3.5 rounded bg-violet-300" /> Slots open</span>
+                        <span className="flex items-center gap-1.5"><span className="inline-block h-3.5 w-3.5 rounded bg-teal-600" /> Picked</span>
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+
+              {/* STEP 2 — Head Physio */}
+              <div className="w-full flex-shrink-0 border-b border-slate-200 p-5 lg:w-[22rem] lg:border-b-0 lg:border-r lg:overflow-y-auto" data-testid="branch-review-hp-panel">
+                <p className="mb-1 text-xs font-bold uppercase tracking-wider text-slate-400">2 · Head Physio</p>
+                <p className="mb-3 text-xs text-slate-400">Only those with availability on the picked date.</p>
+                {!sendDraft.review_date ? (
+                  <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">Pick a date first.</p>
+                ) : hpAvail.loading ? (
+                  <p className="text-sm text-slate-400">Checking availability...</p>
+                ) : hpAvail.experts.length === 0 ? (
+                  <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">No Head Physio is available on this date.</p>
                 ) : (
-                  <div className="space-y-1.5">
-                    {data.head_physios.map((hp) => (
-                      <button
-                        key={hp.id}
-                        type="button"
-                        onClick={() => setSendDraft({ ...sendDraft, head_physio_id: hp.id })}
-                        className={`flex w-full items-center gap-3 rounded-lg border-2 p-3 text-left transition ${
-                          sendDraft.head_physio_id === hp.id ? "border-violet-500 bg-violet-50" : "border-slate-200 hover:border-violet-300"
-                        }`}
-                        data-testid={`branch-review-hp-${hp.id}`}
-                      >
-                        <span className={`flex h-9 w-9 items-center justify-center rounded-full text-sm font-bold ${sendDraft.head_physio_id === hp.id ? "bg-violet-600 text-white" : "bg-violet-100 text-violet-700"}`}>
-                          {hp.full_name?.charAt(0) || "H"}
-                        </span>
-                        <span className="text-sm font-semibold text-slate-800">{hp.full_name}</span>
-                        {sendDraft.head_physio_id === hp.id && <CheckCircle2 className="ml-auto h-4 w-4 text-violet-600" />}
-                      </button>
-                    ))}
+                  <div className="space-y-2">
+                    {hpAvail.experts.map((doc) => {
+                      const active = sendDraft.head_physio_id === doc.id;
+                      const open = (doc.free_slots || []).length;
+                      return (
+                        <button
+                          key={doc.id}
+                          type="button"
+                          onClick={() => setSendDraft({ ...sendDraft, head_physio_id: doc.id, review_time: "", duration: null })}
+                          className={`flex w-full items-center gap-3 rounded-lg border-2 p-3.5 text-left transition ${active ? "border-teal-500 bg-teal-50 shadow-sm" : "border-slate-200 bg-white hover:border-teal-300 hover:bg-slate-50"}`}
+                          data-testid={`branch-review-hp-${doc.id}`}
+                        >
+                          <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-base font-bold ${active ? "bg-teal-600 text-white" : "bg-teal-100 text-teal-700"}`}>
+                            {doc.full_name?.charAt(0) || "H"}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-bold text-slate-800">{doc.full_name}</p>
+                            <p className={`truncate text-xs ${open > 0 ? "text-slate-400" : "text-amber-600"}`}>
+                              {open > 0 ? `${open} slot${open === 1 ? "" : "s"} open` : "Nothing published"}
+                            </p>
+                          </div>
+                          {active && <CheckCircle2 className="ml-auto h-5 w-5 shrink-0 text-teal-600" />}
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>
-              <div>
-                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">Review Date *</label>
-                <Input
-                  type="date"
-                  value={sendDraft.review_date}
-                  onChange={(e) => setSendDraft({ ...sendDraft, review_date: e.target.value })}
-                  data-testid="branch-review-date"
-                />
-                <p className="mt-1 text-[11px] text-slate-400">Today's date puts it straight into that Head Physio's Today Review list.</p>
-              </div>
-              {sendDraft.review.physio_notes && (
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Physio's Notes</p>
-                  <p className="mt-1 whitespace-pre-wrap text-sm text-slate-600">{sendDraft.review.physio_notes}</p>
+
+              {/* STEP 3 — Time slot, from what the Head Physio actually published. */}
+              <div className="flex-1 overflow-y-auto p-5" data-testid="branch-review-slot-panel">
+                <p className="mb-1 text-xs font-bold uppercase tracking-wider text-slate-400">3 · Time Slot</p>
+                <p className="mb-3 text-xs text-slate-400">Published availability only.</p>
+                {!sendDraft.head_physio_id ? (
+                  <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">Select a Head Physio to see their available times.</p>
+                ) : sendSlots.length === 0 ? (
+                  <div className="rounded-lg border-2 border-amber-200 bg-amber-50 px-4 py-3" data-testid="branch-review-no-slots">
+                    <p className="text-sm font-semibold text-amber-800">No availability published for this date.</p>
+                    <p className="mt-0.5 text-xs text-amber-700">
+                      Confirm with the Head Physio, then open MANAGEMENT → CONSULTANT CALENDAR and mark them available.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4" data-testid="branch-review-slots">
+                    {sendSlots.map((s) => {
+                      const active = sendDraft.review_time === s.time;
+                      return (
+                        <button
+                          key={s.slot_time}
+                          type="button"
+                          onClick={() => setSendDraft({ ...sendDraft, review_time: s.time, duration: s.duration })}
+                          className={`rounded-lg border-2 px-2 py-2.5 text-center transition ${active ? "border-teal-500 bg-teal-50 text-teal-700 shadow-sm ring-2 ring-teal-100" : "border-slate-200 bg-white text-slate-600 hover:border-teal-300 hover:bg-slate-50"}`}
+                          data-testid={`branch-review-slot-${s.time}`}
+                        >
+                          <span className="block text-base font-bold">{to12h(s.time)}</span>
+                          <span className="block text-[11px] text-slate-400">{s.duration} min</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                {sendDraft.review_time && sendDraft.duration && (
+                  <p className="mt-4 rounded-lg border-2 border-teal-300 bg-teal-50 px-4 py-2.5 text-sm font-bold text-teal-700" data-testid="branch-review-slot-summary">
+                    {to12h(sendDraft.review_time)} – {endTime12h(sendDraft.review_time, sendDraft.duration)} · {sendDraft.duration} minute review
+                  </p>
+                )}
+
+                {sendDraft.review.physio_notes && (
+                  <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Physio's Notes</p>
+                    <p className="mt-1 whitespace-pre-wrap text-sm text-slate-600">{sendDraft.review.physio_notes}</p>
+                  </div>
+                )}
+
+                <div className="mt-5">
+                  <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-slate-400">Notes</label>
+                  <textarea
+                    rows={3}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-teal-400 focus:outline-none focus:ring-1 focus:ring-teal-400"
+                    placeholder="Optional notes for the Head Physio..."
+                    value={sendDraft.notes}
+                    onChange={(e) => setSendDraft({ ...sendDraft, notes: e.target.value })}
+                    data-testid="branch-review-notes"
+                  />
                 </div>
-              )}
+              </div>
             </div>
-            <div className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-6 py-3.5">
+
+            <div className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-100 px-6 py-3.5">
               <Button variant="outline" onClick={() => setSendDraft(null)} data-testid="branch-review-send-cancel">Cancel</Button>
               <Button className="bg-emerald-600 text-white hover:bg-emerald-700" onClick={submitSend} disabled={sending || !sendDraft.head_physio_id} data-testid="branch-review-send-submit">
-                {sending ? "Sending..." : "Send Review"}
+                {sending ? "Sending..." : "Confirm"}
               </Button>
             </div>
           </div>
