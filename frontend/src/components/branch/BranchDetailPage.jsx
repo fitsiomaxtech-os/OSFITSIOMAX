@@ -15,7 +15,7 @@ const TABS = [
   { key: "summary", label: "Summary", icon: BarChart3 },
   { key: "staff", label: "Staff", icon: Users },
   { key: "performance", label: "Performance", icon: Activity },
-  { key: "head_physio", label: "Head Physio", icon: Stethoscope },
+  { key: "head_physio", label: "Experts", icon: Stethoscope },
 ];
 
 export const BranchDetailPage = ({ branchId, onBack, readOnly = false }) => {
