@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Eye, Plus, Search, Settings as Cog, Calendar as CalendarIcon, Phone, FileText, StickyNote, ArrowRight, CheckCircle2, X, Pencil, PhoneOff, Clock, Bell, Building2, Trash2, Lock, Users, CalendarCheck, UserRound, LogOut, Mail, Youtube } from "lucide-react";
+import { Eye, Plus, Search, Settings as Cog, Calendar as CalendarIcon, Phone, FileText, StickyNote, ArrowRight, CheckCircle2, X, Pencil, PhoneOff, Clock, Bell, Building2, Trash2, Lock, Users, CalendarCheck, UserRound, LogOut, Mail, Youtube, ChevronDown, ChevronUp } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -909,16 +909,12 @@ const LeadDetailDialog = ({ lead, stages, currentUser, onClose, onSaved, onMoveS
           </div>
         </div>
 
-        {/* Pill tabs — Move to Stage lives behind "Additional Details" rather than as
-            an always-visible footer: that footer had no height cap of its own, and on
-            a small phone it could push the dialog past the viewport and get clipped by
-            the outer overflow-hidden wrapper. */}
+        {/* Pill tabs */}
         <div className="flex flex-wrap gap-1.5 border-b border-slate-100 bg-slate-50/60 px-5 py-2.5">
           {[
             { key: "overview", label: "Overview", color: "bg-sky-500" },
             { key: "history", label: "History", color: "bg-violet-500" },
             { key: "follow-up", label: "Follow-up", color: "bg-emerald-500" },
-            { key: "additional", label: "Additional Details", color: "bg-amber-500" },
           ].map((t) => (
             <button
               key={t.key}
@@ -934,12 +930,12 @@ const LeadDetailDialog = ({ lead, stages, currentUser, onClose, onSaved, onMoveS
         <div className="max-h-[55vh] overflow-y-auto bg-slate-50/30 p-5">
           {tab === "overview" && (
             <div className="space-y-3">
-              <ColorSection title="Contact Information" tone="sky" icon={<Phone className="h-4 w-4" />}>
+              <ColorSection title="Contact Information" tone="sky" icon={<Phone className="h-4 w-4" />} collapsible defaultOpen={false}>
                 <ColorRow k="Phone" v={currentLead.phone} />
                 <ColorRow k="Email" v={currentLead.email || "—"} />
                 <ColorRow k="Location" v={currentLead.location || "—"} />
               </ColorSection>
-              <ColorSection title="Additional Details" tone="violet" icon={<FileText className="h-4 w-4" />}>
+              <ColorSection title="Additional Details" tone="violet" icon={<FileText className="h-4 w-4" />} collapsible defaultOpen={false}>
                 <ColorRow k="Expected Consultation" v={currentLead.expected_consultation_date || "—"} />
                 <ColorRow k="Months of Pain" v={currentLead.months_of_pain ?? "—"} />
                 <ColorRow k="Age" v={currentLead.age ?? "—"} />
@@ -1065,14 +1061,14 @@ const LeadDetailDialog = ({ lead, stages, currentUser, onClose, onSaved, onMoveS
               })}
             </div>
           )}
+        </div>
 
-          {tab === "additional" && (
-            <div className="space-y-3" data-testid="presales-detail-additional">
-              <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">
-                <ArrowRight className="h-3.5 w-3.5 text-slate-400" />
-                Move to Stage
-              </p>
-              <div className="flex flex-wrap gap-2" data-testid="presales-detail-move-stages">
+        <div className="border-t border-slate-200 bg-white px-5 py-3">
+          <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">
+            <ArrowRight className="h-3.5 w-3.5 text-slate-400" />
+            Move to Stage
+          </p>
+          <div className="flex flex-wrap gap-2" data-testid="presales-detail-move-stages">
             {stages.filter((s) => s.name === "New Leads" ? currentLead.stage === "New Leads" : true).map((s) => {
               const active = currentLead.stage === s.name;
               const handleClick = async () => {
@@ -1144,8 +1140,6 @@ const LeadDetailDialog = ({ lead, stages, currentUser, onClose, onSaved, onMoveS
               >
                 <PhoneOff className="mr-1 h-3.5 w-3.5" /> +1 No Answer
               </Button>
-            </div>
-          )}
             </div>
           )}
         </div>
@@ -1476,15 +1470,26 @@ const TONE_MAP = {
   emerald: { bar: "bg-emerald-500", iconBg: "bg-emerald-100 text-emerald-700", title: "text-emerald-700", border: "border-emerald-100" },
 };
 
-const ColorSection = ({ title, tone = "sky", icon, children }) => {
+// `collapsible` opts a section into an FAQ-style accordion (starts at `defaultOpen`,
+// toggled by tapping the header) — plain ColorSection callers keep the original
+// always-expanded card unchanged.
+const ColorSection = ({ title, tone = "sky", icon, children, collapsible = false, defaultOpen = true }) => {
   const t = TONE_MAP[tone] || TONE_MAP.sky;
+  const [open, setOpen] = useState(defaultOpen);
+  const showContent = collapsible ? open : true;
   return (
     <div className={`overflow-hidden rounded-xl border bg-white shadow-sm ${t.border}`}>
-      <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-2.5">
+      <div
+        role={collapsible ? "button" : undefined}
+        tabIndex={collapsible ? 0 : undefined}
+        onClick={collapsible ? () => setOpen((v) => !v) : undefined}
+        className={`flex items-center gap-2 border-b border-slate-100 px-4 py-2.5 ${collapsible ? "cursor-pointer select-none" : ""}`}
+      >
         <span className={`flex h-7 w-7 items-center justify-center rounded-lg ${t.iconBg}`}>{icon}</span>
-        <p className={`text-xs font-bold uppercase tracking-wider ${t.title}`}>{title}</p>
+        <p className={`flex-1 text-xs font-bold uppercase tracking-wider ${t.title}`}>{title}</p>
+        {collapsible && (open ? <ChevronUp className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />)}
       </div>
-      <div className="space-y-2 px-4 py-3">{children}</div>
+      {showContent && <div className="space-y-2 px-4 py-3">{children}</div>}
     </div>
   );
 };
