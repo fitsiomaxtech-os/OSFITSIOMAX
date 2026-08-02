@@ -7,8 +7,18 @@ from stage_utils import get_closing_stage_name
 from deps import v3_current_user, v3_require_roles
 from constants import V3_STAGES, V3_BRANCH_STAGES
 from schemas.v3 import V3UserOut, V3LeadOut
+from routers.v3_finance import REVENUE_ACTIONS, _parse_rs_amount
 
 router = APIRouter(prefix="/api/v3")
+
+# The vertical names already used when creating leads/branches (see CRMPage.jsx's
+# verticalDefaults / defaultBranch) — Physiotherapy gets its own branch-by-branch
+# breakdown (2x2 cards); the other three are shown as one aggregate card each.
+DASHBOARD_VERTICAL_LABELS = {
+    "offline_fitness_gym": "Offline Fitness",
+    "online_physiotherapy": "Online Physiotherapy",
+    "online_fitness": "Online Fitness",
+}
 
 
 async def _stage_names(stage_type: str, fallback: list) -> list:
@@ -413,4 +423,106 @@ async def v3_master_control(
             "progress": progress,
             "total_records": total_leads,
         },
+    }
+
+
+def _date_range_query(field: str, start_date: Optional[str], end_date: Optional[str]) -> dict:
+    if not start_date and not end_date:
+        return {}
+    rng: dict = {}
+    if start_date:
+        rng["$gte"] = start_date
+    if end_date:
+        rng["$lte"] = f"{end_date}T23:59:59"
+    return {field: rng}
+
+
+@router.get("/dashboard/overview")
+async def v3_dashboard_overview(
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    _: V3UserOut = Depends(v3_require_roles("super_admin")),
+):
+    """Super Admin's new Dashboard (the default landing view) — Leads / Appointments /
+    Treatments / Revenue for a date range, each split into the Physiotherapy branches
+    (one count per branch) plus one aggregate per other vertical. Revenue is built off
+    the lead_activity payment trail like finance/revenue-overview — leads/appointments/
+    sessions carry no payment date of their own, activity log entries do."""
+    branches = await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1, "vertical": 1}).to_list(500)
+    branch_by_id = {b["id"]: b for b in branches}
+    physio_branches = [b for b in branches if b.get("vertical") == "offline_physiotherapy"]
+    other_verticals = list(DASHBOARD_VERTICAL_LABELS.keys())
+
+    def branch_vertical(branch_id):
+        return (branch_by_id.get(branch_id) or {}).get("vertical")
+
+    def new_bucket():
+        return {"total": 0.0, "physio_branches": {b["id"]: 0.0 for b in physio_branches}, "verticals": {v: 0.0 for v in other_verticals}}
+
+    def add_to_bucket(bucket, branch_id, vertical, amount=1.0):
+        bucket["total"] += amount
+        if branch_id in bucket["physio_branches"]:
+            bucket["physio_branches"][branch_id] += amount
+        elif vertical in bucket["verticals"]:
+            bucket["verticals"][vertical] += amount
+
+    def format_bucket(bucket, currency=False):
+        rnd = (lambda v: round(v, 2)) if currency else int
+        return {
+            "total": rnd(bucket["total"]),
+            "physio_branches": [
+                {"branch_id": b["id"], "branch_name": b["branch_name"], "value": rnd(bucket["physio_branches"][b["id"]])}
+                for b in physio_branches
+            ],
+            "verticals": [
+                {"vertical": v, "label": DASHBOARD_VERTICAL_LABELS[v], "value": rnd(bucket["verticals"][v])}
+                for v in other_verticals
+            ],
+        }
+
+    leads_bucket = new_bucket()
+    lead_rows = await v3_col("leads").find(
+        _date_range_query("created_at", start_date, end_date), {"_id": 0, "branch_id": 1, "vertical": 1}
+    ).to_list(50000)
+    for l in lead_rows:
+        bid = l.get("branch_id")
+        add_to_bucket(leads_bucket, bid, l.get("vertical") or branch_vertical(bid))
+
+    appt_bucket = new_bucket()
+    appt_rows = await v3_col("leads").find(
+        _date_range_query("appointment_date", start_date, end_date), {"_id": 0, "branch_id": 1, "vertical": 1}
+    ).to_list(50000)
+    for l in appt_rows:
+        bid = l.get("branch_id")
+        add_to_bucket(appt_bucket, bid, l.get("vertical") or branch_vertical(bid))
+
+    treat_bucket = new_bucket()
+    sess_query = {"status": "completed"}
+    sess_query.update(_date_range_query("slot_time", start_date, end_date))
+    sess_rows = await v3_col("sessions").find(sess_query, {"_id": 0, "branch_id": 1}).to_list(50000)
+    for s in sess_rows:
+        bid = s.get("branch_id")
+        add_to_bucket(treat_bucket, bid, branch_vertical(bid))
+
+    revenue_bucket = new_bucket()
+    activity_query = {"action": {"$in": REVENUE_ACTIONS}}
+    activity_query.update(_date_range_query("created_at", start_date, end_date))
+    activities = await v3_col("lead_activity").find(activity_query, {"_id": 0, "lead_id": 1, "details": 1}).to_list(50000)
+    activity_lead_ids = list({a["lead_id"] for a in activities if a.get("lead_id")})
+    activity_leads = await v3_col("leads").find(
+        {"id": {"$in": activity_lead_ids}}, {"_id": 0, "id": 1, "branch_id": 1, "vertical": 1}
+    ).to_list(50000)
+    activity_lead_map = {l["id"]: l for l in activity_leads}
+    for a in activities:
+        lead = activity_lead_map.get(a.get("lead_id"), {})
+        bid = lead.get("branch_id")
+        amount = _parse_rs_amount(a.get("details", ""))
+        add_to_bucket(revenue_bucket, bid, lead.get("vertical") or branch_vertical(bid), amount)
+
+    return {
+        "applied_filters": {"start_date": start_date, "end_date": end_date},
+        "leads": format_bucket(leads_bucket),
+        "appointments": format_bucket(appt_bucket),
+        "treatments": format_bucket(treat_bucket),
+        "revenue": format_bucket(revenue_bucket, currency=True),
     }

@@ -7,6 +7,7 @@ import {
   CalendarDays,
   Database,
   Headphones,
+  LayoutDashboard,
   LogOut,
   Mail,
   Megaphone,
@@ -60,6 +61,7 @@ import { PhysioBoard, CalendarPage as PhysioCalendarPage } from "@/components/Ph
 import { MarketingBoard } from "@/components/marketing/MarketingBoard";
 import { PreSalesCRM } from "@/components/PreSalesCRM";
 import { MasterControlBoard } from "@/components/MasterControlBoard";
+import { DashboardBoard } from "@/components/DashboardBoard";
 import { PipelineStageManagement } from "@/components/PipelineStageManagement";
 import { HRBoard } from "@/components/hr/HRBoard";
 import { BranchManagementBoard } from "@/components/branch/BranchManagementBoard";
@@ -77,10 +79,12 @@ const ROLE_META = {
   accountant: { label: "Accountant", icon: BadgeIndianRupee },
 };
 
-// Same 8 destinations as the desktop tab strip below. On a phone, the 5 most-used
+// Same 9 destinations as the desktop tab strip below. On a phone, the 5 most-used
 // get a direct bottom-nav slot each; the rest sit behind a "More" popover — both
 // derived from this one array so the two surfaces can't drift out of sync.
+// Dashboard is the default landing view; Master View moved into "More" to make room.
 const SUPER_ADMIN_TABS = [
+  { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { key: "master", label: "Master View", icon: Database },
   { key: "marketing", label: "Marketing Board", icon: Megaphone },
   { key: "stages", label: "Rehabilitation Phase", icon: Activity },
@@ -91,7 +95,7 @@ const SUPER_ADMIN_TABS = [
   { key: "packages", label: "FITSIO STORE", icon: Store },
 ];
 
-const SUPER_ADMIN_BOTTOM_KEYS = ["master", "marketing", "hr", "presales", "branch_wise"];
+const SUPER_ADMIN_BOTTOM_KEYS = ["dashboard", "marketing", "hr", "presales", "branch_wise"];
 const SUPER_ADMIN_BOTTOM_TABS = SUPER_ADMIN_TABS.filter((t) => SUPER_ADMIN_BOTTOM_KEYS.includes(t.key));
 const SUPER_ADMIN_MORE_TABS = SUPER_ADMIN_TABS.filter((t) => !SUPER_ADMIN_BOTTOM_KEYS.includes(t.key) && t.key !== "stages");
 
@@ -233,7 +237,7 @@ export const CRMPage = ({ auth, onLogout }) => {
     if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("sheets_connect")) {
       return "marketing";
     }
-    return "master";
+    return "dashboard";
   });
 
   const safeCall = async (fn, fallback) => {
@@ -827,6 +831,10 @@ export const CRMPage = ({ auth, onLogout }) => {
 
         {showPreSalesBoard && (
           <PreSalesCRM role={role} currentUser={auth.user} onLogout={logout} />
+        )}
+
+        {showSuperAdminBoard && superAdminView === "dashboard" && (
+          <DashboardBoard />
         )}
 
         {(showSuperAdminBoard && superAdminView === "master") && (
