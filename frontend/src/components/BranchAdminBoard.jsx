@@ -15,6 +15,7 @@ import {
   LayoutDashboard,
   FileText,
   Share2,
+  Copy,
   Download,
   ShoppingCart,
   ClipboardList,
@@ -68,18 +69,46 @@ const weekdayLabel = (d) => (d
   ? new Date(`${d}T00:00:00`).toLocaleDateString("en-US", { weekday: "long", day: "numeric", month: "long" })
   : "—");
 
-const apptRows = (a) => [
+// `compact` drops the three facts the confirmation's own hero already states in bigger
+// type — the on-screen popup shows that hero, so repeating them underneath is noise. The
+// printed sheet keeps them, where the row list has to stand on its own as the record.
+const apptRows = (a, { compact = false } = {}) => [
   ["Reference No.", a.refNo],
   ["Patient", a.patient],
   ["Patient No.", a.patientNo],
   ["Phone", a.phone],
-  ["Date", dmyLabel(a.date)],
-  ["Time", `${to12h(a.time)} – ${endTime12h(a.time, a.duration)}`],
+  compact ? null : ["Date", dmyLabel(a.date)],
+  compact ? null : ["Time", `${to12h(a.time)} – ${endTime12h(a.time, a.duration)}`],
   ["Duration", `${a.duration} minutes`],
-  ["Head Physio", a.headPhysio],
+  compact ? null : ["Head Physio", a.headPhysio],
   a.branch ? ["Branch", a.branch] : null,
   ["Booked By", a.bookedBy],
 ];
+
+/** The confirmation as a message addressed to the patient — short lines that survive
+ *  WhatsApp and SMS, which is how it actually reaches them. */
+const apptMessage = (a) => {
+  const lines = [
+    `Dear ${a.patient},`,
+    "",
+    "Your appointment is booked.",
+    "",
+    `Date: ${weekdayLabel(a.date)} (${dmyLabel(a.date)})`,
+    `Time: ${to12h(a.time)} - ${endTime12h(a.time, a.duration)} (${a.duration} min)`,
+    `Head Physio: ${a.headPhysio}`,
+  ];
+  if (a.branch) lines.push(`Branch: ${a.branch}`);
+  if (a.notes) lines.push(`Notes: ${a.notes}`);
+  lines.push(
+    "",
+    `Ref: ${a.refNo}`,
+    "Please arrive 10 minutes early.",
+    "To reschedule or cancel, contact the branch quoting this reference.",
+    "",
+    "— FITSIOMAX",
+  );
+  return lines.join("\n");
+};
 
 const apptHtml = (a) => `<!doctype html><html><head><meta charset="utf-8">
 <title>Appointment ${escapeHtml(a.refNo)}</title><style>${PRINTABLE_STYLES}</style></head>
@@ -104,12 +133,28 @@ const apptHtml = (a) => `<!doctype html><html><head><meta charset="utf-8">
   <div class="foot">This is a computer-generated confirmation and needs no signature.<br>Thank you for choosing FITSIOMAX.</div>
 </div></body></html>`;
 
-const apptText = (a) => [
-  "FITSIOMAX — Appointment Confirmed",
-  ...apptRows(a).filter(Boolean).map(([k, v]) => `${k}: ${v}`),
-  a.notes ? `Notes: ${a.notes}` : "",
-  "Please arrive 10 minutes early.",
-].filter(Boolean).join("\n");
+/** Clipboard write, with the execCommand fallback for the non-HTTPS/older-browser case
+ *  where navigator.clipboard simply isn't there. */
+const copyApptMessage = async (a) => {
+  const text = apptMessage(a);
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const el = document.createElement("textarea");
+      el.value = text;
+      el.style.position = "fixed";
+      el.style.opacity = "0";
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand("copy");
+      document.body.removeChild(el);
+    }
+    toast.success("Confirmation copied — paste it into WhatsApp or SMS");
+  } catch {
+    toast.error("Couldn't copy on this device");
+  }
+};
 
 export const BranchAdminBoard = ({ branchId }) => {
   const [boardData, setBoardData] = useState({ leads: [], stage_counts: {} });
@@ -1203,13 +1248,19 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
               </div>
 
               <dl className="mt-5 space-y-2 text-sm">
-                {apptRows(apptConfirm).filter(Boolean).map(([k, v]) => (
+                {apptRows(apptConfirm, { compact: true }).filter(Boolean).map(([k, v]) => (
                   <div key={k} className="flex items-start justify-between gap-3 border-b border-slate-100 pb-2">
                     <dt className="text-slate-500">{k}</dt>
                     <dd className="text-right font-semibold text-slate-700">{v}</dd>
                   </div>
                 ))}
               </dl>
+
+              {/* The two standing instructions, same wording the printed sheet carries. */}
+              <div className="mt-4 rounded-lg border border-teal-100 bg-teal-50/60 p-3 text-xs leading-relaxed text-teal-800" data-testid="branch-appt-confirm-note">
+                <p>Please arrive 10 minutes early.</p>
+                <p>To reschedule or cancel, contact the branch quoting reference {apptConfirm.refNo}.</p>
+              </div>
 
               {apptConfirm.notes && (
                 <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
@@ -1225,8 +1276,13 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
               <Button className="w-full bg-teal-600 text-white hover:bg-teal-700" onClick={() => openPrintable(apptHtml(apptConfirm), { print: true })} data-testid="branch-appt-confirm-pdf">
                 <FileText className="mr-1.5 h-4 w-4" /> Open PDF
               </Button>
-              <div className="grid grid-cols-2 gap-2">
-                <Button variant="outline" onClick={() => sharePrintable(apptText(apptConfirm), `FITSIOMAX Appointment ${apptConfirm.refNo}`)} data-testid="branch-appt-confirm-share">
+              {/* Copy and Share both send the patient-addressed message, not the row
+                  dump — it's pasted into WhatsApp far more often than it's printed. */}
+              <div className="grid grid-cols-3 gap-2">
+                <Button variant="outline" onClick={() => copyApptMessage(apptConfirm)} data-testid="branch-appt-confirm-copy">
+                  <Copy className="mr-1.5 h-4 w-4" /> Copy
+                </Button>
+                <Button variant="outline" onClick={() => sharePrintable(apptMessage(apptConfirm), `FITSIOMAX Appointment ${apptConfirm.refNo}`)} data-testid="branch-appt-confirm-share">
                   <Share2 className="mr-1.5 h-4 w-4" /> Share
                 </Button>
                 <Button variant="outline" onClick={() => downloadPrintable(apptHtml(apptConfirm), `appointment-${apptConfirm.refNo}.html`)} data-testid="branch-appt-confirm-download">
