@@ -168,9 +168,23 @@ async def physio_patients(physio_id: Optional[str] = None, user: V3UserOut = Dep
     for s in sessions:
         sessions_by_lead.setdefault(s["lead_id"], []).append(s)
 
+    # Where each week's review has got to: written up by this physio and waiting on the
+    # Head Physio ("submitted"), or closed out by them ("reviewed").
+    assessment_rows = await v3_col("weekly_assessments").find(
+        {"lead_id": {"$in": lead_ids}}, {"_id": 0, "lead_id": 1, "status": 1}
+    ).to_list(2000)
+    reviews_by_lead: dict = {}
+    for a in assessment_rows:
+        r = reviews_by_lead.setdefault(a["lead_id"], {"submitted": 0, "reviewed": 0})
+        if a.get("status") == "reviewed":
+            r["reviewed"] += 1
+        else:
+            r["submitted"] += 1
+
     patients = []
     for lead in leads:
         patient_sessions = sessions_by_lead.get(lead["id"], [])
+        reviews = reviews_by_lead.get(lead["id"], {"submitted": 0, "reviewed": 0})
         completed = sum(1 for s in patient_sessions if s["status"] == "completed")
         total = len(patient_sessions)
         next_session = next((s for s in patient_sessions if s["status"] == "upcoming"), None)
@@ -192,6 +206,8 @@ async def physio_patients(physio_id: Optional[str] = None, user: V3UserOut = Dep
             "physio_stage": lead.get("physio_stage"),
             "consultation_stage": lead.get("consultation_stage"),
             "updated_at": lead.get("updated_at"),
+            "reviews_submitted": reviews["submitted"],
+            "reviews_reviewed": reviews["reviewed"],
         })
 
     return {"patients": patients}

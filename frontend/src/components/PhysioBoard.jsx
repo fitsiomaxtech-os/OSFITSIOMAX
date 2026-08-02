@@ -379,9 +379,19 @@ function TreatmentTab({ physioId }) {
   );
 }
 
+const REVIEW_TABS = [
+  { key: "overall", label: "Overall" },
+  { key: "branch_admin", label: "Branch Admin" },
+  { key: "head_physio", label: "Head Physio" },
+  { key: "completed", label: "Completed" },
+];
+
 function ReviewTab({ physioId }) {
   const [patients, setPatients] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [bucket, setBucket] = useState("overall");
+  const [search, setSearch] = useState("");
+  const [dateFilter, setDateFilter] = useState("");
   const [weeksTarget, setWeeksTarget] = useState(null); // patient whose weeks are being picked
   const [assessmentTarget, setAssessmentTarget] = useState(null); // { leadId, leadName, week } | null
 
@@ -398,17 +408,89 @@ function ReviewTab({ physioId }) {
 
   useEffect(() => { load(); }, [load]);
 
+  // Where a patient's weeks sit in the hand-off: nothing written up yet (the review
+  // appointment is still Branch Admin's to arrange), written up and waiting on the
+  // Head Physio, or every week closed out by them.
+  const bucketOf = (p) => {
+    const weeks = p.weeks || p.package_weeks || 0;
+    if (weeks > 0 && (p.reviews_reviewed || 0) >= weeks) return "completed";
+    if ((p.reviews_submitted || 0) > 0) return "head_physio";
+    return "branch_admin";
+  };
+
+  const counts = useMemo(() => {
+    const c = { overall: patients.length, branch_admin: 0, head_physio: 0, completed: 0 };
+    patients.forEach((p) => { c[bucketOf(p)] += 1; });
+    return c;
+  }, [patients]);
+
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return patients.filter((p) => {
+      if (bucket !== "overall" && bucketOf(p) !== bucket) return false;
+      if (dateFilter && (p.updated_at || "").slice(0, 10) !== dateFilter) return false;
+      if (q && !((p.lead_name || "").toLowerCase().includes(q) || (p.phone || "").toLowerCase().includes(q))) return false;
+      return true;
+    });
+  }, [patients, bucket, search, dateFilter]);
+
   return (
     <div data-testid="physio-review-tab">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-sm font-semibold text-slate-700">Weekly Reviews</h3>
-        <span className="rounded-full bg-sky-100 px-2.5 py-0.5 text-[10px] font-semibold text-sky-700">{patients.length} patients</span>
+        <span className="rounded-full bg-sky-100 px-2.5 py-0.5 text-[10px] font-semibold text-sky-700">{visible.length} patients</span>
       </div>
 
-      {patients.length === 0 && !loading ? (
+      {/* Where each patient's weeks have got to along the review hand-off. */}
+      <div className="mb-3 flex flex-wrap gap-1 rounded-lg border border-slate-200 bg-white p-1 w-fit">
+        {REVIEW_TABS.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            onClick={() => setBucket(t.key)}
+            className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
+              bucket === t.key ? "bg-sky-100 text-sky-700" : "text-slate-500 hover:bg-slate-50"
+            }`}
+            data-testid={`physio-review-bucket-${t.key}`}
+          >
+            {t.label} <span className="text-[10px] text-slate-400">({counts[t.key]})</span>
+          </button>
+        ))}
+      </div>
+
+      <div className="mb-3 flex flex-wrap items-center gap-2" data-testid="physio-review-toolbar">
+        <div className="relative min-w-[240px] flex-1">
+          <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search patient by name or phone..."
+            className="h-10 pl-9"
+            data-testid="physio-review-search"
+          />
+        </div>
+        <Input
+          type="date"
+          value={dateFilter}
+          onChange={(e) => setDateFilter(e.target.value)}
+          className="h-10 w-44"
+          data-testid="physio-review-date-filter"
+        />
+        {dateFilter && (
+          <Button variant="outline" className="h-10" onClick={() => setDateFilter("")} data-testid="physio-review-date-clear">
+            Clear
+          </Button>
+        )}
+      </div>
+
+      {visible.length === 0 && !loading ? (
         <div className="text-center py-16">
           <ClipboardCheck className="h-10 w-10 text-slate-200 mx-auto mb-3" />
-          <p className="text-sm text-slate-400">Nothing to review yet — complete a treatment day first</p>
+          <p className="text-sm text-slate-400">
+            {patients.length === 0
+              ? "Nothing to review yet — complete a treatment day first"
+              : "No patient matches these filters"}
+          </p>
         </div>
       ) : (
         <div className="overflow-auto rounded-xl border border-slate-200 bg-white">
@@ -423,7 +505,7 @@ function ReviewTab({ physioId }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {patients.map((p) => (
+              {visible.map((p) => (
                 <tr
                   key={p.lead_id}
                   onClick={() => setWeeksTarget(p)}
