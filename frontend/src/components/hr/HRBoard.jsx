@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Users, ShieldCheck, BarChart3, Plus, Pencil, Trash2, Eye, KeyRound, X, UserPlus, MoreVertical, CheckCircle2, XCircle, AlertOctagon, ChevronDown } from "lucide-react";
+import { Users, ShieldCheck, BarChart3, Plus, Pencil, Trash2, Eye, EyeOff, KeyRound, X, UserPlus, MoreVertical, CheckCircle2, XCircle, AlertOctagon, ChevronDown } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -680,8 +680,8 @@ const UserActionsModal = ({ user, onClose, onDone }) => {
 
         {mode === "password" && (
           <div className="space-y-3" data-testid="hr-actions-password-form">
-            <Input type="password" placeholder="New password (min 6)" value={pwd} onChange={(e) => setPwd(e.target.value)} data-testid="hr-actions-password-new" />
-            <Input type="password" placeholder="Confirm new password" value={confirmPwd} onChange={(e) => setConfirmPwd(e.target.value)} data-testid="hr-actions-password-confirm" />
+            <PasswordInput placeholder="New password (min 6)" value={pwd} onChange={(e) => setPwd(e.target.value)} testid="hr-actions-password-new" />
+            <PasswordInput placeholder="Confirm new password" value={confirmPwd} onChange={(e) => setConfirmPwd(e.target.value)} testid="hr-actions-password-confirm" />
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => { setMode(null); setPwd(""); setConfirmPwd(""); }} className="flex-1" data-testid="hr-actions-password-back">Back</Button>
               <Button onClick={submitPwd} disabled={busy} className="flex-1 bg-orange-500 hover:bg-orange-600" data-testid="hr-actions-password-save">Update Password</Button>
@@ -1007,8 +1007,8 @@ const CreateUserModal = ({ meta, reloadMeta, onClose, onSaved }) => {
             <BranchSelectDropdown value={form.branch_id} branches={branches} onChange={(id) => setForm({ ...form, branch_id: id })} />
           </Field>
         )}
-        <Field label="Password *"><Input type="password" placeholder="Min 6 characters" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} data-testid="hr-create-user-pwd" /></Field>
-        <Field label="Confirm Password *"><Input type="password" placeholder="Confirm password" value={form.confirm} onChange={(e) => setForm({ ...form, confirm: e.target.value })} data-testid="hr-create-user-confirm" /></Field>
+        <Field label="Password *"><PasswordInput placeholder="Min 6 characters" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} testid="hr-create-user-pwd" /></Field>
+        <Field label="Confirm Password *"><PasswordInput placeholder="Confirm password" value={form.confirm} onChange={(e) => setForm({ ...form, confirm: e.target.value })} testid="hr-create-user-confirm" /></Field>
         <div className="flex gap-2 pt-2"><Button variant="outline" onClick={onClose} className="flex-1" data-testid="hr-create-user-cancel">Cancel</Button><Button onClick={submit} className="flex-1 bg-sky-600 hover:bg-sky-700" data-testid="hr-create-user-submit">Create User</Button></div>
       </div>
     </div>
@@ -1023,6 +1023,35 @@ const Field = ({ label, children, className = "" }) => (
     {children}
   </div>
 );
+
+// A password box that can be read back. Whoever sets a password here has to pass it on
+// to the person it belongs to, so being unable to check what was typed is how an account
+// gets handed over with a credential nobody can log in with.
+const PasswordInput = ({ value, onChange, placeholder, testid }) => {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="relative">
+      <Input
+        type={show ? "text" : "password"}
+        placeholder={placeholder}
+        value={value}
+        onChange={onChange}
+        className="pr-10"
+        data-testid={testid}
+      />
+      <button
+        type="button"
+        onClick={() => setShow((s) => !s)}
+        className="absolute inset-y-0 right-0 flex w-10 items-center justify-center text-slate-400 transition hover:text-slate-700"
+        title={show ? "Hide password" : "Show password"}
+        aria-label={show ? "Hide password" : "Show password"}
+        data-testid={`${testid}-toggle`}
+      >
+        {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+      </button>
+    </div>
+  );
+};
 
 // `uppercase` styles the displayed text only — the stored value is untouched, so
 // existing records and the backend's department list keep matching.
