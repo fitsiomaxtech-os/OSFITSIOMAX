@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Calendar, CheckCircle2, ChevronLeft, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2, Ban, ClipboardCheck, IndianRupee } from "lucide-react";
+import { Calendar, CheckCircle2, ChevronLeft, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2, Ban, ClipboardCheck, IndianRupee, Printer, Share2, Download } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,6 +37,104 @@ const INSTALLMENT_PAYMENT_MODES = [
 ];
 const PARTIAL_ORDINALS = ["First", "Second", "Third", "Fourth", "Fifth", "Sixth", "Seventh", "Eighth", "Ninth", "Tenth"];
 const partialInstallmentLabel = (idx) => `${PARTIAL_ORDINALS[idx] || `#${idx + 1}`} Payment`;
+
+// ---- Payment receipt ----------------------------------------------------------------
+// The receipt is built as a standalone HTML document rather than printed from the page:
+// window.print() here would send the whole board — modals, sidebar and all — to the
+// printer, and the same document is what gets downloaded, so paper and file always match.
+const RECEIPT_STYLES = `
+  *{box-sizing:border-box}
+  body{margin:0;padding:28px;font-family:'Segoe UI',Arial,sans-serif;color:#0f172a;background:#fff}
+  .wrap{max-width:560px;margin:0 auto;border:1px solid #cbd5e1;border-radius:12px;padding:26px}
+  .brand{font-size:22px;font-weight:800;letter-spacing:.5px}
+  .sub{font-size:12px;color:#64748b;margin-top:2px}
+  .tag{display:inline-block;margin-top:12px;padding:5px 12px;border-radius:6px;
+       background:#dcfce7;color:#15803d;font-size:12px;font-weight:800;letter-spacing:.6px}
+  hr{border:0;border-top:1px dashed #cbd5e1;margin:18px 0}
+  .amt-label{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#64748b}
+  .amt{font-size:34px;font-weight:800;color:#15803d;margin-top:2px}
+  table{width:100%;border-collapse:collapse;font-size:13px;margin-top:6px}
+  td{padding:7px 0;vertical-align:top}
+  td.k{color:#64748b;width:45%}
+  td.v{text-align:right;font-weight:600}
+  .foot{margin-top:20px;font-size:11px;color:#94a3b8;text-align:center;line-height:1.6}
+  @media print{body{padding:0}.wrap{border:none;border-radius:0}}
+`;
+
+const receiptRows = (r) => [
+  ["Receipt No.", r.receiptNo],
+  ["Date", r.dateLabel],
+  ["Patient", r.patient],
+  ["Patient No.", r.patientNo],
+  ["Phone", r.phone],
+  ["Paid For", r.paidFor],
+  r.packageName ? ["Package", r.packageName] : null,
+  ["Payment Mode", r.modeLabel],
+  r.reference ? ["Reference", r.reference] : null,
+  r.originalAmount && r.originalAmount !== r.amount ? ["Original Price", `Rs.${r.originalAmount}`] : null,
+  r.discount ? ["Discount", `- Rs.${r.discount}`] : null,
+  ["Amount Paid", `Rs.${r.amount}`],
+  ["Collected By", r.collectedBy],
+].filter(Boolean);
+
+const escapeHtml = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => (
+  { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+));
+
+const receiptHtml = (r) => `<!doctype html><html><head><meta charset="utf-8">
+<title>Receipt ${escapeHtml(r.receiptNo)}</title><style>${RECEIPT_STYLES}</style></head>
+<body><div class="wrap">
+  <div class="brand">FITSIOMAX</div>
+  <div class="sub">${escapeHtml(r.branch || "Physiotherapy & Rehabilitation")}</div>
+  <div class="tag">PAYMENT RECEIVED</div>
+  <hr>
+  <div class="amt-label">Amount Paid</div>
+  <div class="amt">Rs.${escapeHtml(r.amount)}</div>
+  <hr>
+  <table>${receiptRows(r).map(([k, v]) => `<tr><td class="k">${escapeHtml(k)}</td><td class="v">${escapeHtml(v)}</td></tr>`).join("")}</table>
+  <hr>
+  <div class="foot">This is a computer-generated receipt and needs no signature.<br>Thank you for choosing FITSIOMAX.</div>
+</div></body></html>`;
+
+const receiptText = (r) => [
+  `FITSIOMAX — Payment Receipt`,
+  ...receiptRows(r).map(([k, v]) => `${k}: ${v}`),
+].join("\n");
+
+/** Opens the receipt in its own window and sends that window to the printer. */
+const printReceipt = (r) => {
+  const w = window.open("", "_blank", "width=680,height=800");
+  if (!w) { toast.error("Allow pop-ups to print the receipt"); return; }
+  w.document.write(receiptHtml(r));
+  w.document.close();
+  w.focus();
+  // Give the new document a tick to lay out before the print dialog measures it.
+  setTimeout(() => { w.print(); }, 250);
+};
+
+const downloadReceipt = (r) => {
+  const blob = new Blob([receiptHtml(r)], { type: "text/html;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `receipt-${r.receiptNo}.html`;
+  a.click();
+  URL.revokeObjectURL(url);
+};
+
+const shareReceipt = async (r) => {
+  const text = receiptText(r);
+  if (navigator.share) {
+    try { await navigator.share({ title: `FITSIOMAX Receipt ${r.receiptNo}`, text }); return; }
+    catch { return; } // user dismissed the share sheet — not an error worth reporting
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    toast.success("Receipt copied — paste it into WhatsApp or email");
+  } catch {
+    toast.error("Couldn't share the receipt on this device");
+  }
+};
 
 // Month-grid helpers for the treatment-session slot picker — the same shape the PHYSIO
 // CALENDAR itself uses, so the two read as one workflow.
@@ -113,6 +211,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // mode needs its own extra fields (UPI Transaction ID/UTR, Card account details).
   // Cash at the expected amount skips this entirely and submits straight away.
   const [packageConfirmDraft, setPackageConfirmDraft] = useState(null);
+
+  // Shown after a fee is actually taken — the money has changed hands and the client is
+  // standing there, so the acknowledgement has to be something that can be handed over,
+  // not a toast that disappears. Lives outside the lead dialog so it survives that
+  // closing on the last fee.
+  const [receipt, setReceipt] = useState(null);
 
   // Collect Treatment Fee popup (Branch Admin only) — at the Treatment Fee stage, any payment method
   const [treatmentFeeDraft, setTreatmentFeeDraft] = useState(null); // { paid_amount, payment_mode } | null
@@ -614,6 +718,27 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       toast.success(selectedLead.package_paid != null ? "Consultation Fee payment updated" : "Consultation Fee collected");
       setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === res.lead.id ? res.lead : l) }));
       setPackageConfirmDraft(null);
+      const assigned = selectedLead.package_price;
+      setReceipt({
+        receiptNo: `CF-${(selectedLead.patient_number || selectedLead.id || "").toString().slice(-8).toUpperCase()}-${Date.now().toString().slice(-6)}`,
+        dateLabel: new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }),
+        patient: selectedLead.name || "—",
+        patientNo: selectedLead.patient_number || "—",
+        phone: selectedLead.phone || "—",
+        branch: selectedLead.branch_name || "",
+        paidFor: "Consultation Fee",
+        packageName: selectedLead.package_name || "",
+        amount: payload.amount,
+        // A Branch-Admin-negotiated amount below the assigned price is a discount, and the
+        // receipt has to show both numbers or it looks like the price was simply different.
+        originalAmount: assigned != null && assigned !== payload.amount ? assigned : null,
+        discount: assigned != null && assigned > payload.amount ? Math.round((assigned - payload.amount) * 100) / 100 : null,
+        modeLabel: (CONSULTATION_FEE_PAYMENT_MODES.find((m) => m.value === payload.payment_mode) || {}).label || payload.payment_mode,
+        reference: payload.upi_utr || payload.upi_transaction_id
+          || (payload.account_number ? `Card ****${String(payload.account_number).slice(-4)}` : ""),
+        collectedBy: "Branch Admin",
+        isCash: payload.payment_mode === "cash",
+      });
       if (bothFeesDone(res.lead)) {
         setCollectFeeDraft(null);
         setTreatmentFeeDraft(null);
@@ -2913,6 +3038,71 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Payment receipt — the acknowledgement the client is handed. Rendered here rather
+          than inside the lead dialog because collecting the last outstanding fee closes
+          that dialog, and the receipt has to outlive it. */}
+      {receipt && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-3" data-testid="cons-receipt-modal">
+          <div className="flex max-h-[94vh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between bg-emerald-600 px-6 py-4 text-white">
+              <div>
+                <p className="text-lg font-bold">Payment Received</p>
+                <p className="text-xs text-white/80">Receipt {receipt.receiptNo}</p>
+              </div>
+              <button onClick={() => setReceipt(null)} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="cons-receipt-close">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6">
+              <div className="rounded-xl border-2 border-emerald-200 bg-emerald-50 px-4 py-5 text-center">
+                <p className="text-xs font-bold uppercase tracking-widest text-emerald-600">Amount Paid</p>
+                <p className="mt-1 text-4xl font-extrabold text-emerald-700" data-testid="cons-receipt-amount">Rs.{receipt.amount}</p>
+                <p className="mt-1 text-sm font-semibold text-emerald-600">{receipt.modeLabel}</p>
+              </div>
+
+              <dl className="mt-5 space-y-2 text-sm">
+                {receiptRows(receipt).map(([k, v]) => (
+                  <div key={k} className="flex items-start justify-between gap-3 border-b border-slate-100 pb-2">
+                    <dt className="text-slate-500">{k}</dt>
+                    <dd className={`text-right font-semibold ${k === "Amount Paid" ? "text-emerald-700" : k === "Discount" ? "text-rose-600" : "text-slate-700"}`}>{v}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+
+            <div className="space-y-2 border-t border-slate-200 bg-slate-50 px-6 py-4">
+              {/* Cash needs a bill in hand, so Print leads. Everything else already left a
+                  trail with the bank, so sharing the receipt is the more useful default. */}
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  className={receipt.isCash ? "bg-emerald-600 text-white hover:bg-emerald-700" : ""}
+                  variant={receipt.isCash ? undefined : "outline"}
+                  onClick={() => printReceipt(receipt)}
+                  data-testid="cons-receipt-print"
+                >
+                  <Printer className="mr-1.5 h-4 w-4" /> Print Bill
+                </Button>
+                <Button
+                  className={receipt.isCash ? "" : "bg-emerald-600 text-white hover:bg-emerald-700"}
+                  variant={receipt.isCash ? "outline" : undefined}
+                  onClick={() => shareReceipt(receipt)}
+                  data-testid="cons-receipt-share"
+                >
+                  <Share2 className="mr-1.5 h-4 w-4" /> Share
+                </Button>
+              </div>
+              <Button variant="outline" className="w-full" onClick={() => downloadReceipt(receipt)} data-testid="cons-receipt-download">
+                <Download className="mr-1.5 h-4 w-4" /> Download Receipt
+              </Button>
+              <Button variant="ghost" className="w-full text-slate-500" onClick={() => setReceipt(null)} data-testid="cons-receipt-done">
+                Done
+              </Button>
+            </div>
           </div>
         </div>
       )}
