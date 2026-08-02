@@ -89,6 +89,8 @@ export const getLeads = async (params) => (await api.get("/leads", { params })).
 export const createManualLead = async (payload) => (await api.post("/leads/manual", payload)).data;
 export const updateLead = async (leadId, payload) => (await api.put(`/leads/${leadId}`, payload)).data;
 export const deleteLead = async (leadId) => (await api.delete(`/leads/${leadId}`)).data;
+export const getPortalAccountStatus = async (leadId) => (await api.get(`/leads/${leadId}/portal-account`)).data;
+export const createOrResetPortalAccount = async (leadId, payload) => (await api.post(`/leads/${leadId}/portal-account`, payload)).data;
 export const rnrAttempt = async (leadId) => (await api.post(`/leads/${leadId}/rnr-attempt`)).data;
 export const scheduleFollowUp = async (leadId, payload) => (await api.post(`/leads/${leadId}/follow-up`, payload)).data;
 export const rescheduleFollowUp = async (leadId, followupId, payload) => (await api.post(`/leads/${leadId}/follow-up/${followupId}/reschedule`, payload)).data;

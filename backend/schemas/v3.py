@@ -362,6 +362,19 @@ class V3MarkInstallmentPaidInput(BaseModel):
     cheque_number: Optional[str] = None
 
 
+class V3PortalAccountInput(BaseModel):
+    # Both optional — email defaults to the lead's own email if it has one; password
+    # defaults to a freshly generated one when omitted ("Generate"), or the Branch
+    # Admin can supply their own ("Create").
+    email: Optional[str] = None
+    password: Optional[str] = None
+
+
+class V3PatientPortalLogin(BaseModel):
+    email: str
+    password: str
+
+
 class V3ConsultationDecisionInput(BaseModel):
     decision: Literal["consultation_only", "consultation_treatment"]
     # Required only when decision == "consultation_treatment" — the Treatment/Session

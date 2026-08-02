@@ -23,6 +23,7 @@ import {
   Bell,
   BadgeIndianRupee,
   UserCog,
+  User,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -54,6 +55,7 @@ import { AccountantManageTab } from "@/components/branch/AccountantManageTab";
 import { BranchCalendarPanel } from "@/components/branch/BranchCalendarPanel";
 import { BranchDetailPage } from "@/components/branch/BranchDetailPage";
 import { BranchReviewPanel } from "@/components/branch/BranchReviewPanel";
+import { PatientsPortalPanel } from "@/components/branch/PatientsPortalPanel";
 import { CreateLeadModal } from "@/components/CreateLeadModal";
 import { LOGO_URL, PRINTABLE_STYLES, escapeHtml, rowsHtml, openPrintable, sharePrintable } from "@/lib/printable";
 
@@ -351,6 +353,7 @@ export const BranchAdminBoard = ({ branchId }) => {
     { key: "review", label: "Review", icon: ClipboardCheck },
     { key: "consultations", label: "MANAGEMENT", icon: Stethoscope },
     { key: "rehab", label: "Rehab", icon: Activity },
+    { key: "patients", label: "Patients", icon: User },
     { key: "accountant_mgmt", label: "Accountant Manage", icon: BadgeIndianRupee },
     { key: "store", label: "Fitsiomax Store", icon: ShoppingCart },
   ];
@@ -421,6 +424,8 @@ export const BranchAdminBoard = ({ branchId }) => {
         <BranchReviewPanel branchId={branchId} />
       ) : activeView === "rehab" ? (
         <PlaceholderPanel label="Rehab" testid="branch-rehab-panel" />
+      ) : activeView === "patients" ? (
+        <PatientsPortalPanel branchId={branchId} />
       ) : activeView === "store" ? (
         <FitsiomaxStorePanel />
       ) : activeView === "accountant_mgmt" ? (
