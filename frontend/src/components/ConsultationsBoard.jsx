@@ -1002,13 +1002,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
           ? `Rs.${stillOwed.reduce((s, i) => s + (i.amount || 0), 0)}${stillOwed[0]?.due_date ? ` · due ${stillOwed[0].due_date}` : ""}`
           : "",
       }));
-      if (consultationFeeDone(updatedLead)) {
-        setCollectFeeDraft(null);
-        setTreatmentFeeDraft(null);
-        setSelectedLead(null);
-      } else {
-        setSelectedLead(updatedLead);
-      }
+      // The receipt above is the confirmation and closes on its own button, so the
+      // patient stays open behind it — collecting one installment shouldn't throw the
+      // admin out of the patient they're working on. The remaining balance and the
+      // next due date are both on the Fee Collected panel they land back on.
+      setCollectFeeDraft(null);
+      setTreatmentFeeDraft(null);
+      setSelectedLead(updatedLead);
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed to collect this installment");
     }
@@ -1735,14 +1735,44 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           </div>
                         </div>
                         {hasPendingInstallments ? (
-                          <>
-                            <p className="mt-1 text-[11px] text-slate-500">
-                              {savedInstallments.filter((i) => i.paid).length} of {savedInstallments.length} installments collected.
-                            </p>
-                            <Button size="sm" className="mt-2 bg-indigo-600 text-xs hover:bg-indigo-700" onClick={openPartialScheduleDraft} data-testid="cons-open-partial-schedule-sidebar">
-                              View Payment Schedule
-                            </Button>
-                          </>
+                          // What's still owed and when it's due, with Collect right here —
+                          // reopening a partially-paid patient is exactly when the rest
+                          // gets taken, so it shouldn't need a trip through the schedule.
+                          (() => {
+                            const unpaid = savedInstallments.filter((i) => !i.paid);
+                            const nextIdx = savedInstallments.findIndex((i) => !i.paid);
+                            const next = savedInstallments[nextIdx] || {};
+                            const balance = unpaid.reduce((s, i) => s + (i.amount || 0), 0);
+                            const nextOverdue = !!next.due_date && next.due_date < new Date().toISOString().slice(0, 10);
+                            return (
+                              <>
+                                <p className="mt-1 text-[11px] text-slate-500">
+                                  {savedInstallments.filter((i) => i.paid).length} of {savedInstallments.length} installments collected.
+                                </p>
+                                <div className={`mt-2 rounded-md border px-2.5 py-2 ${nextOverdue ? "border-rose-200 bg-rose-50" : "border-amber-200 bg-amber-50"}`} data-testid="cons-partial-balance-summary">
+                                  <div className="flex items-center justify-between">
+                                    <span className={`text-[11px] font-semibold ${nextOverdue ? "text-rose-700" : "text-amber-700"}`}>Balance Amount</span>
+                                    <span className={`text-sm font-bold ${nextOverdue ? "text-rose-700" : "text-amber-700"}`}>Rs.{balance}</span>
+                                  </div>
+                                  <p className={`mt-0.5 text-[10px] ${nextOverdue ? "text-rose-600" : "text-amber-600"}`}>
+                                    Next · {partialInstallmentLabel(nextIdx)}
+                                    {next.sessions ? ` · ${next.sessions} sessions` : ""}
+                                    {next.amount != null ? ` · Rs.${next.amount}` : ""}
+                                    {next.due_date ? ` · due ${next.due_date}` : ""}
+                                    {nextOverdue ? " · OVERDUE" : ""}
+                                  </p>
+                                </div>
+                                <div className="mt-2 flex flex-wrap gap-1.5">
+                                  <Button size="sm" className="bg-emerald-600 text-xs hover:bg-emerald-700" onClick={() => openPartialCollectPopup(nextIdx)} data-testid="cons-collect-next-installment">
+                                    Collect Rs.{next.amount ?? balance}
+                                  </Button>
+                                  <Button size="sm" variant="outline" className="text-xs" onClick={openPartialScheduleDraft} data-testid="cons-open-partial-schedule-sidebar">
+                                    View Payment Schedule
+                                  </Button>
+                                </div>
+                              </>
+                            );
+                          })()
                         ) : treatmentPaid ? (
                           <p className="mt-1 flex items-center gap-1 text-[11px] font-medium text-emerald-600" data-testid="cons-treatment-fee-already-collected">
                             <CheckCircle2 className="h-3 w-3" /> Already Collected
@@ -3346,6 +3376,7 @@ function PartialInstallmentsEditor({ installments, setInstallments, totalSession
         const sessionsNum = parseInt(inst.sessions, 10) || 0;
         const amount = Math.round(sessionsNum * perSessionRate);
         const isToday = !!inst.due_date && inst.due_date === todayIso;
+        const overdue = !!inst.due_date && inst.due_date < todayIso;
         const isPaid = !!inst.paid;
         return (
           <div key={idx} className="flex items-end gap-1.5" data-testid={`cons-treatment-fee-partial-row-${idx}`}>
@@ -3396,25 +3427,29 @@ function PartialInstallmentsEditor({ installments, setInstallments, totalSession
               >
                 <CheckCircle2 className="mr-1 h-3.5 w-3.5" /> Paid
               </Button>
-            ) : isToday ? (
-              <Button
-                size="sm"
-                onClick={() => onCollectRow(idx)}
-                disabled={collecting || !allFilled || mismatch}
-                className="h-9 bg-emerald-600 text-xs hover:bg-emerald-700"
-                data-testid={`cons-treatment-fee-partial-collect-${idx}`}
-              >
-                Collect
-              </Button>
             ) : (
-              <Button
-                size="sm"
-                disabled
-                className="h-9 bg-rose-600 text-xs text-white hover:bg-rose-600 disabled:!opacity-100"
-                data-testid={`cons-treatment-fee-partial-due-${idx}`}
-              >
-                Due
-              </Button>
+              // The due date is when the money is expected, not the only day it can be
+              // taken — a patient who walks in early still has to be collectable, so Due
+              // is a state the row wears, not a lock on the button beside it.
+              <>
+                <span
+                  className={`mb-1.5 shrink-0 rounded-md px-2 py-1 text-[10px] font-bold ${
+                    overdue ? "bg-rose-100 text-rose-700" : isToday ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500"
+                  }`}
+                  data-testid={`cons-treatment-fee-partial-due-${idx}`}
+                >
+                  {overdue ? "OVERDUE" : isToday ? "DUE TODAY" : "DUE"}
+                </span>
+                <Button
+                  size="sm"
+                  onClick={() => onCollectRow(idx)}
+                  disabled={collecting || !allFilled || mismatch}
+                  className="h-9 bg-emerald-600 text-xs hover:bg-emerald-700"
+                  data-testid={`cons-treatment-fee-partial-collect-${idx}`}
+                >
+                  Collect
+                </Button>
+              </>
             )}
             {installments.length > 2 && !isPaid && (
               <button
