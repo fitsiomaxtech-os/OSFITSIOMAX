@@ -71,7 +71,7 @@ export const PullFromSheetButton = ({ onPulled, notConnectedHint, noSourcesHint,
         disabled={busy}
         title="Pull from Sheet"
         aria-label="Pull from Sheet"
-        className="h-10 w-10 border-emerald-600 bg-emerald-600 p-0 text-white hover:bg-emerald-700"
+        className="h-10 w-10 shrink-0 rounded-full border-emerald-600 bg-emerald-600 p-0 text-white shadow-sm hover:bg-emerald-700"
         data-testid="presales-pull-from-sheet-btn"
       >
         <RefreshCw className={`h-4 w-4 ${busy ? "animate-spin" : ""}`} />
