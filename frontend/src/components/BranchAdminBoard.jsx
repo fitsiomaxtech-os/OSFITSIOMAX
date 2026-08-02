@@ -1240,9 +1240,14 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
 
       {/* Appointment Date & Time Popup */}
       {apptDraft && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-2 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) setApptDraft(null); }} data-testid="branch-appt-modal">
-          <div className="flex h-[calc(100vh-1rem)] w-full max-w-7xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-200 bg-slate-100 px-6 py-4">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-0 backdrop-blur-sm sm:p-2" onClick={(e) => { if (e.target === e.currentTarget) setApptDraft(null); }} data-testid="branch-appt-modal">
+          {/* Full-bleed on a phone — three booking steps need every pixel, and an inset
+              card just spends them on backdrop. max-h in dvh so the footer isn't left
+              under the browser's URL bar: 100vh on mobile measures the viewport as if
+              that bar were hidden, which pushes Confirm off the bottom. The vh height
+              stays as the fallback for anything without dvh. */}
+          <div className="flex h-full max-h-[100dvh] w-full max-w-7xl flex-col overflow-hidden bg-white shadow-2xl sm:h-[calc(100vh-1rem)] sm:max-h-[calc(100dvh-1rem)] sm:rounded-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 bg-slate-100 px-4 py-3 sm:px-6 sm:py-4">
               <div className="flex items-center gap-2.5">
                 <Calendar className="h-5 w-5 text-slate-500" />
                 <div>
@@ -1260,7 +1265,7 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                 one before it has an answer. */}
             <div className="flex flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
               {/* STEP 1 — Date */}
-              <div className="w-full flex-shrink-0 border-b border-slate-200 p-6 lg:w-[28rem] lg:border-b-0 lg:border-r lg:overflow-y-auto" data-testid="branch-appt-date-panel">
+              <div className="w-full flex-shrink-0 border-b border-slate-200 p-4 sm:p-6 lg:w-[28rem] lg:border-b-0 lg:border-r lg:overflow-y-auto" data-testid="branch-appt-date-panel">
                 <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-400">1 · Date</p>
                 {(() => {
                   const todayStr = new Date().toISOString().slice(0, 10);
@@ -1337,7 +1342,7 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
               </div>
 
               {/* STEP 2 — Head Physio */}
-              <div className="w-full flex-shrink-0 border-b border-slate-200 p-5 lg:w-[22rem] lg:border-b-0 lg:border-r lg:overflow-y-auto" data-testid="branch-appt-expert-panel">
+              <div className="w-full flex-shrink-0 border-b border-slate-200 p-4 sm:p-5 lg:w-[22rem] lg:border-b-0 lg:border-r lg:overflow-y-auto" data-testid="branch-appt-expert-panel">
                 <p className="mb-1 text-xs font-bold uppercase tracking-wider text-slate-400">2 · Head Physio</p>
                 <p className="mb-3 text-xs text-slate-400">Only those with availability on the picked date.</p>
                 {!apptDraft.appointment_date ? (
@@ -1379,7 +1384,11 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
               {/* STEP 3 — Time slot. Times come only from what the expert has actually
                   confirmed on HEAD PHYSIO CALENDAR — no free typing, so nothing gets booked
                   into a slot the Head Physio never agreed to. */}
-              <div className="flex-1 overflow-y-auto p-5" data-testid="branch-appt-slot-panel">
+              {/* overflow and flex-1 are gated to lg on purpose. Below that the three
+                  steps are one stacked column that scrolls as a whole, and an inner
+                  scroller here would trap Time Slot in a short box of its own inside
+                  that scroll — two scrollbars, and the slots unreachable. */}
+              <div className="w-full flex-shrink-0 p-4 sm:p-5 lg:flex-1 lg:overflow-y-auto" data-testid="branch-appt-slot-panel">
                 <p className="mb-1 text-xs font-bold uppercase tracking-wider text-slate-400">3 · Time Slot</p>
                 <p className="mb-3 text-xs text-slate-400">Published availability only.</p>
                 {!apptDraft.physio_id ? (
@@ -1430,7 +1439,7 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
               </div>
             </div>
 
-            <div className="flex items-center justify-between gap-3 border-t border-slate-200 bg-slate-100 px-6 py-3.5">
+            <div className="flex items-center justify-between gap-2 border-t border-slate-200 bg-slate-100 px-3 py-3 sm:gap-3 sm:px-6 sm:py-3.5">
               {/* Marking the lead Cancelled is a destructive move — it frees the slot and
                   drops the lead out of the consultation pipeline — so it reads red the
                   moment it's ticked, and carries the primary button's colour with it. */}
@@ -1440,7 +1449,7 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                   <button
                     type="button"
                     onClick={() => setApptDraft({ ...apptDraft, final_stage: cancelled ? "Appointment Date & Time" : "Cancelled" })}
-                    className={`rounded-lg border-2 px-6 py-2.5 text-sm font-bold uppercase tracking-wide transition ${
+                    className={`shrink rounded-lg border-2 px-3 py-2.5 text-xs font-bold uppercase tracking-wide transition sm:px-6 sm:text-sm ${
                       cancelled
                         ? "border-rose-700 bg-rose-600 text-white shadow-sm"
                         : "border-rose-200 bg-white text-rose-600 hover:border-rose-400 hover:bg-rose-50"
@@ -1452,7 +1461,7 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                   </button>
                 );
               })()}
-              <div className="flex items-center gap-2">
+              <div className="flex shrink-0 items-center gap-2">
               <Button variant="outline" onClick={() => setApptDraft(null)} data-testid="branch-appt-cancel">Cancel</Button>
               <Button
                 className={apptDraft.final_stage === "Cancelled"
