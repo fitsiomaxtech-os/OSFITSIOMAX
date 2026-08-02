@@ -132,7 +132,7 @@ const PAYMENT_MODE_COLORS = {
   partial: "#e11d48",
 };
 
-export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened, externalDate, hideDateFilter = false, onCountChange }) => {
+export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened, externalDate, hideDateFilter = false, onCountChange, onRowsChange }) => {
   const isConsultant = viewerRole === "head_physio";
   // Head Physio tracks progress on their own independent pipeline (head_consultation_stage),
   // fully separate from Branch's own consultation_stage pipeline.
@@ -338,6 +338,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   useEffect(() => {
     if (onCountChange) onCountChange(dateAndSearchFiltered.length, derivedStageCounts);
   }, [dateAndSearchFiltered.length, derivedStageCounts, onCountChange]);
+
+  // The rows themselves, for a parent that merges this board's leads into a list of its
+  // own. Safe to depend on directly: it's a useMemo, so its identity only changes when
+  // the underlying set does.
+  useEffect(() => {
+    if (onRowsChange) onRowsChange(dateAndSearchFiltered);
+  }, [dateAndSearchFiltered, onRowsChange]);
 
   useEffect(() => {
     listStoreItems().then(setStoreItems).catch(() => setStoreItems([]));
