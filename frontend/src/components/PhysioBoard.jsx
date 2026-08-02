@@ -192,10 +192,17 @@ function TreatmentTab({ physioId }) {
   );
 
   // Meta Ads-style date filter for the summary tile only — separate from the week
-  // strip below, which always keeps its own single selected day. Picking a preset
+  // strip below, which always keeps its own single selected day. Defaults to Today
+  // rather than Overall, same as the week strip's own default. Picking a preset
   // whose range is a single day (Today, Yesterday, an exact calendar date) also
   // jumps the week strip there, since there's no ambiguity about which day to show.
-  const [filterValue, setFilterValue] = useState(null);
+  const [filterValue, setFilterValue] = useState(() => {
+    const from = new Date();
+    from.setHours(0, 0, 0, 0);
+    const to = new Date();
+    to.setHours(23, 59, 59, 999);
+    return { key: "today", label: "Today", from, to };
+  });
   const [filterSessions, setFilterSessions] = useState([]);
 
   const handleFilterChange = (next) => {
