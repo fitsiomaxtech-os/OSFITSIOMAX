@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CalendarCheck, CheckCircle2, X, RefreshCw, AlertTriangle, Search } from "lucide-react";
+import { X, RefreshCw, AlertTriangle, Search } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,7 +21,6 @@ const dmy = (d) => {
  * exactly how a patient's week-one review gets missed.
  */
 export const HeadPhysioReviewTab = ({ selectedDate, compact = false, onCountChange }) => {
-  const [sub, setSub] = useState("today");
   const [data, setData] = useState({ today: [], upcoming: [], overdue: [], completed: [], today_date: "" });
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
@@ -49,12 +48,15 @@ export const HeadPhysioReviewTab = ({ selectedDate, compact = false, onCountChan
     return selectedDate ? all.filter((r) => (r.review_date || "") === selectedDate) : all;
   }, [data.completed, selectedDate]);
 
+  // Outstanding first, then what's already written — the day's reviews are one list, not
+  // two tabs to check. Each row already reads differently by status, so splitting them
+  // only added a control to click before seeing either half.
   const rows = useMemo(() => {
-    const list = sub === "today" ? dueList : completedList;
+    const list = [...dueList, ...completedList];
     if (!search) return list;
     const q = search.toLowerCase();
     return list.filter((r) => (r.lead_name || "").toLowerCase().includes(q) || (r.patient_number || "").toLowerCase().includes(q));
-  }, [sub, dueList, completedList, search]);
+  }, [dueList, completedList, search]);
 
   // Outstanding reviews only — a tab labelled "Review 2" means two still to write, not
   // two that exist.
@@ -73,45 +75,14 @@ export const HeadPhysioReviewTab = ({ selectedDate, compact = false, onCountChan
       toast.success("Review completed");
       setDraft(null);
       await load();
-      setSub("completed");
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Failed to save the review");
     }
     setSaving(false);
   };
 
-  const SUBS = [
-    { key: "today", label: selectedDate ? "Review" : "Today Review", icon: CalendarCheck, n: dueList.length },
-    { key: "completed", label: "Completed Review", icon: CheckCircle2, n: completedList.length },
-  ];
-
   return (
     <div className="space-y-4" data-testid="hp-review-tab">
-      <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="hp-review-subtabs">
-        {SUBS.map((t) => {
-          const Icon = t.icon;
-          const active = sub === t.key;
-          return (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => setSub(t.key)}
-              className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${
-                active
-                  ? t.key === "completed" ? "bg-emerald-600 text-white shadow-sm" : "bg-sky-600 text-white shadow-sm"
-                  : "text-slate-600 hover:bg-slate-50"
-              }`}
-              data-testid={`hp-review-subtab-${t.key}`}
-            >
-              <Icon className="h-4 w-4" />{t.label}
-              <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
-                active ? "bg-white/25 text-white" : t.key === "completed" ? "bg-emerald-100 text-emerald-700" : "bg-sky-100 text-sky-700"
-              }`}>{t.n}</span>
-            </button>
-          );
-        })}
-      </div>
-
       {!compact && (
         <Card>
           <CardContent className="flex flex-wrap items-center gap-3 p-3">
@@ -130,16 +101,15 @@ export const HeadPhysioReviewTab = ({ selectedDate, compact = false, onCountChan
         <p className="py-10 text-center text-sm text-slate-400">Loading reviews...</p>
       ) : rows.length === 0 ? (
         <p className="rounded-lg border border-dashed border-slate-200 px-3 py-12 text-center text-sm text-slate-400">
-          {sub === "today"
-            ? selectedDate
-              ? "No reviews due on this day."
-              : "No reviews assigned to you. A Branch Admin sends them here once a Physio raises one."
-            : selectedDate ? "No reviews completed on this day." : "You haven't completed any reviews yet."}
+          {selectedDate
+            ? "No reviews on this day."
+            : "No reviews assigned to you. A Branch Admin sends them here once a Physio raises one."}
         </p>
       ) : (
         <div className="space-y-2">
           {rows.map((r) => {
-            const overdue = sub === "today" && r.review_date && r.review_date < (data.today_date || "");
+            const done = r.status === "completed";
+            const overdue = !done && r.review_date && r.review_date < (data.today_date || "");
             const isToday = r.review_date === data.today_date;
             return (
               <div key={r.id} className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border-2 bg-white p-4 ${overdue ? "border-rose-300" : isToday ? "border-sky-300" : "border-slate-200"}`} data-testid={`hp-review-row-${r.id}`}>
@@ -156,11 +126,11 @@ export const HeadPhysioReviewTab = ({ selectedDate, compact = false, onCountChan
                     {r.session_package_name ? ` · ${r.session_package_name}` : ""}
                   </p>
                   {r.physio_notes && <p className="mt-1 line-clamp-2 text-xs text-slate-600">“{r.physio_notes}”</p>}
-                  {sub === "completed" && r.head_physio_notes && (
+                  {done && r.head_physio_notes && (
                     <p className="mt-1 line-clamp-2 text-xs font-medium text-emerald-700">{r.head_physio_notes}</p>
                   )}
                 </div>
-                {sub === "today" ? (
+                {!done ? (
                   <Button size="sm" className="shrink-0 bg-sky-600 text-xs text-white hover:bg-sky-700" onClick={() => setDraft({ review: r, head_physio_notes: "", head_physio_suggestions: "" })} data-testid={`hp-review-write-${r.id}`}>
                     Write Review
                   </Button>
