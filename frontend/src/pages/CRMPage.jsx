@@ -10,7 +10,7 @@ import {
   LogOut,
   Mail,
   Megaphone,
-  Menu,
+  MoreHorizontal,
   Network,
   Search,
   ShieldCheck,
@@ -77,9 +77,9 @@ const ROLE_META = {
   accountant: { label: "Accountant", icon: BadgeIndianRupee },
 };
 
-// Same 8 destinations as the desktop tab strip below — on a phone there isn't room
-// for 8 tabs, so this backs a bottom "Menu" trigger that opens a sheet listing them
-// instead (see super-admin-bottom-nav / super-admin-menu-sheet).
+// Same 8 destinations as the desktop tab strip below. On a phone, the 5 most-used
+// get a direct bottom-nav slot each; the rest sit behind a "More" popover — both
+// derived from this one array so the two surfaces can't drift out of sync.
 const SUPER_ADMIN_TABS = [
   { key: "master", label: "Master View", icon: Database },
   { key: "marketing", label: "Marketing Board", icon: Megaphone },
@@ -90,6 +90,10 @@ const SUPER_ADMIN_TABS = [
   { key: "branch_wise", label: "Branch Wise", icon: Network },
   { key: "packages", label: "FITSIO STORE", icon: Store },
 ];
+
+const SUPER_ADMIN_BOTTOM_KEYS = ["master", "marketing", "hr", "presales", "branch_wise"];
+const SUPER_ADMIN_BOTTOM_TABS = SUPER_ADMIN_TABS.filter((t) => SUPER_ADMIN_BOTTOM_KEYS.includes(t.key));
+const SUPER_ADMIN_MORE_TABS = SUPER_ADMIN_TABS.filter((t) => !SUPER_ADMIN_BOTTOM_KEYS.includes(t.key) && t.key !== "stages");
 
 
 const verticalDefaults = [
@@ -723,20 +727,40 @@ export const CRMPage = ({ auth, onLogout }) => {
           </div>
         )}
 
-        {/* Phone equivalent of the tab strip above: a bottom bar with one "Menu" trigger
-            (8 destinations don't fit as bottom-nav icons) that opens a sheet listing them,
+        {/* Phone equivalent of the tab strip above: a real bottom nav with the 5
+            most-used destinations as direct icons, plus a "More" slot for the rest —
             same pattern as the Physio/Branch Admin/Pre-Sales bottom navs. */}
         {showSuperAdminBoard && (
           <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white md:hidden" data-testid="super-admin-bottom-nav">
-            <button
-              type="button"
-              onClick={() => setShowSuperAdminMenu(true)}
-              className="flex w-full items-center justify-center gap-2 py-3 text-sm font-semibold text-sky-600"
-              data-testid="super-admin-menu-trigger"
-            >
-              <Menu className="h-5 w-5" />
-              {SUPER_ADMIN_TABS.find((t) => t.key === superAdminView)?.label || "Menu"}
-            </button>
+            <div className="flex items-stretch justify-around">
+              {SUPER_ADMIN_BOTTOM_TABS.map((t) => {
+                const Icon = t.icon;
+                const active = superAdminView === t.key;
+                return (
+                  <button
+                    key={t.key}
+                    type="button"
+                    onClick={() => { setSuperAdminView(t.key); setShowSuperAdminMenu(false); }}
+                    className={`flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-medium leading-tight ${active ? "text-sky-600" : "text-slate-400"}`}
+                    data-testid={`super-admin-nav-${t.key === "branch_wise" ? "branch-wise" : t.key}`}
+                  >
+                    <Icon className="h-5 w-5" />
+                    {t.label}
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                onClick={() => setShowSuperAdminMenu((v) => !v)}
+                className={`flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-medium leading-tight ${
+                  SUPER_ADMIN_MORE_TABS.some((t) => t.key === superAdminView) || showSuperAdminMenu ? "text-sky-600" : "text-slate-400"
+                }`}
+                data-testid="super-admin-nav-more"
+              >
+                <MoreHorizontal className="h-5 w-5" />
+                More
+              </button>
+            </div>
           </div>
         )}
 
@@ -746,14 +770,14 @@ export const CRMPage = ({ auth, onLogout }) => {
             onClick={() => setShowSuperAdminMenu(false)}
             data-testid="super-admin-menu-sheet"
           >
-            <div className="max-h-[75vh] w-full overflow-y-auto rounded-t-2xl bg-white p-2 pb-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="w-full rounded-t-2xl bg-white p-2 pb-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between px-3 py-2">
-                <p className="text-sm font-semibold text-slate-700">Menu</p>
+                <p className="text-sm font-semibold text-slate-700">More</p>
                 <button type="button" onClick={() => setShowSuperAdminMenu(false)} className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100" data-testid="super-admin-menu-close">
                   <X className="h-4 w-4" />
                 </button>
               </div>
-              {SUPER_ADMIN_TABS.map((t) => {
+              {SUPER_ADMIN_MORE_TABS.map((t) => {
                 const Icon = t.icon;
                 const active = superAdminView === t.key;
                 return (
@@ -762,7 +786,7 @@ export const CRMPage = ({ auth, onLogout }) => {
                     type="button"
                     onClick={() => { setSuperAdminView(t.key); setShowSuperAdminMenu(false); }}
                     className={`flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left text-sm font-medium ${active ? "bg-sky-50 text-sky-700" : "text-slate-700 hover:bg-slate-50"}`}
-                    data-testid={`super-admin-menu-${t.key === "branch_wise" ? "branch-wise" : t.key}`}
+                    data-testid={`super-admin-menu-${t.key}`}
                   >
                     <Icon className="h-4 w-4" />
                     {t.label}
