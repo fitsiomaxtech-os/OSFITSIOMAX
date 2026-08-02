@@ -315,6 +315,7 @@ function TreatmentTab({ physioId }) {
         <ConsultationDetailModal
           lead={selectedLead}
           physioId={physioId}
+          activeDate={selectedDate}
           // Days are completed inside the popup, so re-pull on close to refresh the counts.
           onClose={() => { setSelectedLead(null); load(); }}
           onDone={() => { setSelectedLead(null); load(); }}
@@ -447,7 +448,7 @@ function ReviewTab({ physioId }) {
   );
 }
 
-function ConsultationDetailModal({ lead, physioId, onClose, onDone }) {
+function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }) {
   const [submitting, setSubmitting] = useState(false);
   const [sessions, setSessions] = useState([]);
   const [completeTarget, setCompleteTarget] = useState(null);
@@ -574,10 +575,18 @@ function ConsultationDetailModal({ lead, physioId, onClose, onDone }) {
               <div className="space-y-2">
                 {sessions.map((s) => {
                   const done = s.status === "completed";
+                  // Only the day being viewed can be ticked off — a day is completed on
+                  // the date it actually falls on, so the others stay read-only until
+                  // their own date is picked in the strip behind this popup.
+                  const isActiveDay = !activeDate || (s.slot_time || "").startsWith(activeDate);
                   return (
                     <div
                       key={s.id}
-                      className={`flex items-center gap-3 rounded-lg border p-3 ${done ? "border-emerald-200 bg-emerald-50/50" : "border-slate-200 bg-white"}`}
+                      className={`flex items-center gap-3 rounded-lg border p-3 ${
+                        done ? "border-emerald-200 bg-emerald-50/50"
+                        : isActiveDay ? "border-sky-200 bg-sky-50/40"
+                        : "border-slate-200 bg-white"
+                      }`}
                       data-testid={`physio-treatment-day-${s.id}`}
                     >
                       <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold ${done ? "bg-emerald-200 text-emerald-800" : "bg-slate-100 text-slate-500"}`}>
@@ -592,12 +601,22 @@ function ConsultationDetailModal({ lead, physioId, onClose, onDone }) {
                       </div>
                       {done ? (
                         <span className="shrink-0 rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-semibold text-emerald-700">Complete</span>
-                      ) : (
+                      ) : isActiveDay ? (
                         <Button
                           size="sm"
                           className="shrink-0 bg-sky-600 text-xs text-white hover:bg-sky-700"
                           onClick={() => setCompleteTarget(s)}
                           data-testid={`physio-complete-day-${s.id}`}
+                        >
+                          <Check className="mr-1 h-3 w-3" /> Complete
+                        </Button>
+                      ) : (
+                        <Button
+                          size="sm"
+                          disabled
+                          className="shrink-0 bg-slate-100 text-xs text-slate-400 hover:bg-slate-100"
+                          title={`Pick ${fmtDate(s.slot_time)} in the date strip to complete this day`}
+                          data-testid={`physio-day-locked-${s.id}`}
                         >
                           <Check className="mr-1 h-3 w-3" /> Complete
                         </Button>
@@ -642,7 +661,11 @@ function ConsultationDetailModal({ lead, physioId, onClose, onDone }) {
         </div>
 
         <div className="flex items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-6 py-3.5">
-          <p className="text-[11px] text-slate-500">Completing a day sends that week's session to Review for a weekly write-up.</p>
+          <p className="text-[11px] text-slate-500">
+            {activeDate
+              ? "Only the day you opened can be completed — pick another date in the strip to complete that one."
+              : "Completing a day sends that week's session to Review for a weekly write-up."}
+          </p>
           <button
             type="button"
             onClick={markComplete}
