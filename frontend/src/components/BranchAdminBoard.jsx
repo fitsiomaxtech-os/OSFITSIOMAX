@@ -135,7 +135,10 @@ const waNumber = (raw) => {
 const sendApptOnWhatsApp = (a) => {
   const num = waNumber(a.phone);
   if (!num) { toast.error("This patient has no phone number on file"); return; }
-  window.open(`https://wa.me/${num}?text=${encodeURIComponent(apptMessage(a))}`, "_blank", "noopener,noreferrer");
+  // Same-tab, not window.open(..., "_blank"): on mobile that hands the browser an
+  // ambiguous new-tab context and the app is often left on a blank white screen once
+  // WhatsApp hands control back (caf18a6, same fix on the Physio board).
+  window.location.href = `https://wa.me/${num}?text=${encodeURIComponent(apptMessage(a))}`;
 };
 
 /** The card image plus the message, through the OS share sheet — the only path that can

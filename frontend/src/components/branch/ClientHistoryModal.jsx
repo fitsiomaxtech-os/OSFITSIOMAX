@@ -96,7 +96,9 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
     if (!client?.phone) return;
     const digits = client.phone.replace(/[^0-9]/g, "");
     const msg = encodeURIComponent(`Hi ${client.name}, this is a reminder that you have an outstanding balance of ${fmt(data.balance)}. Kindly clear it at your earliest convenience.`);
-    window.open(`https://wa.me/${digits}?text=${msg}`, "_blank");
+    // Same-tab handoff, not window.open(..., "_blank") — see caf18a6: the new-tab route
+    // leaves mobile browsers on a blank white screen when WhatsApp returns control.
+    window.location.href = `https://wa.me/${digits}?text=${msg}`;
   };
 
   const sendEmailReminder = () => {
