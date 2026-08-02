@@ -132,7 +132,7 @@ const PAYMENT_MODE_COLORS = {
   partial: "#e11d48",
 };
 
-export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened, externalDate, hideDateFilter = false, onCountChange, onRowsChange }) => {
+export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened, externalDate, hideDateFilter = false, onCountChange, onRowsChange, externalSearch, mobileCards = false }) => {
   const isConsultant = viewerRole === "head_physio";
   // Head Physio tracks progress on their own independent pipeline (head_consultation_stage),
   // fully separate from Branch's own consultation_stage pipeline.
@@ -356,6 +356,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   useEffect(() => {
     if (externalStageFilter !== undefined) setStageFilter(externalStageFilter);
   }, [externalStageFilter]);
+
+  // A parent search box (the Head Physio header's) drives the search, so a phone doesn't
+  // need a second one inside a list it has already scrolled past.
+  useEffect(() => {
+    if (externalSearch !== undefined) setSearch(externalSearch);
+  }, [externalSearch]);
 
   // A parent day-picker (the Head Physio board's week strip) drives the date filter, so
   // the board shows one day at a time without its own popover fighting the selection.
@@ -1193,8 +1199,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
         />
       )}
 
-      {/* Search */}
-      <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2">
+      {/* Search — hidden when a parent already provides one. */}
+      <div className={`items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 ${externalSearch !== undefined ? "hidden sm:flex" : "flex"}`}>
         <Search className="h-4 w-4 text-slate-400" />
         <Input
           value={search}
@@ -1216,8 +1222,49 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
         </Button>
       </div>
 
+      {mobileCards && (
+        <div className="space-y-2 sm:hidden" data-testid="cons-mobile-cards">
+          {filtered.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">
+              No patients on this day.
+            </p>
+          ) : filtered.map((l) => {
+            const hex = stageColor(l[stageField]);
+            return (
+              <button
+                key={l.id}
+                type="button"
+                onClick={() => { setSelectedLead(l); setDetailTab("overview"); }}
+                className="w-full rounded-xl border border-slate-200 bg-white p-3 text-left"
+                data-testid={`cons-card-${l.id}`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-bold text-slate-800">{l.name || "—"}</p>
+                    <p className="truncate text-xs text-slate-500">{l.phone || "—"}</p>
+                  </div>
+                  <span
+                    className="shrink-0 rounded-[5px] px-2 py-0.5 text-[10px] font-bold"
+                    style={{ background: `${hex}14`, color: hex, border: `1px solid ${hex}33` }}
+                  >
+                    {l[stageField] || "—"}
+                  </span>
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
+                  {l.patient_number && <span className="font-mono">{l.patient_number}</span>}
+                  {l.assigned_physio_name && <span>· {l.assigned_physio_name}</span>}
+                  {l.appointment_date && (
+                    <span>· {l.appointment_date} {l.appointment_time ? to12h(l.appointment_time) : ""}</span>
+                  )}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {/* Table */}
-      <Card className="overflow-hidden border-slate-200">
+      <Card className={`overflow-hidden border-slate-200 ${mobileCards ? "hidden sm:block" : ""}`}>
         <CardContent className="overflow-x-auto p-0">
           <table className="w-full min-w-[720px] table-fixed text-sm">
             <thead className="bg-slate-50 text-xs uppercase text-slate-500">

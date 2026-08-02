@@ -9,6 +9,7 @@ import {
   Headphones,
   LogOut,
   Mail,
+  Search,
   ShieldCheck,
   Stethoscope,
   UserCircle,
@@ -191,6 +192,10 @@ export const CRMPage = ({ auth, onLogout }) => {
   const [showProfile, setShowProfile] = useState(false);
   const [showPhysioCalendar, setShowPhysioCalendar] = useState(false);
   const [showHPCalendar, setShowHPCalendar] = useState(false);
+  // Lead search lives in the header for a Head Physio: on a phone the board is all list,
+  // and a search box inside it scrolls away the moment you start reading.
+  const [showHPSearch, setShowHPSearch] = useState(false);
+  const [hpSearch, setHpSearch] = useState("");
 
   const role = auth.user.role;
   const roleLabel = ROLE_META[role]?.label || role;
@@ -580,11 +585,32 @@ export const CRMPage = ({ auth, onLogout }) => {
                   FitsiomaxOS
                 </p>
                 <h1 className="truncate text-base font-bold text-slate-900 sm:text-2xl" data-testid="role-board-title">
-                  {boardTitle}
+                  {showHeadPhysioBoard ? (
+                    <>
+                      <span className="sm:hidden">{auth.user.full_name}</span>
+                      <span className="hidden sm:inline">{boardTitle}</span>
+                    </>
+                  ) : boardTitle}
                 </h1>
               </div>
             </div>
             <div className="flex items-center gap-2 sm:gap-3">
+              {showHeadPhysioBoard && (
+                <button
+                  type="button"
+                  onClick={() => setShowHPSearch((v) => !v)}
+                  className={`flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-sm font-medium sm:px-3 ${
+                    hpSearch || showHPSearch
+                      ? "border-teal-300 bg-teal-50 text-teal-700"
+                      : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                  }`}
+                  aria-label="Search leads"
+                  data-testid="hp-header-search-button"
+                >
+                  <Search className="h-4 w-4" />
+                  <span className="hidden sm:inline">Search</span>
+                </button>
+              )}
               {/* A Head Physio's own calendar sits beside their profile rather than in the
                   board's tab row — it's a reference, not one of the lists they work. */}
               {showHeadPhysioBoard && (
@@ -633,6 +659,27 @@ export const CRMPage = ({ auth, onLogout }) => {
 
         {showPhysioBoard && showPhysioCalendar && (
           <PhysioCalendarPage onClose={() => setShowPhysioCalendar(false)} />
+        )}
+
+        {showHeadPhysioBoard && showHPSearch && (
+          <div className="border-b border-slate-200 bg-white px-3 pb-3 sm:px-6" data-testid="hp-header-search-bar">
+            <div className="flex items-center gap-2 rounded-md border border-slate-200 px-3 py-2">
+              <Search className="h-4 w-4 shrink-0 text-slate-400" />
+              <input
+                autoFocus
+                value={hpSearch}
+                onChange={(e) => setHpSearch(e.target.value)}
+                placeholder="Search leads by name, phone or patient no..."
+                className="min-w-0 flex-1 border-0 p-0 text-sm outline-none placeholder:text-slate-400"
+                data-testid="hp-header-search-input"
+              />
+              {hpSearch && (
+                <button type="button" onClick={() => setHpSearch("")} className="shrink-0 text-slate-400 hover:text-slate-600" aria-label="Clear search">
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+          </div>
         )}
 
         {showHeadPhysioBoard && showHPCalendar && (
@@ -702,7 +749,7 @@ export const CRMPage = ({ auth, onLogout }) => {
         )}
 
         {showHeadPhysioBoard && (
-          <HeadPhysioBoard branchId={auth?.user?.branch_id} branchIds={auth?.user?.branch_ids} user={auth?.user} />
+          <HeadPhysioBoard branchId={auth?.user?.branch_id} branchIds={auth?.user?.branch_ids} user={auth?.user} search={hpSearch} />
         )}
 
         {showPhysioBoard && (

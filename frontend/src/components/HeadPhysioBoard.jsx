@@ -61,7 +61,7 @@ const WORK_TABS = [
   { key: "all", label: "All", icon: LayoutList },
 ];
 
-export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
+export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "" }) => {
   const [workTab, setWorkTab] = useState("consultations");
   // The day every list under Consultations answers to. Starts on today.
   const [workDate, setWorkDate] = useState(todayIso());
@@ -77,7 +77,10 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
   const [patients, setPatients] = useState([]);
   // New Rehab is a patient with no package recommended yet — the same shape as the other
   // cards: what is still waiting on this Head Physio, not everything on their list.
-  const newRehab = patients.filter((p) => !p.has_recommendation);
+  const q = search.trim().toLowerCase();
+  const matches = (...fields) => !q || fields.some((f) => String(f || "").toLowerCase().includes(q));
+  const visiblePatients = patients.filter((p) => matches(p.lead_name, p.phone));
+  const newRehab = visiblePatients.filter((p) => !p.has_recommendation);
 
   // All is one list, not three stacked sections — the same patient can be in more than one
   // of them, and reading three tables to find the day's work defeats the point. Every row
@@ -94,7 +97,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
       when: l.appointment_date ? `${l.appointment_date} ${to12h(l.appointment_time)}` : "",
       who: l.assigned_physio_name || "",
     })),
-    ...reviewRows.map((r) => ({
+    ...reviewRows.filter((r) => matches(r.lead_name, r.phone, r.patient_number)).map((r) => ({
       key: `r-${r.id}`,
       name: r.lead_name || "Unknown",
       patientNo: r.patient_number || "",
@@ -104,7 +107,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
       when: r.review_date || "",
       who: r.physio_name || "",
     })),
-    ...patients.map((p) => ({
+    ...visiblePatients.map((p) => ({
       key: `p-${p.lead_id}`,
       name: p.lead_name || "Unknown",
       patientNo: "",
@@ -114,7 +117,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
       when: "",
       who: p.branch_stage || "",
     })),
-  ], [consultRows, reviewRows, patients]);
+  ], [consultRows, reviewRows, visiblePatients]);
   const [loading, setLoading] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState(null);
   const [showRecommendModal, setShowRecommendModal] = useState(null);
@@ -155,7 +158,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
               count behind it, so the day's workload reads without opening anything.
               Two-up on phones, four across from tablet; the bottom bar stays for
               thumb reach. */}
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3" data-testid="hp-work-tabs">
+          <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 sm:mx-0 sm:grid sm:grid-cols-4 sm:gap-3 sm:overflow-visible sm:px-0 sm:pb-0" data-testid="hp-work-tabs">
             {WORK_TABS.map((t) => {
               const Icon = t.icon;
               const active = workTab === t.key;
@@ -169,18 +172,18 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
                   key={t.key}
                   type="button"
                   onClick={() => setWorkTab(t.key)}
-                  className={`rounded-xl border-2 px-2 py-3 text-center transition sm:px-4 sm:py-4 sm:text-left ${
+                  className={`w-[7.5rem] shrink-0 rounded-xl border-2 px-3 py-2.5 text-left transition sm:w-auto sm:px-4 sm:py-4 ${
                     active
                       ? "border-teal-600 bg-teal-50 shadow-sm"
                       : "border-slate-200 bg-white hover:border-teal-300 hover:shadow-sm"
                   }`}
                   data-testid={`hp-work-tab-${t.key}`}
                 >
-                  <span className={`flex items-center justify-center gap-1.5 sm:justify-start ${active ? "text-teal-700" : "text-slate-500"}`}>
+                  <span className={`flex items-center gap-1.5 ${active ? "text-teal-700" : "text-slate-500"}`}>
                     <Icon className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />
                     <span className="truncate text-[10px] font-bold uppercase tracking-wider sm:text-xs">{t.label}</span>
                   </span>
-                  <span className={`mt-0.5 block text-xl font-extrabold sm:mt-1 sm:text-3xl ${active ? "text-teal-700" : "text-slate-800"}`}>
+                  <span className={`mt-0.5 block text-2xl font-extrabold sm:mt-1 sm:text-3xl ${active ? "text-teal-700" : "text-slate-800"}`}>
                     {n}
                   </span>
                 </button>
@@ -196,6 +199,8 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
               viewerRole="head_physio"
               externalDate={workDate}
               hideDateFilter
+              externalSearch={search}
+              mobileCards
               // The cards ARE the stage filter now: Consultations is the New Appointment
               // queue, All drops the stage narrowing entirely. Keeping the board's own
               // stage pills as well would be the same control offered twice.
@@ -221,7 +226,33 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
               weekly assessments sit under it — same patients, the per-week record rather
               than the dispatched reviews. */}
           {workTab === "all" && (
-            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white" data-testid="hp-work-all">
+            <div data-testid="hp-work-all">
+              {/* Six columns can't reflow onto a phone, so the same rows render as cards
+                  there rather than scrolling sideways past the ones that matter. */}
+              <div className="space-y-2 sm:hidden">
+                {allRows.length === 0 ? (
+                  <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">Nothing on this day.</p>
+                ) : allRows.map((r) => (
+                  <div key={r.key} className="rounded-xl border border-slate-200 bg-white p-3" data-testid={`hp-all-card-${r.key}`}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-bold text-slate-800">{r.name}</p>
+                        <p className="truncate text-xs text-slate-500">{r.phone || "—"}</p>
+                      </div>
+                      <span className={`shrink-0 whitespace-nowrap rounded-[5px] border px-2 py-0.5 text-[10px] font-bold ${STAGE_TONES[r.tone]}`}>
+                        {r.stage}
+                      </span>
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
+                      {r.patientNo && <span className="font-mono">{r.patientNo}</span>}
+                      {r.who && <span>· {r.who}</span>}
+                      {r.when && <span>· {r.when}</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white sm:block">
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[720px] text-sm">
                   <thead className="bg-slate-50 text-left text-[10px] uppercase tracking-wider text-slate-400">
@@ -253,6 +284,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
                     ))}
                   </tbody>
                 </table>
+              </div>
               </div>
             </div>
           )}
@@ -426,7 +458,49 @@ function PatientsTab({ patients, onRecommend, onSelect, loading }) {
   // package, who is still waiting — which a grid of three-across cards makes harder than
   // it needs to be.
   return (
-    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white" data-testid="hp-patients-list">
+    <div data-testid="hp-patients-list">
+      {/* Cards on a phone, the table from sm — same rows either way. */}
+      <div className="space-y-2 sm:hidden">
+        {patients.map((p) => (
+          <div key={p.lead_id} className="rounded-xl border border-slate-200 bg-white p-3" data-testid={`hp-patient-card-${p.lead_id}`}>
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-teal-50 text-xs font-bold text-teal-700">
+                  {p.lead_name?.charAt(0)?.toUpperCase() || "?"}
+                </span>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-bold text-slate-800">{p.lead_name}</p>
+                  <p className="truncate text-xs text-slate-500">{p.phone || "—"}</p>
+                </div>
+              </div>
+              <span className={`shrink-0 whitespace-nowrap rounded-[5px] px-2 py-0.5 text-[10px] font-bold ${
+                p.branch_stage === "Portfolio" ? "bg-emerald-100 text-emerald-700"
+                  : p.has_recommendation ? "bg-violet-100 text-violet-700"
+                  : "bg-slate-100 text-slate-500"
+              }`}>
+                {p.branch_stage || "—"}
+              </span>
+            </div>
+            <p className="mt-2 text-[11px] text-slate-500">
+              {p.recommendation
+                ? `${p.recommendation.recommended_weeks}w × ${p.recommendation.sessions_per_week}/week = ${p.recommendation.total_sessions} sessions · ${p.recommendation.status}`
+                : "Not recommended yet"}
+            </p>
+            <div className="mt-2.5 flex gap-2">
+              <Button size="sm" variant="outline" className="flex-1 text-xs" onClick={() => onSelect(p)}>
+                <Calendar className="mr-1 h-3 w-3" /> Sessions
+              </Button>
+              {!p.has_recommendation && (
+                <Button size="sm" className="flex-1 bg-teal-600 text-xs text-white hover:bg-teal-700" onClick={() => onRecommend(p)}>
+                  <Package className="mr-1 h-3 w-3" /> Recommend
+                </Button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white sm:block">
       <div className="overflow-x-auto">
         <table className="w-full min-w-[760px] text-sm">
           <thead className="bg-slate-50 text-left text-[10px] uppercase tracking-wider text-slate-400">
@@ -492,6 +566,7 @@ function PatientsTab({ patients, onRecommend, onSelect, loading }) {
             ))}
           </tbody>
         </table>
+      </div>
       </div>
     </div>
   );
