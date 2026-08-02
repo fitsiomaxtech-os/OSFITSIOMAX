@@ -15,6 +15,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
+import { StageTab } from "@/components/ui/stage-tab";
 import {
   physioConsultations,
   physioCompleteConsultation,
@@ -382,10 +383,10 @@ function TreatmentTab({ physioId }) {
 }
 
 const REVIEW_TABS = [
-  { key: "overall", label: "Overall" },
-  { key: "branch_admin", label: "Branch Admin" },
-  { key: "head_physio", label: "Head Physio" },
-  { key: "completed", label: "Completed" },
+  { key: "overall", label: "Overall", color: "#0ea5e9" },
+  { key: "branch_admin", label: "Branch Admin", color: "#a855f7" },
+  { key: "head_physio", label: "Head Physio", color: "#f59e0b" },
+  { key: "completed", label: "Completed", color: "#22c55e" },
 ];
 
 /**
@@ -604,21 +605,22 @@ function ReviewTab({ physioId }) {
         <span className="rounded-full bg-sky-100 px-2.5 py-0.5 text-[10px] font-semibold text-sky-700">{visible.length} patients</span>
       </div>
 
-      {/* Where each patient's weeks have got to along the review hand-off. */}
-      <div className="mb-3 flex flex-wrap gap-1 rounded-lg border border-slate-200 bg-white p-1 w-fit">
-        {REVIEW_TABS.map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            onClick={() => setBucket(t.key)}
-            className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
-              bucket === t.key ? "bg-sky-100 text-sky-700" : "text-slate-500 hover:bg-slate-50"
-            }`}
-            data-testid={`physio-review-bucket-${t.key}`}
-          >
-            {t.label} <span className="text-[10px] text-slate-400">({counts[t.key]})</span>
-          </button>
-        ))}
+      {/* Where each patient's weeks have got to along the review hand-off — same
+          coloured count pills the Branch Leads stage bar uses. */}
+      <div className="mb-3 -mx-1 rounded-xl border border-slate-200 bg-white/95 p-1 shadow-sm" data-testid="physio-review-buckets">
+        <div className="flex flex-nowrap gap-1 overflow-x-auto sm:overflow-visible">
+          {REVIEW_TABS.map((t) => (
+            <StageTab
+              key={t.key}
+              label={t.label}
+              count={counts[t.key]}
+              active={bucket === t.key}
+              onClick={() => setBucket(t.key)}
+              color={t.color}
+              testid={`physio-review-bucket-${t.key}`}
+            />
+          ))}
+        </div>
       </div>
 
       <div className="mb-3 flex flex-wrap items-center gap-2" data-testid="physio-review-toolbar">
