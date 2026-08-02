@@ -98,51 +98,55 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
     // Bottom padding on phones clears the fixed bottom bar, so the last row of any list
     // is still reachable instead of sitting underneath it.
     <div className="space-y-4 pb-20 sm:pb-0" data-testid="head-physio-board-root">
-      {assignedBranchIds.length > 1 && (
-        <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-slate-200 bg-white p-1.5" data-testid="hp-branch-switcher">
-          <Building2 className="ml-1.5 h-4 w-4 text-slate-400" />
-          {assignedBranchIds.map((bId) => (
-            <button
-              key={bId}
-              type="button"
-              onClick={() => setActiveBranchId(bId)}
-              className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
-                effectiveBranchId === bId ? "bg-teal-600 text-white" : "text-slate-600 hover:bg-slate-100"
-              }`}
-              data-testid={`hp-branch-switch-${bId}`}
-            >
-              {branchNames[bId] || bId}
-            </button>
-          ))}
+      {/* One header row: what you're looking at on the left, which day on the right. The
+          day picker lives here rather than inside Consultations so it holds its place as
+          the tabs change instead of the page reflowing under the cursor. */}
+      <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-2 lg:flex-row lg:items-center lg:justify-between lg:gap-4 lg:p-3">
+        <div className="flex items-center gap-1 overflow-x-auto" data-testid="hp-tabs">
+          {/* A Head Physio covering more than one branch still has to pick one — without
+              it they'd be pinned to whichever came back first. Single-branch logins, the
+              common case, never see it. */}
+          {assignedBranchIds.length > 1 && (
+            <div className="mr-1 flex shrink-0 items-center gap-1 border-r border-slate-200 pr-2" data-testid="hp-branch-switcher">
+              <Building2 className="h-4 w-4 shrink-0 text-slate-400" />
+              <select
+                value={effectiveBranchId}
+                onChange={(e) => setActiveBranchId(e.target.value)}
+                className="h-8 max-w-[9rem] rounded-md border border-slate-200 bg-white px-1.5 text-xs font-semibold text-slate-700"
+                data-testid="hp-branch-select"
+              >
+                {assignedBranchIds.map((bId) => (
+                  <option key={bId} value={bId}>{branchNames[bId] || bId}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          {VIEW_TABS.map((tab) => {
+            const Icon = tab.icon;
+            const active = activeTab === tab.key;
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setActiveTab(tab.key)}
+                className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 py-2 text-[13px] font-medium transition-colors sm:px-3 sm:text-sm ${
+                  active ? "bg-teal-600 text-white shadow-sm" : "text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+                }`}
+                data-testid={`hp-tab-${tab.key}`}
+              >
+                <Icon className="h-4 w-4" /> {tab.label}
+              </button>
+            );
+          })}
         </div>
-      )}
 
-      {/* Tabs */}
-      <div className="flex items-center gap-1 overflow-x-auto border-b border-slate-200">
-        {VIEW_TABS.map((tab) => {
-          const Icon = tab.icon;
-          return (
-            <button
-              key={tab.key}
-              type="button"
-              onClick={() => setActiveTab(tab.key)}
-              className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2.5 text-[13px] font-medium transition-colors sm:px-4 sm:text-sm ${
-                activeTab === tab.key
-                  ? "border-teal-500 text-teal-700"
-                  : "border-transparent text-slate-400 hover:text-slate-600"
-              }`}
-              data-testid={`hp-tab-${tab.key}`}
-            >
-              <Icon className="h-4 w-4" /> {tab.label}
-            </button>
-          );
-        })}
+        <div className="w-full shrink-0 border-t border-slate-100 pt-2 lg:w-[26rem] lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0" data-testid="hp-header-week">
+          <WeekStrip value={workDate} onChange={setWorkDate} testid="hp-week-strip" bare />
+        </div>
       </div>
 
       {activeTab === "consultations" && (
         <div className="space-y-4" data-testid="hp-work-view">
-          <WeekStrip value={workDate} onChange={setWorkDate} testid="hp-week-strip" />
-
           {/* Summary cards, not a pill bar — these are the day's workload, so each one
               carries its own count and reads at a glance from across a room. Three equal
               columns at every width, so the row fits a phone without wrapping or

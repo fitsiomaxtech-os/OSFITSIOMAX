@@ -44,6 +44,9 @@ class ReviewRaiseInput(BaseModel):
 class ReviewSendInput(BaseModel):
     head_physio_id: str
     review_date: str  # YYYY-MM-DD
+    review_time: Optional[str] = None  # HH:MM, from the Head Physio's published slots
+    review_duration: Optional[int] = None  # minutes, carried from that slot
+    notes: Optional[str] = None  # branch's own note, on top of the physio's
 
 
 class ReviewCompleteInput(BaseModel):
@@ -293,7 +296,7 @@ async def branch_send_review(
         raise HTTPException(status_code=400, detail="review_date must be YYYY-MM-DD") from exc
 
     now = now_iso()
-    await v3_col("reviews").update_one({"id": review_id}, {"$set": {
+    updates = {
         "head_physio_id": hp["id"],
         "head_physio_name": hp["full_name"],
         "review_date": payload.review_date,
@@ -301,12 +304,21 @@ async def branch_send_review(
         "sent_at": now,
         "sent_by": user.full_name,
         "updated_at": now,
-    }})
+    }
+    # The slot is picked from what the Head Physio actually published, so it's stored
+    # alongside the date rather than leaving them to work the time out themselves.
+    if payload.review_time:
+        updates["review_time"] = payload.review_time
+        updates["review_duration"] = payload.review_duration
+    if payload.notes and payload.notes.strip():
+        updates["branch_notes"] = payload.notes.strip()
+    await v3_col("reviews").update_one({"id": review_id}, {"$set": updates})
     await v3_col("lead_activity").insert_one({
         "id": str(uuid.uuid4()),
         "lead_id": rev["lead_id"],
         "action": "review_sent",
-        "details": f"Review sent to {hp['full_name']} for {payload.review_date}",
+        "details": f"Review sent to {hp['full_name']} for {payload.review_date}"
+                   + (f" at {payload.review_time}" if payload.review_time else ""),
         "created_by": user.full_name,
         "created_by_role": user.role,
         "created_at": now,
