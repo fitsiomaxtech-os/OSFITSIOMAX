@@ -29,12 +29,16 @@ export const StageTab = ({ label, count, active, onClick, color, testid, gridded
           : { background: `${tint}14`, color: tint, border: `1px solid ${tint}33` }
       }
     >
-      {/* In a grid cell the type has to be tighter, so a long stage name ("Consultation
-          Completed") wraps inside its column rather than widening it. */}
-      <span className={`font-semibold uppercase sm:text-[11px] sm:leading-tight sm:tracking-wider ${
+      {/* Title case, as the stage is actually named — "Consultation Completed", not
+          CONSULTATION COMPLETED. The wide tracking went with the caps; it was there to
+          space shouted letters out and only loosens ordinary words.
+
+          In a grid cell the type is tighter still, so a long name wraps inside its
+          column rather than widening it. */}
+      <span className={`font-semibold sm:text-[11px] sm:leading-tight ${
         gridded
-          ? "text-[9px] leading-[1.2] tracking-tight [hyphens:auto]"
-          : "text-[11px] leading-tight tracking-wider"
+          ? "text-[9px] leading-[1.2] [hyphens:auto]"
+          : "text-[11px] leading-tight"
       }`}>{label}</span>
       <span className={`mt-0.5 font-bold leading-none sm:text-lg ${gridded ? "text-base" : "text-lg"}`}>{count}</span>
     </button>
