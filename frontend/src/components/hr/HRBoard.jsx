@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Users, ShieldCheck, BarChart3, Plus, Pencil, Trash2, Eye, KeyRound, X, UserPlus, Stethoscope, MoreVertical, CheckCircle2, XCircle, AlertOctagon, ChevronDown } from "lucide-react";
+import { Users, ShieldCheck, BarChart3, Plus, Pencil, Trash2, Eye, KeyRound, X, UserPlus, MoreVertical, CheckCircle2, XCircle, AlertOctagon, ChevronDown } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,13 +7,12 @@ import { toast } from "@/components/ui/sonner";
 import {
   hrDashboard, hrEmployees, hrCreateEmployee, hrUpdateEmployee, hrDeleteEmployee,
   hrUsers, hrCreateUser, hrUpdateUser, hrResetPassword, hrDeactivateUser, hrActivateUser, hrDeleteUserPermanent, hrUpdateUserRole, hrMeta, hrAddCustomRole,
-  getBranches, getDoctors, createDoctor, deleteDoctor, addDoctorSlots,
+  getBranches,
 } from "@/lib/api";
 
 const TABS = [
   { key: "dashboard", label: "Dashboard", icon: BarChart3 },
   { key: "employees", label: "Employees", icon: Users },
-  { key: "experts", label: "Fitsiomax Experts", icon: Stethoscope },
   { key: "roles", label: "Roles & Credentials", icon: ShieldCheck },
 ];
 
@@ -45,7 +44,6 @@ export const HRBoard = () => {
       </div>
       {tab === "dashboard" && <DashboardTab />}
       {tab === "employees" && <EmployeesTab meta={meta} />}
-      {tab === "experts" && <FitsiomaxExpertsTab />}
       {tab === "roles" && <RolesTab meta={meta} reloadMeta={reloadMeta} />}
     </div>
   );
@@ -1039,218 +1037,5 @@ const Select = ({ value, onChange, options = [], testid, uppercase = false }) =>
   </select>
 );
 
-// ---------- Fitsiomax Experts (moved from Super Admin Master View) ----------
-const blankExpertForm = { full_name: "", profile_type: "physio", branch_id: "", employee_id: "", specialization: "", joining_date: "", slot: "" };
-
-const FitsiomaxExpertsTab = () => {
-  const [doctors, setDoctors] = useState([]);
-  const [branches, setBranches] = useState([]);
-  const [employees, setEmployees] = useState([]);
-  const [form, setForm] = useState(blankExpertForm);
-  const [saving, setSaving] = useState(false);
-
-  const [slotDoctorId, setSlotDoctorId] = useState("");
-  const [slotTime, setSlotTime] = useState("");
-
-  const reloadList = async () => {
-    const [docsRes, brsRes, empsRes] = await Promise.allSettled([
-      getDoctors(), getBranches(), hrEmployees({ status: "active" }),
-    ]);
-    if (docsRes.status === "fulfilled") setDoctors(docsRes.value || []);
-    else console.error("[Fitsiomax Experts] getDoctors failed:", docsRes.reason);
-    if (brsRes.status === "fulfilled") setBranches(brsRes.value || []);
-    else console.error("[Fitsiomax Experts] getBranches failed:", brsRes.reason);
-    if (empsRes.status === "fulfilled") setEmployees(empsRes.value || []);
-    else console.error("[Fitsiomax Experts] hrEmployees failed:", empsRes.reason);
-
-    const failed = [
-      docsRes.status === "rejected" && "experts",
-      brsRes.status === "rejected" && "branches",
-      empsRes.status === "rejected" && "employees",
-    ].filter(Boolean);
-    if (failed.length) toast.error(`Failed to load: ${failed.join(", ")}`);
-  };
-
-  useEffect(() => { reloadList(); }, []);
-
-  const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
-
-  const pickEmployee = (id) => {
-    const emp = employees.find((e) => e.id === id);
-    setForm((p) => ({ ...p, employee_id: id, full_name: p.full_name || emp?.full_name || "" }));
-  };
-
-  const resetForm = () => { setForm(blankExpertForm); };
-
-  const finishWithSlot = async (doctorId) => {
-    if (!form.slot) return;
-    try { await addDoctorSlots(doctorId, { slots: [form.slot] }); }
-    catch { toast.error("Expert created, but the initial slot failed to save — add it below instead"); }
-  };
-
-  const submitCreate = async (event) => {
-    event.preventDefault();
-    if (!form.full_name.trim()) { toast.error("Enter a name"); return; }
-    if (!form.branch_id) { toast.error("Choose a branch"); return; }
-
-    try {
-      setSaving(true);
-      const created = await createDoctor({
-        full_name: form.full_name,
-        profile_type: form.profile_type,
-        branch_id: form.branch_id,
-        specialization: form.specialization,
-        employee_id: form.employee_id || null,
-        joining_date: form.joining_date || null,
-      });
-      await finishWithSlot(created.id);
-      resetForm();
-      await reloadList();
-      toast.success("Fitsiomax Expert created");
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || "Failed to create");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const removeDoctor = async (doctor) => {
-    if (!window.confirm(`Delete expert profile "${doctor.full_name}"?`)) return;
-    try {
-      await deleteDoctor(doctor.id);
-      toast.success("Expert deleted");
-      await reloadList();
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || "Delete failed");
-    }
-  };
-
-  const addSlotNow = async (event) => {
-    event.preventDefault();
-    if (!slotDoctorId || !slotTime) {
-      toast.error("Select expert and slot time");
-      return;
-    }
-    try {
-      setSaving(true);
-      await addDoctorSlots(slotDoctorId, { slots: [slotTime] });
-      setSlotTime("");
-      toast.success("Slot added");
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || "Failed to add slot");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Card className="border-slate-200 bg-white" data-testid="hr-experts-card">
-      <CardHeader>
-        <CardTitle className="text-base">Fitsiomax Experts</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-5">
-        <div>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500" data-testid="hr-experts-add-heading">Create Physio / Head Physio / Doctor</p>
-            <form className="grid gap-2 md:grid-cols-3" onSubmit={submitCreate} data-testid="hr-experts-create-form">
-              <Field label="Name *">
-                <Input value={form.full_name} onChange={(e) => set("full_name", e.target.value)} placeholder="Expert name" data-testid="hr-experts-name-input" />
-              </Field>
-              <Field label="Type *">
-                <select value={form.profile_type} onChange={(e) => set("profile_type", e.target.value)} className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm" data-testid="hr-experts-profile-select">
-                  <option value="physio">Physio</option>
-                  <option value="head_physio">Head Physio</option>
-                  <option value="doctor">Doctor</option>
-                </select>
-              </Field>
-              <Field label="Branch *">
-                <select value={form.branch_id} onChange={(e) => set("branch_id", e.target.value)} className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm" data-testid="hr-experts-branch-select">
-                  <option value="">Select branch...</option>
-                  {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.branch_name}</option>)}
-                </select>
-              </Field>
-              <Field label="Assign Fitsiomax Expert (optional)" className="md:col-span-2">
-                <div className="flex gap-2">
-                  <select value={form.employee_id} onChange={(e) => pickEmployee(e.target.value)} className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm" data-testid="hr-experts-employee-select">
-                    <option value="">Link to an existing employee...</option>
-                    {employees.map((e) => <option key={e.id} value={e.id}>{e.employee_code ? `${e.employee_code} — ` : ""}{e.full_name}{e.email ? ` (${e.email})` : ""}</option>)}
-                  </select>
-                  {form.employee_id && (
-                    <Button type="button" variant="outline" onClick={() => set("employee_id", "")} data-testid="hr-experts-employee-unlink">
-                      Unlink
-                    </Button>
-                  )}
-                </div>
-              </Field>
-              <Field label="Joining Date">
-                <Input type="date" value={form.joining_date} onChange={(e) => set("joining_date", e.target.value)} data-testid="hr-experts-joining-input" />
-              </Field>
-              <Field label="Specialization" className="md:col-span-2">
-                <Input value={form.specialization} onChange={(e) => set("specialization", e.target.value)} placeholder="e.g. Sports Physiotherapy" data-testid="hr-experts-specialization-input" />
-              </Field>
-              <Field label="Initial Slot (optional)">
-                <Input type="datetime-local" value={form.slot} onChange={(e) => set("slot", e.target.value)} data-testid="hr-experts-initial-slot-input" />
-              </Field>
-              <div className="md:col-span-3">
-                <Button type="submit" disabled={saving} data-testid="hr-experts-create-submit">
-                  Create Fitsiomax Expert
-                </Button>
-              </div>
-            </form>
-        </div>
-
-        <div>
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500" data-testid="hr-experts-list-heading">Existing Experts</p>
-          <div className="overflow-auto rounded-md border border-slate-200">
-            <table className="min-w-full text-sm">
-              <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-                <tr><th className="px-3 py-2">Name</th><th className="px-3 py-2">Type</th><th className="px-3 py-2">Branch</th><th className="px-3 py-2">Specialization</th><th className="px-3 py-2">Actions</th></tr>
-              </thead>
-              <tbody>
-                {doctors.map((d) => (
-                  <tr key={d.id} className="border-t border-slate-100" data-testid={`hr-experts-row-${d.id}`}>
-                    <td className="px-3 py-2 font-medium text-slate-800">{d.full_name}</td>
-                    <td className="px-3 py-2 text-slate-600">{d.profile_type}</td>
-                    <td className="px-3 py-2 text-slate-600">{branches.find((b) => b.id === d.branch_id)?.branch_name || "—"}</td>
-                    <td className="px-3 py-2 text-slate-600">{d.specialization || "—"}</td>
-                    <td className="px-3 py-2">
-                      <button onClick={() => removeDoctor(d)} className="text-red-500 hover:text-red-700" title="Delete expert profile" data-testid={`hr-experts-delete-${d.id}`}>
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-                {doctors.length === 0 && <tr><td colSpan="5" className="px-3 py-6 text-center text-slate-400">No experts yet.</td></tr>}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div>
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Add Availability Slot to an Existing Expert</p>
-          <form className="flex flex-col gap-2" onSubmit={addSlotNow} data-testid="hr-experts-slot-form">
-            <select
-              value={slotDoctorId}
-              onChange={(e) => setSlotDoctorId(e.target.value)}
-              className="h-9 rounded-md border border-slate-200 px-3 text-sm"
-              data-testid="hr-experts-slot-doctor-select"
-            >
-              <option value="">Select expert...</option>
-              {doctors.map((doctor) => (
-                <option key={doctor.id} value={doctor.id}>{doctor.full_name}</option>
-              ))}
-            </select>
-            <Input
-              type="datetime-local"
-              value={slotTime}
-              onChange={(e) => setSlotTime(e.target.value)}
-              data-testid="hr-experts-slot-time-input"
-            />
-            <Button type="submit" variant="outline" disabled={saving} data-testid="hr-experts-slot-submit">Add Slot</Button>
-          </form>
-        </div>
-      </CardContent>
-    </Card>
-  );
-};
 
 export default HRBoard;
