@@ -1,26 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Send, Clock, CheckCircle2, X, Search, RefreshCw } from "lucide-react";
+import { Send, CheckCircle2, X, Search, RefreshCw } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
+import { StageTab } from "@/components/ui/stage-tab";
 import { branchReviews, branchSendReview } from "@/lib/api";
 
 // Three views onto one pipeline: waiting to be sent, sent and still outstanding, done.
 // Each row already names the Head Physio it went to, so the branch can see who has what
 // without a separate view for it.
 const SUB_TABS = [
-  { key: "send", label: "Send to Review", icon: Send, tone: "amber" },
-  { key: "pending", label: "Pending Review", icon: Clock, tone: "sky" },
-  { key: "complete", label: "Review Complete", icon: CheckCircle2, tone: "emerald" },
+  { key: "send", label: "Send to Review", color: "#f59e0b" },
+  { key: "pending", label: "Pending Review", color: "#0ea5e9" },
+  { key: "complete", label: "Review Complete", color: "#22c55e" },
 ];
-
-const TONE = {
-  amber: { on: "bg-amber-600 text-white shadow-sm", off: "text-amber-700 hover:bg-amber-50", pill: "bg-amber-100 text-amber-700" },
-  violet: { on: "bg-violet-600 text-white shadow-sm", off: "text-violet-700 hover:bg-violet-50", pill: "bg-violet-100 text-violet-700" },
-  sky: { on: "bg-sky-600 text-white shadow-sm", off: "text-sky-700 hover:bg-sky-50", pill: "bg-sky-100 text-sky-700" },
-  emerald: { on: "bg-emerald-600 text-white shadow-sm", off: "text-emerald-700 hover:bg-emerald-50", pill: "bg-emerald-100 text-emerald-700" },
-};
 
 const dmy = (d) => {
   if (!d) return "—";
@@ -147,25 +141,22 @@ export const BranchReviewPanel = ({ branchId }) => {
 
   return (
     <div className="space-y-4" data-testid="branch-review-panel">
-      <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="branch-review-subtabs">
-        {SUB_TABS.map((t) => {
-          const Icon = t.icon;
-          const active = sub === t.key;
-          const tone = TONE[t.tone];
-          const n = countFor(t.key);
-          return (
-            <button
+      {/* Same coloured count pills the Branch Leads stage bar uses, so the three
+          stages of the review pipeline read the same way as the lead stages above. */}
+      <div className="-mx-1 rounded-xl border border-slate-200 bg-white/95 p-1 shadow-sm" data-testid="branch-review-subtabs">
+        <div className="flex flex-nowrap gap-1 overflow-x-auto sm:overflow-visible">
+          {SUB_TABS.map((t) => (
+            <StageTab
               key={t.key}
-              type="button"
+              label={t.label}
+              count={countFor(t.key)}
+              active={sub === t.key}
               onClick={() => setSub(t.key)}
-              className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${active ? tone.on : tone.off}`}
-              data-testid={`branch-review-subtab-${t.key}`}
-            >
-              <Icon className="h-4 w-4" />{t.label}
-              <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${active ? "bg-white/25 text-white" : tone.pill}`}>{n}</span>
-            </button>
-          );
-        })}
+              color={t.color}
+              testid={`branch-review-subtab-${t.key}`}
+            />
+          ))}
+        </div>
       </div>
 
       <Card>
