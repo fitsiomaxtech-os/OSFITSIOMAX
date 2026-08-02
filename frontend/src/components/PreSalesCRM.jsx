@@ -13,6 +13,7 @@ import { CreateLeadModal } from "@/components/CreateLeadModal";
 import { SourcePill } from "@/components/marketing/SourcePill";
 import { PullFromSheetButton } from "@/components/PullFromSheetButton";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
+import { StageTabBar } from "@/components/ui/stage-tab";
 
 const initials = (name) => (name || "?").split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
 
@@ -233,7 +234,7 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
 
   return (
     <div className={`space-y-5 ${role === "pre_sales" ? "pb-20 md:pb-0" : ""}`} data-testid="presales-crm-page">
-    <div className={role === "pre_sales" && activeTab !== "leads" ? "hidden space-y-5 md:block" : "space-y-5"} data-testid="presales-leads-tab">
+    <div className={role === "pre_sales" ? "hidden space-y-5 md:block" : "space-y-5"} data-testid="presales-leads-tab">
       {/* KPI Cards */}
       <div className="flex flex-nowrap gap-3" data-testid="presales-kpi-row">
         <KpiCard label="Total Leads" value={stageCounts.All} active={stageFilter === "All"} color="#22c55e" onClick={() => setStageFilter("All")} testid="presales-kpi-all" />
@@ -399,6 +400,99 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
         </CardContent>
       </Card>
     </div>
+
+      {role === "pre_sales" && activeTab === "leads" && (
+        <div className="space-y-3 md:hidden" data-testid="presales-leads-mobile">
+          <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2">
+            <Search className="h-4 w-4 shrink-0 text-slate-400" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search leads..."
+              className="h-8 border-0 p-0 focus-visible:ring-0"
+              data-testid="presales-mobile-search"
+            />
+            <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="presales-mobile-date-filter" />
+            <PullFromSheetButton onPulled={load} iconOnly />
+          </div>
+
+          <StageTabBar
+            stages={stages}
+            stageFilter={stageFilter === "All" ? null : stageFilter}
+            setStageFilter={(v) => setStageFilter(v === null ? "All" : v)}
+            counts={stageCounts}
+            totalCount={stageCounts.All}
+            testid="presales-mobile-stagebar"
+          />
+
+          <div className="space-y-2">
+            {visibleLeads.length === 0 ? (
+              <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">
+                {loading ? "Loading..." : "No leads match."}
+              </p>
+            ) : visibleLeads.map((l) => {
+              const stg = stages.find((s) => s.name === l.stage);
+              const hex = stg?.color || "#64748b";
+              return (
+                <div
+                  key={l.id}
+                  onClick={() => setEditing(l)}
+                  className="rounded-xl border border-slate-200 bg-white p-3"
+                  data-testid={`presales-mobile-card-${l.id}`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-xs font-bold ${avatarColor(l.name).bg} ${avatarColor(l.name).fg}`}>{initials(l.name)}</span>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-bold text-slate-800">{l.name || "—"}</p>
+                        <p className="truncate text-xs text-slate-500">{l.phone || "—"}</p>
+                      </div>
+                    </div>
+                    <span className="shrink-0 rounded-[5px] px-2 py-0.5 text-[10px] font-bold" style={{ background: `${hex}14`, color: hex, border: `1px solid ${hex}33` }}>
+                      {l.stage}
+                    </span>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500">
+                      {l.stage === "RNR" && (l.rnr_attempts || 0) > 0 && (
+                        <span className="inline-flex items-center gap-0.5 font-semibold text-rose-600">
+                          <PhoneOff className="h-2.5 w-2.5" />×{l.rnr_attempts}
+                        </span>
+                      )}
+                      {l.stage === "Follow Up" && l.next_follow_up_at && (
+                        <span className="inline-flex items-center gap-0.5 font-semibold text-amber-600">
+                          <Clock className="h-2.5 w-2.5" />
+                          {new Date(l.next_follow_up_at).toLocaleDateString(undefined, { day: "2-digit", month: "short" })}
+                        </span>
+                      )}
+                      {(l.source_tab || l.source_type) && <span className="truncate">{l.source_tab || l.source_type}</span>}
+                    </div>
+                    <LeadContactIcons lead={l} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {filtered.length > visibleCount && (
+            <div className="flex items-center justify-center pt-1">
+              <Button variant="outline" onClick={() => setVisibleCount((c) => c + 50)} data-testid="presales-mobile-load-more">
+                Load More ({filtered.length - visibleCount} remaining)
+              </Button>
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={() => setShowCreate(true)}
+            className="fixed bottom-24 right-4 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-sky-600 text-white shadow-lg hover:bg-sky-700"
+            data-testid="presales-mobile-create-fab"
+            aria-label="Create Lead"
+          >
+            <Plus className="h-6 w-6" />
+          </button>
+        </div>
+      )}
 
       {role === "pre_sales" && activeTab === "consultations" && (
         <ConsultationsTab leads={appointmentLeads} branches={branches} loading={loading} onOpen={setEditing} />
