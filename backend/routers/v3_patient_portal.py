@@ -23,8 +23,12 @@ from schemas.v3 import V3UserOut, V3PortalAccountInput, V3PatientPortalLogin
 router = APIRouter(prefix="/api/v3")
 
 
-def _generate_password(length: int = 8) -> str:
-    alphabet = string.ascii_uppercase + string.ascii_lowercase + string.digits
+def _generate_password(length: int = 10) -> str:
+    # No 0/O, 1/l/I or similarly-confusable characters — this is typed by a patient on
+    # a phone keyboard, often copy-pasted imperfectly from a WhatsApp message on a small
+    # screen, so every character needs to be unambiguous by eye. Length bumped up from 8
+    # to 10 to keep entropy reasonable after shrinking the alphabet.
+    alphabet = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"
     return "".join(random.choices(alphabet, k=length))
 
 
@@ -146,19 +150,61 @@ async def patient_portal_logout(authorization: str = Header(...)):
 
 @router.get("/patient-portal/me")
 async def patient_portal_me(lead_id: str = Depends(_current_patient_lead_id)):
+    """Backs all four Client Portal tabs (Sessions / Treatment / Payment History /
+    Profile) in one call — this is the patient's own read-only mirror of what the
+    Physio's Patient Detail page already shows, minus anything staff-only (no head
+    physio contact info; that's deliberately not returned here at all)."""
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Patient not found")
 
     sessions = await v3_col("sessions").find({"lead_id": lead_id}, {"_id": 0}).sort("slot_time", 1).to_list(500)
     assessments = await v3_col("weekly_assessments").find({"lead_id": lead_id}, {"_id": 0}).sort("week_number", 1).to_list(100)
+    reviews = await v3_col("reviews").find({"lead_id": lead_id}, {"_id": 0}).sort("raised_at", 1).to_list(50)
     total = len(sessions)
     completed = len([s for s in sessions if s.get("status") == "completed"])
+
+    branch = {}
+    if lead.get("branch_id"):
+        branch = await v3_col("branches").find_one(
+            {"id": lead["branch_id"]}, {"_id": 0, "branch_name": 1, "phone": 1, "address": 1}
+        ) or {}
+
+    # Every Treatment Fee installment collected so far, split into what's actually
+    # been paid vs the next thing due — same math the Physio's own Payment History
+    # tab and Branch Admin's Outstanding Amount board use.
+    installments = (lead.get("treatment_fee_payment_details") or {}).get("installments") or []
+    is_partial = lead.get("treatment_fee_payment_mode") == "partial"
+    treatment_paid = (
+        sum(i.get("amount", 0) for i in installments if i.get("paid")) if is_partial
+        else (lead.get("treatment_fee_paid") or 0)
+    )
+    unpaid = sorted((i for i in installments if not i.get("paid")), key=lambda i: i.get("due_date", "")) if is_partial else []
+    next_due = unpaid[0] if unpaid else None
 
     return {
         "patient_name": lead.get("name", "Unknown"),
         "phone": lead.get("phone", ""),
+        "email": lead.get("email", ""),
+        "patient_number": lead.get("patient_number"),
+        "age": lead.get("age"),
+        "gender": lead.get("gender"),
+        "occupation": lead.get("occupation"),
+        "address": lead.get("address"),
+        "city": lead.get("city"),
+        "state": lead.get("state"),
+        "condition": lead.get("condition"),
+
+        # Doctor detail card — physio_name from the session docs (same source the
+        # Physio board itself uses); head_physio_name is informational only, no
+        # contact info is ever included anywhere in this response on purpose.
         "physio_name": next((s.get("physio_name") for s in sessions if s.get("physio_name")), ""),
+        "head_physio_name": next((s.get("head_physio_name") for s in sessions if s.get("head_physio_name")), ""),
+
+        "branch_name": branch.get("branch_name", ""),
+        "branch_phone": branch.get("phone", ""),
+        "branch_address": branch.get("address", ""),
+
         "total_sessions": total,
         "completed_sessions": completed,
         "remaining_sessions": total - completed,
@@ -176,4 +222,34 @@ async def patient_portal_me(lead_id: str = Depends(_current_patient_lead_id)):
             {"week_number": a.get("week_number"), "jr_physio_notes": a.get("jr_physio_notes"), "status": a.get("status")}
             for a in assessments
         ],
+
+        "diagnosis": lead.get("diagnosis"),
+        "physio_diagnosis_report": lead.get("physio_diagnosis_report"),
+        "treatment_summary": lead.get("treatment_summary"),
+        "session_package_name": lead.get("session_package_name"),
+        "session_package_sessions": lead.get("session_package_sessions"),
+
+        "reviews": [
+            {
+                "review_number": (r.get("treatment_days") or 0) // 7,
+                "status": r.get("status"),
+                "review_date": r.get("review_date"),
+                "head_physio_suggestions": r.get("head_physio_suggestions"),
+            }
+            for r in reviews
+        ],
+
+        "payment": {
+            "consultation_fee_total": lead.get("package_price"),
+            "consultation_fee_paid": lead.get("package_paid"),
+            "consultation_payment_mode": lead.get("package_payment_mode"),
+            "treatment_fee_total": lead.get("session_package_price"),
+            "treatment_fee_paid": treatment_paid,
+            "treatment_payment_mode": lead.get("treatment_fee_payment_mode"),
+            "is_partial": is_partial,
+            "installments_total": len(installments),
+            "installments_paid": len([i for i in installments if i.get("paid")]),
+            "next_due_amount": next_due.get("amount") if next_due else None,
+            "next_due_date": next_due.get("due_date") if next_due else None,
+        },
     }

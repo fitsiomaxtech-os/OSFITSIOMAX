@@ -171,11 +171,18 @@ function PatientPortalDetailModal({ lead, onClose, onSaved }) {
     if (!justCreated) return;
     const num = waNumber(phone);
     if (!num) { toast.error("This patient has no phone number on file"); return; }
+    // Blank lines between each field, *bold* labels (WhatsApp markdown), and the
+    // auto-linked URL last on its own line — a credential sandwiched right next to
+    // label text with no visual gap is exactly what gets over-selected on a small
+    // touchscreen when the patient copies it by hand.
     const text = [
-      `Hi ${name}, here are your Fitsiomax Client Portal details:`,
-      `Link: ${portalUrl()}`,
-      `Username: ${justCreated.email}`,
-      `Password: ${justCreated.password}`,
+      `Hi ${name}, here is your Fitsiomax Client Portal access:`,
+      "",
+      `*Username:* ${justCreated.email}`,
+      "",
+      `*Password:* ${justCreated.password}`,
+      "",
+      `*Login here:* ${portalUrl()}`,
     ].join("\n");
     // Same-tab handoff, not window.open(..., "_blank") — that leaves the tab on a
     // blank white screen on the way back on mobile (see PhysioBoard's Call/WhatsApp fix).
