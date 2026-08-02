@@ -86,7 +86,7 @@ const ROLE_META = {
 const SUPER_ADMIN_TABS = [
   { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { key: "master", label: "Master View", icon: Database },
-  { key: "marketing", label: "Marketing Board", icon: Megaphone },
+  { key: "marketing", label: "Marketing Source", icon: Megaphone },
   { key: "stages", label: "Rehabilitation Phase", icon: Activity },
   { key: "hr", label: "HR Admin", icon: Users },
   { key: "presales", label: "Pre-Sales CRM", icon: Headphones },

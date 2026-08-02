@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   FileSpreadsheet, Layers, Users, ChevronDown,
-  Plus, RefreshCw, Trash2, Link as LinkIcon, ArrowRightLeft, X, Pencil,
+  Plus, RefreshCw, Trash2, Link as LinkIcon, ArrowRightLeft, X, Pencil, Lock,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -17,9 +17,9 @@ import { MaskedContact } from "@/components/MaskedContact";
 import { SourcePill } from "@/components/marketing/SourcePill";
 
 const SUB_TABS = [
-  { key: "lead_sources", label: "Lead Sources", icon: FileSpreadsheet },
   { key: "all_leads", label: "All Leads", icon: Layers },
   { key: "team", label: "Team & Distribution", icon: Users },
+  { key: "lead_sources", label: "Lead Sources", icon: FileSpreadsheet },
 ];
 
 const TabBtn = ({ active, label, Icon, onClick, testid }) => (
@@ -47,6 +47,9 @@ const SourcesTab = ({ branches = [] }) => {
   const [syncResult, setSyncResult] = useState(null);
   const [pullResult, setPullResult] = useState(null);
   const [pullingId, setPullingId] = useState(null);
+  const [showDisconnect, setShowDisconnect] = useState(false);
+  const [disconnectSecret, setDisconnectSecret] = useState("");
+  const [disconnecting, setDisconnecting] = useState(false);
 
   const load = useCallback(() => mkGetSources().then(setSources).catch((e) => console.warn("[load failed]", e?.message || e)), []);
   const loadGs = useCallback(() => gsStatus().then(setGs).catch((e) => console.warn("[gs status]", e?.message || e)), []);
@@ -72,11 +75,22 @@ const SourcesTab = ({ branches = [] }) => {
     } catch (e) { toast.error(e?.response?.data?.detail || "Failed to start OAuth"); }
   };
 
-  const disconnectGoogle = async () => {
-    if (!window.confirm("Disconnect Google? All synced sources will need to reconnect.")) return;
-    await gsDisconnect();
-    toast.success("Disconnected");
-    loadGs();
+  // The whole lead pipeline runs through this connection, so disconnecting needs the
+  // shared secret key (set on the server as SHEETS_DISCONNECT_SECRET) — a browser
+  // confirm() alone is too easy to click past by accident.
+  const confirmDisconnect = async () => {
+    if (!disconnectSecret.trim()) { toast.error("Enter the secret key"); return; }
+    setDisconnecting(true);
+    try {
+      await gsDisconnect(disconnectSecret.trim());
+      toast.success("Disconnected");
+      setShowDisconnect(false);
+      setDisconnectSecret("");
+      loadGs();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Disconnect failed");
+    }
+    setDisconnecting(false);
   };
 
   // Extract spreadsheet ID from any Google Sheets URL: /spreadsheets/d/{ID}/...
@@ -171,7 +185,7 @@ const SourcesTab = ({ branches = [] }) => {
           </div>
           <div className="flex gap-2">
             {gs.connected ? (
-              <Button variant="outline" size="sm" onClick={disconnectGoogle} className="text-red-600 hover:bg-red-50" data-testid="gs-disconnect-btn">Disconnect</Button>
+              <Button variant="outline" size="sm" onClick={() => setShowDisconnect(true)} className="text-red-600 hover:bg-red-50" data-testid="gs-disconnect-btn">Disconnect</Button>
             ) : (
               <Button onClick={connectGoogle} className="bg-white text-slate-800 border border-slate-300 hover:bg-slate-50 shadow-sm" data-testid="gs-connect-btn">
                 <svg viewBox="0 0 48 48" className="mr-2 h-4 w-4">
@@ -279,7 +293,7 @@ const SourcesTab = ({ branches = [] }) => {
 
       {showSync && (
         <DialogShell title={`Sync: ${showSync.name}`} onClose={() => { setShowSync(null); setSyncResult(null); }} testid="mk-sync-dialog">
-          <p className="text-xs text-slate-500">Paste JSON rows from your Google Sheet (each row = one object). Phones are deduped by last 10 digits. New leads land in <span className="font-semibold">Pre-Sales CRM</span> + Marketing Board → All Leads with auto round-robin if enabled.</p>
+          <p className="text-xs text-slate-500">Paste JSON rows from your Google Sheet (each row = one object). Phones are deduped by last 10 digits. New leads land in <span className="font-semibold">Pre-Sales CRM</span> + Marketing Source → All Leads with auto round-robin if enabled.</p>
           <textarea
             value={syncRows}
             onChange={(e) => setSyncRows(e.target.value)}
@@ -310,6 +324,32 @@ const SourcesTab = ({ branches = [] }) => {
 
       {showEdit && (
         <EditSourceDialog source={showEdit} branches={branches} onClose={() => setShowEdit(null)} onSaved={() => { setShowEdit(null); load(); }} />
+      )}
+
+      {showDisconnect && (
+        <DialogShell title="Disconnect Google Sheets" onClose={() => { setShowDisconnect(false); setDisconnectSecret(""); }} testid="gs-disconnect-dialog">
+          <p className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+            <Lock className="mt-0.5 h-4 w-4 shrink-0" />
+            Every branch's lead sync runs through this connection. Enter the secret key to confirm.
+          </p>
+          <Input
+            type="password"
+            autoFocus
+            placeholder="Secret key"
+            value={disconnectSecret}
+            onChange={(e) => setDisconnectSecret(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") confirmDisconnect(); }}
+            data-testid="gs-disconnect-secret"
+          />
+          <Button
+            onClick={confirmDisconnect}
+            disabled={disconnecting || !disconnectSecret.trim()}
+            className="w-full bg-red-600 text-white hover:bg-red-700"
+            data-testid="gs-disconnect-confirm"
+          >
+            {disconnecting ? "Disconnecting..." : "Disconnect"}
+          </Button>
+        </DialogShell>
       )}
     </div>
   );
@@ -588,7 +628,53 @@ const AllLeadsTab = ({ team }) => {
         </div>
       </div>
 
-      <div className="overflow-auto rounded-lg border border-slate-200">
+      {/* Mobile: full-width cards, all the row's details folded into one card instead
+          of spread across columns you'd otherwise have to scroll sideways to read. */}
+      <div className="space-y-2 md:hidden" data-testid="mk-leads-mobile-cards">
+        {data.rows.map((l) => (
+          <div key={l.id} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm" data-testid={`mk-lead-card-${l.id}`}>
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={!!selected[l.id]}
+                  onChange={(e) => setSelected({ ...selected, [l.id]: e.target.checked })}
+                  data-testid={`mk-lead-select-mobile-${l.id}`}
+                />
+                <p className="truncate text-sm font-semibold text-slate-800">{l.name}</p>
+              </div>
+              <button onClick={() => remove(l.id)} className="shrink-0 text-red-500 hover:text-red-700" data-testid={`mk-lead-delete-mobile-${l.id}`}>
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="mt-2">
+              <MaskedContact phone={l.phone} email={l.email} locked={l.stage === "Lost"} />
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <SourcePill source={l.source_tab || l.source_type} />
+              <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">{l.stage}</span>
+              <span className="text-xs text-slate-400">{(l.created_at || "").slice(0, 10)}</span>
+            </div>
+            <div className="mt-2">
+              <ColorFilterDropdown
+                compact
+                value={l.assigned_user_id || ""}
+                options={[
+                  { value: "", label: "— Unassigned —", classes: "border-slate-200 bg-white text-slate-700" },
+                  ...everyone.map((u, i) => ({ value: u.id, label: u.full_name, classes: ASSIGNEE_COLOR_PALETTE[i % ASSIGNEE_COLOR_PALETTE.length] })),
+                ]}
+                onChange={(v) => reassign(l.id, v)}
+                testId={`mk-lead-reassign-mobile-${l.id}`}
+              />
+            </div>
+          </div>
+        ))}
+        {data.rows.length === 0 && (
+          <p className="rounded-lg border border-dashed border-slate-200 py-8 text-center text-sm text-slate-400">No leads match these filters.</p>
+        )}
+      </div>
+
+      <div className="hidden overflow-auto rounded-lg border border-slate-200 md:block">
         <table className="min-w-full text-xs">
           <thead className="bg-slate-50 text-left text-slate-500">
             <tr>
@@ -771,7 +857,7 @@ const DialogShell = ({ title, onClose, children, testid }) => (
 // ============ Root ============
 
 export const MarketingBoard = ({ branches = [] }) => {
-  const [tab, setTab] = useState("lead_sources");
+  const [tab, setTab] = useState("all_leads");
   const [team, setTeam] = useState({ pre_sales: [], sales: [] });
   const reloadTeam = useCallback(() => mkGetTeam().then(setTeam).catch((e) => console.warn("[load failed]", e?.message || e)), []);
   useEffect(() => { reloadTeam(); }, [reloadTeam]);
@@ -779,7 +865,7 @@ export const MarketingBoard = ({ branches = [] }) => {
   return (
     <div className="space-y-4" data-testid="marketing-board">
       <div>
-        <h2 className="text-2xl font-bold text-slate-900">Marketing Board</h2>
+        <h2 className="text-2xl font-bold text-slate-900">Marketing Source</h2>
         <p className="text-sm text-slate-500">Source leads, distribute them, and track team performance.</p>
       </div>
       <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2" data-testid="mk-subtabs">

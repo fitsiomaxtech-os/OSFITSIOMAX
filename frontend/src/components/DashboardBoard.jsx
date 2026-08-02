@@ -67,7 +67,7 @@ export const DashboardBoard = () => {
 
   return (
     <div className="space-y-4" data-testid="dashboard-board">
-      <div>
+      <div className="hidden md:block">
         <h2 className="text-2xl font-bold text-slate-900">Dashboard</h2>
         <p className="text-sm text-slate-500">Leads, appointments, treatments and revenue across every branch and vertical.</p>
       </div>
@@ -112,7 +112,9 @@ export const DashboardBoard = () => {
         )}
       </div>
 
-      <div className="flex flex-wrap gap-1 rounded-xl border border-slate-200 bg-white/95 p-1" data-testid="dashboard-tabs">
+      {/* Single row always — no min-width per tab (that's what forced a 2-row wrap on
+          a phone), each tab just shrinks to share the row instead. */}
+      <div className="flex gap-1 rounded-xl border border-slate-200 bg-white/95 p-1" data-testid="dashboard-tabs">
         {DASH_TABS.map((t) => {
           const Icon = t.icon;
           const active = activeTab === t.key;
@@ -121,11 +123,11 @@ export const DashboardBoard = () => {
               key={t.key}
               type="button"
               onClick={() => setActiveTab(t.key)}
-              className={`flex flex-1 min-w-[110px] items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold transition ${active ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100"}`}
+              className={`flex flex-1 min-w-0 items-center justify-center gap-1 rounded-lg px-1.5 py-2 text-[11px] font-semibold transition sm:gap-1.5 sm:px-3 sm:text-sm ${active ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100"}`}
               data-testid={`dashboard-tab-${t.key}`}
             >
-              <Icon className="h-4 w-4" />
-              {t.label}
+              <Icon className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />
+              <span className="truncate">{t.label}</span>
             </button>
           );
         })}
