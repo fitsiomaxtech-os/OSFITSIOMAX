@@ -16,6 +16,7 @@ import {
   FileText,
   Share2,
   Copy,
+  Link as LinkIcon,
   Download,
   ShoppingCart,
   ClipboardList,
@@ -85,6 +86,19 @@ const apptRows = (a, { compact = false } = {}) => [
   ["Booked By", a.bookedBy],
 ];
 
+/** 128 bits from the platform CSPRNG — the share link's only key, so it can't be a
+ *  counter or anything derived from the patient's own details. */
+const randomToken = () => {
+  const bytes = new Uint8Array(16);
+  (window.crypto || window.msCrypto).getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+};
+
+/** Where the patient opens their own copy of this confirmation. Keyed by an unguessable
+ *  token rather than the reference number, which is printed on the sheet and derived
+ *  from the patient number — guessable, and not something to hang access on. */
+const apptLink = (a) => (a.shareToken ? `${window.location.origin}/appointment/${a.shareToken}` : "");
+
 /** The confirmation as a message addressed to the patient — short lines that survive
  *  WhatsApp and SMS, which is how it actually reaches them. */
 const apptMessage = (a) => {
@@ -99,9 +113,11 @@ const apptMessage = (a) => {
   ];
   if (a.branch) lines.push(`Branch: ${a.branch}`);
   if (a.notes) lines.push(`Notes: ${a.notes}`);
+  lines.push("", `Ref: ${a.refNo}`);
+  const link = apptLink(a);
+  if (link) lines.push("", "View your appointment:", link);
   lines.push(
     "",
-    `Ref: ${a.refNo}`,
     "Please arrive 10 minutes early.",
     "To reschedule or cancel, contact the branch quoting this reference.",
     "",
@@ -135,8 +151,7 @@ const apptHtml = (a) => `<!doctype html><html><head><meta charset="utf-8">
 
 /** Clipboard write, with the execCommand fallback for the non-HTTPS/older-browser case
  *  where navigator.clipboard simply isn't there. */
-const copyApptMessage = async (a) => {
-  const text = apptMessage(a);
+const copyApptText = async (text, successMsg) => {
   try {
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(text);
@@ -150,11 +165,13 @@ const copyApptMessage = async (a) => {
       document.execCommand("copy");
       document.body.removeChild(el);
     }
-    toast.success("Confirmation copied — paste it into WhatsApp or SMS");
+    toast.success(successMsg);
   } catch {
     toast.error("Couldn't copy on this device");
   }
 };
+
+const copyApptMessage = (a) => copyApptText(apptMessage(a), "Confirmation copied — paste it into WhatsApp or SMS");
 
 export const BranchAdminBoard = ({ branchId }) => {
   const [boardData, setBoardData] = useState({ leads: [], stage_counts: {} });
@@ -1230,7 +1247,12 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                   if (!apptDraft.physio_id) { toast.error("Please select an expert"); return; }
                   if (!apptDraft.appointment_time) { toast.error("Pick a time slot"); return; }
                   try {
-                    await scheduleBranchAppointment(lead.id, apptDraft);
+                    // Minted here so the confirmation, its share link and the stored
+                    // booking all carry the same pair — no second round trip to learn
+                    // what the server called it.
+                    const refNo = `APT-${(lead.patient_number || lead.id || "").toString().slice(-8).toUpperCase()}-${Date.now().toString().slice(-6)}`;
+                    const shareToken = randomToken();
+                    await scheduleBranchAppointment(lead.id, { ...apptDraft, ref_no: refNo, share_token: shareToken });
                     toast.success(`Appointment ${apptDraft.appointment_date} ${to12h(apptDraft.appointment_time)} → ${apptDraft.final_stage}`);
                     const stage = apptDraft.final_stage;
                     setApptDraft(null);
@@ -1245,7 +1267,8 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                     const hp = apptExperts.experts.find((d) => d.id === apptDraft.physio_id);
                     setApptConfirm({
                       finalStage: stage,
-                      refNo: `APT-${(lead.patient_number || lead.id || "").toString().slice(-8).toUpperCase()}-${Date.now().toString().slice(-6)}`,
+                      refNo,
+                      shareToken,
                       patient: lead.name || "—",
                       patientNo: lead.patient_number || "—",
                       phone: lead.phone || "—",
@@ -1331,6 +1354,11 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
               <Button className="w-full bg-teal-600 text-white hover:bg-teal-700" onClick={() => openPrintable(apptHtml(apptConfirm), { print: true })} data-testid="branch-appt-confirm-pdf">
                 <FileText className="mr-1.5 h-4 w-4" /> Open PDF
               </Button>
+              {apptLink(apptConfirm) && (
+                <Button variant="outline" className="w-full" onClick={() => copyApptText(apptLink(apptConfirm), "Link copied")} data-testid="branch-appt-confirm-copy-link">
+                  <LinkIcon className="mr-1.5 h-4 w-4" /> Copy Link
+                </Button>
+              )}
               {/* Copy and Share both send the patient-addressed message, not the row
                   dump — it's pasted into WhatsApp far more often than it's printed. */}
               <div className="grid grid-cols-3 gap-2">

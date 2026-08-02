@@ -137,6 +137,9 @@ export const rescheduleBranchFollowUp = async (leadId, followupId, payload) => (
 export const collectFee = async (leadId, payload) => (await api.post(`/leads/${leadId}/collect-fee`, payload)).data;
 export const assignPhysio = async (leadId, payload) => (await api.post(`/leads/${leadId}/assign-physio`, payload)).data;
 export const scheduleBranchAppointment = async (leadId, payload) => (await api.post(`/leads/${leadId}/schedule-branch-appointment`, payload)).data;
+// The patient's own confirmation link — no session, so it deliberately bypasses the
+// authenticated client and its 401-triggered logout.
+export const getPublicAppointment = async (token) => (await axios.get(`${BACKEND_URL}/api/v3/public/appointment/${token}`)).data;
 export const getConsultationsBoard = async (branchId, pipeline) => (await api.get(`/branch-admin/consultations/${branchId}/board`, { params: pipeline ? { pipeline } : {} })).data;
 // Consultation Appointment Scheduling (Branch Admin > Calendar > Schedule)
 export const listConsultAppointments = async (branchId) => (await api.get(`/branch-admin/${branchId}/consult-appointments`)).data;

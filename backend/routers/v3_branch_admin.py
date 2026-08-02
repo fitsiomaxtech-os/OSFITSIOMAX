@@ -43,6 +43,45 @@ async def _head_consultation_stage_names() -> list:
     return names or V3_HEAD_CONSULTATION_STAGES
 
 
+@router.get("/public/appointment/{share_token}")
+async def v3_public_appointment(share_token: str):
+    """The appointment confirmation behind its share link — what the patient opens.
+
+    Deliberately unauthenticated: the patient has no login. The token is the only key,
+    so it must stay unguessable (the caller mints a random one at booking time), and
+    only the fields already printed on the confirmation they were sent are returned —
+    nothing else about the lead is exposed by holding the link.
+    """
+    appt = await v3_col("appointments").find_one({"share_token": share_token}, {"_id": 0})
+    if not appt:
+        raise HTTPException(status_code=404, detail="This appointment link is not valid")
+
+    lead = await v3_col("leads").find_one(
+        {"id": appt.get("lead_id")}, {"_id": 0, "patient_number": 1, "phone": 1, "branch_id": 1}
+    ) or {}
+    branch = await v3_col("branches").find_one(
+        {"id": appt.get("branch_id") or lead.get("branch_id")}, {"_id": 0, "branch_name": 1, "address": 1}
+    ) or {}
+
+    return {
+        "refNo": appt.get("ref_no") or "",
+        "patient": appt.get("patient_name") or appt.get("lead_name") or "—",
+        "patientNo": lead.get("patient_number") or "—",
+        "phone": lead.get("phone") or "—",
+        "date": appt.get("appointment_date"),
+        "time": appt.get("appointment_time"),
+        "duration": appt.get("duration") or 30,
+        "headPhysio": appt.get("doctor_name") or "—",
+        "branch": branch.get("branch_name") or "",
+        "branchAddress": branch.get("address") or "",
+        "notes": appt.get("notes") or "",
+        "bookedBy": "Branch Admin" if appt.get("created_by_role") == "branch_admin" else (appt.get("created_by") or ""),
+        # A cancelled booking keeps its link working, but says so rather than showing a
+        # confirmation for an appointment that is no longer happening.
+        "cancelled": appt.get("status") == "cancelled",
+    }
+
+
 @router.get("/branch-board/{branch_id}")
 async def v3_branch_board_new(branch_id: str, _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev"))):
     try:
@@ -185,6 +224,11 @@ class V3BranchAppointmentInput(BaseModel):
     # Length of the picked slot, carried from the expert's published calendar so the
     # Calendar tab can render the real end time (09:30–10:00) rather than assuming 30.
     duration: Optional[int] = None
+    # The confirmation the patient is sent: `ref_no` is what's printed on it, and
+    # `share_token` is the unguessable id its public link is keyed by. Both are minted
+    # by the caller so the link can be built without a second round trip.
+    ref_no: Optional[str] = None
+    share_token: Optional[str] = None
 
 
 @router.post("/leads/{lead_id}/schedule-branch-appointment", response_model=V3LeadOut)
@@ -283,6 +327,10 @@ async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointm
             "created_by_role": user.role,
             "updated_at": now_iso(),
         }
+        if payload.ref_no:
+            appt_fields["ref_no"] = payload.ref_no
+        if payload.share_token:
+            appt_fields["share_token"] = payload.share_token
         if existing_appt:
             # Rescheduling an existing booking — move it rather than leaving a stale row
             # holding the old slot.
