@@ -96,11 +96,31 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
     return () => { cancelled = true; };
   }, [isPhysio]);
 
+  // Head Physios are common to every branch — they're created once in HR Admin and take
+  // consultations wherever they're needed, so this lists all of them rather than only the
+  // ones carrying this branch's id. Physios are not: they deliver treatment at the branch
+  // they belong to, so PHYSIO CALENDAR stays branch-scoped.
+  //
+  // Listing them by user account also collapses the duplicate doctors records the
+  // multi-branch model leaves behind — one Head Physio appears once, and the record with
+  // their published slots is the one kept.
   const loadDoctors = useCallback(async () => {
     if (!branchId) return;
     try {
-      const all = await getDoctors({ branch_id: branchId });
-      setDoctors(all.filter((d) => d.profile_type === profileType));
+      if (profileType !== "head_physio") {
+        const all = await getDoctors({ branch_id: branchId });
+        setDoctors(all.filter((d) => d.profile_type === profileType));
+        return;
+      }
+      const all = await getDoctors();
+      const heads = (all || []).filter((d) => d.profile_type === "head_physio");
+      const best = new Map();
+      heads.forEach((d) => {
+        const key = d.user_id || d.full_name || d.id;
+        const seen = best.get(key);
+        if (!seen || (d.slots || []).length > (seen.slots || []).length) best.set(key, d);
+      });
+      setDoctors([...best.values()].sort((a, b) => (a.full_name || "").localeCompare(b.full_name || "")));
     } catch { /* silent */ }
   }, [branchId, profileType]);
 
