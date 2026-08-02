@@ -84,7 +84,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
       {/* The day picker is the whole header now — the branch filter is gone (Head
           Physios cover every branch) and Calendar and My Profile moved to the app header
           beside the avatar, leaving the summary cards below as the only navigation. */}
-      <div className="rounded-xl border border-slate-200 bg-white p-3 sm:p-4">
+      <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
         <WeekStrip value={workDate} onChange={setWorkDate} testid="hp-week-strip" bare />
       </div>
 
