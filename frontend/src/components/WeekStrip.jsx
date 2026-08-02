@@ -45,7 +45,7 @@ export const WeekStrip = ({ value, onChange, counts = {}, testid = "week-strip",
     // `bare` drops the card chrome so this can sit inside a row the parent already owns.
     <div className={bare ? "" : "rounded-xl border border-slate-200 bg-white p-3 sm:p-4"} data-testid={testid}>
       <div className={`flex items-center justify-between gap-2 ${bare ? "mb-1.5" : "mb-3"}`}>
-        <p className={`min-w-0 truncate font-bold text-slate-800 ${bare ? "text-xs sm:text-[13px]" : "text-[13px] sm:text-base"}`} data-testid={`${testid}-label`}>
+        <p className="min-w-0 truncate text-[13px] font-bold text-slate-800 sm:text-base" data-testid={`${testid}-label`}>
           {longLabel(selected)}
           {selected === today && <span className="ml-2 rounded-md bg-teal-100 px-2 py-0.5 text-[11px] font-bold text-teal-700">TODAY</span>}
         </p>
@@ -69,7 +69,7 @@ export const WeekStrip = ({ value, onChange, counts = {}, testid = "week-strip",
         </div>
       </div>
 
-      <div className={`grid grid-cols-7 ${bare ? "gap-1" : "gap-1 sm:gap-2"}`}>
+      <div className="grid grid-cols-7 gap-1 sm:gap-2">
         {days.map((iso, i) => {
           const active = iso === selected;
           const isToday = iso === today;
@@ -79,7 +79,7 @@ export const WeekStrip = ({ value, onChange, counts = {}, testid = "week-strip",
               key={iso}
               type="button"
               onClick={() => onChange(iso)}
-              className={`relative flex flex-col items-center rounded-lg transition ${bare ? "px-2 py-1.5" : "py-2 sm:py-2.5"} ${
+              className={`relative flex flex-col items-center rounded-lg py-2 transition sm:py-2.5 ${
                 active
                   ? "bg-teal-600 text-white shadow-sm"
                   : isToday
@@ -88,8 +88,8 @@ export const WeekStrip = ({ value, onChange, counts = {}, testid = "week-strip",
               }`}
               data-testid={`${testid}-day-${iso}`}
             >
-              <span className={`font-bold uppercase ${bare ? "text-[9px]" : "text-[10px] sm:text-[11px]"} ${active ? "text-white/80" : "text-slate-400"}`}>{DOW[i]}</span>
-              <span className={`font-bold ${bare ? "text-sm" : "text-base sm:text-lg"}`}>{Number(iso.slice(8, 10))}</span>
+              <span className={`text-[10px] font-bold uppercase sm:text-[11px] ${active ? "text-white/80" : "text-slate-400"}`}>{DOW[i]}</span>
+              <span className="text-base font-bold sm:text-lg">{Number(iso.slice(8, 10))}</span>
               {n > 0 && (
                 <span className={`mt-0.5 rounded-full px-1.5 text-[9px] font-bold sm:text-[10px] ${active ? "bg-white/25 text-white" : "bg-slate-200 text-slate-600"}`}>
                   {n}
