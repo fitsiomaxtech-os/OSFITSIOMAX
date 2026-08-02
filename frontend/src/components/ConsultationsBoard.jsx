@@ -212,7 +212,7 @@ const PAYMENT_MODE_COLORS = {
   partial: "#e11d48",
 };
 
-export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened }) => {
+export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened, externalDate, hideDateFilter = false }) => {
   const isConsultant = viewerRole === "head_physio";
   // Head Physio tracks progress on their own independent pipeline (head_consultation_stage),
   // fully separate from Branch's own consultation_stage pipeline.
@@ -422,6 +422,16 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   useEffect(() => {
     if (externalStageFilter !== undefined) setStageFilter(externalStageFilter);
   }, [externalStageFilter]);
+
+  // A parent day-picker (the Head Physio board's week strip) drives the date filter, so
+  // the board shows one day at a time without its own popover fighting the selection.
+  useEffect(() => {
+    if (externalDate === undefined) return;
+    if (!externalDate) { setDateFilter(null); return; }
+    const from = new Date(`${externalDate}T00:00:00`);
+    const to = new Date(`${externalDate}T23:59:59`);
+    setDateFilter({ from, to, key: externalDate, label: externalDate });
+  }, [externalDate]);
 
   // Branch Leads' own lead popup hands off a specific lead here (rather than duplicating
   // this board's stage-specific popups) — once this board's own data has loaded, find that
@@ -1269,7 +1279,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
           className="h-8 border-0 p-0 focus-visible:ring-0"
           data-testid="cons-search"
         />
-        <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="cons-date-filter" />
+        {!hideDateFilter && <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="cons-date-filter" />}
         <Button
           onClick={load}
           disabled={loading}
