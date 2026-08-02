@@ -577,24 +577,55 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
 
 // ============ Mobile: Consultations tab (leads booked for a consultation) ============
 
+// Read-only milestone tracker for what happens to a lead after it's handed to a
+// branch: branch_stage carries the first two ("New Appointment" is set the instant a
+// branch is assigned; "Appointment Date & Time" is set once a specific date/time is
+// booked, and branch_stage never advances past it). The doctor finishing the visit
+// and suggesting a treatment plan is a *different* field — consultation_stage (or
+// head_consultation_stage) hits "Consultation Visit" — so it's tracked separately and
+// can be true at the same time branch_stage is still "Appointment Date & Time".
+const CONSULT_MILESTONES = [
+  { key: "new", label: "New Branch Assign", color: "#0ea5e9" },
+  { key: "booked", label: "Consultation Booked", color: "#f59e0b" },
+  { key: "completed", label: "Consultation Completed", color: "#22c55e" },
+];
+
+const consultMilestoneMatch = (l, key) => {
+  if (key === "new") return l.branch_stage === "New Appointment";
+  if (key === "booked") return l.branch_stage === "Appointment Date & Time";
+  if (key === "completed") return l.consultation_stage === "Consultation Visit" || l.head_consultation_stage === "Consultation Visit";
+  return false;
+};
+
 const ConsultationsTab = ({ leads, branches, loading, onOpen }) => {
   const [dateFilter, setDateFilter] = useState(null);
+  const [milestoneFilter, setMilestoneFilter] = useState(null);
+
+  const milestoneCounts = useMemo(() => ({
+    new: leads.filter((l) => consultMilestoneMatch(l, "new")).length,
+    booked: leads.filter((l) => consultMilestoneMatch(l, "booked")).length,
+    completed: leads.filter((l) => consultMilestoneMatch(l, "completed")).length,
+  }), [leads]);
 
   // Filters by appointment_date (when the consultation is booked), not created_at —
   // same field ConsultationsBoard's own date filter uses for this stage of leads.
   const filtered = useMemo(() => {
-    if (!dateFilter) return leads;
-    const from = dateFilter.from?.getTime();
-    const to = dateFilter.to?.getTime();
-    return leads.filter((l) => {
-      if (!l.appointment_date) return false;
-      const ts = new Date(`${l.appointment_date}T00:00:00`).getTime();
-      if (!ts) return false;
-      if (from && ts < from) return false;
-      if (to && ts > to) return false;
-      return true;
-    });
-  }, [leads, dateFilter]);
+    let rows = leads;
+    if (dateFilter) {
+      const from = dateFilter.from?.getTime();
+      const to = dateFilter.to?.getTime();
+      rows = rows.filter((l) => {
+        if (!l.appointment_date) return false;
+        const ts = new Date(`${l.appointment_date}T00:00:00`).getTime();
+        if (!ts) return false;
+        if (from && ts < from) return false;
+        if (to && ts > to) return false;
+        return true;
+      });
+    }
+    if (milestoneFilter) rows = rows.filter((l) => consultMilestoneMatch(l, milestoneFilter));
+    return rows;
+  }, [leads, dateFilter, milestoneFilter]);
 
   return (
     <div className="space-y-3 md:hidden" data-testid="presales-consultations-tab">
@@ -602,6 +633,30 @@ const ConsultationsTab = ({ leads, branches, loading, onOpen }) => {
         <h2 className="text-sm font-semibold text-slate-700">Consultations ({filtered.length})</h2>
         <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="presales-consult-date-filter" />
       </div>
+
+      <div className="grid grid-cols-3 gap-2" data-testid="presales-consult-milestones">
+        {CONSULT_MILESTONES.map((m) => {
+          const active = milestoneFilter === m.key;
+          return (
+            <button
+              key={m.key}
+              type="button"
+              onClick={() => setMilestoneFilter(active ? null : m.key)}
+              className="rounded-xl p-2.5 text-center transition-all"
+              style={
+                active
+                  ? { background: m.color, color: "#fff", boxShadow: `0 2px 8px ${m.color}40` }
+                  : { background: `${m.color}14`, color: m.color, border: `1px solid ${m.color}33` }
+              }
+              data-testid={`presales-consult-milestone-${m.key}`}
+            >
+              <p className="text-lg font-bold leading-none">{milestoneCounts[m.key]}</p>
+              <p className="mt-1 text-[9px] font-semibold uppercase leading-tight tracking-tight">{m.label}</p>
+            </button>
+          );
+        })}
+      </div>
+
       {filtered.length === 0 ? (
         <p className="rounded-xl border border-slate-200 bg-white py-10 text-center text-sm text-slate-400">
           {loading ? "Loading..." : "No consultations booked yet."}
@@ -609,6 +664,7 @@ const ConsultationsTab = ({ leads, branches, loading, onOpen }) => {
       ) : (
         filtered.map((l) => {
           const { branchName, status, statusColor } = branchStatusInfo(l, branches);
+          const completed = consultMilestoneMatch(l, "completed");
           return (
             <div
               key={l.id}
@@ -628,6 +684,11 @@ const ConsultationsTab = ({ leads, branches, loading, onOpen }) => {
                   <span className="text-[10px] text-emerald-600">Expert: {l.assigned_physio_name}</span>
                 ) : (
                   <span className="text-[10px] text-amber-600">Pending Expert</span>
+                )}
+                {completed && (
+                  <span className="inline-flex items-center gap-0.5 rounded border border-emerald-200 bg-emerald-50 px-1.5 text-[10px] font-semibold text-emerald-700">
+                    <CheckCircle2 className="h-2.5 w-2.5" />Treatment Suggested
+                  </span>
                 )}
               </div>
             </div>
@@ -848,20 +909,24 @@ const LeadDetailDialog = ({ lead, stages, currentUser, onClose, onSaved, onMoveS
           </div>
         </div>
 
-        {/* Pill tabs */}
+        {/* Pill tabs — Move to Stage lives behind "Additional Details" rather than as
+            an always-visible footer: that footer had no height cap of its own, and on
+            a small phone it could push the dialog past the viewport and get clipped by
+            the outer overflow-hidden wrapper. */}
         <div className="flex flex-wrap gap-1.5 border-b border-slate-100 bg-slate-50/60 px-5 py-2.5">
           {[
-            { key: "overview", color: "bg-sky-500" },
-            { key: "history", color: "bg-violet-500" },
-            { key: "follow-up", color: "bg-emerald-500" },
+            { key: "overview", label: "Overview", color: "bg-sky-500" },
+            { key: "history", label: "History", color: "bg-violet-500" },
+            { key: "follow-up", label: "Follow-up", color: "bg-emerald-500" },
+            { key: "additional", label: "Additional Details", color: "bg-amber-500" },
           ].map((t) => (
             <button
               key={t.key}
               onClick={() => setTab(t.key)}
-              className={`rounded-full px-3.5 py-1 text-xs font-semibold capitalize transition-all ${tab === t.key ? `${t.color} text-white shadow-sm` : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"}`}
+              className={`rounded-full px-3.5 py-1 text-xs font-semibold transition-all ${tab === t.key ? `${t.color} text-white shadow-sm` : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"}`}
               data-testid={`presales-detail-tab-${t.key}`}
             >
-              {t.key}
+              {t.label}
             </button>
           ))}
         </div>
@@ -1000,14 +1065,14 @@ const LeadDetailDialog = ({ lead, stages, currentUser, onClose, onSaved, onMoveS
               })}
             </div>
           )}
-        </div>
 
-        <div className="border-t border-slate-200 bg-white px-5 py-3">
-          <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">
-            <ArrowRight className="h-3.5 w-3.5 text-slate-400" />
-            Move to Stage
-          </p>
-          <div className="flex flex-wrap gap-2" data-testid="presales-detail-move-stages">
+          {tab === "additional" && (
+            <div className="space-y-3" data-testid="presales-detail-additional">
+              <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                <ArrowRight className="h-3.5 w-3.5 text-slate-400" />
+                Move to Stage
+              </p>
+              <div className="flex flex-wrap gap-2" data-testid="presales-detail-move-stages">
             {stages.filter((s) => s.name === "New Leads" ? currentLead.stage === "New Leads" : true).map((s) => {
               const active = currentLead.stage === s.name;
               const handleClick = async () => {
@@ -1079,6 +1144,8 @@ const LeadDetailDialog = ({ lead, stages, currentUser, onClose, onSaved, onMoveS
               >
                 <PhoneOff className="mr-1 h-3.5 w-3.5" /> +1 No Answer
               </Button>
+            </div>
+          )}
             </div>
           )}
         </div>
