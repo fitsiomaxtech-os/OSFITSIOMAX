@@ -2988,7 +2988,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                                       type="button"
                                       onClick={() => togglePickedSlot(slot)}
                                       disabled={taken}
-                                      className={`rounded-lg border-2 p-3 text-left transition-all ${
+                                      className={`overflow-hidden rounded-lg border-2 p-2 text-left transition-all sm:p-3 ${
                                         taken
                                           ? "cursor-not-allowed border-amber-300 bg-amber-50 opacity-70"
                                           : picked
@@ -2997,23 +2997,28 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                                             : "border-rose-400 bg-rose-100 shadow-md ring-2 ring-rose-200"
                                           : "border-emerald-200 bg-emerald-50 hover:border-emerald-400 hover:shadow-sm"
                                       }`}
+                                      title={taken
+                                        ? `Booked · ${physioCalendarData?.booked?.[slot]?.lead_name || "—"}`
+                                        : `${to12h(time)} – ${endTime12h(time, sessionMinutes)}${picked ? ` · Day ${planByDate[pickerDate].day} · ${pickedPaid ? "PAID" : "UNPAID"}` : ""}`}
                                       data-testid={`cons-slot-pick-${time}`}
                                     >
-                                      <div className="flex items-center justify-between gap-1">
-                                        <span className={`text-base font-bold ${taken ? "text-amber-800" : picked ? (pickedPaid ? "text-emerald-900" : "text-rose-900") : "text-emerald-800"}`}>
-                                          {to12h(time)}
-                                        </span>
-                                        {picked && (
-                                          <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold text-white ${pickedPaid ? "bg-emerald-600" : "bg-rose-600"}`}>
-                                            Day {planByDate[pickerDate].day}
-                                          </span>
-                                        )}
-                                      </div>
-                                      <p className={`mt-0.5 text-xs font-medium ${taken ? "truncate text-amber-600" : picked ? (pickedPaid ? "text-emerald-700" : "text-rose-700") : "text-emerald-600"}`}>
+                                      {/* Two lines, always. Both nowrap and sized to a third
+                                          of a phone, so "10:00 AM" can't break after the hour
+                                          and turn one box into four lines while "8:00 AM"
+                                          beside it stays at two. The first line carries only
+                                          the time — a Day badge sharing it was what tipped the
+                                          longest times over the width. */}
+                                      <p className={`truncate text-[13px] font-bold sm:text-base ${taken ? "text-amber-800" : picked ? (pickedPaid ? "text-emerald-900" : "text-rose-900") : "text-emerald-800"}`}>
+                                        {to12h(time)}
+                                      </p>
+                                      {/* Once a slot is picked, which treatment day it became
+                                          and whether it's paid matter more than its end time,
+                                          which is fixed by the package and named in the header. */}
+                                      <p className={`mt-0.5 truncate text-[10px] font-medium sm:text-xs ${taken ? "text-amber-600" : picked ? (pickedPaid ? "text-emerald-700" : "text-rose-700") : "text-emerald-600"}`}>
                                         {taken
                                           ? `Booked · ${physioCalendarData?.booked?.[slot]?.lead_name || "—"}`
                                           : picked
-                                          ? `ends ${endTime12h(time, sessionMinutes)} · ${pickedPaid ? "PAID" : "UNPAID"}`
+                                          ? `Day ${planByDate[pickerDate].day} · ${pickedPaid ? "PAID" : "UNPAID"}`
                                           : `ends ${endTime12h(time, sessionMinutes)}`}
                                       </p>
                                     </button>
