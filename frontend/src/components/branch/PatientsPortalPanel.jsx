@@ -1,29 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
-import { Copy, PhoneCall, User, X } from "lucide-react";
+import { Copy, Phone, PhoneCall, User, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
+import { WhatsAppIcon } from "@/components/ui/whatsapp-icon";
 import {
   getBranchBoard, updateLead,
   getPortalAccountStatus, createOrResetPortalAccount,
 } from "@/lib/api";
-
-/** Same E.164-for-wa.me sanitizer used in BranchAdminBoard.jsx / PhysioBoard.jsx —
- *  duplicated locally rather than exported/shared, matching how this codebase already
- *  keeps this small helper alongside each file that needs it. */
-const waNumber = (raw) => {
-  const digits = String(raw || "").replace(/\D/g, "");
-  if (!digits) return "";
-  if (digits.length === 10) return `91${digits}`;
-  if (digits.length === 11 && digits.startsWith("0")) return `91${digits.slice(1)}`;
-  return digits;
-};
-
-const WhatsAppIcon = ({ className }) => (
-  <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
-    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884M20.52 3.449C18.24 1.245 15.24.03 12.045 0c-6.472 0-11.734 5.262-11.736 11.735a11.7 11.7 0 001.567 5.87L.057 24l6.607-1.732a11.7 11.7 0 005.376 1.37h.005c6.472 0 11.734-5.262 11.735-11.734a11.68 11.68 0 00-3.26-8.457" />
-  </svg>
-);
+// Was a local copy of waNumber, identical to the three still inlined elsewhere. Now that
+// lib/phone.js exists this one points at it — the others can follow as they're touched.
+import { waNumber } from "@/lib/phone";
 
 const portalUrl = () => `${window.location.origin}/portal`;
 
@@ -73,7 +60,68 @@ export const PatientsPortalPanel = ({ branchId }) => {
           <p className="text-sm text-slate-400">No patients yet — a lead shows up here once their Treatment Fee is collected</p>
         </div>
       ) : (
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+        <>
+        {/* Cards on a phone. Four columns can't hold their width there — the phone
+            column was cut off mid-number, which is the one thing this list is used to
+            look up. Call and WhatsApp sit on the card for the same reason. */}
+        <div className="space-y-2 md:hidden" data-testid="branch-patients-mobile">
+          {visible.map((l) => {
+            const wa = waNumber(l.phone);
+            return (
+              // A div, not a button: the actions below are interactive themselves.
+              <div
+                key={l.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => setSelected(l)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelected(l); } }}
+                className="w-full cursor-pointer rounded-xl border border-slate-200 bg-white p-3 text-left active:bg-slate-50"
+                data-testid={`branch-patient-card-${l.id}`}
+              >
+                <div className="flex items-start gap-2.5">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-sky-50 text-xs font-bold text-sky-700">
+                    {l.name?.charAt(0)?.toUpperCase() || "?"}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="truncate font-semibold text-slate-800">{l.name}</span>
+                      <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">Paid</span>
+                    </div>
+                    <p className="truncate text-xs text-slate-600">{l.phone || "—"}</p>
+                    <p className="mt-0.5 text-[11px] text-slate-500">
+                      Treatment Fee Rs.{l.treatment_fee_paid}
+                      {l.treatment_fee_payment_mode && <span className="capitalize text-slate-400"> · {l.treatment_fee_payment_mode}</span>}
+                    </p>
+                  </div>
+                </div>
+                {wa && (
+                  <div className="mt-2.5 flex gap-2 border-t border-slate-100 pt-2.5">
+                    <a
+                      href={`tel:${wa}`}
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => e.stopPropagation()}
+                      className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-200 py-2 text-xs font-semibold text-slate-700 active:bg-slate-100"
+                      data-testid={`branch-patient-call-${l.id}`}
+                    >
+                      <Phone className="h-3.5 w-3.5" /> Call
+                    </a>
+                    <a
+                      href={`https://wa.me/${wa}`}
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => e.stopPropagation()}
+                      className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-[#25D366]/40 bg-[#25D366]/10 py-2 text-xs font-semibold text-[#128C7E] active:bg-[#25D366]/20"
+                      data-testid={`branch-patient-whatsapp-${l.id}`}
+                    >
+                      <WhatsAppIcon className="h-3.5 w-3.5" /> WhatsApp
+                    </a>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white md:block">
           <table className="min-w-full text-sm">
             <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
               <tr>
@@ -109,6 +157,7 @@ export const PatientsPortalPanel = ({ branchId }) => {
             </tbody>
           </table>
         </div>
+        </>
       )}
 
       {selected && (

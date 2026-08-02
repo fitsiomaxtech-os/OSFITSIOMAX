@@ -208,7 +208,46 @@ const RevenueDetailTable = ({ title, rows, onView }) => (
   <Card data-testid="accountant-manage-revenue-detail">
     <CardContent className="p-4">
       <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</p>
-      <div className="overflow-x-auto">
+      {/* Cards on a phone. Nine columns behind a 52rem scroll means every one of them is
+          off-screen except the first two, and a transaction is only useful read whole —
+          who paid, how much, by what, when. */}
+      <div className="space-y-2 md:hidden" data-testid="revenue-detail-mobile">
+        {rows.length === 0 ? (
+          <p className="rounded-lg border border-dashed border-slate-200 px-3 py-8 text-center text-sm text-slate-400">No transactions yet.</p>
+        ) : rows.map((tx, i) => (
+          <div
+            key={tx.id}
+            role={onView ? "button" : undefined}
+            tabIndex={onView ? 0 : undefined}
+            onClick={() => onView && onView(tx.lead_id)}
+            onKeyDown={(e) => {
+              if (onView && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onView(tx.lead_id); }
+            }}
+            className={`rounded-xl border border-slate-200 bg-white p-3 ${onView ? "cursor-pointer active:bg-slate-50" : ""}`}
+            data-testid={`revenue-detail-card-${tx.id}`}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="truncate font-semibold text-slate-800">
+                  <span className="mr-1.5 font-normal text-slate-400">{i + 1}.</span>
+                  {tx.client_name || "Unknown"}
+                </p>
+                <p className="truncate text-xs text-slate-500">{tx.phone || "—"}</p>
+              </div>
+              <span className="shrink-0 text-sm font-bold text-emerald-600">{fmt(tx.gross)}</span>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-slate-100 pt-2 text-[11px] text-slate-500">
+              <span className="capitalize">{tx.source}</span>
+              <PaymentModeBadge mode={tx.payment_mode} />
+              <span>{(tx.date || "").slice(0, 10)}</span>
+              {tx.branch_name && <span className="truncate">· {tx.branch_name}</span>}
+              {onView && <Eye className="ml-auto h-3.5 w-3.5 shrink-0 text-slate-300" />}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="hidden overflow-x-auto md:block">
         {/* table-fixed at w-full squeezes ten columns into a phone's width rather than
             letting the wrapper scroll — the min-width is what makes it scroll instead. */}
         <table className="w-full min-w-[52rem] table-fixed border-separate border-spacing-x-0 border-spacing-y-2 text-sm">
