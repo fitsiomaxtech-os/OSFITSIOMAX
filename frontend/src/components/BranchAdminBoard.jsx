@@ -401,13 +401,15 @@ export const BranchAdminBoard = ({ branchId }) => {
     }
   };
 
+  // `short` is what the bottom nav shows — six full labels will not fit across a phone,
+  // and a truncated "Accountant Ma…" reads worse than a word chosen to be short.
   const VIEW_TABS = [
-    { key: "pipeline", label: "Branch Leads", icon: LayoutDashboard },
-    { key: "review", label: "Review", icon: ClipboardCheck },
-    { key: "consultations", label: "MANAGEMENT", icon: Stethoscope },
-    { key: "patients", label: "Patients", icon: User },
-    { key: "accountant_mgmt", label: "Accountant Manage", icon: BadgeIndianRupee },
-    { key: "store", label: "Fitsiomax Store", icon: ShoppingCart },
+    { key: "pipeline", label: "Branch Leads", short: "Leads", icon: LayoutDashboard },
+    { key: "review", label: "Review", short: "Review", icon: ClipboardCheck },
+    { key: "consultations", label: "MANAGEMENT", short: "Manage", icon: Stethoscope },
+    { key: "patients", label: "Patients", short: "Patients", icon: User },
+    { key: "accountant_mgmt", label: "Accountant Manage", short: "Accounts", icon: BadgeIndianRupee },
+    { key: "store", label: "Fitsiomax Store", short: "Store", icon: ShoppingCart },
   ];
 
   // Everything under MANAGEMENT — Experts and Calendar used to be their own
@@ -421,9 +423,10 @@ export const BranchAdminBoard = ({ branchId }) => {
   ];
 
   return (
-    <div className="space-y-4" data-testid="branch-admin-board-root">
-      {/* View Tabs */}
-      <div className="flex items-center gap-1 overflow-x-auto border-b border-slate-200 pb-0" data-testid="branch-view-tabs">
+    // Bottom padding on a phone so the last row of a list clears the fixed nav below.
+    <div className="space-y-4 pb-20 md:pb-0" data-testid="branch-admin-board-root">
+      {/* View Tabs — desk only; a phone gets the bottom nav at the end of this file. */}
+      <div className="hidden items-center gap-1 overflow-x-auto border-b border-slate-200 pb-0 md:flex" data-testid="branch-view-tabs">
         {VIEW_TABS.map((tab) => {
           const Icon = tab.icon;
           return (
@@ -738,8 +741,41 @@ export const BranchAdminBoard = ({ branchId }) => {
       )}
 
       {loading && (
-        <div className="fixed bottom-4 right-4 rounded-md bg-slate-900 px-3 py-2 text-sm text-white">Loading...</div>
+        <div className="fixed bottom-20 right-4 rounded-md bg-slate-900 px-3 py-2 text-sm text-white md:bottom-4">Loading...</div>
       )}
+
+      {/* Bottom nav — phones only. The top strip scrolls sideways, which left Accountant
+          Manage and Store behind a swipe; down here all six are reachable by thumb.
+          Columns are counted off VIEW_TABS rather than hardcoded, so adding or dropping
+          a tab (as Rehab was) re-divides the bar instead of leaving a gap. */}
+      <nav
+        className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-2px_10px_rgba(15,23,42,0.06)] backdrop-blur supports-[backdrop-filter]:bg-white/85 md:hidden"
+        data-testid="branch-bottom-nav"
+      >
+        <div className="grid" style={{ gridTemplateColumns: `repeat(${VIEW_TABS.length}, minmax(0, 1fr))` }}>
+          {VIEW_TABS.map((tab) => {
+            const Icon = tab.icon;
+            const active = activeView === tab.key;
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setActiveView(tab.key)}
+                aria-current={active ? "page" : undefined}
+                className={`relative flex min-w-0 flex-col items-center justify-center gap-0.5 px-0.5 py-2 transition-colors ${
+                  active ? "text-sky-600" : "text-slate-400 active:text-slate-600"
+                }`}
+                data-testid={`branch-bottom-nav-${tab.key}`}
+              >
+                {/* The strip sits on the top edge, where the desk tabs carry their underline. */}
+                {active && <span className="absolute inset-x-2 top-0 h-0.5 rounded-full bg-sky-500" />}
+                <Icon className="h-[18px] w-[18px] flex-none" />
+                <span className="w-full truncate text-center text-[9px] font-semibold leading-tight">{tab.short}</span>
+              </button>
+            );
+          })}
+        </div>
+      </nav>
     </div>
   );
 };
