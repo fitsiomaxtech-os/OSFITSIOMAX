@@ -3446,88 +3446,102 @@ function PartialInstallmentsEditor({ installments, setInstallments, totalSession
         const overdue = !!inst.due_date && inst.due_date < todayIso;
         const isPaid = !!inst.paid;
         return (
-          <div key={idx} className="flex items-end gap-1.5" data-testid={`cons-treatment-fee-partial-row-${idx}`}>
-            <div className="flex-1">
-              <label className="mb-1 block text-[11px] font-medium text-slate-500">{partialInstallmentLabel(idx)} Sessions *</label>
-              <Input
-                type="number"
-                min="1"
-                max={totalSessions || undefined}
-                value={inst.sessions}
-                disabled={isPaid}
-                onChange={(e) => {
-                  const next = [...installments];
-                  next[idx] = { ...next[idx], sessions: e.target.value };
-                  setInstallments(next);
-                }}
-                className="h-9"
-                data-testid={`cons-treatment-fee-partial-sessions-${idx}`}
-              />
-            </div>
-            <div className="w-20">
-              <label className="mb-1 block text-[11px] font-medium text-slate-500">Amount</label>
-              <div className="flex h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-2 text-xs font-semibold text-slate-700" data-testid={`cons-treatment-fee-partial-computed-amount-${idx}`}>
-                {sessionsNum > 0 ? `₹${amount}` : "—"}
+          // Which installment this is, and its state, are named on their own line rather
+          // than inside the Sessions label. As "First Payment Sessions *" that label wrapped
+          // four lines deep on a phone and dragged its own column out of line with the two
+          // beside it, while pushing Collect off the right edge.
+          <div
+            key={idx}
+            className="rounded-lg border border-slate-200 p-2 sm:rounded-none sm:border-0 sm:border-t sm:border-slate-100 sm:p-0 sm:pt-2"
+            data-testid={`cons-treatment-fee-partial-row-${idx}`}
+          >
+            <div className="mb-1.5 flex items-center justify-between gap-2">
+              <span className="text-[11px] font-bold text-slate-700">{partialInstallmentLabel(idx)}</span>
+              <div className="flex items-center gap-1.5">
+                {isPaid ? (
+                  <span className="rounded-md bg-emerald-100 px-2 py-1 text-[10px] font-bold text-emerald-700" data-testid={`cons-treatment-fee-partial-paid-${idx}`}>
+                    PAID
+                  </span>
+                ) : (
+                  // The due date is when the money is expected, not the only day it can be
+                  // taken — a patient who walks in early still has to be collectable, so Due
+                  // is a state the row wears, not a lock on the button below it.
+                  <span
+                    className={`rounded-md px-2 py-1 text-[10px] font-bold ${
+                      overdue ? "bg-rose-100 text-rose-700" : isToday ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500"
+                    }`}
+                    data-testid={`cons-treatment-fee-partial-due-${idx}`}
+                  >
+                    {overdue ? "OVERDUE" : isToday ? "DUE TODAY" : "DUE"}
+                  </span>
+                )}
+                {installments.length > 2 && !isPaid && (
+                  <button
+                    type="button"
+                    onClick={() => setInstallments(installments.filter((_, i) => i !== idx))}
+                    className="rounded p-1 text-rose-400 hover:bg-rose-50 hover:text-rose-600"
+                    data-testid={`cons-treatment-fee-partial-remove-${idx}`}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
               </div>
             </div>
-            <div className="flex-1">
-              <label className="mb-1 block text-[11px] font-medium text-slate-500">Due Date *</label>
-              <Input
-                type="date"
-                value={inst.due_date}
-                disabled={isPaid}
-                onChange={(e) => {
-                  const next = [...installments];
-                  next[idx] = { ...next[idx], due_date: e.target.value };
-                  setInstallments(next);
-                }}
-                className="h-9"
-                data-testid={`cons-treatment-fee-partial-date-${idx}`}
-              />
-            </div>
-            {isPaid ? (
-              <Button
-                size="sm"
-                disabled
-                className="h-9 bg-emerald-600 text-xs text-white hover:bg-emerald-600 disabled:!opacity-100"
-                data-testid={`cons-treatment-fee-partial-paid-${idx}`}
-              >
-                <CheckCircle2 className="mr-1 h-3.5 w-3.5" /> Paid
-              </Button>
-            ) : (
-              // The due date is when the money is expected, not the only day it can be
-              // taken — a patient who walks in early still has to be collectable, so Due
-              // is a state the row wears, not a lock on the button beside it.
-              <>
-                <span
-                  className={`mb-1.5 shrink-0 rounded-md px-2 py-1 text-[10px] font-bold ${
-                    overdue ? "bg-rose-100 text-rose-700" : isToday ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500"
-                  }`}
-                  data-testid={`cons-treatment-fee-partial-due-${idx}`}
-                >
-                  {overdue ? "OVERDUE" : isToday ? "DUE TODAY" : "DUE"}
-                </span>
+
+            {/* Two columns on a phone — Sessions beside Amount, then the date and the
+                button full width under them. Squeezing all three fields onto one line
+                leaves the date box too narrow to read at 360px, which is most phones. */}
+            <div className="grid grid-cols-2 items-end gap-2 sm:flex sm:flex-wrap sm:gap-1.5">
+              <div className="min-w-0 sm:flex-1">
+                <label className="mb-1 block text-[11px] font-medium text-slate-500">Sessions *</label>
+                <Input
+                  type="number"
+                  min="1"
+                  max={totalSessions || undefined}
+                  value={inst.sessions}
+                  disabled={isPaid}
+                  onChange={(e) => {
+                    const next = [...installments];
+                    next[idx] = { ...next[idx], sessions: e.target.value };
+                    setInstallments(next);
+                  }}
+                  className="h-9"
+                  data-testid={`cons-treatment-fee-partial-sessions-${idx}`}
+                />
+              </div>
+              <div className="min-w-0 sm:w-[62px] sm:shrink-0">
+                <label className="mb-1 block text-[11px] font-medium text-slate-500">Amount</label>
+                <div className="flex h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-2 text-xs font-semibold text-slate-700" data-testid={`cons-treatment-fee-partial-computed-amount-${idx}`}>
+                  {sessionsNum > 0 ? `₹${amount}` : "—"}
+                </div>
+              </div>
+              <div className="col-span-2 min-w-0 sm:col-auto sm:min-w-[126px] sm:flex-[1.4]">
+                <label className="mb-1 block text-[11px] font-medium text-slate-500">Due Date *</label>
+                <Input
+                  type="date"
+                  value={inst.due_date}
+                  disabled={isPaid}
+                  onChange={(e) => {
+                    const next = [...installments];
+                    next[idx] = { ...next[idx], due_date: e.target.value };
+                    setInstallments(next);
+                  }}
+                  className="h-9"
+                  data-testid={`cons-treatment-fee-partial-date-${idx}`}
+                />
+              </div>
+              {!isPaid && (
                 <Button
                   size="sm"
                   onClick={() => onCollectRow(idx)}
                   disabled={collecting || !allFilled || mismatch}
-                  className="h-9 bg-emerald-600 text-xs hover:bg-emerald-700"
+                  className="col-span-2 h-9 w-full bg-emerald-600 text-xs hover:bg-emerald-700 sm:col-auto sm:w-auto"
                   data-testid={`cons-treatment-fee-partial-collect-${idx}`}
                 >
                   Collect
                 </Button>
-              </>
-            )}
-            {installments.length > 2 && !isPaid && (
-              <button
-                type="button"
-                onClick={() => setInstallments(installments.filter((_, i) => i !== idx))}
-                className="mb-1.5 rounded p-1.5 text-rose-400 hover:bg-rose-50 hover:text-rose-600"
-                data-testid={`cons-treatment-fee-partial-remove-${idx}`}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-            )}
+              )}
+            </div>
           </div>
         );
       })}
