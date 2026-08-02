@@ -148,9 +148,9 @@ async def consult_day(branch_id: str, date: str, _: V3UserOut = Depends(v3_requi
     if not is_open:
         return {"open": False, "reason": reason, "open_time": None, "close_time": None, "head_physios": []}
 
-    hps = await v3_col("doctors").find(
-        {"branch_id": branch_id, "profile_type": "head_physio"}, {"_id": 0}
-    ).to_list(200)
+    # Head Physios are org-wide: they take consultations for every branch, so this
+    # never narrows by branch_id.
+    hps = await v3_col("doctors").find({"profile_type": "head_physio"}, {"_id": 0}).to_list(200)
     doctor_ids = [d["id"] for d in hps]
 
     booked_by_doc: dict = {}

@@ -322,12 +322,9 @@ async def v3_available_experts(
     """
     if not date:
         raise HTTPException(status_code=400, detail="date is required")
-    branch_experts = await v3_col("doctors").find(
-        {"branch_id": branch_id, "profile_type": "head_physio"}, {"_id": 0}
-    ).to_list(500)
-    # Fallback for a branch with no Head Physio mapped to it yet.
-    if not branch_experts:
-        branch_experts = await v3_col("doctors").find({"profile_type": "head_physio"}, {"_id": 0}).to_list(500)
+    # Head Physios are org-wide: they take consultations for every branch, so this
+    # never narrows by branch_id.
+    branch_experts = await v3_col("doctors").find({"profile_type": "head_physio"}, {"_id": 0}).to_list(500)
 
     # Availability is decided per slot, not per day: an expert with a 9:30 booking is
     # still free at 10:00. So a same-day booking no longer hides them — only being
@@ -402,13 +399,11 @@ async def v3_available_dates(
     endpoint can't be used for this: it ignores the date when reading an expert's slots
     and falls back to a default 09:00-17:30 grid, so it reports every day as open.)
     """
+    # Head Physios are org-wide: they take consultations for every branch, so this
+    # never narrows by branch_id.
     branch_experts = await v3_col("doctors").find(
-        {"branch_id": branch_id, "profile_type": "head_physio"}, {"_id": 0, "id": 1, "slots": 1}
+        {"profile_type": "head_physio"}, {"_id": 0, "id": 1, "slots": 1}
     ).to_list(500)
-    if not branch_experts:
-        branch_experts = await v3_col("doctors").find(
-            {"profile_type": "head_physio"}, {"_id": 0, "id": 1, "slots": 1}
-        ).to_list(500)
 
     booked_rows = await v3_col("appointments").find(
         {"status": "new_appointment", "slot_time": {"$regex": f"^{month}-"}},
