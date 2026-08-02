@@ -1108,8 +1108,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
 
       {/* Detail / move-stage dialog */}
       {selectedLead && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 sm:p-4" data-testid="cons-detail-dialog">
-          <div className="w-full h-full sm:h-auto sm:w-[92vw] sm:max-w-3xl sm:max-h-[85vh] overflow-y-auto space-y-3 bg-white p-4 shadow-2xl sm:rounded-xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 sm:p-2" data-testid="cons-detail-dialog">
+          <div className="w-full h-full sm:w-[96vw] sm:max-w-5xl sm:h-[calc(100vh-1rem)] overflow-y-auto space-y-3 bg-white p-5 shadow-2xl sm:rounded-xl">
             <div className="flex items-start justify-between">
               <div>
                 <h3 className="flex items-center gap-2 text-base font-semibold text-slate-900" data-testid="cons-detail-title">
