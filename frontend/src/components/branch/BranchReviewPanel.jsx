@@ -390,7 +390,7 @@ export const BranchReviewPanel = ({ branchId }) => {
               </div>
 
               {/* STEP 3 — Time slot, from what the Head Physio actually published. */}
-              <div className="flex-1 overflow-y-auto p-5" data-testid="branch-review-slot-panel">
+              <div className="w-full flex-shrink-0 p-4 sm:p-5 lg:flex-1 lg:overflow-y-auto" data-testid="branch-review-slot-panel">
                 <p className="mb-1 text-xs font-bold uppercase tracking-wider text-slate-400">3 · Time Slot</p>
                 <p className="mb-3 text-xs text-slate-400">Published availability only.</p>
                 {!sendDraft.head_physio_id ? (

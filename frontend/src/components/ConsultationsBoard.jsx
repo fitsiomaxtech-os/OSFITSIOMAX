@@ -2782,49 +2782,56 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         </p>
                       </div>
                     </div>
-                    <button onClick={() => setShowSlotPicker(false)} className="order-2 shrink-0 rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="cons-slot-picker-close">
+                    <button onClick={() => setShowSlotPicker(false)} className="shrink-0 rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="cons-slot-picker-close">
                       <X className="h-5 w-5" />
                     </button>
-                    {/* Same bordered-box treatment as the PAID / UNPAID status badges below,
-                        in dark green so it reads as the popup's headline status. order puts
-                        it back between the title and the close button from sm up. */}
-                    <span
-                      className="order-3 w-full rounded-lg border-2 border-emerald-900 bg-emerald-700 px-4 py-1.5 text-center text-xs font-bold text-white shadow-sm sm:order-1 sm:w-auto sm:py-2 sm:text-sm"
-                      data-testid="cons-slot-picker-count"
-                    >
-                      {sortedPickedSlots.length} of {totalSessionsNeeded} treatment days fixed
-                    </span>
                   </div>
 
                   {/* Treatment Fee standing — which of these treatment days are actually paid
                       for. The balance sessions still get scheduled, but they're marked unpaid
                       so nobody books them believing the money is in. */}
-                  <div className="flex flex-wrap items-center gap-3 border-b-2 border-slate-200 bg-slate-100 px-6 py-3.5" data-testid="cons-slot-picker-payment">
-                    <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Treatment Fee</span>
-                    <span className="rounded-lg border-2 border-emerald-400 bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-700 shadow-sm" data-testid="cons-payment-paid">
-                      {sessionPayment.paid} session{sessionPayment.paid === 1 ? "" : "s"} PAID
-                      {sessionPayment.paidAmount > 0 && <span className="ml-2 font-semibold text-emerald-600">Rs.{sessionPayment.paidAmount}</span>}
-                      {sessionPayment.paid > 0 && <span className="ml-2 font-medium text-emerald-500">Day 1–{sessionPayment.paid}</span>}
-                    </span>
-                    {sessionPayment.unpaid > 0 ? (
-                      <span className="rounded-lg border-2 border-rose-400 bg-rose-50 px-4 py-2 text-sm font-bold text-rose-700 shadow-sm" data-testid="cons-payment-unpaid">
-                        {sessionPayment.unpaid} session{sessionPayment.unpaid === 1 ? "" : "s"} UNPAID
-                        {sessionPayment.dueAmount > 0 && <span className="ml-2 font-semibold text-rose-600">Rs.{sessionPayment.dueAmount}</span>}
-                        <span className="ml-2 font-medium text-rose-500">
-                          Day {sessionPayment.paid + 1}–{sessionPayment.total}
-                          {sessionPayment.dueDate ? ` · due ${dayLabel(sessionPayment.dueDate)}` : ""}
+                  {/* One status strip. Scheduling progress used to sit up in the purple
+                      header while the two payment badges sat down here, so the three things
+                      that describe where this booking stands were split across two bars and
+                      lined up with nothing. They read as a set now: a heading row, then the
+                      chips beneath it, each chip a full-width row on a phone so the amount
+                      and the day range inside it stay on one line. */}
+                  <div className="border-b-2 border-slate-200 bg-slate-100 px-4 py-3 sm:px-6 sm:py-3.5" data-testid="cons-slot-picker-payment">
+                    <div className="mb-2 flex items-baseline justify-between gap-2">
+                      <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Treatment Fee</span>
+                      {sessionPayment.price > 0 && (
+                        <span className="shrink-0 text-[12px] font-bold text-slate-600 sm:text-[13px]">
+                          Rs.{sessionPayment.paidAmount} of Rs.{sessionPayment.price} collected
                         </span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap items-stretch gap-2">
+                      <span
+                        className="w-full rounded-lg border-2 border-emerald-900 bg-emerald-700 px-3 py-1.5 text-center text-xs font-bold text-white shadow-sm sm:w-auto sm:px-4 sm:py-2 sm:text-sm"
+                        data-testid="cons-slot-picker-count"
+                      >
+                        {sortedPickedSlots.length} of {totalSessionsNeeded} treatment days fixed
                       </span>
-                    ) : (
-                      <span className="rounded-lg border-2 border-emerald-400 bg-emerald-100 px-4 py-2 text-sm font-bold text-emerald-800 shadow-sm">
-                        Package fully paid
+                      <span className="w-full rounded-lg border-2 border-emerald-400 bg-emerald-50 px-3 py-1.5 text-center text-xs font-bold text-emerald-700 shadow-sm sm:w-auto sm:px-4 sm:py-2 sm:text-left sm:text-sm" data-testid="cons-payment-paid">
+                        {sessionPayment.paid} session{sessionPayment.paid === 1 ? "" : "s"} PAID
+                        {sessionPayment.paidAmount > 0 && <span className="ml-2 font-semibold text-emerald-600">Rs.{sessionPayment.paidAmount}</span>}
+                        {sessionPayment.paid > 0 && <span className="ml-2 font-medium text-emerald-500">Day 1–{sessionPayment.paid}</span>}
                       </span>
-                    )}
-                    {sessionPayment.price > 0 && (
-                      <span className="ml-auto text-[13px] font-bold text-slate-600">
-                        Rs.{sessionPayment.paidAmount} of Rs.{sessionPayment.price} collected
-                      </span>
-                    )}
+                      {sessionPayment.unpaid > 0 ? (
+                        <span className="w-full rounded-lg border-2 border-rose-400 bg-rose-50 px-3 py-1.5 text-center text-xs font-bold text-rose-700 shadow-sm sm:w-auto sm:px-4 sm:py-2 sm:text-left sm:text-sm" data-testid="cons-payment-unpaid">
+                          {sessionPayment.unpaid} session{sessionPayment.unpaid === 1 ? "" : "s"} UNPAID
+                          {sessionPayment.dueAmount > 0 && <span className="ml-2 font-semibold text-rose-600">Rs.{sessionPayment.dueAmount}</span>}
+                          <span className="ml-2 font-medium text-rose-500">
+                            Day {sessionPayment.paid + 1}–{sessionPayment.total}
+                            {sessionPayment.dueDate ? ` · due ${dayLabel(sessionPayment.dueDate)}` : ""}
+                          </span>
+                        </span>
+                      ) : (
+                        <span className="w-full rounded-lg border-2 border-emerald-400 bg-emerald-100 px-3 py-1.5 text-center text-xs font-bold text-emerald-800 shadow-sm sm:w-auto sm:px-4 sm:py-2 sm:text-left sm:text-sm">
+                          Package fully paid
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   {loadingPhysioCalendar ? (
@@ -2922,7 +2929,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       </div>
 
                       {/* Times published on the focused date */}
-                      <div className="flex-1 overflow-y-auto p-4">
+                      {/* overflow and flex-1 only from lg, where the calendar and the times
+                          are side-by-side columns that scroll independently. Stacked on a
+                          phone this was a scroller inside the body's own scroller, which
+                          trapped the times in a short box — the date heading was clipped and
+                          the slots under it couldn't be reached at all. */}
+                      <div className="w-full flex-shrink-0 p-4 lg:flex-1 lg:overflow-y-auto">
                         {!pickerDate ? (
                           <div className="flex h-full items-center justify-center">
                             <div className="text-center">

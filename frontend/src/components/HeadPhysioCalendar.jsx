@@ -506,7 +506,7 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
               </div>
 
               {/* Time Slots Grid */}
-              <div className="flex-1 p-4 overflow-y-auto">
+              <div className="w-full flex-shrink-0 p-4 sm:p-5 lg:flex-1 lg:overflow-y-auto">
                 {!selectedDate ? (
                   <div className="flex items-center justify-center h-full">
                     <div className="text-center">
