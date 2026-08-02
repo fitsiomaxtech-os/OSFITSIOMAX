@@ -51,7 +51,6 @@ import { HeadPhysioCalendar } from "@/components/HeadPhysioCalendar";
 import { ConsultationsBoard } from "@/components/ConsultationsBoard";
 import { FitsiomaxStorePanel } from "@/components/BranchStoreBoard";
 import { PullFromSheetButton } from "@/components/PullFromSheetButton";
-import { PlaceholderPanel } from "@/components/PackagesBoard";
 import { AccountantManageTab } from "@/components/branch/AccountantManageTab";
 import { BranchCalendarPanel } from "@/components/branch/BranchCalendarPanel";
 import { BranchDetailPage } from "@/components/branch/BranchDetailPage";
@@ -406,7 +405,6 @@ export const BranchAdminBoard = ({ branchId }) => {
     { key: "pipeline", label: "Branch Leads", icon: LayoutDashboard },
     { key: "review", label: "Review", icon: ClipboardCheck },
     { key: "consultations", label: "MANAGEMENT", icon: Stethoscope },
-    { key: "rehab", label: "Rehab", icon: Activity },
     { key: "patients", label: "Patients", icon: User },
     { key: "accountant_mgmt", label: "Accountant Manage", icon: BadgeIndianRupee },
     { key: "store", label: "Fitsiomax Store", icon: ShoppingCart },
@@ -476,8 +474,6 @@ export const BranchAdminBoard = ({ branchId }) => {
         </div>
       ) : activeView === "review" ? (
         <BranchReviewPanel branchId={branchId} />
-      ) : activeView === "rehab" ? (
-        <PlaceholderPanel label="Rehab" testid="branch-rehab-panel" />
       ) : activeView === "patients" ? (
         <PatientsPortalPanel branchId={branchId} />
       ) : activeView === "store" ? (
