@@ -215,21 +215,24 @@ async def physio_consultations(physio_id: Optional[str] = None, user: V3UserOut 
     lead_ids = [l["id"] for l in leads]
     day_rows = await v3_col("sessions").find(
         {"physio_id": doctor["id"], "lead_id": {"$in": lead_ids}},
-        {"_id": 0, "lead_id": 1, "status": 1},
+        {"_id": 0, "lead_id": 1, "status": 1, "week_number": 1},
     ).to_list(5000)
     tallies: dict = {}
     for row in day_rows:
-        t = tallies.setdefault(row["lead_id"], {"total": 0, "completed": 0})
+        t = tallies.setdefault(row["lead_id"], {"total": 0, "completed": 0, "weeks": 0})
         t["total"] += 1
         if row.get("status") == "completed":
             t["completed"] += 1
+        # Weeks the plan spans — the highest week any of its days falls in.
+        t["weeks"] = max(t["weeks"], row.get("week_number") or 1)
 
     out = []
     for ld in leads:
         dumped = V3LeadOut(**ld).model_dump()
-        t = tallies.get(ld["id"], {"total": 0, "completed": 0})
+        t = tallies.get(ld["id"], {"total": 0, "completed": 0, "weeks": 0})
         dumped["total_sessions"] = t["total"]
         dumped["completed_sessions"] = t["completed"]
+        dumped["weeks"] = t["weeks"]
         out.append(dumped)
 
     return {

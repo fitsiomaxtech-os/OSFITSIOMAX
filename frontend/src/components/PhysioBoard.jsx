@@ -154,6 +154,7 @@ function TreatmentTab({ physioId }) {
           lead: lead || { id: s.lead_id, name: s.lead_name },
           time: (s.slot_time.split("T")[1] || "").slice(0, 5),
           label: `Day ${s.session_number} of ${s.total_sessions}`,
+          week: s.week_number,
           done: s.status === "completed",
         });
       });
@@ -256,7 +257,7 @@ function TreatmentTab({ physioId }) {
               <tr>
                 <th className="px-4 py-2.5">Patient</th>
                 <th className="px-4 py-2.5">Phone</th>
-                <th className="px-4 py-2.5">Stage</th>
+                <th className="px-4 py-2.5">Total Weeks</th>
                 <th className="px-4 py-2.5">Complete Days</th>
                 <th className="px-4 py-2.5">Updated</th>
                 <th className="px-4 py-2.5">Time</th>
@@ -285,11 +286,19 @@ function TreatmentTab({ physioId }) {
                     </td>
                     <td className="px-4 py-3 text-slate-600">{l.phone || "—"}</td>
                     <td className="px-4 py-3">
-                      <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-semibold ${
-                        l.physio_stage === "Complete" ? "bg-emerald-100 text-emerald-700" : "bg-sky-100 text-sky-700"
-                      }`}>
-                        {l.physio_stage === "Complete" ? "Complete" : (l.consultation_stage || "New Appointment")}
-                      </span>
+                      {/* Which week of the plan this row falls in, out of the weeks the
+                          patient's booked days span. */}
+                      {l.weeks ? (
+                        r.week ? (
+                          <span className="inline-flex items-center rounded-full bg-sky-100 px-2.5 py-1 text-[10px] font-semibold text-sky-700">
+                            Week {r.week} of {l.weeks}
+                          </span>
+                        ) : (
+                          <span className="text-slate-600">{l.weeks} week{l.weeks === 1 ? "" : "s"}</span>
+                        )
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-slate-600">{completeDays(l) || "—"}</td>
                     <td className="px-4 py-3 text-slate-500">{(l.updated_at || "").slice(0, 10) || "—"}</td>
