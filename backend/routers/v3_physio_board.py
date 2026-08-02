@@ -258,6 +258,25 @@ async def physio_consultations(physio_id: Optional[str] = None, user: V3UserOut 
     }
 
 
+@router.get("/physio/patient/{lead_id}")
+async def physio_patient_detail(lead_id: str, physio_id: Optional[str] = None, user: V3UserOut = Depends(v3_require_roles("physio", "super_admin"))):
+    """Full record for one of this physio's own assigned patients — backs the Patient
+    Detail page's Treatment and Profile tabs (diagnosis, treatment plan, payment fields).
+    physio_patients/physio_consultations only ever return a hand-picked subset; this is
+    the one place a physio can read everything V3LeadOut carries for their own patient."""
+    doctor = await _resolve_doctor(user, physio_id)
+    if not doctor:
+        raise HTTPException(status_code=404, detail="No physio profile found for this user")
+
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    if lead.get("assigned_physio_id") != doctor["id"]:
+        raise HTTPException(status_code=403, detail="This lead is not assigned to you")
+
+    return V3LeadOut(**lead).model_dump()
+
+
 @router.post("/physio/leads/{lead_id}/complete-consultation")
 async def physio_complete_consultation(lead_id: str, physio_id: Optional[str] = None, user: V3UserOut = Depends(v3_require_roles("physio", "super_admin"))):
     """Physio marks their initial consultation review of an assigned lead as finished."""

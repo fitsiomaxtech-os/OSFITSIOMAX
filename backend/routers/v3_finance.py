@@ -526,16 +526,22 @@ async def revenue_overview(
 @router.get("/finance/client/{lead_id}")
 async def client_transaction_history(
     lead_id: str,
-    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "accountant")),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "accountant", "physio")),
 ):
     """Transactions History > eye icon — one client's full profile, every payment
     they've made, their current outstanding balance, and their complete activity
-    timeline (stage moves, follow-ups, diagnosis notes — not just payments)."""
+    timeline (stage moves, follow-ups, diagnosis notes — not just payments).
+    A physio only ever sees their own assigned patient's history here, read-only —
+    used by the Patient Detail page's Payment History tab."""
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Client not found")
     if user.role == "branch_admin" and lead.get("branch_id") != user.branch_id:
         raise HTTPException(status_code=404, detail="Client not found")
+    if user.role == "physio":
+        doctor = await v3_col("doctors").find_one({"user_id": user.id, "profile_type": "physio"}, {"_id": 0, "id": 1})
+        if not doctor or lead.get("assigned_physio_id") != doctor["id"]:
+            raise HTTPException(status_code=404, detail="Client not found")
 
     branch_name = ""
     if lead.get("branch_id"):

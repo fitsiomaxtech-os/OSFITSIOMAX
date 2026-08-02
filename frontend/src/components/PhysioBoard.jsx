@@ -22,11 +22,13 @@ import {
   physioCompleteConsultation,
   physioCalendar,
   physioPatients,
+  physioPatientDetail,
   physioSessions,
   physioCompleteSession,
   physioWeeklyAssessment,
   physioReviews,
   physioRaiseReview,
+  getClientTransactionHistory,
 } from "@/lib/api";
 import { to12h, slotTo12h } from "@/lib/time";
 
@@ -1229,8 +1231,12 @@ function PatientsTab({ physioId, onCountChange }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await physioPatients(physioId);
-      setPatients(data.patients || []);
+      // review_number is only on /physio/reviews — merged in here so a patient's card
+      // can show how many review milestones they've had without a second round trip
+      // when opening their detail page.
+      const [data, rev] = await Promise.all([physioPatients(physioId), physioReviews(physioId)]);
+      const reviewByLead = Object.fromEntries((rev.patients || []).map((r) => [r.lead_id, r.review_number || 0]));
+      setPatients((data.patients || []).map((p) => ({ ...p, review_number: reviewByLead[p.lead_id] || 0 })));
     } catch { /* silent */ }
     setLoading(false);
   }, [physioId]);
@@ -1279,7 +1285,14 @@ function PatientsTab({ physioId, onCountChange }) {
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold text-slate-800">{p.lead_name}</p>
-                  <p className="truncate text-[10px] text-slate-400">{p.phone} · {p.package_weeks || "?"} weeks program</p>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <p className="truncate text-[10px] text-slate-400">{p.phone} · {p.package_weeks || "?"} weeks program</p>
+                    {p.review_number > 0 && (
+                      <span className="shrink-0 rounded-full bg-violet-100 px-1.5 py-0.5 text-[9px] font-semibold text-violet-700">
+                        {ordinal(p.review_number)} Review
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <Button size="sm" variant="outline" className="shrink-0 text-xs" onClick={() => setSelectedPatient(p)} data-testid={`physio-view-patient-${p.lead_id}`}>
                   <ClipboardList className="h-3 w-3 sm:mr-1" /> <span className="hidden sm:inline">Details</span>
@@ -1312,7 +1325,7 @@ function PatientsTab({ physioId, onCountChange }) {
       )}
 
       {selectedPatient && (
-        <PatientDetailModal
+        <PatientDetailPage
           patient={selectedPatient}
           physioId={physioId}
           onClose={() => setSelectedPatient(null)}
@@ -1323,138 +1336,311 @@ function PatientsTab({ physioId, onCountChange }) {
   );
 }
 
-function PatientDetailModal({ patient, physioId, onClose, onRefresh }) {
-  const [sessions, setSessions] = useState([]);
-  const [assessments, setAssessments] = useState([]);
+// Full page (not a popup) — Sessions / Treatment / Payment History / Profile.
+// Same fixed inset-0 full-bleed pattern as CalendarPage, opened from a patient card
+// in PatientsTab instead of a modal.
+export function PatientDetailPage({ patient, physioId, onClose, onRefresh }) {
   const [detailTab, setDetailTab] = useState("sessions");
-  const [completeModal, setCompleteModal] = useState(null);
-  const [assessmentWeek, setAssessmentWeek] = useState(null);
+  const [lead, setLead] = useState(null);
+  const [sessions, setSessions] = useState([]);
+  const [sessionFilter, setSessionFilter] = useState("all"); // all | pending | completed
+  const [viewSession, setViewSession] = useState(null);
 
   const load = useCallback(async () => {
     try {
-      const data = await physioSessions(patient.lead_id);
-      setSessions(data.sessions || []);
-      setAssessments(data.assessments || []);
+      const [leadData, sessData] = await Promise.all([
+        physioPatientDetail(patient.lead_id, physioId),
+        physioSessions(patient.lead_id),
+      ]);
+      setLead(leadData);
+      setSessions(sessData.sessions || []);
     } catch { /* silent */ }
-  }, [patient.lead_id]);
+  }, [patient.lead_id, physioId]);
 
   useEffect(() => { load(); }, [load]);
 
+  const pendingSessions = sessions.filter((s) => s.status !== "completed").length;
+  const completedSessions = sessions.filter((s) => s.status === "completed").length;
+  const visibleSessions = sessions.filter((s) => (
+    sessionFilter === "pending" ? s.status !== "completed"
+    : sessionFilter === "completed" ? s.status === "completed"
+    : true
+  ));
+
+  const Row = ({ label, value }) => (
+    !value ? null : (
+      <div>
+        <p className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">{label}</p>
+        <p className="text-xs text-slate-700">{value}</p>
+      </div>
+    )
+  );
+
+  const TABS = [
+    { key: "sessions", label: "Sessions" },
+    { key: "treatment", label: "Treatment" },
+    { key: "payment", label: "Payment History" },
+    { key: "profile", label: "Profile" },
+  ];
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="w-full max-w-3xl rounded-xl bg-white shadow-2xl max-h-[85vh] flex flex-col" data-testid="patient-detail-modal">
-        <div className="flex items-center justify-between border-b p-5">
-          <div>
-            <h3 className="text-base font-semibold text-slate-800">{patient.lead_name}</h3>
-            <p className="text-[10px] text-slate-400">{patient.completed_sessions}/{patient.total_sessions} completed · {patient.package_weeks || "?"} weeks</p>
+    <div className="fixed inset-0 z-50 flex flex-col bg-white" data-testid="physio-patient-detail-page">
+      <div className="flex items-center gap-2 border-b border-slate-200 p-4">
+        <button type="button" onClick={onClose} className="rounded p-1.5 text-slate-500 hover:bg-slate-100" data-testid="physio-patient-back">
+          <ArrowLeft className="h-5 w-5" />
+        </button>
+        <div className="min-w-0">
+          <h2 className="truncate text-sm font-semibold text-slate-800">{patient.lead_name}</h2>
+          <p className="text-[10px] text-slate-400">{patient.phone}</p>
+        </div>
+      </div>
+
+      <div className="flex gap-1 overflow-x-auto border-b border-slate-200 px-4 pt-2" data-testid="physio-patient-tabs">
+        {TABS.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            onClick={() => setDetailTab(t.key)}
+            className={`shrink-0 whitespace-nowrap rounded-t-md px-3 py-2 text-xs font-medium transition ${
+              detailTab === t.key ? "border-b-2 border-sky-500 text-sky-700" : "border-b-2 border-transparent text-slate-400 hover:text-slate-600"
+            }`}
+            data-testid={`physio-patient-tab-${t.key}`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-4">
+        {detailTab === "sessions" && (
+          <div className="space-y-3" data-testid="physio-patient-sessions-tab">
+            <div className="grid grid-cols-3 gap-2">
+              <StatTile
+                label="Pending" value={pendingSessions} solidClass="bg-amber-600"
+                onClick={() => setSessionFilter("pending")} active={sessionFilter === "pending"} testid="physio-patient-stat-pending"
+              />
+              <StatTile
+                label="Completed" value={completedSessions} valueClass="text-emerald-600"
+                onClick={() => setSessionFilter("completed")} active={sessionFilter === "completed"} testid="physio-patient-stat-completed"
+              />
+              <StatTile
+                label="Total" value={sessions.length} valueClass="text-sky-700"
+                onClick={() => setSessionFilter("all")} active={sessionFilter === "all"} testid="physio-patient-stat-total"
+              />
+            </div>
+            {visibleSessions.length === 0 ? (
+              <p className="py-10 text-center text-xs text-slate-400">No sessions</p>
+            ) : (
+              <div className="space-y-2">
+                {visibleSessions.map((s) => {
+                  const done = s.status === "completed";
+                  return (
+                    <button
+                      type="button"
+                      key={s.id}
+                      onClick={() => setViewSession(s)}
+                      className={`flex w-full items-center gap-3 rounded-lg border p-3 text-left transition ${done ? "border-emerald-200 bg-emerald-50/50" : "border-slate-200 bg-white hover:border-sky-200"}`}
+                      data-testid={`physio-patient-session-${s.id}`}
+                    >
+                      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold ${done ? "bg-emerald-200 text-emerald-800" : "bg-slate-100 text-slate-500"}`}>
+                        {s.session_number}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-xs font-medium text-slate-700">Session #{s.session_number} · Week {s.week_number}</p>
+                        <p className="text-[10px] text-slate-400">{s.slot_time ? `${s.slot_time.split("T")[0]} at ${slotTo12h(s.slot_time)}` : "—"}</p>
+                        {done && s.jr_physio_remarks && <p className="mt-0.5 truncate text-[10px] text-emerald-600">{s.jr_physio_remarks}</p>}
+                      </div>
+                      <span className={`shrink-0 rounded-full px-2 py-0.5 text-[9px] font-semibold ${done ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+                        {done ? "Completed" : "Pending"}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
-          <button type="button" onClick={onClose} className="p-1 rounded hover:bg-slate-100"><X className="h-5 w-5 text-slate-400" /></button>
-        </div>
-
-        <div className="flex gap-1 px-5 pt-3">
-          {[{ key: "sessions", label: "Sessions" }, { key: "assessments", label: "Weekly Assessments" }].map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => setDetailTab(t.key)}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
-                detailTab === t.key ? "bg-sky-100 text-sky-700" : "text-slate-400 hover:bg-slate-50"
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-5">
-          {detailTab === "sessions" && (
-            <div className="space-y-2">
-              {sessions.map((s) => (
-                <div key={s.id} className={`rounded-lg border p-3 flex items-center gap-3 ${s.status === "completed" ? "border-emerald-200 bg-emerald-50/50" : "border-slate-200"}`}>
-                  <div className={`h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold ${s.status === "completed" ? "bg-emerald-200 text-emerald-800" : "bg-slate-100 text-slate-500"}`}>
-                    {s.session_number}
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-xs font-medium text-slate-700">Session #{s.session_number} · Week {s.week_number}</p>
-                    <p className="text-[10px] text-slate-400">{s.slot_time ? `${s.slot_time.split("T")[0]} at ${slotTo12h(s.slot_time)}` : "—"}</p>
-                    {s.jr_physio_remarks && <p className="text-[10px] text-emerald-600 mt-0.5">Remarks: {s.jr_physio_remarks}</p>}
-                  </div>
-                  {s.status === "upcoming" ? (
-                    <Button size="sm" className="bg-sky-600 hover:bg-sky-700 text-white text-xs" onClick={() => setCompleteModal(s)}>
-                      <Check className="h-3 w-3 mr-1" /> Complete
-                    </Button>
-                  ) : (
-                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[9px] font-semibold text-emerald-700">Done</span>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-
-          {detailTab === "assessments" && (
-            <div className="space-y-3">
-              {Array.from({ length: patient.package_weeks || 1 }, (_, i) => {
-                const week = i + 1;
-                const existing = assessments.find((a) => a.week_number === week);
-                return (
-                  <div key={week} className="rounded-lg border border-slate-200 p-3">
-                    <div className="flex items-center justify-between mb-2">
-                      <p className="text-xs font-semibold text-slate-700">Week {week}</p>
-                      {existing ? (
-                        <span className={`rounded-full px-2 py-0.5 text-[9px] font-semibold ${
-                          existing.status === "reviewed" ? "bg-teal-100 text-teal-700" :
-                          "bg-amber-100 text-amber-700"
-                        }`}>{existing.status}</span>
-                      ) : (
-                        <Button size="sm" variant="outline" className="text-[10px] h-6" onClick={() => setAssessmentWeek(week)}>
-                          <Send className="h-3 w-3 mr-1" /> Submit
-                        </Button>
-                      )}
-                    </div>
-                    {existing?.jr_physio_notes && (
-                      <div className="rounded bg-sky-50 p-2 mb-1">
-                        <p className="text-[9px] font-semibold text-sky-500 uppercase">Your Notes</p>
-                        <p className="text-xs text-sky-800">{existing.jr_physio_notes}</p>
-                      </div>
-                    )}
-                    {existing?.head_physio_notes && (
-                      <div className="rounded bg-teal-50 p-2">
-                        <p className="text-[9px] font-semibold text-teal-500 uppercase">Head Physio Feedback</p>
-                        <p className="text-xs text-teal-800">{existing.head_physio_notes}</p>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {completeModal && (
-          <CompleteSessionModal
-            session={completeModal}
-            onClose={() => setCompleteModal(null)}
-            onDone={() => { setCompleteModal(null); load(); onRefresh(); }}
-          />
         )}
 
-        {assessmentWeek && (
-          <WeeklyAssessmentModal
-            leadId={patient.lead_id}
-            week={assessmentWeek}
-            physioId={physioId}
-            onClose={() => setAssessmentWeek(null)}
-            onDone={() => { setAssessmentWeek(null); load(); }}
-          />
+        {detailTab === "treatment" && (
+          <div className="space-y-3" data-testid="physio-patient-treatment-tab">
+            <div className="rounded-lg border border-slate-200 bg-white p-3">
+              <p className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-slate-400">Treatment Package</p>
+              <p className="text-sm font-semibold text-slate-800">
+                {lead?.session_package_name || "—"}{lead?.session_package_sessions ? ` · ${lead.session_package_sessions} sessions` : ""}
+              </p>
+            </div>
+            {lead?.diagnosis && (
+              <div className="rounded-lg border border-slate-200 p-3">
+                <p className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-slate-400">Pre-Sales Diagnosis</p>
+                <p className="whitespace-pre-wrap text-xs text-slate-700">{lead.diagnosis}</p>
+              </div>
+            )}
+            {lead?.physio_diagnosis_report && (
+              <div className="rounded-lg border border-sky-200 bg-sky-50 p-3">
+                <p className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-sky-500">Diagnosis Report (Head Physio)</p>
+                <p className="whitespace-pre-wrap text-xs text-sky-900">{lead.physio_diagnosis_report}</p>
+              </div>
+            )}
+            {lead?.treatment_summary && (
+              <div className="rounded-lg border border-violet-200 bg-violet-50 p-3">
+                <p className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-violet-500">Treatment Summary (Head Physio)</p>
+                <p className="whitespace-pre-wrap text-xs text-violet-900">{lead.treatment_summary}</p>
+              </div>
+            )}
+            {lead && !lead.physio_diagnosis_report && !lead.treatment_summary && (
+              <p className="rounded-lg border border-dashed border-slate-200 p-6 text-center text-xs text-slate-400">
+                No treatment details submitted by the Head Physio yet.
+              </p>
+            )}
+          </div>
+        )}
+
+        {detailTab === "payment" && <PaymentHistoryTab leadId={patient.lead_id} lead={lead} />}
+
+        {detailTab === "profile" && lead && (
+          <div className="grid grid-cols-2 gap-3" data-testid="physio-patient-profile-tab">
+            <Row label="Patient Number" value={lead.patient_number} />
+            <Row label="Phone" value={lead.phone} />
+            <Row label="Email" value={lead.email} />
+            <Row label="Alternative Phone" value={lead.alternative_phone} />
+            <Row label="Age" value={lead.age} />
+            <Row label="Gender" value={lead.gender} />
+            <Row label="Occupation" value={lead.occupation} />
+            <Row label="Address" value={lead.address} />
+            <Row label="City / State" value={[lead.city, lead.state].filter(Boolean).join(", ")} />
+            <Row label="Condition" value={lead.condition} />
+            <Row label="Months of Pain" value={lead.months_of_pain} />
+          </div>
+        )}
+      </div>
+
+      {viewSession && (
+        <CompleteSessionModal
+          session={viewSession}
+          onClose={() => setViewSession(null)}
+          onDone={() => { setViewSession(null); load(); onRefresh?.(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// Total/Collected/Pending across both fees, then a card each for Consultation Fee and
+// Treatment Fee — reuses the same finance history the Accountant's Transactions History
+// popup calls, just read-only and scoped to this physio's own patient.
+function PaymentHistoryTab({ leadId, lead }) {
+  const [payment, setPayment] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { setPayment(await getClientTransactionHistory(leadId)); } catch { /* silent */ }
+    setLoading(false);
+  }, [leadId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  if (!payment) {
+    return <p className="py-10 text-center text-xs text-slate-400">{loading ? "Loading..." : "Could not load payment history"}</p>;
+  }
+
+  const pd = payment.payment_details || {};
+  const consultationTotal = pd.consultation_fee_total || 0;
+  const consultationPaid = pd.consultation_fee_paid ?? 0;
+  const treatmentTotal = lead?.session_package_price || 0;
+  const isPartial = lead?.treatment_fee_payment_mode === "partial";
+  const installments = (lead?.treatment_fee_payment_details || {}).installments || [];
+  const treatmentPaid = isPartial
+    ? installments.filter((i) => i.paid).reduce((sum, i) => sum + (i.amount || 0), 0)
+    : (pd.treatment_fee_paid ?? 0);
+  const totalAll = consultationTotal + treatmentTotal;
+  const collectedAll = consultationPaid + treatmentPaid;
+  const pendingAll = Math.max(totalAll - collectedAll, 0);
+  const nextDue = isPartial
+    ? installments.filter((i) => !i.paid).sort((a, b) => (a.due_date || "").localeCompare(b.due_date || ""))[0]
+    : null;
+
+  return (
+    <div className="space-y-4" data-testid="physio-patient-payment-tab">
+      <div className="grid grid-cols-3 gap-2">
+        <StatTile label="Total" value={`₹${totalAll}`} valueClass="text-sky-700" />
+        <StatTile label="Collected" value={`₹${collectedAll}`} valueClass="text-emerald-600" />
+        <StatTile label="Pending" value={`₹${pendingAll}`} solidClass={pendingAll > 0 ? "bg-amber-600" : "bg-slate-400"} />
+      </div>
+
+      <div className="rounded-lg border border-slate-200 bg-white p-3" data-testid="physio-patient-consultation-fee">
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Consultation Fee</p>
+          <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${consultationPaid ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+            {consultationPaid ? "Paid" : "Pending"}
+          </span>
+        </div>
+        {consultationPaid ? (
+          <div className="space-y-1 text-xs text-slate-600">
+            <p>Amount: <span className="font-semibold text-slate-800">₹{consultationPaid}</span></p>
+            <p>Payment Mode: <span className="font-semibold capitalize text-slate-800">{lead?.package_payment_mode || "—"}</span></p>
+            <p>Consultation Mode: <span className="font-semibold capitalize text-slate-800">{lead?.consultation_mode || "—"}</span></p>
+            {lead?.package_payment_details?.upi_transaction_id && (
+              <p>UPI Txn {lead.package_payment_details.upi_transaction_id} · UTR {lead.package_payment_details.upi_utr}</p>
+            )}
+            {lead?.package_payment_details?.account_last4 && (
+              <p>Card ****{lead.package_payment_details.account_last4} · {lead.package_payment_details.bank_name}</p>
+            )}
+          </div>
+        ) : (
+          <p className="text-xs text-slate-400">Not yet collected{consultationTotal ? ` — ₹${consultationTotal} due` : ""}</p>
+        )}
+      </div>
+
+      <div className="rounded-lg border border-slate-200 bg-white p-3" data-testid="physio-patient-treatment-fee">
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Treatment Fee</p>
+          {lead?.treatment_fee_paid == null ? (
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">Not Collected</span>
+          ) : isPartial ? (
+            <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold text-sky-700">Partial</span>
+          ) : (
+            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">Paid in Full</span>
+          )}
+        </div>
+        {lead?.treatment_fee_paid == null ? (
+          <p className="text-xs text-slate-400">No treatment fee collected yet</p>
+        ) : !isPartial ? (
+          <div className="space-y-1 text-xs text-slate-600">
+            <p>Amount: <span className="font-semibold text-slate-800">₹{lead.treatment_fee_paid}</span></p>
+            <p>Payment Mode: <span className="font-semibold capitalize text-slate-800">{lead.treatment_fee_payment_mode}</span></p>
+            {lead?.treatment_fee_payment_details?.cheque_number && (
+              <p>Cheque #{lead.treatment_fee_payment_details.cheque_number} · {lead.treatment_fee_payment_details.bank_name}</p>
+            )}
+            {lead?.treatment_fee_payment_details?.upi_transaction_id && (
+              <p>UPI Txn {lead.treatment_fee_payment_details.upi_transaction_id} · UTR {lead.treatment_fee_payment_details.upi_utr}</p>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <p className="text-[11px] text-slate-500">{installments.filter((i) => i.paid).length} of {installments.length} payments collected</p>
+            {nextDue ? (
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-800">
+                Next payment <span className="font-semibold">₹{nextDue.amount}</span> due {nextDue.due_date}
+                <span className="ml-1 text-[10px] text-amber-500">(also visible to Branch Admin)</span>
+              </div>
+            ) : (
+              <p className="rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-2 text-xs text-emerald-700">All installments collected</p>
+            )}
+          </div>
         )}
       </div>
     </div>
   );
 }
 
+// Doubles as a read-only "view summary" for an already-completed session — any
+// session, in any stage, can be opened here; only an upcoming one gets an editable
+// textarea and a submit button.
 function CompleteSessionModal({ session, onClose, onDone }) {
-  const [remarks, setRemarks] = useState("");
+  const [remarks, setRemarks] = useState(session.jr_physio_remarks || "");
   const [submitting, setSubmitting] = useState(false);
+  const isDone = session.status === "completed";
 
   const handleSubmit = async () => {
     if (!remarks.trim()) { toast.error("Please add remarks"); return; }
@@ -1473,18 +1659,28 @@ function CompleteSessionModal({ session, onClose, onDone }) {
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="w-full max-w-md rounded-xl bg-white shadow-2xl" data-testid="complete-session-modal">
         <div className="border-b p-5">
-          <h3 className="text-base font-semibold text-slate-800">Complete Session #{session.session_number}</h3>
+          <h3 className="text-base font-semibold text-slate-800">{isDone ? "Session Summary" : "Complete Session"} #{session.session_number}</h3>
           <p className="text-[10px] text-slate-400">{session.lead_name} · {session.slot_time ? `${session.slot_time.split("T")[0]} at ${slotTo12h(session.slot_time)}` : "—"}</p>
         </div>
         <div className="p-5">
-          <label className="text-xs font-medium text-slate-600 mb-1 block">Session Remarks (visible to patient)</label>
-          <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={4} placeholder="Exercises done, observations, next steps..." className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm" data-testid="session-remarks" />
+          <label className="text-xs font-medium text-slate-600 mb-1 block">Session {isDone ? "Summary" : "Remarks (visible to patient)"}</label>
+          <textarea
+            value={remarks}
+            onChange={(e) => setRemarks(e.target.value)}
+            rows={4}
+            disabled={isDone}
+            placeholder="Exercises done, observations, next steps..."
+            className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm disabled:bg-slate-50 disabled:text-slate-500"
+            data-testid="session-remarks"
+          />
         </div>
         <div className="flex justify-end gap-2 border-t p-4">
-          <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
-          <Button size="sm" onClick={handleSubmit} disabled={submitting} className="bg-sky-600 hover:bg-sky-700 text-white" data-testid="session-complete-submit">
-            {submitting ? "Completing..." : "Mark Complete"}
-          </Button>
+          <Button variant="outline" size="sm" onClick={onClose}>{isDone ? "Close" : "Cancel"}</Button>
+          {!isDone && (
+            <Button size="sm" onClick={handleSubmit} disabled={submitting} className="bg-sky-600 hover:bg-sky-700 text-white" data-testid="session-complete-submit">
+              {submitting ? "Completing..." : "Mark Complete"}
+            </Button>
+          )}
         </div>
       </div>
     </div>
