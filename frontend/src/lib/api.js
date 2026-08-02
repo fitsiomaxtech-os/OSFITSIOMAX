@@ -91,6 +91,10 @@ export const updateLead = async (leadId, payload) => (await api.put(`/leads/${le
 export const deleteLead = async (leadId) => (await api.delete(`/leads/${leadId}`)).data;
 export const getPortalAccountStatus = async (leadId) => (await api.get(`/leads/${leadId}/portal-account`)).data;
 export const createOrResetPortalAccount = async (leadId, payload) => (await api.post(`/leads/${leadId}/portal-account`, payload)).data;
+
+export const listTestimonials = async () => (await api.get("/testimonials/manage")).data;
+export const addTestimonial = async (payload) => (await api.post("/testimonials", payload)).data;
+export const deleteTestimonial = async (id) => (await api.delete(`/testimonials/${id}`)).data;
 export const rnrAttempt = async (leadId) => (await api.post(`/leads/${leadId}/rnr-attempt`)).data;
 export const scheduleFollowUp = async (leadId, payload) => (await api.post(`/leads/${leadId}/follow-up`, payload)).data;
 export const rescheduleFollowUp = async (leadId, followupId, payload) => (await api.post(`/leads/${leadId}/follow-up/${followupId}/reschedule`, payload)).data;

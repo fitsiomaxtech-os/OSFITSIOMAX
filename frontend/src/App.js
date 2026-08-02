@@ -6,6 +6,7 @@ import { CRMPage } from "@/pages/CRMPage";
 import { CreateSuperAdminPublicPage } from "@/pages/CreateSuperAdminPublicPage";
 import { ResetPasswordPage } from "@/pages/ResetPasswordPage";
 import { PatientPortalPage } from "@/pages/PatientPortalPage";
+import { TestimonialsPage } from "@/pages/TestimonialsPage";
 import { clearSession, loadSession, saveSession } from "@/lib/session";
 import { apiMe } from "@/lib/api";
 
@@ -71,6 +72,7 @@ function App() {
         <Route path="/createsuperadmin" element={<CreateSuperAdminPublicPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/portal" element={<PatientPortalPage />} />
+        <Route path="/testimonials" element={<TestimonialsPage />} />
         <Route path="*" element={<Navigate to={isAuthenticated ? "/app" : "/"} replace />} />
       </Routes>
     </BrowserRouter>

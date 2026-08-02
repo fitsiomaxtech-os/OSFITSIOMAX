@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Eye, Plus, Search, Settings as Cog, Calendar as CalendarIcon, Phone, FileText, StickyNote, ArrowRight, CheckCircle2, X, Pencil, PhoneOff, Clock, Bell, Building2, Trash2, Lock } from "lucide-react";
+import { Eye, Plus, Search, Settings as Cog, Calendar as CalendarIcon, Phone, FileText, StickyNote, ArrowRight, CheckCircle2, X, Pencil, PhoneOff, Clock, Bell, Building2, Trash2, Lock, Users, CalendarCheck, UserRound, LogOut, Mail, Youtube } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import {
   getLeads, createManualLead, stagesList, updateLead, rnrAttempt, scheduleFollowUp, rescheduleFollowUp, scheduleAppointment, getBranches, leadActivity, deleteLead,
+  listTestimonials, addTestimonial, deleteTestimonial,
 } from "@/lib/api";
 import { LeadEditModal } from "@/components/LeadEditModal";
 import { CreateLeadModal } from "@/components/CreateLeadModal";
@@ -53,9 +54,81 @@ const avatarColor = (name) => {
   return AVATAR_PALETTE[idx];
 };
 
+// 10-digit → prepend 91; 11-digit leading 0 → drop the 0 and prepend 91 — same
+// sanitizer used for WhatsApp links elsewhere in this app (PhysioBoard, Client Portal).
+const waNumber = (raw) => {
+  const digits = (raw || "").replace(/\D/g, "");
+  if (digits.length === 10) return `91${digits}`;
+  if (digits.length === 11 && digits.startsWith("0")) return `91${digits.slice(1)}`;
+  return digits;
+};
+
+// lucide-react has no WhatsApp glyph, so this is hand-drawn (duplicated per-file,
+// matching the convention already used in PhysioBoard.jsx / PatientsPortalPanel.jsx).
+const WhatsAppIcon = ({ className }) => (
+  <svg viewBox="0 0 24 24" className={className} fill="currentColor">
+    <path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2 22l5.29-1.39a9.9 9.9 0 0 0 4.75 1.21h.01c5.46 0 9.9-4.45 9.9-9.91C21.96 6.45 17.5 2 12.04 2m0 18.15a8.2 8.2 0 0 1-4.19-1.15l-.3-.18-3.14.82.84-3.06-.2-.31a8.22 8.22 0 0 1-1.26-4.36c0-4.54 3.7-8.24 8.25-8.24 2.2 0 4.27.86 5.83 2.42a8.18 8.18 0 0 1 2.41 5.83c0 4.55-3.7 8.24-8.24 8.24m4.52-6.17c-.25-.12-1.47-.72-1.69-.81-.23-.08-.39-.12-.56.13-.17.24-.64.81-.78.97-.15.17-.29.19-.54.06-.25-.12-1.05-.39-1.99-1.24-.74-.66-1.23-1.47-1.38-1.72-.14-.25-.02-.38.11-.5.11-.11.25-.29.37-.43.13-.15.17-.25.25-.42.08-.17.04-.31-.02-.43-.06-.12-.56-1.36-.77-1.86-.2-.48-.41-.42-.56-.43h-.48c-.17 0-.43.06-.66.31s-.87.85-.87 2.08.89 2.41 1.02 2.58c.12.17 1.75 2.67 4.24 3.74.59.26 1.05.41 1.41.52.59.19 1.13.16 1.56.1.48-.07 1.47-.6 1.67-1.18.21-.58.21-1.08.15-1.18-.06-.1-.23-.16-.48-.28"/>
+  </svg>
+);
+
+const testimonialsUrl = () => `${window.location.origin}/testimonials`;
+
+// Call → native dialer (tel:); WhatsApp → a template message pointing the lead at the
+// patient testimonial videos before the rep even gets them on the phone. Same-tab
+// navigation (window.location.href, not window.open), matching the fix applied
+// elsewhere for the mobile "blank screen on return from WhatsApp" bug.
+const LeadContactIcons = ({ lead }) => {
+  if (!lead.phone) return null;
+  const num = waNumber(lead.phone);
+  const handleCall = (e) => { e.stopPropagation(); window.location.href = `tel:${lead.phone}`; };
+  const handleWhatsApp = (e) => {
+    e.stopPropagation();
+    const text = [
+      `Hi ${lead.name || "there"}, this is Fitsiomax!`,
+      "",
+      "Take a look at real patient success stories before we connect:",
+      testimonialsUrl(),
+    ].join("\n");
+    window.location.href = `https://wa.me/${num}?text=${encodeURIComponent(text)}`;
+  };
+  return (
+    <div className="flex items-center justify-center gap-1">
+      <button type="button" onClick={handleCall} className="rounded-full p-1.5 text-sky-600 hover:bg-sky-50" title="Call" data-testid={`presales-call-${lead.id}`}>
+        <Phone className="h-3.5 w-3.5" />
+      </button>
+      <button type="button" onClick={handleWhatsApp} className="rounded-full p-1.5 text-emerald-600 hover:bg-emerald-50" title="WhatsApp" data-testid={`presales-whatsapp-${lead.id}`}>
+        <WhatsAppIcon className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+};
+
+// Shared between the desktop Appointment column and the mobile Consultations tab —
+// same branch_stage vocabulary the Branch Admin's own pipeline already uses.
+const branchStatusInfo = (lead, branches) => {
+  const branchName = lead.branch_id
+    ? (branches.find((b) => b.id === lead.branch_id)?.branch_name || branches.find((b) => b.id === lead.branch_id)?.name)
+    : (lead.appointment_mode === "online" ? "Online Consultation" : "Unassigned");
+  const status = lead.branch_stage || "Pending";
+  const statusColor = {
+    "New Appointment": "bg-blue-50 text-blue-700 border-blue-200",
+    "Portfolio": "bg-violet-50 text-violet-700 border-violet-200",
+    "Follow Up": "bg-orange-50 text-orange-700 border-orange-200",
+    "Appointment Date & Time": "bg-teal-50 text-teal-700 border-teal-200",
+    "Cancelled": "bg-rose-50 text-rose-700 border-rose-200",
+  }[status] || "bg-slate-50 text-slate-600 border-slate-200";
+  return { branchName, status, statusColor };
+};
+
+const PRESALES_TABS = [
+  { key: "leads", label: "Leads", icon: Users },
+  { key: "consultations", label: "Consultations", icon: CalendarCheck },
+  { key: "profile", label: "Profile", icon: UserRound },
+];
+
 const PRESALES_CRM_LOCKED = false;
 
-export const PreSalesCRM = ({ onManageStages, role, currentUser }) => {
+export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => {
   const [stages, setStages] = useState([]);
   const [leads, setLeads] = useState([]);
   const [branches, setBranches] = useState([]);
@@ -68,6 +141,7 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser }) => {
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [loading, setLoading] = useState(false);
   const [visibleCount, setVisibleCount] = useState(50);
+  const [activeTab, setActiveTab] = useState("leads"); // mobile bottom-nav only; desktop always shows Leads
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -133,6 +207,12 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser }) => {
   useEffect(() => { setVisibleCount(50); }, [stageFilter, sourceFilter, search, dateFilter]);
   const visibleLeads = filtered.slice(0, visibleCount);
 
+  // Mobile Consultations tab — this rep's leads currently booked for a consultation.
+  const appointmentLeads = useMemo(
+    () => dateSourceFiltered.filter((l) => l.stage === "Appointment").sort((a, b) => (b.created_at || "").localeCompare(a.created_at || "")),
+    [dateSourceFiltered],
+  );
+
   const moveToStage = async (leadId, stageName) => {
     try { await updateLead(leadId, { stage: stageName }); toast.success(`Moved to ${stageName}`); load(); }
     catch (e) { toast.error(e?.response?.data?.detail || "Move failed"); }
@@ -152,7 +232,8 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser }) => {
   }
 
   return (
-    <div className="space-y-5" data-testid="presales-crm-page">
+    <div className={`space-y-5 ${role === "pre_sales" ? "pb-20 md:pb-0" : ""}`} data-testid="presales-crm-page">
+    <div className={role === "pre_sales" && activeTab !== "leads" ? "hidden space-y-5 md:block" : "space-y-5"} data-testid="presales-leads-tab">
       {/* KPI Cards */}
       <div className="flex flex-nowrap gap-3" data-testid="presales-kpi-row">
         <KpiCard label="Total Leads" value={stageCounts.All} active={stageFilter === "All"} color="#22c55e" onClick={() => setStageFilter("All")} testid="presales-kpi-all" />
@@ -214,7 +295,12 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser }) => {
                           <span className="truncate">{l.name}</span>
                         </div>
                       </td>
-                      <td className="border-y border-slate-200 bg-white px-3 py-3 text-center font-mono text-xs text-slate-700 transition-colors group-hover:bg-slate-50">{l.phone || "—"}</td>
+                      <td className="border-y border-slate-200 bg-white px-3 py-3 text-center transition-colors group-hover:bg-slate-50">
+                        <div className="flex flex-col items-center gap-1">
+                          <span className="font-mono text-xs text-slate-700">{l.phone || "—"}</span>
+                          <LeadContactIcons lead={l} />
+                        </div>
+                      </td>
                       <td className="border-y border-slate-200 bg-white px-3 py-3 text-center text-xs text-slate-600 transition-colors group-hover:bg-slate-50">{l.email || "—"}</td>
                       <td className="border-y border-slate-200 bg-white px-3 py-3 text-center transition-colors group-hover:bg-slate-50"><SourcePill source={l.source_tab || l.source_type} /></td>
                       <td className="border-y border-slate-200 bg-white px-3 py-3 transition-colors group-hover:bg-slate-50">
@@ -247,15 +333,7 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser }) => {
                         </div>
                       </td>
                       {stageFilter === "Appointment" && (() => {
-                        const branchName = l.branch_id ? (branches.find((b) => b.id === l.branch_id)?.branch_name || branches.find((b) => b.id === l.branch_id)?.name) : (l.appointment_mode === "online" ? "Online Consultation" : "Unassigned");
-                        const status = l.branch_stage || "Pending";
-                        const statusColor = {
-                          "New Appointment": "bg-blue-50 text-blue-700 border-blue-200",
-                          "Portfolio": "bg-violet-50 text-violet-700 border-violet-200",
-                          "Follow Up": "bg-orange-50 text-orange-700 border-orange-200",
-                          "Appointment Date & Time": "bg-teal-50 text-teal-700 border-teal-200",
-                          "Cancelled": "bg-rose-50 text-rose-700 border-rose-200",
-                        }[status] || "bg-slate-50 text-slate-600 border-slate-200";
+                        const { branchName, status, statusColor } = branchStatusInfo(l, branches);
                         return (
                           <td className="border-y border-slate-200 bg-white px-3 py-3 text-center text-xs transition-colors group-hover:bg-slate-50">
                             <div className="flex flex-col items-center gap-1" data-testid={`presales-branch-status-${l.id}`}>
@@ -320,6 +398,15 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser }) => {
           )}
         </CardContent>
       </Card>
+    </div>
+
+      {role === "pre_sales" && activeTab === "consultations" && (
+        <ConsultationsTab leads={appointmentLeads} branches={branches} loading={loading} onOpen={setEditing} />
+      )}
+
+      {role === "pre_sales" && activeTab === "profile" && (
+        <ProfileTab currentUser={currentUser} branches={branches} onLogout={onLogout} />
+      )}
 
       {editing && (
         <LeadDetailDialog lead={editing} stages={stages} currentUser={currentUser} onClose={() => setEditing(null)} onSaved={load} onMoveStage={moveToStage} />
@@ -363,6 +450,190 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser }) => {
           </div>
         </div>
       )}
+
+      {role === "pre_sales" && (
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white md:hidden" data-testid="presales-bottom-nav">
+          <div className="mx-auto flex max-w-lg items-stretch justify-around">
+            {PRESALES_TABS.map((t) => {
+              const Icon = t.icon;
+              const active = activeTab === t.key;
+              return (
+                <button
+                  key={t.key}
+                  type="button"
+                  onClick={() => setActiveTab(t.key)}
+                  className={`flex flex-1 flex-col items-center gap-0.5 py-2.5 text-[11px] font-medium transition-colors ${active ? "text-sky-600" : "text-slate-400"}`}
+                  data-testid={`presales-nav-${t.key}`}
+                >
+                  <Icon className="h-5 w-5" />
+                  {t.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ============ Mobile: Consultations tab (leads booked for a consultation) ============
+
+const ConsultationsTab = ({ leads, branches, loading, onOpen }) => (
+  <div className="space-y-3 md:hidden" data-testid="presales-consultations-tab">
+    <h2 className="text-sm font-semibold text-slate-700">Consultations ({leads.length})</h2>
+    {leads.length === 0 ? (
+      <p className="rounded-xl border border-slate-200 bg-white py-10 text-center text-sm text-slate-400">
+        {loading ? "Loading..." : "No consultations booked yet."}
+      </p>
+    ) : (
+      leads.map((l) => {
+        const { branchName, status, statusColor } = branchStatusInfo(l, branches);
+        return (
+          <div
+            key={l.id}
+            onClick={() => onOpen(l)}
+            className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"
+            data-testid={`presales-consultation-card-${l.id}`}
+          >
+            <div className="flex items-center gap-2">
+              <span className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-xs font-bold ${avatarColor(l.name).bg} ${avatarColor(l.name).fg}`}>{initials(l.name)}</span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold text-slate-800">{l.name}</p>
+                <p className="font-mono text-xs text-slate-500">{l.phone || "—"}</p>
+              </div>
+              <LeadContactIcons lead={l} />
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              <span className="text-xs font-medium text-slate-600">{branchName || "—"}</span>
+              <span className={`inline-flex items-center rounded border px-1.5 text-[10px] font-semibold ${statusColor}`}>{status}</span>
+              {l.assigned_physio_name ? (
+                <span className="text-[10px] text-emerald-600">Expert: {l.assigned_physio_name}</span>
+              ) : (
+                <span className="text-[10px] text-amber-600">Pending Expert</span>
+              )}
+            </div>
+          </div>
+        );
+      })
+    )}
+  </div>
+);
+
+// ============ Mobile: Profile tab (rep's own info + testimonial video management) ============
+
+const ProfileTab = ({ currentUser, branches, onLogout }) => {
+  const [videos, setVideos] = useState([]);
+  const [loadingVideos, setLoadingVideos] = useState(false);
+  const [url, setUrl] = useState("");
+  const [title, setTitle] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const loadVideos = useCallback(async () => {
+    setLoadingVideos(true);
+    try { setVideos(await listTestimonials()); }
+    catch { /* keep whatever was already shown */ }
+    setLoadingVideos(false);
+  }, []);
+
+  useEffect(() => { loadVideos(); }, [loadVideos]);
+
+  const branchName = currentUser?.branch_id
+    ? (branches.find((b) => b.id === currentUser.branch_id)?.branch_name || branches.find((b) => b.id === currentUser.branch_id)?.name)
+    : null;
+  const joinedOn = currentUser?.created_at
+    ? new Date(currentUser.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })
+    : "—";
+
+  const handleAdd = async (e) => {
+    e.preventDefault();
+    if (!url.trim()) return;
+    setSaving(true);
+    try {
+      await addTestimonial({ youtube_url: url.trim(), title: title.trim() || undefined });
+      setUrl(""); setTitle("");
+      toast.success("Testimonial added");
+      loadVideos();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Could not add — check the YouTube link");
+    }
+    setSaving(false);
+  };
+
+  const handleDelete = async (id) => {
+    try { await deleteTestimonial(id); setVideos((v) => v.filter((x) => x.id !== id)); }
+    catch { toast.error("Delete failed"); }
+  };
+
+  return (
+    <div className="space-y-4 md:hidden" data-testid="presales-profile-tab">
+      <Card>
+        <CardContent className="p-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-sky-100 text-xl font-bold text-sky-700">
+              {currentUser?.full_name?.charAt(0)?.toUpperCase() || "?"}
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-base font-semibold text-slate-800">{currentUser?.full_name}</p>
+              <p className="flex items-center gap-1 text-xs text-slate-400"><Mail className="h-3 w-3" />{currentUser?.email}</p>
+            </div>
+          </div>
+          <div className="mt-4 space-y-2">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <span className="text-xs text-slate-400">Role</span>
+              <span className="text-sm font-medium text-slate-700">Pre-Sales</span>
+            </div>
+            {branchName && (
+              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                <span className="text-xs text-slate-400">Branch</span>
+                <span className="text-sm font-medium text-slate-700">{branchName}</span>
+              </div>
+            )}
+            <div className="flex items-center justify-between pb-1">
+              <span className="text-xs text-slate-400">Joined On</span>
+              <span className="text-sm font-medium text-slate-700">{joinedOn}</span>
+            </div>
+          </div>
+          <Button variant="outline" onClick={onLogout} className="mt-4 w-full text-rose-600 hover:bg-rose-50" data-testid="presales-profile-logout">
+            <LogOut className="mr-1.5 h-4 w-4" />Logout
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="flex items-center gap-1.5 text-sm">
+            <Youtube className="h-4 w-4 text-rose-500" />Testimonial Videos
+          </CardTitle>
+          <p className="text-xs text-slate-400">Shown live on the link shared with leads over WhatsApp.</p>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <form onSubmit={handleAdd} className="space-y-2">
+            <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="Paste YouTube video link" data-testid="presales-testimonial-url" />
+            <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title (optional)" data-testid="presales-testimonial-title" />
+            <Button type="submit" disabled={saving || !url.trim()} className="w-full bg-sky-600 hover:bg-sky-700" data-testid="presales-testimonial-add">
+              {saving ? "Adding..." : "Add Video"}
+            </Button>
+          </form>
+
+          <div className="space-y-2 pt-1">
+            {loadingVideos ? (
+              <p className="text-center text-xs text-slate-400">Loading...</p>
+            ) : videos.length === 0 ? (
+              <p className="text-center text-xs text-slate-400">No videos added yet.</p>
+            ) : (
+              videos.map((v) => (
+                <div key={v.id} className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2" data-testid={`presales-testimonial-row-${v.id}`}>
+                  <span className="truncate text-xs font-medium text-slate-700">{v.title || v.video_id}</span>
+                  <button type="button" onClick={() => handleDelete(v.id)} className="rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600" data-testid={`presales-testimonial-delete-${v.id}`}>
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 };

@@ -683,7 +683,7 @@ export const CRMPage = ({ auth, onLogout }) => {
         )}
 
         {showPreSalesBoard && (
-          <PreSalesCRM role={role} currentUser={auth.user} />
+          <PreSalesCRM role={role} currentUser={auth.user} onLogout={logout} />
         )}
 
         {(showSuperAdminBoard && superAdminView === "master") && (

@@ -381,6 +381,11 @@ class V3PatientPortalGoogleLogin(BaseModel):
     credential: str
 
 
+class V3TestimonialInput(BaseModel):
+    youtube_url: str
+    title: Optional[str] = None
+
+
 class V3ConsultationDecisionInput(BaseModel):
     decision: Literal["consultation_only", "consultation_treatment"]
     # Required only when decision == "consultation_treatment" — the Treatment/Session
