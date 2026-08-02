@@ -1,0 +1,15 @@
+{
+  "short_name": "Fitsiomax Portal",
+  "name": "Fitsiomax Client Portal",
+  "description": "Track your physiotherapy sessions, treatment plan and payments.",
+  "start_url": "/portal",
+  "scope": "/portal",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f8fafc",
+  "theme_color": "#0284c7",
+  "icons": [
+    { "src": "/portal-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/portal-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

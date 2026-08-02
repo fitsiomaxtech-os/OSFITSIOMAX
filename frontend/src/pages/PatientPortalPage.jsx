@@ -19,6 +19,45 @@ const LOGO_URL =
 export const PatientPortalPage = () => {
   const [session, setSession] = useState(loadPortalSession());
 
+  // Gives /portal its own installable PWA identity — separate icon, name and manifest
+  // from the staff CRM that shares this same index.html — without touching index.html
+  // itself, so /app is never affected.
+  useEffect(() => {
+    const setLink = (rel, href, extra = {}) => {
+      let el = document.querySelector(`link[rel="${rel}"][data-portal-pwa]`);
+      if (!el) {
+        el = document.createElement("link");
+        el.rel = rel;
+        el.setAttribute("data-portal-pwa", "true");
+        document.head.appendChild(el);
+      }
+      el.href = href;
+      Object.entries(extra).forEach(([k, v]) => el.setAttribute(k, v));
+    };
+    const setMeta = (name, content) => {
+      let el = document.querySelector(`meta[name="${name}"][data-portal-pwa]`);
+      if (!el) {
+        el = document.createElement("meta");
+        el.name = name;
+        el.setAttribute("data-portal-pwa", "true");
+        document.head.appendChild(el);
+      }
+      el.content = content;
+    };
+
+    setLink("manifest", "/portal-manifest.json");
+    setLink("apple-touch-icon", "/portal-icon.svg");
+    setLink("icon", "/portal-icon.svg", { type: "image/svg+xml" });
+    setMeta("theme-color", "#0284c7");
+    setMeta("apple-mobile-web-app-capable", "yes");
+    setMeta("apple-mobile-web-app-status-bar-style", "black-translucent");
+    setMeta("apple-mobile-web-app-title", "Fitsiomax Portal");
+
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/portal-sw.js", { scope: "/portal" }).catch(() => {});
+    }
+  }, []);
+
   const handleLogin = (data) => {
     savePortalSession(data);
     setSession(data);
