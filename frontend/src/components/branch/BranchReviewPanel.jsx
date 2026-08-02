@@ -1,18 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ClipboardCheck, Send, Stethoscope, Clock, CheckCircle2, X, Search, RefreshCw } from "lucide-react";
+import { Send, Clock, CheckCircle2, X, Search, RefreshCw } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { branchReviews, branchSendReview } from "@/lib/api";
 
-// The four views onto one pipeline. "Head Physio Review List" and "Pending Review" both
-// read dispatched reviews — the first groups them by who is doing them, the second is the
-// flat worklist of what is still outstanding, which is the question the branch actually
-// gets asked.
+// Three views onto one pipeline: waiting to be sent, sent and still outstanding, done.
+// Each row already names the Head Physio it went to, so the branch can see who has what
+// without a separate view for it.
 const SUB_TABS = [
   { key: "send", label: "Send to Review", icon: Send, tone: "amber" },
-  { key: "hp_list", label: "Head Physio Review List", icon: Stethoscope, tone: "violet" },
   { key: "pending", label: "Pending Review", icon: Clock, tone: "sky" },
   { key: "complete", label: "Review Complete", icon: CheckCircle2, tone: "emerald" },
 ];
@@ -63,16 +61,14 @@ export const BranchReviewPanel = ({ branchId }) => {
   const countFor = (key) => (
     key === "send" ? counts.send_to_review
       : key === "pending" ? counts.sent
-      : key === "complete" ? counts.completed
-      : (counts.sent || 0) + (counts.completed || 0)
+      : counts.completed
   ) || 0;
 
   const rows = useMemo(() => {
     const all = data.reviews || [];
     const byTab = sub === "send" ? all.filter((r) => r.status === "send_to_review")
       : sub === "pending" ? all.filter((r) => r.status === "sent")
-      : sub === "complete" ? all.filter((r) => r.status === "completed")
-      : all.filter((r) => r.status !== "send_to_review");
+      : all.filter((r) => r.status === "completed");
     if (!search) return byTab;
     const q = search.toLowerCase();
     return byTab.filter((r) =>
@@ -81,17 +77,6 @@ export const BranchReviewPanel = ({ branchId }) => {
       || (r.phone || "").includes(q)
       || (r.head_physio_name || "").toLowerCase().includes(q));
   }, [data.reviews, sub, search]);
-
-  // Head Physio Review List is the only view grouped by who is doing the work.
-  const grouped = useMemo(() => {
-    if (sub !== "hp_list") return [];
-    const map = {};
-    rows.forEach((r) => {
-      const key = r.head_physio_id || "unassigned";
-      (map[key] = map[key] || { id: key, name: r.head_physio_name || "Unassigned", items: [] }).items.push(r);
-    });
-    return Object.values(map).sort((a, b) => b.items.length - a.items.length);
-  }, [rows, sub]);
 
   const openSend = (review) => setSendDraft({
     review,
@@ -197,20 +182,6 @@ export const BranchReviewPanel = ({ branchId }) => {
 
       {loading && rows.length === 0 ? (
         <p className="py-10 text-center text-sm text-slate-400">Loading reviews...</p>
-      ) : sub === "hp_list" ? (
-        grouped.length === 0 ? <Empty>Nothing has been sent to a Head Physio yet.</Empty> : (
-          <div className="space-y-4">
-            {grouped.map((g) => (
-              <div key={g.id} data-testid={`branch-review-hp-group-${g.id}`}>
-                <p className="mb-2 flex items-center gap-2 text-sm font-bold text-slate-700">
-                  <Stethoscope className="h-4 w-4 text-violet-500" /> {g.name}
-                  <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-bold text-violet-700">{g.items.length}</span>
-                </p>
-                <div className="space-y-2">{g.items.map((r) => <ReviewRow key={r.id} r={r} />)}</div>
-              </div>
-            ))}
-          </div>
-        )
       ) : rows.length === 0 ? (
         <Empty>
           {sub === "send" ? "No reviews waiting to be sent. A Physio raises one once a patient has completed 7 days of treatment."
