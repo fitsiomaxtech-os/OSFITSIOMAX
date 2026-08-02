@@ -145,7 +145,7 @@ function TreatmentTab({ physioId }) {
   return (
     <div data-testid="physio-treatment-tab">
       {/* Day strip — newest on the left, today anchored in the middle on first load. */}
-      <div className="mb-4 flex items-center gap-1.5 overflow-x-auto rounded-lg border border-slate-200 bg-white p-1.5" data-testid="physio-treatment-day-strip">
+      <div className="mb-4 flex w-full items-center gap-1.5 rounded-lg border border-slate-200 bg-white p-1.5" data-testid="physio-treatment-day-strip">
         <Button size="sm" variant="outline" className="shrink-0" onClick={() => setStripCentre((c) => shiftIso(c, 1))} data-testid="physio-day-strip-newer">
           <ChevronLeft className="h-4 w-4" />
         </Button>
@@ -159,7 +159,7 @@ function TreatmentTab({ physioId }) {
               key={date}
               type="button"
               onClick={() => setSelectedDate(date)}
-              className={`w-24 shrink-0 rounded-md border py-1 text-center leading-tight transition ${
+              className={`min-w-0 flex-1 basis-0 rounded-md border py-1.5 text-center leading-tight transition ${
                 isSelected
                   ? "border-sky-600 bg-sky-600 text-white shadow-sm"
                   : isToday
