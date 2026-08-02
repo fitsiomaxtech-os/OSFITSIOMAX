@@ -166,10 +166,16 @@ async def v3_get_doctors(
     user: V3UserOut = Depends(v3_current_user),
 ):
     query: Dict[str, object] = {}
+    scope_branch = None
     if user.role in ["branch_admin", "head_physio", "physio"] and user.branch_id:
-        query["branch_id"] = user.branch_id
+        scope_branch = user.branch_id
     elif branch_id:
-        query["branch_id"] = branch_id
+        scope_branch = branch_id
+    if scope_branch:
+        # Head Physios belong to no branch — they take consultations across the whole
+        # organisation — so branch scoping must not filter them out, or a branch's own
+        # HEAD PHYSIO CALENDAR comes back empty. Physios stay scoped to their branch.
+        query["$or"] = [{"branch_id": scope_branch}, {"profile_type": "head_physio"}]
     rows = await v3_col("doctors").find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
     out = []
     for row in rows:

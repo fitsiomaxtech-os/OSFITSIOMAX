@@ -329,9 +329,9 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
   const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
 
   return (
-    <div className="flex flex-col gap-4 lg:h-[calc(100vh-220px)] lg:flex-row" data-testid="head-physio-calendar-root">
+    <div className="flex flex-col gap-3 sm:gap-4 lg:h-[calc(100vh-220px)] lg:flex-row" data-testid="head-physio-calendar-root">
       {/* LEFT PANEL — Doctor List */}
-      <div className="flex max-h-64 w-full flex-shrink-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white lg:h-full lg:max-h-none lg:w-72" data-testid="doctor-list-panel">
+      <div className="flex w-full flex-shrink-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white lg:h-full lg:w-72" data-testid="doctor-list-panel">
         <div className="p-4 border-b border-slate-100 bg-slate-50/60">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
@@ -343,9 +343,13 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
           <p className="mt-0.5 text-[10px] text-slate-400">Managed by HR Admin</p>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-2 space-y-1.5" data-testid="doctor-list">
+        <div className="flex gap-1.5 overflow-x-auto p-2 lg:flex-1 lg:flex-col lg:overflow-y-auto lg:overflow-x-visible" data-testid="doctor-list">
           {doctors.length === 0 && (
-            <p className="text-xs text-slate-400 text-center py-6">No {roleLabelPlural} assigned to this branch yet — ask HR Admin to add one.</p>
+            <p className="text-xs text-slate-400 text-center py-6">
+              {isPhysio
+                ? "No Physios assigned to this branch yet — ask HR Admin to add one."
+                : "No Head Physios created yet — ask HR Admin to add one."}
+            </p>
           )}
           {doctors.map((doc) => {
             const isActive = selectedDoctor?.id === doc.id;
@@ -355,22 +359,22 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
                 key={doc.id}
                 type="button"
                 onClick={() => selectDoctor(doc)}
-                className={`w-full flex items-center gap-3 rounded-lg border p-3 text-left transition-all ${
+                className={`flex w-56 shrink-0 items-center gap-2.5 rounded-lg border p-2.5 text-left transition-all sm:w-64 lg:w-full lg:shrink lg:gap-3 lg:p-3 ${
                   isActive
                     ? "border-violet-400 bg-violet-50 shadow-sm"
                     : "border-slate-100 bg-white hover:border-slate-200 hover:bg-slate-50"
                 }`}
                 data-testid={`doctor-card-${doc.id}`}
               >
-                <div className={`flex h-9 w-9 items-center justify-center rounded-full text-sm font-bold ${isActive ? "bg-violet-200 text-violet-800" : "bg-slate-100 text-slate-600"}`}>
+                <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold ${isActive ? "bg-violet-200 text-violet-800" : "bg-slate-100 text-slate-600"}`}>
                   {doc.full_name?.charAt(0)?.toUpperCase() || "D"}
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-slate-800 truncate">{doc.full_name}</p>
                   <p className="text-[10px] text-slate-400">{doc.specialization || "Physiotherapist"}</p>
                 </div>
-                <div className="flex flex-col items-end">
-                  <span className={`rounded-full px-2 py-0.5 text-[9px] font-semibold ${slotCount > 0 ? "bg-emerald-50 text-emerald-600" : "bg-slate-50 text-slate-400"}`}>
+                <div className="flex shrink-0 flex-col items-end">
+                  <span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[9px] font-semibold ${slotCount > 0 ? "bg-emerald-50 text-emerald-600" : "bg-slate-50 text-slate-400"}`}>
                     {slotCount} slots
                   </span>
                 </div>
@@ -440,7 +444,7 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
               {/* Month Calendar — scrolls on its own, otherwise the controls below it
                   (duration, type, Mark Whole Day Available, Repeat) get clipped by the
                   row's lg:overflow-hidden with no way to reach them. */}
-              <div className="w-full flex-shrink-0 border-b border-slate-100 p-5 flex flex-col lg:w-[26rem] lg:border-b-0 lg:border-r lg:overflow-y-auto">
+              <div className="flex w-full flex-shrink-0 flex-col border-b border-slate-100 p-3 sm:p-5 lg:w-[26rem] lg:border-b-0 lg:border-r lg:overflow-y-auto">
                 <div className="flex items-center justify-between mb-4">
                   <button type="button" onClick={prevMonth} className="p-1 rounded hover:bg-slate-100" data-testid="cal-prev-month">
                     <ChevronLeft className="h-4 w-4 text-slate-500" />
@@ -523,7 +527,7 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
                         <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-amber-400 inline-block" /> Booked</span>
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 lg:grid-cols-3 gap-2" data-testid="time-slots-grid">
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3" data-testid="time-slots-grid">
                       {generateTimeGrid().map((time) => {
                         const state = getSlotState(time);
                         const detail = getSlotDetail(time);
