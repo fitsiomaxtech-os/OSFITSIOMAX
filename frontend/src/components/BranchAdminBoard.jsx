@@ -148,6 +148,10 @@ const copyCardToClipboard = async (a) => {
   }
 };
 
+/** A phone rather than a desk: the two need opposite handoffs, below. */
+const isHandheld = () => (typeof window !== "undefined"
+  && (window.matchMedia?.("(pointer: coarse)").matches || navigator.maxTouchPoints > 0));
+
 /**
  * Opens WhatsApp on the patient's own number with the confirmation already typed, and
  * leaves the card image on the clipboard so it can be pasted in on top.
@@ -157,18 +161,38 @@ const copyCardToClipboard = async (a) => {
  * carries an attachment and it always asks who it is for. The clipboard bridges them —
  * pasting into the chat attaches the card and WhatsApp moves the typed text down into
  * its caption, which is the picture-above/words-below shape the branch is after.
+ *
+ * Resolves true when the card made it to the clipboard, so the caller can leave the
+ * paste instruction on screen instead of in a toast that the handoff wipes out.
  */
 const sendApptOnWhatsApp = async (a) => {
   const num = waNumber(a.phone);
-  if (!num) { toast.error("This patient has no phone number on file"); return; }
+  if (!num) { toast.error("This patient has no phone number on file"); return false; }
+
+  // The tab has to be claimed here, synchronously, while the click is still the reason
+  // anything is happening — after the await below the gesture is spent and the popup
+  // blocker takes it. Opened blank and pointed at WhatsApp once the card is copied.
+  // noopener isn't passed because it makes window.open return null; opener is cleared
+  // by hand instead, which buys the same protection while keeping the handle.
+  const tab = isHandheld() ? null : window.open("", "_blank");
+  if (tab) tab.opener = null;
+
   const copied = await copyCardToClipboard(a);
-  toast.success(copied
-    ? "Card copied — paste it into the chat to attach it"
-    : "Opening WhatsApp");
-  // Same-tab, not window.open(..., "_blank"): on mobile that hands the browser an
-  // ambiguous new-tab context and the app is often left on a blank white screen once
-  // WhatsApp hands control back (caf18a6, same fix on the Physio board).
-  window.location.href = `https://wa.me/${num}?text=${encodeURIComponent(apptMessage(a))}`;
+  // Only the failure is worth a toast — success is said by the panel that stays up.
+  if (!copied) toast.message("This browser can't copy the card — use Send Card + Message for the image");
+  const url = `https://wa.me/${num}?text=${encodeURIComponent(apptMessage(a))}`;
+
+  if (tab && !tab.closed) {
+    // Desk: WhatsApp Web gets its own tab and the board stays where it was, so the
+    // "now paste it" prompt is still on screen when the branch looks back.
+    tab.location.href = url;
+  } else {
+    // Phone: same-tab, not window.open(..., "_blank") — that hands mobile browsers an
+    // ambiguous new-tab context and often leaves the app on a blank white screen once
+    // WhatsApp gives control back (caf18a6, same fix on the Physio board).
+    window.location.href = url;
+  }
+  return copied;
 };
 
 /** The card image plus the message, through the OS share sheet — the only path that can
@@ -708,6 +732,10 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
   // Shown once a booking is actually made. Kept outside the Appointment popup because
   // confirming closes that popup and the lead card with it.
   const [apptConfirm, setApptConfirm] = useState(null);
+  // Whether the card is sitting on the clipboard waiting to be pasted. A toast can't
+  // carry this — sending navigates to WhatsApp and takes the toast with it, and the
+  // instruction is needed after that trip, not during it.
+  const [cardCopied, setCardCopied] = useState(false);
   // The branch's own address and map link, for the confirmation the patient is sent —
   // they need to know where to come, which the lead record doesn't carry.
   const [branchInfo, setBranchInfo] = useState(null);
@@ -1394,6 +1422,9 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                       notes: (apptDraft.notes || "").trim(),
                       bookedBy: "Branch Admin",
                     });
+                    // A fresh booking hasn't been copied yet — the previous one's card
+                    // is on the clipboard, and saying otherwise would send the wrong image.
+                    setCardCopied(false);
                   } catch (e) { toast.error(e?.response?.data?.detail || "Failed to schedule"); }
                 }}
                 data-testid="branch-appt-save"
@@ -1472,17 +1503,26 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                   number with the confirmation typed, card image waiting on the clipboard. */}
               <Button
                 className="w-full bg-[#25D366] text-white hover:bg-[#1da851]"
-                onClick={() => sendApptOnWhatsApp(apptConfirm)}
+                onClick={async () => setCardCopied(await sendApptOnWhatsApp(apptConfirm))}
                 data-testid="branch-appt-confirm-whatsapp"
               >
                 <WhatsAppIcon className="mr-1.5 h-4 w-4" /> Send on WhatsApp
               </Button>
-              {/* The paste is the only manual step in the whole flow and nothing on screen
-                  would otherwise suggest it, so it is spelled out rather than discovered. */}
-              <p className="px-1 text-center text-[11px] leading-snug text-slate-500" data-testid="branch-appt-confirm-hint">
-                Opens {apptConfirm.patient}'s chat with the message ready. The card image is
-                copied too — paste it in to send the picture with it.
-              </p>
+              {/* The paste is the only manual step in the flow and nothing on screen would
+                  otherwise suggest it, so it is spelled out beforehand and then left up
+                  afterwards — the trip to WhatsApp is exactly when it's needed, and a
+                  toast would already be gone by then. */}
+              {cardCopied ? (
+                <p className="flex items-center justify-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-2 text-center text-[11px] font-semibold leading-snug text-emerald-800" data-testid="branch-appt-confirm-hint">
+                  <CheckCircle2 className="h-3.5 w-3.5 flex-none" />
+                  Card copied — paste it into {apptConfirm.patient}'s chat to attach it
+                </p>
+              ) : (
+                <p className="px-1 text-center text-[11px] leading-snug text-slate-500" data-testid="branch-appt-confirm-hint">
+                  Opens {apptConfirm.patient}'s chat with the message ready. The card image is
+                  copied too — paste it in to send the picture with it.
+                </p>
+              )}
               {/* The attachment route proper: the share sheet is the only thing that can
                   carry a file, at the cost of asking who it is going to. */}
               <Button variant="outline" className="w-full" onClick={() => shareApptCard(apptConfirm)} data-testid="branch-appt-confirm-share-card">
