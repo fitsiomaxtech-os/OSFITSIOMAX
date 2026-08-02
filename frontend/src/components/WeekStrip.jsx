@@ -49,12 +49,12 @@ export const WeekStrip = ({ value, onChange, counts = {}, testid = "week-strip",
       className={`flex flex-wrap items-center gap-x-4 gap-y-2 ${bare ? "" : "rounded-xl border border-slate-200 bg-white px-3 py-2"}`}
       data-testid={testid}
     >
-      <p className="min-w-0 truncate text-sm font-bold text-slate-800" data-testid={`${testid}-label`}>
+      <p className="min-w-0 truncate text-[13px] font-bold text-slate-800 sm:text-sm" data-testid={`${testid}-label`}>
         {longLabel(selected)}
         {selected === today && <span className="ml-2 rounded bg-teal-100 px-1.5 py-0.5 text-[10px] font-bold text-teal-700">TODAY</span>}
       </p>
 
-      <div className="flex items-center gap-1">
+      <div className="flex w-full items-center justify-between gap-1 sm:w-auto sm:justify-start">
         {days.map((iso, i) => {
           const active = iso === selected;
           const isToday = iso === today;
