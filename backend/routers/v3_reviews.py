@@ -73,16 +73,17 @@ async def _review_or_404(review_id: str) -> dict:
 
 
 async def _treatment_days(lead_id: str) -> int:
-    """Distinct days this patient has actually attended treatment.
+    """Completed treatment sessions for this patient (the field is still named
+    treatment_days for compatibility with what's already stored on review docs).
 
-    Counted from completed sessions rather than from the assignment date — a package
-    booked three weeks out is not three weeks of treatment, and the review is about what
-    the patient has been through, not how long ago they paid.
+    Counted as completed sessions rather than distinct calendar days — a milestone at
+    exactly the 7th/14th/etc completed session, matching the same session_number the
+    Treatment tab's own review badge is built on. Also counted from completed sessions
+    rather than from the assignment date — a package booked three weeks out is not three
+    weeks of treatment, and the review is about what the patient has been through, not
+    how long ago they paid.
     """
-    rows = await v3_col("sessions").find(
-        {"lead_id": lead_id, "status": "completed"}, {"_id": 0, "slot_time": 1}
-    ).to_list(500)
-    return len({(r.get("slot_time") or "")[:10] for r in rows if r.get("slot_time")})
+    return await v3_col("sessions").count_documents({"lead_id": lead_id, "status": "completed"})
 
 
 async def _first_session_date(lead_id: str) -> Optional[str]:
@@ -189,7 +190,7 @@ async def physio_raise_review(
     if not elig["eligible"]:
         if elig["review"] and elig["review"].get("status") in (SEND_TO_REVIEW, SENT):
             raise HTTPException(status_code=409, detail="This patient already has a review in progress")
-        raise HTTPException(status_code=400, detail=f"This patient hasn't reached a new review milestone yet (every {REVIEW_AFTER_DAYS} treatment days)")
+        raise HTTPException(status_code=400, detail=f"This patient hasn't reached a new review milestone yet (every {REVIEW_AFTER_DAYS} completed sessions)")
 
     doctor = await v3_col("doctors").find_one(
         {"user_id": user.id, "profile_type": "physio"}, {"_id": 0, "id": 1, "full_name": 1}
@@ -227,7 +228,7 @@ async def physio_raise_review(
         "id": str(uuid.uuid4()),
         "lead_id": lead_id,
         "action": "review_raised",
-        "details": f"Physio raised a review after {review['treatment_days']} days of treatment"
+        "details": f"Physio raised a review after {review['treatment_days']} completed sessions"
                    + (f" · {review['reason']}" if review["reason"] else ""),
         "created_by": user.full_name,
         "created_by_role": user.role,

@@ -490,8 +490,8 @@ const ordinal = (n) => {
 /**
  * Review — the Physio's end of the post-treatment review chain, in one place.
  *
- * A new review only becomes raisable every 7 treatment days — 7, 14, 21, 28... — not
- * "7 or more"; a 28-session package gets exactly 4 review points. New Review shows only
+ * A new review only becomes raisable every 7 completed sessions — 7, 14, 21, 28... —
+ * not "7 or more"; a 28-session package gets exactly 4 review points. New Review shows only
  * patients who've just reached one and don't already have one in flight or covering it,
  * computed server-side (_review_eligibility in v3_reviews.py) so raising one is rejected
  * the same way if attempted outside that window.
@@ -684,7 +684,7 @@ function ReviewTab({ physioId, onCountChange }) {
                       <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-bold ${
                         p.due_for_review ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-600"
                       }`}>
-                        {p.treatment_days} / {threshold} days
+                        {p.treatment_days} / {threshold} sessions
                       </span>
                       {p.review_number > 0 && (
                         <span className="inline-flex items-center rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-semibold text-violet-700">
@@ -724,7 +724,7 @@ function ReviewTab({ physioId, onCountChange }) {
               <div className="min-w-0">
                 <h3 className="text-base font-bold">{weeksTarget.lead_name}</h3>
                 <p className="text-xs text-white/80">
-                  {weeksTarget.treatment_days} treatment days
+                  {weeksTarget.treatment_days} completed sessions
                   {weeksTarget.total_sessions ? ` · ${weeksTarget.completed_sessions} of ${weeksTarget.total_sessions} booked days complete` : ""}
                 </p>
               </div>
@@ -766,7 +766,7 @@ function ReviewTab({ physioId, onCountChange }) {
               <div>
                 <p className="text-lg font-bold">Send for Review</p>
                 <p className="text-xs text-white/80">
-                  {draft.patient.lead_name} · {ordinal(draft.patient.review_number)} Review · {draft.patient.treatment_days} treatment days
+                  {draft.patient.lead_name} · {ordinal(draft.patient.review_number)} Review · {draft.patient.treatment_days} completed sessions
                 </p>
               </div>
               <button onClick={() => setDraft(null)} className="rounded-lg border-2 border-orange-200 bg-orange-100 p-2 text-orange-600 hover:bg-orange-200" data-testid="physio-raise-review-close">
