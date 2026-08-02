@@ -134,7 +134,9 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
   const [leads, setLeads] = useState([]);
   const [branches, setBranches] = useState([]);
   const [search, setSearch] = useState("");
-  const [stageFilter, setStageFilter] = useState("All");
+  // Opens on New Leads, not All — that's the stage that needs action; a rep shouldn't
+  // have to dig through everything already worked on just to see what's new.
+  const [stageFilter, setStageFilter] = useState("New Leads");
   const [sourceFilter, setSourceFilter] = useState("");
   const [dateFilter, setDateFilter] = useState(null);
   const [editing, setEditing] = useState(null);
@@ -209,9 +211,10 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
   const visibleLeads = filtered.slice(0, visibleCount);
 
   // Mobile Consultations tab — this rep's leads currently booked for a consultation.
+  // Not narrowed by the Leads tab's own date filter — ConsultationsTab applies its own.
   const appointmentLeads = useMemo(
-    () => dateSourceFiltered.filter((l) => l.stage === "Appointment").sort((a, b) => (b.created_at || "").localeCompare(a.created_at || "")),
-    [dateSourceFiltered],
+    () => leads.filter((l) => l.stage === "Appointment").sort((a, b) => (b.created_at || "").localeCompare(a.created_at || "")),
+    [leads],
   );
 
   const moveToStage = async (leadId, stageName) => {
@@ -233,7 +236,11 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
   }
 
   return (
-    <div className={`space-y-5 ${role === "pre_sales" ? "pb-20 md:pb-0" : ""}`} data-testid="presales-crm-page">
+    {/* flex+gap, not space-y — space-y's sibling selector keys off the `hidden`
+        HTML attribute, not the `hidden` class, so the desktop leads block (hidden
+        by class on mobile, not attribute) would still count as a sibling and hand
+        the next block phantom top margin for content a phone never draws. */}
+    <div className={`flex flex-col gap-5 ${role === "pre_sales" ? "pb-20 md:pb-0" : ""}`} data-testid="presales-crm-page">
     <div className={role === "pre_sales" ? "hidden space-y-5 md:block" : "space-y-5"} data-testid="presales-leads-tab">
       {/* KPI Cards */}
       <div className="flex flex-nowrap gap-3" data-testid="presales-kpi-row">
@@ -413,7 +420,7 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
               data-testid="presales-mobile-search"
             />
             <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="presales-mobile-date-filter" />
-            <PullFromSheetButton onPulled={load} iconOnly />
+            <PullFromSheetButton onPulled={() => { load(); setStageFilter("New Leads"); }} iconOnly />
           </div>
 
           <StageTabBar
@@ -443,10 +450,7 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex min-w-0 items-center gap-2">
                       <span className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-xs font-bold ${avatarColor(l.name).bg} ${avatarColor(l.name).fg}`}>{initials(l.name)}</span>
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-bold text-slate-800">{l.name || "—"}</p>
-                        <p className="truncate text-xs text-slate-500">{l.phone || "—"}</p>
-                      </div>
+                      <p className="min-w-0 truncate text-sm font-bold text-slate-800">{l.name || "—"}</p>
                     </div>
                     <span className="shrink-0 rounded-[5px] px-2 py-0.5 text-[10px] font-bold" style={{ background: `${hex}14`, color: hex, border: `1px solid ${hex}33` }}>
                       {l.stage}
@@ -573,46 +577,66 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
 
 // ============ Mobile: Consultations tab (leads booked for a consultation) ============
 
-const ConsultationsTab = ({ leads, branches, loading, onOpen }) => (
-  <div className="space-y-3 md:hidden" data-testid="presales-consultations-tab">
-    <h2 className="text-sm font-semibold text-slate-700">Consultations ({leads.length})</h2>
-    {leads.length === 0 ? (
-      <p className="rounded-xl border border-slate-200 bg-white py-10 text-center text-sm text-slate-400">
-        {loading ? "Loading..." : "No consultations booked yet."}
-      </p>
-    ) : (
-      leads.map((l) => {
-        const { branchName, status, statusColor } = branchStatusInfo(l, branches);
-        return (
-          <div
-            key={l.id}
-            onClick={() => onOpen(l)}
-            className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"
-            data-testid={`presales-consultation-card-${l.id}`}
-          >
-            <div className="flex items-center gap-2">
-              <span className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-xs font-bold ${avatarColor(l.name).bg} ${avatarColor(l.name).fg}`}>{initials(l.name)}</span>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold text-slate-800">{l.name}</p>
-                <p className="font-mono text-xs text-slate-500">{l.phone || "—"}</p>
+const ConsultationsTab = ({ leads, branches, loading, onOpen }) => {
+  const [dateFilter, setDateFilter] = useState(null);
+
+  // Filters by appointment_date (when the consultation is booked), not created_at —
+  // same field ConsultationsBoard's own date filter uses for this stage of leads.
+  const filtered = useMemo(() => {
+    if (!dateFilter) return leads;
+    const from = dateFilter.from?.getTime();
+    const to = dateFilter.to?.getTime();
+    return leads.filter((l) => {
+      if (!l.appointment_date) return false;
+      const ts = new Date(`${l.appointment_date}T00:00:00`).getTime();
+      if (!ts) return false;
+      if (from && ts < from) return false;
+      if (to && ts > to) return false;
+      return true;
+    });
+  }, [leads, dateFilter]);
+
+  return (
+    <div className="space-y-3 md:hidden" data-testid="presales-consultations-tab">
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold text-slate-700">Consultations ({filtered.length})</h2>
+        <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="presales-consult-date-filter" />
+      </div>
+      {filtered.length === 0 ? (
+        <p className="rounded-xl border border-slate-200 bg-white py-10 text-center text-sm text-slate-400">
+          {loading ? "Loading..." : "No consultations booked yet."}
+        </p>
+      ) : (
+        filtered.map((l) => {
+          const { branchName, status, statusColor } = branchStatusInfo(l, branches);
+          return (
+            <div
+              key={l.id}
+              onClick={() => onOpen(l)}
+              className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"
+              data-testid={`presales-consultation-card-${l.id}`}
+            >
+              <div className="flex items-center gap-2">
+                <span className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-xs font-bold ${avatarColor(l.name).bg} ${avatarColor(l.name).fg}`}>{initials(l.name)}</span>
+                <p className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-800">{l.name}</p>
+                <LeadContactIcons lead={l} />
               </div>
-              <LeadContactIcons lead={l} />
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                <span className="text-xs font-medium text-slate-600">{branchName || "—"}</span>
+                <span className={`inline-flex items-center rounded border px-1.5 text-[10px] font-semibold ${statusColor}`}>{status}</span>
+                {l.assigned_physio_name ? (
+                  <span className="text-[10px] text-emerald-600">Expert: {l.assigned_physio_name}</span>
+                ) : (
+                  <span className="text-[10px] text-amber-600">Pending Expert</span>
+                )}
+              </div>
             </div>
-            <div className="mt-2 flex flex-wrap items-center gap-1.5">
-              <span className="text-xs font-medium text-slate-600">{branchName || "—"}</span>
-              <span className={`inline-flex items-center rounded border px-1.5 text-[10px] font-semibold ${statusColor}`}>{status}</span>
-              {l.assigned_physio_name ? (
-                <span className="text-[10px] text-emerald-600">Expert: {l.assigned_physio_name}</span>
-              ) : (
-                <span className="text-[10px] text-amber-600">Pending Expert</span>
-              )}
-            </div>
-          </div>
-        );
-      })
-    )}
-  </div>
-);
+          );
+        })
+      )}
+    </div>
+  );
+};
 
 // ============ Mobile: Profile tab (rep's own info + testimonial video management) ============
 
