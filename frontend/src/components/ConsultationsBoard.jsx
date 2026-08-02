@@ -19,6 +19,7 @@ import {
 import { waNumber } from "@/lib/phone";
 import { endTime12h, to12h } from "@/lib/time";
 import { LOGO_URL, PRINTABLE_STYLES, escapeHtml, openPrintable, downloadPrintable, sharePrintable } from "@/lib/printable";
+import { MilkDateInput } from "@/components/ui/milk-calendar";
 
 const CONSULTATION_FEE_PAYMENT_MODES = [
   { value: "cash", label: "Cash" },
@@ -2386,8 +2387,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         <label className="mb-1 block text-[11px] font-medium text-slate-500">
                           Due Date for Balance ({treatmentRemainingSessions} sessions, Rs.{treatmentRemainingAmount}) *
                         </label>
-                        <Input
-                          type="date"
+                        <MilkDateInput
+                          
                           value={treatmentFeeDraft.balance_due_date}
                           onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, balance_due_date: e.target.value })}
                           className="h-9"
@@ -3112,8 +3113,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                   <div className="space-y-4 p-5">
                     <div>
                       <label className="mb-1 block text-xs font-semibold text-slate-600">Date *</label>
-                      <Input
-                        type="date"
+                      <MilkDateInput
+                        
                         value={followUpDraft.date}
                         min={new Date().toISOString().slice(0, 10)}
                         onChange={(e) => setFollowUpDraft({ ...followUpDraft, date: e.target.value })}
@@ -3184,8 +3185,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                   <div className="space-y-4 p-5">
                     <div>
                       <label className="mb-1 block text-xs font-semibold text-slate-600">New Date *</label>
-                      <Input
-                        type="date"
+                      <MilkDateInput
+                        
                         value={rescheduleDraft.date}
                         min={new Date().toISOString().slice(0, 10)}
                         onChange={(e) => setRescheduleDraft({ ...rescheduleDraft, date: e.target.value })}
@@ -3521,8 +3522,8 @@ function PartialInstallmentsEditor({ installments, setInstallments, totalSession
               </div>
               <div className="col-span-2 min-w-0 sm:col-auto sm:min-w-[126px] sm:flex-[1.4]">
                 <label className="mb-1 block text-[11px] font-medium text-slate-500">Due Date *</label>
-                <Input
-                  type="date"
+                <MilkDateInput
+                  
                   value={inst.due_date}
                   disabled={isPaid}
                   onChange={(e) => {

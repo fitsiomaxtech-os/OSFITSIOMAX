@@ -10,6 +10,7 @@ import { toast } from "@/components/ui/sonner";
 import { bmDetail, updateBranch, bmReassignAdmin, hrBranchAdminCandidates, bmHeadPhysioCandidates, bmAssignHeadPhysio } from "@/lib/api";
 import { BranchFormDialogV2 } from "@/components/branch/BranchFormDialogV2";
 import { slotTo12h } from "@/lib/time";
+import { MilkDateInput } from "@/components/ui/milk-calendar";
 
 const TABS = [
   { key: "summary", label: "Summary", icon: BarChart3 },
@@ -447,7 +448,7 @@ const EditMetaDialog = ({ branch, onClose, onSaved }) => {
         <h3 className="text-base font-semibold">Edit Branch — {branch.branch_name}</h3>
         <Input value={form.branch_name} onChange={(e) => setForm({ ...form, branch_name: e.target.value })} placeholder="Name" data-testid="branch-edit-name" />
         <Input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} placeholder="Address" data-testid="branch-edit-address" />
-        <Input type="date" value={form.opened_date} onChange={(e) => setForm({ ...form, opened_date: e.target.value })} placeholder="Opened Date" data-testid="branch-edit-opened" />
+        <MilkDateInput  value={form.opened_date} onChange={(e) => setForm({ ...form, opened_date: e.target.value })} placeholder="Opened Date" data-testid="branch-edit-opened" />
         <Input value={form.opening_hours} onChange={(e) => setForm({ ...form, opening_hours: e.target.value })} placeholder="Opening Hours (e.g. Mon-Sat 7am-9pm)" data-testid="branch-edit-hours" />
         <Input value={form.admin_phone} onChange={(e) => setForm({ ...form, admin_phone: e.target.value })} placeholder="Admin Phone" data-testid="branch-edit-phone" />
         <select className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm" value={form.vertical} onChange={(e) => setForm({ ...form, vertical: e.target.value })} data-testid="branch-edit-vertical">

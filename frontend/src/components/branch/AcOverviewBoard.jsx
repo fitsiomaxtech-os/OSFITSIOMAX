@@ -7,6 +7,7 @@ import {
   BarChart, Bar, Legend,
 } from "recharts";
 import { NetCashflowSunburst } from "@/components/branch/NetCashflowSunburst";
+import { MilkDateInput } from "@/components/ui/milk-calendar";
 
 const DATE_PRESETS = [
   { key: "today", label: "Today" },
@@ -94,9 +95,9 @@ export const AcOverviewBoard = () => {
         {preset === "custom" && (
           <div className="flex items-center gap-1.5 text-xs text-slate-500">
             <CalendarDays className="h-3.5 w-3.5" />
-            <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className="h-8 rounded-md border border-slate-200 px-2 text-xs" data-testid="ac-overview-custom-from" />
+            <MilkDateInput  value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className="h-8 rounded-md border border-slate-200 px-2 text-xs" data-testid="ac-overview-custom-from" />
             <span>to</span>
-            <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} className="h-8 rounded-md border border-slate-200 px-2 text-xs" data-testid="ac-overview-custom-to" />
+            <MilkDateInput  value={customTo} onChange={(e) => setCustomTo(e.target.value)} className="h-8 rounded-md border border-slate-200 px-2 text-xs" data-testid="ac-overview-custom-to" />
           </div>
         )}
         <select

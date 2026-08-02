@@ -1146,7 +1146,7 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                 <div className="flex flex-wrap items-end gap-2">
                   <div>
                     <label className="mb-1 block text-[11px] font-medium text-slate-500">Date</label>
-                    <Input type="date" value={followUpForm.date} min={new Date().toISOString().slice(0, 10)} onChange={(e) => setFollowUpForm({ ...followUpForm, date: e.target.value })} className="w-40" data-testid="branch-followup-date" />
+                    <MilkDateInput  value={followUpForm.date} min={new Date().toISOString().slice(0, 10)} onChange={(e) => setFollowUpForm({ ...followUpForm, date: e.target.value })} className="w-40" data-testid="branch-followup-date" />
                   </div>
                   <div>
                     <label className="mb-1 block text-[11px] font-medium text-slate-500">Time</label>
@@ -1202,7 +1202,7 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                   <div className="flex flex-wrap items-end gap-2">
                     <div>
                       <label className="mb-1 block text-[11px] font-medium text-slate-500">New Date</label>
-                      <Input type="date" value={rescheduleDraft.date} min={new Date().toISOString().slice(0, 10)} onChange={(e) => setRescheduleDraft({ ...rescheduleDraft, date: e.target.value })} className="w-40" data-testid="branch-followup-reschedule-date" />
+                      <MilkDateInput  value={rescheduleDraft.date} min={new Date().toISOString().slice(0, 10)} onChange={(e) => setRescheduleDraft({ ...rescheduleDraft, date: e.target.value })} className="w-40" data-testid="branch-followup-reschedule-date" />
                     </div>
                     <div>
                       <label className="mb-1 block text-[11px] font-medium text-slate-500">New Time</label>

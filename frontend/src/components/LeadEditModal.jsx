@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { updateLead, getBranches, stagesList } from "@/lib/api";
+import { MilkDateInput } from "@/components/ui/milk-calendar";
 
 const DEPARTMENTS = [
   { value: "offline_physio", label: "Offline Physio" },
@@ -73,7 +74,7 @@ export const LeadEditModal = ({ lead, onClose, onSaved }) => {
             <Field label="Phone *"><Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} data-testid="lead-edit-phone" /></Field>
             <Field label="Email"><Input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} data-testid="lead-edit-email" /></Field>
             <Field label="Location"><Input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} data-testid="lead-edit-location" /></Field>
-            <Field label="Expected Consultation Date"><Input type="date" value={form.expected_consultation_date} onChange={(e) => setForm({ ...form, expected_consultation_date: e.target.value })} data-testid="lead-edit-consultdate" /></Field>
+            <Field label="Expected Consultation Date"><MilkDateInput  value={form.expected_consultation_date} onChange={(e) => setForm({ ...form, expected_consultation_date: e.target.value })} data-testid="lead-edit-consultdate" /></Field>
             <Field label="Months of Pain"><Input type="number" min="0" value={form.months_of_pain} onChange={(e) => setForm({ ...form, months_of_pain: e.target.value })} data-testid="lead-edit-months-pain" /></Field>
             <Field label="Age"><Input type="number" min="0" value={form.age} onChange={(e) => setForm({ ...form, age: e.target.value })} data-testid="lead-edit-age" /></Field>
             <Field label="Gender">

@@ -47,6 +47,7 @@ import {
   updateBranch,
 } from "@/lib/api";
 import { CreateLeadModal } from "@/components/CreateLeadModal";
+import { MilkDateInput } from "@/components/ui/milk-calendar";
 
 const TABS = [
   { key: "dashboard", label: "Dashboard", icon: BarChart3 },
@@ -703,9 +704,9 @@ function DashboardTab({
       {/* Filter Toolbar */}
       <Card className="rounded-2xl border-slate-200 shadow-sm">
         <CardContent className="flex flex-wrap items-center gap-2 p-3">
-          <Input type="date" value={leadDateFrom} onChange={(e) => setLeadDateFrom(e.target.value)} className="h-9 w-auto" data-testid="bd-filter-date-from" />
+          <MilkDateInput  value={leadDateFrom} onChange={(e) => setLeadDateFrom(e.target.value)} className="h-9 w-auto" data-testid="bd-filter-date-from" />
           <span className="text-xs text-slate-400">to</span>
-          <Input type="date" value={leadDateTo} onChange={(e) => setLeadDateTo(e.target.value)} className="h-9 w-auto" data-testid="bd-filter-date-to" />
+          <MilkDateInput  value={leadDateTo} onChange={(e) => setLeadDateTo(e.target.value)} className="h-9 w-auto" data-testid="bd-filter-date-to" />
           <select value={leadBranchFilter} onChange={(e) => setLeadBranchFilter(e.target.value)} className="h-9 rounded-md border border-slate-200 bg-white px-3 text-sm" data-testid="bd-filter-branch">
             <option value="">All branches</option>
             {branches.map((b) => (<option key={b.id} value={b.id}>{b.branch_name}</option>))}
@@ -1131,8 +1132,8 @@ function LeadMasterTab({
             <option key={b.id} value={b.id}>{b.branch_name}</option>
           ))}
         </select>
-        <Input type="date" value={leadDateFrom} onChange={(e) => setLeadDateFrom(e.target.value)} data-testid="bd-lead-date-from" />
-        <Input type="date" value={leadDateTo} onChange={(e) => setLeadDateTo(e.target.value)} data-testid="bd-lead-date-to" />
+        <MilkDateInput  value={leadDateFrom} onChange={(e) => setLeadDateFrom(e.target.value)} data-testid="bd-lead-date-from" />
+        <MilkDateInput  value={leadDateTo} onChange={(e) => setLeadDateTo(e.target.value)} data-testid="bd-lead-date-to" />
       </div>
 
       {/* Lead Table */}

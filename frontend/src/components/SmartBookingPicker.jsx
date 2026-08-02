@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { CalendarDays, ChevronLeft, ChevronRight, User } from "lucide-react";
 import { toast } from "@/components/ui/sonner";
 import { getDaySlots, getDoctors, getExpertCalendar } from "@/lib/api";
+import { MilkDateInput } from "@/components/ui/milk-calendar";
 
 const todayStr = () => {
   const d = new Date();
@@ -93,8 +94,8 @@ const DateFirstPicker = ({ branchId, value, onChange }) => {
 
       <div>
         <label className="mb-1 block text-xs font-semibold text-slate-600">Date</label>
-        <input
-          type="date"
+        <MilkDateInput
+          
           min={todayStr()}
           value={value?.appointment_date || ""}
           onChange={(e) => onPickDate(e.target.value)}

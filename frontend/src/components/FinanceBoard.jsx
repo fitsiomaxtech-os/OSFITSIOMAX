@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { getBranchFinance } from "@/lib/api";
+import { MilkDateInput } from "@/components/ui/milk-calendar";
 
 const FEE_FILTERS = [
   { key: "all", label: "All" },
@@ -202,16 +203,16 @@ export const FinanceBoard = ({ branchId } = {}) => {
 
         <div className="flex items-center gap-1.5 text-xs text-slate-500">
           <CalendarDays className="h-3.5 w-3.5" />
-          <input
-            type="date"
+          <MilkDateInput
+            
             value={startDate}
             onChange={(e) => setStartDate(e.target.value)}
             className="h-8 rounded-md border border-slate-200 px-2 text-xs"
             data-testid="finance-start-date"
           />
           <span>to</span>
-          <input
-            type="date"
+          <MilkDateInput
+            
             value={endDate}
             onChange={(e) => setEndDate(e.target.value)}
             className="h-8 rounded-md border border-slate-200 px-2 text-xs"

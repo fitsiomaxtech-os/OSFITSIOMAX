@@ -7,6 +7,7 @@ import {
   createManualLead, getBranches,
   leadFieldsList, leadFieldsCreate, leadFieldsUpdate, leadFieldsDelete,
 } from "@/lib/api";
+import { MilkDateInput } from "@/components/ui/milk-calendar";
 
 const SOURCE_OPTIONS = ["Meta", "SEO", "Referral", "Walk-In", "Website", "CSV Import", "Google Sheets", "Other"];
 const DEPARTMENT_OPTIONS = [
@@ -109,7 +110,7 @@ export const CreateLeadModal = ({ onClose, onSaved, isSuperAdmin = true, branchI
               <Field label="Age"><Input type="number" min="0" placeholder="e.g. 32" value={form.age} onChange={(e) => set("age", e.target.value)} data-testid="lead-create-age" /></Field>
               <Field label="Gender"><Select value={form.gender} onChange={(v) => set("gender", v)} options={["", ...GENDER_OPTIONS]} testid="lead-create-gender" /></Field>
               <Field label="Occupation"><Input placeholder="e.g. Software Engineer" value={form.occupation} onChange={(e) => set("occupation", e.target.value)} data-testid="lead-create-occupation" /></Field>
-              <Field label="Expected Consultation Date" className="sm:col-span-2"><Input type="date" value={form.expected_consultation_date} onChange={(e) => set("expected_consultation_date", e.target.value)} data-testid="lead-create-consultdate" /></Field>
+              <Field label="Expected Consultation Date" className="sm:col-span-2"><MilkDateInput  value={form.expected_consultation_date} onChange={(e) => set("expected_consultation_date", e.target.value)} data-testid="lead-create-consultdate" /></Field>
             </div>
 
             {!branchId && ["offline_physio", "offline_fitness"].includes(form.department) && (
@@ -171,7 +172,7 @@ const CustomFieldInput = ({ field, value, onChange }) => {
           {(field.options || []).map((o) => <option key={o} value={o}>{o}</option>)}
         </select>
       )}
-      {field.type === "date" && <Input type="date" {...common} />}
+      {field.type === "date" && <MilkDateInput  {...common} />}
       {field.type === "number" && <Input type="number" {...common} />}
       {(field.type === "text" || field.type === "email" || field.type === "phone") && <Input type={field.type === "email" ? "email" : "text"} {...common} />}
     </Field>

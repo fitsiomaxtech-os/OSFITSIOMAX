@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const DOW = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
@@ -103,3 +103,60 @@ export const MilkCalendar = ({ value, onChange, min, accent = "amber", testid = 
 };
 
 export default MilkCalendar;
+
+
+/**
+ * A date field that opens the calendar above in a popover, instead of whatever picker the
+ * browser would show. Chrome's desktop dialog and the Android/iOS wheel are both
+ * unstyleable and neither looks like the rest of the OS — on a phone especially, tapping a
+ * date threw up a full-screen system control mid-form.
+ *
+ * Drop-in for `<Input type="date">`: onChange receives an event-shaped
+ * `{ target: { value } }`, so existing `(e) => ...e.target.value` handlers keep working.
+ */
+export const MilkDateInput = ({
+  value, onChange, min, max, disabled, className = "", accent = "amber",
+  placeholder = "Select date", ...rest
+}) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDocClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
+  const label = value
+    ? new Date(`${value}T00:00:00`).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
+    : placeholder;
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen((o) => !o)}
+        className={`flex h-9 w-full items-center justify-between gap-2 rounded-md border border-input bg-transparent px-3 text-left text-sm shadow-sm disabled:cursor-not-allowed disabled:opacity-50 ${value ? "text-slate-800" : "text-muted-foreground"} ${className}`}
+        {...rest}
+      >
+        <span className="truncate">{label}</span>
+        <CalendarDays className="h-4 w-4 shrink-0 text-slate-400" />
+      </button>
+      {open && (
+        // Right-aligned and above/below by container flow; w-max keeps the grid from being
+        // squeezed by a narrow field.
+        <div className="absolute left-0 z-50 mt-1 w-max">
+          <MilkCalendar
+            value={value}
+            min={min}
+            max={max}
+            accent={accent}
+            onChange={(d) => { onChange?.({ target: { value: d } }); setOpen(false); }}
+          />
+        </div>
+      )}
+    </div>
+  );
+};

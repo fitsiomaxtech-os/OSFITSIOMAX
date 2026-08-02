@@ -39,6 +39,7 @@ import {
   updateLead,
 } from "@/lib/api";
 import { to12h } from "@/lib/time";
+import { MilkDateInput } from "@/components/ui/milk-calendar";
 
 const PIPELINE_STAGES = [
   "New Lead",
@@ -203,9 +204,9 @@ export const PreSalesBoard = () => {
       {/* Date Filter (collapsible) */}
       {showDateFilter && (
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3" data-testid="presales-date-filter">
-          <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-40" data-testid="presales-date-from" />
+          <MilkDateInput  value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-40" data-testid="presales-date-from" />
           <span className="text-xs text-slate-400">to</span>
-          <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-40" data-testid="presales-date-to" />
+          <MilkDateInput  value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-40" data-testid="presales-date-to" />
           <Button size="sm" variant="outline" onClick={() => { setDateFrom(""); setDateTo(""); }} data-testid="presales-date-clear-btn">Clear</Button>
         </div>
       )}
@@ -770,7 +771,7 @@ function LeadDetailModal({ lead, branches, onClose, onStageMove, onRefresh }) {
                         {/* Date Picker */}
                         <div>
                           <label className="text-[10px] font-medium text-slate-500">Select Date</label>
-                          <Input type="date" value={selectedDate} onChange={(e) => { setSelectedDate(e.target.value); setSelectedSlot(""); setSelectedDoctorId(""); }} data-testid="booking-date-picker" />
+                          <MilkDateInput  value={selectedDate} onChange={(e) => { setSelectedDate(e.target.value); setSelectedSlot(""); setSelectedDoctorId(""); }} data-testid="booking-date-picker" />
                         </div>
 
                         {/* Time Slots Grid */}
@@ -885,7 +886,7 @@ function LeadDetailModal({ lead, branches, onClose, onStageMove, onRefresh }) {
             <div className="space-y-3" data-testid="lead-detail-followups">
               <div className="flex flex-wrap gap-2">
                 <Input value={newFollowUp.note} onChange={(e) => setNewFollowUp((p) => ({ ...p, note: e.target.value }))} placeholder="Follow-up note..." className="flex-1" data-testid="lead-detail-followup-note" />
-                <Input type="date" value={newFollowUp.scheduled_date} onChange={(e) => setNewFollowUp((p) => ({ ...p, scheduled_date: e.target.value }))} className="w-36" data-testid="lead-detail-followup-date" />
+                <MilkDateInput  value={newFollowUp.scheduled_date} onChange={(e) => setNewFollowUp((p) => ({ ...p, scheduled_date: e.target.value }))} className="w-36" data-testid="lead-detail-followup-date" />
                 <Button size="sm" onClick={addFollowUpNow} className="bg-sky-600 text-white hover:bg-sky-700" data-testid="lead-detail-followup-submit">Schedule</Button>
               </div>
               {followUps.length === 0 ? (

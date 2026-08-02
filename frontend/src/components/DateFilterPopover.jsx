@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
+import { MilkDateInput } from "@/components/ui/milk-calendar";
 
 /**
  * DateFilterPopover
@@ -135,11 +136,11 @@ export const DateFilterPopover = ({ value, onChange, testid = "date-filter" }) =
               <div className="space-y-2">
                 <div>
                   <label className="text-xs font-medium text-slate-500">From</label>
-                  <Input type="date" value={rangeFrom} onChange={(e) => setRangeFrom(e.target.value)} data-testid={`${testid}-range-from`} />
+                  <MilkDateInput  value={rangeFrom} onChange={(e) => setRangeFrom(e.target.value)} data-testid={`${testid}-range-from`} />
                 </div>
                 <div>
                   <label className="text-xs font-medium text-slate-500">To</label>
-                  <Input type="date" value={rangeTo} onChange={(e) => setRangeTo(e.target.value)} min={rangeFrom || undefined} data-testid={`${testid}-range-to`} />
+                  <MilkDateInput  value={rangeTo} onChange={(e) => setRangeTo(e.target.value)} min={rangeFrom || undefined} data-testid={`${testid}-range-to`} />
                 </div>
               </div>
               <Button

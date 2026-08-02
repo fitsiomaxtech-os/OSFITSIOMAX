@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { bmCreateWithExistingAdmin, updateBranch, hrBranchAdminCandidates, bmPerformance, bmHeadPhysioCandidates, bmAssignHeadPhysio } from "@/lib/api";
+import { MilkDateInput } from "@/components/ui/milk-calendar";
 
 const TABS = [
   { key: "details", label: "Branch Details", icon: MapPin },
@@ -165,7 +166,7 @@ export const BranchFormDialogV2 = ({ branch, onClose, onSaved }) => {
               <Field label="Branch Phone"><Input value={form.phone} onChange={(e) => set("phone", e.target.value)} placeholder="Front-desk phone" data-testid="bf2-phone" /></Field>
               <Field label="Branch Email"><Input value={form.email} onChange={(e) => set("email", e.target.value)} placeholder="branch@example.com" data-testid="bf2-email" /></Field>
               <Field label="Address *" className="sm:col-span-2"><Input value={form.address} onChange={(e) => set("address", e.target.value)} placeholder="Street, City, PIN" data-testid="bf2-address" /></Field>
-              <Field label="Opened Date"><Input type="date" value={form.opened_date} onChange={(e) => set("opened_date", e.target.value)} data-testid="bf2-opened-date" /></Field>
+              <Field label="Opened Date"><MilkDateInput  value={form.opened_date} onChange={(e) => set("opened_date", e.target.value)} data-testid="bf2-opened-date" /></Field>
               <Field label="Map Location" className="sm:col-span-1">
                 <Input value={form.map_location} onChange={(e) => set("map_location", e.target.value)} placeholder="Google Maps URL or lat,lng" data-testid="bf2-map" />
                 {form.map_location && <a href={form.map_location.startsWith("http") ? form.map_location : `https://www.google.com/maps?q=${encodeURIComponent(form.map_location)}`} target="_blank" rel="noopener noreferrer" className="mt-1 inline-block text-[11px] text-sky-600 hover:underline" data-testid="bf2-map-preview">Open in Google Maps →</a>}
@@ -203,7 +204,7 @@ export const BranchFormDialogV2 = ({ branch, onClose, onSaved }) => {
                 <p className="text-xs font-semibold text-slate-600">Branch Holidays (closed days)</p>
                 <p className="mb-2 text-xs text-slate-500">Add specific dates the branch is closed. These appear as holidays on the Branch Admin calendar.</p>
                 <div className="flex gap-2">
-                  <Input type="date" value={holidayInput} onChange={(e) => setHolidayInput(e.target.value)} className="w-44" data-testid="bf2-holiday-input" />
+                  <MilkDateInput  value={holidayInput} onChange={(e) => setHolidayInput(e.target.value)} className="w-44" data-testid="bf2-holiday-input" />
                   <Button type="button" variant="outline" onClick={addHoliday} data-testid="bf2-holiday-add">Add Holiday</Button>
                 </div>
                 {form.holidays.length > 0 ? (

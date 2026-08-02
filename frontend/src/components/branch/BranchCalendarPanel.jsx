@@ -12,6 +12,7 @@ import {
   cancelConsultAppointment,
 } from "@/lib/api";
 import { to12h } from "@/lib/time";
+import { MilkDateInput } from "@/components/ui/milk-calendar";
 
 // weekly_hours is keyed mon..sun; JS getDay() is 0=Sun..6=Sat.
 const DAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
@@ -534,7 +535,7 @@ export const BranchCalendarPanel = ({ branchId }) => {
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600">Date *</label>
-                <Input type="date" value={draft.date} onChange={(e) => setDraft((p) => ({ ...p, date: e.target.value, doctor_id: "", time: "" }))} data-testid="cal-modal-date" />
+                <MilkDateInput  value={draft.date} onChange={(e) => setDraft((p) => ({ ...p, date: e.target.value, doctor_id: "", time: "" }))} data-testid="cal-modal-date" />
               </div>
 
               {dayLoading ? (

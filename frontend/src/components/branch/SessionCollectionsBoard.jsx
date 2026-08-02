@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Eye, Banknote, CreditCard, Smartphone, Layers, ChevronDown } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { MilkDateInput } from "@/components/ui/milk-calendar";
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 const todayIso = () => new Date().toISOString().slice(0, 10);
@@ -218,8 +219,8 @@ export const SessionCollectionsBoard = ({ rows, onView }) => {
             }}
             testId="session-collections-status-filter"
           />
-          <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="h-9 rounded-md border border-slate-200 px-2 text-sm" data-testid="session-collections-from-date" />
-          <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="h-9 rounded-md border border-slate-200 px-2 text-sm" data-testid="session-collections-to-date" />
+          <MilkDateInput  value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="h-9 rounded-md border border-slate-200 px-2 text-sm" data-testid="session-collections-from-date" />
+          <MilkDateInput  value={toDate} onChange={(e) => setToDate(e.target.value)} className="h-9 rounded-md border border-slate-200 px-2 text-sm" data-testid="session-collections-to-date" />
         </CardContent>
       </Card>
 
