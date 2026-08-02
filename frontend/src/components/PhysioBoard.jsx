@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   Calendar,
-  CalendarDays,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -10,7 +9,6 @@ import {
   ClipboardList,
   Search,
   Send,
-  UserCircle,
   Users,
   X,
 } from "lucide-react";
@@ -18,8 +16,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { StageTab } from "@/components/ui/stage-tab";
+import { DateFilterPopover } from "@/components/DateFilterPopover";
 import {
-  apiMe,
   physioConsultations,
   physioCompleteConsultation,
   physioCalendar,
@@ -43,30 +41,9 @@ const BOTTOM_TABS = [
 
 export const PhysioBoard = ({ physioId } = {}) => {
   const [activeTab, setActiveTab] = useState("treatment");
-  const [showCalendar, setShowCalendar] = useState(false);
-  const [showProfile, setShowProfile] = useState(false);
 
   return (
     <div className="space-y-3 pb-20" data-testid="physio-board-root">
-      <div className="flex items-center justify-between">
-        <button
-          type="button"
-          onClick={() => setShowProfile(true)}
-          className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
-          data-testid="physio-open-profile"
-        >
-          <UserCircle className="h-4 w-4" /> <span className="hidden sm:inline">Profile</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setShowCalendar(true)}
-          className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
-          data-testid="physio-open-calendar"
-        >
-          <span className="hidden sm:inline">Calendar</span> <CalendarDays className="h-4 w-4" />
-        </button>
-      </div>
-
       {activeTab === "treatment" && <TreatmentTab physioId={physioId} />}
       {activeTab === "review" && <ReviewTab physioId={physioId} />}
       {activeTab === "patients" && <PatientsTab physioId={physioId} />}
@@ -92,66 +69,9 @@ export const PhysioBoard = ({ physioId } = {}) => {
           })}
         </div>
       </div>
-
-      {showCalendar && <CalendarPage physioId={physioId} onClose={() => setShowCalendar(false)} />}
-      {showProfile && <PhysioProfileModal onClose={() => setShowProfile(false)} />}
     </div>
   );
 };
-
-function PhysioProfileModal({ onClose }) {
-  const [user, setUser] = useState(null);
-
-  useEffect(() => {
-    (async () => {
-      try { setUser(await apiMe()); } catch { /* silent */ }
-    })();
-  }, []);
-
-  const joinedOn = user?.created_at
-    ? new Date(user.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })
-    : "—";
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" data-testid="physio-profile-modal" onClick={onClose}>
-      <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-slate-800">My Profile</h3>
-          <button type="button" onClick={onClose} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="physio-profile-close"><X className="h-4 w-4" /></button>
-        </div>
-        {!user ? (
-          <p className="text-xs text-slate-400">Loading...</p>
-        ) : (
-          <>
-            <div className="mb-4 flex items-center gap-3">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-sky-100 text-lg font-bold text-sky-700">
-                {user.full_name?.charAt(0)?.toUpperCase() || "?"}
-              </div>
-              <div className="min-w-0">
-                <p className="truncate text-sm font-semibold text-slate-800">{user.full_name}</p>
-                <p className="truncate text-[11px] text-slate-400">{user.email}</p>
-              </div>
-            </div>
-            <div className="space-y-2 text-xs">
-              <div className="flex items-center justify-between border-t border-slate-100 pt-2">
-                <span className="text-slate-400">Employee ID</span>
-                <span className="font-medium text-slate-700">{user.id ? `#${user.id.slice(-8).toUpperCase()}` : "—"}</span>
-              </div>
-              <div className="flex items-center justify-between border-t border-slate-100 pt-2">
-                <span className="text-slate-400">Role</span>
-                <span className="font-medium text-slate-700">Physio</span>
-              </div>
-              <div className="flex items-center justify-between border-t border-slate-100 pt-2">
-                <span className="text-slate-400">Joined On</span>
-                <span className="font-medium text-slate-700">{joinedOn}</span>
-              </div>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
 
 const isoOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const shiftIso = (iso, days) => {
@@ -258,76 +178,115 @@ function TreatmentTab({ physioId }) {
     ));
   }, [dayRows, search]);
 
-  // Every treatment day this physio holds, regardless of date.
+  // Every treatment day this physio holds, regardless of date — the default when
+  // no Meta-style date filter is active.
   const overall = useMemo(() => {
     const total = leads.reduce((n, l) => n + (l.total_sessions || 0), 0);
     const completed = leads.reduce((n, l) => n + (l.completed_sessions || 0), 0);
     return { total, completed, pending: total - completed };
   }, [leads]);
 
-  const today = useMemo(() => {
-    const rows = rowsFor(todayIso);
-    const completed = rows.filter((r) => r.done).length;
-    return { total: rows.length, completed, pending: rows.length - completed };
-  }, [rowsFor, todayIso]);
-
   const countFor = (date) => (
     leads.filter((l) => l.appointment_date === date).length
     + sessions.filter((s) => (s.slot_time || "").startsWith(date)).length
   );
 
+  // Meta Ads-style date filter for the summary tile only — separate from the week
+  // strip below, which always keeps its own single selected day. Picking a preset
+  // whose range is a single day (Today, Yesterday, an exact calendar date) also
+  // jumps the week strip there, since there's no ambiguity about which day to show.
+  const [filterValue, setFilterValue] = useState(null);
+  const [filterSessions, setFilterSessions] = useState([]);
+
+  const handleFilterChange = (next) => {
+    setFilterValue(next);
+    if (next && isoOf(next.from) === isoOf(next.to)) {
+      const d = isoOf(next.from);
+      setSelectedDate(d);
+      setWeekAnchor(d);
+    }
+  };
+
+  useEffect(() => {
+    if (!filterValue) { setFilterSessions([]); return; }
+    let cancelled = false;
+    (async () => {
+      const months = [];
+      let y = filterValue.from.getFullYear(), m = filterValue.from.getMonth();
+      const endY = filterValue.to.getFullYear(), endM = filterValue.to.getMonth();
+      while (y < endY || (y === endY && m <= endM)) {
+        months.push({ year: y, month: m + 1 });
+        m += 1;
+        if (m > 11) { m = 0; y += 1; }
+      }
+      try {
+        const results = await Promise.all(months.map((mo) => physioCalendar(mo.month, mo.year, physioId)));
+        if (!cancelled) setFilterSessions(results.flatMap((r) => r.sessions || []));
+      } catch { /* silent */ }
+    })();
+    return () => { cancelled = true; };
+  }, [filterValue, physioId]);
+
+  const filterStats = useMemo(() => {
+    if (!filterValue) return overall;
+    const fromIso = isoOf(filterValue.from);
+    const toIso = isoOf(filterValue.to);
+    const inRange = (d) => d && d >= fromIso && d <= toIso;
+    const apptRows = leads.filter((l) => inRange(l.appointment_date));
+    const dayRows = filterSessions.filter((s) => inRange((s.slot_time || "").slice(0, 10)));
+    const total = apptRows.length + dayRows.length;
+    const completed = apptRows.filter((l) => l.physio_stage === "Complete").length + dayRows.filter((s) => s.status === "completed").length;
+    return { total, completed, pending: total - completed };
+  }, [filterValue, leads, filterSessions, overall]);
+
+  const [searchOpen, setSearchOpen] = useState(false);
+
   return (
     <div data-testid="physio-treatment-tab">
-      {/* Two summary groups side by side: the whole caseload, and just today. */}
-      <div className="mb-4 grid gap-3 lg:grid-cols-2">
-        <div className="rounded-xl border border-sky-100 bg-sky-50/40 p-3" data-testid="physio-overall-summary">
-          <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-sky-700">Overall Treatment</p>
-          <div className="grid grid-cols-3 gap-2">
-            <StatTile label="Total Days" value={overall.total} valueClass="text-sky-700" />
-            <StatTile label="Completed" value={overall.completed} valueClass="text-emerald-600" sub={overall.total ? `${Math.round((overall.completed / overall.total) * 100)}% done` : null} />
-            <StatTile label="Pending" value={overall.pending} solidClass="bg-violet-600" sub="Days left" />
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-emerald-100 bg-emerald-50/40 p-3" data-testid="physio-today-summary">
-          <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-emerald-700">Today's Appointments</p>
-          <div className="grid grid-cols-3 gap-2">
-            <StatTile label="Total" value={today.total} valueClass="text-slate-700" />
-            <StatTile label="Completed" value={today.completed} valueClass="text-emerald-600" />
-            <StatTile label="Pending" value={today.pending} solidClass="bg-emerald-600" sub="Yet to do" />
-          </div>
+      <div className="mb-4 rounded-xl border border-sky-100 bg-sky-50/40 p-3" data-testid="physio-treatment-summary">
+        <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-sky-700">{filterValue ? filterValue.label : "Overall Treatment"}</p>
+        <div className="grid grid-cols-3 gap-2">
+          <StatTile label="Total Days" value={filterStats.total} valueClass="text-sky-700" />
+          <StatTile label="Completed" value={filterStats.completed} valueClass="text-emerald-600" sub={filterStats.total ? `${Math.round((filterStats.completed / filterStats.total) * 100)}% done` : null} />
+          <StatTile label="Pending" value={filterStats.pending} solidClass="bg-violet-600" sub="Days left" />
         </div>
       </div>
 
-      {/* Search the day's list, or jump the strip straight to a date. */}
+      {/* Icon-only search that expands on tap, plus the Meta-style date filter —
+          when nothing's picked the summary above shows Overall; the week strip
+          below always keeps today selected by default regardless. */}
       <div className="mb-3 flex flex-wrap items-center gap-2" data-testid="physio-treatment-toolbar">
-        <div className="relative min-w-[240px] flex-1">
-          <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search patient by name or phone..."
-            className="h-10 pl-9"
-            data-testid="physio-treatment-search"
-          />
-        </div>
-        <Input
-          type="date"
-          value={selectedDate}
-          onChange={(e) => { const v = e.target.value; if (v) { setSelectedDate(v); setWeekAnchor(v); } }}
-          className="h-10 w-44"
-          data-testid="physio-treatment-date-filter"
-        />
-        {selectedDate !== todayIso && (
-          <Button
-            variant="outline"
-            className="h-10"
-            onClick={() => { setSelectedDate(todayIso); setWeekAnchor(todayIso); }}
-            data-testid="physio-treatment-today"
+        {searchOpen ? (
+          <div className="relative min-w-[200px] flex-1">
+            <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
+            <Input
+              autoFocus
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search patient by name or phone..."
+              className="h-10 pl-9 pr-9"
+              data-testid="physio-treatment-search"
+            />
+            <button
+              type="button"
+              onClick={() => { setSearchOpen(false); setSearch(""); }}
+              className="absolute right-2 top-2 rounded p-1 text-slate-400 hover:bg-slate-100"
+              data-testid="physio-treatment-search-close"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setSearchOpen(true)}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+            data-testid="physio-treatment-search-open"
           >
-            Today
-          </Button>
+            <Search className="h-4 w-4" />
+          </button>
         )}
+        <DateFilterPopover value={filterValue} onChange={handleFilterChange} testid="physio-treatment-date-filter" />
       </div>
 
       {/* Sun-Sat week strip — today is always the default selection. */}
@@ -1030,7 +989,7 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
   );
 }
 
-function CalendarPage({ physioId, onClose }) {
+export function CalendarPage({ physioId, onClose }) {
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth() + 1);
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
   const [data, setData] = useState({ sessions: [] });

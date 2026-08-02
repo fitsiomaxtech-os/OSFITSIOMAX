@@ -50,7 +50,7 @@ import { BusinessLeadsDashboard } from "@/components/BusinessLeadsDashboard";
 import { PreSalesBoard } from "@/components/PreSalesBoard";
 import { BranchAdminBoard } from "@/components/BranchAdminBoard";
 import { HeadPhysioBoard } from "@/components/HeadPhysioBoard";
-import { PhysioBoard } from "@/components/PhysioBoard";
+import { PhysioBoard, CalendarPage as PhysioCalendarPage } from "@/components/PhysioBoard";
 import { MarketingBoard } from "@/components/marketing/MarketingBoard";
 import { PreSalesCRM } from "@/components/PreSalesCRM";
 import { MasterControlBoard } from "@/components/MasterControlBoard";
@@ -189,6 +189,7 @@ export const CRMPage = ({ auth, onLogout }) => {
 
   const [loading, setLoading] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const [showPhysioCalendar, setShowPhysioCalendar] = useState(false);
 
   const role = auth.user.role;
   const roleLabel = ROLE_META[role]?.label || role;
@@ -540,7 +541,32 @@ export const CRMPage = ({ auth, onLogout }) => {
 
       <div className="w-full" data-testid="role-board-full-width-wrap">
         <header className="sticky top-0 z-20 w-full border-b border-slate-200 bg-white px-3 py-3 shadow-sm sm:px-6 sm:py-4" data-testid="role-board-header">
-          <div className="flex flex-wrap items-center justify-between gap-2">
+          {/* Physio, mobile only: name + FitsiomaxOS subline on the left, Calendar /
+              Profile / Logout icons on the right — replaces the desktop header below,
+              which stays exactly as-is for every other role and at sm:+ for physio. */}
+          {showPhysioBoard && (
+            <div className="flex items-center justify-between gap-2 sm:hidden" data-testid="physio-mobile-header">
+              <div className="flex min-w-0 items-center gap-2">
+                <img src={LOGO_URL} alt="Fitsiomax" className="h-9 w-9 shrink-0 rounded-lg object-contain" data-testid="header-left-logo-mobile" />
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-bold text-slate-900" data-testid="physio-mobile-header-name">{auth.user.full_name}</p>
+                  <p className="text-[10px] font-semibold tracking-wide text-sky-600" data-testid="physio-mobile-header-brand">FitsiomaxOS</p>
+                </div>
+              </div>
+              <div className="flex shrink-0 items-center gap-1">
+                <button type="button" onClick={() => setShowPhysioCalendar(true)} className="rounded-md p-2 text-slate-500 hover:bg-slate-50" data-testid="physio-mobile-header-calendar">
+                  <CalendarDays className="h-5 w-5" />
+                </button>
+                <button type="button" onClick={() => setShowProfile(true)} className="rounded-md p-2 text-slate-500 hover:bg-slate-50" data-testid="physio-mobile-header-profile">
+                  <UserCircle className="h-5 w-5" />
+                </button>
+                <button type="button" onClick={logout} className="rounded-md p-2 text-slate-500 hover:bg-slate-50" data-testid="physio-mobile-header-logout">
+                  <LogOut className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+          )}
+          <div className={`flex flex-wrap items-center justify-between gap-2 ${showPhysioBoard ? "hidden sm:flex" : ""}`}>
             <div className="flex min-w-0 items-center gap-2 sm:gap-4">
               <img src={LOGO_URL} alt="Fitsiomax" className="h-9 w-9 shrink-0 rounded-lg object-contain sm:h-14 sm:w-14" data-testid="header-left-logo" />
               <div className="min-w-0">
@@ -584,6 +610,10 @@ export const CRMPage = ({ auth, onLogout }) => {
 
         {showProfile && (
           <MyProfileModal user={auth.user} roleLabel={roleLabel} branchName={myBranchName} onClose={() => setShowProfile(false)} />
+        )}
+
+        {showPhysioBoard && showPhysioCalendar && (
+          <PhysioCalendarPage onClose={() => setShowPhysioCalendar(false)} />
         )}
 
         <div className="w-full space-y-4 px-3 py-4 sm:space-y-6 sm:px-6 sm:py-6">
