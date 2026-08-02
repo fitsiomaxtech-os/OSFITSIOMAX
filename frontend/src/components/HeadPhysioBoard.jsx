@@ -123,10 +123,11 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "" }) => {
   const [showRecommendModal, setShowRecommendModal] = useState(null);
   const [showReviewModal, setShowReviewModal] = useState(null);
 
-  // Head Physios cover every branch, so there's no switcher any more — but the branch a
-  // fetch is scoped to still matters, and that's the one on their account.
+  // Head Physios cover every branch and carry none of their own, so "all" is the normal
+  // case here — without it the board asked for branch `undefined` and every list came back
+  // empty while the appointments sat there booked.
   const assignedBranchIds = branchIds && branchIds.length ? branchIds : (branchId ? [branchId] : []);
-  const effectiveBranchId = assignedBranchIds[0] || branchId;
+  const effectiveBranchId = assignedBranchIds[0] || branchId || "all";
 
   const loadPatients = useCallback(async () => {
     setLoading(true);

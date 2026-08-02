@@ -664,11 +664,17 @@ async def v3_consultations_board(branch_id: str, pipeline: Optional[str] = None,
     Physio every branch lead that has merely entered the Branch's pipeline, not just the ones
     actually handed off to them, inflating "All Stages" beyond the sum of their own stage pills.
     Super Admin driving a branch's Head Physio board (Branch Management > Branch Control) can
-    pass pipeline=head_consultation to see it the same way that branch's head physio would."""
+    pass pipeline=head_consultation to see it the same way that branch's head physio would.
+
+    branch_id="all" drops the branch filter. Head Physios cover every branch and so carry no
+    branch of their own; without this their board would ask for a branch it doesn't have and
+    come back empty."""
     try:
         is_hp = user.role == "head_physio" or (user.role == "super_admin" and pipeline == "head_consultation")
         field = "head_consultation_stage" if is_hp else "consultation_stage"
-        query = {"branch_id": branch_id, field: {"$ne": None}}
+        query = {field: {"$ne": None}}
+        if branch_id and branch_id != "all":
+            query["branch_id"] = branch_id
         leads_docs = await v3_col("leads").find(query, {"_id": 0}).sort("updated_at", -1).to_list(2000)
         stage_names = await _head_consultation_stage_names() if is_hp else await _consultation_stage_names()
         stage_counts = {}
