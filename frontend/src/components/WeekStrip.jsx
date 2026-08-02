@@ -43,12 +43,12 @@ export const WeekStrip = ({ value, onChange, counts = {}, testid = "week-strip" 
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-3 sm:p-4" data-testid={testid}>
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm font-bold text-slate-800 sm:text-base" data-testid={`${testid}-label`}>
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <p className="min-w-0 truncate text-[13px] font-bold text-slate-800 sm:text-base" data-testid={`${testid}-label`}>
           {longLabel(selected)}
           {selected === today && <span className="ml-2 rounded-md bg-teal-100 px-2 py-0.5 text-[11px] font-bold text-teal-700">TODAY</span>}
         </p>
-        <div className="flex items-center gap-1.5">
+        <div className="flex shrink-0 items-center gap-1.5">
           {selected !== today && (
             <button
               type="button"

@@ -59,6 +59,9 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
   const [workTab, setWorkTab] = useState("consultations");
   // The day every list under Consultations answers to. Starts on today.
   const [workDate, setWorkDate] = useState(todayIso());
+  // Reported up by each list so the cards can be labelled without fetching twice.
+  const [consultCount, setConsultCount] = useState(0);
+  const [reviewCount, setReviewCount] = useState(0);
   const [patients, setPatients] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState(null);
@@ -123,7 +126,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
               key={tab.key}
               type="button"
               onClick={() => setActiveTab(tab.key)}
-              className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
+              className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2.5 text-[13px] font-medium transition-colors sm:px-4 sm:text-sm ${
                 activeTab === tab.key
                   ? "border-teal-500 text-teal-700"
                   : "border-transparent text-slate-400 hover:text-slate-600"
@@ -140,53 +143,69 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
         <div className="space-y-4" data-testid="hp-work-view">
           <WeekStrip value={workDate} onChange={setWorkDate} testid="hp-week-strip" />
 
-          {/* Desktop segmented control. On phones the same three live in the bottom bar,
-              where a thumb can reach them. */}
-          <div className="hidden flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1 sm:flex" data-testid="hp-work-tabs">
+          {/* Summary cards, not a pill bar — these are the day's workload, so each one
+              carries its own count and reads at a glance from across a room. Three equal
+              columns at every width, so the row fits a phone without wrapping or
+              scrolling; the bottom bar is still there for thumb reach. */}
+          <div className="grid grid-cols-3 gap-2 sm:gap-3" data-testid="hp-work-tabs">
             {WORK_TABS.map((t) => {
               const Icon = t.icon;
+              const active = workTab === t.key;
+              const n = t.key === "consultations" ? consultCount
+                : t.key === "review" ? reviewCount
+                : consultCount + reviewCount;
               return (
                 <button
                   key={t.key}
                   type="button"
                   onClick={() => setWorkTab(t.key)}
-                  className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${
-                    workTab === t.key ? "bg-teal-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"
+                  className={`rounded-xl border-2 px-2 py-3 text-center transition sm:px-4 sm:py-4 sm:text-left ${
+                    active
+                      ? "border-teal-600 bg-teal-50 shadow-sm"
+                      : "border-slate-200 bg-white hover:border-teal-300 hover:shadow-sm"
                   }`}
                   data-testid={`hp-work-tab-${t.key}`}
                 >
-                  <Icon className="h-4 w-4" />{t.label}
+                  <span className={`flex items-center justify-center gap-1.5 sm:justify-start ${active ? "text-teal-700" : "text-slate-500"}`}>
+                    <Icon className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />
+                    <span className="truncate text-[10px] font-bold uppercase tracking-wider sm:text-xs">{t.label}</span>
+                  </span>
+                  <span className={`mt-0.5 block text-xl font-extrabold sm:mt-1 sm:text-3xl ${active ? "text-teal-700" : "text-slate-800"}`}>
+                    {n}
+                  </span>
                 </button>
               );
             })}
           </div>
 
-          {(workTab === "consultations" || workTab === "all") && (
-            <div data-testid="hp-work-consultations">
-              {workTab === "all" && (
-                <p className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-400">
-                  <Calendar className="h-3.5 w-3.5" /> Consultations
-                </p>
-              )}
-              <ConsultationsBoard
-                branchId={effectiveBranchId}
-                viewerRole="head_physio"
-                externalDate={workDate}
-                hideDateFilter
-              />
-            </div>
-          )}
+          {/* Both stay mounted and hidden rather than unmounted, so every card keeps a
+              live count whichever one is open, and switching costs no refetch. */}
+          <div className={workTab === "review" ? "hidden" : ""} data-testid="hp-work-consultations">
+            {workTab === "all" && (
+              <p className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-400">
+                <Calendar className="h-3.5 w-3.5" /> Consultations
+              </p>
+            )}
+            <ConsultationsBoard
+              branchId={effectiveBranchId}
+              viewerRole="head_physio"
+              externalDate={workDate}
+              hideDateFilter
+              onCountChange={setConsultCount}
+            />
+          </div>
 
-          {(workTab === "review" || workTab === "all") && (
-            <div className={workTab === "all" ? "border-t border-slate-200 pt-4" : ""} data-testid="hp-work-review">
-              {workTab === "all" && (
-                <p className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-400">
-                  <ClipboardCheck className="h-3.5 w-3.5" /> Review
-                </p>
-              )}
-              <HeadPhysioReviewTab selectedDate={workDate} compact={workTab === "all"} />
-            </div>
-          )}
+          <div
+            className={workTab === "consultations" ? "hidden" : workTab === "all" ? "border-t border-slate-200 pt-4" : ""}
+            data-testid="hp-work-review"
+          >
+            {workTab === "all" && (
+              <p className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-400">
+                <ClipboardCheck className="h-3.5 w-3.5" /> Review
+              </p>
+            )}
+            <HeadPhysioReviewTab selectedDate={workDate} compact={workTab === "all"} onCountChange={setReviewCount} />
+          </div>
         </div>
       )}
 
