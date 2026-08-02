@@ -1254,14 +1254,14 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
               vh values stay as the fallback for anything without dvh. */}
           <div className="flex h-[calc(100vh-1rem)] max-h-[calc(100dvh-1rem)] w-full max-w-7xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-200 bg-slate-100 px-4 py-3 sm:px-6 sm:py-4">
-              <div className="flex items-center gap-2.5">
-                <Calendar className="h-5 w-5 text-slate-500" />
-                <div>
-                  <p className="text-lg font-bold text-slate-800">Appointment</p>
-                  <p className="text-xs text-slate-500">{lead.name} · pick a date, then the Head Physio, then their time</p>
+              <div className="flex min-w-0 items-center gap-2.5">
+                <Calendar className="h-5 w-5 shrink-0 text-slate-500" />
+                <div className="min-w-0">
+                  <p className="text-base font-bold text-slate-800 sm:text-lg">Appointment</p>
+                  <p className="truncate text-xs text-slate-500">{lead.name} · pick a date, then the Head Physio, then their time</p>
                 </div>
               </div>
-              <button onClick={() => setApptDraft(null)} className="rounded-lg border-2 border-orange-200 bg-orange-100 p-2 text-orange-600 transition hover:border-orange-300 hover:bg-orange-200 hover:text-orange-700" data-testid="branch-appt-close">
+              <button onClick={() => setApptDraft(null)} className="shrink-0 rounded-lg border-2 border-orange-200 bg-orange-100 p-2 text-orange-600 transition hover:border-orange-300 hover:bg-orange-200 hover:text-orange-700" data-testid="branch-appt-close">
                 <X className="h-5 w-5" />
               </button>
             </div>

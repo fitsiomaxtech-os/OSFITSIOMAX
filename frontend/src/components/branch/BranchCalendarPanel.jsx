@@ -462,9 +462,9 @@ export const BranchCalendarPanel = ({ branchId }) => {
               </div>
             </div>
 
-            <div className="flex items-center justify-between gap-3 border-t-2 border-slate-200 bg-slate-100 px-6 py-3.5">
-              <p className="text-xs text-slate-500">Payment Due is the next unpaid Treatment Fee installment on the client's record.</p>
-              <Button variant="outline" onClick={() => setDayView(null)} data-testid="cal-day-modal-back">Close</Button>
+            <div className="flex flex-col gap-2.5 border-t-2 border-slate-200 bg-slate-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-6 sm:py-3.5">
+              <p className="text-xs leading-snug text-slate-500">Payment Due is the next unpaid Treatment Fee installment on the client's record.</p>
+              <Button variant="outline" className="w-full shrink-0 sm:w-auto" onClick={() => setDayView(null)} data-testid="cal-day-modal-back">Close</Button>
             </div>
           </div>
         </div>

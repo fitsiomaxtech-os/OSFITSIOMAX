@@ -2762,35 +2762,37 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
             {showPhysioModal && showSlotPicker && physioPick && (
               <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-2" data-testid="cons-slot-picker-modal">
                 <div className="flex h-[calc(100vh-1rem)] max-h-[calc(100vh-1rem)] w-full max-w-7xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-                  <div className="flex items-center justify-between bg-gradient-to-r from-violet-600 to-indigo-600 px-6 py-4 text-white">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white/20 text-lg font-bold text-white">
+                  {/* Wraps on a phone: the title keeps the first line with the close button
+                      and the status badge drops to its own beneath. Side by side the badge
+                      refuses to shrink and squeezes the name into a one-word column. */}
+                  <div className="flex flex-wrap items-center justify-between gap-2.5 bg-gradient-to-r from-violet-600 to-indigo-600 px-4 py-3 text-white sm:flex-nowrap sm:gap-3 sm:px-6 sm:py-4">
+                    <div className="flex min-w-0 flex-1 items-center gap-2.5 sm:gap-3">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/20 text-base font-bold text-white sm:h-12 sm:w-12 sm:text-lg">
                         {(physioCalendarData?.doctor_name || physioOptions.find((p) => p.id === physioPick)?.full_name || "P").charAt(0).toUpperCase()}
                       </div>
-                      <div>
-                        <p className="text-lg font-semibold" data-testid="cons-slot-picker-physio">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold sm:text-lg" data-testid="cons-slot-picker-physio">
                           {selectedLead.name} <span className="font-normal text-white/70">with</span>{" "}
                           {physioCalendarData?.doctor_name || physioOptions.find((p) => p.id === physioPick)?.full_name || "Physio"}
                         </p>
-                        <p className="text-[13px] text-white/75">
+                        <p className="text-[11px] leading-snug text-white/75 sm:text-[13px]">
                           {selectedLead.session_package_name || "Session package"} · {totalSessionsNeeded} sessions ·
                           {" "}one session a day · {sessionMinutes} min each · {openSlotCount} slots open
                         </p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-3">
-                      {/* Same bordered-box treatment as the PAID / UNPAID status badges below,
-                          in dark green so it reads as the popup's headline status. */}
-                      <span
-                        className="rounded-lg border-2 border-emerald-900 bg-emerald-700 px-4 py-2 text-sm font-bold text-white shadow-sm"
-                        data-testid="cons-slot-picker-count"
-                      >
-                        {sortedPickedSlots.length} of {totalSessionsNeeded} treatment days fixed
-                      </span>
-                      <button onClick={() => setShowSlotPicker(false)} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="cons-slot-picker-close">
-                        <X className="h-5 w-5" />
-                      </button>
-                    </div>
+                    <button onClick={() => setShowSlotPicker(false)} className="order-2 shrink-0 rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="cons-slot-picker-close">
+                      <X className="h-5 w-5" />
+                    </button>
+                    {/* Same bordered-box treatment as the PAID / UNPAID status badges below,
+                        in dark green so it reads as the popup's headline status. order puts
+                        it back between the title and the close button from sm up. */}
+                    <span
+                      className="order-3 w-full rounded-lg border-2 border-emerald-900 bg-emerald-700 px-4 py-1.5 text-center text-xs font-bold text-white shadow-sm sm:order-1 sm:w-auto sm:py-2 sm:text-sm"
+                      data-testid="cons-slot-picker-count"
+                    >
+                      {sortedPickedSlots.length} of {totalSessionsNeeded} treatment days fixed
+                    </span>
                   </div>
 
                   {/* Treatment Fee standing — which of these treatment days are actually paid
@@ -3060,8 +3062,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     </div>
                   )}
 
-                  <div className="flex items-center justify-between gap-3 border-t-2 border-slate-200 bg-slate-100 px-6 py-4">
-                    <div className="text-[13px] text-slate-500">
+                  {/* Stacked on a phone. On one line the two buttons take what they need
+                      and the note beside them is left a column barely a word wide. */}
+                  <div className="flex flex-col gap-2.5 border-t-2 border-slate-200 bg-slate-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-6 sm:py-4">
+                    <div className="text-[12px] leading-snug text-slate-500 sm:text-[13px]">
                       <p className="font-bold text-slate-700">
                         {allSessionsPicked
                           ? `All ${totalSessionsNeeded} treatment days are fixed${treatmentPlan.length > 0 ? ` · ${dayLabel(treatmentPlan[0].date)} to ${dayLabel(treatmentPlan[treatmentPlan.length - 1].date)}` : ""}.`
@@ -3074,12 +3078,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         </p>
                       )}
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Button variant="outline" className="text-sm" onClick={() => setShowSlotPicker(false)} data-testid="cons-slot-picker-back">
+                    <div className="flex shrink-0 items-center gap-2">
+                      <Button variant="outline" className="flex-1 text-sm sm:flex-none" onClick={() => setShowSlotPicker(false)} data-testid="cons-slot-picker-back">
                         Back
                       </Button>
                       <Button
-                        className="bg-emerald-600 text-sm hover:bg-emerald-700"
+                        className="flex-[2] bg-emerald-600 text-sm hover:bg-emerald-700 sm:flex-none"
                         onClick={submitPhysioAssign}
                         disabled={assigningPhysio || !allSessionsPicked}
                         data-testid="cons-slot-picker-submit"

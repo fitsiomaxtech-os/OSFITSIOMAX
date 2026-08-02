@@ -170,7 +170,7 @@ export const NetCashflowSunburst = ({ data, onDrilldown }) => {
   return (
     <Card>
       <CardContent className="p-4">
-        <div className="mb-3 flex items-center justify-between">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Revenue by Category — Net Cashflow</p>
           <div className="flex items-center gap-2">
             <span className="rounded-[5px] border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700" data-testid="cashflow-pending-badge">
