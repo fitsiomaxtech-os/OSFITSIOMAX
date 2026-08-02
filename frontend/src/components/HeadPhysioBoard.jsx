@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { ConsultationsBoard } from "@/components/ConsultationsBoard";
+import { HeadPhysioReviewTab } from "@/components/HeadPhysioReviewTab";
 import {
   getBranches,
   getHPMyCalendar,
@@ -129,11 +130,20 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
         />
       )}
 
+      {/* The dispatched post-treatment reviews come first — they're work handed to this
+          Head Physio by name. The weekly assessments below are their own separate,
+          patient-by-patient record and stay reachable underneath. */}
       {activeTab === "assessments" && (
-        <AssessmentsTab
-          patients={patients}
-          onReview={(p, w) => setShowReviewModal({ patient: p, week: w })}
-        />
+        <div className="space-y-6">
+          <HeadPhysioReviewTab />
+          <div className="border-t border-slate-200 pt-5">
+            <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-400">Weekly Assessments</p>
+            <AssessmentsTab
+              patients={patients}
+              onReview={(p, w) => setShowReviewModal({ patient: p, week: w })}
+            />
+          </div>
+        </div>
       )}
 
       {activeTab === "calendar" && <MyCalendarTab branchId={effectiveBranchId} />}

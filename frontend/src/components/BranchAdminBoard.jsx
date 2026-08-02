@@ -47,6 +47,7 @@ import { PlaceholderPanel } from "@/components/PackagesBoard";
 import { AccountantManageTab } from "@/components/branch/AccountantManageTab";
 import { BranchCalendarPanel } from "@/components/branch/BranchCalendarPanel";
 import { BranchDetailPage } from "@/components/branch/BranchDetailPage";
+import { BranchReviewPanel } from "@/components/branch/BranchReviewPanel";
 import { CreateLeadModal } from "@/components/CreateLeadModal";
 
 export const BranchAdminBoard = ({ branchId }) => {
@@ -229,7 +230,7 @@ export const BranchAdminBoard = ({ branchId }) => {
           )}
         </div>
       ) : activeView === "review" ? (
-        <PlaceholderPanel label="Review" testid="branch-review-panel" />
+        <BranchReviewPanel branchId={branchId} />
       ) : activeView === "rehab" ? (
         <PlaceholderPanel label="Rehab" testid="branch-rehab-panel" />
       ) : activeView === "store" ? (

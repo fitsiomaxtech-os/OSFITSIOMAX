@@ -23,6 +23,8 @@ import {
   physioSessions,
   physioCompleteSession,
   physioWeeklyAssessment,
+  physioReviews,
+  physioRaiseReview,
 } from "@/lib/api";
 import { to12h, slotTo12h } from "@/lib/time";
 
@@ -386,6 +388,162 @@ const REVIEW_TABS = [
   { key: "completed", label: "Completed" },
 ];
 
+/**
+ * "Send for Head Physio Review" — the Physio's end of the review chain.
+ *
+ * Treatment days are counted from days actually attended, not from when the package was
+ * bought: a package booked three weeks out is not three weeks of treatment. A patient
+ * under the threshold can still be sent up early, because a physio noticing something
+ * wrong in week one is exactly when a Head Physio most needs to see them — the badge
+ * just stops flagging it as due.
+ */
+function SendForReviewSection({ physioId }) {
+  const [data, setData] = useState({ patients: [], review_after_days: 7 });
+  const [loading, setLoading] = useState(false);
+  const [draft, setDraft] = useState(null); // { patient, reason, physio_notes }
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { setData(await physioReviews(physioId)); }
+    catch { setData({ patients: [], review_after_days: 7 }); }
+    setLoading(false);
+  }, [physioId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const submit = async () => {
+    setSaving(true);
+    try {
+      await physioRaiseReview(draft.patient.lead_id, { reason: draft.reason, physio_notes: draft.physio_notes }, physioId);
+      toast.success("Sent to Branch Admin for review");
+      setDraft(null);
+      await load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Failed to raise the review");
+    }
+    setSaving(false);
+  };
+
+  const threshold = data.review_after_days || 7;
+  const patients = data.patients || [];
+  const due = patients.filter((p) => p.due_for_review && !p.review_status);
+
+  return (
+    <div data-testid="physio-send-review-section">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-slate-700">Send for Head Physio Review</h3>
+        <div className="flex items-center gap-2">
+          {due.length > 0 && (
+            <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-[10px] font-bold text-amber-700">{due.length} due</span>
+          )}
+          <button type="button" onClick={load} className="rounded-md border border-slate-200 px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-slate-50" data-testid="physio-send-review-refresh">
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      {patients.length === 0 && !loading ? (
+        <p className="rounded-lg border border-dashed border-slate-200 px-3 py-8 text-center text-sm text-slate-400">
+          No patients assigned to you yet.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {patients.map((p) => {
+            const raised = !!p.review_status;
+            return (
+              <div key={p.lead_id} className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border-2 bg-white p-3.5 ${p.due_for_review && !raised ? "border-amber-300" : "border-slate-200"}`} data-testid={`physio-send-review-${p.lead_id}`}>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-sm font-bold text-slate-800">{p.lead_name}</p>
+                    {p.patient_number && <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-slate-500">{p.patient_number}</span>}
+                    <span className={`rounded-md px-2 py-0.5 text-[11px] font-bold ${p.due_for_review ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-600"}`}>
+                      {p.treatment_days} / {threshold} treatment days
+                    </span>
+                  </div>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    {p.phone || "—"}
+                    {p.first_session_date ? ` · started ${p.first_session_date}` : ""}
+                  </p>
+                </div>
+                {raised ? (
+                  <span className={`shrink-0 rounded-md px-2.5 py-1 text-[11px] font-bold ${
+                    p.review_status === "completed" ? "bg-emerald-100 text-emerald-700"
+                      : p.review_status === "sent" ? "bg-violet-100 text-violet-700"
+                      : "bg-sky-100 text-sky-700"
+                  }`}>
+                    {p.review_status === "completed" ? "REVIEW COMPLETED"
+                      : p.review_status === "sent" ? "WITH HEAD PHYSIO"
+                      : "WITH BRANCH ADMIN"}
+                  </span>
+                ) : (
+                  <Button
+                    size="sm"
+                    className={`shrink-0 text-xs text-white ${p.due_for_review ? "bg-amber-600 hover:bg-amber-700" : "bg-slate-400 hover:bg-slate-500"}`}
+                    onClick={() => setDraft({ patient: p, reason: "", physio_notes: "" })}
+                    data-testid={`physio-raise-review-${p.lead_id}`}
+                  >
+                    Send for Review
+                  </Button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {draft && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-3" onClick={(e) => { if (e.target === e.currentTarget) setDraft(null); }}>
+          <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl" data-testid="physio-raise-review-modal">
+            <div className="flex items-center justify-between bg-slate-500 px-6 py-4 text-white">
+              <div>
+                <p className="text-lg font-bold">Send for Review</p>
+                <p className="text-xs text-white/80">{draft.patient.lead_name} · {draft.patient.treatment_days} treatment days</p>
+              </div>
+              <button onClick={() => setDraft(null)} className="rounded-lg border-2 border-orange-200 bg-orange-100 p-2 text-orange-600 hover:bg-orange-200" data-testid="physio-raise-review-close">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="space-y-4 p-5">
+              {!draft.patient.due_for_review && (
+                <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                  This patient has {draft.patient.treatment_days} of {threshold} treatment days. You can still send them up early.
+                </p>
+              )}
+              <div>
+                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">Reason</label>
+                <Input
+                  value={draft.reason}
+                  onChange={(e) => setDraft({ ...draft, reason: e.target.value })}
+                  placeholder="e.g. Week 1 progress review"
+                  data-testid="physio-raise-review-reason"
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">Notes for the Head Physio</label>
+                <textarea
+                  rows={4}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400"
+                  placeholder="How has the patient responded so far?"
+                  value={draft.physio_notes}
+                  onChange={(e) => setDraft({ ...draft, physio_notes: e.target.value })}
+                  data-testid="physio-raise-review-notes"
+                />
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-6 py-3.5">
+              <Button variant="outline" onClick={() => setDraft(null)} data-testid="physio-raise-review-cancel">Cancel</Button>
+              <Button className="bg-emerald-600 text-white hover:bg-emerald-700" onClick={submit} disabled={saving} data-testid="physio-raise-review-submit">
+                {saving ? "Sending..." : "Send to Branch Admin"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ReviewTab({ physioId }) {
   const [patients, setPatients] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -436,7 +594,12 @@ function ReviewTab({ physioId }) {
 
   return (
     <div data-testid="physio-review-tab">
-      <div className="flex items-center justify-between mb-4">
+      {/* The start of the post-treatment review chain: this is where a patient who has
+          been through a week of treatment gets sent up to the Branch Admin, who puts them
+          in front of a Head Physio. */}
+      <SendForReviewSection physioId={physioId} />
+
+      <div className="flex items-center justify-between mb-4 mt-8 border-t border-slate-200 pt-6">
         <h3 className="text-sm font-semibold text-slate-700">Weekly Reviews</h3>
         <span className="rounded-full bg-sky-100 px-2.5 py-0.5 text-[10px] font-semibold text-sky-700">{visible.length} patients</span>
       </div>

@@ -147,6 +147,14 @@ export const updateConsultAppointment = async (apptId, payload) => (await api.pa
 export const cancelConsultAppointment = async (apptId) => (await api.post(`/branch-admin/consult-appointments/${apptId}/cancel`)).data;
 export const getAvailableExperts = async (branchId, date, time, leadId) => (await api.get(`/branch-admin/available-experts/${branchId}`, { params: { date, ...(time ? { time } : {}), ...(leadId ? { lead_id: leadId } : {}) } })).data;
 export const getAvailableDates = async (branchId, month, leadId) => (await api.get(`/branch-admin/available-dates/${branchId}`, { params: { month, ...(leadId ? { lead_id: leadId } : {}) } })).data;
+
+// ---- Post-treatment Review: Physio raises -> Branch Admin sends -> Head Physio writes it
+export const physioReviews = async (physioId) => (await api.get("/physio/reviews", { params: physioId ? { physio_id: physioId } : {} })).data;
+export const physioRaiseReview = async (leadId, payload, physioId) => (await api.post(`/physio/reviews/raise/${leadId}`, payload, { params: physioId ? { physio_id: physioId } : {} })).data;
+export const branchReviews = async (branchId, status) => (await api.get(`/branch-admin/reviews/${branchId}`, { params: status ? { status } : {} })).data;
+export const branchSendReview = async (reviewId, payload) => (await api.post(`/branch-admin/reviews/${reviewId}/send`, payload)).data;
+export const hpReviews = async () => (await api.get("/head-physio/reviews")).data;
+export const hpCompleteReview = async (reviewId, payload) => (await api.post(`/head-physio/reviews/${reviewId}/complete`, payload)).data;
 export const getCalendarAvailability = async (branchId, month) => (await api.get(`/branch-admin/calendar-availability/${branchId}`, { params: { month } })).data;
 export const getDaySlots = async (branchId, date) => (await api.get(`/branch-admin/day-slots/${branchId}`, { params: { date } })).data;
 export const getExpertCalendar = async (expertId, month) => (await api.get(`/branch-admin/expert-calendar/${expertId}`, { params: { month } })).data;
