@@ -515,6 +515,9 @@ export const BranchAdminBoard = ({ branchId }) => {
               showOwnStageBar={false}
               autoOpenLeadId={autoOpenLeadId}
               onAutoOpened={() => setAutoOpenLeadId(null)}
+              // Eight columns can't be read on a phone — without this the consultation
+              // stages fall back to the desk table and every field arrives truncated.
+              mobileCards
             />
           ) : (
           <>
