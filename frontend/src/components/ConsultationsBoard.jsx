@@ -42,10 +42,16 @@ const partialInstallmentLabel = (idx) => `${PARTIAL_ORDINALS[idx] || `#${idx + 1
 // The receipt is built as a standalone HTML document rather than printed from the page:
 // window.print() here would send the whole board — modals, sidebar and all — to the
 // printer, and the same document is what gets downloaded, so paper and file always match.
+// Same mark the login page and CRM header use, so a printed bill is recognisably the OS's.
+const LOGO_URL =
+  "https://customer-assets.emergentagent.com/job_3d74aa9e-a241-4207-b148-2bbe29802707/artifacts/nozl77ti_Logo%20Icon.webp";
+
 const RECEIPT_STYLES = `
   *{box-sizing:border-box}
   body{margin:0;padding:28px;font-family:'Segoe UI',Arial,sans-serif;color:#0f172a;background:#fff}
   .wrap{max-width:560px;margin:0 auto;border:1px solid #cbd5e1;border-radius:12px;padding:26px}
+  .head{display:flex;align-items:center;gap:14px}
+  .logo{width:52px;height:52px;object-fit:contain;border-radius:10px;flex:none}
   .brand{font-size:22px;font-weight:800;letter-spacing:.5px}
   .sub{font-size:12px;color:#64748b;margin-top:2px}
   .tag{display:inline-block;margin-top:12px;padding:5px 12px;border-radius:6px;
@@ -84,8 +90,13 @@ const escapeHtml = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => (
 const receiptHtml = (r) => `<!doctype html><html><head><meta charset="utf-8">
 <title>Receipt ${escapeHtml(r.receiptNo)}</title><style>${RECEIPT_STYLES}</style></head>
 <body><div class="wrap">
-  <div class="brand">FITSIOMAX</div>
-  <div class="sub">${escapeHtml(r.branch || "Physiotherapy & Rehabilitation")}</div>
+  <div class="head">
+    <img class="logo" src="${LOGO_URL}" alt="FITSIOMAX">
+    <div>
+      <div class="brand">FITSIOMAX</div>
+      <div class="sub">${escapeHtml(r.branch || "Physiotherapy & Rehabilitation")}</div>
+    </div>
+  </div>
   <div class="tag">PAYMENT RECEIVED</div>
   <hr>
   <div class="amt-label">Amount Paid</div>
@@ -108,8 +119,18 @@ const printReceipt = (r) => {
   w.document.write(receiptHtml(r));
   w.document.close();
   w.focus();
-  // Give the new document a tick to lay out before the print dialog measures it.
-  setTimeout(() => { w.print(); }, 250);
+  // Wait for the logo to finish loading — printing before it does drops it from the bill
+  // silently. `load` also fires if the image fails, and the timeout covers the case where
+  // it never resolves at all, so the dialog always opens either way.
+  let printed = false;
+  const go = () => {
+    if (printed) return;
+    printed = true;
+    try { w.print(); } catch { /* window was closed before printing */ }
+  };
+  if (w.document.readyState === "complete") go();
+  else w.addEventListener("load", go, { once: true });
+  setTimeout(go, 3000);
 };
 
 const downloadReceipt = (r) => {
@@ -3048,17 +3069,28 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       {receipt && (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-3" data-testid="cons-receipt-modal">
           <div className="flex max-h-[94vh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-            <div className="flex items-start justify-between bg-emerald-600 px-6 py-4 text-white">
-              <div>
-                <p className="text-lg font-bold">Payment Received</p>
-                <p className="text-xs text-white/80">Receipt {receipt.receiptNo}</p>
+            <div className="flex items-start justify-between gap-3 bg-emerald-600 px-6 py-4 text-white">
+              <div className="flex min-w-0 items-center gap-3">
+                <img src={LOGO_URL} alt="FITSIOMAX" className="h-11 w-11 shrink-0 rounded-lg bg-white/90 object-contain p-1" />
+                <div className="min-w-0">
+                  <p className="text-lg font-bold">Payment Received</p>
+                  <p className="truncate text-xs text-white/80">Receipt {receipt.receiptNo}</p>
+                </div>
               </div>
-              <button onClick={() => setReceipt(null)} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="cons-receipt-close">
+              <button onClick={() => setReceipt(null)} className="shrink-0 rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="cons-receipt-close">
                 <X className="h-5 w-5" />
               </button>
             </div>
 
             <div className="flex-1 overflow-y-auto p-6">
+              <div className="mb-4 flex items-center justify-center gap-2 text-center">
+                <img src={LOGO_URL} alt="" className="h-7 w-7 object-contain" />
+                <div className="text-left">
+                  <p className="text-base font-extrabold tracking-wide text-slate-800">FITSIOMAX</p>
+                  <p className="text-[10px] text-slate-400">{receipt.branch || "Physiotherapy & Rehabilitation"}</p>
+                </div>
+              </div>
+
               <div className="rounded-xl border-2 border-emerald-200 bg-emerald-50 px-4 py-5 text-center">
                 <p className="text-xs font-bold uppercase tracking-widest text-emerald-600">Amount Paid</p>
                 <p className="mt-1 text-4xl font-extrabold text-emerald-700" data-testid="cons-receipt-amount">Rs.{receipt.amount}</p>
