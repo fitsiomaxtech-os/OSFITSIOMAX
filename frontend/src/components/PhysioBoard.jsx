@@ -75,6 +75,25 @@ const shiftIso = (iso, days) => {
 const DAY_STRIP_LENGTH = 7;
 const DAY_STRIP_HALF = Math.floor(DAY_STRIP_LENGTH / 2);
 
+// Summary tile. `solidClass` fills the tile — used on the one figure in each group
+// that the physio is actually acting on, so it carries the group rather than
+// sitting level with the counts either side of it.
+const StatTile = ({ label, value, sub, valueClass, solidClass }) => (
+  solidClass ? (
+    <div className={`rounded-lg px-3 py-2.5 ${solidClass}`}>
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-white/75">{label}</p>
+      <p className="text-xl font-bold text-white">{value}</p>
+      {sub && <p className="text-[10px] text-white/70">{sub}</p>}
+    </div>
+  ) : (
+    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2.5">
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{label}</p>
+      <p className={`text-xl font-bold ${valueClass || "text-slate-700"}`}>{value}</p>
+      {sub && <p className="text-[10px] text-slate-400">{sub}</p>}
+    </div>
+  )
+);
+
 function TreatmentTab({ physioId }) {
   const [leads, setLeads] = useState([]);
   const [sessions, setSessions] = useState([]);
@@ -117,14 +136,17 @@ function TreatmentTab({ physioId }) {
 
   const leadById = useMemo(() => Object.fromEntries(leads.map((l) => [l.id, l])), [leads]);
 
-  // Everything on the selected day: the branch-booked appointment, plus any treatment
+  // Everything booked on a given day: the branch-booked appointment, plus any treatment
   // day scheduled that date. Both land in the same list, earliest time first.
-  const dayRows = useMemo(() => {
+  const rowsFor = useCallback((date) => {
     const rows = leads
-      .filter((l) => l.appointment_date === selectedDate)
-      .map((l) => ({ key: `appt-${l.id}`, lead: l, time: l.appointment_time || "", label: "Appointment" }));
+      .filter((l) => l.appointment_date === date)
+      .map((l) => ({
+        key: `appt-${l.id}`, lead: l, time: l.appointment_time || "",
+        label: "Appointment", done: l.physio_stage === "Complete",
+      }));
     sessions
-      .filter((s) => (s.slot_time || "").startsWith(selectedDate))
+      .filter((s) => (s.slot_time || "").startsWith(date))
       .forEach((s) => {
         const lead = leadById[s.lead_id];
         rows.push({
@@ -132,10 +154,26 @@ function TreatmentTab({ physioId }) {
           lead: lead || { id: s.lead_id, name: s.lead_name },
           time: (s.slot_time.split("T")[1] || "").slice(0, 5),
           label: `Day ${s.session_number} of ${s.total_sessions}`,
+          done: s.status === "completed",
         });
       });
     return rows.sort((a, b) => (a.time || "").localeCompare(b.time || ""));
-  }, [leads, sessions, leadById, selectedDate]);
+  }, [leads, sessions, leadById]);
+
+  const dayRows = useMemo(() => rowsFor(selectedDate), [rowsFor, selectedDate]);
+
+  // Every treatment day this physio holds, regardless of date.
+  const overall = useMemo(() => {
+    const total = leads.reduce((n, l) => n + (l.total_sessions || 0), 0);
+    const completed = leads.reduce((n, l) => n + (l.completed_sessions || 0), 0);
+    return { total, completed, pending: total - completed };
+  }, [leads]);
+
+  const today = useMemo(() => {
+    const rows = rowsFor(todayIso);
+    const completed = rows.filter((r) => r.done).length;
+    return { total: rows.length, completed, pending: rows.length - completed };
+  }, [rowsFor, todayIso]);
 
   const countFor = (date) => (
     leads.filter((l) => l.appointment_date === date).length
@@ -144,6 +182,27 @@ function TreatmentTab({ physioId }) {
 
   return (
     <div data-testid="physio-treatment-tab">
+      {/* Two summary groups side by side: the whole caseload, and just today. */}
+      <div className="mb-4 grid gap-3 lg:grid-cols-2">
+        <div className="rounded-xl border border-sky-100 bg-sky-50/40 p-3" data-testid="physio-overall-summary">
+          <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-sky-700">Overall Treatment</p>
+          <div className="grid grid-cols-3 gap-2">
+            <StatTile label="Total Days" value={overall.total} valueClass="text-sky-700" />
+            <StatTile label="Completed" value={overall.completed} valueClass="text-emerald-600" sub={overall.total ? `${Math.round((overall.completed / overall.total) * 100)}% done` : null} />
+            <StatTile label="Pending" value={overall.pending} solidClass="bg-violet-600" sub="Days left" />
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-emerald-100 bg-emerald-50/40 p-3" data-testid="physio-today-summary">
+          <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-emerald-700">Today's Appointments</p>
+          <div className="grid grid-cols-3 gap-2">
+            <StatTile label="Total" value={today.total} valueClass="text-slate-700" />
+            <StatTile label="Completed" value={today.completed} valueClass="text-emerald-600" />
+            <StatTile label="Pending" value={today.pending} solidClass="bg-emerald-600" sub="Yet to do" />
+          </div>
+        </div>
+      </div>
+
       {/* Day strip — newest on the left, today anchored in the middle on first load. */}
       <div className="mb-4 flex w-full items-center gap-1.5 rounded-lg border border-slate-200 bg-white p-1.5" data-testid="physio-treatment-day-strip">
         <Button size="sm" variant="outline" className="shrink-0" onClick={() => setStripCentre((c) => shiftIso(c, 1))} data-testid="physio-day-strip-newer">
