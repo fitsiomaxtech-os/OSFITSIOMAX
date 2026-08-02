@@ -390,7 +390,11 @@ const REVIEW_TABS = [
 ];
 
 /**
- * "Send for Head Physio Review" — the Physio's end of the review chain.
+ * Review — the Physio's end of the post-treatment review chain, in one place.
+ *
+ * Raising a review is what starts the chain: it lands with the Branch Admin, who
+ * dispatches it to a named Head Physio, who writes it up. The tabs follow a patient
+ * along that hand-off, and the weekly write-up hangs off the same rows.
  *
  * Treatment days are counted from days actually attended, not from when the package was
  * bought: a package booked three weeks out is not three weeks of treatment. A patient
@@ -398,22 +402,34 @@ const REVIEW_TABS = [
  * wrong in week one is exactly when a Head Physio most needs to see them — the badge
  * just stops flagging it as due.
  */
-function SendForReviewSection({ physioId }) {
-  const [data, setData] = useState({ patients: [], review_after_days: 7 });
+function ReviewTab({ physioId }) {
+  const [patients, setPatients] = useState([]);
+  const [threshold, setThreshold] = useState(7);
   const [loading, setLoading] = useState(false);
-  const [draft, setDraft] = useState(null); // { patient, reason, physio_notes }
+  const [bucket, setBucket] = useState("overall");
+  const [search, setSearch] = useState("");
+  const [dateFilter, setDateFilter] = useState("");
+  const [weeksTarget, setWeeksTarget] = useState(null); // patient whose weeks are being picked
+  const [assessmentTarget, setAssessmentTarget] = useState(null); // { leadId, leadName, week } | null
+  const [draft, setDraft] = useState(null); // { patient, reason, physio_notes } | null
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
-    try { setData(await physioReviews(physioId)); }
-    catch { setData({ patients: [], review_after_days: 7 }); }
+    try {
+      // Two sources: the review chain's own state, and the session tallies that say how
+      // many weeks there are to write up. Keyed together on lead_id.
+      const [rev, pats] = await Promise.all([physioReviews(physioId), physioPatients(physioId)]);
+      const byLead = Object.fromEntries((pats.patients || []).map((p) => [p.lead_id, p]));
+      setThreshold(rev.review_after_days || 7);
+      setPatients((rev.patients || []).map((p) => ({ ...(byLead[p.lead_id] || {}), ...p })));
+    } catch { /* silent */ }
     setLoading(false);
   }, [physioId]);
 
   useEffect(() => { load(); }, [load]);
 
-  const submit = async () => {
+  const submitRaise = async () => {
     setSaving(true);
     try {
       await physioRaiseReview(draft.patient.lead_id, { reason: draft.reason, physio_notes: draft.physio_notes }, physioId);
@@ -426,73 +442,233 @@ function SendForReviewSection({ physioId }) {
     setSaving(false);
   };
 
-  const threshold = data.review_after_days || 7;
-  const patients = data.patients || [];
-  const due = patients.filter((p) => p.due_for_review && !p.review_status);
+  // Who currently holds the review. A patient with none raised sits outside the chain
+  // and only shows under Overall, which is where they get sent up from.
+  const bucketOf = (p) => {
+    if (p.review_status === "completed") return "completed";
+    if (p.review_status === "sent") return "head_physio";
+    if (p.review_status === "send_to_review") return "branch_admin";
+    return "not_raised";
+  };
+
+  const counts = useMemo(() => {
+    const c = { overall: patients.length, branch_admin: 0, head_physio: 0, completed: 0, not_raised: 0 };
+    patients.forEach((p) => { c[bucketOf(p)] += 1; });
+    return c;
+  }, [patients]);
+
+  const dueCount = useMemo(
+    () => patients.filter((p) => p.due_for_review && !p.review_status).length,
+    [patients],
+  );
+
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return patients.filter((p) => {
+      if (bucket !== "overall" && bucketOf(p) !== bucket) return false;
+      if (dateFilter && (p.first_session_date || "") !== dateFilter) return false;
+      if (q && !(
+        (p.lead_name || "").toLowerCase().includes(q)
+        || (p.phone || "").toLowerCase().includes(q)
+        || (p.patient_number || "").toLowerCase().includes(q)
+      )) return false;
+      return true;
+    });
+  }, [patients, bucket, search, dateFilter]);
+
+  const STATUS_BADGE = {
+    completed: { label: "Review Completed", cls: "bg-emerald-100 text-emerald-700" },
+    sent: { label: "With Head Physio", cls: "bg-violet-100 text-violet-700" },
+    send_to_review: { label: "With Branch Admin", cls: "bg-sky-100 text-sky-700" },
+  };
 
   return (
-    <div data-testid="physio-send-review-section">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold text-slate-700">Send for Head Physio Review</h3>
+    <div data-testid="physio-review-tab">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-slate-700">Weekly Reviews</h3>
         <div className="flex items-center gap-2">
-          {due.length > 0 && (
-            <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-[10px] font-bold text-amber-700">{due.length} due</span>
+          {dueCount > 0 && (
+            <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-[10px] font-bold text-amber-700" data-testid="physio-review-due-count">
+              {dueCount} due
+            </span>
           )}
-          <button type="button" onClick={load} className="rounded-md border border-slate-200 px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-slate-50" data-testid="physio-send-review-refresh">
-            Refresh
-          </button>
+          <span className="rounded-full bg-sky-100 px-2.5 py-0.5 text-[10px] font-semibold text-sky-700">{visible.length} patients</span>
         </div>
       </div>
 
-      {patients.length === 0 && !loading ? (
-        <p className="rounded-lg border border-dashed border-slate-200 px-3 py-8 text-center text-sm text-slate-400">
-          No patients assigned to you yet.
-        </p>
+      {/* Where each patient's weeks have got to along the review hand-off — same
+          coloured count pills the Branch Leads stage bar uses. */}
+      <div className="mb-3 -mx-1 rounded-xl border border-slate-200 bg-white/95 p-1 shadow-sm" data-testid="physio-review-buckets">
+        <div className="flex flex-nowrap gap-1 overflow-x-auto sm:overflow-visible">
+          {REVIEW_TABS.map((t) => (
+            <StageTab
+              key={t.key}
+              label={t.label}
+              count={counts[t.key]}
+              active={bucket === t.key}
+              onClick={() => setBucket(t.key)}
+              color={t.color}
+              testid={`physio-review-bucket-${t.key}`}
+            />
+          ))}
+        </div>
+      </div>
+
+      <div className="mb-3 flex flex-wrap items-center gap-2" data-testid="physio-review-toolbar">
+        <div className="relative min-w-[240px] flex-1">
+          <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search patient by name, phone or patient no..."
+            className="h-10 pl-9"
+            data-testid="physio-review-search"
+          />
+        </div>
+        <Input
+          type="date"
+          value={dateFilter}
+          onChange={(e) => setDateFilter(e.target.value)}
+          className="h-10 w-44"
+          title="Filter by treatment start date"
+          data-testid="physio-review-date-filter"
+        />
+        {dateFilter && (
+          <Button variant="outline" className="h-10" onClick={() => setDateFilter("")} data-testid="physio-review-date-clear">
+            Clear
+          </Button>
+        )}
+      </div>
+
+      {visible.length === 0 && !loading ? (
+        <div className="text-center py-16">
+          <ClipboardCheck className="h-10 w-10 text-slate-200 mx-auto mb-3" />
+          <p className="text-sm text-slate-400">
+            {patients.length === 0
+              ? "No patients assigned to you yet"
+              : "No patient matches these filters"}
+          </p>
+        </div>
       ) : (
-        <div className="space-y-2">
-          {patients.map((p) => {
-            const raised = !!p.review_status;
-            return (
-              <div key={p.lead_id} className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border-2 bg-white p-3.5 ${p.due_for_review && !raised ? "border-amber-300" : "border-slate-200"}`} data-testid={`physio-send-review-${p.lead_id}`}>
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-sm font-bold text-slate-800">{p.lead_name}</p>
-                    {p.patient_number && <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-slate-500">{p.patient_number}</span>}
-                    <span className={`rounded-md px-2 py-0.5 text-[11px] font-bold ${p.due_for_review ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-600"}`}>
-                      {p.treatment_days} / {threshold} treatment days
-                    </span>
-                  </div>
-                  <p className="mt-0.5 text-xs text-slate-500">
-                    {p.phone || "—"}
-                    {p.first_session_date ? ` · started ${p.first_session_date}` : ""}
-                  </p>
-                </div>
-                {raised ? (
-                  <span className={`shrink-0 rounded-md px-2.5 py-1 text-[11px] font-bold ${
-                    p.review_status === "completed" ? "bg-emerald-100 text-emerald-700"
-                      : p.review_status === "sent" ? "bg-violet-100 text-violet-700"
-                      : "bg-sky-100 text-sky-700"
-                  }`}>
-                    {p.review_status === "completed" ? "REVIEW COMPLETED"
-                      : p.review_status === "sent" ? "WITH HEAD PHYSIO"
-                      : "WITH BRANCH ADMIN"}
-                  </span>
-                ) : (
-                  <Button
-                    size="sm"
-                    className={`shrink-0 text-xs text-white ${p.due_for_review ? "bg-amber-600 hover:bg-amber-700" : "bg-slate-400 hover:bg-slate-500"}`}
-                    onClick={() => setDraft({ patient: p, reason: "", physio_notes: "" })}
-                    data-testid={`physio-raise-review-${p.lead_id}`}
+        <div className="overflow-auto rounded-xl border border-slate-200 bg-white">
+          <table className="min-w-full text-sm">
+            <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+              <tr>
+                <th className="px-4 py-2.5">Patient</th>
+                <th className="px-4 py-2.5">Phone</th>
+                <th className="px-4 py-2.5">Treatment Days</th>
+                <th className="px-4 py-2.5">Review Status</th>
+                <th className="px-4 py-2.5">Started</th>
+                <th className="px-4 py-2.5">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {visible.map((p) => {
+                const badge = STATUS_BADGE[p.review_status];
+                return (
+                  <tr
+                    key={p.lead_id}
+                    onClick={() => setWeeksTarget(p)}
+                    className="cursor-pointer transition-colors hover:bg-slate-50"
+                    data-testid={`physio-review-patient-${p.lead_id}`}
                   >
-                    Send for Review
-                  </Button>
-                )}
-              </div>
-            );
-          })}
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2.5">
+                        <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-sky-50 text-xs font-bold text-sky-700">
+                          {p.lead_name?.charAt(0)?.toUpperCase() || "?"}
+                        </span>
+                        <div className="min-w-0">
+                          <span className="block font-medium text-slate-800">{p.lead_name}</span>
+                          {p.patient_number && (
+                            <span className="block font-mono text-[10px] text-slate-400">{p.patient_number}</span>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">{p.phone || "—"}</td>
+                    <td className="px-4 py-3">
+                      <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-bold ${
+                        p.due_for_review ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-600"
+                      }`}>
+                        {p.treatment_days} / {threshold} days
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      {badge ? (
+                        <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-semibold ${badge.cls}`}>
+                          {badge.label}
+                        </span>
+                      ) : (
+                        <span className="text-[11px] text-slate-400">Not raised</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-slate-500">{p.first_session_date || "—"}</td>
+                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                      {p.review_status ? (
+                        <span className="text-[11px] text-slate-400">—</span>
+                      ) : (
+                        <Button
+                          size="sm"
+                          className={`text-xs text-white ${p.due_for_review ? "bg-amber-600 hover:bg-amber-700" : "bg-slate-400 hover:bg-slate-500"}`}
+                          onClick={() => setDraft({ patient: p, reason: "", physio_notes: "" })}
+                          data-testid={`physio-raise-review-${p.lead_id}`}
+                        >
+                          Send for Review
+                        </Button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
 
+      {/* Row click opens that patient's weeks — the write-up itself is the same
+          WeeklyAssessmentModal the per-patient detail view uses. */}
+      {weeksTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) setWeeksTarget(null); }}>
+          <div className="w-full max-w-md overflow-hidden rounded-xl bg-white shadow-2xl" data-testid="physio-review-weeks-modal">
+            <div className="flex items-start justify-between gap-3 bg-slate-500 px-5 py-4 text-white">
+              <div className="min-w-0">
+                <h3 className="text-base font-bold">{weeksTarget.lead_name}</h3>
+                <p className="text-xs text-white/80">
+                  {weeksTarget.treatment_days} treatment days
+                  {weeksTarget.total_sessions ? ` · ${weeksTarget.completed_sessions} of ${weeksTarget.total_sessions} booked days complete` : ""}
+                </p>
+              </div>
+              <button type="button" onClick={() => setWeeksTarget(null)} className="rounded-full p-1.5 text-white/80 hover:bg-white/20"><X className="h-5 w-5" /></button>
+            </div>
+            <div className="p-5">
+              {(weeksTarget.weeks || weeksTarget.package_weeks || 0) === 0 ? (
+                <p className="rounded-lg border border-dashed border-slate-200 px-3 py-6 text-center text-xs text-slate-400">
+                  No treatment weeks booked yet — nothing to write up.
+                </p>
+              ) : (
+                <>
+                  <p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Pick a week to write up</p>
+                  <div className="flex flex-wrap gap-2">
+                    {Array.from({ length: weeksTarget.weeks || weeksTarget.package_weeks || 0 }, (_, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => setAssessmentTarget({ leadId: weeksTarget.lead_id, leadName: weeksTarget.lead_name, week: i + 1 })}
+                        className="rounded-lg border border-slate-200 px-3 py-1.5 text-[11px] font-medium text-slate-600 transition-all hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700"
+                        data-testid={`physio-review-week-${weeksTarget.lead_id}-${i + 1}`}
+                      >
+                        Week {i + 1}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Raising the review — reason and notes travel with it to the Head Physio. */}
       {draft && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-3" onClick={(e) => { if (e.target === e.currentTarget) setDraft(null); }}>
           <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl" data-testid="physio-raise-review-modal">
@@ -534,203 +710,9 @@ function SendForReviewSection({ physioId }) {
             </div>
             <div className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-6 py-3.5">
               <Button variant="outline" onClick={() => setDraft(null)} data-testid="physio-raise-review-cancel">Cancel</Button>
-              <Button className="bg-emerald-600 text-white hover:bg-emerald-700" onClick={submit} disabled={saving} data-testid="physio-raise-review-submit">
+              <Button className="bg-emerald-600 text-white hover:bg-emerald-700" onClick={submitRaise} disabled={saving} data-testid="physio-raise-review-submit">
                 {saving ? "Sending..." : "Send to Branch Admin"}
               </Button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ReviewTab({ physioId }) {
-  const [patients, setPatients] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [bucket, setBucket] = useState("overall");
-  const [search, setSearch] = useState("");
-  const [dateFilter, setDateFilter] = useState("");
-  const [weeksTarget, setWeeksTarget] = useState(null); // patient whose weeks are being picked
-  const [assessmentTarget, setAssessmentTarget] = useState(null); // { leadId, leadName, week } | null
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await physioPatients(physioId);
-      // A patient only reaches Review once at least one treatment day has been
-      // completed in Treatment — that completed day is what there is to write up.
-      setPatients((data.patients || []).filter((p) => (p.completed_sessions || 0) > 0));
-    } catch { /* silent */ }
-    setLoading(false);
-  }, [physioId]);
-
-  useEffect(() => { load(); }, [load]);
-
-  // Where a patient's weeks sit in the hand-off: nothing written up yet (the review
-  // appointment is still Branch Admin's to arrange), written up and waiting on the
-  // Head Physio, or every week closed out by them.
-  const bucketOf = (p) => {
-    const weeks = p.weeks || p.package_weeks || 0;
-    if (weeks > 0 && (p.reviews_reviewed || 0) >= weeks) return "completed";
-    if ((p.reviews_submitted || 0) > 0) return "head_physio";
-    return "branch_admin";
-  };
-
-  const counts = useMemo(() => {
-    const c = { overall: patients.length, branch_admin: 0, head_physio: 0, completed: 0 };
-    patients.forEach((p) => { c[bucketOf(p)] += 1; });
-    return c;
-  }, [patients]);
-
-  const visible = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return patients.filter((p) => {
-      if (bucket !== "overall" && bucketOf(p) !== bucket) return false;
-      if (dateFilter && (p.updated_at || "").slice(0, 10) !== dateFilter) return false;
-      if (q && !((p.lead_name || "").toLowerCase().includes(q) || (p.phone || "").toLowerCase().includes(q))) return false;
-      return true;
-    });
-  }, [patients, bucket, search, dateFilter]);
-
-  return (
-    <div data-testid="physio-review-tab">
-      {/* The start of the post-treatment review chain: this is where a patient who has
-          been through a week of treatment gets sent up to the Branch Admin, who puts them
-          in front of a Head Physio. */}
-      <SendForReviewSection physioId={physioId} />
-
-      <div className="flex items-center justify-between mb-4 mt-8 border-t border-slate-200 pt-6">
-        <h3 className="text-sm font-semibold text-slate-700">Weekly Reviews</h3>
-        <span className="rounded-full bg-sky-100 px-2.5 py-0.5 text-[10px] font-semibold text-sky-700">{visible.length} patients</span>
-      </div>
-
-      {/* Where each patient's weeks have got to along the review hand-off — same
-          coloured count pills the Branch Leads stage bar uses. */}
-      <div className="mb-3 -mx-1 rounded-xl border border-slate-200 bg-white/95 p-1 shadow-sm" data-testid="physio-review-buckets">
-        <div className="flex flex-nowrap gap-1 overflow-x-auto sm:overflow-visible">
-          {REVIEW_TABS.map((t) => (
-            <StageTab
-              key={t.key}
-              label={t.label}
-              count={counts[t.key]}
-              active={bucket === t.key}
-              onClick={() => setBucket(t.key)}
-              color={t.color}
-              testid={`physio-review-bucket-${t.key}`}
-            />
-          ))}
-        </div>
-      </div>
-
-      <div className="mb-3 flex flex-wrap items-center gap-2" data-testid="physio-review-toolbar">
-        <div className="relative min-w-[240px] flex-1">
-          <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search patient by name or phone..."
-            className="h-10 pl-9"
-            data-testid="physio-review-search"
-          />
-        </div>
-        <Input
-          type="date"
-          value={dateFilter}
-          onChange={(e) => setDateFilter(e.target.value)}
-          className="h-10 w-44"
-          data-testid="physio-review-date-filter"
-        />
-        {dateFilter && (
-          <Button variant="outline" className="h-10" onClick={() => setDateFilter("")} data-testid="physio-review-date-clear">
-            Clear
-          </Button>
-        )}
-      </div>
-
-      {visible.length === 0 && !loading ? (
-        <div className="text-center py-16">
-          <ClipboardCheck className="h-10 w-10 text-slate-200 mx-auto mb-3" />
-          <p className="text-sm text-slate-400">
-            {patients.length === 0
-              ? "Nothing to review yet — complete a treatment day first"
-              : "No patient matches these filters"}
-          </p>
-        </div>
-      ) : (
-        <div className="overflow-auto rounded-xl border border-slate-200 bg-white">
-          <table className="min-w-full text-sm">
-            <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-              <tr>
-                <th className="px-4 py-2.5">Patient</th>
-                <th className="px-4 py-2.5">Phone</th>
-                <th className="px-4 py-2.5">Stage</th>
-                <th className="px-4 py-2.5">Complete Days</th>
-                <th className="px-4 py-2.5">Updated</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {visible.map((p) => (
-                <tr
-                  key={p.lead_id}
-                  onClick={() => setWeeksTarget(p)}
-                  className="cursor-pointer transition-colors hover:bg-slate-50"
-                  data-testid={`physio-review-patient-${p.lead_id}`}
-                >
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2.5">
-                      <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-sky-50 text-xs font-bold text-sky-700">
-                        {p.lead_name?.charAt(0)?.toUpperCase() || "?"}
-                      </span>
-                      <span className="font-medium text-slate-800">{p.lead_name}</span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-slate-600">{p.phone || "—"}</td>
-                  <td className="px-4 py-3">
-                    <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-semibold ${
-                      p.physio_stage === "Complete" ? "bg-emerald-100 text-emerald-700" : "bg-sky-100 text-sky-700"
-                    }`}>
-                      {p.physio_stage === "Complete" ? "Complete" : (p.consultation_stage || "In Treatment")}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-slate-600">{p.completed_sessions} of {p.total_sessions}</td>
-                  <td className="px-4 py-3 text-slate-500">{(p.updated_at || "").slice(0, 10) || "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* Row click opens that patient's weeks — the write-up itself is the same
-          WeeklyAssessmentModal the per-patient detail view uses. */}
-      {weeksTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) setWeeksTarget(null); }}>
-          <div className="w-full max-w-md overflow-hidden rounded-xl bg-white shadow-2xl" data-testid="physio-review-weeks-modal">
-            <div className="flex items-start justify-between gap-3 bg-slate-500 px-5 py-4 text-white">
-              <div className="min-w-0">
-                <h3 className="text-base font-bold">{weeksTarget.lead_name}</h3>
-                <p className="text-xs text-white/80">
-                  {weeksTarget.completed_sessions} of {weeksTarget.total_sessions} days complete
-                </p>
-              </div>
-              <button type="button" onClick={() => setWeeksTarget(null)} className="rounded-full p-1.5 text-white/80 hover:bg-white/20"><X className="h-5 w-5" /></button>
-            </div>
-            <div className="p-5">
-              <p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Pick a week to write up</p>
-              <div className="flex flex-wrap gap-2">
-                {Array.from({ length: weeksTarget.weeks || weeksTarget.package_weeks || 0 }, (_, i) => (
-                  <button
-                    key={i}
-                    type="button"
-                    onClick={() => setAssessmentTarget({ leadId: weeksTarget.lead_id, leadName: weeksTarget.lead_name, week: i + 1 })}
-                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-[11px] font-medium text-slate-600 transition-all hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700"
-                    data-testid={`physio-review-week-${weeksTarget.lead_id}-${i + 1}`}
-                  >
-                    Week {i + 1}
-                  </button>
-                ))}
-              </div>
             </div>
           </div>
         </div>
