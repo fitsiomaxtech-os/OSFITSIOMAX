@@ -31,10 +31,11 @@ import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { StageTabBar, stageDisplayLabel } from "@/components/ui/stage-tab";
-import { apptCardPng } from "@/lib/apptCard";
+import { apptCardPng, REASSURANCE } from "@/lib/apptCard";
 import {
   scheduleBranchAppointment,
   publicAppointmentUrl,
+  getBranches,
   getBranchBoard,
   getAvailableExperts,
   getAvailableDates,
@@ -57,7 +58,7 @@ import { BranchDetailPage } from "@/components/branch/BranchDetailPage";
 import { BranchReviewPanel } from "@/components/branch/BranchReviewPanel";
 import { PatientsPortalPanel } from "@/components/branch/PatientsPortalPanel";
 import { CreateLeadModal } from "@/components/CreateLeadModal";
-import { LOGO_URL, PRINTABLE_STYLES, escapeHtml, rowsHtml, openPrintable, sharePrintable } from "@/lib/printable";
+import { LOGO_URL, PRINTABLE_STYLES, escapeHtml, rowsHtml, openPrintable } from "@/lib/printable";
 
 // ---- Appointment confirmation -------------------------------------------------------
 // What the client walks away with. Built as its own document so it can be opened, printed
@@ -124,37 +125,41 @@ const waNumber = (raw) => {
 };
 
 /**
- * Sends the confirmation to WhatsApp as a card image with the message beneath it —
- * the shape a payment app's receipt arrives in.
+ * Opens WhatsApp on the patient's own number with the confirmation already typed.
  *
- * The two halves of that can't come from one action: wa.me addresses a specific number
- * but carries text only, and the OS share sheet is the only route that takes an image
- * but always asks who it's going to. So the image path is preferred where the device
- * supports it (a phone, which is where this is used), and the direct-to-number link is
- * the fallback everywhere else.
+ * wa.me is the only route that addresses a specific number, and it carries text only —
+ * so the message stands on its own, and the link in it is what renders the card. The
+ * image goes out through Send Card, which uses the share sheet and therefore has to ask
+ * who it is going to.
  */
-const sendApptOnWhatsApp = async (a) => {
-  const text = apptMessage(a);
+const sendApptOnWhatsApp = (a) => {
   const num = waNumber(a.phone);
+  if (!num) { toast.error("This patient has no phone number on file"); return; }
+  window.open(`https://wa.me/${num}?text=${encodeURIComponent(apptMessage(a))}`, "_blank", "noopener,noreferrer");
+};
+
+/** The card image plus the message, through the OS share sheet — the only path that can
+ *  carry an attachment, at the cost of picking the recipient there. */
+const shareApptCard = async (a) => {
   try {
     const blob = await apptCardPng(a);
     const file = new File([blob], `appointment-${a.refNo || "confirmation"}.png`, { type: "image/png" });
     if (navigator.canShare?.({ files: [file] })) {
-      await navigator.share({ files: [file], text });
+      await navigator.share({ files: [file], text: apptMessage(a) });
       return;
     }
+    downloadApptCard(a, blob);
+    toast.success("Card saved — attach it to your message");
   } catch (err) {
-    // A cancelled share sheet is the user's own doing, not a failure to fall back from.
-    if (err?.name === "AbortError") return;
+    if (err?.name === "AbortError") return;  // the user closed the share sheet
+    toast.error("Couldn't build the card image");
   }
-  if (!num) { toast.error("This patient has no phone number on file"); return; }
-  window.open(`https://wa.me/${num}?text=${encodeURIComponent(text)}`, "_blank", "noopener,noreferrer");
 };
 
 /** The card on its own, for attaching by hand where the share sheet isn't available. */
-const downloadApptCard = async (a) => {
+const downloadApptCard = async (a, prebuilt) => {
   try {
-    const blob = await apptCardPng(a);
+    const blob = prebuilt || await apptCardPng(a);
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -166,30 +171,24 @@ const downloadApptCard = async (a) => {
   }
 };
 
-/** The confirmation as a message addressed to the patient — short lines that survive
- *  WhatsApp and SMS, which is how it actually reaches them. */
+/** The confirmation as a note to the patient — the day, the hours, the place, and a line
+ *  telling them they're in hand. Short lines, because it is read on a phone in WhatsApp. */
 const apptMessage = (a) => {
   const lines = [
-    `Dear ${a.patient},`,
+    `Hi ${a.patient},`,
     "",
-    "Your appointment is booked.",
-    "",
-    `Date: ${weekdayLabel(a.date)} (${dmyLabel(a.date)})`,
-    `Time: ${to12h(a.time)} - ${endTime12h(a.time, a.duration)} (${a.duration} min)`,
-    `Head Physio: ${a.headPhysio}`,
+    "Your appointment is",
+    weekdayLabel(a.date),
+    `${to12h(a.time)} to ${endTime12h(a.time, a.duration)}`,
   ];
-  if (a.branch) lines.push(`Branch: ${a.branch}`);
+  if (a.branch) lines.push(`at ${a.branch}`);
+  lines.push("", REASSURANCE, "— Team Fitsiomax", "", `Head Physio: ${a.headPhysio}`);
   if (a.notes) lines.push(`Notes: ${a.notes}`);
-  lines.push("", `Ref: ${a.refNo}`);
+  if (a.branchAddress) lines.push("", `Location: ${a.branchAddress}`);
+  if (a.mapLocation) lines.push(a.mapLocation);
   const link = apptLink(a);
   if (link) lines.push("", "View your appointment:", link);
-  lines.push(
-    "",
-    "Please arrive 10 minutes early.",
-    "To reschedule or cancel, contact the branch quoting this reference.",
-    "",
-    "— FITSIOMAX",
-  );
+  lines.push("", `Ref: ${a.refNo}`, "Please arrive 10 minutes early.");
   return lines.join("\n");
 };
 
@@ -678,6 +677,18 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
   // Shown once a booking is actually made. Kept outside the Appointment popup because
   // confirming closes that popup and the lead card with it.
   const [apptConfirm, setApptConfirm] = useState(null);
+  // The branch's own address and map link, for the confirmation the patient is sent —
+  // they need to know where to come, which the lead record doesn't carry.
+  const [branchInfo, setBranchInfo] = useState(null);
+
+  useEffect(() => {
+    if (!branchId) return;
+    let cancelled = false;
+    getBranches()
+      .then((rows) => { if (!cancelled) setBranchInfo((rows || []).find((b) => b.id === branchId) || null); })
+      .catch(() => { /* the confirmation just omits the location */ });
+    return () => { cancelled = true; };
+  }, [branchId]);
   // { "YYYY-MM-DD": free slot count } for the shown month — drives the purple marking so
   // the days worth clicking are visible without opening each one.
   const [apptOpenDates, setApptOpenDates] = useState({});
@@ -1342,7 +1353,9 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                       patient: lead.name || "—",
                       patientNo: lead.patient_number || "—",
                       phone: lead.phone || "—",
-                      branch: lead.branch_name || "",
+                      branch: branchInfo?.branch_name || lead.branch_name || "",
+                      branchAddress: branchInfo?.address || "",
+                      mapLocation: branchInfo?.map_location || "",
                       date: apptDraft.appointment_date,
                       time: apptDraft.appointment_time,
                       duration: apptDraft.duration || 30,
@@ -1438,17 +1451,16 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                   <LinkIcon className="mr-1.5 h-4 w-4" /> Copy Link
                 </Button>
               )}
-              {/* Copy and Share both send the patient-addressed message, not the row
-                  dump — it's pasted into WhatsApp far more often than it's printed. */}
-              <div className="grid grid-cols-3 gap-2">
+              {/* Sends the card image with the message under it. Goes through the OS
+                  share sheet, which is the only route that carries an attachment — so
+                  the recipient is picked there rather than being the patient outright. */}
+              <Button variant="outline" className="w-full" onClick={() => shareApptCard(apptConfirm)} data-testid="branch-appt-confirm-share-card">
+                <Share2 className="mr-1.5 h-4 w-4" /> Send Card + Message
+              </Button>
+              <div className="grid grid-cols-2 gap-2">
                 <Button variant="outline" onClick={() => copyApptMessage(apptConfirm)} data-testid="branch-appt-confirm-copy">
                   <Copy className="mr-1.5 h-4 w-4" /> Copy
                 </Button>
-                <Button variant="outline" onClick={() => sharePrintable(apptMessage(apptConfirm), `FITSIOMAX Appointment ${apptConfirm.refNo}`)} data-testid="branch-appt-confirm-share">
-                  <Share2 className="mr-1.5 h-4 w-4" /> Share
-                </Button>
-                {/* The card image, not the printable sheet — this is what gets attached
-                    to a message by hand when the share sheet isn't available. */}
                 <Button variant="outline" onClick={() => downloadApptCard(apptConfirm)} data-testid="branch-appt-confirm-download">
                   <Download className="mr-1.5 h-4 w-4" /> Card
                 </Button>

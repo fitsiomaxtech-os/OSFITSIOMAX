@@ -78,18 +78,15 @@ def _end12h(t: str, minutes: int) -> str:
 
 
 def _weekday_label(d: str) -> str:
+    """"Friday, July 17, 2026" — the same wording the card image uses, so the page the
+    link opens reads as the note the patient was already sent."""
     try:
-        return date.fromisoformat(d).strftime("%A, %B %-d")
+        dt = date.fromisoformat(d)
     except (ValueError, TypeError):
-        try:  # %-d is not portable to Windows
-            return date.fromisoformat(d).strftime("%A, %B %d").replace(" 0", " ")
-        except (ValueError, TypeError):
-            return d or "—"
-
-
-def _dmy(d: str) -> str:
-    parts = str(d or "").split("-")
-    return f"{parts[2]} - {parts[1]} - {parts[0]}" if len(parts) == 3 else (d or "—")
+        return d or "—"
+    # Built by hand rather than with %-d/%#d, neither of which is portable across the
+    # dev (Windows) and deploy (Linux) platforms.
+    return f"{dt.strftime('%A, %B')} {dt.day}, {dt.year}"
 
 
 _PAGE_CSS = """
@@ -114,6 +111,12 @@ body{margin:0;padding:24px 12px;background:#f1f5f9;color:#0f172a;
 .hero.cancelled .hero-date,.hero.cancelled .hero-time,.hero.cancelled .hero-with{color:#be123c}
 .banner{margin-top:14px;border:1px solid #fecdd3;background:#fff1f2;border-radius:8px;
         padding:10px 12px;font-size:12px;font-weight:600;color:#be123c}
+.greet{margin-top:18px;font-size:17px;font-weight:700;color:#0f172a}
+.say{margin-top:10px;border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:12px 14px}
+.say p{margin:0;font-size:14px;line-height:1.7;color:#475569}
+.sign{margin-top:8px;text-align:right;font-size:13px;font-weight:700;color:#0d9488}
+.map{display:inline-block;margin-top:10px;padding:8px 14px;border-radius:8px;background:#0d9488;
+     color:#fff;font-size:13px;font-weight:600;text-decoration:none}
 table{width:100%;border-collapse:collapse;margin-top:18px;font-size:14px}
 td{padding:9px 0;border-bottom:1px solid #f1f5f9;vertical-align:top}
 td.k{color:#64748b}
@@ -141,32 +144,38 @@ This appointment link is not valid.<br>Please contact the branch for help.</p></
 </div></div></body></html>"""
 
 
-def _appt_card_html(a: dict) -> str:
-    """The confirmation as a standalone page. The og:* tags are what WhatsApp, Signal and
-    the rest read to draw their preview card above the message — without them a shared
-    link is just a bare URL."""
-    cancelled = bool(a["cancelled"])
-    when = f"{_to12h(a['time'])} – {_end12h(a['time'], a['duration'])}"
-    title = ("Appointment Cancelled" if cancelled else "Appointment Confirmed")
-    og_desc = f"{_weekday_label(a['date'])} · {when} with {a['head_physio']}"
+REASSURANCE = ("We understand the pain you are going through. Don't worry — our team is "
+               "here to consult with you and see you through it.")
 
-    rows = [
-        ("Reference No.", a["ref_no"] or "—"),
-        ("Patient", a["patient"]),
-        ("Patient No.", a["patient_no"]),
-        ("Phone", a["phone"]),
-        ("Date", _dmy(a["date"])),
-        ("Time", when),
-        ("Duration", f"{a['duration']} minutes"),
-        ("Head Physio", a["head_physio"]),
-    ]
+
+def _appt_card_html(a: dict) -> str:
+    """The confirmation as a standalone page. Kept in step with the card image the branch
+    sends (frontend/src/lib/apptCard.js) so the link opens to the same note the patient
+    already has in their chat — a greeting, the day, the place, and the line telling them
+    they are in hand, rather than a dump of every field on the record.
+
+    The og:* tags are what WhatsApp, Signal and the rest read to draw their preview card
+    above the message — without them a shared link is just a bare URL."""
+    cancelled = bool(a["cancelled"])
+    when = f"{_to12h(a['time'])} to {_end12h(a['time'], a['duration'])}"
+    title = ("Appointment Cancelled" if cancelled else "Appointment Confirmed")
+    og_desc = f"{_weekday_label(a['date'])} · {when}"
     if a["branch"]:
-        rows.append(("Branch", a["branch"]))
-    if a["booked_by"]:
-        rows.append(("Booked By", a["booked_by"]))
+        og_desc += f" at {a['branch']}"
+
+    rows = [("Head Physio", a["head_physio"])]
+    if a["ref_no"]:
+        rows.append(("Reference", a["ref_no"]))
     rows_html = "".join(
         f'<tr><td class="k">{_esc(k)}</td><td class="v">{_esc(v)}</td></tr>' for k, v in rows
     )
+
+    # The map link is a plain anchor rather than an embed: an iframe would need a keyed
+    # Maps API and would be blocked in the in-app browsers this page mostly opens in.
+    map_html = ""
+    if a["map_location"]:
+        map_html = (f'<a class="map" href="{_esc(a["map_location"])}" target="_blank" '
+                    f'rel="noopener noreferrer">Open in Maps</a>')
 
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -185,20 +194,24 @@ def _appt_card_html(a: dict) -> str:
   <div class="head{' cancelled' if cancelled else ''}">
     <img class="logo" src="{LOGO_URL}" alt="FITSIOMAX">
     <div><div class="h-title">{_esc(title)}</div>
-    {f'<div class="h-ref">Ref {_esc(a["ref_no"])}</div>' if a["ref_no"] else ''}</div>
+    <div class="h-ref">FITSIOMAX · Physiotherapy &amp; Rehabilitation</div></div>
   </div>
   <div class="body">
     <div class="hero{' cancelled' if cancelled else ''}">
       <div class="hero-label">Your Appointment</div>
       <div class="hero-date">{_esc(_weekday_label(a['date']))}</div>
       <div class="hero-time">{_esc(when)}</div>
-      <div class="hero-with">with {_esc(a['head_physio'])}</div>
+      {f'<div class="hero-with">at {_esc(a["branch"])}</div>' if a["branch"] else ''}
     </div>
-    {'<div class="banner">This appointment has been cancelled. Contact the branch to book another.</div>' if cancelled else ''}
+    <div class="greet">Hi {_esc(a['patient'])},</div>
+    {'<div class="banner">This appointment has been cancelled. Please contact the branch to book another.</div>'
+     if cancelled else
+     f'<div class="say"><p>{_esc(REASSURANCE)}</p><div class="sign">— Team Fitsiomax</div></div>'}
     <table>{rows_html}</table>
-    {f'<div class="box"><div class="box-label">Branch Address</div><p>{_esc(a["branch_address"])}</p></div>' if a["branch_address"] else ''}
     {f'<div class="box"><div class="box-label">Notes</div><p>{_esc(a["notes"])}</p></div>' if a["notes"] else ''}
-    {'' if cancelled else f'<div class="note"><p>Please arrive 10 minutes early.</p><p>To reschedule or cancel, contact the branch quoting reference {_esc(a["ref_no"] or "above")}.</p></div>'}
+    {f'<div class="box"><div class="box-label">Location</div><p>{_esc(a["branch_address"])}</p>{map_html}</div>'
+     if (a["branch_address"] or map_html) else ''}
+    {'' if cancelled else '<div class="note"><p>Please arrive 10 minutes early.</p></div>'}
   </div>
 </div>
 <p class="foot">FITSIOMAX · Physiotherapy &amp; Rehabilitation</p>
@@ -224,25 +237,24 @@ async def v3_public_appointment(share_token: str):
         return HTMLResponse(_appt_missing_html(), status_code=404)
 
     lead = await v3_col("leads").find_one(
-        {"id": appt.get("lead_id")}, {"_id": 0, "patient_number": 1, "phone": 1, "branch_id": 1}
+        {"id": appt.get("lead_id")}, {"_id": 0, "branch_id": 1}
     ) or {}
     branch = await v3_col("branches").find_one(
-        {"id": appt.get("branch_id") or lead.get("branch_id")}, {"_id": 0, "branch_name": 1, "address": 1}
+        {"id": appt.get("branch_id") or lead.get("branch_id")},
+        {"_id": 0, "branch_name": 1, "address": 1, "map_location": 1},
     ) or {}
 
     return HTMLResponse(_appt_card_html({
         "ref_no": appt.get("ref_no") or "",
         "patient": appt.get("patient_name") or appt.get("lead_name") or "—",
-        "patient_no": lead.get("patient_number") or "—",
-        "phone": lead.get("phone") or "—",
         "date": appt.get("appointment_date") or "",
         "time": appt.get("appointment_time") or "",
         "duration": appt.get("duration") or 30,
         "head_physio": appt.get("doctor_name") or "—",
         "branch": branch.get("branch_name") or "",
         "branch_address": branch.get("address") or "",
+        "map_location": branch.get("map_location") or "",
         "notes": appt.get("notes") or "",
-        "booked_by": "Branch Admin" if appt.get("created_by_role") == "branch_admin" else (appt.get("created_by") or ""),
         # A cancelled booking keeps its link working, but says so rather than showing a
         # confirmation for an appointment that is no longer happening.
         "cancelled": appt.get("status") == "cancelled",
