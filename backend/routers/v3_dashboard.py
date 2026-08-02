@@ -3,6 +3,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from database import v3_col
+from stage_utils import get_closing_stage_name
 from deps import v3_current_user, v3_require_roles
 from constants import V3_STAGES, V3_BRANCH_STAGES
 from schemas.v3 import V3UserOut, V3LeadOut
@@ -269,6 +270,9 @@ async def v3_master_control(
 
     total_leads = await leads.count_documents(merged())
     first_branch_stage = (await _stage_names("sales", V3_BRANCH_STAGES))[0]
+    # The Head Physio pipeline's closing stage — renamed since it shipped, so counting the
+    # old literal here reported zero consultations however many there were.
+    head_closing_stage = await get_closing_stage_name("head_consultation", "Consultation Visit")
 
     # Patient journey counts (label → count).
     # The displayed Journey Flow Map pills follow the real lifecycle
@@ -286,7 +290,7 @@ async def v3_master_control(
         # Branch (leads) → Head Physio (consultation) → Branch (consultation) → End
         "New Appointment": await leads.count_documents(merged({"branch_stage": first_branch_stage})),
         "Appointment Date & Time": await leads.count_documents(merged({"branch_stage": "Appointment Date & Time"})),
-        "Consultation": await leads.count_documents(merged({"head_consultation_stage": "Consultation Visit"})),
+        "Consultation": await leads.count_documents(merged({"head_consultation_stage": head_closing_stage})),
         "Fee Collected": await leads.count_documents(merged({"consultation_stage": "Fee Collected"})),
         "Physio Assign": await leads.count_documents(merged({"consultation_stage": "Physio Assign"})),
         "Patient": await leads.count_documents(merged({"consultation_stage": "Consultation Completed"})),

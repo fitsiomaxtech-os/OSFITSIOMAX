@@ -8,6 +8,7 @@ from database import v3_col
 from utils import now_iso
 from deps import v3_current_user, v3_require_roles
 from constants import V3_HEAD_CONSULTATION_STAGES
+from stage_utils import get_closing_stage_name, get_stage_name_at
 from schemas.v3 import (
     V3UserOut, V3PackageRecommendInput, V3HeadPhysioReviewInput, V3LeadOut,
     V3ConsultationDecisionInput, V3AssignPhysioSessionsInput,
@@ -24,6 +25,23 @@ async def _head_consultation_stage_names() -> list:
     ).sort("order", 1).to_list(50)
     names = [r["name"] for r in rows]
     return names or V3_HEAD_CONSULTATION_STAGES
+
+
+async def _head_closing_stage() -> str:
+    """Where a completed consultation lands on the Head Physio's own pipeline."""
+    return await get_closing_stage_name("head_consultation", V3_HEAD_CONSULTATION_STAGES[-1])
+
+
+async def _branch_consultation_visit_stage() -> str:
+    """Where Branch Admin picks a finished consultation up — the named stage while it is
+    still called that, otherwise the position it occupies in their pipeline."""
+    rows = await v3_col("pipeline_stages").find(
+        {"type": "consultation"}, {"_id": 0, "name": 1}
+    ).sort("order", 1).to_list(50)
+    names = [r["name"] for r in rows]
+    if "Consultation Visit" in names:
+        return "Consultation Visit"
+    return await get_stage_name_at("consultation", 1, "Consultation Visit")
 
 
 async def _resolve_hp_doctor(user: V3UserOut, branch_id: Optional[str] = None) -> Optional[dict]:
@@ -237,7 +255,7 @@ async def hp_move_head_consultation_stage(
     stage_names = await _head_consultation_stage_names()
     if payload.head_consultation_stage not in stage_names:
         raise HTTPException(status_code=400, detail=f"Invalid head_consultation_stage. Allowed: {stage_names}")
-    if payload.head_consultation_stage == "Consultation Visit":
+    if payload.head_consultation_stage == await _head_closing_stage():
         raise HTTPException(
             status_code=403,
             detail="Use the consultation-decision endpoint (Save & Move) — it requires Diagnosis, Treatment Summary and a decision first.",
@@ -285,10 +303,13 @@ async def hp_consultation_decision(
     if not (lead.get("treatment_summary") or "").strip():
         raise HTTPException(status_code=400, detail="Write the Treatment Summary before Save & Move")
 
+    # Completing a consultation moves BOTH pipelines at once: the lead closes out on the
+    # Head Physio's board and appears on Branch Admin's Consultation Visit column, which
+    # is the one hand-off point between the two.
     updates = {
         "consultation_decision": payload.decision,
-        "head_consultation_stage": "Consultation Visit",
-        "consultation_stage": "Consultation Visit",
+        "head_consultation_stage": await _head_closing_stage(),
+        "consultation_stage": await _branch_consultation_visit_stage(),
         "updated_at": now_iso(),
     }
     detail = f"Consultation decision: {'Consultation Only' if payload.decision == 'consultation_only' else 'Consultation + Treatment'}"
