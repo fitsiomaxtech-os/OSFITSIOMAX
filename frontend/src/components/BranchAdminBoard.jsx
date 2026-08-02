@@ -125,16 +125,46 @@ const waNumber = (raw) => {
 };
 
 /**
- * Opens WhatsApp on the patient's own number with the confirmation already typed.
+ * Puts the card PNG on the system clipboard.
  *
- * wa.me is the only route that addresses a specific number, and it carries text only —
- * so the message stands on its own, and the link in it is what renders the card. The
- * image goes out through Send Card, which uses the share sheet and therefore has to ask
- * who it is going to.
+ * Safari only honours a ClipboardItem built around an unresolved promise — awaiting the
+ * blob first spends the user gesture and the write is refused. Chrome accepts both, so
+ * the promise form is tried first and the resolved form is the fallback for anything
+ * that rejects it. A false return is not an error: the message still sends, it just
+ * arrives without the picture.
  */
-const sendApptOnWhatsApp = (a) => {
+const copyCardToClipboard = async (a) => {
+  if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") return false;
+  try {
+    await navigator.clipboard.write([new ClipboardItem({ "image/png": apptCardPng(a) })]);
+    return true;
+  } catch {
+    try {
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": await apptCardPng(a) })]);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+};
+
+/**
+ * Opens WhatsApp on the patient's own number with the confirmation already typed, and
+ * leaves the card image on the clipboard so it can be pasted in on top.
+ *
+ * The split is forced by WhatsApp, not chosen: wa.me is the only route that addresses a
+ * specific number and it carries text only, while the share sheet is the only route that
+ * carries an attachment and it always asks who it is for. The clipboard bridges them —
+ * pasting into the chat attaches the card and WhatsApp moves the typed text down into
+ * its caption, which is the picture-above/words-below shape the branch is after.
+ */
+const sendApptOnWhatsApp = async (a) => {
   const num = waNumber(a.phone);
   if (!num) { toast.error("This patient has no phone number on file"); return; }
+  const copied = await copyCardToClipboard(a);
+  toast.success(copied
+    ? "Card copied — paste it into the chat to attach it"
+    : "Opening WhatsApp");
   // Same-tab, not window.open(..., "_blank"): on mobile that hands the browser an
   // ambiguous new-tab context and the app is often left on a blank white screen once
   // WhatsApp hands control back (caf18a6, same fix on the Physio board).
@@ -189,9 +219,7 @@ const apptMessage = (a) => {
   if (a.notes) lines.push(`Notes: ${a.notes}`);
   if (a.branchAddress) lines.push("", `Location: ${a.branchAddress}`);
   if (a.mapLocation) lines.push(a.mapLocation);
-  const link = apptLink(a);
-  if (link) lines.push("", "View your appointment:", link);
-  lines.push("", `Ref: ${a.refNo}`, "Please arrive 10 minutes early.");
+  lines.push("", "Please arrive 10 minutes early.");
   return lines.join("\n");
 };
 
@@ -1440,8 +1468,8 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
               <Button className="w-full bg-teal-600 text-white hover:bg-teal-700" onClick={() => openPrintable(apptHtml(apptConfirm), { print: true })} data-testid="branch-appt-confirm-pdf">
                 <FileText className="mr-1.5 h-4 w-4" /> Open PDF
               </Button>
-              {/* The one the branch actually reaches for: opens WhatsApp on the patient's
-                  own number with the confirmation and its link already typed. */}
+              {/* The one the branch actually reaches for: straight to the patient's own
+                  number with the confirmation typed, card image waiting on the clipboard. */}
               <Button
                 className="w-full bg-[#25D366] text-white hover:bg-[#1da851]"
                 onClick={() => sendApptOnWhatsApp(apptConfirm)}
@@ -1449,14 +1477,14 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
               >
                 <WhatsAppIcon className="mr-1.5 h-4 w-4" /> Send on WhatsApp
               </Button>
-              {apptLink(apptConfirm) && (
-                <Button variant="outline" className="w-full" onClick={() => copyApptText(apptLink(apptConfirm), "Link copied")} data-testid="branch-appt-confirm-copy-link">
-                  <LinkIcon className="mr-1.5 h-4 w-4" /> Copy Link
-                </Button>
-              )}
-              {/* Sends the card image with the message under it. Goes through the OS
-                  share sheet, which is the only route that carries an attachment — so
-                  the recipient is picked there rather than being the patient outright. */}
+              {/* The paste is the only manual step in the whole flow and nothing on screen
+                  would otherwise suggest it, so it is spelled out rather than discovered. */}
+              <p className="px-1 text-center text-[11px] leading-snug text-slate-500" data-testid="branch-appt-confirm-hint">
+                Opens {apptConfirm.patient}'s chat with the message ready. The card image is
+                copied too — paste it in to send the picture with it.
+              </p>
+              {/* The attachment route proper: the share sheet is the only thing that can
+                  carry a file, at the cost of asking who it is going to. */}
               <Button variant="outline" className="w-full" onClick={() => shareApptCard(apptConfirm)} data-testid="branch-appt-confirm-share-card">
                 <Share2 className="mr-1.5 h-4 w-4" /> Send Card + Message
               </Button>
@@ -1468,6 +1496,11 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                   <Download className="mr-1.5 h-4 w-4" /> Card
                 </Button>
               </div>
+              {apptLink(apptConfirm) && (
+                <Button variant="outline" className="w-full" onClick={() => copyApptText(apptLink(apptConfirm), "Link copied")} data-testid="branch-appt-confirm-copy-link">
+                  <LinkIcon className="mr-1.5 h-4 w-4" /> Copy Link
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 className="w-full text-slate-500"
