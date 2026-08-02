@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Calendar,
   CheckCircle2,
+  ClipboardCheck,
   ChevronLeft,
   ChevronRight,
   Phone,
@@ -158,9 +159,10 @@ export const BranchAdminBoard = ({ branchId }) => {
 
   const VIEW_TABS = [
     { key: "pipeline", label: "Branch Leads", icon: LayoutDashboard },
+    { key: "review", label: "Review", icon: ClipboardCheck },
     { key: "consultations", label: "MANAGEMENT", icon: Stethoscope },
-    { key: "accountant_mgmt", label: "Accountant Manage", icon: BadgeIndianRupee },
     { key: "rehab", label: "Rehab", icon: Activity },
+    { key: "accountant_mgmt", label: "Accountant Manage", icon: BadgeIndianRupee },
     { key: "store", label: "Fitsiomax Store", icon: ShoppingCart },
   ];
 
@@ -226,6 +228,8 @@ export const BranchAdminBoard = ({ branchId }) => {
             <HeadPhysioCalendar branchId={branchId} />
           )}
         </div>
+      ) : activeView === "review" ? (
+        <PlaceholderPanel label="Review" testid="branch-review-panel" />
       ) : activeView === "rehab" ? (
         <PlaceholderPanel label="Rehab" testid="branch-rehab-panel" />
       ) : activeView === "store" ? (
