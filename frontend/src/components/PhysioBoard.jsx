@@ -7,11 +7,13 @@ import {
   ChevronRight,
   ClipboardCheck,
   ClipboardList,
+  Search,
   Send,
   Users,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import {
   physioConsultations,
@@ -101,6 +103,7 @@ function TreatmentTab({ physioId }) {
   const [selectedLead, setSelectedLead] = useState(null);
 
   const todayIso = isoOf(new Date());
+  const [search, setSearch] = useState("");
   const [selectedDate, setSelectedDate] = useState(todayIso);
   // Held apart from the selected day so clicking a chip only moves the highlight —
   // the arrows are the only thing that slides the seven-day window.
@@ -163,6 +166,14 @@ function TreatmentTab({ physioId }) {
 
   const dayRows = useMemo(() => rowsFor(selectedDate), [rowsFor, selectedDate]);
 
+  const visibleRows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return dayRows;
+    return dayRows.filter((r) => (
+      (r.lead.name || "").toLowerCase().includes(q) || (r.lead.phone || "").toLowerCase().includes(q)
+    ));
+  }, [dayRows, search]);
+
   // Every treatment day this physio holds, regardless of date.
   const overall = useMemo(() => {
     const total = leads.reduce((n, l) => n + (l.total_sessions || 0), 0);
@@ -204,6 +215,37 @@ function TreatmentTab({ physioId }) {
         </div>
       </div>
 
+      {/* Search the day's list, or jump the strip straight to a date. */}
+      <div className="mb-3 flex flex-wrap items-center gap-2" data-testid="physio-treatment-toolbar">
+        <div className="relative min-w-[240px] flex-1">
+          <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search patient by name or phone..."
+            className="h-10 pl-9"
+            data-testid="physio-treatment-search"
+          />
+        </div>
+        <Input
+          type="date"
+          value={selectedDate}
+          onChange={(e) => { const v = e.target.value; if (v) { setSelectedDate(v); setStripCentre(v); } }}
+          className="h-10 w-44"
+          data-testid="physio-treatment-date-filter"
+        />
+        {selectedDate !== todayIso && (
+          <Button
+            variant="outline"
+            className="h-10"
+            onClick={() => { setSelectedDate(todayIso); setStripCentre(todayIso); }}
+            data-testid="physio-treatment-today"
+          >
+            Today
+          </Button>
+        )}
+      </div>
+
       {/* Day strip — newest on the left, today anchored in the middle on first load. */}
       <div className="mb-4 flex w-full items-center gap-1.5 rounded-lg border border-slate-200 bg-white p-1.5" data-testid="physio-treatment-day-strip">
         <Button size="sm" variant="outline" className="shrink-0" onClick={() => setStripCentre((c) => shiftIso(c, 1))} data-testid="physio-day-strip-newer">
@@ -243,11 +285,13 @@ function TreatmentTab({ physioId }) {
         </Button>
       </div>
 
-      {dayRows.length === 0 && !loading ? (
+      {visibleRows.length === 0 && !loading ? (
         <div className="text-center py-16">
           <ClipboardList className="h-10 w-10 text-slate-200 mx-auto mb-3" />
           <p className="text-sm text-slate-400">
-            Nothing booked for {new Date(`${selectedDate}T00:00:00`).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
+            {search.trim()
+              ? `No patient matches "${search.trim()}" on this day`
+              : `Nothing booked for ${new Date(`${selectedDate}T00:00:00`).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}`}
           </p>
         </div>
       ) : (
@@ -259,12 +303,13 @@ function TreatmentTab({ physioId }) {
                 <th className="px-4 py-2.5">Phone</th>
                 <th className="px-4 py-2.5">Total Weeks</th>
                 <th className="px-4 py-2.5">Complete Days</th>
+                <th className="px-4 py-2.5">Today Treatment</th>
                 <th className="px-4 py-2.5">Updated</th>
-                <th className="px-4 py-2.5">Time</th>
+                <th className="px-4 py-2.5">Appt Timing</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {dayRows.map((r) => {
+              {visibleRows.map((r) => {
                 const l = r.lead;
                 return (
                   <tr
@@ -301,6 +346,15 @@ function TreatmentTab({ physioId }) {
                       )}
                     </td>
                     <td className="px-4 py-3 text-slate-600">{completeDays(l) || "—"}</td>
+                    <td className="px-4 py-3">
+                      {/* This row's own state on the selected day — flips to Completed
+                          as soon as the day is ticked off in the popup. */}
+                      <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-semibold ${
+                        r.done ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
+                      }`} data-testid={`physio-row-status-${r.key}`}>
+                        {r.done ? "Completed" : "Not Completed"}
+                      </span>
+                    </td>
                     <td className="px-4 py-3 text-slate-500">{(l.updated_at || "").slice(0, 10) || "—"}</td>
                     <td className="px-4 py-3 text-slate-600">{r.time ? to12h(r.time) : "—"}</td>
                   </tr>
