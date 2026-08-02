@@ -57,6 +57,7 @@ import { BranchDetailPage } from "@/components/branch/BranchDetailPage";
 import { BranchReviewPanel } from "@/components/branch/BranchReviewPanel";
 import { PatientsPortalPanel } from "@/components/branch/PatientsPortalPanel";
 import { CreateLeadModal } from "@/components/CreateLeadModal";
+import { MilkCalendar } from "@/components/ui/milk-calendar";
 import { LOGO_URL, PRINTABLE_STYLES, escapeHtml, rowsHtml, openPrintable } from "@/lib/printable";
 
 // ---- Appointment confirmation -------------------------------------------------------
@@ -1659,8 +1660,16 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
             </div>
             <div className="space-y-4 p-5">
               <div>
-                <label className="mb-1 block text-xs font-semibold text-slate-600">Date *</label>
-                <Input type="date" value={followUpMoveDraft.date} min={new Date().toISOString().slice(0, 10)} onChange={(e) => setFollowUpMoveDraft({ ...followUpMoveDraft, date: e.target.value })} data-testid="branch-followup-move-date" />
+                <label className="mb-1.5 block text-xs font-semibold text-slate-600">Date *</label>
+                {/* Always open, in the OS's own palette — the native picker dropped a
+                    browser dialog with its own chrome and blue over the popup. */}
+                <MilkCalendar
+                  value={followUpMoveDraft.date}
+                  min={new Date().toISOString().slice(0, 10)}
+                  accent="amber"
+                  onChange={(d) => setFollowUpMoveDraft({ ...followUpMoveDraft, date: d })}
+                  testid="branch-followup-move-date"
+                />
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600">Time *</label>
