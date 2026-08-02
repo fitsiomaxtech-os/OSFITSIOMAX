@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  ArrowLeft,
   Calendar,
   CalendarDays,
   Check,
@@ -9,6 +10,7 @@ import {
   ClipboardList,
   Search,
   Send,
+  UserCircle,
   Users,
   X,
 } from "lucide-react";
@@ -17,6 +19,7 @@ import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { StageTab } from "@/components/ui/stage-tab";
 import {
+  apiMe,
   physioConsultations,
   physioCompleteConsultation,
   physioCalendar,
@@ -29,46 +32,126 @@ import {
 } from "@/lib/api";
 import { to12h, slotTo12h } from "@/lib/time";
 
-const TABS = [
+// Bottom nav (mobile-first): Treatment and Patients keep their old icons; Review
+// takes the slot Calendar used to hold there — Calendar moved to the top-right
+// page button instead, alongside Profile on the top-left.
+const BOTTOM_TABS = [
   { key: "treatment", label: "Treatment", icon: ClipboardList },
   { key: "review", label: "Review", icon: ClipboardCheck },
-  { key: "calendar", label: "Calendar", icon: CalendarDays },
-  { key: "patients", label: "Patients History", icon: Users },
+  { key: "patients", label: "Patients", icon: Users },
 ];
 
 export const PhysioBoard = ({ physioId } = {}) => {
   const [activeTab, setActiveTab] = useState("treatment");
+  const [showCalendar, setShowCalendar] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
 
   return (
-    <div className="space-y-4" data-testid="physio-board-root">
-      <div className="flex items-center gap-1 overflow-x-auto border-b border-slate-200">
-        {TABS.map((tab) => {
-          const Icon = tab.icon;
-          return (
-            <button
-              key={tab.key}
-              type="button"
-              onClick={() => setActiveTab(tab.key)}
-              className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
-                activeTab === tab.key
-                  ? "border-sky-500 text-sky-700"
-                  : "border-transparent text-slate-400 hover:text-slate-600"
-              }`}
-              data-testid={`physio-tab-${tab.key}`}
-            >
-              <Icon className="h-4 w-4" /> {tab.label}
-            </button>
-          );
-        })}
+    <div className="space-y-3 pb-20" data-testid="physio-board-root">
+      <div className="flex items-center justify-between">
+        <button
+          type="button"
+          onClick={() => setShowProfile(true)}
+          className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+          data-testid="physio-open-profile"
+        >
+          <UserCircle className="h-4 w-4" /> <span className="hidden sm:inline">Profile</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowCalendar(true)}
+          className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+          data-testid="physio-open-calendar"
+        >
+          <span className="hidden sm:inline">Calendar</span> <CalendarDays className="h-4 w-4" />
+        </button>
       </div>
 
       {activeTab === "treatment" && <TreatmentTab physioId={physioId} />}
       {activeTab === "review" && <ReviewTab physioId={physioId} />}
-      {activeTab === "calendar" && <CalendarTab physioId={physioId} />}
       {activeTab === "patients" && <PatientsTab physioId={physioId} />}
+
+      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white" data-testid="physio-bottom-nav">
+        <div className="mx-auto flex max-w-lg items-stretch justify-around">
+          {BOTTOM_TABS.map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.key;
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setActiveTab(tab.key)}
+                className={`flex flex-1 flex-col items-center gap-0.5 py-2.5 text-[11px] font-medium transition ${
+                  isActive ? "text-sky-600" : "text-slate-400"
+                }`}
+                data-testid={`physio-bottom-tab-${tab.key}`}
+              >
+                <Icon className="h-5 w-5" /> {tab.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {showCalendar && <CalendarPage physioId={physioId} onClose={() => setShowCalendar(false)} />}
+      {showProfile && <PhysioProfileModal onClose={() => setShowProfile(false)} />}
     </div>
   );
 };
+
+function PhysioProfileModal({ onClose }) {
+  const [user, setUser] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      try { setUser(await apiMe()); } catch { /* silent */ }
+    })();
+  }, []);
+
+  const joinedOn = user?.created_at
+    ? new Date(user.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })
+    : "—";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" data-testid="physio-profile-modal" onClick={onClose}>
+      <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-slate-800">My Profile</h3>
+          <button type="button" onClick={onClose} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="physio-profile-close"><X className="h-4 w-4" /></button>
+        </div>
+        {!user ? (
+          <p className="text-xs text-slate-400">Loading...</p>
+        ) : (
+          <>
+            <div className="mb-4 flex items-center gap-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-sky-100 text-lg font-bold text-sky-700">
+                {user.full_name?.charAt(0)?.toUpperCase() || "?"}
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-slate-800">{user.full_name}</p>
+                <p className="truncate text-[11px] text-slate-400">{user.email}</p>
+              </div>
+            </div>
+            <div className="space-y-2 text-xs">
+              <div className="flex items-center justify-between border-t border-slate-100 pt-2">
+                <span className="text-slate-400">Employee ID</span>
+                <span className="font-medium text-slate-700">{user.id ? `#${user.id.slice(-8).toUpperCase()}` : "—"}</span>
+              </div>
+              <div className="flex items-center justify-between border-t border-slate-100 pt-2">
+                <span className="text-slate-400">Role</span>
+                <span className="font-medium text-slate-700">Physio</span>
+              </div>
+              <div className="flex items-center justify-between border-t border-slate-100 pt-2">
+                <span className="text-slate-400">Joined On</span>
+                <span className="font-medium text-slate-700">{joinedOn}</span>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
 
 const isoOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const shiftIso = (iso, days) => {
@@ -76,9 +159,13 @@ const shiftIso = (iso, days) => {
   d.setDate(d.getDate() + days);
   return isoOf(d);
 };
-// Seven days at a time, newest on the left, with the anchored day in the middle.
-const DAY_STRIP_LENGTH = 7;
-const DAY_STRIP_HALF = Math.floor(DAY_STRIP_LENGTH / 2);
+// Sunday-to-Saturday calendar week containing `iso` — the week strip always shows
+// a real week, not an arbitrary sliding window, so it reads like a normal calendar.
+const weekDatesFor = (iso) => {
+  const sunday = shiftIso(iso, -new Date(`${iso}T00:00:00`).getDay());
+  return Array.from({ length: 7 }, (_, i) => shiftIso(sunday, i));
+};
+const DAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"];
 
 // Summary tile. `solidClass` fills the tile — used on the one figure in each group
 // that the physio is actually acting on, so it carries the group rather than
@@ -108,14 +195,11 @@ function TreatmentTab({ physioId }) {
   const todayIso = isoOf(new Date());
   const [search, setSearch] = useState("");
   const [selectedDate, setSelectedDate] = useState(todayIso);
-  // Held apart from the selected day so clicking a chip only moves the highlight —
-  // the arrows are the only thing that slides the seven-day window.
-  const [stripCentre, setStripCentre] = useState(todayIso);
+  // Which Sun-Sat week is showing — held apart from selectedDate so the arrows
+  // move the whole week without disturbing which single day is highlighted.
+  const [weekAnchor, setWeekAnchor] = useState(todayIso);
 
-  const stripDates = useMemo(
-    () => Array.from({ length: DAY_STRIP_LENGTH }, (_, i) => shiftIso(stripCentre, DAY_STRIP_HALF - i)),
-    [stripCentre],
-  );
+  const stripDates = useMemo(() => weekDatesFor(weekAnchor), [weekAnchor]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -134,11 +218,6 @@ function TreatmentTab({ physioId }) {
   }, [physioId, stripDates.join(",")]);
 
   useEffect(() => { load(); }, [load]);
-
-  // Treatment days ticked off out of however many were booked for this patient.
-  const completeDays = (lead) => (
-    lead?.total_sessions ? `${lead.completed_sessions || 0} of ${lead.total_sessions}` : null
-  );
 
   const leadById = useMemo(() => Object.fromEntries(leads.map((l) => [l.id, l])), [leads]);
 
@@ -160,6 +239,8 @@ function TreatmentTab({ physioId }) {
           lead: lead || { id: s.lead_id, name: s.lead_name },
           time: (s.slot_time.split("T")[1] || "").slice(0, 5),
           label: `Day ${s.session_number} of ${s.total_sessions}`,
+          sessionNumber: s.session_number,
+          totalSessions: s.total_sessions,
           week: s.week_number,
           done: s.status === "completed",
         });
@@ -233,7 +314,7 @@ function TreatmentTab({ physioId }) {
         <Input
           type="date"
           value={selectedDate}
-          onChange={(e) => { const v = e.target.value; if (v) { setSelectedDate(v); setStripCentre(v); } }}
+          onChange={(e) => { const v = e.target.value; if (v) { setSelectedDate(v); setWeekAnchor(v); } }}
           className="h-10 w-44"
           data-testid="physio-treatment-date-filter"
         />
@@ -241,7 +322,7 @@ function TreatmentTab({ physioId }) {
           <Button
             variant="outline"
             className="h-10"
-            onClick={() => { setSelectedDate(todayIso); setStripCentre(todayIso); }}
+            onClick={() => { setSelectedDate(todayIso); setWeekAnchor(todayIso); }}
             data-testid="physio-treatment-today"
           >
             Today
@@ -249,43 +330,46 @@ function TreatmentTab({ physioId }) {
         )}
       </div>
 
-      {/* Day strip — newest on the left, today anchored in the middle on first load. */}
-      <div className="mb-4 flex w-full items-center gap-1.5 rounded-lg border border-slate-200 bg-white p-1.5" data-testid="physio-treatment-day-strip">
-        <Button size="sm" variant="outline" className="shrink-0" onClick={() => setStripCentre((c) => shiftIso(c, 1))} data-testid="physio-day-strip-newer">
-          <ChevronLeft className="h-4 w-4" />
-        </Button>
-        {stripDates.map((date) => {
-          const d = new Date(`${date}T00:00:00`);
-          const isSelected = date === selectedDate;
-          const isToday = date === todayIso;
-          const n = countFor(date);
-          return (
-            <button
-              key={date}
-              type="button"
-              onClick={() => setSelectedDate(date)}
-              className={`min-w-0 flex-1 basis-0 rounded-md border py-1.5 text-center leading-tight transition ${
-                isSelected
-                  ? "border-sky-600 bg-sky-600 text-white shadow-sm"
-                  : isToday
-                  ? "border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100"
-                  : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-              }`}
-              title={isToday ? "Today" : undefined}
-              data-testid={`physio-day-${date}`}
-            >
-              <span className="block truncate px-1 text-sm font-semibold">
-                {d.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-              </span>
-              <span className={`block text-[10px] font-medium ${isSelected ? "text-sky-100" : "text-slate-400"}`}>
-                {d.toLocaleDateString("en-US", { weekday: "short" })}{n > 0 ? ` · ${n}` : ""}
-              </span>
-            </button>
-          );
-        })}
-        <Button size="sm" variant="outline" className="shrink-0" onClick={() => setStripCentre((c) => shiftIso(c, -1))} data-testid="physio-day-strip-older">
-          <ChevronRight className="h-4 w-4" />
-        </Button>
+      {/* Sun-Sat week strip — today is always the default selection. */}
+      <div className="mb-4 rounded-xl border border-slate-200 bg-white p-3" data-testid="physio-treatment-week-strip">
+        <div className="mb-2 flex items-center justify-between">
+          <button type="button" onClick={() => setWeekAnchor((a) => shiftIso(a, -7))} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="physio-week-prev">
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <p className="text-xs font-semibold text-slate-600">
+            {new Date(`${weekAnchor}T00:00:00`).toLocaleDateString("en-US", { month: "long", year: "numeric" })}
+          </p>
+          <button type="button" onClick={() => setWeekAnchor((a) => shiftIso(a, 7))} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="physio-week-next">
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="grid grid-cols-7 gap-1">
+          {stripDates.map((date, i) => {
+            const day = parseInt(date.split("-")[2], 10);
+            const isSelected = date === selectedDate;
+            const isToday = date === todayIso;
+            const n = countFor(date);
+            return (
+              <button
+                key={date}
+                type="button"
+                onClick={() => setSelectedDate(date)}
+                className={`flex flex-col items-center gap-1 rounded-lg py-1.5 transition ${isSelected ? "bg-sky-600" : "hover:bg-slate-50"}`}
+                data-testid={`physio-day-${date}`}
+              >
+                <span className={`text-[10px] font-semibold ${isSelected ? "text-sky-100" : "text-slate-400"}`}>{DAY_LETTERS[i]}</span>
+                <span
+                  className={`flex h-7 w-7 items-center justify-center rounded-full text-sm font-semibold ${
+                    isSelected ? "bg-white/20 text-white" : isToday ? "bg-sky-100 text-sky-700" : "text-slate-600"
+                  }`}
+                >
+                  {day}
+                </span>
+                {n > 0 && <span className={`text-[9px] font-medium ${isSelected ? "text-sky-100" : "text-slate-400"}`}>{n}</span>}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {visibleRows.length === 0 && !loading ? (
@@ -298,73 +382,54 @@ function TreatmentTab({ physioId }) {
           </p>
         </div>
       ) : (
-        <div className="overflow-auto rounded-xl border border-slate-200 bg-white">
-          <table className="min-w-full text-sm">
-            <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-              <tr>
-                <th className="px-4 py-2.5">Patient</th>
-                <th className="px-4 py-2.5">Phone</th>
-                <th className="px-4 py-2.5">Total Weeks</th>
-                <th className="px-4 py-2.5">Complete Days</th>
-                <th className="px-4 py-2.5">Today Treatment</th>
-                <th className="px-4 py-2.5">Updated</th>
-                <th className="px-4 py-2.5">Appt Timing</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {visibleRows.map((r) => {
-                const l = r.lead;
-                return (
-                  <tr
-                    key={r.key}
-                    onClick={() => l?.phone !== undefined && setSelectedLead(l)}
-                    className="cursor-pointer transition-colors hover:bg-slate-50"
-                    data-testid={`consultation-lead-${l.id}`}
-                  >
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2.5">
-                        <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-sky-50 text-xs font-bold text-sky-700">
-                          {l.name?.charAt(0)?.toUpperCase() || "?"}
+        <div className="space-y-2">
+          {visibleRows.map((r) => {
+            const l = r.lead;
+            const clickable = l?.phone !== undefined;
+            // Every 7th treatment day is a review milestone — reviewsSoFar counts how
+            // many the patient has already passed; isReviewDay flags today as one of them.
+            const reviewsSoFar = r.sessionNumber ? Math.floor(r.sessionNumber / 7) : 0;
+            const isReviewDay = r.sessionNumber > 0 && r.sessionNumber % 7 === 0;
+            return (
+              <button
+                type="button"
+                key={r.key}
+                onClick={() => clickable && setSelectedLead(l)}
+                disabled={!clickable}
+                className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left transition disabled:cursor-default ${
+                  r.done ? "border-emerald-200 bg-emerald-50/50" : isReviewDay ? "border-violet-200 bg-violet-50/40" : "border-slate-200 bg-white hover:border-sky-200"
+                }`}
+                data-testid={`treatment-row-${r.key}`}
+              >
+                <div className={`flex h-11 w-16 shrink-0 items-center justify-center rounded-lg text-[11px] font-bold ${r.done ? "bg-emerald-200 text-emerald-800" : "bg-sky-100 text-sky-700"}`}>
+                  {r.time ? to12h(r.time) : "—"}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold text-slate-800">{l.name}</p>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500">
+                    {r.sessionNumber ? (
+                      <>
+                        <span>{String(r.sessionNumber).padStart(2, "0")}/{r.totalSessions}</span>
+                        <span className={`rounded-full px-1.5 py-0.5 font-semibold ${reviewsSoFar > 0 ? "bg-violet-100 text-violet-700" : "bg-slate-100 text-slate-400"}`}>
+                          {reviewsSoFar} Review{reviewsSoFar === 1 ? "" : "s"}
                         </span>
-                        <div className="min-w-0">
-                          <span className="block font-medium text-slate-800">{l.name}</span>
-                          <span className="block text-[10px] text-slate-400">{r.label}</span>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">{l.phone || "—"}</td>
-                    <td className="px-4 py-3">
-                      {/* Which week of the plan this row falls in, out of the weeks the
-                          patient's booked days span. */}
-                      {l.weeks ? (
-                        r.week ? (
-                          <span className="inline-flex items-center rounded-full bg-sky-100 px-2.5 py-1 text-[10px] font-semibold text-sky-700">
-                            Week {r.week} of {l.weeks}
-                          </span>
-                        ) : (
-                          <span className="text-slate-600">{l.weeks} week{l.weeks === 1 ? "" : "s"}</span>
-                        )
-                      ) : (
-                        <span className="text-slate-400">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">{completeDays(l) || "—"}</td>
-                    <td className="px-4 py-3">
-                      {/* This row's own state on the selected day — flips to Completed
-                          as soon as the day is ticked off in the popup. */}
-                      <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-semibold ${
-                        r.done ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
-                      }`} data-testid={`physio-row-status-${r.key}`}>
-                        {r.done ? "Completed" : "Not Completed"}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-slate-500">{(l.updated_at || "").slice(0, 10) || "—"}</td>
-                    <td className="px-4 py-3 text-slate-600">{r.time ? to12h(r.time) : "—"}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                        {isReviewDay && <span className="rounded-full bg-violet-600 px-1.5 py-0.5 font-semibold text-white">Review Today</span>}
+                      </>
+                    ) : (
+                      <span>{r.label}</span>
+                    )}
+                  </div>
+                </div>
+                {r.done ? (
+                  <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-semibold text-emerald-700">Done</span>
+                ) : (
+                  <span className="flex shrink-0 items-center gap-0.5 text-[11px] font-semibold text-sky-600">
+                    View <ChevronRight className="h-3.5 w-3.5" />
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
       )}
 
@@ -550,78 +615,49 @@ function ReviewTab({ physioId }) {
           </p>
         </div>
       ) : (
-        <div className="overflow-auto rounded-xl border border-slate-200 bg-white">
-          <table className="min-w-full text-sm">
-            <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-              <tr>
-                <th className="px-4 py-2.5">Patient</th>
-                <th className="px-4 py-2.5">Phone</th>
-                <th className="px-4 py-2.5">Treatment Days</th>
-                <th className="px-4 py-2.5">Review Status</th>
-                <th className="px-4 py-2.5">Started</th>
-                <th className="px-4 py-2.5">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {visible.map((p) => {
-                const badge = STATUS_BADGE[p.review_status];
-                return (
-                  <tr
-                    key={p.lead_id}
-                    onClick={() => setWeeksTarget(p)}
-                    className="cursor-pointer transition-colors hover:bg-slate-50"
-                    data-testid={`physio-review-patient-${p.lead_id}`}
-                  >
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2.5">
-                        <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-sky-50 text-xs font-bold text-sky-700">
-                          {p.lead_name?.charAt(0)?.toUpperCase() || "?"}
-                        </span>
-                        <div className="min-w-0">
-                          <span className="block font-medium text-slate-800">{p.lead_name}</span>
-                          {p.patient_number && (
-                            <span className="block font-mono text-[10px] text-slate-400">{p.patient_number}</span>
-                          )}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">{p.phone || "—"}</td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-bold ${
+        <div className="space-y-2">
+          {visible.map((p) => {
+            const badge = STATUS_BADGE[p.review_status];
+            return (
+              <div key={p.lead_id} className="rounded-xl border border-slate-200 bg-white p-3" data-testid={`physio-review-patient-${p.lead_id}`}>
+                <button type="button" onClick={() => setWeeksTarget(p)} className="flex w-full items-start gap-2.5 text-left">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-sky-50 text-xs font-bold text-sky-700">
+                    {p.lead_name?.charAt(0)?.toUpperCase() || "?"}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-slate-800">{p.lead_name}</p>
+                    <p className="truncate text-[10px] text-slate-400">
+                      {p.phone || "—"}{p.patient_number ? ` · ${p.patient_number}` : ""}
+                    </p>
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                      <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-bold ${
                         p.due_for_review ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-600"
                       }`}>
                         {p.treatment_days} / {threshold} days
                       </span>
-                    </td>
-                    <td className="px-4 py-3">
                       {badge ? (
-                        <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-semibold ${badge.cls}`}>
+                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${badge.cls}`}>
                           {badge.label}
                         </span>
                       ) : (
-                        <span className="text-[11px] text-slate-400">Not raised</span>
+                        <span className="text-[10px] text-slate-400">Not raised</span>
                       )}
-                    </td>
-                    <td className="px-4 py-3 text-slate-500">{p.first_session_date || "—"}</td>
-                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                      {p.review_status ? (
-                        <span className="text-[11px] text-slate-400">—</span>
-                      ) : (
-                        <Button
-                          size="sm"
-                          className={`text-xs text-white ${p.due_for_review ? "bg-amber-600 hover:bg-amber-700" : "bg-slate-400 hover:bg-slate-500"}`}
-                          onClick={() => setDraft({ patient: p, reason: "", physio_notes: "" })}
-                          data-testid={`physio-raise-review-${p.lead_id}`}
-                        >
-                          Send for Review
-                        </Button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                    </div>
+                  </div>
+                </button>
+                {!p.review_status && (
+                  <Button
+                    size="sm"
+                    className={`mt-2 w-full text-xs text-white ${p.due_for_review ? "bg-amber-600 hover:bg-amber-700" : "bg-slate-400 hover:bg-slate-500"}`}
+                    onClick={() => setDraft({ patient: p, reason: "", physio_notes: "" })}
+                    data-testid={`physio-raise-review-${p.lead_id}`}
+                  >
+                    Send for Review
+                  </Button>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -994,7 +1030,7 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
   );
 }
 
-function CalendarTab({ physioId }) {
+function CalendarPage({ physioId, onClose }) {
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth() + 1);
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
   const [data, setData] = useState({ sessions: [] });
@@ -1030,89 +1066,100 @@ function CalendarTab({ physioId }) {
   const daySessions = selectedDate ? (data.sessions || []).filter((s) => s.slot_time?.startsWith(selectedDate)) : [];
 
   return (
-    <div className="flex gap-4" data-testid="physio-calendar-tab">
-      {/* Calendar Grid */}
-      <div className="flex-1 rounded-xl border border-slate-200 bg-white p-4">
-        <div className="flex items-center justify-between mb-4">
-          <button type="button" onClick={prevMonth} className="p-1 rounded hover:bg-slate-100"><ChevronLeft className="h-4 w-4" /></button>
-          <h4 className="text-sm font-semibold text-slate-700">{monthNames[currentMonth]} {currentYear}</h4>
-          <button type="button" onClick={nextMonth} className="p-1 rounded hover:bg-slate-100"><ChevronRight className="h-4 w-4" /></button>
-        </div>
-        <div className="grid grid-cols-7 gap-1 mb-2">
-          {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((d) => (
-            <div key={d} className="text-center text-[10px] font-semibold text-slate-400 py-1">{d}</div>
-          ))}
-        </div>
-        <div className="grid grid-cols-7 gap-1">
-          {Array.from({ length: firstDay }, (_, i) => <div key={`e-${i}`} className="h-16" />)}
-          {Array.from({ length: daysInMonth }, (_, i) => {
-            const day = i + 1;
-            const d = dateStr(day);
-            const isToday = d === todayStr;
-            const isSelected = d === selectedDate;
-            const sessions = getSessionsForDay(day);
-            const hasCompleted = sessions.some((s) => s.status === "completed");
-            const hasUpcoming = sessions.some((s) => s.status === "upcoming");
-
-            return (
-              <button
-                key={day}
-                type="button"
-                onClick={() => setSelectedDate(d)}
-                className={`h-16 rounded-lg text-xs font-medium p-1 flex flex-col items-center transition-all ${
-                  isSelected ? "bg-sky-600 text-white" :
-                  isToday ? "bg-sky-50 text-sky-700 border border-sky-200" :
-                  "hover:bg-slate-50 text-slate-600"
-                }`}
-              >
-                <span>{day}</span>
-                {sessions.length > 0 && (
-                  <div className="flex gap-0.5 mt-auto">
-                    {hasUpcoming && <span className={`h-1.5 w-1.5 rounded-full ${isSelected ? "bg-white" : "bg-sky-400"}`} />}
-                    {hasCompleted && <span className={`h-1.5 w-1.5 rounded-full ${isSelected ? "bg-white/60" : "bg-emerald-400"}`} />}
-                    <span className={`text-[8px] ${isSelected ? "text-white/80" : "text-slate-400"}`}>{sessions.length}</span>
-                  </div>
-                )}
-              </button>
-            );
-          })}
-        </div>
+    <div className="fixed inset-0 z-50 flex flex-col bg-white" data-testid="physio-calendar-page">
+      <div className="flex items-center gap-2 border-b border-slate-200 p-4">
+        <button type="button" onClick={onClose} className="rounded p-1.5 text-slate-500 hover:bg-slate-100" data-testid="physio-calendar-back">
+          <ArrowLeft className="h-5 w-5" />
+        </button>
+        <h2 className="text-sm font-semibold text-slate-800">My Calendar</h2>
       </div>
 
-      {/* Day Detail */}
-      <div className="w-80 rounded-xl border border-slate-200 bg-white p-4 overflow-y-auto max-h-[600px]">
-        {!selectedDate ? (
-          <div className="flex items-center justify-center h-48">
-            <div className="text-center">
-              <Calendar className="h-8 w-8 text-slate-200 mx-auto mb-2" />
-              <p className="text-xs text-slate-400">Select a date</p>
+      <div className="flex-1 overflow-y-auto p-4">
+        <div className="flex flex-col gap-4 sm:flex-row">
+          {/* Calendar Grid */}
+          <div className="flex-1 rounded-xl border border-slate-200 bg-white p-4">
+            <div className="flex items-center justify-between mb-4">
+              <button type="button" onClick={prevMonth} className="p-1 rounded hover:bg-slate-100"><ChevronLeft className="h-4 w-4" /></button>
+              <h4 className="text-sm font-semibold text-slate-700">{monthNames[currentMonth]} {currentYear}</h4>
+              <button type="button" onClick={nextMonth} className="p-1 rounded hover:bg-slate-100"><ChevronRight className="h-4 w-4" /></button>
+            </div>
+            <div className="grid grid-cols-7 gap-1 mb-2">
+              {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((d) => (
+                <div key={d} className="text-center text-[10px] font-semibold text-slate-400 py-1">{d}</div>
+              ))}
+            </div>
+            <div className="grid grid-cols-7 gap-1">
+              {Array.from({ length: firstDay }, (_, i) => <div key={`e-${i}`} className="h-14 sm:h-16" />)}
+              {Array.from({ length: daysInMonth }, (_, i) => {
+                const day = i + 1;
+                const d = dateStr(day);
+                const isToday = d === todayStr;
+                const isSelected = d === selectedDate;
+                const sessions = getSessionsForDay(day);
+                const hasCompleted = sessions.some((s) => s.status === "completed");
+                const hasUpcoming = sessions.some((s) => s.status === "upcoming");
+
+                return (
+                  <button
+                    key={day}
+                    type="button"
+                    onClick={() => setSelectedDate(d)}
+                    className={`h-14 sm:h-16 rounded-lg text-xs font-medium p-1 flex flex-col items-center transition-all ${
+                      isSelected ? "bg-sky-600 text-white" :
+                      isToday ? "bg-sky-50 text-sky-700 border border-sky-200" :
+                      "hover:bg-slate-50 text-slate-600"
+                    }`}
+                  >
+                    <span>{day}</span>
+                    {sessions.length > 0 && (
+                      <div className="flex gap-0.5 mt-auto">
+                        {hasUpcoming && <span className={`h-1.5 w-1.5 rounded-full ${isSelected ? "bg-white" : "bg-sky-400"}`} />}
+                        {hasCompleted && <span className={`h-1.5 w-1.5 rounded-full ${isSelected ? "bg-white/60" : "bg-emerald-400"}`} />}
+                        <span className={`text-[8px] ${isSelected ? "text-white/80" : "text-slate-400"}`}>{sessions.length}</span>
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           </div>
-        ) : (
-          <>
-            <h4 className="text-sm font-semibold text-slate-700 mb-3">
-              {new Date(selectedDate + "T00:00").toLocaleDateString("en-IN", { weekday: "long", month: "short", day: "numeric" })}
-            </h4>
-            {daySessions.length === 0 ? (
-              <p className="text-xs text-slate-400 text-center py-6">No sessions</p>
-            ) : (
-              <div className="space-y-2">
-                {daySessions.map((s) => (
-                  <div key={s.id} className={`rounded-lg border p-3 ${s.status === "completed" ? "border-emerald-200 bg-emerald-50" : "border-slate-200"}`}>
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-semibold text-slate-700">{slotTo12h(s.slot_time)}</span>
-                      <span className={`text-[9px] rounded-full px-1.5 py-0.5 font-semibold ${s.status === "completed" ? "bg-emerald-100 text-emerald-700" : "bg-sky-100 text-sky-700"}`}>
-                        {s.status}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-600">{s.lead_name}</p>
-                    <p className="text-[9px] text-slate-400">#{s.session_number} · W{s.week_number}</p>
-                  </div>
-                ))}
+
+          {/* Day Detail */}
+          <div className="w-full sm:w-80 rounded-xl border border-slate-200 bg-white p-4 overflow-y-auto sm:max-h-[600px]">
+            {!selectedDate ? (
+              <div className="flex items-center justify-center h-32 sm:h-48">
+                <div className="text-center">
+                  <Calendar className="h-8 w-8 text-slate-200 mx-auto mb-2" />
+                  <p className="text-xs text-slate-400">Select a date</p>
+                </div>
               </div>
+            ) : (
+              <>
+                <h4 className="text-sm font-semibold text-slate-700 mb-3">
+                  {new Date(selectedDate + "T00:00").toLocaleDateString("en-IN", { weekday: "long", month: "short", day: "numeric" })}
+                </h4>
+                {daySessions.length === 0 ? (
+                  <p className="text-xs text-slate-400 text-center py-6">No sessions</p>
+                ) : (
+                  <div className="space-y-2">
+                    {daySessions.map((s) => (
+                      <div key={s.id} className={`rounded-lg border p-3 ${s.status === "completed" ? "border-emerald-200 bg-emerald-50" : "border-slate-200"}`}>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs font-semibold text-slate-700">{slotTo12h(s.slot_time)}</span>
+                          <span className={`text-[9px] rounded-full px-1.5 py-0.5 font-semibold ${s.status === "completed" ? "bg-emerald-100 text-emerald-700" : "bg-sky-100 text-sky-700"}`}>
+                            {s.status}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-600">{s.lead_name}</p>
+                        <p className="text-[9px] text-slate-400">#{s.session_number} · W{s.week_number}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
-          </>
-        )}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -1167,31 +1214,31 @@ function PatientsTab({ physioId }) {
         <div className="space-y-3">
           {visiblePatients.map((p) => (
             <div key={p.lead_id} className="rounded-xl border border-slate-200 bg-white p-4 hover:shadow-sm transition-shadow" data-testid={`physio-patient-${p.lead_id}`}>
-              <div className="flex items-center gap-4">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-sky-50 text-sm font-bold text-sky-700">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-sky-50 text-sm font-bold text-sky-700">
                   {p.lead_name?.charAt(0)?.toUpperCase()}
                 </div>
-                <div className="flex-1">
-                  <p className="text-sm font-semibold text-slate-800">{p.lead_name}</p>
-                  <p className="text-[10px] text-slate-400">{p.phone} · {p.package_weeks || "?"} weeks program</p>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold text-slate-800">{p.lead_name}</p>
+                  <p className="truncate text-[10px] text-slate-400">{p.phone} · {p.package_weeks || "?"} weeks program</p>
                 </div>
-                <div className="flex items-center gap-3">
-                  <div className="text-center">
-                    <p className="text-lg font-bold text-emerald-600">{p.completed_sessions}</p>
-                    <p className="text-[9px] text-slate-400">Done</p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-lg font-bold text-sky-600">{p.remaining_sessions}</p>
-                    <p className="text-[9px] text-slate-400">Left</p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-lg font-bold text-slate-600">{p.total_sessions}</p>
-                    <p className="text-[9px] text-slate-400">Total</p>
-                  </div>
-                </div>
-                <Button size="sm" variant="outline" className="text-xs" onClick={() => setSelectedPatient(p)} data-testid={`physio-view-patient-${p.lead_id}`}>
-                  <ClipboardList className="h-3 w-3 mr-1" /> Details
+                <Button size="sm" variant="outline" className="shrink-0 text-xs" onClick={() => setSelectedPatient(p)} data-testid={`physio-view-patient-${p.lead_id}`}>
+                  <ClipboardList className="h-3 w-3 sm:mr-1" /> <span className="hidden sm:inline">Details</span>
                 </Button>
+              </div>
+              <div className="mt-3 flex items-center justify-around rounded-lg bg-slate-50 py-2 text-center sm:justify-start sm:gap-6 sm:bg-transparent sm:py-0">
+                <div>
+                  <p className="text-base font-bold text-emerald-600">{p.completed_sessions}</p>
+                  <p className="text-[9px] text-slate-400">Done</p>
+                </div>
+                <div>
+                  <p className="text-base font-bold text-sky-600">{p.remaining_sessions}</p>
+                  <p className="text-[9px] text-slate-400">Left</p>
+                </div>
+                <div>
+                  <p className="text-base font-bold text-slate-600">{p.total_sessions}</p>
+                  <p className="text-[9px] text-slate-400">Total</p>
+                </div>
               </div>
               {/* Progress bar */}
               <div className="mt-3 h-1.5 w-full rounded-full bg-slate-100 overflow-hidden">
@@ -1235,7 +1282,7 @@ function PatientDetailModal({ patient, physioId, onClose, onRefresh }) {
   useEffect(() => { load(); }, [load]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="w-full max-w-3xl rounded-xl bg-white shadow-2xl max-h-[85vh] flex flex-col" data-testid="patient-detail-modal">
         <div className="flex items-center justify-between border-b p-5">
           <div>
@@ -1364,7 +1411,7 @@ function CompleteSessionModal({ session, onClose, onDone }) {
   };
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="w-full max-w-md rounded-xl bg-white shadow-2xl" data-testid="complete-session-modal">
         <div className="border-b p-5">
           <h3 className="text-base font-semibold text-slate-800">Complete Session #{session.session_number}</h3>
@@ -1403,7 +1450,7 @@ function WeeklyAssessmentModal({ leadId, week, physioId, onClose, onDone }) {
   };
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="w-full max-w-md rounded-xl bg-white shadow-2xl" data-testid="weekly-assessment-modal">
         <div className="border-b p-5">
           <h3 className="text-base font-semibold text-slate-800">Week {week} Assessment</h3>
