@@ -84,8 +84,14 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
       {/* The day picker is the whole header now — the branch filter is gone (Head
           Physios cover every branch) and Calendar and My Profile moved to the app header
           beside the avatar, leaving the summary cards below as the only navigation. */}
-      <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
-        <WeekStrip value={workDate} onChange={setWorkDate} testid="hp-week-strip" bare />
+      {/* Two regions. The left is deliberately left empty — reserved space, not a gap to
+          be filled later by whatever comes along. The day filter takes only the width it
+          needs on the right, divided off from it. */}
+      <div className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-2 lg:flex-row lg:items-center lg:gap-4">
+        <div className="hidden min-h-[2.25rem] flex-1 lg:block" data-testid="hp-header-reserved" />
+        <div className="shrink-0 lg:border-l lg:border-slate-100 lg:pl-4" data-testid="hp-header-day-filter">
+          <WeekStrip value={workDate} onChange={setWorkDate} testid="hp-week-strip" bare />
+        </div>
       </div>
 
       <div className="space-y-4" data-testid="hp-work-view">

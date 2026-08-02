@@ -19,9 +19,9 @@ const longLabel = (iso) => {
  * happening now rather than on everything ever booked. Sunday-first, to match the
  * S M T W T F S the clinic reads.
  *
- * Deliberately one compact line: the days are fixed-width buttons rather than a grid
- * stretched across the row. This sits above every list on the board, so the space it
- * takes is space the day's work doesn't get.
+ * Deliberately one compact line that sizes to its contents rather than stretching: it
+ * sits above every list on the board, so the space it takes is space the day's work
+ * doesn't get, and the room it leaves beside it is deliberately kept free.
  */
 export const WeekStrip = ({ value, onChange, counts = {}, testid = "week-strip", bare = false }) => {
   const today = todayIso();
@@ -84,7 +84,7 @@ export const WeekStrip = ({ value, onChange, counts = {}, testid = "week-strip",
         })}
       </div>
 
-      <div className="ml-auto flex shrink-0 items-center gap-1">
+      <div className="flex shrink-0 items-center gap-1">
         {selected !== today && (
           <button
             type="button"
