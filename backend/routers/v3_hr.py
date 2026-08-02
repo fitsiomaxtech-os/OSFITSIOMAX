@@ -18,7 +18,12 @@ DEFAULT_ROLES = ["super_admin", "business_dev", "pre_sales", "branch_admin", "he
 
 # Both consultant roles can be assigned to more than one branch (a linked `doctors`
 # record is kept in sync per branch) — every other role stays pinned to a single branch.
-MULTI_BRANCH_ROLES = {"head_physio", "physio"}
+# Physios are assigned to branches — they deliver treatment where they work, and may cover
+# more than one. Head Physios are not: they take consultations across the whole
+# organisation, so they get a single branchless expert record and are offered everywhere.
+MULTI_BRANCH_ROLES = {"physio"}
+ORG_WIDE_ROLES = {"head_physio"}
+EXPERT_ROLES = MULTI_BRANCH_ROLES | ORG_WIDE_ROLES
 
 
 def _slugify_role(label: str) -> str:
@@ -296,7 +301,21 @@ async def create_user_account(payload: UserAccountCreate, _: V3UserOut = Depends
         "created_at": now_iso(),
     }
     await v3_col("users").insert_one(user.copy())
-    if payload.role in MULTI_BRANCH_ROLES:
+    if payload.role in ORG_WIDE_ROLES:
+        # One branchless record — a Head Physio has one calendar the whole organisation
+        # books against, not a separate one per branch.
+        await v3_col("doctors").insert_one({
+            "id": str(uuid.uuid4()),
+            "full_name": payload.full_name,
+            "profile_type": payload.role,
+            "branch_id": None,
+            "specialization": "",
+            "slots": [],
+            "slot_details": [],
+            "user_id": user["id"],
+            "created_at": now_iso(),
+        })
+    elif payload.role in MULTI_BRANCH_ROLES:
         # One doctors record per assigned branch (each branch's calendar/booking is
         # scoped to its own record) — plain single-branch case is just a list of one.
         for b_id in (payload.branch_ids or [payload.branch_id]):
@@ -379,13 +398,16 @@ async def update_user_role(user_id: str, role: str, _: V3UserOut = Depends(v3_re
     res = await v3_col("users").update_one({"id": user_id}, {"$set": {"role": role}})
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="User not found")
-    if role in MULTI_BRANCH_ROLES:
+    if role in EXPERT_ROLES:
         user = await v3_col("users").find_one({"id": user_id}, {"_id": 0})
         existing_docs = await v3_col("doctors").find(
             {"user_id": user_id, "profile_type": role}, {"_id": 0, "branch_id": 1}
         ).to_list(50)
         existing_branch_ids = {d.get("branch_id") for d in existing_docs}
-        for b_id in (user.get("branch_ids") or [user.get("branch_id")]):
+        # A Head Physio needs exactly one record and it belongs to no branch; a Physio
+        # needs one per branch they cover.
+        wanted = [None] if role in ORG_WIDE_ROLES else (user.get("branch_ids") or [user.get("branch_id")])
+        for b_id in wanted:
             if b_id not in existing_branch_ids:
                 await v3_col("doctors").insert_one({
                     "id": str(uuid.uuid4()),

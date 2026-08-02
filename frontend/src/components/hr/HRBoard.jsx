@@ -18,7 +18,11 @@ const TABS = [
 
 // Both consultant roles can cover more than one branch — every other role keeps the
 // original single Branch select.
-const MULTI_BRANCH_ROLE_LABELS = { head_physio: "Head Physio", physio: "Physio" };
+// Physios belong to branches and may cover several, so they get the checkbox list.
+// Head Physios cover the whole organisation by definition — offering them a branch choice
+// would suggest they could be limited to one, which they can't be.
+const MULTI_BRANCH_ROLE_LABELS = { physio: "Physio" };
+const ORG_WIDE_ROLES = new Set(["head_physio"]);
 
 export const HRBoard = () => {
   const [tab, setTab] = useState("dashboard");
@@ -481,6 +485,7 @@ const UserActionsModal = ({ user, onClose, onDone }) => {
   const [employees, setEmployees] = useState([]);
   const roleLabelForMulti = MULTI_BRANCH_ROLE_LABELS[user.role];
   const isMultiBranchRole = Boolean(roleLabelForMulti);
+  const isOrgWideRole = ORG_WIDE_ROLES.has(user.role);
   const [editForm, setEditForm] = useState({
     full_name: user.full_name || "",
     email: user.email || "",
@@ -500,12 +505,13 @@ const UserActionsModal = ({ user, onClose, onDone }) => {
   const submitEdit = async () => {
     if (!editForm.full_name.trim() || !editForm.email.trim()) { toast.error("Name and email are required"); return; }
     if (isMultiBranchRole && editForm.branch_ids.length === 0) { toast.error("Select at least one branch"); return; }
+    // Head Physios are org-wide; sending a branch would pin them to one.
     try {
       setBusy(true);
       // branch_ids only applies (and is only sent) for Head Physio/Physio — every other
       // role keeps its single `branch_id` select untouched by the multi-branch field.
       const { branch_ids, branch_id, ...rest } = editForm;
-      const payload = isMultiBranchRole ? { ...rest, branch_ids } : { ...rest, branch_id };
+      const payload = isOrgWideRole ? { ...rest, branch_ids: [] } : isMultiBranchRole ? { ...rest, branch_ids } : { ...rest, branch_id };
       await hrUpdateUser(user.id, payload);
       toast.success(`${editForm.full_name} updated`);
       onDone();
@@ -630,7 +636,13 @@ const UserActionsModal = ({ user, onClose, onDone }) => {
           <div className="space-y-3" data-testid="hr-actions-edit-form">
             <Field label="Name"><Input placeholder="Full name" value={editForm.full_name} onChange={(e) => setEditForm({ ...editForm, full_name: e.target.value })} data-testid="hr-actions-edit-name" /></Field>
             <Field label="Email"><Input placeholder="user@company.com" value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} data-testid="hr-actions-edit-email" /></Field>
-            {isMultiBranchRole ? (
+            {isOrgWideRole ? (
+              <Field label="Branches">
+                <p className="rounded-md border border-teal-200 bg-teal-50 px-3 py-2 text-xs font-medium text-teal-700" data-testid="hr-org-wide-branch-note">
+                  Head Physios cover every branch — no branch selection needed.
+                </p>
+              </Field>
+            ) : isMultiBranchRole ? (
               <Field label={`Branches (${roleLabelForMulti} can cover more than one)`}>
                 <div className="space-y-1.5 rounded-md border border-slate-200 p-2" data-testid="hr-actions-edit-branch-ids">
                   {branches.map((b) => {
@@ -888,6 +900,7 @@ const CreateUserModal = ({ meta, reloadMeta, onClose, onSaved }) => {
   const [form, setForm] = useState({ employee_id: "", full_name: "", email: "", role: "", branch_id: "", branch_ids: [], password: "", confirm: "" });
   const roleLabelForMulti = MULTI_BRANCH_ROLE_LABELS[form.role];
   const isMultiBranchRole = Boolean(roleLabelForMulti);
+  const isOrgWideRole = ORG_WIDE_ROLES.has(form.role);
   const [addingRole, setAddingRole] = useState(false);
   const [newRoleLabel, setNewRoleLabel] = useState("");
   const [savingRole, setSavingRole] = useState(false);
@@ -928,7 +941,9 @@ const CreateUserModal = ({ meta, reloadMeta, onClose, onSaved }) => {
         password: form.password,
         role: form.role,
         employee_id: form.employee_id || null,
-        ...(isMultiBranchRole ? { branch_ids: form.branch_ids } : { branch_id: form.branch_id || null }),
+        ...(isOrgWideRole ? { branch_ids: [], branch_id: null }
+          : isMultiBranchRole ? { branch_ids: form.branch_ids }
+          : { branch_id: form.branch_id || null }),
       });
       toast.success("User created");
       onSaved();
@@ -977,7 +992,13 @@ const CreateUserModal = ({ meta, reloadMeta, onClose, onSaved }) => {
             <p className="mt-1 text-[10px] text-slate-400">A new role only adds a selectable name — page access still needs to be built for it separately.</p>
           )}
         </Field>
-        {isMultiBranchRole ? (
+        {isOrgWideRole ? (
+          <Field label="Branches">
+            <p className="rounded-md border border-teal-200 bg-teal-50 px-3 py-2 text-xs font-medium text-teal-700" data-testid="hr-create-org-wide-branch-note">
+              Head Physios cover every branch — no branch selection needed.
+            </p>
+          </Field>
+        ) : isMultiBranchRole ? (
           <Field label={`Branches (${roleLabelForMulti} can cover more than one)`}>
             <div className="space-y-1.5 rounded-md border border-slate-200 p-2" data-testid="hr-create-user-branch-ids">
               {branches.map((b) => {

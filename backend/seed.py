@@ -457,6 +457,67 @@ async def sync_head_physio_doctors() -> None:
         )
 
 
+async def consolidate_head_physio_doctors() -> None:
+    """Collapse each Head Physio down to one branchless expert record.
+
+    Head Physios cover every branch, but the old model gave them one `doctors` record per
+    assigned branch. That left duplicates in every expert picker, and split their published
+    availability across records — which is why a branch could show a Head Physio as having
+    published nothing while their real slots sat on a sibling record.
+
+    Slots are merged rather than picked, so no published availability is lost, and the
+    surviving record keeps the id that appointments already point at wherever possible.
+    Safe to re-run: once each user has a single branchless record there is nothing to do.
+    """
+    by_user: dict = {}
+    cursor = v3_col("doctors").find({"profile_type": "head_physio"}, {"_id": 0})
+    async for doc in cursor:
+        key = doc.get("user_id") or f"name:{doc.get('full_name')}"
+        by_user.setdefault(key, []).append(doc)
+
+    for key, docs in by_user.items():
+        if len(docs) == 1 and docs[0].get("branch_id") is None:
+            continue  # already consolidated
+
+        # Keep whichever record is actually referenced by appointments; failing that, the
+        # one carrying the most published slots. Either way its id stays valid.
+        ids = [d["id"] for d in docs]
+        booked = await v3_col("appointments").find(
+            {"doctor_id": {"$in": ids}}, {"_id": 0, "doctor_id": 1}
+        ).to_list(5000)
+        booked_ids = {b.get("doctor_id") for b in booked}
+        keeper = next((d for d in docs if d["id"] in booked_ids), None)
+        if keeper is None:
+            keeper = max(docs, key=lambda d: len(d.get("slots") or []))
+
+        merged_slots = sorted({s for d in docs for s in (d.get("slots") or []) if isinstance(s, str)})
+        details: dict = {}
+        for d in docs:
+            for det in (d.get("slot_details") or []):
+                if det.get("slot_time"):
+                    details.setdefault(det["slot_time"], det)
+        merged_details = [details[t] for t in sorted(details) if t in details]
+
+        await v3_col("doctors").update_one({"id": keeper["id"]}, {"$set": {
+            "branch_id": None,
+            "slots": merged_slots,
+            "slot_details": merged_details,
+        }})
+        drop = [d["id"] for d in docs if d["id"] != keeper["id"]]
+        if drop:
+            # Re-point any appointment on a dropped record before it disappears, so no
+            # booking is orphaned by the merge.
+            await v3_col("appointments").update_many(
+                {"doctor_id": {"$in": drop}}, {"$set": {"doctor_id": keeper["id"]}}
+            )
+            await v3_col("doctors").delete_many({"id": {"$in": drop}})
+
+    # Their login carries no branch either — a Head Physio isn't "at" one.
+    await v3_col("users").update_many(
+        {"role": "head_physio"}, {"$set": {"branch_id": None, "branch_ids": []}}
+    )
+
+
 async def backfill_login_history_from_sessions() -> None:
     """login_history only started recording on /auth/login once that tracking was added,
     so anyone already logged in at that point shows zero entries in the Super Admin

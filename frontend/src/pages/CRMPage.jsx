@@ -49,7 +49,7 @@ import { toast, Toaster } from "@/components/ui/sonner";
 import { BusinessLeadsDashboard } from "@/components/BusinessLeadsDashboard";
 import { PreSalesBoard } from "@/components/PreSalesBoard";
 import { BranchAdminBoard } from "@/components/BranchAdminBoard";
-import { HeadPhysioBoard } from "@/components/HeadPhysioBoard";
+import { HeadPhysioBoard, HeadPhysioCalendarModal } from "@/components/HeadPhysioBoard";
 import { PhysioBoard, CalendarPage as PhysioCalendarPage } from "@/components/PhysioBoard";
 import { MarketingBoard } from "@/components/marketing/MarketingBoard";
 import { PreSalesCRM } from "@/components/PreSalesCRM";
@@ -190,6 +190,7 @@ export const CRMPage = ({ auth, onLogout }) => {
   const [loading, setLoading] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showPhysioCalendar, setShowPhysioCalendar] = useState(false);
+  const [showHPCalendar, setShowHPCalendar] = useState(false);
 
   const role = auth.user.role;
   const roleLabel = ROLE_META[role]?.label || role;
@@ -584,6 +585,19 @@ export const CRMPage = ({ auth, onLogout }) => {
               </div>
             </div>
             <div className="flex items-center gap-2 sm:gap-3">
+              {/* A Head Physio's own calendar sits beside their profile rather than in the
+                  board's tab row — it's a reference, not one of the lists they work. */}
+              {showHeadPhysioBoard && (
+                <button
+                  type="button"
+                  onClick={() => setShowHPCalendar(true)}
+                  className="flex items-center gap-1.5 rounded-md border border-slate-200 px-2 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 sm:px-3"
+                  data-testid="hp-header-calendar-button"
+                >
+                  <CalendarDays className="h-4 w-4" />
+                  <span className="hidden sm:inline">Calendar</span>
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setShowProfile(true)}
@@ -619,6 +633,10 @@ export const CRMPage = ({ auth, onLogout }) => {
 
         {showPhysioBoard && showPhysioCalendar && (
           <PhysioCalendarPage onClose={() => setShowPhysioCalendar(false)} />
+        )}
+
+        {showHeadPhysioBoard && showHPCalendar && (
+          <HeadPhysioCalendarModal branchId={auth?.user?.branch_id} onClose={() => setShowHPCalendar(false)} />
         )}
 
         <div className="w-full space-y-4 px-3 py-4 sm:space-y-6 sm:px-6 sm:py-6">

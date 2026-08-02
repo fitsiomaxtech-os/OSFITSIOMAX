@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Activity,
-  Building2,
   Calendar,
   CalendarClock,
   Check,
@@ -16,7 +15,6 @@ import {
   Send,
   Stethoscope,
   User,
-  UserCircle,
   Users,
   X,
 } from "lucide-react";
@@ -27,7 +25,6 @@ import { ConsultationsBoard } from "@/components/ConsultationsBoard";
 import { HeadPhysioReviewTab } from "@/components/HeadPhysioReviewTab";
 import { WeekStrip, todayIso } from "@/components/WeekStrip";
 import {
-  getBranches,
   getHPMyCalendar,
   getHPMyPatients,
   hpRecommendPackage,
@@ -37,25 +34,21 @@ import {
 } from "@/lib/api";
 import { to12h, slotTo12h } from "@/lib/time";
 
-const VIEW_TABS = [
-  { key: "consultations", label: "Consultations", icon: Calendar },
-  { key: "assessments", label: "Review", icon: ClipboardList },
-  { key: "rehab", label: "Rehab", icon: Activity },
-  { key: "calendar", label: "Calendar", icon: CalendarClock },
-  { key: "profile", label: "My Profile", icon: UserCircle },
-];
-
-// The three lists inside Consultations. Consultations are what Branch Admin books in;
+// The summary cards ARE the navigation now. Consultations are what Branch Admin books in;
 // Reviews are what Branch Admin sends over once a Physio flags a patient at seven days of
-// treatment. Both are that day's work, so All puts them on one screen.
+// treatment; Rehab is the patient list. All puts the day's two work lists on one screen.
+//
+// Calendar and My Profile used to sit alongside these. Both moved to the header beside the
+// avatar — neither is a list to work through, and keeping them here made five things look
+// like five queues.
 const WORK_TABS = [
   { key: "consultations", label: "Consultations", icon: Calendar },
   { key: "review", label: "Review", icon: ClipboardCheck },
+  { key: "rehab", label: "Rehab", icon: Activity },
   { key: "all", label: "All", icon: LayoutList },
 ];
 
 export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
-  const [activeTab, setActiveTab] = useState("consultations");
   const [workTab, setWorkTab] = useState("consultations");
   // The day every list under Consultations answers to. Starts on today.
   const [workDate, setWorkDate] = useState(todayIso());
@@ -68,20 +61,10 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
   const [showRecommendModal, setShowRecommendModal] = useState(null);
   const [showReviewModal, setShowReviewModal] = useState(null);
 
-  // Assigned to just one branch (the common case) keeps working exactly as before —
-  // the switcher only appears once a Head Physio covers more than one branch.
+  // Head Physios cover every branch, so there's no switcher any more — but the branch a
+  // fetch is scoped to still matters, and that's the one on their account.
   const assignedBranchIds = branchIds && branchIds.length ? branchIds : (branchId ? [branchId] : []);
-  const [activeBranchId, setActiveBranchId] = useState(assignedBranchIds[0] || branchId);
-  const [branchNames, setBranchNames] = useState({});
-
-  useEffect(() => {
-    if (assignedBranchIds.length < 2) return;
-    getBranches().then((rows) => {
-      setBranchNames(Object.fromEntries((rows || []).map((b) => [b.id, b.branch_name])));
-    }).catch(() => {});
-  }, [assignedBranchIds.join(",")]);
-
-  const effectiveBranchId = activeBranchId || branchId;
+  const effectiveBranchId = assignedBranchIds[0] || branchId;
 
   const loadPatients = useCallback(async () => {
     setLoading(true);
@@ -98,67 +81,31 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
     // Bottom padding on phones clears the fixed bottom bar, so the last row of any list
     // is still reachable instead of sitting underneath it.
     <div className="space-y-4 pb-20 sm:pb-0" data-testid="head-physio-board-root">
-      {/* One header row: what you're looking at on the left, which day on the right. The
-          day picker lives here rather than inside Consultations so it holds its place as
-          the tabs change instead of the page reflowing under the cursor. */}
-      <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-2 lg:flex-row lg:items-center lg:justify-between lg:gap-4 lg:p-3">
-        <div className="flex shrink-0 items-center gap-1 overflow-x-auto" data-testid="hp-tabs">
-          {/* A Head Physio covering more than one branch still has to pick one — without
-              it they'd be pinned to whichever came back first. Single-branch logins, the
-              common case, never see it. */}
-          {assignedBranchIds.length > 1 && (
-            <div className="mr-1 flex shrink-0 items-center gap-1 border-r border-slate-200 pr-2" data-testid="hp-branch-switcher">
-              <Building2 className="h-4 w-4 shrink-0 text-slate-400" />
-              <select
-                value={effectiveBranchId}
-                onChange={(e) => setActiveBranchId(e.target.value)}
-                className="h-8 max-w-[9rem] rounded-md border border-slate-200 bg-white px-1.5 text-xs font-semibold text-slate-700"
-                data-testid="hp-branch-select"
-              >
-                {assignedBranchIds.map((bId) => (
-                  <option key={bId} value={bId}>{branchNames[bId] || bId}</option>
-                ))}
-              </select>
-            </div>
-          )}
-          {VIEW_TABS.map((tab) => {
-            const Icon = tab.icon;
-            const active = activeTab === tab.key;
-            return (
-              <button
-                key={tab.key}
-                type="button"
-                onClick={() => setActiveTab(tab.key)}
-                className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 py-2 text-[13px] font-medium transition-colors sm:px-3 sm:text-sm ${
-                  active ? "bg-teal-600 text-white shadow-sm" : "text-slate-500 hover:bg-slate-100 hover:text-slate-700"
-                }`}
-                data-testid={`hp-tab-${tab.key}`}
-              >
-                <Icon className="h-4 w-4" /> {tab.label}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Takes whatever the tabs leave rather than a fixed column, so the seven days
-            are full-size targets instead of being squeezed into a corner. */}
-        <div className="w-full min-w-0 flex-1 border-t border-slate-100 pt-2 lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0" data-testid="hp-header-week">
+      {/* The day picker is the whole header now — the branch filter is gone (Head
+          Physios cover every branch) and Calendar and My Profile moved to the app header
+          beside the avatar, leaving the summary cards below as the only navigation. */}
+      {/* Two regions. The left is deliberately left empty — reserved space, not a gap to
+          be filled later by whatever comes along. The day filter takes only the width it
+          needs on the right, divided off from it. */}
+      <div className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-2 lg:flex-row lg:items-center lg:gap-4">
+        <div className="hidden min-h-[2.25rem] flex-1 lg:block" data-testid="hp-header-reserved" />
+        <div className="shrink-0 lg:border-l lg:border-slate-100 lg:pl-4" data-testid="hp-header-day-filter">
           <WeekStrip value={workDate} onChange={setWorkDate} testid="hp-week-strip" bare />
         </div>
       </div>
 
-      {activeTab === "consultations" && (
-        <div className="space-y-4" data-testid="hp-work-view">
+      <div className="space-y-4" data-testid="hp-work-view">
           {/* Summary cards, not a pill bar — these are the day's workload, so each one
               carries its own count and reads at a glance from across a room. Three equal
               columns at every width, so the row fits a phone without wrapping or
               scrolling; the bottom bar is still there for thumb reach. */}
-          <div className="grid grid-cols-3 gap-2 sm:gap-3" data-testid="hp-work-tabs">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3" data-testid="hp-work-tabs">
             {WORK_TABS.map((t) => {
               const Icon = t.icon;
               const active = workTab === t.key;
               const n = t.key === "consultations" ? consultCount
                 : t.key === "review" ? reviewCount
+                : t.key === "rehab" ? patients.length
                 : consultCount + reviewCount;
               return (
                 <button
@@ -186,7 +133,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
 
           {/* Both stay mounted and hidden rather than unmounted, so every card keeps a
               live count whichever one is open, and switching costs no refetch. */}
-          <div className={workTab === "review" ? "hidden" : ""} data-testid="hp-work-consultations">
+          <div className={workTab === "consultations" || workTab === "all" ? "" : "hidden"} data-testid="hp-work-consultations">
             {workTab === "all" && (
               <p className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-400">
                 <Calendar className="h-3.5 w-3.5" /> Consultations
@@ -202,7 +149,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
           </div>
 
           <div
-            className={workTab === "consultations" ? "hidden" : workTab === "all" ? "border-t border-slate-200 pt-4" : ""}
+            className={workTab === "review" ? "" : workTab === "all" ? "border-t border-slate-200 pt-4" : "hidden"}
             data-testid="hp-work-review"
           >
             {workTab === "all" && (
@@ -212,37 +159,28 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
             )}
             <HeadPhysioReviewTab selectedDate={workDate} compact={workTab === "all"} onCountChange={setReviewCount} />
           </div>
-        </div>
-      )}
 
-      {activeTab === "rehab" && (
-        <PatientsTab
-          patients={patients}
-          onRecommend={(p) => setShowRecommendModal(p)}
-          onSelect={(p) => setSelectedPatient(p)}
-          loading={loading}
-        />
-      )}
-
-      {/* The dispatched post-treatment reviews come first — they're work handed to this
-          Head Physio by name. The weekly assessments below are their own separate,
-          patient-by-patient record and stay reachable underneath. */}
-      {activeTab === "assessments" && (
-        <div className="space-y-6">
-          <HeadPhysioReviewTab />
-          <div className="border-t border-slate-200 pt-5">
-            <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-400">Weekly Assessments</p>
-            <AssessmentsTab
-              patients={patients}
-              onReview={(p, w) => setShowReviewModal({ patient: p, week: w })}
-            />
-          </div>
-        </div>
-      )}
-
-      {activeTab === "calendar" && <MyCalendarTab branchId={effectiveBranchId} />}
-
-      {activeTab === "profile" && <MyProfileTab user={user} />}
+          {/* Rehab is the patient list, not a day's queue, so it isn't date-filtered and
+              doesn't join All. The weekly assessments sit under it — same patients, the
+              per-week record rather than the dispatched reviews. */}
+          {workTab === "rehab" && (
+            <div className="space-y-6" data-testid="hp-work-rehab">
+              <PatientsTab
+                patients={patients}
+                onRecommend={(p) => setShowRecommendModal(p)}
+                onSelect={(p) => setSelectedPatient(p)}
+                loading={loading}
+              />
+              <div className="border-t border-slate-200 pt-5">
+                <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-400">Weekly Assessments</p>
+                <AssessmentsTab
+                  patients={patients}
+                  onReview={(p, w) => setShowReviewModal({ patient: p, week: w })}
+                />
+              </div>
+            </div>
+          )}
+      </div>
 
       {showRecommendModal && (
         <RecommendPackageModal
@@ -271,18 +209,17 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
       {/* Sits above the bottom bar on phones so it never covers the nav. */}
       {loading && <div className="fixed bottom-20 right-4 z-40 rounded-md bg-slate-900 px-3 py-2 text-sm text-white sm:bottom-4">Loading...</div>}
 
-      {/* Mobile bottom bar — the Head Physio works this board on a phone between patients,
-          where the top tabs are a stretch away. Tapping one jumps back to Consultations so
-          the bar always lands on the list it names. */}
+      {/* Mobile bottom bar — the Head Physio works this board on a phone between
+          patients, where the cards at the top are a stretch away. Same four, thumb-high. */}
       <nav className="fixed inset-x-0 bottom-0 z-50 flex border-t border-slate-200 bg-white shadow-[0_-2px_10px_rgba(0,0,0,0.06)] sm:hidden" data-testid="hp-bottom-nav">
         {WORK_TABS.map((t) => {
           const Icon = t.icon;
-          const active = activeTab === "consultations" && workTab === t.key;
+          const active = workTab === t.key;
           return (
             <button
               key={t.key}
               type="button"
-              onClick={() => { setActiveTab("consultations"); setWorkTab(t.key); }}
+              onClick={() => setWorkTab(t.key)}
               className={`flex flex-1 flex-col items-center gap-0.5 py-2.5 text-[11px] font-semibold transition ${
                 active ? "text-teal-700" : "text-slate-400"
               }`}
@@ -299,6 +236,30 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
     </div>
   );
 };
+
+/**
+ * The Head Physio's own calendar, lifted out of the tab row into a modal opened from the
+ * header next to their profile — it's a reference they glance at, not one of the lists
+ * they work through, so it no longer takes a slot alongside them.
+ */
+export const HeadPhysioCalendarModal = ({ branchId, onClose }) => (
+  <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-3" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} data-testid="hp-calendar-modal">
+    <div className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+      <div className="flex items-center justify-between bg-slate-500 px-6 py-4 text-white">
+        <div className="flex items-center gap-2.5">
+          <CalendarClock className="h-5 w-5" />
+          <p className="text-lg font-bold">My Calendar</p>
+        </div>
+        <button onClick={onClose} className="rounded-lg border-2 border-orange-200 bg-orange-100 p-2 text-orange-600 hover:bg-orange-200" data-testid="hp-calendar-modal-close">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto p-5">
+        <MyCalendarTab branchId={branchId} />
+      </div>
+    </div>
+  </div>
+);
 
 function MyCalendarTab({ branchId }) {
   const [data, setData] = useState({ slots: [], booked: {} });
@@ -353,37 +314,6 @@ function MyCalendarTab({ branchId }) {
           </div>
         </div>
       ))}
-    </div>
-  );
-}
-
-function MyProfileTab({ user }) {
-  if (!user) return null;
-  const fields = [
-    { label: "Name", value: user.full_name },
-    { label: "Email", value: user.email },
-    { label: "Role", value: "Consultant / Head Physio" },
-  ];
-
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white p-6 max-w-md" data-testid="hp-profile-tab">
-      <div className="flex items-center gap-3 mb-5">
-        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-teal-100 text-lg font-bold text-teal-700">
-          {user.full_name?.charAt(0)?.toUpperCase()}
-        </div>
-        <div>
-          <p className="text-base font-semibold text-slate-800">{user.full_name}</p>
-          <p className="text-xs text-slate-400">Consultant / Head Physio</p>
-        </div>
-      </div>
-      <div className="space-y-3">
-        {fields.map((f) => (
-          <div key={f.label} className="flex items-center justify-between border-b border-slate-100 pb-2">
-            <span className="text-xs text-slate-400">{f.label}</span>
-            <span className="text-sm text-slate-700">{f.value}</span>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }

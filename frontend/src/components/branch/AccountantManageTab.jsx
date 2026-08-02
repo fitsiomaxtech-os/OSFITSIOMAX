@@ -209,7 +209,9 @@ const RevenueDetailTable = ({ title, rows, onView }) => (
     <CardContent className="p-4">
       <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</p>
       <div className="overflow-x-auto">
-        <table className="w-full table-fixed border-separate border-spacing-x-0 border-spacing-y-2 text-sm">
+        {/* table-fixed at w-full squeezes ten columns into a phone's width rather than
+            letting the wrapper scroll — the min-width is what makes it scroll instead. */}
+        <table className="w-full min-w-[52rem] table-fixed border-separate border-spacing-x-0 border-spacing-y-2 text-sm">
           <thead>
             <tr>
               <th className="w-[5%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">S.No</th>

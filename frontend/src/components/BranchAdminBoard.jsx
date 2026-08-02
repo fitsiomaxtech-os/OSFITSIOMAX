@@ -16,6 +16,7 @@ import {
   FileText,
   Share2,
   Copy,
+  Link as LinkIcon,
   Download,
   ShoppingCart,
   ClipboardList,
@@ -31,6 +32,7 @@ import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { StageTabBar, stageDisplayLabel } from "@/components/ui/stage-tab";
 import {
   scheduleBranchAppointment,
+  publicAppointmentUrl,
   getBranchBoard,
   getAvailableExperts,
   getAvailableDates,
@@ -85,6 +87,46 @@ const apptRows = (a, { compact = false } = {}) => [
   ["Booked By", a.bookedBy],
 ];
 
+/** lucide has no WhatsApp glyph and the brand mark can't be approximated with a generic
+ *  chat bubble — staff scan for this exact shape. */
+const WhatsAppIcon = ({ className }) => (
+  <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51l-.57-.01c-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884a9.82 9.82 0 016.988 2.896 9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.885-9.885 9.885M20.52 3.449C18.24 1.245 15.24 0 12.045 0 5.463 0 .104 5.359.101 11.943c0 2.096.549 4.142 1.595 5.945L0 24l6.305-1.654a11.94 11.94 0 005.71 1.454h.005c6.585 0 11.946-5.359 11.949-11.945a11.87 11.87 0 00-3.44-8.406" />
+  </svg>
+);
+
+/** 128 bits from the platform CSPRNG — the share link's only key, so it can't be a
+ *  counter or anything derived from the patient's own details. */
+const randomToken = () => {
+  const bytes = new Uint8Array(16);
+  (window.crypto || window.msCrypto).getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+};
+
+/** Where the patient opens their own copy of this confirmation. Keyed by an unguessable
+ *  token rather than the reference number, which is printed on the sheet and derived
+ *  from the patient number — guessable, and not something to hang access on. */
+const apptLink = (a) => (a.shareToken ? publicAppointmentUrl(a.shareToken) : "");
+
+/** A stored phone in E.164 for wa.me, which takes digits only — no +, spaces or the
+ *  "p:" prefix some records carry. A bare 10-digit number is assumed Indian, matching
+ *  every other number in the system; anything already carrying a country code is left
+ *  alone. Returns "" when there's nothing dialable, so the button can hide itself. */
+const waNumber = (raw) => {
+  const digits = String(raw || "").replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.length === 10) return `91${digits}`;
+  if (digits.length === 11 && digits.startsWith("0")) return `91${digits.slice(1)}`;
+  return digits;
+};
+
+/** Opens WhatsApp on the patient's own number with the confirmation already typed. */
+const openWhatsApp = (a) => {
+  const num = waNumber(a.phone);
+  if (!num) { toast.error("This patient has no phone number on file"); return; }
+  window.open(`https://wa.me/${num}?text=${encodeURIComponent(apptMessage(a))}`, "_blank", "noopener,noreferrer");
+};
+
 /** The confirmation as a message addressed to the patient — short lines that survive
  *  WhatsApp and SMS, which is how it actually reaches them. */
 const apptMessage = (a) => {
@@ -99,9 +141,11 @@ const apptMessage = (a) => {
   ];
   if (a.branch) lines.push(`Branch: ${a.branch}`);
   if (a.notes) lines.push(`Notes: ${a.notes}`);
+  lines.push("", `Ref: ${a.refNo}`);
+  const link = apptLink(a);
+  if (link) lines.push("", "View your appointment:", link);
   lines.push(
     "",
-    `Ref: ${a.refNo}`,
     "Please arrive 10 minutes early.",
     "To reschedule or cancel, contact the branch quoting this reference.",
     "",
@@ -135,8 +179,7 @@ const apptHtml = (a) => `<!doctype html><html><head><meta charset="utf-8">
 
 /** Clipboard write, with the execCommand fallback for the non-HTTPS/older-browser case
  *  where navigator.clipboard simply isn't there. */
-const copyApptMessage = async (a) => {
-  const text = apptMessage(a);
+const copyApptText = async (text, successMsg) => {
   try {
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(text);
@@ -150,11 +193,13 @@ const copyApptMessage = async (a) => {
       document.execCommand("copy");
       document.body.removeChild(el);
     }
-    toast.success("Confirmation copied — paste it into WhatsApp or SMS");
+    toast.success(successMsg);
   } catch {
     toast.error("Couldn't copy on this device");
   }
 };
+
+const copyApptMessage = (a) => copyApptText(apptMessage(a), "Confirmation copied — paste it into WhatsApp or SMS");
 
 export const BranchAdminBoard = ({ branchId }) => {
   const [boardData, setBoardData] = useState({ leads: [], stage_counts: {} });
@@ -294,7 +339,7 @@ export const BranchAdminBoard = ({ branchId }) => {
               key={tab.key}
               type="button"
               onClick={() => setActiveView(tab.key)}
-              className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
+              className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-2.5 py-2.5 text-xs font-medium transition-colors sm:px-4 sm:text-sm ${
                 activeView === tab.key
                   ? "border-sky-500 text-sky-700"
                   : "border-transparent text-slate-400 hover:text-slate-600"
@@ -369,14 +414,15 @@ export const BranchAdminBoard = ({ branchId }) => {
             />
           ) : (
           <>
-          {/* Toolbar */}
-          <div className="flex items-center gap-3" data-testid="branch-toolbar">
-            <div className="relative flex-1">
+          {/* Toolbar — search takes the whole first row on a phone, the actions sit
+              together underneath rather than all four squeezing onto one line. */}
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3" data-testid="branch-toolbar">
+            <div className="relative w-full sm:flex-1">
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
               <Input className="pl-9" placeholder="Search patients..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} data-testid="branch-search" />
             </div>
             <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="branch-date-filter" />
-            <Button onClick={() => setShowCreateLead(true)} className="bg-sky-600 hover:bg-sky-700" data-testid="branch-create-lead-btn">
+            <Button onClick={() => setShowCreateLead(true)} className="flex-1 bg-sky-600 hover:bg-sky-700 sm:flex-none" data-testid="branch-create-lead-btn">
               <UserPlus className="h-4 w-4 mr-1.5" />Create Lead
             </Button>
             <PullFromSheetButton
@@ -387,10 +433,62 @@ export const BranchAdminBoard = ({ branchId }) => {
             />
           </div>
 
+          {/* Phone list — six columns can't be read at 430px whichever way they're sized,
+              so below md the same rows are stacked as cards instead of being pushed off
+              the side of a horizontally-scrolling table. */}
+          <div className="space-y-2 md:hidden" data-testid="branch-list-mobile">
+            {(() => {
+              const visible = (stageFilter ? filteredLeads.filter((l) => l.branch_stage === stageFilter) : filteredLeads);
+              if (visible.length === 0) {
+                return (
+                  <p className="rounded-lg border border-slate-200 bg-white px-4 py-10 text-center text-sm text-slate-400" data-testid="branch-list-mobile-empty">
+                    No patients {stageFilter ? `in stage "${stageDisplayLabel(stageFilter)}"` : "yet"}.
+                  </p>
+                );
+              }
+              return visible.map((lead) => {
+                const hex = lead.branch_stage ? stageColor(lead.branch_stage) : null;
+                return (
+                  <button
+                    key={lead.id}
+                    type="button"
+                    onClick={() => setSelectedLead(lead)}
+                    className="w-full rounded-xl border border-slate-200 bg-white p-3 text-left transition active:bg-slate-50"
+                    data-testid={`branch-card-${lead.id}`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-violet-100 text-xs font-bold text-violet-700">
+                        {lead.name?.charAt(0)?.toUpperCase() || "?"}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="truncate font-semibold text-slate-800">{lead.name}</span>
+                          <span
+                            className="shrink-0 rounded-[5px] border px-2 py-0.5 text-[10px] font-medium"
+                            style={hex ? { background: `${hex}14`, color: hex, border: `1px solid ${hex}33` } : { background: "#f1f5f9", color: "#475569", border: "1px solid #e2e8f0" }}
+                          >
+                            {lead.branch_stage ? stageDisplayLabel(lead.branch_stage) : "—"}
+                          </span>
+                        </div>
+                        {lead.patient_number && <p className="truncate font-mono text-[10px] text-slate-400">{lead.patient_number}</p>}
+                        <p className="mt-1 truncate text-xs text-slate-600">{lead.phone || "—"}</p>
+                        {lead.email && <p className="truncate text-xs text-slate-500">{lead.email}</p>}
+                        <div className="mt-1 flex flex-wrap items-center gap-x-2 text-[10px] text-slate-400">
+                          {lead.assigned_physio_name && <span className="truncate">Physio: {lead.assigned_physio_name}</span>}
+                          <span>Updated {(lead.updated_at || "").slice(0, 10)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                );
+              });
+            })()}
+          </div>
+
           {/* List View (table) — its own scroll region so the sticky header can use top-0
               instead of guessing the page header's pixel height, which was colliding with
               the stat cards row as it scrolled past. */}
-          <div className="w-full max-h-[65vh] overflow-auto rounded-lg border border-slate-200 bg-white" data-testid="branch-list">
+          <div className="hidden w-full max-h-[65vh] overflow-auto rounded-lg border border-slate-200 bg-white md:block" data-testid="branch-list">
             <table className="w-full min-w-[640px] table-fixed divide-y divide-slate-200 text-sm">
               <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                 <tr>
@@ -686,8 +784,10 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
   const avatarFirstChar = (lead.name?.trim()?.charAt(0) || "?").toUpperCase();
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} data-testid="branch-lead-modal-overlay">
-      <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-slate-200" data-testid="branch-lead-modal">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-0 backdrop-blur-sm sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} data-testid="branch-lead-modal-overlay">
+      {/* Full-bleed on a phone — a centred card with margins wastes the little width
+          there is, and the stage stepper inside needs every pixel of it. */}
+      <div className="flex h-full max-h-full w-full flex-col overflow-hidden bg-white shadow-2xl ring-1 ring-slate-200 sm:h-auto sm:max-h-[90vh] sm:max-w-2xl sm:rounded-2xl" data-testid="branch-lead-modal">
         {/* Gradient header */}
         <div className="relative bg-gradient-to-r from-sky-500 via-indigo-500 to-violet-500 px-5 py-4 text-white">
           <div className="flex items-start justify-between gap-3">
@@ -1175,7 +1275,12 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                   if (!apptDraft.physio_id) { toast.error("Please select an expert"); return; }
                   if (!apptDraft.appointment_time) { toast.error("Pick a time slot"); return; }
                   try {
-                    await scheduleBranchAppointment(lead.id, apptDraft);
+                    // Minted here so the confirmation, its share link and the stored
+                    // booking all carry the same pair — no second round trip to learn
+                    // what the server called it.
+                    const refNo = `APT-${(lead.patient_number || lead.id || "").toString().slice(-8).toUpperCase()}-${Date.now().toString().slice(-6)}`;
+                    const shareToken = randomToken();
+                    await scheduleBranchAppointment(lead.id, { ...apptDraft, ref_no: refNo, share_token: shareToken });
                     toast.success(`Appointment ${apptDraft.appointment_date} ${to12h(apptDraft.appointment_time)} → ${apptDraft.final_stage}`);
                     const stage = apptDraft.final_stage;
                     setApptDraft(null);
@@ -1190,7 +1295,8 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                     const hp = apptExperts.experts.find((d) => d.id === apptDraft.physio_id);
                     setApptConfirm({
                       finalStage: stage,
-                      refNo: `APT-${(lead.patient_number || lead.id || "").toString().slice(-8).toUpperCase()}-${Date.now().toString().slice(-6)}`,
+                      refNo,
+                      shareToken,
                       patient: lead.name || "—",
                       patientNo: lead.patient_number || "—",
                       phone: lead.phone || "—",
@@ -1276,6 +1382,20 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
               <Button className="w-full bg-teal-600 text-white hover:bg-teal-700" onClick={() => openPrintable(apptHtml(apptConfirm), { print: true })} data-testid="branch-appt-confirm-pdf">
                 <FileText className="mr-1.5 h-4 w-4" /> Open PDF
               </Button>
+              {/* The one the branch actually reaches for: opens WhatsApp on the patient's
+                  own number with the confirmation and its link already typed. */}
+              <Button
+                className="w-full bg-[#25D366] text-white hover:bg-[#1da851]"
+                onClick={() => openWhatsApp(apptConfirm)}
+                data-testid="branch-appt-confirm-whatsapp"
+              >
+                <WhatsAppIcon className="mr-1.5 h-4 w-4" /> Send on WhatsApp
+              </Button>
+              {apptLink(apptConfirm) && (
+                <Button variant="outline" className="w-full" onClick={() => copyApptText(apptLink(apptConfirm), "Link copied")} data-testid="branch-appt-confirm-copy-link">
+                  <LinkIcon className="mr-1.5 h-4 w-4" /> Copy Link
+                </Button>
+              )}
               {/* Copy and Share both send the patient-addressed message, not the row
                   dump — it's pasted into WhatsApp far more often than it's printed. */}
               <div className="grid grid-cols-3 gap-2">
@@ -1304,8 +1424,8 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
 
       {/* Follow Up Date & Time Popup (triggered from Move to Stage) */}
       {followUpMoveDraft && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) setFollowUpMoveDraft(null); }} data-testid="branch-followup-move-modal">
-          <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-3 backdrop-blur-sm sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) setFollowUpMoveDraft(null); }} data-testid="branch-followup-move-modal">
+          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white shadow-2xl">
             <div className="flex items-center justify-between bg-gradient-to-r from-amber-500 to-orange-500 px-5 py-4 text-white">
               <div className="flex items-center gap-2">
                 <Bell className="h-5 w-5" />

@@ -259,13 +259,11 @@ async def branch_reviews(
         if r.get("status") in counts:
             counts[r["status"]] += 1
 
+    # Head Physios are org-wide: they take consultations for every branch, so this
+    # never narrows by branch_id.
     head_physios = await v3_col("doctors").find(
-        {"branch_id": branch_id, "profile_type": "head_physio"}, {"_id": 0, "id": 1, "full_name": 1}
+        {"profile_type": "head_physio"}, {"_id": 0, "id": 1, "full_name": 1}
     ).to_list(200)
-    if not head_physios:
-        head_physios = await v3_col("doctors").find(
-            {"profile_type": "head_physio"}, {"_id": 0, "id": 1, "full_name": 1}
-        ).to_list(200)
 
     return {
         "branch_id": branch_id,

@@ -1,7 +1,8 @@
 from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import Dict, Optional
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from calendar import monthrange
 import logging
 import uuid
@@ -41,6 +42,211 @@ async def _head_consultation_stage_names() -> list:
     rows = await v3_col("pipeline_stages").find({"type": "head_consultation"}, {"_id": 0, "name": 1}).sort("order", 1).to_list(200)
     names = [r["name"] for r in rows]
     return names or V3_HEAD_CONSULTATION_STAGES
+
+
+# ---------------------------------------------- Public appointment confirmation page
+
+LOGO_URL = ("https://customer-assets.emergentagent.com/job_3d74aa9e-a241-4207-b148-2bbe29802707"
+            "/artifacts/nozl77ti_Logo%20Icon.webp")
+
+
+def _esc(s) -> str:
+    return (str(s if s is not None else "")
+            .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            .replace('"', "&quot;").replace("'", "&#39;"))
+
+
+def _to12h(t: str) -> str:
+    """'14:05' -> '2:05 PM'. Left as-is if it isn't a real HH:MM."""
+    try:
+        h, m = (t or "").split(":")[:2]
+        h, m = int(h), int(m)
+    except (ValueError, TypeError):
+        return t or "—"
+    suffix = "AM" if h < 12 else "PM"
+    hour = h % 12 or 12
+    return f"{hour}:{m:02d} {suffix}"
+
+
+def _end12h(t: str, minutes: int) -> str:
+    try:
+        h, m = (t or "").split(":")[:2]
+        total = int(h) * 60 + int(m) + int(minutes or 0)
+    except (ValueError, TypeError):
+        return "—"
+    return _to12h(f"{(total // 60) % 24:02d}:{total % 60:02d}")
+
+
+def _weekday_label(d: str) -> str:
+    try:
+        return date.fromisoformat(d).strftime("%A, %B %-d")
+    except (ValueError, TypeError):
+        try:  # %-d is not portable to Windows
+            return date.fromisoformat(d).strftime("%A, %B %d").replace(" 0", " ")
+        except (ValueError, TypeError):
+            return d or "—"
+
+
+def _dmy(d: str) -> str:
+    parts = str(d or "").split("-")
+    return f"{parts[2]} - {parts[1]} - {parts[0]}" if len(parts) == 3 else (d or "—")
+
+
+_PAGE_CSS = """
+*{box-sizing:border-box}
+body{margin:0;padding:24px 12px;background:#f1f5f9;color:#0f172a;
+     font-family:'Segoe UI',system-ui,-apple-system,Arial,sans-serif}
+.wrap{max-width:480px;margin:0 auto}
+.card{background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 16px rgba(15,23,42,.10)}
+.head{display:flex;align-items:center;gap:12px;padding:16px 20px;background:#0d9488;color:#fff}
+.head.cancelled{background:#e11d48}
+.logo{width:44px;height:44px;flex:none;border-radius:10px;background:rgba(255,255,255,.9);object-fit:contain;padding:4px}
+.h-title{font-size:18px;font-weight:700}
+.h-ref{font-size:12px;opacity:.85;margin-top:2px}
+.body{padding:20px}
+.hero{border:2px solid #99f6e4;background:#f0fdfa;border-radius:12px;padding:18px;text-align:center}
+.hero.cancelled{border-color:#fecdd3;background:#fff1f2}
+.hero-label{font-size:11px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;color:#0d9488}
+.hero.cancelled .hero-label{color:#e11d48}
+.hero-date{font-size:24px;font-weight:800;color:#0f766e;margin-top:4px}
+.hero-time{font-size:18px;font-weight:700;color:#0f766e}
+.hero-with{font-size:14px;font-weight:600;color:#0d9488;margin-top:4px}
+.hero.cancelled .hero-date,.hero.cancelled .hero-time,.hero.cancelled .hero-with{color:#be123c}
+.banner{margin-top:14px;border:1px solid #fecdd3;background:#fff1f2;border-radius:8px;
+        padding:10px 12px;font-size:12px;font-weight:600;color:#be123c}
+table{width:100%;border-collapse:collapse;margin-top:18px;font-size:14px}
+td{padding:9px 0;border-bottom:1px solid #f1f5f9;vertical-align:top}
+td.k{color:#64748b}
+td.v{text-align:right;font-weight:600;color:#1e293b}
+tr:last-child td{border-bottom:0}
+.box{margin-top:14px;border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:12px}
+.box-label{font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#94a3b8}
+.box p{margin:4px 0 0;font-size:13px;color:#475569;line-height:1.6;white-space:pre-wrap}
+.note{margin-top:14px;border:1px solid #ccfbf1;background:rgba(240,253,250,.7);border-radius:8px;
+      padding:12px;font-size:12px;line-height:1.7;color:#115e59}
+.note p{margin:0}
+.foot{margin-top:16px;text-align:center;font-size:12px;color:#94a3b8}
+@media print{body{background:#fff;padding:0}.card{box-shadow:none}}
+"""
+
+
+def _appt_missing_html() -> str:
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Appointment not found — FITSIOMAX</title><style>{_PAGE_CSS}</style></head>
+<body><div class="wrap"><div class="card">
+<div class="head"><img class="logo" src="{LOGO_URL}" alt="FITSIOMAX"><div class="h-title">FITSIOMAX</div></div>
+<div class="body"><p style="text-align:center;color:#64748b;font-size:14px;padding:24px 0">
+This appointment link is not valid.<br>Please contact the branch for help.</p></div>
+</div></div></body></html>"""
+
+
+def _appt_card_html(a: dict) -> str:
+    """The confirmation as a standalone page. The og:* tags are what WhatsApp, Signal and
+    the rest read to draw their preview card above the message — without them a shared
+    link is just a bare URL."""
+    cancelled = bool(a["cancelled"])
+    when = f"{_to12h(a['time'])} – {_end12h(a['time'], a['duration'])}"
+    title = ("Appointment Cancelled" if cancelled else "Appointment Confirmed")
+    og_desc = f"{_weekday_label(a['date'])} · {when} with {a['head_physio']}"
+
+    rows = [
+        ("Reference No.", a["ref_no"] or "—"),
+        ("Patient", a["patient"]),
+        ("Patient No.", a["patient_no"]),
+        ("Phone", a["phone"]),
+        ("Date", _dmy(a["date"])),
+        ("Time", when),
+        ("Duration", f"{a['duration']} minutes"),
+        ("Head Physio", a["head_physio"]),
+    ]
+    if a["branch"]:
+        rows.append(("Branch", a["branch"]))
+    if a["booked_by"]:
+        rows.append(("Booked By", a["booked_by"]))
+    rows_html = "".join(
+        f'<tr><td class="k">{_esc(k)}</td><td class="v">{_esc(v)}</td></tr>' for k, v in rows
+    )
+
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{_esc(title)} — FITSIOMAX</title>
+<meta name="theme-color" content="{'#e11d48' if cancelled else '#0d9488'}">
+<meta name="description" content="{_esc(og_desc)}">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="FITSIOMAX">
+<meta property="og:title" content="{_esc(title)} — {_esc(a['patient'])}">
+<meta property="og:description" content="{_esc(og_desc)}">
+<meta property="og:image" content="{LOGO_URL}">
+<meta name="twitter:card" content="summary">
+<meta name="robots" content="noindex,nofollow">
+<style>{_PAGE_CSS}</style></head>
+<body><div class="wrap"><div class="card">
+  <div class="head{' cancelled' if cancelled else ''}">
+    <img class="logo" src="{LOGO_URL}" alt="FITSIOMAX">
+    <div><div class="h-title">{_esc(title)}</div>
+    {f'<div class="h-ref">Ref {_esc(a["ref_no"])}</div>' if a["ref_no"] else ''}</div>
+  </div>
+  <div class="body">
+    <div class="hero{' cancelled' if cancelled else ''}">
+      <div class="hero-label">Your Appointment</div>
+      <div class="hero-date">{_esc(_weekday_label(a['date']))}</div>
+      <div class="hero-time">{_esc(when)}</div>
+      <div class="hero-with">with {_esc(a['head_physio'])}</div>
+    </div>
+    {'<div class="banner">This appointment has been cancelled. Contact the branch to book another.</div>' if cancelled else ''}
+    <table>{rows_html}</table>
+    {f'<div class="box"><div class="box-label">Branch Address</div><p>{_esc(a["branch_address"])}</p></div>' if a["branch_address"] else ''}
+    {f'<div class="box"><div class="box-label">Notes</div><p>{_esc(a["notes"])}</p></div>' if a["notes"] else ''}
+    {'' if cancelled else f'<div class="note"><p>Please arrive 10 minutes early.</p><p>To reschedule or cancel, contact the branch quoting reference {_esc(a["ref_no"] or "above")}.</p></div>'}
+  </div>
+</div>
+<p class="foot">FITSIOMAX · Physiotherapy &amp; Rehabilitation</p>
+</div></body></html>"""
+
+
+@router.get("/public/appointment/{share_token}", response_class=HTMLResponse)
+async def v3_public_appointment(share_token: str):
+    """The appointment confirmation behind its share link — what the patient opens.
+
+    Server-rendered rather than a route in the SPA, for two reasons: WhatsApp and every
+    other chat app fetch a shared link with a crawler that does not run JavaScript, so
+    only real HTML gets the preview card; and the patient opening it on a phone gets the
+    confirmation immediately instead of downloading an app bundle first.
+
+    Deliberately unauthenticated: the patient has no login. The token is the only key, so
+    it must stay unguessable (a CSPRNG value minted at booking), and only the fields
+    already printed on the confirmation they were sent are rendered — holding a link
+    reveals nothing further about the lead.
+    """
+    appt = await v3_col("appointments").find_one({"share_token": share_token}, {"_id": 0})
+    if not appt:
+        return HTMLResponse(_appt_missing_html(), status_code=404)
+
+    lead = await v3_col("leads").find_one(
+        {"id": appt.get("lead_id")}, {"_id": 0, "patient_number": 1, "phone": 1, "branch_id": 1}
+    ) or {}
+    branch = await v3_col("branches").find_one(
+        {"id": appt.get("branch_id") or lead.get("branch_id")}, {"_id": 0, "branch_name": 1, "address": 1}
+    ) or {}
+
+    return HTMLResponse(_appt_card_html({
+        "ref_no": appt.get("ref_no") or "",
+        "patient": appt.get("patient_name") or appt.get("lead_name") or "—",
+        "patient_no": lead.get("patient_number") or "—",
+        "phone": lead.get("phone") or "—",
+        "date": appt.get("appointment_date") or "",
+        "time": appt.get("appointment_time") or "",
+        "duration": appt.get("duration") or 30,
+        "head_physio": appt.get("doctor_name") or "—",
+        "branch": branch.get("branch_name") or "",
+        "branch_address": branch.get("address") or "",
+        "notes": appt.get("notes") or "",
+        "booked_by": "Branch Admin" if appt.get("created_by_role") == "branch_admin" else (appt.get("created_by") or ""),
+        # A cancelled booking keeps its link working, but says so rather than showing a
+        # confirmation for an appointment that is no longer happening.
+        "cancelled": appt.get("status") == "cancelled",
+    }))
 
 
 @router.get("/branch-board/{branch_id}")
@@ -185,6 +391,11 @@ class V3BranchAppointmentInput(BaseModel):
     # Length of the picked slot, carried from the expert's published calendar so the
     # Calendar tab can render the real end time (09:30–10:00) rather than assuming 30.
     duration: Optional[int] = None
+    # The confirmation the patient is sent: `ref_no` is what's printed on it, and
+    # `share_token` is the unguessable id its public link is keyed by. Both are minted
+    # by the caller so the link can be built without a second round trip.
+    ref_no: Optional[str] = None
+    share_token: Optional[str] = None
 
 
 @router.post("/leads/{lead_id}/schedule-branch-appointment", response_model=V3LeadOut)
@@ -283,6 +494,10 @@ async def v3_schedule_branch_appointment(lead_id: str, payload: V3BranchAppointm
             "created_by_role": user.role,
             "updated_at": now_iso(),
         }
+        if payload.ref_no:
+            appt_fields["ref_no"] = payload.ref_no
+        if payload.share_token:
+            appt_fields["share_token"] = payload.share_token
         if existing_appt:
             # Rescheduling an existing booking — move it rather than leaving a stale row
             # holding the old slot.
@@ -322,12 +537,9 @@ async def v3_available_experts(
     """
     if not date:
         raise HTTPException(status_code=400, detail="date is required")
-    branch_experts = await v3_col("doctors").find(
-        {"branch_id": branch_id, "profile_type": "head_physio"}, {"_id": 0}
-    ).to_list(500)
-    # Fallback for a branch with no Head Physio mapped to it yet.
-    if not branch_experts:
-        branch_experts = await v3_col("doctors").find({"profile_type": "head_physio"}, {"_id": 0}).to_list(500)
+    # Head Physios are org-wide: they take consultations for every branch, so this
+    # never narrows by branch_id.
+    branch_experts = await v3_col("doctors").find({"profile_type": "head_physio"}, {"_id": 0}).to_list(500)
 
     # Availability is decided per slot, not per day: an expert with a 9:30 booking is
     # still free at 10:00. So a same-day booking no longer hides them — only being
@@ -402,13 +614,11 @@ async def v3_available_dates(
     endpoint can't be used for this: it ignores the date when reading an expert's slots
     and falls back to a default 09:00-17:30 grid, so it reports every day as open.)
     """
+    # Head Physios are org-wide: they take consultations for every branch, so this
+    # never narrows by branch_id.
     branch_experts = await v3_col("doctors").find(
-        {"branch_id": branch_id, "profile_type": "head_physio"}, {"_id": 0, "id": 1, "slots": 1}
+        {"profile_type": "head_physio"}, {"_id": 0, "id": 1, "slots": 1}
     ).to_list(500)
-    if not branch_experts:
-        branch_experts = await v3_col("doctors").find(
-            {"profile_type": "head_physio"}, {"_id": 0, "id": 1, "slots": 1}
-        ).to_list(500)
 
     booked_rows = await v3_col("appointments").find(
         {"status": "new_appointment", "slot_time": {"$regex": f"^{month}-"}},
