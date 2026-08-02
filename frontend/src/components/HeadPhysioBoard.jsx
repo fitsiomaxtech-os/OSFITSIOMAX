@@ -6,8 +6,10 @@ import {
   CalendarClock,
   Check,
   ChevronRight,
+  ClipboardCheck,
   ClipboardList,
   FileText,
+  LayoutList,
   MessageSquare,
   Package,
   Phone,
@@ -23,6 +25,7 @@ import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { ConsultationsBoard } from "@/components/ConsultationsBoard";
 import { HeadPhysioReviewTab } from "@/components/HeadPhysioReviewTab";
+import { WeekStrip, todayIso } from "@/components/WeekStrip";
 import {
   getBranches,
   getHPMyCalendar,
@@ -42,8 +45,20 @@ const VIEW_TABS = [
   { key: "profile", label: "My Profile", icon: UserCircle },
 ];
 
+// The three lists inside Consultations. Consultations are what Branch Admin books in;
+// Reviews are what Branch Admin sends over once a Physio flags a patient at seven days of
+// treatment. Both are that day's work, so All puts them on one screen.
+const WORK_TABS = [
+  { key: "consultations", label: "Consultations", icon: Calendar },
+  { key: "review", label: "Review", icon: ClipboardCheck },
+  { key: "all", label: "All", icon: LayoutList },
+];
+
 export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
   const [activeTab, setActiveTab] = useState("consultations");
+  const [workTab, setWorkTab] = useState("consultations");
+  // The day every list under Consultations answers to. Starts on today.
+  const [workDate, setWorkDate] = useState(todayIso());
   const [patients, setPatients] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState(null);
@@ -77,7 +92,9 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
   useEffect(() => { loadPatients(); }, [loadPatients]);
 
   return (
-    <div className="space-y-4" data-testid="head-physio-board-root">
+    // Bottom padding on phones clears the fixed bottom bar, so the last row of any list
+    // is still reachable instead of sitting underneath it.
+    <div className="space-y-4 pb-20 sm:pb-0" data-testid="head-physio-board-root">
       {assignedBranchIds.length > 1 && (
         <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-slate-200 bg-white p-1.5" data-testid="hp-branch-switcher">
           <Building2 className="ml-1.5 h-4 w-4 text-slate-400" />
@@ -119,7 +136,59 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
         })}
       </div>
 
-      {activeTab === "consultations" && <ConsultationsBoard branchId={effectiveBranchId} viewerRole="head_physio" />}
+      {activeTab === "consultations" && (
+        <div className="space-y-4" data-testid="hp-work-view">
+          <WeekStrip value={workDate} onChange={setWorkDate} testid="hp-week-strip" />
+
+          {/* Desktop segmented control. On phones the same three live in the bottom bar,
+              where a thumb can reach them. */}
+          <div className="hidden flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1 sm:flex" data-testid="hp-work-tabs">
+            {WORK_TABS.map((t) => {
+              const Icon = t.icon;
+              return (
+                <button
+                  key={t.key}
+                  type="button"
+                  onClick={() => setWorkTab(t.key)}
+                  className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${
+                    workTab === t.key ? "bg-teal-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"
+                  }`}
+                  data-testid={`hp-work-tab-${t.key}`}
+                >
+                  <Icon className="h-4 w-4" />{t.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {(workTab === "consultations" || workTab === "all") && (
+            <div data-testid="hp-work-consultations">
+              {workTab === "all" && (
+                <p className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-400">
+                  <Calendar className="h-3.5 w-3.5" /> Consultations
+                </p>
+              )}
+              <ConsultationsBoard
+                branchId={effectiveBranchId}
+                viewerRole="head_physio"
+                externalDate={workDate}
+                hideDateFilter
+              />
+            </div>
+          )}
+
+          {(workTab === "review" || workTab === "all") && (
+            <div className={workTab === "all" ? "border-t border-slate-200 pt-4" : ""} data-testid="hp-work-review">
+              {workTab === "all" && (
+                <p className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-400">
+                  <ClipboardCheck className="h-3.5 w-3.5" /> Review
+                </p>
+              )}
+              <HeadPhysioReviewTab selectedDate={workDate} compact={workTab === "all"} />
+            </div>
+          )}
+        </div>
+      )}
 
       {activeTab === "rehab" && (
         <PatientsTab
@@ -174,7 +243,34 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user }) => {
         />
       )}
 
-      {loading && <div className="fixed bottom-4 right-4 rounded-md bg-slate-900 px-3 py-2 text-sm text-white">Loading...</div>}
+      {/* Sits above the bottom bar on phones so it never covers the nav. */}
+      {loading && <div className="fixed bottom-20 right-4 z-40 rounded-md bg-slate-900 px-3 py-2 text-sm text-white sm:bottom-4">Loading...</div>}
+
+      {/* Mobile bottom bar — the Head Physio works this board on a phone between patients,
+          where the top tabs are a stretch away. Tapping one jumps back to Consultations so
+          the bar always lands on the list it names. */}
+      <nav className="fixed inset-x-0 bottom-0 z-50 flex border-t border-slate-200 bg-white shadow-[0_-2px_10px_rgba(0,0,0,0.06)] sm:hidden" data-testid="hp-bottom-nav">
+        {WORK_TABS.map((t) => {
+          const Icon = t.icon;
+          const active = activeTab === "consultations" && workTab === t.key;
+          return (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => { setActiveTab("consultations"); setWorkTab(t.key); }}
+              className={`flex flex-1 flex-col items-center gap-0.5 py-2.5 text-[11px] font-semibold transition ${
+                active ? "text-teal-700" : "text-slate-400"
+              }`}
+              data-testid={`hp-bottom-nav-${t.key}`}
+            >
+              <span className={`rounded-full px-4 py-1 transition ${active ? "bg-teal-100" : ""}`}>
+                <Icon className="h-5 w-5" />
+              </span>
+              {t.label}
+            </button>
+          );
+        })}
+      </nav>
     </div>
   );
 };
@@ -407,8 +503,8 @@ function RecommendPackageModal({ patient, onClose, onDone }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} data-testid="recommend-modal-overlay">
-      <div className="w-full max-w-md rounded-xl bg-white shadow-2xl" data-testid="recommend-modal">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} data-testid="recommend-modal-overlay">
+      <div className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-xl bg-white shadow-2xl" data-testid="recommend-modal">
         <div className="flex items-center justify-between border-b p-5">
           <h3 className="text-base font-semibold text-slate-800">Recommend Package — {patient.lead_name}</h3>
           <button type="button" onClick={onClose} className="p-1 rounded hover:bg-slate-100"><X className="h-5 w-5 text-slate-400" /></button>
@@ -487,8 +583,8 @@ function WeeklyReviewModal({ patient, week, onClose, onDone }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} data-testid="review-modal-overlay">
-      <div className="w-full max-w-lg rounded-xl bg-white shadow-2xl" data-testid="review-modal">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} data-testid="review-modal-overlay">
+      <div className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white shadow-2xl" data-testid="review-modal">
         <div className="flex items-center justify-between border-b p-5">
           <h3 className="text-base font-semibold text-slate-800">{patient.lead_name} — Week {week} Review</h3>
           <button type="button" onClick={onClose} className="p-1 rounded hover:bg-slate-100"><X className="h-5 w-5 text-slate-400" /></button>
@@ -537,7 +633,7 @@ function PatientSessionsModal({ patient, onClose }) {
   }, [patient.lead_id]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="w-full max-w-2xl rounded-xl bg-white shadow-2xl max-h-[80vh] flex flex-col">
         <div className="flex items-center justify-between border-b p-5">
           <h3 className="text-base font-semibold text-slate-800">{patient.lead_name} — Sessions</h3>

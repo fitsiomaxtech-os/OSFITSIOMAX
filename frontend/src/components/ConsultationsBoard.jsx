@@ -212,7 +212,7 @@ const PAYMENT_MODE_COLORS = {
   partial: "#e11d48",
 };
 
-export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened }) => {
+export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened, externalDate, hideDateFilter = false }) => {
   const isConsultant = viewerRole === "head_physio";
   // Head Physio tracks progress on their own independent pipeline (head_consultation_stage),
   // fully separate from Branch's own consultation_stage pipeline.
@@ -422,6 +422,16 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   useEffect(() => {
     if (externalStageFilter !== undefined) setStageFilter(externalStageFilter);
   }, [externalStageFilter]);
+
+  // A parent day-picker (the Head Physio board's week strip) drives the date filter, so
+  // the board shows one day at a time without its own popover fighting the selection.
+  useEffect(() => {
+    if (externalDate === undefined) return;
+    if (!externalDate) { setDateFilter(null); return; }
+    const from = new Date(`${externalDate}T00:00:00`);
+    const to = new Date(`${externalDate}T23:59:59`);
+    setDateFilter({ from, to, key: externalDate, label: externalDate });
+  }, [externalDate]);
 
   // Branch Leads' own lead popup hands off a specific lead here (rather than duplicating
   // this board's stage-specific popups) — once this board's own data has loaded, find that
@@ -739,13 +749,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     return payload;
   };
 
-  // Both fee sections are collected independently — each has its own "Collect"
-  // button and can be actioned in either order. The popup only closes once every
-  // fee it was opened for is collected; until then it stays open so the other
-  // section's own button is still reachable.
-  const bothFeesDone = (lead) => !treatmentFeeDraft || lead.treatment_fee_paid != null;
-  const consultationFeeDone = (lead) => !collectFeeDraft || lead.package_paid != null;
-
   // Clicking "Collect Consultation Fee" in the main popup always opens the
   // second "Confirm Payment" popup — a simple, explicit confirm/cancel step
   // (with the amount still editable there) before anything is actually saved.
@@ -795,13 +798,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
         packageName: selectedLead.package_name || "",
         assignedPrice: selectedLead.package_price,
       }));
-      if (bothFeesDone(res.lead)) {
-        setCollectFeeDraft(null);
-        setTreatmentFeeDraft(null);
-        setSelectedLead(null);
-      } else {
-        setSelectedLead(res.lead);
-      }
+      // The receipt closes on its own button; the patient stays open behind it so the
+      // Treatment Fee can be taken next without reopening them.
+      setCollectFeeDraft(null);
+      setTreatmentFeeDraft(null);
+      setSelectedLead(res.lead);
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed to collect Consultation Fee");
     }
@@ -899,13 +900,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
           : "",
         installments: scheduleOnly ? savedInst : [],
       }));
-      if (consultationFeeDone(res.lead)) {
-        setCollectFeeDraft(null);
-        setTreatmentFeeDraft(null);
-        setSelectedLead(null);
-      } else {
-        setSelectedLead(res.lead);
-      }
+      // Same as the installment path: the receipt is the confirmation and closes on
+      // its own button, so the patient stays open behind it rather than the whole
+      // stack vanishing the moment the money goes through.
+      setCollectFeeDraft(null);
+      setTreatmentFeeDraft(null);
+      setSelectedLead(res.lead);
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed to collect Treatment Fee");
     }
@@ -1269,7 +1269,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
           className="h-8 border-0 p-0 focus-visible:ring-0"
           data-testid="cons-search"
         />
-        <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="cons-date-filter" />
+        {!hideDateFilter && <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="cons-date-filter" />}
         <Button
           onClick={load}
           disabled={loading}

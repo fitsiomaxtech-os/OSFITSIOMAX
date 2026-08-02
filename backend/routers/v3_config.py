@@ -319,7 +319,11 @@ async def v3_reset_all_leads(confirm: bool = False, _: V3UserOut = Depends(v3_re
     }
     leads_result = await v3_col("leads").update_many({}, {"$set": reset_fields})
 
-    sessions_deleted = (await v3_col("sessions").delete_many({})).deleted_count
+    # Treatment sessions only. The `sessions` collection also holds auth login tokens
+    # ({token, user_id}), and an unfiltered delete here signed every user out of every
+    # device — nothing to do with resetting leads. Treatment sessions are the ones
+    # carrying lead_id; login tokens have none, so they can never match.
+    sessions_deleted = (await v3_col("sessions").delete_many({"lead_id": {"$exists": True}})).deleted_count
     assessments_deleted = (await v3_col("weekly_assessments").delete_many({})).deleted_count
     recs_deleted = (await v3_col("package_recommendations").delete_many({})).deleted_count
     appts_deleted = (await v3_col("appointments").delete_many({})).deleted_count

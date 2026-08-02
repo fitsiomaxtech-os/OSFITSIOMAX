@@ -10,6 +10,10 @@ from schemas.v3 import V3UserOut, V3LoginRequest, V3LoginResponse
 
 router = APIRouter(prefix="/api/v3")
 
+# How many devices one account can stay signed in on at once. Generous on purpose — the
+# point is that a second sign-in doesn't end the first, not to police device count.
+MAX_SESSIONS_PER_USER = 10
+
 
 @router.get("/")
 async def v3_root():
@@ -35,8 +39,20 @@ async def v3_login(payload: V3LoginRequest):
         )
 
     token = str(uuid.uuid4())
-    await v3_col("sessions").delete_many({"user_id": user["id"]})
     await v3_col("sessions").insert_one({"token": token, "user_id": user["id"], "created_at": now_iso()})
+    # Signing in on a second device must NOT sign the first one out. A Head Physio moves
+    # between a phone on the floor and a desk machine and expects both to stay live, and
+    # a branch's shared account is used from more than one place at once.
+    #
+    # Only the oldest sessions beyond the cap are dropped, so tokens can't accumulate
+    # forever on an account that signs in every day. The user_id filter also keeps this
+    # away from the treatment-session documents that share this collection — those carry
+    # no user_id, so they can never match.
+    stale = await v3_col("sessions").find(
+        {"user_id": user["id"]}, {"_id": 0, "token": 1}
+    ).sort("created_at", -1).skip(MAX_SESSIONS_PER_USER).to_list(500)
+    if stale:
+        await v3_col("sessions").delete_many({"token": {"$in": [s["token"] for s in stale]}})
     await v3_col("login_history").insert_one({
         "id": str(uuid.uuid4()),
         "user_id": user["id"],

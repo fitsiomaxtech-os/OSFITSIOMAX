@@ -20,7 +20,7 @@ const dmy = (d) => {
  * an overdue review that fell out of Today would sit in a list nobody opens, which is
  * exactly how a patient's week-one review gets missed.
  */
-export const HeadPhysioReviewTab = () => {
+export const HeadPhysioReviewTab = ({ selectedDate, compact = false }) => {
   const [sub, setSub] = useState("today");
   const [data, setData] = useState({ today: [], upcoming: [], overdue: [], completed: [], today_date: "" });
   const [loading, setLoading] = useState(false);
@@ -37,13 +37,24 @@ export const HeadPhysioReviewTab = () => {
 
   useEffect(() => { load(); }, [load]);
 
-  const dueList = useMemo(() => [...(data.overdue || []), ...(data.today || []), ...(data.upcoming || [])], [data]);
+  // With a day picked upstream, "due" means that day's reviews rather than everything
+  // outstanding — the week strip is the filter, so the list has to answer to it.
+  const dueList = useMemo(() => {
+    const all = [...(data.overdue || []), ...(data.today || []), ...(data.upcoming || [])];
+    return selectedDate ? all.filter((r) => (r.review_date || "") === selectedDate) : all;
+  }, [data, selectedDate]);
+
+  const completedList = useMemo(() => {
+    const all = data.completed || [];
+    return selectedDate ? all.filter((r) => (r.review_date || "") === selectedDate) : all;
+  }, [data.completed, selectedDate]);
+
   const rows = useMemo(() => {
-    const list = sub === "today" ? dueList : (data.completed || []);
+    const list = sub === "today" ? dueList : completedList;
     if (!search) return list;
     const q = search.toLowerCase();
     return list.filter((r) => (r.lead_name || "").toLowerCase().includes(q) || (r.patient_number || "").toLowerCase().includes(q));
-  }, [sub, dueList, data.completed, search]);
+  }, [sub, dueList, completedList, search]);
 
   const submit = async () => {
     if (!draft.head_physio_notes.trim()) { toast.error("Write the review notes"); return; }
@@ -64,8 +75,8 @@ export const HeadPhysioReviewTab = () => {
   };
 
   const SUBS = [
-    { key: "today", label: "Today Review", icon: CalendarCheck, n: dueList.length },
-    { key: "completed", label: "Completed Review", icon: CheckCircle2, n: (data.completed || []).length },
+    { key: "today", label: selectedDate ? "Review" : "Today Review", icon: CalendarCheck, n: dueList.length },
+    { key: "completed", label: "Completed Review", icon: CheckCircle2, n: completedList.length },
   ];
 
   return (
@@ -95,25 +106,29 @@ export const HeadPhysioReviewTab = () => {
         })}
       </div>
 
-      <Card>
-        <CardContent className="flex flex-wrap items-center gap-3 p-3">
-          <div className="relative min-w-[220px] flex-1">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search patient or number..." className="pl-9" data-testid="hp-review-search" />
-          </div>
-          <Button variant="outline" size="sm" onClick={load} disabled={loading} data-testid="hp-review-refresh">
-            <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} /> Refresh
-          </Button>
-        </CardContent>
-      </Card>
+      {!compact && (
+        <Card>
+          <CardContent className="flex flex-wrap items-center gap-3 p-3">
+            <div className="relative min-w-0 flex-1 sm:min-w-[220px]">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search patient or number..." className="pl-9" data-testid="hp-review-search" />
+            </div>
+            <Button variant="outline" size="sm" onClick={load} disabled={loading} data-testid="hp-review-refresh">
+              <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} /> Refresh
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       {loading && rows.length === 0 ? (
         <p className="py-10 text-center text-sm text-slate-400">Loading reviews...</p>
       ) : rows.length === 0 ? (
         <p className="rounded-lg border border-dashed border-slate-200 px-3 py-12 text-center text-sm text-slate-400">
           {sub === "today"
-            ? "No reviews assigned to you. A Branch Admin sends them here once a Physio raises one."
-            : "You haven't completed any reviews yet."}
+            ? selectedDate
+              ? "No reviews due on this day."
+              : "No reviews assigned to you. A Branch Admin sends them here once a Physio raises one."
+            : selectedDate ? "No reviews completed on this day." : "You haven't completed any reviews yet."}
         </p>
       ) : (
         <div className="space-y-2">
