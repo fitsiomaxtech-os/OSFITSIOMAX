@@ -1339,7 +1339,11 @@ function PatientsTab({ physioId, onCountChange }) {
                       e.stopPropagation();
                       const num = waNumber(p.phone);
                       if (!num) { toast.error("This patient has no phone number on file"); return; }
-                      window.open(`https://wa.me/${num}`, "_blank", "noopener,noreferrer");
+                      // window.open(..., "_blank") hands mobile browsers an ambiguous new-tab/
+                      // popup context — on the way back from WhatsApp that often leaves the
+                      // original tab on a blank white screen. Same-tab navigation (like the
+                      // tel: Call button already uses) hands off to the OS cleanly instead.
+                      window.location.href = `https://wa.me/${num}`;
                     }}
                     onKeyDown={(e) => e.stopPropagation()}
                     className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 text-[#25D366] hover:bg-slate-50"
