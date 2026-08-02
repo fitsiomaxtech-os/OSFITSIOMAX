@@ -56,6 +56,8 @@ const RECEIPT_STYLES = `
   .sub{font-size:12px;color:#64748b;margin-top:2px}
   .tag{display:inline-block;margin-top:12px;padding:5px 12px;border-radius:6px;
        background:#dcfce7;color:#15803d;font-size:12px;font-weight:800;letter-spacing:.6px}
+  .tag-sch{background:#fef3c7;color:#b45309}
+  .amt-sch{color:#b45309}
   hr{border:0;border-top:1px dashed #cbd5e1;margin:18px 0}
   .amt-label{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#64748b}
   .amt{font-size:34px;font-weight:800;color:#15803d;margin-top:2px}
@@ -67,20 +69,33 @@ const RECEIPT_STYLES = `
   @media print{body{padding:0}.wrap{border:none;border-radius:0}}
 `;
 
+const ALL_PAYMENT_MODE_LABELS = { cash: "Cash", upi: "UPI", card: "Card", cheque: "Cheque", partial: "Partial Payment" };
+
+/** Whatever identifies this payment with the bank — the thing a dispute is traced by. */
+const paymentReference = (p) => p.upi_utr || p.upi_transaction_id
+  || (p.cheque_number ? `Cheque ${p.cheque_number}${p.bank_name ? ` · ${p.bank_name}` : ""}` : "")
+  || (p.account_number ? `Card ****${String(p.account_number).replace(/\D/g, "").slice(-4)}` : "");
+
+// `kind: "schedule"` is a Partial Payment plan — the installments are agreed but no money
+// has come in yet, so it must never print "Amount Paid" or "PAYMENT RECEIVED".
+const isSchedule = (r) => r.kind === "schedule";
+
 const receiptRows = (r) => [
-  ["Receipt No.", r.receiptNo],
+  [isSchedule(r) ? "Reference No." : "Receipt No.", r.receiptNo],
   ["Date", r.dateLabel],
   ["Patient", r.patient],
   ["Patient No.", r.patientNo],
   ["Phone", r.phone],
-  ["Paid For", r.paidFor],
+  [isSchedule(r) ? "Scheduled For" : "Paid For", r.paidFor],
   r.packageName ? ["Package", r.packageName] : null,
+  r.sessionsCovered ? ["Sessions Covered", r.sessionsCovered] : null,
   ["Payment Mode", r.modeLabel],
   r.reference ? ["Reference", r.reference] : null,
-  r.originalAmount && r.originalAmount !== r.amount ? ["Original Price", `Rs.${r.originalAmount}`] : null,
+  r.originalAmount != null && r.originalAmount !== r.amount ? ["Original Price", `Rs.${r.originalAmount}`] : null,
   r.discount ? ["Discount", `- Rs.${r.discount}`] : null,
-  ["Amount Paid", `Rs.${r.amount}`],
-  ["Collected By", r.collectedBy],
+  [isSchedule(r) ? "Total Payable" : "Amount Paid", `Rs.${r.amount}`],
+  r.balanceDue ? ["Balance Due", r.balanceDue] : null,
+  [isSchedule(r) ? "Prepared By" : "Collected By", r.collectedBy],
 ].filter(Boolean);
 
 const escapeHtml = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => (
@@ -97,14 +112,18 @@ const receiptHtml = (r) => `<!doctype html><html><head><meta charset="utf-8">
       <div class="sub">${escapeHtml(r.branch || "Physiotherapy & Rehabilitation")}</div>
     </div>
   </div>
-  <div class="tag">PAYMENT RECEIVED</div>
+  <div class="tag${isSchedule(r) ? " tag-sch" : ""}">${isSchedule(r) ? "PAYMENT SCHEDULE" : "PAYMENT RECEIVED"}</div>
   <hr>
-  <div class="amt-label">Amount Paid</div>
-  <div class="amt">Rs.${escapeHtml(r.amount)}</div>
+  <div class="amt-label">${isSchedule(r) ? "Total Payable" : "Amount Paid"}</div>
+  <div class="amt${isSchedule(r) ? " amt-sch" : ""}">Rs.${escapeHtml(r.amount)}</div>
   <hr>
   <table>${receiptRows(r).map(([k, v]) => `<tr><td class="k">${escapeHtml(k)}</td><td class="v">${escapeHtml(v)}</td></tr>`).join("")}</table>
+  ${(r.installments || []).length ? `<hr><div class="amt-label">Installments</div>
+  <table>${r.installments.map((i, n) => `<tr><td class="k">#${n + 1}${i.sessions ? ` · ${escapeHtml(i.sessions)} sessions` : ""} · due ${escapeHtml(i.due_date || "—")}</td><td class="v">Rs.${escapeHtml(i.amount)}${i.paid ? " · PAID" : ""}</td></tr>`).join("")}</table>` : ""}
   <hr>
-  <div class="foot">This is a computer-generated receipt and needs no signature.<br>Thank you for choosing FITSIOMAX.</div>
+  <div class="foot">${isSchedule(r)
+    ? "This is a payment schedule, not a receipt — no amount has been collected yet.<br>A receipt is issued for each installment when it is paid."
+    : "This is a computer-generated receipt and needs no signature.<br>Thank you for choosing FITSIOMAX."}</div>
 </div></body></html>`;
 
 const receiptText = (r) => [
@@ -238,6 +257,37 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // not a toast that disappears. Lives outside the lead dialog so it survives that
   // closing on the last fee.
   const [receipt, setReceipt] = useState(null);
+
+  /** Every fee path builds its receipt here, so they can't drift apart field by field. */
+  const makeReceipt = ({ lead, payload, prefix, paidFor, packageName, assignedPrice, kind = "paid", sessionsCovered, balanceDue, installments }) => {
+    const amount = payload.amount;
+    // A Branch-Admin-negotiated amount below the assigned price is a discount, and the
+    // receipt has to show both numbers or it reads as though the price was simply lower.
+    const discount = assignedPrice != null && assignedPrice > amount
+      ? Math.round((assignedPrice - amount) * 100) / 100
+      : null;
+    return {
+      kind,
+      receiptNo: `${prefix}-${(lead.patient_number || lead.id || "").toString().slice(-8).toUpperCase()}-${Date.now().toString().slice(-6)}`,
+      dateLabel: new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }),
+      patient: lead.name || "—",
+      patientNo: lead.patient_number || "—",
+      phone: lead.phone || "—",
+      branch: lead.branch_name || "",
+      paidFor,
+      packageName: packageName || "",
+      sessionsCovered: sessionsCovered || "",
+      balanceDue: balanceDue || "",
+      installments: installments || [],
+      amount,
+      originalAmount: assignedPrice != null ? assignedPrice : null,
+      discount,
+      modeLabel: ALL_PAYMENT_MODE_LABELS[payload.payment_mode] || payload.payment_mode,
+      reference: paymentReference(payload),
+      collectedBy: "Branch Admin",
+      isCash: payload.payment_mode === "cash",
+    };
+  };
 
   // Collect Treatment Fee popup (Branch Admin only) — at the Treatment Fee stage, any payment method
   const [treatmentFeeDraft, setTreatmentFeeDraft] = useState(null); // { paid_amount, payment_mode } | null
@@ -739,27 +789,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       toast.success(selectedLead.package_paid != null ? "Consultation Fee payment updated" : "Consultation Fee collected");
       setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === res.lead.id ? res.lead : l) }));
       setPackageConfirmDraft(null);
-      const assigned = selectedLead.package_price;
-      setReceipt({
-        receiptNo: `CF-${(selectedLead.patient_number || selectedLead.id || "").toString().slice(-8).toUpperCase()}-${Date.now().toString().slice(-6)}`,
-        dateLabel: new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }),
-        patient: selectedLead.name || "—",
-        patientNo: selectedLead.patient_number || "—",
-        phone: selectedLead.phone || "—",
-        branch: selectedLead.branch_name || "",
+      setReceipt(makeReceipt({
+        lead: selectedLead, payload, prefix: "CF",
         paidFor: "Consultation Fee",
         packageName: selectedLead.package_name || "",
-        amount: payload.amount,
-        // A Branch-Admin-negotiated amount below the assigned price is a discount, and the
-        // receipt has to show both numbers or it looks like the price was simply different.
-        originalAmount: assigned != null && assigned !== payload.amount ? assigned : null,
-        discount: assigned != null && assigned > payload.amount ? Math.round((assigned - payload.amount) * 100) / 100 : null,
-        modeLabel: (CONSULTATION_FEE_PAYMENT_MODES.find((m) => m.value === payload.payment_mode) || {}).label || payload.payment_mode,
-        reference: payload.upi_utr || payload.upi_transaction_id
-          || (payload.account_number ? `Card ****${String(payload.account_number).slice(-4)}` : ""),
-        collectedBy: "Branch Admin",
-        isCash: payload.payment_mode === "cash",
-      });
+        assignedPrice: selectedLead.package_price,
+      }));
       if (bothFeesDone(res.lead)) {
         setCollectFeeDraft(null);
         setTreatmentFeeDraft(null);
@@ -834,6 +869,36 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       toast.success(selectedLead.treatment_fee_paid != null ? "Treatment Fee payment updated" : "Treatment Fee collected");
       setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === res.lead.id ? res.lead : l) }));
       setTreatmentConfirmDraft(null);
+
+      const totalSessions = selectedLead.session_package_sessions || 0;
+      const savedInst = res.lead?.treatment_fee_payment_details?.installments || [];
+      const scheduleOnly = payload.payment_mode === "partial";
+      // Cash/UPI/Card/Cheque can cover only some of the package's sessions now, with the
+      // rest scheduled — the receipt has to say which sessions this money bought, or it
+      // reads as payment for the whole package.
+      const partOfPackage = !scheduleOnly && payload.sessions_now != null && totalSessions && payload.sessions_now < totalSessions;
+      const unpaid = savedInst.filter((i) => !i.paid);
+      setReceipt(makeReceipt({
+        lead: selectedLead, payload,
+        prefix: scheduleOnly ? "TS" : "TF",
+        kind: scheduleOnly ? "schedule" : "paid",
+        paidFor: "Treatment Fee",
+        packageName: selectedLead.session_package_name
+          ? `${selectedLead.session_package_name} · ${totalSessions} sessions`
+          : "",
+        // Against what these sessions should cost, not the whole package — collecting for
+        // fewer sessions must never be recorded as a discount.
+        assignedPrice: scheduleOnly
+          ? null
+          : partOfPackage
+          ? Math.round((selectedLead.session_package_price || 0) / totalSessions * payload.sessions_now)
+          : selectedLead.session_package_price,
+        sessionsCovered: partOfPackage ? `${payload.sessions_now} of ${totalSessions}` : "",
+        balanceDue: unpaid.length
+          ? `Rs.${unpaid.reduce((s, i) => s + (i.amount || 0), 0)}${unpaid[0]?.due_date ? ` · due ${unpaid[0].due_date}` : ""}`
+          : "",
+        installments: scheduleOnly ? savedInst : [],
+      }));
       if (consultationFeeDone(res.lead)) {
         setCollectFeeDraft(null);
         setTreatmentFeeDraft(null);
@@ -923,6 +988,20 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       toast.success(`Payment #${draft.idx + 1} collected`);
       setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => (l.id === updatedLead.id ? updatedLead : l)) }));
       setPartialCollectDraft(null);
+
+      const stillOwed = installments.filter((i) => !i.paid);
+      const thisInst = installments[draft.idx] || {};
+      setReceipt(makeReceipt({
+        lead: updatedLead, payload, prefix: `TF${draft.idx + 1}`,
+        paidFor: `Treatment Fee · Payment #${draft.idx + 1} of ${installments.length}`,
+        packageName: updatedLead.session_package_name
+          ? `${updatedLead.session_package_name} · ${updatedLead.session_package_sessions || 0} sessions`
+          : "",
+        sessionsCovered: thisInst.sessions ? `${thisInst.sessions} sessions` : "",
+        balanceDue: stillOwed.length
+          ? `Rs.${stillOwed.reduce((s, i) => s + (i.amount || 0), 0)}${stillOwed[0]?.due_date ? ` · due ${stillOwed[0].due_date}` : ""}`
+          : "",
+      }));
       if (consultationFeeDone(updatedLead)) {
         setCollectFeeDraft(null);
         setTreatmentFeeDraft(null);
@@ -3069,12 +3148,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       {receipt && (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-3" data-testid="cons-receipt-modal">
           <div className="flex max-h-[94vh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-            <div className="flex items-start justify-between gap-3 bg-emerald-600 px-6 py-4 text-white">
+            <div className={`flex items-start justify-between gap-3 px-6 py-4 text-white ${isSchedule(receipt) ? "bg-amber-600" : "bg-emerald-600"}`}>
               <div className="flex min-w-0 items-center gap-3">
                 <img src={LOGO_URL} alt="FITSIOMAX" className="h-11 w-11 shrink-0 rounded-lg bg-white/90 object-contain p-1" />
                 <div className="min-w-0">
-                  <p className="text-lg font-bold">Payment Received</p>
-                  <p className="truncate text-xs text-white/80">Receipt {receipt.receiptNo}</p>
+                  <p className="text-lg font-bold">{isSchedule(receipt) ? "Payment Schedule Created" : "Payment Received"}</p>
+                  <p className="truncate text-xs text-white/80">{isSchedule(receipt) ? "Reference" : "Receipt"} {receipt.receiptNo}</p>
                 </div>
               </div>
               <button onClick={() => setReceipt(null)} className="shrink-0 rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="cons-receipt-close">
@@ -3091,20 +3170,48 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 </div>
               </div>
 
-              <div className="rounded-xl border-2 border-emerald-200 bg-emerald-50 px-4 py-5 text-center">
-                <p className="text-xs font-bold uppercase tracking-widest text-emerald-600">Amount Paid</p>
-                <p className="mt-1 text-4xl font-extrabold text-emerald-700" data-testid="cons-receipt-amount">Rs.{receipt.amount}</p>
-                <p className="mt-1 text-sm font-semibold text-emerald-600">{receipt.modeLabel}</p>
+              <div className={`rounded-xl border-2 px-4 py-5 text-center ${isSchedule(receipt) ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-50"}`}>
+                <p className={`text-xs font-bold uppercase tracking-widest ${isSchedule(receipt) ? "text-amber-600" : "text-emerald-600"}`}>
+                  {isSchedule(receipt) ? "Total Payable" : "Amount Paid"}
+                </p>
+                <p className={`mt-1 text-4xl font-extrabold ${isSchedule(receipt) ? "text-amber-700" : "text-emerald-700"}`} data-testid="cons-receipt-amount">Rs.{receipt.amount}</p>
+                <p className={`mt-1 text-sm font-semibold ${isSchedule(receipt) ? "text-amber-600" : "text-emerald-600"}`}>{receipt.modeLabel}</p>
+                {isSchedule(receipt) && (
+                  <p className="mt-2 text-xs font-medium text-amber-700">Nothing collected yet — each installment gets its own receipt.</p>
+                )}
               </div>
 
               <dl className="mt-5 space-y-2 text-sm">
                 {receiptRows(receipt).map(([k, v]) => (
                   <div key={k} className="flex items-start justify-between gap-3 border-b border-slate-100 pb-2">
                     <dt className="text-slate-500">{k}</dt>
-                    <dd className={`text-right font-semibold ${k === "Amount Paid" ? "text-emerald-700" : k === "Discount" ? "text-rose-600" : "text-slate-700"}`}>{v}</dd>
+                    <dd className={`text-right font-semibold ${
+                      k === "Amount Paid" ? "text-emerald-700"
+                      : k === "Total Payable" ? "text-amber-700"
+                      : k === "Discount" ? "text-rose-600"
+                      : k === "Balance Due" ? "text-rose-600"
+                      : "text-slate-700"}`}>{v}</dd>
                   </div>
                 ))}
               </dl>
+
+              {receipt.installments.length > 0 && (
+                <div className="mt-5">
+                  <p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-400">Installments</p>
+                  <div className="space-y-1.5">
+                    {receipt.installments.map((i, n) => (
+                      <div key={n} className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 text-xs">
+                        <span className="text-slate-600">
+                          #{n + 1}{i.sessions ? ` · ${i.sessions} sessions` : ""} · due {i.due_date || "—"}
+                        </span>
+                        <span className={`font-bold ${i.paid ? "text-emerald-600" : "text-amber-600"}`}>
+                          Rs.{i.amount}{i.paid ? " · PAID" : ""}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="space-y-2 border-t border-slate-200 bg-slate-50 px-6 py-4">
@@ -3117,7 +3224,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                   onClick={() => printReceipt(receipt)}
                   data-testid="cons-receipt-print"
                 >
-                  <Printer className="mr-1.5 h-4 w-4" /> Print Bill
+                  <Printer className="mr-1.5 h-4 w-4" /> {isSchedule(receipt) ? "Print Schedule" : "Print Bill"}
                 </Button>
                 <Button
                   className={receipt.isCash ? "" : "bg-emerald-600 text-white hover:bg-emerald-700"}
@@ -3129,7 +3236,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 </Button>
               </div>
               <Button variant="outline" className="w-full" onClick={() => downloadReceipt(receipt)} data-testid="cons-receipt-download">
-                <Download className="mr-1.5 h-4 w-4" /> Download Receipt
+                <Download className="mr-1.5 h-4 w-4" /> {isSchedule(receipt) ? "Download Schedule" : "Download Receipt"}
               </Button>
               <Button variant="ghost" className="w-full text-slate-500" onClick={() => setReceipt(null)} data-testid="cons-receipt-done">
                 Done
