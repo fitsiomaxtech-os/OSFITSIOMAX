@@ -41,18 +41,34 @@ const BOTTOM_TABS = [
 
 export const PhysioBoard = ({ physioId } = {}) => {
   const [activeTab, setActiveTab] = useState("treatment");
+  // Round badge counts on the bottom nav — Treatment's is today's filtered count
+  // (the date filter defaults to Today already), Review's is how many patients just
+  // reached a new milestone, Patients' is this physio's whole caseload. All three
+  // tabs stay mounted (hidden via CSS, not unmounted) so every badge stays live even
+  // while another tab is the one showing.
+  const [treatmentCount, setTreatmentCount] = useState(0);
+  const [reviewCount, setReviewCount] = useState(0);
+  const [patientsCount, setPatientsCount] = useState(0);
+  const badgeFor = { treatment: treatmentCount, review: reviewCount, patients: patientsCount };
 
   return (
     <div className="space-y-3 pb-20" data-testid="physio-board-root">
-      {activeTab === "treatment" && <TreatmentTab physioId={physioId} />}
-      {activeTab === "review" && <ReviewTab physioId={physioId} />}
-      {activeTab === "patients" && <PatientsTab physioId={physioId} />}
+      <div style={{ display: activeTab === "treatment" ? "block" : "none" }}>
+        <TreatmentTab physioId={physioId} onCountChange={setTreatmentCount} />
+      </div>
+      <div style={{ display: activeTab === "review" ? "block" : "none" }}>
+        <ReviewTab physioId={physioId} onCountChange={setReviewCount} />
+      </div>
+      <div style={{ display: activeTab === "patients" ? "block" : "none" }}>
+        <PatientsTab physioId={physioId} onCountChange={setPatientsCount} />
+      </div>
 
       <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white" data-testid="physio-bottom-nav">
         <div className="mx-auto flex max-w-lg items-stretch justify-around">
           {BOTTOM_TABS.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.key;
+            const count = badgeFor[tab.key] || 0;
             return (
               <button
                 key={tab.key}
@@ -63,7 +79,18 @@ export const PhysioBoard = ({ physioId } = {}) => {
                 }`}
                 data-testid={`physio-bottom-tab-${tab.key}`}
               >
-                <Icon className="h-5 w-5" /> {tab.label}
+                <span className="relative">
+                  <Icon className="h-5 w-5" />
+                  {count > 0 && (
+                    <span
+                      className="absolute -right-2 -top-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-bold leading-none text-white"
+                      data-testid={`physio-bottom-tab-badge-${tab.key}`}
+                    >
+                      {count > 99 ? "99+" : count}
+                    </span>
+                  )}
+                </span>
+                {tab.label}
               </button>
             );
           })}
@@ -114,7 +141,7 @@ const StatTile = ({ label, value, sub, valueClass, solidClass, onClick, active, 
   );
 };
 
-function TreatmentTab({ physioId }) {
+function TreatmentTab({ physioId, onCountChange }) {
   const [leads, setLeads] = useState([]);
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -267,6 +294,8 @@ function TreatmentTab({ physioId }) {
     const completed = apptRows.filter((l) => l.physio_stage === "Complete").length + dayRows.filter((s) => s.status === "completed").length;
     return { total, completed, pending: total - completed };
   }, [filterValue, leads, filterSessions, overall]);
+
+  useEffect(() => { onCountChange?.(filterStats.total); }, [filterStats.total, onCountChange]);
 
   const [searchOpen, setSearchOpen] = useState(false);
 
@@ -471,7 +500,7 @@ const ordinal = (n) => {
  * dispatches it to a named Head Physio, who writes it up. Requests / Assigned / Completed
  * follow a patient along that hand-off, and the weekly write-up hangs off the same rows.
  */
-function ReviewTab({ physioId }) {
+function ReviewTab({ physioId, onCountChange }) {
   const [patients, setPatients] = useState([]);
   const [threshold, setThreshold] = useState(7);
   const [loading, setLoading] = useState(false);
@@ -521,20 +550,33 @@ function ReviewTab({ physioId }) {
     return p.due_for_review ? "new_review" : "not_due";
   };
 
+  // Date filter narrows the whole tab, not just the final list — the Total pill and
+  // every bucket's count on the tabs below are computed from this, not from `patients`.
+  const dateFiltered = useMemo(() => {
+    if (!filterValue) return patients;
+    const fromIso = isoOf(filterValue.from);
+    const toIso = isoOf(filterValue.to);
+    return patients.filter((p) => {
+      const d = p.first_session_date || "";
+      return d && d >= fromIso && d <= toIso;
+    });
+  }, [patients, filterValue]);
+
   const counts = useMemo(() => {
     const c = { new_review: 0, requests: 0, assigned: 0, completed: 0 };
-    patients.forEach((p) => { const b = bucketOf(p); if (b in c) c[b] += 1; });
+    dateFiltered.forEach((p) => { const b = bucketOf(p); if (b in c) c[b] += 1; });
     return c;
-  }, [patients]);
+  }, [dateFiltered]);
+
+  // Nav badge reflects every patient newly due, regardless of whatever date filter
+  // is currently narrowing the tab's own view.
+  const newReviewTotal = useMemo(() => patients.filter((p) => bucketOf(p) === "new_review").length, [patients]);
+  useEffect(() => { onCountChange?.(newReviewTotal); }, [newReviewTotal, onCountChange]);
 
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return patients.filter((p) => {
+    return dateFiltered.filter((p) => {
       if (bucketOf(p) !== bucket) return false;
-      if (filterValue) {
-        const d = p.first_session_date || "";
-        if (!d || d < isoOf(filterValue.from) || d > isoOf(filterValue.to)) return false;
-      }
       if (q && !(
         (p.lead_name || "").toLowerCase().includes(q)
         || (p.phone || "").toLowerCase().includes(q)
@@ -542,7 +584,7 @@ function ReviewTab({ physioId }) {
       )) return false;
       return true;
     });
-  }, [patients, bucket, search, filterValue]);
+  }, [dateFiltered, bucket, search]);
 
   const STATUS_BADGE = {
     completed: { label: "Review Completed", cls: "bg-emerald-100 text-emerald-700" },
@@ -559,28 +601,9 @@ function ReviewTab({ physioId }) {
 
   return (
     <div data-testid="physio-review-tab">
-      {/* Summary card, styled like the Treatment tab's — each tile narrows the list below. */}
-      <div className="mb-4 rounded-xl border border-sky-100 bg-sky-50/40 p-3" data-testid="physio-review-summary">
-        <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-sky-700">Reviews</p>
-        <div className="grid grid-cols-3 gap-2">
-          <StatTile
-            label="New Review" value={counts.new_review} solidClass="bg-amber-600" sub="Ready now"
-            onClick={() => setBucket("new_review")} active={bucket === "new_review"} testid="physio-review-stat-new"
-          />
-          <StatTile
-            label="In Progress" value={counts.requests + counts.assigned} valueClass="text-violet-700"
-            onClick={() => setBucket(bucket === "requests" || bucket === "assigned" ? "new_review" : "requests")}
-            active={bucket === "requests" || bucket === "assigned"} testid="physio-review-stat-progress"
-          />
-          <StatTile
-            label="Completed" value={counts.completed} valueClass="text-emerald-600"
-            onClick={() => setBucket("completed")} active={bucket === "completed"} testid="physio-review-stat-completed"
-          />
-        </div>
-      </div>
-
-      {/* Icon-only search that expands on tap, plus the Meta-style date filter — same
-          pattern as the Treatment tab. */}
+      {/* Icon-only search, the Meta-style date filter, and a small Total pill next to
+          it — everything the bucket tabs below read from is filtered by this date
+          range first, so Total and every bucket count move together. */}
       <div className="mb-3 flex flex-wrap items-center gap-2" data-testid="physio-review-toolbar">
         {searchOpen ? (
           <div className="relative min-w-[200px] flex-1">
@@ -613,6 +636,10 @@ function ReviewTab({ physioId }) {
           </button>
         )}
         <DateFilterPopover value={filterValue} onChange={setFilterValue} testid="physio-review-date-filter" />
+        <div className="flex h-10 shrink-0 items-center gap-1.5 rounded-md border border-sky-200 bg-sky-50 px-3" data-testid="physio-review-total">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-sky-600">Total</span>
+          <span className="text-sm font-bold text-sky-700">{dateFiltered.length}</span>
+        </div>
       </div>
 
       {/* New Review / Requests / Assigned / Completed — same hand-off the patient
@@ -1189,7 +1216,7 @@ export function CalendarPage({ physioId, onClose }) {
   );
 }
 
-function PatientsTab({ physioId }) {
+function PatientsTab({ physioId, onCountChange }) {
   const [patients, setPatients] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState(null);
@@ -1205,6 +1232,7 @@ function PatientsTab({ physioId }) {
   }, [physioId]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { onCountChange?.(patients.length); }, [patients.length, onCountChange]);
 
   const isCompleted = (p) => p.physio_stage === "Complete";
   const ongoingCount = patients.filter((p) => !isCompleted(p)).length;
