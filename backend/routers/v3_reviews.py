@@ -93,6 +93,37 @@ def _shape(rev: dict) -> dict:
     return {k: v for k, v in rev.items() if k != "_id"}
 
 
+def _review_eligibility(existing_for_lead: List[dict], treatment_days: int) -> dict:
+    """A new review becomes raisable every REVIEW_AFTER_DAYS treatment days — 7, 14, 21,
+    28... not just "7 or more" — so a 28-session package gets exactly 4 review points,
+    one per completed week of treatment, rather than staying permanently "due" past day 7.
+
+    milestone: the highest 7-multiple reached so far (0 if none yet).
+    review_number: which review this is — 1st at day 7, 2nd at day 14, etc.
+    eligible: whether a *new* review can be raised right now.
+    review: the review relevant to explain the current (non-eligible) state — an open
+    one in flight, or the most recent completed one still covering this milestone.
+    None once a fresh milestone is eligible, since that old review is no longer "current".
+    """
+    milestone = (treatment_days // REVIEW_AFTER_DAYS) * REVIEW_AFTER_DAYS
+    review_number = milestone // REVIEW_AFTER_DAYS if milestone else 0
+
+    open_review = next((r for r in existing_for_lead if r.get("status") in (SEND_TO_REVIEW, SENT)), None)
+    if open_review:
+        return {"milestone": milestone, "review_number": review_number, "eligible": False, "review": open_review}
+
+    if milestone == 0:
+        return {"milestone": 0, "review_number": 0, "eligible": False, "review": None}
+
+    completed = [r for r in existing_for_lead if r.get("status") == COMPLETED]
+    latest_completed = max(completed, key=lambda r: r.get("raised_at") or "", default=None)
+
+    if latest_completed is None or milestone > (latest_completed.get("treatment_days") or 0):
+        return {"milestone": milestone, "review_number": review_number, "eligible": True, "review": None}
+
+    return {"milestone": milestone, "review_number": review_number, "eligible": False, "review": latest_completed}
+
+
 # ---------------------------------------------------------------- Physio: raise a review
 
 @router.get("/physio/reviews")
@@ -112,12 +143,15 @@ async def physio_reviews(
     lead_ids = await v3_col("sessions").distinct("lead_id", {"physio_id": pid})
     leads = await v3_col("leads").find({"id": {"$in": lead_ids}}, {"_id": 0}).to_list(500)
     existing = await v3_col("reviews").find({"physio_id": pid}, {"_id": 0}).to_list(500)
-    by_lead = {r["lead_id"]: r for r in existing}
+    by_lead: dict = {}
+    for r in existing:
+        by_lead.setdefault(r["lead_id"], []).append(r)
 
     patients = []
     for l in leads:
         days = await _treatment_days(l["id"])
-        rev = by_lead.get(l["id"])
+        elig = _review_eligibility(by_lead.get(l["id"], []), days)
+        rev = elig["review"]
         patients.append({
             "lead_id": l["id"],
             "lead_name": l.get("name", "Unknown"),
@@ -125,7 +159,9 @@ async def physio_reviews(
             "phone": l.get("phone", ""),
             "treatment_days": days,
             "first_session_date": await _first_session_date(l["id"]),
-            "due_for_review": days >= REVIEW_AFTER_DAYS,
+            "milestone": elig["milestone"],
+            "review_number": elig["review_number"],
+            "due_for_review": elig["eligible"],
             "review_status": rev.get("status") if rev else None,
             "review_id": rev.get("id") if rev else None,
         })
@@ -140,13 +176,17 @@ async def physio_raise_review(
     physio_id: Optional[str] = None,
     user: V3UserOut = Depends(v3_require_roles("physio", "super_admin")),
 ):
-    """Physio sends a patient up for review. Lands in Branch Admin > Review > Send to Review."""
+    """Physio sends a patient up for review. Lands in Branch Admin > Review > Send to Review.
+    Only raisable at a fresh 7-treatment-day milestone (7, 14, 21...) — mirrors the same
+    _review_eligibility check /physio/reviews uses to decide who shows under New Review."""
     lead = await _lead_or_404(lead_id)
-    open_review = await v3_col("reviews").find_one(
-        {"lead_id": lead_id, "status": {"$in": [SEND_TO_REVIEW, SENT]}}, {"_id": 0, "id": 1, "status": 1}
-    )
-    if open_review:
-        raise HTTPException(status_code=409, detail="This patient already has a review in progress")
+    existing_for_lead = await v3_col("reviews").find({"lead_id": lead_id}, {"_id": 0}).to_list(50)
+    days = await _treatment_days(lead_id)
+    elig = _review_eligibility(existing_for_lead, days)
+    if not elig["eligible"]:
+        if elig["review"] and elig["review"].get("status") in (SEND_TO_REVIEW, SENT):
+            raise HTTPException(status_code=409, detail="This patient already has a review in progress")
+        raise HTTPException(status_code=400, detail=f"This patient hasn't reached a new review milestone yet (every {REVIEW_AFTER_DAYS} treatment days)")
 
     doctor = await v3_col("doctors").find_one(
         {"user_id": user.id, "profile_type": "physio"}, {"_id": 0, "id": 1, "full_name": 1}
