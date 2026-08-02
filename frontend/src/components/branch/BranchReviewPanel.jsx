@@ -101,23 +101,20 @@ export const BranchReviewPanel = ({ branchId }) => {
     const overdue = r.status === "sent" && r.review_date && r.review_date < (data.today || "");
     return (
       <tr className="transition-colors hover:bg-slate-50" data-testid={`branch-review-row-${r.id}`}>
-        <td className="px-4 py-3">
+        <td className="px-4 py-3 align-middle">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-medium text-slate-800">{r.lead_name}</span>
             {r.patient_number && <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-slate-500">{r.patient_number}</span>}
             <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">{r.treatment_days} treatment days</span>
             {overdue && <span className="rounded-md bg-rose-100 px-2 py-0.5 text-[10px] font-bold text-rose-700">OVERDUE</span>}
           </div>
-          {(r.session_package_name || r.reason) && (
-            <p className="mt-0.5 text-[10px] text-slate-400">
-              {[r.session_package_name, r.reason].filter(Boolean).join(" · ")}
-            </p>
-          )}
+          {r.reason && <p className="mt-0.5 text-[10px] text-slate-400">{r.reason}</p>}
         </td>
-        <td className="px-4 py-3 text-slate-600">{r.phone || "—"}</td>
-        <td className="px-4 py-3 text-slate-600">{r.physio_name || "—"}</td>
+        <td className="whitespace-nowrap px-4 py-3 align-middle text-slate-600">{r.phone || "—"}</td>
+        <td className="whitespace-nowrap px-4 py-3 align-middle text-slate-600">{r.physio_name || "—"}</td>
+        <td className="whitespace-nowrap px-4 py-3 align-middle text-slate-600">{r.session_package_name || "—"}</td>
         {sub !== "send" && (
-          <td className="px-4 py-3">
+          <td className="whitespace-nowrap px-4 py-3 align-middle">
             <span className="font-medium text-violet-700">{r.head_physio_name || "—"}</span>
             <p className={`text-[10px] ${overdue ? "text-rose-600" : "text-slate-400"}`}>
               review {dmy(r.review_date)}
@@ -125,22 +122,23 @@ export const BranchReviewPanel = ({ branchId }) => {
             </p>
           </td>
         )}
-        <td className="px-4 py-3">
-          <div className="flex items-center gap-2">
-            <Button size="sm" variant="outline" className="text-xs" onClick={() => setViewing(r)} data-testid={`branch-review-view-${r.id}`}>
-              View
+        <td className="whitespace-nowrap px-4 py-3 align-middle">
+          {r.status === "send_to_review" ? (
+            <Button size="sm" className="bg-amber-600 text-xs text-white hover:bg-amber-700" onClick={() => openSend(r)} data-testid={`branch-review-send-${r.id}`}>
+              <Send className="mr-1.5 h-3.5 w-3.5" /> Send to Head Physio
             </Button>
-            {r.status === "send_to_review" && (
-              <Button size="sm" className="bg-amber-600 text-xs text-white hover:bg-amber-700" onClick={() => openSend(r)} data-testid={`branch-review-send-${r.id}`}>
-                <Send className="mr-1.5 h-3.5 w-3.5" /> Send to Head Physio
-              </Button>
-            )}
-            {r.status === "sent" && (
-              <Button size="sm" variant="outline" className="text-xs" onClick={() => openSend(r)} data-testid={`branch-review-reassign-${r.id}`}>
-                Reassign
-              </Button>
-            )}
-          </div>
+          ) : r.status === "sent" ? (
+            <Button size="sm" variant="outline" className="text-xs" onClick={() => openSend(r)} data-testid={`branch-review-reassign-${r.id}`}>
+              Reassign
+            </Button>
+          ) : (
+            <span className="text-[11px] text-slate-400">—</span>
+          )}
+        </td>
+        <td className="whitespace-nowrap px-4 py-3 align-middle">
+          <Button size="sm" variant="outline" className="text-xs" onClick={() => setViewing(r)} data-testid={`branch-review-view-${r.id}`}>
+            View
+          </Button>
         </td>
       </tr>
     );
@@ -192,10 +190,12 @@ export const BranchReviewPanel = ({ branchId }) => {
             <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
               <tr>
                 <th className="px-4 py-2.5">Patient</th>
-                <th className="px-4 py-2.5">Phone</th>
-                <th className="px-4 py-2.5">Physio</th>
-                {sub !== "send" && <th className="px-4 py-2.5">Head Physio</th>}
-                <th className="px-4 py-2.5">{sub === "send" ? "Send to Head Physio" : "Action"}</th>
+                <th className="whitespace-nowrap px-4 py-2.5">Phone</th>
+                <th className="whitespace-nowrap px-4 py-2.5">Physio</th>
+                <th className="whitespace-nowrap px-4 py-2.5">Weeks</th>
+                {sub !== "send" && <th className="whitespace-nowrap px-4 py-2.5">Head Physio</th>}
+                <th className="whitespace-nowrap px-4 py-2.5">{sub === "send" ? "Send to Head Physio" : "Action"}</th>
+                <th className="whitespace-nowrap px-4 py-2.5">View</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
