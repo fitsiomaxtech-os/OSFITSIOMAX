@@ -14,6 +14,8 @@ import {
   Activity,
   LayoutDashboard,
   FileText,
+  Share2,
+  Download,
   ShoppingCart,
   ClipboardList,
   Bell,
@@ -49,6 +51,65 @@ import { BranchCalendarPanel } from "@/components/branch/BranchCalendarPanel";
 import { BranchDetailPage } from "@/components/branch/BranchDetailPage";
 import { BranchReviewPanel } from "@/components/branch/BranchReviewPanel";
 import { CreateLeadModal } from "@/components/CreateLeadModal";
+import { LOGO_URL, PRINTABLE_STYLES, escapeHtml, rowsHtml, openPrintable, downloadPrintable, sharePrintable } from "@/lib/printable";
+
+// ---- Appointment confirmation -------------------------------------------------------
+// What the client walks away with. Built as its own document so it can be opened, printed
+// to PDF, saved or shared — same branding, styles and mechanics the payment receipt uses,
+// from lib/printable.js.
+
+/** "2026-08-05" -> "05 - 08 - 2026" */
+const dmyLabel = (d) => {
+  const [y, m, day] = String(d || "").split("-");
+  return y && m && day ? `${day} - ${m} - ${y}` : d || "—";
+};
+/** "2026-08-05" -> "Wednesday, 5 August" */
+const weekdayLabel = (d) => (d
+  ? new Date(`${d}T00:00:00`).toLocaleDateString("en-US", { weekday: "long", day: "numeric", month: "long" })
+  : "—");
+
+const apptRows = (a) => [
+  ["Reference No.", a.refNo],
+  ["Patient", a.patient],
+  ["Patient No.", a.patientNo],
+  ["Phone", a.phone],
+  ["Date", dmyLabel(a.date)],
+  ["Time", `${to12h(a.time)} – ${endTime12h(a.time, a.duration)}`],
+  ["Duration", `${a.duration} minutes`],
+  ["Head Physio", a.headPhysio],
+  a.branch ? ["Branch", a.branch] : null,
+  ["Booked By", a.bookedBy],
+];
+
+const apptHtml = (a) => `<!doctype html><html><head><meta charset="utf-8">
+<title>Appointment ${escapeHtml(a.refNo)}</title><style>${PRINTABLE_STYLES}</style></head>
+<body><div class="wrap">
+  <div class="head">
+    <img class="logo" src="${LOGO_URL}" alt="FITSIOMAX">
+    <div>
+      <div class="brand">FITSIOMAX</div>
+      <div class="sub">${escapeHtml(a.branch || "Physiotherapy & Rehabilitation")}</div>
+    </div>
+  </div>
+  <div class="tag tag-appt">APPOINTMENT CONFIRMED</div>
+  <hr>
+  <div class="amt-label">Your Appointment</div>
+  <div class="amt amt-appt">${escapeHtml(weekdayLabel(a.date))}<br>${escapeHtml(to12h(a.time))}</div>
+  <hr>
+  ${rowsHtml(apptRows(a))}
+  ${a.notes ? `<div class="note"><b>Notes</b><br>${escapeHtml(a.notes)}</div>` : ""}
+  <div class="note">Please arrive 10 minutes early. To reschedule or cancel, contact the branch
+  quoting reference ${escapeHtml(a.refNo)}.</div>
+  <hr>
+  <div class="foot">This is a computer-generated confirmation and needs no signature.<br>Thank you for choosing FITSIOMAX.</div>
+</div></body></html>`;
+
+const apptText = (a) => [
+  "FITSIOMAX — Appointment Confirmed",
+  ...apptRows(a).filter(Boolean).map(([k, v]) => `${k}: ${v}`),
+  a.notes ? `Notes: ${a.notes}` : "",
+  "Please arrive 10 minutes early.",
+].filter(Boolean).join("\n");
 
 export const BranchAdminBoard = ({ branchId }) => {
   const [boardData, setBoardData] = useState({ leads: [], stage_counts: {} });
@@ -429,6 +490,9 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
   // Month shown by the popup's own calendar. Held apart from the picked date so paging
   // through months doesn't disturb the booking being built.
   const [apptMonth, setApptMonth] = useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() }; });
+  // Shown once a booking is actually made. Kept outside the Appointment popup because
+  // confirming closes that popup and the lead card with it.
+  const [apptConfirm, setApptConfirm] = useState(null);
   // { "YYYY-MM-DD": free slot count } for the shown month — drives the purple marking so
   // the days worth clicking are visible without opening each one.
   const [apptOpenDates, setApptOpenDates] = useState({});
@@ -1068,8 +1132,31 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                   try {
                     await scheduleBranchAppointment(lead.id, apptDraft);
                     toast.success(`Appointment ${apptDraft.appointment_date} ${to12h(apptDraft.appointment_time)} → ${apptDraft.final_stage}`);
+                    const stage = apptDraft.final_stage;
                     setApptDraft(null);
-                    onMoved && onMoved(apptDraft.final_stage); // closes immediately; parent refreshes the list itself
+                    // A cancellation has nothing to hand over, so it closes straight away.
+                    // A booking shows its confirmation first and only tells the parent to
+                    // close once that's dismissed — onMoved unmounts this whole card, and
+                    // the confirmation has to survive long enough to be shared or printed.
+                    if (stage === "Cancelled") {
+                      onMoved && onMoved(stage);
+                      return;
+                    }
+                    const hp = apptExperts.experts.find((d) => d.id === apptDraft.physio_id);
+                    setApptConfirm({
+                      finalStage: stage,
+                      refNo: `APT-${(lead.patient_number || lead.id || "").toString().slice(-8).toUpperCase()}-${Date.now().toString().slice(-6)}`,
+                      patient: lead.name || "—",
+                      patientNo: lead.patient_number || "—",
+                      phone: lead.phone || "—",
+                      branch: lead.branch_name || "",
+                      date: apptDraft.appointment_date,
+                      time: apptDraft.appointment_time,
+                      duration: apptDraft.duration || 30,
+                      headPhysio: hp?.full_name || lead.assigned_physio_name || "—",
+                      notes: (apptDraft.notes || "").trim(),
+                      bookedBy: "Branch Admin",
+                    });
                   } catch (e) { toast.error(e?.response?.data?.detail || "Failed to schedule"); }
                 }}
                 data-testid="branch-appt-save"
@@ -1082,6 +1169,82 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
         </div>
       )}
 
+
+      {/* Appointment confirmation — the sheet the client is given. Opening it as a PDF,
+          sharing it or saving it all render the exact same document. */}
+      {apptConfirm && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-3" data-testid="branch-appt-confirm-modal">
+          <div className="flex max-h-[94vh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-3 bg-teal-600 px-6 py-4 text-white">
+              <div className="flex min-w-0 items-center gap-3">
+                <img src={LOGO_URL} alt="FITSIOMAX" className="h-11 w-11 shrink-0 rounded-lg bg-white/90 object-contain p-1" />
+                <div className="min-w-0">
+                  <p className="text-lg font-bold">Appointment Confirmed</p>
+                  <p className="truncate text-xs text-white/80">Ref {apptConfirm.refNo}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => { const s = apptConfirm.finalStage; setApptConfirm(null); onMoved && onMoved(s); }}
+                className="shrink-0 rounded-lg border-2 border-orange-200 bg-orange-100 p-2 text-orange-600 hover:bg-orange-200"
+                data-testid="branch-appt-confirm-close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6">
+              <div className="rounded-xl border-2 border-teal-200 bg-teal-50 px-4 py-5 text-center">
+                <p className="text-xs font-bold uppercase tracking-widest text-teal-600">Your Appointment</p>
+                <p className="mt-1 text-2xl font-extrabold text-teal-700">{weekdayLabel(apptConfirm.date)}</p>
+                <p className="text-lg font-bold text-teal-700">
+                  {to12h(apptConfirm.time)} – {endTime12h(apptConfirm.time, apptConfirm.duration)}
+                </p>
+                <p className="mt-1 text-sm font-semibold text-teal-600">with {apptConfirm.headPhysio}</p>
+              </div>
+
+              <dl className="mt-5 space-y-2 text-sm">
+                {apptRows(apptConfirm).filter(Boolean).map(([k, v]) => (
+                  <div key={k} className="flex items-start justify-between gap-3 border-b border-slate-100 pb-2">
+                    <dt className="text-slate-500">{k}</dt>
+                    <dd className="text-right font-semibold text-slate-700">{v}</dd>
+                  </div>
+                ))}
+              </dl>
+
+              {apptConfirm.notes && (
+                <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Notes</p>
+                  <p className="mt-1 whitespace-pre-wrap text-sm text-slate-600">{apptConfirm.notes}</p>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2 border-t border-slate-200 bg-slate-50 px-6 py-4">
+              {/* Open leads: the client wants to see the sheet before it's sent anywhere,
+                  and the browser's own Save-as-PDF lives behind that window's print. */}
+              <Button className="w-full bg-teal-600 text-white hover:bg-teal-700" onClick={() => openPrintable(apptHtml(apptConfirm), { print: true })} data-testid="branch-appt-confirm-pdf">
+                <FileText className="mr-1.5 h-4 w-4" /> Open PDF
+              </Button>
+              <div className="grid grid-cols-2 gap-2">
+                <Button variant="outline" onClick={() => sharePrintable(apptText(apptConfirm), `FITSIOMAX Appointment ${apptConfirm.refNo}`)} data-testid="branch-appt-confirm-share">
+                  <Share2 className="mr-1.5 h-4 w-4" /> Share
+                </Button>
+                <Button variant="outline" onClick={() => downloadPrintable(apptHtml(apptConfirm), `appointment-${apptConfirm.refNo}.html`)} data-testid="branch-appt-confirm-download">
+                  <Download className="mr-1.5 h-4 w-4" /> Download
+                </Button>
+              </div>
+              <Button
+                variant="ghost"
+                className="w-full text-slate-500"
+                onClick={() => { const s = apptConfirm.finalStage; setApptConfirm(null); onMoved && onMoved(s); }}
+                data-testid="branch-appt-confirm-done"
+              >
+                Done
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Follow Up Date & Time Popup (triggered from Move to Stage) */}
       {followUpMoveDraft && (
