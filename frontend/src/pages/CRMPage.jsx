@@ -194,7 +194,10 @@ export const CRMPage = ({ auth, onLogout }) => {
   const role = auth.user.role;
   const roleLabel = ROLE_META[role]?.label || role;
   const boardTitle = role === "pre_sales" ? "Pre-sales Master View" : `${roleLabel} Master View`;
-  const myBranchName = branches.find((b) => b.id === auth.user.branch_id)?.branch_name || "";
+  const myBranch = branches.find((b) => b.id === auth.user.branch_id);
+  const myBranchName = myBranch?.branch_name || "";
+  const VERTICAL_LABELS = { offline_physiotherapy: "Physiotherapy", offline_fitness_gym: "Fitness", offline_fitness: "Fitness" };
+  const myVerticalLabel = VERTICAL_LABELS[myBranch?.vertical] || "";
 
   const [superAdminView, setSuperAdminView] = useState(() => {
     if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("sheets_connect")) {
@@ -550,7 +553,9 @@ export const CRMPage = ({ auth, onLogout }) => {
                 <img src={LOGO_URL} alt="Fitsiomax" className="h-9 w-9 shrink-0 rounded-lg object-contain" data-testid="header-left-logo-mobile" />
                 <div className="min-w-0">
                   <p className="truncate text-sm font-bold text-slate-900" data-testid="physio-mobile-header-name">{auth.user.full_name}</p>
-                  <p className="text-[10px] font-semibold tracking-wide text-sky-600" data-testid="physio-mobile-header-brand">FitsiomaxOS</p>
+                  <p className="truncate text-[10px] font-semibold tracking-wide text-sky-600" data-testid="physio-mobile-header-brand">
+                    {myBranchName}{myVerticalLabel && ` ${myVerticalLabel}`}
+                  </p>
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-1">
