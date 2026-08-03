@@ -8,21 +8,44 @@ import { stagesList, stagesCreate, stagesUpdate, stagesDelete, stagesReorder, re
 
 const PALETTE = ["#6366f1", "#3b82f6", "#0ea5e9", "#06b6d4", "#14b8a6", "#22c55e", "#84cc16", "#eab308", "#f59e0b", "#f97316", "#ef4444", "#ec4899", "#a855f7", "#64748b"];
 
+// Every pipeline Super Admin can shape, in one table. The tab strip, the KPI row, the card
+// title and the load-all-counts call are all derived from it, so a sixth pipeline is one
+// entry rather than four separate edits that can drift apart.
+//
+// Recruitment is the odd one out: its records are candidates in their own collection, not
+// leads, and they reference a stage by id — so renaming one here rewrites nothing and
+// cannot orphan anybody.
+const TYPES = [
+  { key: "pre_sales", label: "Pre-Sales", kpi: "Pre-Sales Stages", title: "Pre-Sales", tone: "indigo", records: "Leads" },
+  { key: "sales", label: "Branch Lead Stages", kpi: "Branch Lead Stages", title: "Branch Lead", tone: "green", records: "Leads" },
+  { key: "consultation", label: "Branch Consultation", kpi: "Branch Consultation Stages", title: "Branch Consultation", tone: "orange", records: "Leads" },
+  { key: "head_consultation", label: "Head Consultation", kpi: "Head Consultation Stages", title: "Head Consultation", tone: "sky", records: "Leads" },
+  { key: "recruitment", label: "Recruitment", kpi: "Recruitment Stages", title: "Recruitment", tone: "violet", records: "Candidates" },
+];
+
+// Tailwind only ships classes it can actually see written out, so the tones are spelled in
+// full rather than built as `border-${tone}-500`.
+const TONE_CLASSES = {
+  indigo: { border: "border-indigo-500", text: "text-indigo-600" },
+  green: { border: "border-green-500", text: "text-green-600" },
+  orange: { border: "border-orange-500", text: "text-orange-600" },
+  sky: { border: "border-sky-500", text: "text-sky-600" },
+  violet: { border: "border-violet-500", text: "text-violet-600" },
+};
+
 export const PipelineStageManagement = ({ onBack }) => {
   const [type, setType] = useState("pre_sales");
   const [stages, setStages] = useState([]);
-  const [counts, setCounts] = useState({ pre_sales: 0, sales: 0, consultation: 0, head_consultation: 0 });
+  const [counts, setCounts] = useState(Object.fromEntries(TYPES.map((t) => [t.key, 0])));
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ name: "", color: "#6366f1", is_final: false });
   const [resetting, setResetting] = useState(false);
 
   const load = useCallback(async () => {
-    const [pre, sale, consult, headConsult] = await Promise.all([
-      stagesList("pre_sales"), stagesList("sales"), stagesList("consultation"), stagesList("head_consultation"),
-    ]);
-    setCounts({ pre_sales: pre.length, sales: sale.length, consultation: consult.length, head_consultation: headConsult.length });
-    setStages(type === "pre_sales" ? pre : type === "sales" ? sale : type === "consultation" ? consult : headConsult);
+    const lists = await Promise.all(TYPES.map((t) => stagesList(t.key)));
+    setCounts(Object.fromEntries(TYPES.map((t, i) => [t.key, lists[i].length])));
+    setStages(lists[TYPES.findIndex((t) => t.key === type)] || []);
   }, [type]);
 
   useEffect(() => { load(); }, [load]);
@@ -94,31 +117,39 @@ export const PipelineStageManagement = ({ onBack }) => {
           <Button variant="ghost" size="sm" onClick={onBack} data-testid="stages-back-btn"><ArrowLeft className="h-4 w-4 mr-1" />Settings</Button>
           <div>
             <h2 className="text-2xl font-bold text-slate-900">Pipeline Stage Management</h2>
-            <p className="text-sm text-slate-500">Add, edit, reorder, and delete stages for Pre-Sales, Branch Lead, Branch Consultation, and Head Consultation pipelines.</p>
+            <p className="text-sm text-slate-500">Add, edit, reorder, and delete stages for the Pre-Sales, Branch Lead, Branch Consultation, Head Consultation, and Recruitment pipelines.</p>
           </div>
         </div>
         <Button onClick={() => { setEditing(null); setForm({ name: "", color: PALETTE[Math.floor(Math.random() * PALETTE.length)], is_final: false }); setShowAdd(true); }} className="bg-orange-500 hover:bg-orange-600" data-testid="stages-add-btn"><Plus className="h-4 w-4 mr-1" />Add Stage</Button>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="rounded-xl border-l-4 border-indigo-500 bg-white p-4 shadow-sm" data-testid="stages-kpi-presales"><p className="text-xs text-slate-500">Pre-Sales Stages</p><p className="text-3xl font-bold text-indigo-600">{counts.pre_sales}</p></div>
-        <div className="rounded-xl border-l-4 border-green-500 bg-white p-4 shadow-sm" data-testid="stages-kpi-sales"><p className="text-xs text-slate-500">Branch Lead Stages</p><p className="text-3xl font-bold text-green-600">{counts.sales}</p></div>
-        <div className="rounded-xl border-l-4 border-orange-500 bg-white p-4 shadow-sm" data-testid="stages-kpi-consultation"><p className="text-xs text-slate-500">Branch Consultation Stages</p><p className="text-3xl font-bold text-orange-600">{counts.consultation}</p></div>
-        <div className="rounded-xl border-l-4 border-sky-500 bg-white p-4 shadow-sm" data-testid="stages-kpi-head-consultation"><p className="text-xs text-slate-500">Head Consultation Stages</p><p className="text-3xl font-bold text-sky-600">{counts.head_consultation}</p></div>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        {TYPES.map((t) => (
+          <div key={t.key} className={`rounded-xl border-l-4 bg-white p-4 shadow-sm ${TONE_CLASSES[t.tone].border}`} data-testid={`stages-kpi-${t.key}`}>
+            <p className="text-xs text-slate-500">{t.kpi}</p>
+            <p className={`text-3xl font-bold ${TONE_CLASSES[t.tone].text}`}>{counts[t.key]}</p>
+          </div>
+        ))}
       </div>
 
-      <div className="grid grid-cols-2 gap-2 rounded-lg bg-slate-100 p-1 sm:grid-cols-4">
-        <button onClick={() => setType("pre_sales")} className={`rounded-md py-2 text-sm font-semibold ${type === "pre_sales" ? "bg-white text-indigo-600 shadow" : "text-slate-500"}`} data-testid="stages-tab-presales">Pre-Sales ({counts.pre_sales})</button>
-        <button onClick={() => setType("sales")} className={`rounded-md py-2 text-sm font-semibold ${type === "sales" ? "bg-white text-green-600 shadow" : "text-slate-500"}`} data-testid="stages-tab-sales">Branch Lead Stages ({counts.sales})</button>
-        <button onClick={() => setType("consultation")} className={`rounded-md py-2 text-sm font-semibold ${type === "consultation" ? "bg-white text-orange-600 shadow" : "text-slate-500"}`} data-testid="stages-tab-consultation">Branch Consultation ({counts.consultation})</button>
-        <button onClick={() => setType("head_consultation")} className={`rounded-md py-2 text-sm font-semibold ${type === "head_consultation" ? "bg-white text-sky-600 shadow" : "text-slate-500"}`} data-testid="stages-tab-head-consultation">Head Consultation ({counts.head_consultation})</button>
+      <div className="grid grid-cols-2 gap-2 rounded-lg bg-slate-100 p-1 sm:grid-cols-5">
+        {TYPES.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setType(t.key)}
+            className={`rounded-md py-2 text-sm font-semibold ${type === t.key ? `bg-white shadow ${TONE_CLASSES[t.tone].text}` : "text-slate-500"}`}
+            data-testid={`stages-tab-${t.key}`}
+          >
+            {t.label} ({counts[t.key]})
+          </button>
+        ))}
       </div>
 
       <Card data-testid="stages-list-card">
-        <CardHeader><CardTitle className="text-base">{type === "pre_sales" ? "Pre-Sales" : type === "sales" ? "Branch Lead" : type === "consultation" ? "Branch Consultation" : "Head Consultation"} Pipeline Stages</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-base">{(TYPES.find((t) => t.key === type) || {}).title} Pipeline Stages</CardTitle></CardHeader>
         <CardContent className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="text-left text-xs text-slate-500"><tr><th className="py-2">Order</th><th>Color</th><th>Stage Name</th><th>Leads</th><th>Final</th><th>Actions</th></tr></thead>
+            <thead className="text-left text-xs text-slate-500"><tr><th className="py-2">Order</th><th>Color</th><th>Stage Name</th><th>{(TYPES.find((t) => t.key === type) || {}).records}</th><th>Final</th><th>Actions</th></tr></thead>
             <tbody>
               {stages.map((s, i) => (
                 <tr key={s.id} className="border-t border-slate-100" data-testid={`stages-row-${s.id}`}>

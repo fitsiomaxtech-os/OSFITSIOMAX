@@ -26,11 +26,19 @@ STAGE_TYPE_FIELD = {
     "head_consultation": "head_consultation_stage",
 }
 
+# Recruitment is the one pipeline whose records don't live in `leads`: candidates are in
+# their own collection and hold `stage_id` rather than the stage's name. That makes every
+# name-based operation below a no-op for it — renaming needs no record rewrite at all —
+# but the count and the in-use check still have to look somewhere, so they look there.
+RECRUITMENT_TYPE = "recruitment"
+
+StageType = Literal["pre_sales", "sales", "consultation", "head_consultation", "recruitment"]
+
 
 class StageCreate(BaseModel):
     name: str
     color: Optional[str] = "#64748b"
-    type: Literal["pre_sales", "sales", "consultation", "head_consultation"]
+    type: StageType
     is_final: Optional[bool] = False
 
 
@@ -94,10 +102,25 @@ async def _ensure_seed() -> None:
 
 
 @router.get("")
-async def list_stages(type: Optional[Literal["pre_sales", "sales", "consultation", "head_consultation"]] = None, _: V3UserOut = Depends(v3_current_user)):
+async def list_stages(type: Optional[StageType] = None, _: V3UserOut = Depends(v3_current_user)):
     await _ensure_seed()
+    if type == RECRUITMENT_TYPE:
+        # Its own seed: _ensure_seed above only fires on a completely empty collection, so
+        # in production a type added later would never appear.
+        from routers.v3_recruitment import _ensure_recruitment_stages
+        await _ensure_recruitment_stages()
+
     query = {"type": type} if type else {}
     rows = await v3_col("pipeline_stages").find(query, {"_id": 0}).sort([("type", 1), ("order", 1)]).to_list(500)
+
+    if type == RECRUITMENT_TYPE:
+        by_stage_id = {}
+        async for row in v3_col("candidates").aggregate([{"$group": {"_id": "$stage_id", "n": {"$sum": 1}}}]):
+            by_stage_id[row["_id"]] = row["n"]
+        for r in rows:
+            r["lead_count"] = by_stage_id.get(r["id"], 0)
+        return rows
+
     counts = {}
     if type:
         field = STAGE_TYPE_FIELD[type]
@@ -132,10 +155,11 @@ async def update_stage(stage_id: str, payload: StageUpdate, _: V3UserOut = Depen
     updates = {k: v for k, v in payload.model_dump().items() if v is not None}
     if not updates:
         raise HTTPException(status_code=400, detail="No updates provided")
-    # If renaming, also rename references on existing leads
+    # If renaming, also rename references on existing leads. Recruitment is exempt:
+    # candidates point at this stage by id, so there is nothing to rewrite.
     if "name" in updates:
         old = await v3_col("pipeline_stages").find_one({"id": stage_id}, {"_id": 0, "name": 1, "type": 1})
-        if old and old["name"] != updates["name"]:
+        if old and old["name"] != updates["name"] and old["type"] != RECRUITMENT_TYPE:
             field = STAGE_TYPE_FIELD[old["type"]]
             await v3_col("leads").update_many({field: old["name"]}, {"$set": {field: updates["name"]}})
     res = await v3_col("pipeline_stages").update_one({"id": stage_id}, {"$set": updates})
@@ -149,6 +173,15 @@ async def delete_stage(stage_id: str, _: V3UserOut = Depends(v3_require_roles("s
     stage = await v3_col("pipeline_stages").find_one({"id": stage_id}, {"_id": 0})
     if not stage:
         raise HTTPException(status_code=404, detail="Stage not found")
+    if stage["type"] == RECRUITMENT_TYPE:
+        # Candidates would be orphaned exactly like leads are, just via a different key.
+        in_use = await v3_col("candidates").count_documents({"stage_id": stage_id})
+        if in_use > 0:
+            raise HTTPException(status_code=409, detail=f"Stage in use by {in_use} candidate(s). Move them first.")
+        if await v3_col("pipeline_stages").count_documents({"type": RECRUITMENT_TYPE}) <= 1:
+            raise HTTPException(status_code=409, detail="A pipeline needs at least one stage")
+        await v3_col("pipeline_stages").delete_one({"id": stage_id})
+        return {"message": "Stage deleted"}
     field = STAGE_TYPE_FIELD[stage["type"]]
     in_use = await v3_col("leads").count_documents({field: stage["name"]})
     if in_use > 0:

@@ -360,3 +360,11 @@ export const recruitmentScheduleInterview = async (id, payload) => (await api.po
 export const recruitmentRecordOffer = async (id, payload) => (await api.post(`/recruitment/candidates/${id}/offer`, payload)).data;
 export const recruitmentAddNote = async (id, note) => (await api.post(`/recruitment/candidates/${id}/notes`, { note })).data;
 export const recruitmentDeleteCandidate = async (id) => (await api.delete(`/recruitment/candidates/${id}`)).data;
+
+// Candidate lead sheets — HR's own Google Sheet sources, separate from Marketing's.
+export const recruitmentSheetStatus = async () => (await api.get("/recruitment/sheets/status")).data;
+export const recruitmentSources = async () => (await api.get("/recruitment/sources")).data;
+export const recruitmentCreateSource = async (payload) => (await api.post("/recruitment/sources", payload)).data;
+export const recruitmentUpdateSource = async (id, payload) => (await api.patch(`/recruitment/sources/${id}`, payload)).data;
+export const recruitmentDeleteSource = async (id) => (await api.delete(`/recruitment/sources/${id}`)).data;
+export const recruitmentPullSource = async (id) => (await api.post(`/recruitment/sources/${id}/pull`)).data;

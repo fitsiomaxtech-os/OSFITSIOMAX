@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   ChevronRight,
   Clock,
+  FileSpreadsheet,
   FileText,
   IndianRupee,
   Mail,
@@ -22,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { MilkDateInput, MilkTimeInput } from "@/components/ui/milk-calendar";
+import { CandidateSheetPanel } from "@/components/hr/CandidateSheetPanel";
 import { to12h } from "@/lib/time";
 import {
   recruitmentBoard,
@@ -94,6 +96,9 @@ export const HumanResourceBoard = ({ user }) => {
   const [search, setSearch] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const [selected, setSelected] = useState(null);
+  // The sheet connections are setup, not day-to-day work, so they sit behind their own
+  // view rather than above the pipeline where they'd be scrolled past every morning.
+  const [view, setView] = useState("pipeline");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -146,6 +151,34 @@ export const HumanResourceBoard = ({ user }) => {
 
   return (
     <div className="space-y-4 pb-24 sm:pb-6" data-testid="hr-recruitment-board">
+      <div className="grid grid-cols-2 gap-2 rounded-lg bg-slate-100 p-1 sm:max-w-md" data-testid="hr-view-switch">
+        {[
+          { key: "pipeline", label: "Candidates", icon: Users },
+          { key: "sheets", label: "Lead Sheets", icon: FileSpreadsheet },
+        ].map((v) => {
+          const Icon = v.icon;
+          return (
+            <button
+              key={v.key}
+              type="button"
+              onClick={() => setView(v.key)}
+              className={`inline-flex items-center justify-center gap-1.5 rounded-md py-2 text-sm font-semibold transition ${
+                view === v.key ? "bg-white text-indigo-600 shadow" : "text-slate-500"
+              }`}
+              data-testid={`hr-view-${v.key}`}
+            >
+              <Icon className="h-4 w-4" /> {v.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {view === "sheets" && (
+        <CandidateSheetPanel onImported={() => { load(); setView("pipeline"); }} />
+      )}
+
+      {view === "pipeline" && (
+      <>
       {/* Summary cards — also the filter. Horizontal scroll on a phone rather than a 2x2
           grid, so the row reads as one control instead of four tiles. */}
       <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 sm:mx-0 sm:grid sm:grid-cols-4 sm:gap-3 sm:overflow-visible sm:px-0 sm:pb-0" data-testid="hr-summary-cards">
@@ -175,14 +208,16 @@ export const HumanResourceBoard = ({ user }) => {
         })}
       </div>
 
-      {/* The pipeline itself. Every stage carries its own colour from the database, so a
-          renamed or recoloured stage needs nothing here. */}
-      <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0" data-testid="hr-stage-pills">
+      {/* The pipeline itself, as solid boxes carrying the same weight as the Add Candidate
+          button rather than outline chips. Each keeps its own colour from the database, so
+          a renamed or recoloured stage needs nothing here; the selected one is picked out
+          by a ring instead of by fill, since every box is already filled. */}
+      <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0" data-testid="hr-stage-pills">
         <button
           type="button"
           onClick={() => setStageFilter("all")}
-          className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-bold transition ${
-            stageFilter === "all" ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 bg-white text-slate-600 hover:border-slate-400"
+          className={`shrink-0 rounded-lg bg-slate-800 px-4 py-2 text-xs font-bold text-white shadow-sm transition hover:opacity-90 ${
+            stageFilter === "all" ? "ring-2 ring-slate-800 ring-offset-2" : ""
           }`}
           data-testid="hr-stage-pill-all"
         >
@@ -195,12 +230,10 @@ export const HumanResourceBoard = ({ user }) => {
               key={s.id}
               type="button"
               onClick={() => setStageFilter(active ? "all" : s.id)}
-              className={`shrink-0 whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-bold transition ${
-                active ? "text-white shadow-sm" : "bg-white text-slate-600 hover:border-slate-400"
+              className={`shrink-0 whitespace-nowrap rounded-lg px-4 py-2 text-xs font-bold text-white shadow-sm transition hover:opacity-90 ${
+                active ? "ring-2 ring-offset-2" : ""
               }`}
-              style={active
-                ? { backgroundColor: s.color, borderColor: s.color }
-                : { borderColor: `${s.color}55`, color: s.color }}
+              style={{ backgroundColor: s.color, ...(active ? { "--tw-ring-color": s.color } : {}) }}
               data-testid={`hr-stage-pill-${s.id}`}
             >
               {s.name} · {s.count}
@@ -246,6 +279,8 @@ export const HumanResourceBoard = ({ user }) => {
       >
         <Plus className="h-6 w-6" />
       </button>
+      </>
+      )}
 
       {showAdd && (
         <AddCandidateModal
