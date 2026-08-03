@@ -294,7 +294,7 @@ const copyApptText = async (text, successMsg) => {
 
 const copyApptMessage = (a) => copyApptText(apptMessage(a), "Confirmation copied — paste it into WhatsApp or SMS");
 
-export const BranchAdminBoard = ({ branchId }) => {
+export const BranchAdminBoard = ({ branchId, embedded = false }) => {
   const [boardData, setBoardData] = useState({ leads: [], stage_counts: {} });
   const [stages, setStages] = useState([]); // dynamic Branch Stages, from Super Admin > Pipeline Stage Management
   const [consultationStages, setConsultationStages] = useState([]); // dynamic Consultation Stages, merged into the same stage bar
@@ -434,7 +434,7 @@ export const BranchAdminBoard = ({ branchId }) => {
     // min-w-0 on the children because a flex item defaults to min-width:auto, which would
     // let the scrolling tab strip and the leads table widen the board instead of
     // scrolling inside it.
-    <div className="flex flex-col gap-4 pb-20 [&>*]:min-w-0 md:pb-0" data-testid="branch-admin-board-root">
+    <div className={`flex flex-col gap-4 [&>*]:min-w-0 ${embedded ? "" : "pb-20 md:pb-0"}`} data-testid="branch-admin-board-root">
       {/* View Tabs — desk only; a phone gets the bottom nav at the end of this file. */}
       <div className="hidden items-center gap-1 overflow-x-auto border-b border-slate-200 pb-0 md:flex" data-testid="branch-view-tabs">
         {VIEW_TABS.map((tab) => {
@@ -757,10 +757,14 @@ export const BranchAdminBoard = ({ branchId }) => {
         <div className="fixed bottom-20 right-4 rounded-md bg-slate-900 px-3 py-2 text-sm text-white md:bottom-4">Loading...</div>
       )}
 
-      {/* Bottom nav — phones only. The top strip scrolls sideways, which left Accountant
-          Manage and Store behind a swipe; down here all six are reachable by thumb.
-          Columns are counted off VIEW_TABS rather than hardcoded, so adding or dropping
-          a tab (as Rehab was) re-divides the bar instead of leaving a gap. */}
+      {/* Bottom nav — phones only, and only when this board owns the page (not when
+          Super Admin's Branch Wise embeds it, which already has its own bottom nav —
+          two fixed bottom bars fighting for the same spot was the actual bug). The top
+          strip scrolls sideways, which left Accountant Manage and Store behind a swipe;
+          down here all six are reachable by thumb. Columns are counted off VIEW_TABS
+          rather than hardcoded, so adding or dropping a tab re-divides the bar instead
+          of leaving a gap. */}
+      {!embedded && (
       <nav
         className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-2px_10px_rgba(15,23,42,0.06)] backdrop-blur supports-[backdrop-filter]:bg-white/85 md:hidden"
         data-testid="branch-bottom-nav"
@@ -789,6 +793,7 @@ export const BranchAdminBoard = ({ branchId }) => {
           })}
         </div>
       </nav>
+      )}
     </div>
   );
 };

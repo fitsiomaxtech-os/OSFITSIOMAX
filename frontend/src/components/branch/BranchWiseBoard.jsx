@@ -38,7 +38,7 @@ export const BranchWiseBoard = ({ branches }) => {
         ))}
       </div>
 
-      {activeId && <BranchAdminBoard key={activeId} branchId={activeId} />}
+      {activeId && <BranchAdminBoard key={activeId} branchId={activeId} embedded />}
     </div>
   );
 };
