@@ -79,6 +79,11 @@ const emptyCandidate = {
   notes: "",
 };
 
+// Type for the stage boxes only — nothing else on the board uses Lexend. The 3rem line
+// height is what sets their height, so the vertical padding comes off: padding on top of it
+// would make the box 4rem and the number no longer mean anything.
+const STAGE_BOX_STYLE = { lineHeight: "3rem", fontFamily: "Lexend, sans-serif" };
+
 // The four cards are the board's filter, the same way the Head Physio's cards are. Each
 // one answers a question HR actually asks, not just "how many rows are there".
 const CARDS = [
@@ -221,9 +226,10 @@ export const HumanResourceBoard = ({ user }) => {
         <button
           type="button"
           onClick={() => setStageFilter("all")}
-          className={`shrink-0 rounded-lg bg-slate-800 px-4 py-2 text-xs font-bold text-white shadow-sm transition hover:opacity-90 sm:shrink sm:flex-1 sm:basis-28 ${
+          className={`shrink-0 rounded-lg bg-slate-800 px-4 text-xs font-bold text-white shadow-sm transition hover:opacity-90 sm:shrink sm:flex-1 sm:basis-28 ${
             stageFilter === "all" ? "ring-2 ring-slate-800 ring-offset-2" : ""
           }`}
+          style={STAGE_BOX_STYLE}
           data-testid="hr-stage-pill-all"
         >
           All Stages
@@ -235,10 +241,10 @@ export const HumanResourceBoard = ({ user }) => {
               key={s.id}
               type="button"
               onClick={() => setStageFilter(active ? "all" : s.id)}
-              className={`shrink-0 whitespace-nowrap rounded-lg px-4 py-2 text-xs font-bold text-white shadow-sm transition hover:opacity-90 sm:shrink sm:flex-1 sm:basis-28 ${
+              className={`shrink-0 whitespace-nowrap rounded-lg px-4 text-xs font-bold text-white shadow-sm transition hover:opacity-90 sm:shrink sm:flex-1 sm:basis-28 ${
                 active ? "ring-2 ring-offset-2" : ""
               }`}
-              style={{ backgroundColor: s.color, ...(active ? { "--tw-ring-color": s.color } : {}) }}
+              style={{ ...STAGE_BOX_STYLE, backgroundColor: s.color, ...(active ? { "--tw-ring-color": s.color } : {}) }}
               data-testid={`hr-stage-pill-${s.id}`}
             >
               {s.name} · {s.count}
