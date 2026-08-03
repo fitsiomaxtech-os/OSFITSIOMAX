@@ -211,12 +211,17 @@ export const HumanResourceBoard = ({ user }) => {
       {/* The pipeline itself, as solid boxes carrying the same weight as the Add Candidate
           button rather than outline chips. Each keeps its own colour from the database, so
           a renamed or recoloured stage needs nothing here; the selected one is picked out
-          by a ring instead of by fill, since every box is already filled. */}
+          by a ring instead of by fill, since every box is already filled.
+
+          From sm up the boxes grow to fill the row edge to edge — the pipeline is the
+          board's main control and shouldn't trail off into whitespace. `basis` sets the
+          width they'd rather be, so a long stage name wraps the row instead of squashing;
+          on a phone the row stays a scroller, since eight boxes cannot fit either way. */}
       <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0" data-testid="hr-stage-pills">
         <button
           type="button"
           onClick={() => setStageFilter("all")}
-          className={`shrink-0 rounded-lg bg-slate-800 px-4 py-2 text-xs font-bold text-white shadow-sm transition hover:opacity-90 ${
+          className={`shrink-0 rounded-lg bg-slate-800 px-4 py-2 text-xs font-bold text-white shadow-sm transition hover:opacity-90 sm:shrink sm:flex-1 sm:basis-28 ${
             stageFilter === "all" ? "ring-2 ring-slate-800 ring-offset-2" : ""
           }`}
           data-testid="hr-stage-pill-all"
@@ -230,7 +235,7 @@ export const HumanResourceBoard = ({ user }) => {
               key={s.id}
               type="button"
               onClick={() => setStageFilter(active ? "all" : s.id)}
-              className={`shrink-0 whitespace-nowrap rounded-lg px-4 py-2 text-xs font-bold text-white shadow-sm transition hover:opacity-90 ${
+              className={`shrink-0 whitespace-nowrap rounded-lg px-4 py-2 text-xs font-bold text-white shadow-sm transition hover:opacity-90 sm:shrink sm:flex-1 sm:basis-28 ${
                 active ? "ring-2 ring-offset-2" : ""
               }`}
               style={{ backgroundColor: s.color, ...(active ? { "--tw-ring-color": s.color } : {}) }}
