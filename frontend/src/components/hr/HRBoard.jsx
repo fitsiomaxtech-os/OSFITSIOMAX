@@ -30,19 +30,27 @@ export const HRBoard = () => {
   const [meta, setMeta] = useState({ departments: [], roles: [], custom_roles: [] });
   const reloadMeta = useCallback(() => hrMeta().then(setMeta).catch((e) => console.warn("[load failed]", e?.message || e)), []);
   useEffect(() => { reloadMeta(); }, [reloadMeta]);
+  // flex+gap, not space-y — the title/description block below is hidden by class on
+  // mobile, not the hidden attribute, so space-y's sibling selector would still hand
+  // the tab strip phantom top margin for content a phone never draws.
   return (
-    <div className="space-y-5" data-testid="hr-board">
-      <div>
+    <div className="flex flex-col gap-5" data-testid="hr-board">
+      <div className="hidden md:block">
         <h2 className="text-2xl font-bold text-slate-900">HR Admin</h2>
         <p className="text-sm text-slate-500">Manage employees, attendance, leave & payroll.</p>
       </div>
-      <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="hr-subtabs">
+      <div className="flex gap-1 rounded-lg border border-slate-200 bg-white p-1 sm:gap-2" data-testid="hr-subtabs">
         {TABS.map((t) => {
           const Icon = t.icon;
           const active = tab === t.key;
           return (
-            <button key={t.key} onClick={() => setTab(t.key)} data-testid={`hr-subtab-${t.key}`} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${active ? "bg-orange-50 text-orange-600" : "text-slate-600 hover:bg-slate-50"}`}>
-              <Icon className="h-4 w-4" />{t.label}
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              data-testid={`hr-subtab-${t.key}`}
+              className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-md px-1 py-2 text-center text-[11px] font-medium leading-tight transition sm:flex-row sm:px-3 sm:text-sm ${active ? "bg-orange-50 text-orange-600" : "text-slate-600 hover:bg-slate-50"}`}
+            >
+              <Icon className="h-4 w-4 shrink-0" /><span className="truncate">{t.label}</span>
             </button>
           );
         })}
@@ -131,8 +139,9 @@ const EmployeesTab = ({ meta }) => {
   const active = employees.filter((e) => (e.status || "active") === "active").length;
   const left = employees.filter((e) => (e.status || "active") !== "active").length;
 
+  // flex+gap, not space-y — the desktop table below is hidden by class on mobile.
   return (
-    <div className="space-y-4" data-testid="hr-employees-tab">
+    <div className="flex flex-col gap-4" data-testid="hr-employees-tab">
       <div className="flex flex-wrap items-center gap-2">
         <button onClick={() => setFilterStatus("active")} className={`rounded-md px-3 py-2 text-sm font-medium ${filterStatus === "active" ? "bg-orange-500 text-white" : "bg-slate-100 text-slate-600"}`} data-testid="hr-emp-tab-active">Active Employees ({active})</button>
         <button onClick={() => setFilterStatus("left")} className={`rounded-md px-3 py-2 text-sm font-medium ${filterStatus === "left" ? "bg-slate-700 text-white" : "bg-slate-100 text-slate-600"}`} data-testid="hr-emp-tab-left">Left ({left})</button>
@@ -144,11 +153,35 @@ const EmployeesTab = ({ meta }) => {
         >
           {sortAZ === "desc" ? "Z → A" : "A → Z"}
         </button>
-        <Input placeholder="Search employee..." value={search} onChange={(e) => setSearch(e.target.value)} className="w-64" data-testid="hr-emp-search" />
-        <Button onClick={() => { setEditing(null); setShowAdd(true); }} className="bg-orange-500 hover:bg-orange-600" data-testid="hr-emp-add-btn"><Plus className="h-4 w-4 mr-1" />Add Employee</Button>
+        <Input placeholder="Search employee..." value={search} onChange={(e) => setSearch(e.target.value)} className="w-full sm:w-64" data-testid="hr-emp-search" />
+        <Button onClick={() => { setEditing(null); setShowAdd(true); }} className="w-full bg-orange-500 hover:bg-orange-600 sm:w-auto" data-testid="hr-emp-add-btn"><Plus className="h-4 w-4 mr-1" />Add Employee</Button>
       </div>
 
-      <Card>
+      <div className="space-y-2 md:hidden" data-testid="hr-emp-cards">
+        {filtered.map((e) => (
+          <div key={e.id} className="rounded-xl border border-slate-200 bg-white p-3" data-testid={`hr-emp-card-${e.id}`}>
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="truncate font-medium text-slate-800">{e.full_name}</p>
+                <p className="text-xs text-slate-400">{e.employee_code}</p>
+              </div>
+              <span className={`shrink-0 rounded px-2 py-0.5 text-xs ${e.status === "active" ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}`}>{e.status || "active"}</span>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600">
+              <span>{e.designation || "—"}{e.department ? ` · ${e.department}` : ""}</span>
+              <span className="font-semibold text-emerald-600">₹{Number(e.net_salary || 0).toLocaleString("en-IN")}</span>
+            </div>
+            <div className="mt-1 text-xs text-slate-500">{e.email}{e.phone ? ` · ${e.phone}` : ""}</div>
+            <div className="mt-2 flex items-center gap-3 border-t border-slate-100 pt-2">
+              <button onClick={() => { setEditing(e); setShowAdd(true); }} className="flex items-center gap-1 text-xs font-medium text-blue-600" data-testid={`hr-emp-card-edit-${e.id}`}><Pencil className="h-3.5 w-3.5" />Edit</button>
+              <button onClick={() => remove(e)} className="flex items-center gap-1 text-xs font-medium text-red-600" data-testid={`hr-emp-card-delete-${e.id}`}><Trash2 className="h-3.5 w-3.5" />Delete</button>
+            </div>
+          </div>
+        ))}
+        {filtered.length === 0 && <p className="rounded-xl border border-dashed border-slate-200 py-8 text-center text-sm text-slate-400">No employees.</p>}
+      </div>
+
+      <Card className="hidden md:block">
         <CardHeader><CardTitle className="text-base">Employee Directory</CardTitle></CardHeader>
         <CardContent className="p-0">
           <div className="overflow-auto">
@@ -405,9 +438,60 @@ const RolesTab = ({ meta, reloadMeta }) => {
     catch (e) { toast.error(e?.response?.data?.detail || "Failed"); }
   };
 
+  // flex+gap, not space-y — the mobile-only toolbar/cards and the desktop table are
+  // each hidden by class depending on breakpoint, not the hidden attribute.
   return (
-    <div className="space-y-4" data-testid="hr-roles-tab">
-      <Card>
+    <div className="flex flex-col gap-4" data-testid="hr-roles-tab">
+      <div className="flex flex-wrap items-center gap-2 md:hidden">
+        <button
+          onClick={() => setSortAZ((s) => (s === "asc" ? "desc" : "asc"))}
+          className={`rounded-md px-3 py-2 text-sm font-medium ${sortAZ ? "bg-sky-600 text-white" : "bg-slate-100 text-slate-600"}`}
+          data-testid="hr-roles-sort-az-mobile"
+        >
+          {sortAZ === "desc" ? "Z → A" : "A → Z"}
+        </button>
+        <RoleFilterDropdown value={roleFilter} options={meta.roles} onChange={setRoleFilter} />
+        <Input placeholder="Search name or email..." value={search} onChange={(e) => setSearch(e.target.value)} className="w-full" data-testid="hr-roles-search-mobile" />
+        <Button onClick={() => setShowCreate(true)} className="w-full bg-sky-600 hover:bg-sky-700" data-testid="hr-roles-create-btn-mobile"><UserPlus className="h-4 w-4 mr-1" />Create User</Button>
+      </div>
+
+      <div className="space-y-2 md:hidden" data-testid="hr-user-cards">
+        {sortedUsers.map((u) => (
+          <div key={u.id} className="rounded-xl border border-slate-200 bg-white p-3" data-testid={`hr-user-card-${u.id}`}>
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="truncate font-medium text-slate-800">{u.full_name}</p>
+                <p className="truncate text-xs text-slate-500">{u.email}</p>
+              </div>
+              <button
+                onClick={() => setActionTarget(u)}
+                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600"
+                aria-label={`Actions for ${u.full_name}`}
+                data-testid={`hr-user-card-actions-${u.id}`}
+              >
+                <MoreVertical className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <select
+                value={u.role}
+                onChange={(e) => changeRole(u, e.target.value)}
+                className={`h-7 rounded border px-2 text-xs font-semibold ${roleClasses(u.role)}`}
+                data-testid={`hr-user-card-role-${u.id}`}
+              >
+                {meta.roles.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
+              </select>
+              <span className={`rounded px-2 py-0.5 text-xs ${u.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}`}>{u.is_active ? "Active" : "Inactive"}</span>
+            </div>
+            {u.linked_employee && (
+              <p className="mt-1.5 text-xs text-emerald-600">{u.linked_employee.employee_code} - {u.linked_employee.designation || u.linked_employee.full_name}</p>
+            )}
+          </div>
+        ))}
+        {sortedUsers.length === 0 && <p className="rounded-xl border border-dashed border-slate-200 py-8 text-center text-sm text-slate-400">No users.</p>}
+      </div>
+
+      <Card className="hidden md:block">
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-base">User Roles & Credentials</CardTitle>
           <div className="flex gap-2">
