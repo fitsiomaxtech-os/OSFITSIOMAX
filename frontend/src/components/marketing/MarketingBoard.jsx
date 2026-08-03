@@ -264,7 +264,7 @@ const SourcesTab = ({ branches = [] }) => {
               </div>
             </CardHeader>
             <CardContent className="space-y-2 text-xs text-slate-600">
-              {s.sheet_url && <p className="truncate"><LinkIcon className="mr-1 inline h-3 w-3" />{s.sheet_url}</p>}
+              {s.sheet_url && <p className="flex items-center gap-1 text-slate-400"><LinkIcon className="h-3 w-3 shrink-0" />Google Sheet linked</p>}
               {s.spreadsheet_id && <p className="text-[10px] text-slate-400">ID: <code>{s.spreadsheet_id.slice(0, 24)}…</code></p>}
               <p>Rows: <span className="font-semibold">{s.row_count || 0}</span> · Last sync: {s.last_synced ? s.last_synced.slice(0, 16).replace("T", " ") : "Never"}</p>
               <p>Mappings: <span className="font-semibold">{Object.keys(s.column_mapping || {}).length}</span> · Custom fields: {(s.custom_fields || []).length}</p>
