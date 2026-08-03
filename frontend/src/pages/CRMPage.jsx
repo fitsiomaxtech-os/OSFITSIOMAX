@@ -18,6 +18,7 @@ import {
   Store,
   Stethoscope,
   UserCircle,
+  UserPlus,
   UserRound,
   Users,
   X,
@@ -64,6 +65,7 @@ import { MasterControlBoard } from "@/components/MasterControlBoard";
 import { DashboardBoard } from "@/components/DashboardBoard";
 import { PipelineStageManagement } from "@/components/PipelineStageManagement";
 import { HRBoard } from "@/components/hr/HRBoard";
+import { HumanResourceBoard } from "@/components/hr/HumanResourceBoard";
 import { BranchManagementBoard } from "@/components/branch/BranchManagementBoard";
 import { BranchWiseBoard } from "@/components/branch/BranchWiseBoard";
 import { PackagesBoard } from "@/components/PackagesBoard";
@@ -77,6 +79,21 @@ const ROLE_META = {
   head_physio: { label: "Head Physio", icon: Stethoscope },
   physio: { label: "Physio", icon: Activity },
   accountant: { label: "Accountant", icon: BadgeIndianRupee },
+  human_resource: { label: "Human Resource", icon: UserPlus },
+};
+
+/** Whether a role slug should land on the recruitment board.
+ *
+ * The HR role is added by hand in Super Admin -> HR Admin, so its slug is whatever label
+ * was typed. Matching the shape of the slug rather than one literal means a different
+ * wording ("HR Manager", "Recruiter") still reaches the board instead of falling through
+ * to a blank screen. Kept in step with _is_hr_role in backend/routers/v3_recruitment.py —
+ * a role that passes here and fails there would render the board and 403 every call.
+ */
+const isHumanResourceRole = (role) => {
+  const r = String(role || "").trim().toLowerCase();
+  if (r.includes("human_resource")) return true;
+  return r.split("_").some((t) => ["hr", "recruiter", "recruitment", "talent"].includes(t));
 };
 
 // Same 9 destinations as the desktop tab strip below. On a phone, the 5 most-used
@@ -226,7 +243,9 @@ export const CRMPage = ({ auth, onLogout }) => {
   const [showSuperAdminMenu, setShowSuperAdminMenu] = useState(false);
 
   const role = auth.user.role;
-  const roleLabel = ROLE_META[role]?.label || role;
+  // A hand-created HR role can carry any slug, so fall back to the board's own name
+  // rather than printing "hr_manager Master View" in the header.
+  const roleLabel = ROLE_META[role]?.label || (isHumanResourceRole(role) ? "Human Resource" : role);
   const boardTitle = role === "pre_sales" ? "Pre-sales Master View" : `${roleLabel} Master View`;
   const myBranch = branches.find((b) => b.id === auth.user.branch_id);
   const myBranchName = myBranch?.branch_name || "";
@@ -569,6 +588,7 @@ export const CRMPage = ({ auth, onLogout }) => {
   const showHeadPhysioBoard = role === "head_physio";
   const showPhysioBoard = role === "physio";
   const showAccountantBoard = role === "accountant";
+  const showHumanResourceBoard = isHumanResourceRole(role);
 
   const filteredAppointmentsForPhysioBoards = appointments;
 
@@ -858,6 +878,10 @@ export const CRMPage = ({ auth, onLogout }) => {
 
         {showPhysioBoard && (
           <PhysioBoard />
+        )}
+
+        {showHumanResourceBoard && (
+          <HumanResourceBoard user={auth.user} />
         )}
 
         {showAccountantBoard && (

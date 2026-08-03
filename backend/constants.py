@@ -49,3 +49,20 @@ V3_HEAD_CONSULTATION_STAGES = [
     "New Appointment",
     "Consultation Visit",
 ]
+
+# Recruitment pipeline for the Human Resource Master View. Candidates (job seekers), not
+# patients — they live in their own `candidates` collection and never touch `leads`.
+#
+# Seeded once by v3_recruitment._ensure_recruitment_stages, then owned by the database:
+# nothing reads these literals at runtime, so HR renaming a stage is safe. Candidates
+# reference a stage by id, not by name, so a rename needs no migration at all.
+V3_RECRUITMENT_STAGES = [
+    # (name, colour, is_final)
+    ("Applied", "#6366f1", False),
+    ("Screening", "#0ea5e9", False),
+    ("Interview", "#f59e0b", False),
+    ("Selected", "#a855f7", False),
+    ("Offer Sent", "#14b8a6", False),
+    ("Joined", "#22c55e", True),
+    ("Rejected", "#ef4444", True),
+]

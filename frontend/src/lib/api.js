@@ -344,3 +344,19 @@ export const unlockPhysioDiagnosis = async (leadId) => (await api.put(`/leads/${
 export const saveTreatmentSummary = async (leadId, summary, locked = false) => (await api.post(`/leads/${leadId}/treatment-summary`, { summary, locked })).data;
 export const unlockTreatmentSummary = async (leadId) => (await api.put(`/leads/${leadId}/treatment-summary/unlock`)).data;
 
+
+// Recruitment — Human Resource Master View. Candidates live in their own collection and
+// reference a stage by id, so nothing here passes a stage *name* around.
+export const recruitmentBoard = async (params = {}) => {
+  const q = new URLSearchParams();
+  Object.entries(params).forEach(([k, v]) => { if (v) q.set(k, v); });
+  return (await api.get(`/recruitment/board${q.toString() ? `?${q.toString()}` : ""}`)).data;
+};
+export const recruitmentStages = async () => (await api.get("/recruitment/stages")).data;
+export const recruitmentCreateCandidate = async (payload) => (await api.post("/recruitment/candidates", payload)).data;
+export const recruitmentUpdateCandidate = async (id, payload) => (await api.patch(`/recruitment/candidates/${id}`, payload)).data;
+export const recruitmentMoveCandidate = async (id, payload) => (await api.post(`/recruitment/candidates/${id}/move`, payload)).data;
+export const recruitmentScheduleInterview = async (id, payload) => (await api.post(`/recruitment/candidates/${id}/interview`, payload)).data;
+export const recruitmentRecordOffer = async (id, payload) => (await api.post(`/recruitment/candidates/${id}/offer`, payload)).data;
+export const recruitmentAddNote = async (id, note) => (await api.post(`/recruitment/candidates/${id}/notes`, { note })).data;
+export const recruitmentDeleteCandidate = async (id) => (await api.delete(`/recruitment/candidates/${id}`)).data;
