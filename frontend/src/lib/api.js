@@ -277,6 +277,7 @@ export const bmDetail = async (branchId) => (await api.get(`/branch-mgmt/${branc
 export const gsStatus = async () => (await api.get("/marketing/google-sheets/status")).data;
 export const gsAuthUrl = async () => (await api.get("/marketing/google-sheets/auth")).data;
 export const gsDisconnect = async (secret) => (await api.post("/marketing/google-sheets/disconnect", { secret })).data;
+export const gsVerifySecret = async (secret) => (await api.post("/marketing/google-sheets/verify-secret", { secret })).data;
 export const gsListSpreadsheets = async (nameContains) => (await api.get(`/marketing/google-sheets/spreadsheets${nameContains ? `?name_contains=${encodeURIComponent(nameContains)}` : ""}`)).data;
 export const gsPull = async (sourceId) => (await api.post(`/marketing/google-sheets/pull/${sourceId}`)).data;
 export const gsAutoSyncSources = async () => (await api.get("/marketing/google-sheets/auto-sync/sources")).data;

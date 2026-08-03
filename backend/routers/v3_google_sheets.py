@@ -169,16 +169,28 @@ class DisconnectInput(BaseModel):
     secret: str
 
 
+def _check_secret(secret: str) -> None:
+    required_secret = os.environ.get("SHEETS_DISCONNECT_SECRET")
+    if not required_secret:
+        raise HTTPException(status_code=503, detail="Not configured yet — set SHEETS_DISCONNECT_SECRET on the server")
+    if secret != required_secret:
+        raise HTTPException(status_code=403, detail="Incorrect code")
+
+
+@router.post("/verify-secret")
+async def verify_secret(payload: DisconnectInput, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    """Non-destructive check used to unlock the Connect/Disconnect controls in the
+    'View' popup — the real enforcement still happens again at /disconnect itself."""
+    _check_secret(payload.secret)
+    return {"ok": True}
+
+
 @router.post("/disconnect")
 async def disconnect(payload: DisconnectInput, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
     # The whole lead pipeline runs through this connection — a stray click here breaks
     # every branch's sheet sync, so disconnecting requires a shared secret on top of the
     # super_admin role check, not just a browser confirm() a super admin can click past.
-    required_secret = os.environ.get("SHEETS_DISCONNECT_SECRET")
-    if not required_secret:
-        raise HTTPException(status_code=503, detail="Disconnect is not configured yet — set SHEETS_DISCONNECT_SECRET on the server")
-    if payload.secret != required_secret:
-        raise HTTPException(status_code=403, detail="Incorrect secret key")
+    _check_secret(payload.secret)
     await v3_col("google_sheets_tokens").delete_one({"id": TOKEN_DOC_ID})
     return {"disconnected": True}
 

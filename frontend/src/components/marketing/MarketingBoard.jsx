@@ -11,7 +11,7 @@ import {
   mkGetDistribution, mkPatchDistribution, mkRefreshDistribution,
   mkGetTeam, mkCreateTeamMember, mkAllLeads, mkAssignLead, mkDeleteLead, mkBulkDelete,
   mkGetSources, mkCreateSource, mkUpdateSource, mkDeleteSource, mkSyncSource,
-  gsStatus, gsAuthUrl, gsDisconnect, gsPull,
+  gsStatus, gsAuthUrl, gsDisconnect, gsVerifySecret, gsPull,
 } from "@/lib/api";
 import { MaskedContact } from "@/components/MaskedContact";
 import { SourcePill } from "@/components/marketing/SourcePill";
@@ -47,9 +47,12 @@ const SourcesTab = ({ branches = [] }) => {
   const [syncResult, setSyncResult] = useState(null);
   const [pullResult, setPullResult] = useState(null);
   const [pullingId, setPullingId] = useState(null);
-  const [showDisconnect, setShowDisconnect] = useState(false);
-  const [disconnectSecret, setDisconnectSecret] = useState("");
-  const [disconnecting, setDisconnecting] = useState(false);
+  // "View" opens a locked popup — entering the code unlocks Connect/Disconnect
+  // controls for that connection, rather than either action being one click away.
+  const [showManage, setShowManage] = useState(false);
+  const [manageCode, setManageCode] = useState("");
+  const [manageUnlocked, setManageUnlocked] = useState(false);
+  const [manageBusy, setManageBusy] = useState(false);
 
   const load = useCallback(() => mkGetSources().then(setSources).catch((e) => console.warn("[load failed]", e?.message || e)), []);
   const loadGs = useCallback(() => gsStatus().then(setGs).catch((e) => console.warn("[gs status]", e?.message || e)), []);
@@ -75,22 +78,34 @@ const SourcesTab = ({ branches = [] }) => {
     } catch (e) { toast.error(e?.response?.data?.detail || "Failed to start OAuth"); }
   };
 
-  // The whole lead pipeline runs through this connection, so disconnecting needs the
-  // shared secret key (set on the server as SHEETS_DISCONNECT_SECRET) — a browser
-  // confirm() alone is too easy to click past by accident.
-  const confirmDisconnect = async () => {
-    if (!disconnectSecret.trim()) { toast.error("Enter the secret key"); return; }
-    setDisconnecting(true);
+  // The whole lead pipeline runs through this connection, so both re-connecting and
+  // disconnecting sit behind a shared code (set on the server as
+  // SHEETS_DISCONNECT_SECRET) — "View" opens locked, the code unlocks the controls.
+  const closeManage = () => { setShowManage(false); setManageCode(""); setManageUnlocked(false); };
+
+  const unlockManage = async () => {
+    if (!manageCode.trim()) { toast.error("Enter the code"); return; }
+    setManageBusy(true);
     try {
-      await gsDisconnect(disconnectSecret.trim());
+      await gsVerifySecret(manageCode.trim());
+      setManageUnlocked(true);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Incorrect code");
+    }
+    setManageBusy(false);
+  };
+
+  const disconnectFromManage = async () => {
+    setManageBusy(true);
+    try {
+      await gsDisconnect(manageCode.trim());
       toast.success("Disconnected");
-      setShowDisconnect(false);
-      setDisconnectSecret("");
+      closeManage();
       loadGs();
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Disconnect failed");
     }
-    setDisconnecting(false);
+    setManageBusy(false);
   };
 
   // Extract spreadsheet ID from any Google Sheets URL: /spreadsheets/d/{ID}/...
@@ -185,7 +200,7 @@ const SourcesTab = ({ branches = [] }) => {
           </div>
           <div className="flex gap-2">
             {gs.connected ? (
-              <Button variant="outline" size="sm" onClick={() => setShowDisconnect(true)} className="text-red-600 hover:bg-red-50" data-testid="gs-disconnect-btn">Disconnect</Button>
+              <Button variant="outline" size="sm" onClick={() => setShowManage(true)} data-testid="gs-view-btn">View</Button>
             ) : (
               <Button onClick={connectGoogle} className="bg-white text-slate-800 border border-slate-300 hover:bg-slate-50 shadow-sm" data-testid="gs-connect-btn">
                 <svg viewBox="0 0 48 48" className="mr-2 h-4 w-4">
@@ -326,29 +341,52 @@ const SourcesTab = ({ branches = [] }) => {
         <EditSourceDialog source={showEdit} branches={branches} onClose={() => setShowEdit(null)} onSaved={() => { setShowEdit(null); load(); }} />
       )}
 
-      {showDisconnect && (
-        <DialogShell title="Disconnect Google Sheets" onClose={() => { setShowDisconnect(false); setDisconnectSecret(""); }} testid="gs-disconnect-dialog">
-          <p className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-700">
-            <Lock className="mt-0.5 h-4 w-4 shrink-0" />
-            Every branch's lead sync runs through this connection. Enter the secret key to confirm.
-          </p>
-          <Input
-            type="password"
-            autoFocus
-            placeholder="Secret key"
-            value={disconnectSecret}
-            onChange={(e) => setDisconnectSecret(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") confirmDisconnect(); }}
-            data-testid="gs-disconnect-secret"
-          />
-          <Button
-            onClick={confirmDisconnect}
-            disabled={disconnecting || !disconnectSecret.trim()}
-            className="w-full bg-red-600 text-white hover:bg-red-700"
-            data-testid="gs-disconnect-confirm"
-          >
-            {disconnecting ? "Disconnecting..." : "Disconnect"}
-          </Button>
+      {showManage && (
+        <DialogShell title="Google Sheets Connection" onClose={closeManage} testid="gs-manage-dialog">
+          {!manageUnlocked ? (
+            <>
+              <p className="flex items-start gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+                <Lock className="mt-0.5 h-4 w-4 shrink-0" />
+                Every branch's lead sync runs through this connection. Enter the code to view controls.
+              </p>
+              <Input
+                type="password"
+                autoFocus
+                placeholder="Code"
+                value={manageCode}
+                onChange={(e) => setManageCode(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") unlockManage(); }}
+                data-testid="gs-manage-code"
+              />
+              <Button
+                onClick={unlockManage}
+                disabled={manageBusy || !manageCode.trim()}
+                className="w-full"
+                data-testid="gs-manage-unlock"
+              >
+                {manageBusy ? "Checking..." : "Unlock"}
+              </Button>
+            </>
+          ) : (
+            <>
+              <p className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-700">
+                {gs.connected ? "Currently connected." : "Not connected."}
+              </p>
+              <Button onClick={connectGoogle} className="w-full bg-white text-slate-800 border border-slate-300 hover:bg-slate-50 shadow-sm" data-testid="gs-manage-connect">
+                {gs.connected ? "Reconnect / Switch Account" : "Connect Google"}
+              </Button>
+              {gs.connected && (
+                <Button
+                  onClick={disconnectFromManage}
+                  disabled={manageBusy}
+                  className="w-full bg-red-600 text-white hover:bg-red-700"
+                  data-testid="gs-manage-disconnect"
+                >
+                  {manageBusy ? "Disconnecting..." : "Disconnect"}
+                </Button>
+              )}
+            </>
+          )}
         </DialogShell>
       )}
     </div>
