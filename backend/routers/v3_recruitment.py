@@ -404,6 +404,10 @@ async def delete_candidate(cand_id: str, user: V3UserOut = Depends(require_hr)):
 
 # ---------------------------------------------------------------- stage admin
 
+class StageReorder(BaseModel):
+    ids: List[str]  # every recruitment stage id, in the order they should sit
+
+
 class StageIn(BaseModel):
     name: str
     color: Optional[str] = "#64748b"
@@ -441,6 +445,22 @@ async def update_recruitment_stage(stage_id: str, payload: StagePatch, user: V3U
     # No candidate rewrite needed on rename: they point at this id, not at its name.
     await v3_col("pipeline_stages").update_one({"id": stage_id, "type": STAGE_TYPE}, {"$set": updates})
     return await v3_col("pipeline_stages").find_one({"id": stage_id}, {"_id": 0})
+
+
+@router.post("/stages/reorder")
+async def reorder_recruitment_stages(payload: StageReorder, user: V3UserOut = Depends(require_hr)):
+    """Rewrite the whole order in one call.
+
+    The full list is required rather than a pair of swapped ids: a partial reorder can
+    leave two stages sharing an `order`, and the pipeline's first stage — where every new
+    candidate lands — is decided by that sort.
+    """
+    existing = {s["id"] for s in await _stages()}
+    if set(payload.ids) != existing:
+        raise HTTPException(status_code=400, detail="Send every recruitment stage id exactly once")
+    for i, sid in enumerate(payload.ids):
+        await v3_col("pipeline_stages").update_one({"id": sid, "type": STAGE_TYPE}, {"$set": {"order": i}})
+    return await _stages()
 
 
 @router.delete("/stages/{stage_id}")

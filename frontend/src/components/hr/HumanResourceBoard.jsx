@@ -14,6 +14,7 @@ import {
   Phone,
   Plus,
   Search,
+  SlidersHorizontal,
   Trash2,
   UserPlus,
   Users,
@@ -24,6 +25,7 @@ import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { MilkDateInput, MilkTimeInput } from "@/components/ui/milk-calendar";
 import { CandidateSheetPanel } from "@/components/hr/CandidateSheetPanel";
+import { RecruitmentStagesModal } from "@/components/hr/RecruitmentStagesModal";
 import { to12h } from "@/lib/time";
 import {
   recruitmentBoard,
@@ -104,6 +106,7 @@ export const HumanResourceBoard = ({ user }) => {
   // The sheet connections are setup, not day-to-day work, so they sit behind their own
   // view rather than above the pipeline where they'd be scrolled past every morning.
   const [view, setView] = useState("pipeline");
+  const [showStages, setShowStages] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -156,26 +159,40 @@ export const HumanResourceBoard = ({ user }) => {
 
   return (
     <div className="space-y-4 pb-24 sm:pb-6" data-testid="hr-recruitment-board">
-      <div className="grid grid-cols-2 gap-2 rounded-lg bg-slate-100 p-1 sm:max-w-md" data-testid="hr-view-switch">
-        {[
-          { key: "pipeline", label: "Candidates", icon: Users },
-          { key: "sheets", label: "Lead Sheets", icon: FileSpreadsheet },
-        ].map((v) => {
-          const Icon = v.icon;
-          return (
-            <button
-              key={v.key}
-              type="button"
-              onClick={() => setView(v.key)}
-              className={`inline-flex items-center justify-center gap-1.5 rounded-md py-2 text-sm font-semibold transition ${
-                view === v.key ? "bg-white text-indigo-600 shadow" : "text-slate-500"
-              }`}
-              data-testid={`hr-view-${v.key}`}
-            >
-              <Icon className="h-4 w-4" /> {v.label}
-            </button>
-          );
-        })}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="grid grid-cols-2 gap-2 rounded-lg bg-slate-100 p-1 sm:max-w-md sm:flex-1" data-testid="hr-view-switch">
+          {[
+            { key: "pipeline", label: "Candidates", icon: Users },
+            { key: "sheets", label: "Lead Sheets", icon: FileSpreadsheet },
+          ].map((v) => {
+            const Icon = v.icon;
+            return (
+              <button
+                key={v.key}
+                type="button"
+                onClick={() => setView(v.key)}
+                className={`inline-flex items-center justify-center gap-1.5 rounded-md py-2 text-sm font-semibold transition ${
+                  view === v.key ? "bg-white text-indigo-600 shadow" : "text-slate-500"
+                }`}
+                data-testid={`hr-view-${v.key}`}
+              >
+                <Icon className="h-4 w-4" /> {v.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Shaping the pipeline is HR's to do, so it lives on their board rather than only
+            under Super Admin's Pipeline Stage Management. Same stages, same records — this
+            is a second door onto them, not a copy. */}
+        <button
+          type="button"
+          onClick={() => setShowStages(true)}
+          className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 shadow-sm transition hover:border-indigo-300 hover:text-indigo-700"
+          data-testid="hr-manage-stages-button"
+        >
+          <SlidersHorizontal className="h-4 w-4" /> Manage Stage ({stages.length})
+        </button>
       </div>
 
       {view === "sheets" && (
@@ -291,6 +308,15 @@ export const HumanResourceBoard = ({ user }) => {
         <Plus className="h-6 w-6" />
       </button>
       </>
+      )}
+
+      {showStages && (
+        <RecruitmentStagesModal
+          onClose={() => setShowStages(false)}
+          // A renamed or reordered stage changes what every pill and card on the board
+          // says, so the board reloads behind the modal rather than after it closes.
+          onChanged={load}
+        />
       )}
 
       {showAdd && (

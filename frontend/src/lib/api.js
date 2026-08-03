@@ -368,3 +368,7 @@ export const recruitmentCreateSource = async (payload) => (await api.post("/recr
 export const recruitmentUpdateSource = async (id, payload) => (await api.patch(`/recruitment/sources/${id}`, payload)).data;
 export const recruitmentDeleteSource = async (id) => (await api.delete(`/recruitment/sources/${id}`)).data;
 export const recruitmentPullSource = async (id) => (await api.post(`/recruitment/sources/${id}/pull`)).data;
+export const recruitmentCreateStage = async (payload) => (await api.post("/recruitment/stages", payload)).data;
+export const recruitmentUpdateStage = async (id, payload) => (await api.patch(`/recruitment/stages/${id}`, payload)).data;
+export const recruitmentDeleteStage = async (id) => (await api.delete(`/recruitment/stages/${id}`)).data;
+export const recruitmentReorderStages = async (ids) => (await api.post("/recruitment/stages/reorder", { ids })).data;
