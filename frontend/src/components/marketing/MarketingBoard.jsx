@@ -173,9 +173,32 @@ const SourcesTab = ({ branches = [] }) => {
   };
 
   const remove = async (id) => {
-    if (!window.confirm("Delete this source?")) return;
     await mkDeleteSource(id);
     load();
+  };
+
+  // Editing or deleting a live source is one accidental tap away from breaking a
+  // branch's lead sync, so both sit behind the same code as Connect/Disconnect —
+  // gate first (verify-secret, non-destructive), then run the actual action.
+  const [codeGate, setCodeGate] = useState(null); // { type: "edit" | "delete", source } | null
+  const [codeGateValue, setCodeGateValue] = useState("");
+  const [codeGateBusy, setCodeGateBusy] = useState(false);
+
+  const closeCodeGate = () => { setCodeGate(null); setCodeGateValue(""); };
+
+  const submitCodeGate = async () => {
+    if (!codeGateValue.trim()) { toast.error("Enter the code"); return; }
+    setCodeGateBusy(true);
+    try {
+      await gsVerifySecret(codeGateValue.trim());
+      const { type, source } = codeGate;
+      closeCodeGate();
+      if (type === "edit") setShowEdit(source);
+      else await remove(source.id);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Incorrect code");
+    }
+    setCodeGateBusy(false);
   };
 
   return (
@@ -221,9 +244,9 @@ const SourcesTab = ({ branches = [] }) => {
         <Button onClick={() => setShowAdd(true)} data-testid="mk-add-source-btn"><Plus className="mr-1 h-4 w-4" />Add Source</Button>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-3">
         {sources.map((s) => (
-          <Card key={s.id} data-testid={`mk-source-card-${s.id}`} className="border-slate-200">
+          <Card key={s.id} data-testid={`mk-source-card-${s.id}`} className="min-w-0 border-slate-200">
             <CardHeader className="flex flex-row items-start justify-between gap-2">
               <div>
                 <CardTitle className="text-base">{s.name}</CardTitle>
@@ -236,8 +259,8 @@ const SourcesTab = ({ branches = [] }) => {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <button onClick={() => setShowEdit(s)} className="text-slate-400 hover:text-sky-600" data-testid={`mk-source-edit-${s.id}`} title="Edit source"><Pencil className="h-4 w-4" /></button>
-                <button onClick={() => remove(s.id)} className="text-slate-400 hover:text-red-500" data-testid={`mk-source-delete-${s.id}`} title="Delete source"><Trash2 className="h-4 w-4" /></button>
+                <button onClick={() => setCodeGate({ type: "edit", source: s })} className="text-slate-400 hover:text-sky-600" data-testid={`mk-source-edit-${s.id}`} title="Edit source"><Pencil className="h-4 w-4" /></button>
+                <button onClick={() => setCodeGate({ type: "delete", source: s })} className="text-slate-400 hover:text-red-500" data-testid={`mk-source-delete-${s.id}`} title="Delete source"><Trash2 className="h-4 w-4" /></button>
               </div>
             </CardHeader>
             <CardContent className="space-y-2 text-xs text-slate-600">
@@ -387,6 +410,36 @@ const SourcesTab = ({ branches = [] }) => {
               )}
             </>
           )}
+        </DialogShell>
+      )}
+
+      {codeGate && (
+        <DialogShell
+          title={codeGate.type === "edit" ? "Edit Source" : "Delete Source"}
+          onClose={closeCodeGate}
+          testid="mk-source-code-gate-dialog"
+        >
+          <p className="flex items-start gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+            <Lock className="mt-0.5 h-4 w-4 shrink-0" />
+            {codeGate.type === "edit" ? "Editing" : "Deleting"} "{codeGate.source.name}" needs the code first.
+          </p>
+          <Input
+            type="password"
+            autoFocus
+            placeholder="Code"
+            value={codeGateValue}
+            onChange={(e) => setCodeGateValue(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") submitCodeGate(); }}
+            data-testid="mk-source-code-gate-input"
+          />
+          <Button
+            onClick={submitCodeGate}
+            disabled={codeGateBusy || !codeGateValue.trim()}
+            className={`w-full ${codeGate.type === "delete" ? "bg-red-600 text-white hover:bg-red-700" : ""}`}
+            data-testid="mk-source-code-gate-confirm"
+          >
+            {codeGateBusy ? "Checking..." : codeGate.type === "edit" ? "Continue to Edit" : "Continue to Delete"}
+          </Button>
         </DialogShell>
       )}
     </div>
