@@ -34,6 +34,57 @@ const Badge = ({ meta }) => (
 
 const INFO_BOX_NEUTRAL = "border-slate-200 bg-slate-50 text-slate-700";
 
+// The same four modes, colours and mode-specific fields the Consultations board
+// collects with — a payment recorded from here has to be indistinguishable from one
+// recorded there, or Accountant Manage ends up with two grades of record.
+const COLLECT_MODES = [
+  { value: "cash", label: "Cash", classes: "border-emerald-300 bg-emerald-50 text-emerald-700", active: "border-emerald-500 bg-emerald-600 text-white" },
+  { value: "upi", label: "UPI", classes: "border-sky-300 bg-sky-50 text-sky-700", active: "border-sky-500 bg-sky-600 text-white" },
+  { value: "card", label: "Card", classes: "border-violet-300 bg-violet-50 text-violet-700", active: "border-violet-500 bg-violet-600 text-white" },
+  { value: "cheque", label: "Cheque", classes: "border-amber-300 bg-amber-50 text-amber-700", active: "border-amber-500 bg-amber-600 text-white" },
+];
+
+const emptyCollectDraft = {
+  amount: "",
+  payment_mode: "cash",
+  upi_transaction_id: "", upi_utr: "",
+  account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "",
+  cheque_number: "",
+};
+
+const CollectField = ({ label, value, onChange, placeholder, testid }) => (
+  <label className="block">
+    <span className="mb-1 block text-[11px] font-semibold text-slate-600">{label}</span>
+    <input
+      value={value}
+      onChange={onChange}
+      placeholder={placeholder}
+      className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400"
+      data-testid={testid}
+    />
+  </label>
+);
+
+/** The reference a paid installment carries, as short chips — how it was paid and the
+ *  proof of it. Nothing renders for a mode that has no reference (cash). */
+const paidReference = (s) => [
+  s.upi_transaction_id && `Txn ${s.upi_transaction_id}`,
+  s.upi_utr && `UTR ${s.upi_utr}`,
+  s.account_last4 && `A/C ****${s.account_last4}`,
+  s.account_holder_name,
+  s.cheque_number && `Cheque #${s.cheque_number}`,
+  s.bank_name,
+  s.ifsc_code,
+].filter(Boolean);
+
+/** The same reference, pulled back out of an activity-log line for the transaction list,
+ *  which only ever receives the rendered sentence. Anything before the mode marker is
+ *  the description, not a reference, so it's left alone. */
+const detailReference = (details) => {
+  const m = /·\s*(UPI txn|UTR|A\/C \*\*\*\*|Cheque #)/.exec(details || "");
+  return m ? details.slice(m.index + 1).trim() : "";
+};
+
 const InfoBox = ({ children, className = INFO_BOX_NEUTRAL }) => (
   <div className={`rounded-md border px-2.5 py-1.5 ${className}`}>
     {children}
@@ -73,6 +124,7 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("overview");
   const [recording, setRecording] = useState(false);
+  const [collectDraft, setCollectDraft] = useState(null);
 
   const load = () => {
     setLoading(true);
@@ -113,12 +165,54 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
     window.location.href = `tel:${client.phone.replace(/[^0-9+]/g, "")}`;
   };
 
-  const recordPayment = async () => {
+  const nextInstallment = schedule.find((s) => s.installment_number === pd.next_installment_number);
+
+  /** Opens the confirmation popup rather than collecting on the spot. Money changing
+   *  hands off a single unguarded click is how a client gets charged twice. */
+  const openCollect = () => {
     if (!pd.next_installment_number) return;
+    setCollectDraft({ ...emptyCollectDraft, amount: nextInstallment?.amount ? String(nextInstallment.amount) : "" });
+  };
+
+  const setDraft = (patch) => setCollectDraft((d) => ({ ...d, ...patch }));
+
+  const submitCollect = async () => {
+    const draft = collectDraft;
+    const amount = parseFloat(draft.amount);
+    if (!(amount > 0)) {
+      toast.error("Enter a valid amount");
+      return;
+    }
+    const mode = draft.payment_mode;
+    const payload = { payment_mode: mode, amount };
+    // Validated here as well as on the server so the popup keeps what was typed —
+    // a round trip that fails would otherwise send them back to an empty form.
+    if (mode === "upi") {
+      payload.upi_transaction_id = draft.upi_transaction_id.trim();
+      payload.upi_utr = draft.upi_utr.trim();
+    } else if (mode === "card") {
+      if (!draft.account_number.trim() || !draft.account_holder_name.trim() || !draft.bank_name.trim() || !draft.ifsc_code.trim()) {
+        toast.error("Account Number, Account Holder Name, Bank Name and IFSC Code are required");
+        return;
+      }
+      payload.account_number = draft.account_number.trim();
+      payload.account_holder_name = draft.account_holder_name.trim();
+      payload.bank_name = draft.bank_name.trim();
+      payload.ifsc_code = draft.ifsc_code.trim();
+    } else if (mode === "cheque") {
+      if (!draft.bank_name.trim() || !draft.cheque_number.trim()) {
+        toast.error("Bank Name and Cheque Number are required");
+        return;
+      }
+      payload.bank_name = draft.bank_name.trim();
+      payload.cheque_number = draft.cheque_number.trim();
+    }
+
     setRecording(true);
     try {
-      await markInstallmentPaid(leadId, pd.next_installment_number);
-      toast.success(`Payment recorded for ${client.name}`);
+      await markInstallmentPaid(leadId, pd.next_installment_number, payload);
+      toast.success(`${fmt(amount)} collected from ${client.name}`);
+      setCollectDraft(null);
       load();
       onChanged && onChanged();
     } catch (e) {
@@ -220,11 +314,23 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
                   <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Payment Schedule</p>
                   <div className="space-y-1.5">
                     {schedule.map((s) => (
-                      <div key={s.installment_number} className="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-1.5 text-xs" data-testid={`client-history-schedule-${s.installment_number}`}>
-                        <span className="w-8 font-medium text-slate-500">#{s.installment_number}</span>
-                        <span className="flex-1"><Badge meta={SCHEDULE_STATUS_META[s.status] || SCHEDULE_STATUS_META.upcoming} /></span>
-                        <span className="w-20 text-right font-semibold text-slate-700">{fmt(s.amount)}</span>
-                        <span className="w-24 text-right text-slate-400">{s.due_date}</span>
+                      <div key={s.installment_number} className="rounded-lg border border-slate-100 px-3 py-1.5 text-xs" data-testid={`client-history-schedule-${s.installment_number}`}>
+                        <div className="flex items-center justify-between">
+                          <span className="w-8 font-medium text-slate-500">#{s.installment_number}</span>
+                          <span className="flex-1"><Badge meta={SCHEDULE_STATUS_META[s.status] || SCHEDULE_STATUS_META.upcoming} /></span>
+                          <span className="w-20 text-right font-semibold text-slate-700">{fmt(s.amount)}</span>
+                          <span className="w-24 text-right text-slate-400">{s.due_date}</span>
+                        </div>
+                        {/* How this one was settled, once it has been — the UTR or cheque
+                            number is the only way to match it to a bank statement later. */}
+                        {s.payment_mode && (
+                          <div className="mt-1 flex flex-wrap items-center gap-1 pl-8" data-testid={`client-history-schedule-ref-${s.installment_number}`}>
+                            <span className="rounded-[4px] border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">{formatMode(s.payment_mode)}</span>
+                            {paidReference(s).map((chip) => (
+                              <span key={chip} className="rounded-[4px] bg-slate-50 px-1.5 py-0.5 text-[10px] text-slate-500">{chip}</span>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -242,6 +348,11 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
                         <div>
                           <p className="font-medium text-slate-700 capitalize">{tx.source} · <span className="text-slate-500">{formatMode(tx.payment_mode)}</span></p>
                           <p className="text-[10px] text-slate-400">{fmtDate(tx.date)} {tx.receipt_no && `· ${tx.receipt_no}`}</p>
+                          {/* The UPI/card/cheque reference recorded with this payment,
+                              lifted back out of the activity line it was written into. */}
+                          {detailReference(tx.details) && (
+                            <p className="mt-0.5 text-[10px] text-slate-500" data-testid={`client-history-tx-ref-${tx.id}`}>{detailReference(tx.details)}</p>
+                          )}
                         </div>
                         <div className="text-right">
                           <p className="font-semibold text-emerald-700">{fmt(tx.amount)}</p>
@@ -274,8 +385,9 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Quick Actions</p>
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                   <button
-                    type="button" onClick={recordPayment} disabled={!pd.next_installment_number || recording}
-                    className="flex items-center justify-center gap-1.5 rounded-md border border-slate-200 px-2 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    type="button" onClick={openCollect} disabled={!pd.next_installment_number || recording}
+                    title={pd.next_installment_number ? `Collect installment #${pd.next_installment_number}` : "Nothing left to collect on an installment schedule for this client"}
+                    className="flex items-center justify-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-2 text-xs font-medium text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-white disabled:text-slate-600 disabled:opacity-40"
                     data-testid="client-history-record-payment"
                   >
                     <Wallet className="h-3.5 w-3.5" /> {recording ? "Saving..." : "Collect Payment"}
@@ -296,6 +408,16 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
                     <PhoneCall className="h-3.5 w-3.5" /> Call Client
                   </button>
                 </div>
+                {/* A dead grey button tells nobody why. This screen can only collect
+                    against an installment schedule; a consultation fee or a one-shot
+                    treatment fee is collected from the lead's own Consultations card. */}
+                {!pd.next_installment_number && (
+                  <p className="mt-2 text-[11px] text-slate-400" data-testid="client-history-collect-note">
+                    {data.balance > 0
+                      ? "This client's balance isn't on an installment schedule — collect it from their card in Consultations."
+                      : "Nothing left to collect — this client is fully paid."}
+                  </p>
+                )}
               </div>
             </>
           ) : (
@@ -315,6 +437,107 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
           )}
         </div>
       </div>
+
+      {collectDraft && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-3 backdrop-blur-sm"
+          onClick={(e) => { if (e.target === e.currentTarget && !recording) setCollectDraft(null); }}
+          data-testid="client-collect-modal"
+        >
+          <div className="flex max-h-[92vh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex shrink-0 items-center justify-between bg-gradient-to-r from-emerald-600 to-teal-600 px-5 py-3.5 text-white">
+              <div className="flex items-center gap-2">
+                <Wallet className="h-5 w-5" />
+                <p className="text-base font-semibold">Collect Payment</p>
+              </div>
+              <button onClick={() => !recording && setCollectDraft(null)} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="client-collect-close">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-5 py-4">
+              {/* What exactly is being collected, before any of it is typed — the whole
+                  point of the confirmation step. */}
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
+                  Installment #{pd.next_installment_number}{pd.installments_total ? ` of ${pd.installments_total}` : ""}
+                </p>
+                <p className="mt-0.5 text-2xl font-bold text-emerald-700">{fmt(nextInstallment?.amount)}</p>
+                <p className="mt-0.5 text-[11px] text-emerald-700/80">
+                  {client?.name}{nextInstallment?.due_date ? ` · due ${nextInstallment.due_date}` : ""}
+                </p>
+              </div>
+
+              <div className="mt-4 space-y-3">
+                <CollectField
+                  label="Amount Collected"
+                  value={collectDraft.amount}
+                  onChange={(e) => setDraft({ amount: e.target.value })}
+                  placeholder="0"
+                  testid="client-collect-amount"
+                />
+
+                <div>
+                  <span className="mb-1 block text-[11px] font-semibold text-slate-600">Payment Mode</span>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {COLLECT_MODES.map((m) => (
+                      <button
+                        key={m.value}
+                        type="button"
+                        onClick={() => setDraft({ payment_mode: m.value })}
+                        className={`rounded-md border px-2 py-1.5 text-xs font-semibold transition ${collectDraft.payment_mode === m.value ? m.active : m.classes}`}
+                        data-testid={`client-collect-mode-${m.value}`}
+                      >
+                        {m.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {collectDraft.payment_mode === "upi" && (
+                  <div className="space-y-3 rounded-lg border border-sky-100 bg-sky-50/50 p-3">
+                    <CollectField label="UPI Transaction ID" value={collectDraft.upi_transaction_id} onChange={(e) => setDraft({ upi_transaction_id: e.target.value })} placeholder="e.g. 428301947281" testid="client-collect-upi-txn" />
+                    <CollectField label="UTR" value={collectDraft.upi_utr} onChange={(e) => setDraft({ upi_utr: e.target.value })} placeholder="e.g. 302411223344" testid="client-collect-upi-utr" />
+                  </div>
+                )}
+
+                {collectDraft.payment_mode === "card" && (
+                  <div className="space-y-3 rounded-lg border border-violet-100 bg-violet-50/50 p-3">
+                    <CollectField label="Account Number *" value={collectDraft.account_number} onChange={(e) => setDraft({ account_number: e.target.value })} placeholder="Only the last 4 digits are stored" testid="client-collect-account-number" />
+                    <CollectField label="Account Holder Name *" value={collectDraft.account_holder_name} onChange={(e) => setDraft({ account_holder_name: e.target.value })} placeholder="Name on the card" testid="client-collect-account-holder" />
+                    <CollectField label="Bank Name *" value={collectDraft.bank_name} onChange={(e) => setDraft({ bank_name: e.target.value })} placeholder="e.g. HDFC Bank" testid="client-collect-bank" />
+                    <CollectField label="IFSC Code *" value={collectDraft.ifsc_code} onChange={(e) => setDraft({ ifsc_code: e.target.value })} placeholder="e.g. HDFC0001234" testid="client-collect-ifsc" />
+                  </div>
+                )}
+
+                {collectDraft.payment_mode === "cheque" && (
+                  <div className="space-y-3 rounded-lg border border-amber-100 bg-amber-50/50 p-3">
+                    <CollectField label="Bank Name *" value={collectDraft.bank_name} onChange={(e) => setDraft({ bank_name: e.target.value })} placeholder="e.g. HDFC Bank" testid="client-collect-cheque-bank" />
+                    <CollectField label="Cheque Number *" value={collectDraft.cheque_number} onChange={(e) => setDraft({ cheque_number: e.target.value })} placeholder="e.g. 004512" testid="client-collect-cheque-number" />
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex shrink-0 items-center justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3">
+              <button
+                type="button" onClick={() => setCollectDraft(null)} disabled={recording}
+                className="rounded-md border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-white disabled:opacity-50"
+                data-testid="client-collect-cancel"
+              >
+                Cancel
+              </button>
+              <button
+                type="button" onClick={submitCollect} disabled={recording}
+                className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+                data-testid="client-collect-confirm"
+              >
+                {recording ? "Collecting..." : "Confirm & Collect"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

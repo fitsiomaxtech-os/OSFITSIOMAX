@@ -588,12 +588,24 @@ async def client_transaction_history(
     installments = (lead.get("treatment_fee_payment_details") or {}).get("installments") or []
     session = _lead_session_summary(lead)
 
+    # A collected installment carries how it was paid and the reference that proves it
+    # (UTR, cheque number, the account's last four). Those are written at collection
+    # time but were never returned here, so the Client Details popup had no way to show
+    # them -- the card number itself is never stored, only the last four digits.
     schedule = [
         {
             "installment_number": idx,
             "amount": inst.get("amount", 0),
             "due_date": inst.get("due_date", ""),
             "status": _installment_status(inst, today),
+            "payment_mode": inst.get("payment_mode"),
+            "upi_transaction_id": inst.get("upi_transaction_id"),
+            "upi_utr": inst.get("upi_utr"),
+            "account_last4": inst.get("account_last4"),
+            "account_holder_name": inst.get("account_holder_name"),
+            "bank_name": inst.get("bank_name"),
+            "ifsc_code": inst.get("ifsc_code"),
+            "cheque_number": inst.get("cheque_number"),
         }
         for idx, inst in enumerate(installments, start=1)
     ]
