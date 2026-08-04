@@ -263,12 +263,15 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "" }) => {
                 <table className="w-full min-w-[720px] text-sm">
                   <thead className="bg-slate-50 text-left text-[10px] uppercase tracking-wider text-slate-400">
                     <tr>
-                      <th className="px-4 py-2.5 font-semibold">Patient</th>
-                      <th className="px-4 py-2.5 font-semibold">Patient No.</th>
-                      <th className="px-4 py-2.5 font-semibold">Phone</th>
-                      <th className="px-4 py-2.5 font-semibold">Stage</th>
-                      <th className="px-4 py-2.5 font-semibold">Expert / Branch</th>
-                      <th className="px-4 py-2.5 font-semibold">When</th>
+                      {/* Patient stays left — it's the column the eye scans down to find
+                          a row, and a ragged left edge is exactly what makes a name list
+                          hard to scan. Everything after it is centred. */}
+                      <th className="px-4 py-2.5 text-left font-semibold">Patient</th>
+                      <th className="px-4 py-2.5 text-center font-semibold">Patient No.</th>
+                      <th className="px-4 py-2.5 text-center font-semibold">Phone</th>
+                      <th className="px-4 py-2.5 text-center font-semibold">Stage</th>
+                      <th className="px-4 py-2.5 text-center font-semibold">Expert / Branch</th>
+                      <th className="px-4 py-2.5 text-center font-semibold">When</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -276,16 +279,16 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "" }) => {
                       <tr><td colSpan={6} className="px-4 py-10 text-center text-sm text-slate-400">Nothing on this day.</td></tr>
                     ) : allRows.map((r) => (
                       <tr key={r.key} className="hover:bg-slate-50" data-testid={`hp-all-row-${r.key}`}>
-                        <td className="px-4 py-3 font-medium text-slate-800">{r.name}</td>
-                        <td className="px-4 py-3 font-mono text-[11px] text-slate-400">{r.patientNo || "—"}</td>
-                        <td className="px-4 py-3 text-slate-600">{r.phone || "—"}</td>
-                        <td className="px-4 py-3">
+                        <td className="px-4 py-3 text-left font-medium text-slate-800">{r.name}</td>
+                        <td className="px-4 py-3 text-center font-mono text-[11px] text-slate-400">{r.patientNo || "—"}</td>
+                        <td className="px-4 py-3 text-center text-slate-600">{r.phone || "—"}</td>
+                        <td className="px-4 py-3 text-center">
                           <span className={`inline-flex whitespace-nowrap rounded-[5px] border px-2 py-0.5 text-[10px] font-bold ${STAGE_TONES[r.tone]}`}>
                             {r.stage}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-slate-600">{r.who || "—"}</td>
-                        <td className="px-4 py-3 text-slate-500">{r.when || "—"}</td>
+                        <td className="px-4 py-3 text-center text-slate-600">{r.who || "—"}</td>
+                        <td className="px-4 py-3 text-center text-slate-500">{r.when || "—"}</td>
                       </tr>
                     ))}
                   </tbody>
