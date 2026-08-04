@@ -257,7 +257,7 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
           <Search className="pointer-events-none absolute left-2 top-2.5 h-4 w-4 text-slate-400" />
           <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search leads by name, email, phone..." className="h-10 pl-8" data-testid="presales-search" />
         </div>
-        <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="presales-date-filter" />
+        <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="presales-date-filter" centered />
         <PullFromSheetButton onPulled={load} />
         <Button onClick={() => setShowCreate(true)} className="h-10 bg-sky-600 hover:bg-sky-700" data-testid="presales-create-lead-btn"><Plus className="h-4 w-4 mr-1" />Create Lead</Button>
         <select
@@ -420,7 +420,7 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
               className="h-8 border-0 p-0 focus-visible:ring-0"
               data-testid="presales-mobile-search"
             />
-            <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="presales-mobile-date-filter" />
+            <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="presales-mobile-date-filter" centered />
             <PullFromSheetButton onPulled={() => { load(); setStageFilter("New Leads"); }} iconOnly />
           </div>
 
@@ -632,7 +632,7 @@ const ConsultationsTab = ({ leads, branches, loading, onOpen }) => {
     <div className="space-y-3 md:hidden" data-testid="presales-consultations-tab">
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-sm font-semibold text-slate-700">Consultations ({filtered.length})</h2>
-        <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="presales-consult-date-filter" />
+        <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="presales-consult-date-filter" centered />
       </div>
 
       <div className="grid grid-cols-3 gap-2" data-testid="presales-consult-milestones">
