@@ -187,13 +187,22 @@ export const ConsultationCollectionsBoard = ({ rows, onView }) => {
             }}
             testId="consultation-collections-mode-filter"
           />
+          {/* Centred: these sit in a toolbar directly above the table, where an anchored
+              panel opens over the rows and is clipped by the scroll container. */}
           <MilkDateInput
-             value={fromDate} onChange={(e) => setFromDate(e.target.value)}
+            centered
+            title="From Date"
+            placeholder="From date"
+            value={fromDate} onChange={(e) => setFromDate(e.target.value)}
             className="h-9 rounded-md border border-slate-200 px-2 text-sm"
             data-testid="consultation-collections-from-date"
           />
           <MilkDateInput
-             value={toDate} onChange={(e) => setToDate(e.target.value)}
+            centered
+            title="To Date"
+            placeholder="To date"
+            min={fromDate || undefined}
+            value={toDate} onChange={(e) => setToDate(e.target.value)}
             className="h-9 rounded-md border border-slate-200 px-2 text-sm"
             data-testid="consultation-collections-to-date"
           />

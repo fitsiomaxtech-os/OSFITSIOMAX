@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, ChevronLeft, ChevronRight, Clock } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, Clock, X } from "lucide-react";
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const DOW = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
@@ -132,21 +132,25 @@ export default MilkCalendar;
  */
 export const MilkDateInput = ({
   value, onChange, min, max, disabled, className = "", accent = "amber",
-  placeholder = "Select date", ...rest
+  placeholder = "Select date", centered = false, title = "Select Date", ...rest
 }) => {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
   useEffect(() => {
-    if (!open) return undefined;
+    // A centred dialog is dismissed by its own backdrop; a document listener here would
+    // also fire for clicks inside it.
+    if (!open || centered) return undefined;
     const onDocClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
     document.addEventListener("mousedown", onDocClick);
     return () => document.removeEventListener("mousedown", onDocClick);
-  }, [open]);
+  }, [open, centered]);
 
   const label = value
     ? new Date(`${value}T00:00:00`).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
     : placeholder;
+
+  const pick = (d) => { onChange?.({ target: { value: d } }); setOpen(false); };
 
   return (
     <div className="relative" ref={ref}>
@@ -160,19 +164,39 @@ export const MilkDateInput = ({
         <span className="truncate">{label}</span>
         <CalendarDays className="h-4 w-4 shrink-0 text-slate-400" />
       </button>
-      {open && (
+
+      {/* `centered` opens the calendar as a normal dialog in the middle of the screen
+          instead of a panel hanging off the field. Anchored is right for a form, where the
+          calendar sits under the input it fills; it is wrong in a toolbar above a table,
+          where the panel opens over the rows and gets clipped by whatever scrolls. */}
+      {open && (centered ? (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/50 p-3 backdrop-blur-sm sm:p-4"
+          onClick={(e) => { if (e.target === e.currentTarget) setOpen(false); }}
+          data-testid={`${rest["data-testid"] || "milk-date"}-modal`}
+        >
+          <div className="max-h-[90vh] w-full max-w-xs overflow-y-auto rounded-2xl border border-[#EFEAE0] bg-[#FDFCF8] p-3 shadow-2xl sm:max-w-sm">
+            <div className="mb-2 flex items-center justify-between px-1">
+              <p className="text-sm font-bold text-slate-800">{title}</p>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="rounded-full p-1.5 text-slate-400 hover:bg-[#F3EFE6] hover:text-slate-600"
+                aria-label="Close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <MilkCalendar value={value} min={min} max={max} accent={accent} onChange={pick} />
+          </div>
+        </div>
+      ) : (
         // Right-aligned and above/below by container flow; w-max keeps the grid from being
         // squeezed by a narrow field.
         <div className="absolute left-0 z-50 mt-1 w-max">
-          <MilkCalendar
-            value={value}
-            min={min}
-            max={max}
-            accent={accent}
-            onChange={(d) => { onChange?.({ target: { value: d } }); setOpen(false); }}
-          />
+          <MilkCalendar value={value} min={min} max={max} accent={accent} onChange={pick} />
         </div>
-      )}
+      ))}
     </div>
   );
 };
