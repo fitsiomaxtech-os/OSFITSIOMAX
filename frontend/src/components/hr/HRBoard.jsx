@@ -117,6 +117,7 @@ const EmployeesTab = ({ meta }) => {
   const [sortAZ, setSortAZ] = useState(null); // null = as-loaded | "asc" | "desc"
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [viewing, setViewing] = useState(null);
 
   const load = useCallback(() => hrEmployees({ status: filterStatus === "all" ? "" : filterStatus }).then(setEmployees).catch((e) => console.warn("[load failed]", e?.message || e)), [filterStatus]);
   useEffect(() => { load(); }, [load]);
@@ -132,7 +133,7 @@ const EmployeesTab = ({ meta }) => {
 
   const remove = async (emp) => {
     if (!window.confirm(`Delete employee ${emp.full_name}?`)) return;
-    try { await hrDeleteEmployee(emp.id); toast.success("Deleted"); load(); }
+    try { await hrDeleteEmployee(emp.id); toast.success("Deleted"); setViewing(null); load(); }
     catch (e) { toast.error(e?.response?.data?.detail || "Delete failed"); }
   };
 
@@ -173,8 +174,7 @@ const EmployeesTab = ({ meta }) => {
             </div>
             <div className="mt-1 text-xs text-slate-500">{e.email}{e.phone ? ` · ${e.phone}` : ""}</div>
             <div className="mt-2 flex items-center gap-3 border-t border-slate-100 pt-2">
-              <button onClick={() => { setEditing(e); setShowAdd(true); }} className="flex items-center gap-1 text-xs font-medium text-blue-600" data-testid={`hr-emp-card-edit-${e.id}`}><Pencil className="h-3.5 w-3.5" />Edit</button>
-              <button onClick={() => remove(e)} className="flex items-center gap-1 text-xs font-medium text-red-600" data-testid={`hr-emp-card-delete-${e.id}`}><Trash2 className="h-3.5 w-3.5" />Delete</button>
+              <button onClick={() => setViewing(e)} className="flex items-center gap-1 text-xs font-medium text-sky-600" data-testid={`hr-emp-card-view-${e.id}`}><Eye className="h-3.5 w-3.5" />View</button>
             </div>
           </div>
         ))}
@@ -204,11 +204,10 @@ const EmployeesTab = ({ meta }) => {
                     <td className="px-3 py-2 font-semibold text-emerald-600">₹{Number(e.net_salary || 0).toLocaleString("en-IN")}</td>
                     <td className="px-3 py-2"><span className={`rounded px-2 py-0.5 text-xs ${e.status === "active" ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}`}>{e.status || "active"}</span></td>
                     <td className="px-3 py-2">
-                      <div className="flex gap-2">
-                        <button className="text-slate-500 hover:text-sky-600" data-testid={`hr-emp-view-${e.id}`}><Eye className="h-4 w-4" /></button>
-                        <button onClick={() => { setEditing(e); setShowAdd(true); }} className="text-blue-500 hover:text-blue-700" data-testid={`hr-emp-edit-${e.id}`}><Pencil className="h-4 w-4" /></button>
-                        <button onClick={() => remove(e)} className="text-red-500 hover:text-red-700" data-testid={`hr-emp-delete-${e.id}`}><Trash2 className="h-4 w-4" /></button>
-                      </div>
+                      {/* One way in. Edit and Delete now live inside the view popup, where
+                          you can see who you are about to change before you change them —
+                          this eye previously had no handler at all and did nothing. */}
+                      <button onClick={() => setViewing(e)} title="View employee" className="text-slate-500 hover:text-sky-600" data-testid={`hr-emp-view-${e.id}`}><Eye className="h-4 w-4" /></button>
                     </td>
                   </tr>
                 ))}
@@ -219,10 +218,131 @@ const EmployeesTab = ({ meta }) => {
         </CardContent>
       </Card>
 
+      {viewing && (
+        <EmployeeViewModal
+          employee={viewing}
+          onClose={() => setViewing(null)}
+          onEdit={() => { setEditing(viewing); setViewing(null); setShowAdd(true); }}
+          onDelete={() => remove(viewing)}
+        />
+      )}
+
       {showAdd && <AddEmployeeModal employee={editing} meta={meta} onClose={() => { setShowAdd(false); setEditing(null); }} onSaved={() => { setShowAdd(false); setEditing(null); load(); }} />}
     </div>
   );
 };
+
+// ---------- Employee View Modal ----------
+
+const money = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
+
+const ViewRow = ({ label, value }) => (
+  <div className="flex items-start justify-between gap-3 border-b border-slate-100 py-1.5 last:border-0">
+    <span className="shrink-0 text-xs text-slate-500">{label}</span>
+    <span className="text-right text-xs font-medium text-slate-800">{value || "—"}</span>
+  </div>
+);
+
+const ViewSection = ({ title, children }) => (
+  <div className="rounded-xl border border-slate-200 p-3">
+    <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">{title}</p>
+    {children}
+  </div>
+);
+
+/**
+ * The employee record, read-only, with Edit and Delete on it — the single entry point
+ * from the directory's Actions column. Deleting from a row you can only identify by
+ * position is how the wrong person gets removed; here the whole record is on screen
+ * first.
+ */
+const EmployeeViewModal = ({ employee: e, onClose, onEdit, onDelete }) => (
+  <div
+    className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4"
+    onClick={(ev) => { if (ev.target === ev.currentTarget) onClose(); }}
+    data-testid="hr-emp-view-modal"
+  >
+    <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg bg-white shadow-xl">
+      <div className="flex shrink-0 items-start justify-between border-b border-slate-200 px-5 py-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <h3 className="truncate text-base font-semibold text-slate-900" data-testid="hr-emp-view-name">{e.full_name}</h3>
+            <span className={`shrink-0 rounded px-2 py-0.5 text-[10px] font-semibold ${e.status === "active" ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}`}>{e.status || "active"}</span>
+          </div>
+          <p className="mt-0.5 text-xs text-slate-500">
+            {e.employee_code || "No code"}{e.designation ? ` · ${e.designation}` : ""}{e.department ? ` · ${e.department}` : ""}
+          </p>
+        </div>
+        <button onClick={onClose} className="shrink-0 text-slate-400 hover:text-slate-600" data-testid="hr-emp-view-close"><X className="h-4 w-4" /></button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-5">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <ViewSection title="Personal">
+            <ViewRow label="Email" value={e.email} />
+            <ViewRow label="Phone" value={e.phone} />
+            <ViewRow label="Date of Birth" value={e.dob} />
+            <ViewRow label="Gender" value={e.gender} />
+            <ViewRow label="Blood Group" value={e.blood_group} />
+            <ViewRow label="Marital Status" value={e.marital_status} />
+            <ViewRow label="Father's Name" value={e.father_name} />
+            <ViewRow label="Mother's Name" value={e.mother_name} />
+          </ViewSection>
+
+          <ViewSection title="Employment">
+            <ViewRow label="Employee Code" value={e.employee_code} />
+            <ViewRow label="Department" value={e.department} />
+            <ViewRow label="Designation" value={e.designation} />
+            <ViewRow label="Joining Date" value={e.joining_date} />
+            <ViewRow label="Reporting To" value={e.reporting_to} />
+            <ViewRow label="Status" value={e.status || "active"} />
+          </ViewSection>
+
+          <ViewSection title="ID & Documents">
+            <ViewRow label="PAN" value={e.pan} />
+            <ViewRow label="Aadhar" value={e.aadhar} />
+          </ViewSection>
+
+          <ViewSection title="Address & Emergency">
+            <ViewRow label="Address" value={e.address} />
+            <ViewRow label="Emergency Contact" value={e.emergency_contact_name} />
+            <ViewRow label="Emergency Phone" value={e.emergency_contact_phone} />
+          </ViewSection>
+
+          <ViewSection title="Salary & Bank">
+            <ViewRow label="Net Salary" value={money(e.net_salary)} />
+            <ViewRow label="Gross Salary" value={money(e.gross_salary)} />
+            <ViewRow label="Bank Name" value={e.bank_name} />
+            <ViewRow label="Account Number" value={e.bank_account} />
+            <ViewRow label="IFSC" value={e.ifsc} />
+          </ViewSection>
+
+          {e.notes && (
+            <ViewSection title="Notes">
+              <p className="whitespace-pre-wrap text-xs text-slate-700">{e.notes}</p>
+            </ViewSection>
+          )}
+        </div>
+      </div>
+
+      <div className="flex shrink-0 items-center justify-between gap-2 border-t border-slate-200 px-5 py-3">
+        <button
+          onClick={onDelete}
+          className="flex items-center gap-1.5 rounded-md border border-red-200 px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+          data-testid="hr-emp-view-delete"
+        >
+          <Trash2 className="h-4 w-4" /> Delete
+        </button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={onClose} data-testid="hr-emp-view-cancel">Close</Button>
+          <Button onClick={onEdit} className="bg-orange-500 hover:bg-orange-600" data-testid="hr-emp-view-edit">
+            <Pencil className="mr-1.5 h-4 w-4" /> Edit
+          </Button>
+        </div>
+      </div>
+    </div>
+  </div>
+);
 
 // ---------- Add Employee Modal (multi-tab) ----------
 
@@ -296,7 +416,9 @@ const AddEmployeeModal = ({ employee, meta, onClose, onSaved }) => {
               <Field label="Full Name *"><Input value={form.full_name} onChange={(e) => set("full_name", e.target.value)} data-testid="hr-emp-name" /></Field>
               <Field label="Email"><Input value={form.email} onChange={(e) => set("email", e.target.value)} data-testid="hr-emp-email" /></Field>
               <Field label="Phone"><Input value={form.phone} onChange={(e) => set("phone", e.target.value)} data-testid="hr-emp-phone" /></Field>
-              <Field label="Date of Birth"><MilkDateInput  value={form.dob} onChange={(e) => set("dob", e.target.value)} data-testid="hr-emp-dob" /></Field>
+              {/* Centred, not anchored: this form scrolls inside a 60vh box, so an anchored
+                  calendar opens half-clipped by the panel edge or the footer. */}
+              <Field label="Date of Birth"><MilkDateInput centered title="Date of Birth" value={form.dob} onChange={(e) => set("dob", e.target.value)} data-testid="hr-emp-dob" /></Field>
               <Field label="Gender"><Select value={form.gender} onChange={(v) => set("gender", v)} options={["", "Male", "Female", "Other"]} testid="hr-emp-gender" /></Field>
               <Field label="Blood Group"><Select value={form.blood_group} onChange={(v) => set("blood_group", v)} options={["", "O+", "O-", "A+", "A-", "B+", "B-", "AB+", "AB-"]} testid="hr-emp-bg" /></Field>
               <Field label="Marital Status"><Select value={form.marital_status} onChange={(v) => set("marital_status", v)} options={["", "Single", "Married", "Divorced", "Widowed"]} testid="hr-emp-marital" /></Field>
@@ -310,7 +432,7 @@ const AddEmployeeModal = ({ employee, meta, onClose, onSaved }) => {
               <Field label="Employee Code"><Input value={form.employee_code} onChange={(e) => set("employee_code", e.target.value)} placeholder="Auto-generated" data-testid="hr-emp-code" /></Field>
               <Field label="Department *"><Select value={form.department} onChange={(v) => set("department", v)} options={["", ...meta.departments]} testid="hr-emp-dept" uppercase /></Field>
               <Field label="Designation *"><Select value={form.designation} onChange={(v) => set("designation", v)} options={designationOptions} testid="hr-emp-designation" uppercase /></Field>
-              <Field label="Joining Date"><MilkDateInput  value={form.joining_date} onChange={(e) => set("joining_date", e.target.value)} data-testid="hr-emp-joining" /></Field>
+              <Field label="Joining Date"><MilkDateInput centered title="Joining Date" value={form.joining_date} onChange={(e) => set("joining_date", e.target.value)} data-testid="hr-emp-joining" /></Field>
               <Field label="Reporting To"><Input value={form.reporting_to} onChange={(e) => set("reporting_to", e.target.value)} data-testid="hr-emp-reporting" /></Field>
               <Field label="Status"><Select value={form.status} onChange={(v) => set("status", v)} options={["active", "left", "on_leave"]} testid="hr-emp-status" /></Field>
             </div>
