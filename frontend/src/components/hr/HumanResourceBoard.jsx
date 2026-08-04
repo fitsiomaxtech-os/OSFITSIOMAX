@@ -3,7 +3,6 @@ import {
   ArrowUpDown,
   Briefcase,
   CalendarClock,
-  CheckCircle2,
   ChevronRight,
   Clock,
   FileSpreadsheet,
@@ -26,7 +25,6 @@ import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { MilkDateInput, MilkTimeInput } from "@/components/ui/milk-calendar";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
-import { StageTab } from "@/components/ui/stage-tab";
 import { CandidatePullButton } from "@/components/hr/CandidatePullButton";
 import { CandidateSheetPanel } from "@/components/hr/CandidateSheetPanel";
 import { RecruitmentStagesPanel } from "@/components/hr/RecruitmentStagesPanel";
@@ -93,19 +91,9 @@ const VIEWS = [
   { key: "sources", label: "Source Manage", icon: FileSpreadsheet },
 ];
 
-// The four cards are the board's filter, the same way the Head Physio's cards are. Each
-// one answers a question HR actually asks, not just "how many rows are there".
-const CARDS = [
-  { key: "all", label: "Candidates", icon: Users, hint: "Everyone on record" },
-  { key: "in_process", label: "In Process", icon: Clock, hint: "Not yet joined or rejected" },
-  { key: "interviews", label: "Interviews Today", icon: CalendarClock, hint: "Scheduled for today" },
-  { key: "closed", label: "Closed", icon: CheckCircle2, hint: "Joined or rejected" },
-];
-
 export const HumanResourceBoard = ({ user }) => {
   const [board, setBoard] = useState({ stages: [], candidates: [], summary: {}, sources: [], interview_modes: [] });
   const [loading, setLoading] = useState(false);
-  const [card, setCard] = useState("all");
   const [stageFilter, setStageFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [showAdd, setShowAdd] = useState(false);
@@ -133,16 +121,11 @@ export const HumanResourceBoard = ({ user }) => {
   useEffect(() => { load(); }, [load]);
 
   const stages = board.stages || [];
-  const finalIds = useMemo(() => new Set(stages.filter((s) => s.is_final).map((s) => s.id)), [stages]);
-  const today = todayIso();
+  const totalCount = (board.candidates || []).length;
 
-  // Card, stage pill, date, search then sort narrow the same list, in that order.
+  // Stage card, date, search then sort narrow the same list, in that order.
   const rows = useMemo(() => {
     let list = board.candidates || [];
-    if (card === "in_process") list = list.filter((c) => !finalIds.has(c.stage_id));
-    else if (card === "closed") list = list.filter((c) => finalIds.has(c.stage_id));
-    else if (card === "interviews") list = list.filter((c) => (c.interview || {}).interview_date === today);
-
     if (stageFilter !== "all") list = list.filter((c) => c.stage_id === stageFilter);
 
     if (dateFilter?.from && dateFilter?.to) {
@@ -168,17 +151,7 @@ export const HumanResourceBoard = ({ user }) => {
       const tb = new Date(b.created_at || 0).getTime();
       return sortDir === "newest" ? tb - ta : ta - tb;
     });
-  }, [board.candidates, card, stageFilter, search, finalIds, today, dateFilter, sortDir]);
-
-  const counts = useMemo(() => {
-    const list = board.candidates || [];
-    return {
-      all: list.length,
-      in_process: list.filter((c) => !finalIds.has(c.stage_id)).length,
-      interviews: list.filter((c) => (c.interview || {}).interview_date === today).length,
-      closed: list.filter((c) => finalIds.has(c.stage_id)).length,
-    };
-  }, [board.candidates, finalIds, today]);
+  }, [board.candidates, stageFilter, search, dateFilter, sortDir]);
 
   return (
     <div className="space-y-4 pb-24 md:pb-6" data-testid="hr-recruitment-board">
@@ -218,72 +191,39 @@ export const HumanResourceBoard = ({ user }) => {
 
       {view === "pipeline" && (
       <>
-      {/* Summary cards — also the filter. Horizontal scroll on a phone rather than a 2x2
-          grid, so the row reads as one control instead of four tiles. */}
-      <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 sm:mx-0 sm:grid sm:grid-cols-4 sm:gap-3 sm:overflow-visible sm:px-0 sm:pb-0" data-testid="hr-summary-cards">
-        {CARDS.map((c) => {
-          const Icon = c.icon;
-          const active = card === c.key;
-          return (
-            <button
-              key={c.key}
-              type="button"
-              onClick={() => { setCard(c.key); setStageFilter("all"); }}
-              title={c.hint}
-              className={`w-[8.5rem] shrink-0 rounded-xl border-2 px-3 py-2.5 text-left transition sm:w-auto sm:px-4 sm:py-4 ${
-                active ? "border-indigo-600 bg-indigo-50 shadow-sm" : "border-slate-200 bg-white hover:border-indigo-300 hover:shadow-sm"
-              }`}
-              data-testid={`hr-card-${c.key}`}
-            >
-              <span className={`flex items-center gap-1.5 ${active ? "text-indigo-700" : "text-slate-500"}`}>
-                <Icon className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />
-                <span className="truncate text-[10px] font-bold uppercase tracking-wider sm:text-xs">{c.label}</span>
-              </span>
-              <span className={`mt-0.5 block text-2xl font-extrabold sm:mt-1 sm:text-3xl ${active ? "text-indigo-700" : "text-slate-800"}`}>
-                {counts[c.key]}
-              </span>
-            </button>
-          );
-        })}
-      </div>
+      {/* One row of cards, not two. The summary cards and the stage bar were both filters
+          over the same list sitting one above the other, and the four summary answers were
+          reachable from the stages anyway — Closed is Joined plus Rejected, In Process is
+          everything else.
 
-      {/* The same StageTab the Branch Leads and Consultations boards use, so a stage reads
-          identically wherever you meet it: a soft tint of its own colour when idle, solid
-          when selected, name above count.
-
-          Reused rather than restyled to match — a copy would drift the first time that one
-          is touched. It is driven by stage id here (candidates reference an id, not a
-          name), which is why the bar is laid out locally instead of using StageTabBar.
-          Lexend is set on the wrapper so it inherits without touching the shared
-          component, which Branch Admin also renders. */}
+          The stages wear the summary card now: white, bordered, label over count, aligned
+          left. Each keeps its own colour on the label and number so the pipeline is still
+          readable at a glance; selecting one brings that colour to the border and a wash of
+          it to the card, the same move the summary cards made in indigo. */}
       <div
-        className="-mx-1 rounded-xl border border-slate-200 bg-white p-1"
+        className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 sm:mx-0 sm:grid sm:grid-cols-3 sm:gap-3 sm:overflow-visible sm:px-0 sm:pb-0 lg:grid-cols-5 xl:grid-cols-9"
         style={{ fontFamily: "Lexend, sans-serif" }}
         data-testid="hr-stage-pills"
       >
-        <div className="grid grid-cols-3 gap-1 sm:grid-cols-5 lg:flex lg:flex-nowrap">
-          <StageTab
-            label="All Stages"
-            count={counts.all}
-            active={stageFilter === "all"}
-            onClick={() => setStageFilter("all")}
-            color="#0ea5e9"
-            testid="hr-stage-pill-all"
-            gridded
+        <StageCard
+          label="All Stages"
+          count={totalCount}
+          color="#0ea5e9"
+          active={stageFilter === "all"}
+          onClick={() => setStageFilter("all")}
+          testid="hr-stage-pill-all"
+        />
+        {stages.map((s) => (
+          <StageCard
+            key={s.id}
+            label={s.name}
+            count={s.count ?? 0}
+            color={s.color || "#64748b"}
+            active={stageFilter === s.id}
+            onClick={() => setStageFilter(stageFilter === s.id ? "all" : s.id)}
+            testid={`hr-stage-pill-${s.id}`}
           />
-          {stages.map((s) => (
-            <StageTab
-              key={s.id}
-              label={s.name}
-              count={s.count ?? 0}
-              active={stageFilter === s.id}
-              onClick={() => setStageFilter(stageFilter === s.id ? "all" : s.id)}
-              color={s.color || "#64748b"}
-              testid={`hr-stage-pill-${s.id}`}
-              gridded
-            />
-          ))}
-        </div>
+        ))}
       </div>
 
       <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
@@ -390,6 +330,36 @@ export const HumanResourceBoard = ({ user }) => {
     </div>
   );
 };
+
+
+/** A stage as a summary card: label over count, left aligned, white and bordered.
+ *
+ *  The stage's own colour carries the label and the number rather than the whole card, so
+ *  nine of these side by side stay legible — nine saturated blocks read as a warning, not a
+ *  pipeline. Selecting one pulls that colour onto the border and washes it faintly through
+ *  the card, which is what the indigo summary cards did before them. */
+const StageCard = ({ label, count, color, active, onClick, testid }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className={`w-[8.5rem] shrink-0 rounded-xl border-2 px-3 py-2.5 text-left transition hover:shadow-sm sm:w-auto sm:px-4 sm:py-4 ${
+      active ? "shadow-sm" : "border-slate-200 bg-white"
+    }`}
+    style={active ? { borderColor: color, backgroundColor: `${color}14` } : undefined}
+    data-testid={testid}
+  >
+    <span
+      className="block truncate text-[10px] font-bold uppercase tracking-wider sm:text-xs"
+      style={{ color }}
+      title={label}
+    >
+      {label}
+    </span>
+    <span className="mt-0.5 block text-2xl font-extrabold sm:mt-1 sm:text-3xl" style={{ color }}>
+      {count}
+    </span>
+  </button>
+);
 
 
 /** Where candidates come from, and the shape they move through — the two halves of the
