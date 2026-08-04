@@ -8,10 +8,11 @@ import { PaymentSchedulesBoard } from "@/components/branch/PaymentSchedulesBoard
 import { ConsultationCollectionsBoard } from "@/components/branch/ConsultationCollectionsBoard";
 import { SessionCollectionsBoard } from "@/components/branch/SessionCollectionsBoard";
 import { PaymentPaidBoard } from "@/components/branch/PaymentPaidBoard";
+import { PaymentUnpaidBoard } from "@/components/branch/PaymentUnpaidBoard";
 
-// `tone: "paid"` is Payment Paid's alone — it carries the same green the OS uses for a
-// settled payment everywhere else, so the settled tab is recognisable without reading it.
-// Every other tab keeps the shared sky styling.
+// `tone` is carried only by the two settled/unsettled tabs — green for money fully in,
+// rose for none of it in, the same colours the OS uses for those states everywhere else,
+// so the pair reads as a pair. Every other tab keeps the shared sky styling.
 const SUB_TABS = [
   { key: "total_revenue", label: "Total Revenue" },
   { key: "consultation", label: "Consultation Collections" },
@@ -19,11 +20,15 @@ const SUB_TABS = [
   { key: "outstanding", label: "Outstanding Amount" },
   { key: "schedules", label: "Payment Schedules" },
   { key: "paid", label: "Payment Paid", tone: "paid" },
+  { key: "unpaid", label: "Payment Unpaid", tone: "unpaid" },
 ];
 
 const subTabClasses = (tab, active) => {
   if (tab.tone === "paid") {
     return active ? "bg-emerald-600 text-white shadow-sm" : "text-emerald-700 hover:bg-emerald-50";
+  }
+  if (tab.tone === "unpaid") {
+    return active ? "bg-rose-600 text-white shadow-sm" : "text-rose-700 hover:bg-rose-50";
   }
   return active ? "bg-sky-50 text-sky-700" : "text-slate-600 hover:bg-slate-50";
 };
@@ -56,9 +61,9 @@ const PaymentModeBadge = ({ mode }) => (
  * Accountant Manage — Super Admin's Branch Management > Accountant Management >
  * Accountant Manage, and the same view reused read-only-by-nature (it's all
  * reporting, nothing editable) as Branch Admin's own "Accountant Manage" tab.
- * Five sub-tabs: Total Revenue, Consultation Collections, Session Collections,
- * Outstanding Amount, and Payment Schedules — all sourced from the same
- * finance/revenue-overview payload.
+ * Seven sub-tabs: Total Revenue, Consultation Collections, Session Collections,
+ * Outstanding Amount, Payment Schedules, Payment Paid and Payment Unpaid — all
+ * sourced from the same finance/revenue-overview payload.
  */
 export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
   const [branches, setBranches] = useState([]);
@@ -118,6 +123,15 @@ export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
     });
     return Object.values(map).sort((a, b) => b.total_paid - a.total_paid);
   }, [transactions, outstanding]);
+
+  // Payment Unpaid — the other end of the same ledger: billed clients with nothing
+  // collected at all. They already come through in outstanding_clients carrying their
+  // bill, balance and due date; the only cut needed is paid_amount still at zero, which
+  // is what separates this from Outstanding Amount's part-payers.
+  const unpaidClients = useMemo(
+    () => outstanding.filter((o) => (Number(o.paid_amount) || 0) <= 0 && (Number(o.balance) || 0) > 0),
+    [outstanding],
+  );
 
   return (
     <div className="space-y-4" data-testid="accountant-manage-tab">
@@ -182,6 +196,8 @@ export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
         <OutstandingAmountBoard rows={outstanding} onView={setViewingLeadId} onChanged={load} />
       ) : subTab === "paid" ? (
         <PaymentPaidBoard rows={paidClients} onView={setViewingLeadId} />
+      ) : subTab === "unpaid" ? (
+        <PaymentUnpaidBoard rows={unpaidClients} onView={setViewingLeadId} />
       ) : (
         <PaymentSchedulesBoard rows={schedule} onView={setViewingLeadId} onChanged={load} />
       )}
