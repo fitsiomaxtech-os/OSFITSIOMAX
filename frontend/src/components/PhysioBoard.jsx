@@ -381,7 +381,7 @@ function TreatmentTab({ physioId, onCountChange }) {
             <Search className="h-4 w-4" />
           </button>
         )}
-        <DateFilterPopover value={filterValue} onChange={handleFilterChange} testid="physio-treatment-date-filter" />
+        <DateFilterPopover value={filterValue} onChange={handleFilterChange} testid="physio-treatment-date-filter" centered />
       </div>
 
       {/* Sun-Sat week strip — today is always the default selection. */}
@@ -662,7 +662,7 @@ function ReviewTab({ physioId, onCountChange }) {
             <Search className="h-4 w-4" />
           </button>
         )}
-        <DateFilterPopover value={filterValue} onChange={setFilterValue} testid="physio-review-date-filter" />
+        <DateFilterPopover value={filterValue} onChange={setFilterValue} testid="physio-review-date-filter" centered />
         <div className="flex h-10 shrink-0 items-center gap-1.5 rounded-md border border-sky-200 bg-sky-50 px-3" data-testid="physio-review-total">
           <span className="text-[10px] font-semibold uppercase tracking-wide text-sky-600">Total</span>
           <span className="text-sm font-bold text-sky-700">{dateFiltered.length}</span>

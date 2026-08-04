@@ -529,7 +529,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false }) => {
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
               <Input className="pl-9" placeholder="Search patients..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} data-testid="branch-search" />
             </div>
-            <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="branch-date-filter" />
+            <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="branch-date-filter" centered />
             <Button onClick={() => setShowCreateLead(true)} className="flex-1 bg-sky-600 hover:bg-sky-700 sm:flex-none" data-testid="branch-create-lead-btn">
               <UserPlus className="h-4 w-4 mr-1.5" />Create Lead
             </Button>

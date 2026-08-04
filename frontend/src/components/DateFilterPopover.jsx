@@ -184,7 +184,11 @@ export const DateFilterPopover = ({ value, onChange, testid = "date-filter", cen
               {/* Presets across the top on a phone, down the side from sm — the same two
                   halves either way, never a sideways scroll. */}
               <div className="flex flex-col sm:flex-row">
-                <div className="grid grid-cols-2 gap-1 border-b border-[#EFEAE0] p-2 sm:w-40 sm:shrink-0 sm:grid-cols-1 sm:gap-0.5 sm:border-b-0 sm:border-r" data-testid={`${testid}-presets`}>
+                {/* flex, not a one-column grid, from sm up: grid rows stretch to fill the
+                    dialog's height, which spread five presets out over the whole calendar
+                    beside them. Flex keeps them at their natural height, stacked at the
+                    top. Two columns on a phone, where the rail sits above the calendar. */}
+                <div className="grid grid-cols-2 gap-1 border-b border-[#EFEAE0] p-2 sm:flex sm:w-40 sm:shrink-0 sm:flex-col sm:gap-0.5 sm:border-b-0 sm:border-r" data-testid={`${testid}-presets`}>
                   {list.map((p) => (
                     <button key={p.key} type="button" onClick={() => apply(p)} className={railBtn(value?.key === p.key)} data-testid={`${testid}-preset-${p.key}`}>
                       {p.label}
