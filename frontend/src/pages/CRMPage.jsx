@@ -236,8 +236,9 @@ export const CRMPage = ({ auth, onLogout }) => {
   const [showProfile, setShowProfile] = useState(false);
   const [showPhysioCalendar, setShowPhysioCalendar] = useState(false);
   const [showHPCalendar, setShowHPCalendar] = useState(false);
-  // Lead search lives in the header for a Head Physio: on a phone the board is all list,
-  // and a search box inside it scrolls away the moment you start reading.
+  // Lead search lives in the header for a Head Physio on a phone: the board is all list,
+  // and a search box inside it scrolls away the moment you start reading. On a desktop
+  // that box is always in view, so the header button is hidden there.
   const [showHPSearch, setShowHPSearch] = useState(false);
   const [hpSearch, setHpSearch] = useState("");
   const [showSuperAdminMenu, setShowSuperAdminMenu] = useState(false);
@@ -313,6 +314,22 @@ export const CRMPage = ({ auth, onLogout }) => {
   useEffect(() => {
     loadEverything();
   }, [leadStageFilter, leadBranchFilter, leadDateFrom, leadDateTo, appointmentFilter]);
+
+  // The header search is phone-only, so a window growing past the breakpoint takes the
+  // bar off screen. Drop the query with it — otherwise the list stays filtered by text
+  // the user can no longer see or clear.
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return undefined;
+    const desktop = window.matchMedia("(min-width: 640px)");
+    const sync = () => {
+      if (!desktop.matches) return;
+      setShowHPSearch(false);
+      setHpSearch("");
+    };
+    sync();
+    desktop.addEventListener("change", sync);
+    return () => desktop.removeEventListener("change", sync);
+  }, []);
 
   useEffect(() => {
     if (!editingLeadId) {
@@ -646,11 +663,15 @@ export const CRMPage = ({ auth, onLogout }) => {
               </div>
             </div>
             <div className="flex items-center gap-2 sm:gap-3">
+              {/* Phone only. On a desktop the board already carries its own search box
+                  above the list, so a second one in the header was the same job twice —
+                  it's only on a phone, where that box is a scroll away, that reaching it
+                  from the header earns its place. */}
               {showHeadPhysioBoard && (
                 <button
                   type="button"
                   onClick={() => setShowHPSearch((v) => !v)}
-                  className={`flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-sm font-medium sm:px-3 ${
+                  className={`flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-sm font-medium sm:hidden ${
                     hpSearch || showHPSearch
                       ? "border-teal-300 bg-teal-50 text-teal-700"
                       : "border-slate-200 text-slate-600 hover:bg-slate-50"
@@ -659,7 +680,6 @@ export const CRMPage = ({ auth, onLogout }) => {
                   data-testid="hp-header-search-button"
                 >
                   <Search className="h-4 w-4" />
-                  <span className="hidden sm:inline">Search</span>
                 </button>
               )}
               {/* A Head Physio's own calendar sits beside their profile rather than in the
@@ -713,7 +733,7 @@ export const CRMPage = ({ auth, onLogout }) => {
         )}
 
         {showHeadPhysioBoard && showHPSearch && (
-          <div className="border-b border-slate-200 bg-white px-3 pb-3 sm:px-6" data-testid="hp-header-search-bar">
+          <div className="border-b border-slate-200 bg-white px-3 pb-3 sm:hidden" data-testid="hp-header-search-bar">
             <div className="flex items-center gap-2 rounded-md border border-slate-200 px-3 py-2">
               <Search className="h-4 w-4 shrink-0 text-slate-400" />
               <input
