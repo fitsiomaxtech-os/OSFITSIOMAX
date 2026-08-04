@@ -579,14 +579,11 @@ const AddCandidateModal = ({ sources, onClose, onSaved }) => {
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-3 backdrop-blur-sm sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} data-testid="hr-add-modal">
-      {/* Rendered at 75%. `zoom` rather than `transform: scale` because zoom shrinks the
-          element's real layout box — the backdrop keeps centring it, and the scroll area
-          stays the size you actually see. A transform would leave a full-size box behind,
-          so the scrollbar and the click targets would sit where the popup no longer is.
-
-          Only this popup: `zoom` is inherited, so it belongs on the panel and not on
-          anything the rest of the board shares. */}
-      <div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white shadow-2xl" style={{ zoom: 0.75 }}>
+      {/* Bigger box, type at its natural size — the zoom that was here shrank the text
+          along with the panel, which is the opposite of room to work. Wider so the
+          two-column form gets full-width fields, and taller so the whole form is in view
+          without the footer riding up over it. */}
+      <div className="max-h-[95vh] w-full max-w-4xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
         <div className="sticky top-0 flex items-center justify-between bg-gradient-to-r from-indigo-600 to-violet-600 px-5 py-4 text-white">
           <div className="flex items-center gap-2">
             <UserPlus className="h-5 w-5" />
