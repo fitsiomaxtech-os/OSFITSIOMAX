@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  ArrowUpDown,
   Briefcase,
   CalendarClock,
   CheckCircle2,
@@ -25,6 +26,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { MilkDateInput, MilkTimeInput } from "@/components/ui/milk-calendar";
+import { DateFilterPopover } from "@/components/DateFilterPopover";
+import { StageTab } from "@/components/ui/stage-tab";
+import { CandidatePullButton } from "@/components/hr/CandidatePullButton";
 import { CandidateSheetPanel } from "@/components/hr/CandidateSheetPanel";
 import { RecruitmentStagesPanel } from "@/components/hr/RecruitmentStagesPanel";
 import { HRBoard } from "@/components/hr/HRBoard";
@@ -83,11 +87,6 @@ const emptyCandidate = {
   notes: "",
 };
 
-// Type for the stage boxes only — nothing else on the board uses Lexend. The 3rem line
-// height is what sets their height, so the vertical padding comes off: padding on top of it
-// would make the box 4rem and the number no longer mean anything.
-const STAGE_BOX_STYLE = { lineHeight: "3rem", fontFamily: "Lexend, sans-serif" };
-
 // What this board is for, in three parts: the candidates you work today, the people already
 // employed, and the plumbing that feeds and shapes the pipeline.
 const VIEWS = [
@@ -116,6 +115,8 @@ export const HumanResourceBoard = ({ user }) => {
   // The sheet connections are setup, not day-to-day work, so they sit behind their own
   // view rather than above the pipeline where they'd be scrolled past every morning.
   const [view, setView] = useState("pipeline");
+  const [dateFilter, setDateFilter] = useState({ key: null, label: "", from: null, to: null });
+  const [sortDir, setSortDir] = useState("newest");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -137,7 +138,7 @@ export const HumanResourceBoard = ({ user }) => {
   const finalIds = useMemo(() => new Set(stages.filter((s) => s.is_final).map((s) => s.id)), [stages]);
   const today = todayIso();
 
-  // Card, stage pill and search narrow the same list, in that order.
+  // Card, stage pill, date, search then sort narrow the same list, in that order.
   const rows = useMemo(() => {
     let list = board.candidates || [];
     if (card === "in_process") list = list.filter((c) => !finalIds.has(c.stage_id));
@@ -146,6 +147,15 @@ export const HumanResourceBoard = ({ user }) => {
 
     if (stageFilter !== "all") list = list.filter((c) => c.stage_id === stageFilter);
 
+    if (dateFilter?.from && dateFilter?.to) {
+      const from = dateFilter.from.getTime();
+      const to = dateFilter.to.getTime();
+      list = list.filter((c) => {
+        const t = new Date(c.created_at || 0).getTime();
+        return Number.isFinite(t) && t >= from && t <= to;
+      });
+    }
+
     const q = search.trim().toLowerCase();
     if (q) {
       list = list.filter((c) =>
@@ -153,8 +163,14 @@ export const HumanResourceBoard = ({ user }) => {
           .some((f) => String(f || "").toLowerCase().includes(q)),
       );
     }
-    return list;
-  }, [board.candidates, card, stageFilter, search, finalIds, today]);
+
+    // Copy before sorting — the board's own array is the source for every other count.
+    return [...list].sort((a, b) => {
+      const ta = new Date(a.created_at || 0).getTime();
+      const tb = new Date(b.created_at || 0).getTime();
+      return sortDir === "newest" ? tb - ta : ta - tb;
+    });
+  }, [board.candidates, card, stageFilter, search, finalIds, today, dateFilter, sortDir]);
 
   const counts = useMemo(() => {
     const list = board.candidates || [];
@@ -239,47 +255,46 @@ export const HumanResourceBoard = ({ user }) => {
         })}
       </div>
 
-      {/* The pipeline itself, as solid boxes carrying the same weight as the Add Candidate
-          button rather than outline chips. Each keeps its own colour from the database, so
-          a renamed or recoloured stage needs nothing here; the selected one is picked out
-          by a ring instead of by fill, since every box is already filled.
+      {/* The same StageTab the Branch Leads and Consultations boards use, so a stage reads
+          identically wherever you meet it: a soft tint of its own colour when idle, solid
+          when selected, name above count.
 
-          From sm up the boxes grow to fill the row edge to edge — the pipeline is the
-          board's main control and shouldn't trail off into whitespace. `basis` sets the
-          width they'd rather be, so a long stage name wraps the row instead of squashing;
-          on a phone the row stays a scroller, since eight boxes cannot fit either way. */}
-      <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0" data-testid="hr-stage-pills">
-        <button
-          type="button"
-          onClick={() => setStageFilter("all")}
-          className={`shrink-0 rounded-lg bg-slate-800 px-4 text-xs font-bold text-white shadow-sm transition hover:opacity-90 sm:shrink sm:flex-1 sm:basis-28 ${
-            stageFilter === "all" ? "ring-2 ring-slate-800 ring-offset-2" : ""
-          }`}
-          style={STAGE_BOX_STYLE}
-          data-testid="hr-stage-pill-all"
-        >
-          All Stages
-        </button>
-        {stages.map((s) => {
-          const active = stageFilter === s.id;
-          return (
-            <button
+          Reused rather than restyled to match — a copy would drift the first time that one
+          is touched. It is driven by stage id here (candidates reference an id, not a
+          name), which is why the bar is laid out locally instead of using StageTabBar.
+          Lexend is set on the wrapper so it inherits without touching the shared
+          component, which Branch Admin also renders. */}
+      <div
+        className="-mx-1 rounded-xl border border-slate-200 bg-white p-1"
+        style={{ fontFamily: "Lexend, sans-serif" }}
+        data-testid="hr-stage-pills"
+      >
+        <div className="grid grid-cols-3 gap-1 sm:grid-cols-5 lg:flex lg:flex-nowrap">
+          <StageTab
+            label="All Stages"
+            count={counts.all}
+            active={stageFilter === "all"}
+            onClick={() => setStageFilter("all")}
+            color="#0ea5e9"
+            testid="hr-stage-pill-all"
+            gridded
+          />
+          {stages.map((s) => (
+            <StageTab
               key={s.id}
-              type="button"
-              onClick={() => setStageFilter(active ? "all" : s.id)}
-              className={`shrink-0 whitespace-nowrap rounded-lg px-4 text-xs font-bold text-white shadow-sm transition hover:opacity-90 sm:shrink sm:flex-1 sm:basis-28 ${
-                active ? "ring-2 ring-offset-2" : ""
-              }`}
-              style={{ ...STAGE_BOX_STYLE, backgroundColor: s.color, ...(active ? { "--tw-ring-color": s.color } : {}) }}
-              data-testid={`hr-stage-pill-${s.id}`}
-            >
-              {s.name} · {s.count}
-            </button>
-          );
-        })}
+              label={s.name}
+              count={s.count ?? 0}
+              active={stageFilter === s.id}
+              onClick={() => setStageFilter(stageFilter === s.id ? "all" : s.id)}
+              color={s.color || "#64748b"}
+              testid={`hr-stage-pill-${s.id}`}
+              gridded
+            />
+          ))}
+        </div>
       </div>
 
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+      <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
         <div className="flex flex-1 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2">
           <Search className="h-4 w-4 shrink-0 text-slate-400" />
           <input
@@ -295,13 +310,33 @@ export const HumanResourceBoard = ({ user }) => {
             </button>
           )}
         </div>
-        <Button
-          onClick={() => setShowAdd(true)}
-          className="hidden bg-indigo-600 text-white hover:bg-indigo-700 sm:inline-flex"
-          data-testid="hr-add-candidate-button"
-        >
-          <UserPlus className="mr-1.5 h-4 w-4" /> Add Candidate
-        </Button>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Filters by when the candidate was added, which is what "0d / 19d" in the Age
+              column counts from — the two answer the same question. */}
+          <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="hr-date-filter" />
+
+          <button
+            type="button"
+            onClick={() => setSortDir((d) => (d === "newest" ? "oldest" : "newest"))}
+            className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-600 hover:bg-slate-50"
+            title="Sort by when the candidate was added"
+            data-testid="hr-sort-toggle"
+          >
+            <ArrowUpDown className="h-4 w-4 shrink-0 text-slate-400" />
+            {sortDir === "newest" ? "Newest first" : "Oldest first"}
+          </button>
+
+          <Button
+            onClick={() => setShowAdd(true)}
+            className="hidden h-10 shrink-0 bg-indigo-600 text-white hover:bg-indigo-700 sm:inline-flex"
+            data-testid="hr-add-candidate-button"
+          >
+            <UserPlus className="mr-1.5 h-4 w-4" /> Add Candidate
+          </Button>
+
+          <CandidatePullButton onPulled={load} />
+        </div>
       </div>
 
       <CandidateList rows={rows} onOpen={setSelected} loading={loading} />
