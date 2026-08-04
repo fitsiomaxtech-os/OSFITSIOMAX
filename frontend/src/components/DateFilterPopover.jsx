@@ -39,11 +39,36 @@ const presets = (today) => ([
 
 const toInputValue = (d) => d ? new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10) : "";
 
+/** "2026-08-04" -> "04-08-2026", for showing an already-set range back in a typed field. */
+const isoToManual = (iso) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || "");
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : "";
+};
+
+/** "04-08-2026" -> "2026-08-04", or "" if it isn't a real date.
+ *
+ *  Accepts - / and . as separators and a single-digit day or month, because that is what
+ *  people type. Rejects 31-02 rather than letting the Date constructor roll it forward to
+ *  the 3rd of March, which would silently filter on a day nobody asked for. */
+const manualToIso = (text) => {
+  const m = /^\s*(\d{1,2})\s*[-/.]\s*(\d{1,2})\s*[-/.]\s*(\d{4})\s*$/.exec(text || "");
+  if (!m) return "";
+  const day = Number(m[1]);
+  const month = Number(m[2]);
+  const year = Number(m[3]);
+  const iso = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  const d = new Date(`${iso}T00:00:00`);
+  const real = d.getFullYear() === year && d.getMonth() + 1 === month && d.getDate() === day;
+  return real ? iso : "";
+};
+
 export const DateFilterPopover = ({ value, onChange, testid = "date-filter", centered = false }) => {
   const [open, setOpen] = useState(false);
   const [showRange, setShowRange] = useState(false);
   const [rangeFrom, setRangeFrom] = useState("");
   const [rangeTo, setRangeTo] = useState("");
+  const [rangeFromText, setRangeFromText] = useState("");
+  const [rangeToText, setRangeToText] = useState("");
   const today = useMemo(() => new Date(), []);
   const list = useMemo(() => presets(today), [today]);
 
@@ -61,9 +86,29 @@ export const DateFilterPopover = ({ value, onChange, testid = "date-filter", cen
   };
 
   const openRange = () => {
-    setRangeFrom(value?.key === "range" ? toInputValue(value.from) : "");
-    setRangeTo(value?.key === "range" ? toInputValue(value.to) : "");
+    const from = value?.key === "range" ? toInputValue(value.from) : "";
+    const to = value?.key === "range" ? toInputValue(value.to) : "";
+    setRangeFrom(from);
+    setRangeTo(to);
+    setRangeFromText(isoToManual(from));
+    setRangeToText(isoToManual(to));
     setShowRange(true);
+  };
+
+  // Typed range, for the centred dialog. Kept apart from the ISO state the anchored
+  // variant's pickers write, so the two can't half-overwrite each other.
+  const rangeFromIso = manualToIso(rangeFromText);
+  const rangeToIso = manualToIso(rangeToText);
+  const manualOrderOk = !rangeFromIso || !rangeToIso || rangeFromIso <= rangeToIso;
+  const manualReady = !!rangeFromIso && !!rangeToIso && manualOrderOk;
+
+  const applyManualRange = () => {
+    if (!manualReady) return;
+    const from = startOfDay(new Date(`${rangeFromIso}T00:00:00`));
+    const to = endOfDay(new Date(`${rangeToIso}T00:00:00`));
+    onChange({ key: "range", label: `${fmtShort(from)} - ${fmtShort(to)}`, from, to });
+    setShowRange(false);
+    setOpen(false);
   };
 
   const applyRange = () => {
@@ -152,17 +197,52 @@ export const DateFilterPopover = ({ value, onChange, testid = "date-filter", cen
 
                 <div className="min-w-0 flex-1 p-3">
                   {showRange ? (
+                    /* Typed, not picked. A picker here opened a second calendar on top of
+                       the one this dialog already is, and a range is two dates — quicker to
+                       type than to navigate twice. */
                     <div className="space-y-3" data-testid={`${testid}-range-panel`}>
                       <p className="text-sm font-semibold text-slate-700">Custom Range</p>
                       <div>
                         <label className="text-xs font-medium text-slate-500">From</label>
-                        <MilkDateInput value={rangeFrom} onChange={(e) => setRangeFrom(e.target.value)} data-testid={`${testid}-range-from`} />
+                        <input
+                          value={rangeFromText}
+                          onChange={(e) => setRangeFromText(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") applyManualRange(); }}
+                          inputMode="numeric"
+                          placeholder="DD-MM-YYYY"
+                          className={`h-9 w-full rounded-md border bg-white px-3 text-sm outline-none focus:ring-1 ${
+                            rangeFromText && !rangeFromIso
+                              ? "border-red-300 focus:border-red-400 focus:ring-red-400"
+                              : "border-[#EFEAE0] focus:border-amber-400 focus:ring-amber-400"
+                          }`}
+                          data-testid={`${testid}-range-from`}
+                        />
                       </div>
                       <div>
                         <label className="text-xs font-medium text-slate-500">To</label>
-                        <MilkDateInput value={rangeTo} onChange={(e) => setRangeTo(e.target.value)} min={rangeFrom || undefined} data-testid={`${testid}-range-to`} />
+                        <input
+                          value={rangeToText}
+                          onChange={(e) => setRangeToText(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") applyManualRange(); }}
+                          inputMode="numeric"
+                          placeholder="DD-MM-YYYY"
+                          className={`h-9 w-full rounded-md border bg-white px-3 text-sm outline-none focus:ring-1 ${
+                            (rangeToText && !rangeToIso) || !manualOrderOk
+                              ? "border-red-300 focus:border-red-400 focus:ring-red-400"
+                              : "border-[#EFEAE0] focus:border-amber-400 focus:ring-amber-400"
+                          }`}
+                          data-testid={`${testid}-range-to`}
+                        />
                       </div>
-                      <Button className="w-full" onClick={applyRange} disabled={!rangeFrom || !rangeTo} data-testid={`${testid}-range-apply`}>
+                      {/* Says which of the two is wrong, rather than only greying Apply out. */}
+                      <p className="text-[11px] text-slate-400" data-testid={`${testid}-range-hint`}>
+                        {!manualOrderOk
+                          ? <span className="font-semibold text-red-500">From must not be after To.</span>
+                          : (rangeFromText && !rangeFromIso) || (rangeToText && !rangeToIso)
+                            ? <span className="font-semibold text-red-500">Use DD-MM-YYYY, e.g. 04-08-2026.</span>
+                            : "Type both dates as DD-MM-YYYY, e.g. 04-08-2026."}
+                      </p>
+                      <Button className="w-full" onClick={applyManualRange} disabled={!manualReady} data-testid={`${testid}-range-apply`}>
                         Apply
                       </Button>
                     </div>
