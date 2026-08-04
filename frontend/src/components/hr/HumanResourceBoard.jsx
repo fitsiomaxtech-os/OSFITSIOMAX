@@ -212,7 +212,7 @@ export const HumanResourceBoard = ({ user }) => {
 
       {view === "employees" && (
         <div data-testid="hr-employee-manage">
-          <HRBoard />
+          <HRBoard hideHeading />
         </div>
       )}
 
