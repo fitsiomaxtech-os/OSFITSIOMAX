@@ -25,11 +25,7 @@ const TABS = [
 const MULTI_BRANCH_ROLE_LABELS = { physio: "Physio" };
 const ORG_WIDE_ROLES = new Set(["head_physio"]);
 
-/** `hideHeading` drops the "HR Admin" title block. On the Human Resource board this sits
- *  directly under an Employee Manage tab that has already said where you are, so the
- *  heading only pushes the real content down. Super Admin reaches the same component from
- *  a tab strip shared with seven other boards, where the title still earns its line. */
-export const HRBoard = ({ hideHeading = false }) => {
+export const HRBoard = () => {
   const [tab, setTab] = useState("dashboard");
   const [meta, setMeta] = useState({ departments: [], roles: [], custom_roles: [] });
   const reloadMeta = useCallback(() => hrMeta().then(setMeta).catch((e) => console.warn("[load failed]", e?.message || e)), []);
@@ -39,12 +35,10 @@ export const HRBoard = ({ hideHeading = false }) => {
   // the tab strip phantom top margin for content a phone never draws.
   return (
     <div className="flex flex-col gap-5" data-testid="hr-board">
-      {!hideHeading && (
-        <div className="hidden md:block">
-          <h2 className="text-2xl font-bold text-slate-900">HR Admin</h2>
-          <p className="text-sm text-slate-500">Manage employees, attendance, leave & payroll.</p>
-        </div>
-      )}
+      <div className="hidden md:block">
+        <h2 className="text-2xl font-bold text-slate-900">HR Admin</h2>
+        <p className="text-sm text-slate-500">Manage employees, attendance, leave & payroll.</p>
+      </div>
       <div className="flex gap-1 rounded-lg border border-slate-200 bg-white p-1 sm:gap-2" data-testid="hr-subtabs">
         {TABS.map((t) => {
           const Icon = t.icon;
