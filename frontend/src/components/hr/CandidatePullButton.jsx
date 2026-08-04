@@ -62,15 +62,18 @@ export const CandidatePullButton = ({ onPulled }) => {
     setBusy(false);
   };
 
+  // Icon only. The label is carried by title/aria-label rather than dropped, so the
+  // action still has a name for a tooltip and for a screen reader.
   return (
     <Button
       onClick={pullAll}
       disabled={busy}
-      className="h-10 shrink-0 border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700"
+      title={busy ? "Pulling..." : "Pull from Sheet"}
+      aria-label="Pull from Sheet"
+      className="h-10 w-10 shrink-0 border-emerald-600 bg-emerald-600 p-0 text-white hover:bg-emerald-700"
       data-testid="hr-pull-from-sheet-btn"
     >
-      <RefreshCw className={`mr-1 h-4 w-4 ${busy ? "animate-spin" : ""}`} />
-      {busy ? "Pulling..." : "Pull from Sheet"}
+      <RefreshCw className={`h-4 w-4 ${busy ? "animate-spin" : ""}`} />
     </Button>
   );
 };
