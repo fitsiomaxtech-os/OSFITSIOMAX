@@ -1352,17 +1352,23 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       {/* Table */}
       <Card className={`overflow-hidden border-slate-200 ${mobileCards ? "hidden sm:block" : ""}`}>
         <CardContent className="overflow-x-auto p-0">
-          <table className="w-full min-w-[720px] table-fixed text-sm">
+          {/* These percentages must add up to 100. They used to total 111, and a
+              table-fixed layout answers that by scaling every column down by the
+              overage — so no column was the width it declared, the ratios drifted,
+              and the trailing date columns ended up too narrow to hold a date,
+              breaking "2026-08-02" across two lines. The min-width is what lets the
+              wrapper scroll on a narrow screen instead of crushing them again. */}
+          <table className="w-full min-w-[1000px] table-fixed text-sm">
             <thead className="bg-slate-50 text-xs uppercase text-slate-500">
               <tr>
-                <th className="w-[18%] px-4 py-2 text-left">Patient</th>
-                <th className="w-[11%] px-4 py-2 text-left">Patient No.</th>
-                <th className="w-[13%] px-4 py-2 text-left">Phone</th>
-                <th className="w-[20%] px-4 py-2 text-left">Email</th>
-                <th className="w-[15%] px-4 py-2 text-left">{isConsultant ? "Head Consultation Stage" : "Consultation Stage"}</th>
-                <th className="w-[15%] px-4 py-2 text-left">Assigned Expert</th>
-                <th className="w-[11%] px-4 py-2 text-left">Appointment</th>
-                <th className="w-[8%] px-4 py-2 text-left">Updated</th>
+                <th className="w-[15%] px-4 py-2 text-left align-middle">Patient</th>
+                <th className="w-[12%] px-4 py-2 text-left align-middle">Patient No.</th>
+                <th className="w-[13%] px-4 py-2 text-left align-middle">Phone</th>
+                <th className="w-[15%] px-4 py-2 text-left align-middle">Email</th>
+                <th className="w-[15%] px-4 py-2 text-left align-middle">{isConsultant ? "Head Consultation Stage" : "Consultation Stage"}</th>
+                <th className="w-[12%] px-4 py-2 text-left align-middle">Assigned Expert</th>
+                <th className="w-[9%] px-3 py-2 text-left align-middle">Appointment</th>
+                <th className="w-[9%] px-3 py-2 text-left align-middle">Updated</th>
               </tr>
             </thead>
             <tbody>
@@ -1370,21 +1376,33 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 const hex = stageColor(l[stageField]);
                 return (
                   <tr key={l.id} onClick={() => { setSelectedLead(l); setDetailTab("overview"); }} className="cursor-pointer border-t border-slate-100 hover:bg-slate-50" data-testid={`cons-row-${l.id}`}>
-                    <td className="truncate px-4 py-3 font-medium text-slate-800" title={l.name}>{l.name || "—"}</td>
-                    <td className="truncate px-4 py-3 font-mono text-xs text-slate-500" title={l.patient_number}>{l.patient_number || "—"}</td>
-                    <td className="truncate px-4 py-3 text-slate-600" title={l.phone}>{l.phone || "—"}</td>
-                    <td className="truncate px-4 py-3 text-slate-600" title={l.email}>{l.email || "—"}</td>
-                    <td className="px-4 py-3">
+                    <td className="truncate px-4 py-3 align-middle font-medium text-slate-800" title={l.name}>{l.name || "—"}</td>
+                    <td className="truncate px-4 py-3 align-middle font-mono text-xs text-slate-500" title={l.patient_number}>{l.patient_number || "—"}</td>
+                    <td className="truncate px-4 py-3 align-middle text-slate-600" title={l.phone}>{l.phone || "—"}</td>
+                    <td className="truncate px-4 py-3 align-middle text-slate-600" title={l.email}>{l.email || "—"}</td>
+                    <td className="px-4 py-3 align-middle">
                       <span
-                        className="inline-flex items-center gap-1 rounded-[5px] px-2 py-0.5 text-xs font-semibold"
+                        className="inline-flex max-w-full items-center gap-1 truncate rounded-[5px] px-2 py-0.5 text-xs font-semibold"
                         style={{ background: `${hex}14`, color: hex, border: `1px solid ${hex}33` }}
+                        title={l[stageField] || ""}
                       >
                         {l[stageField] || "—"}
                       </span>
                     </td>
-                    <td className="truncate px-4 py-3 text-slate-600" title={l.assigned_physio_name}>{l.assigned_physio_name || "—"}</td>
-                    <td className="px-4 py-3 text-xs text-slate-500">{l.appointment_date ? `${l.appointment_date} ${l.appointment_time ? to12h(l.appointment_time) : ""}`.trim() : "—"}</td>
-                    <td className="px-4 py-3 text-xs text-slate-400">{(l.updated_at || "").slice(0, 10)}</td>
+                    <td className="truncate px-4 py-3 align-middle text-slate-600" title={l.assigned_physio_name}>{l.assigned_physio_name || "—"}</td>
+                    {/* Date and time each own a line rather than wrapping wherever the
+                        column happens to run out — so the dates stack in a straight
+                        edge down the column instead of breaking at a different word
+                        on every row. */}
+                    <td className="whitespace-nowrap px-3 py-3 align-middle text-xs text-slate-500">
+                      {l.appointment_date ? (
+                        <>
+                          <span className="block">{l.appointment_date}</span>
+                          {l.appointment_time && <span className="block text-slate-400">{to12h(l.appointment_time)}</span>}
+                        </>
+                      ) : "—"}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-3 align-middle text-xs text-slate-400">{(l.updated_at || "").slice(0, 10) || "—"}</td>
                   </tr>
                 );
               })}
