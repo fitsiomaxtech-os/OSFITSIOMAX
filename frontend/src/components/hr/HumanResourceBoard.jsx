@@ -579,12 +579,12 @@ const AddCandidateModal = ({ sources, onClose, onSaved }) => {
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-3 backdrop-blur-sm sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} data-testid="hr-add-modal">
-      {/* Bigger box, type at its natural size — the zoom that was here shrank the text
-          along with the panel, which is the opposite of room to work. Wider so the
-          two-column form gets full-width fields, and taller so the whole form is in view
-          without the footer riding up over it. */}
-      <div className="max-h-[95vh] w-full max-w-4xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
-        <div className="sticky top-0 flex items-center justify-between bg-gradient-to-r from-indigo-600 to-violet-600 px-5 py-4 text-white">
+      {/* One settled box: header and footer are real flex rows rather than sticky
+          overlays, and the panel itself never scrolls. The form is tuned to fit inside
+          it, so on any normal screen there is no scrollbar at all — the middle only
+          starts scrolling (quietly, no track drawn) on a genuinely short window. */}
+      <div className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div className="flex shrink-0 items-center justify-between bg-gradient-to-r from-indigo-600 to-violet-600 px-5 py-3.5 text-white">
           <div className="flex items-center gap-2">
             <UserPlus className="h-5 w-5" />
             <p className="text-base font-semibold">Add Candidate</p>
@@ -594,7 +594,8 @@ const AddCandidateModal = ({ sources, onClose, onSaved }) => {
           </button>
         </div>
 
-        <div className="grid gap-3 p-5 sm:grid-cols-2">
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="grid gap-2.5 sm:grid-cols-2">
           <Field label="Full Name *"><Input value={form.full_name} onChange={(e) => set("full_name", e.target.value)} placeholder="e.g. Ramya Raju" data-testid="hr-add-name" /></Field>
           <Field label="Phone *"><Input value={form.phone} onChange={(e) => set("phone", e.target.value)} placeholder="10-digit mobile" data-testid="hr-add-phone" /></Field>
           <Field label="Email"><Input value={form.email} onChange={(e) => set("email", e.target.value)} placeholder="name@example.com" data-testid="hr-add-email" /></Field>
@@ -617,17 +618,18 @@ const AddCandidateModal = ({ sources, onClose, onSaved }) => {
           <Field label="Resume Link" className="sm:col-span-2"><Input value={form.resume_url} onChange={(e) => set("resume_url", e.target.value)} placeholder="Drive / Dropbox link" data-testid="hr-add-resume" /></Field>
           <Field label="Notes" className="sm:col-span-2">
             <textarea
-              rows={3}
+              rows={2}
               value={form.notes}
               onChange={(e) => set("notes", e.target.value)}
               placeholder="Anything worth remembering about this candidate..."
-              className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+              className="w-full resize-none rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
               data-testid="hr-add-notes"
             />
           </Field>
         </div>
+        </div>
 
-        <div className="sticky bottom-0 flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/80 px-5 py-3 backdrop-blur">
+        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3">
           <Button variant="outline" onClick={onClose} data-testid="hr-add-cancel">Cancel</Button>
           <Button onClick={submit} disabled={busy} className="bg-indigo-600 text-white hover:bg-indigo-700" data-testid="hr-add-save">
             {busy ? "Saving..." : "Add Candidate"}
