@@ -101,7 +101,10 @@ export const HumanResourceBoard = ({ user }) => {
   // The sheet connections are setup, not day-to-day work, so they sit behind their own
   // view rather than above the pipeline where they'd be scrolled past every morning.
   const [view, setView] = useState("pipeline");
-  const [dateFilter, setDateFilter] = useState({ key: null, label: "", from: null, to: null });
+  // null, not an empty object — the filter reads `!!value` to decide whether it is active,
+  // and clearing it sets null, so any other empty shape would show as filtered from the
+  // first render and never match the cleared state.
+  const [dateFilter, setDateFilter] = useState(null); // { from, to, label, key } | null
   const [sortDir, setSortDir] = useState("newest");
 
   const load = useCallback(async () => {
@@ -246,7 +249,7 @@ export const HumanResourceBoard = ({ user }) => {
         <div className="flex flex-wrap items-center gap-2">
           {/* Filters by when the candidate was added, which is what "0d / 19d" in the Age
               column counts from — the two answer the same question. */}
-          <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="hr-date-filter" />
+          <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="hr-date-filter" centered />
 
           <button
             type="button"

@@ -1,10 +1,9 @@
 import { useMemo, useState } from "react";
 import { Calendar as CalendarIcon, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
-import { MilkDateInput } from "@/components/ui/milk-calendar";
+import { MilkCalendar, MilkDateInput } from "@/components/ui/milk-calendar";
 
 /**
  * DateFilterPopover
@@ -40,7 +39,7 @@ const presets = (today) => ([
 
 const toInputValue = (d) => d ? new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10) : "";
 
-export const DateFilterPopover = ({ value, onChange, testid = "date-filter" }) => {
+export const DateFilterPopover = ({ value, onChange, testid = "date-filter", centered = false }) => {
   const [open, setOpen] = useState(false);
   const [showRange, setShowRange] = useState(false);
   const [rangeFrom, setRangeFrom] = useState("");
@@ -80,6 +79,109 @@ export const DateFilterPopover = ({ value, onChange, testid = "date-filter" }) =
 
   const activeLabel = value?.label || "Date Filter";
   const isActive = !!value;
+
+  // `centered` swaps the anchored popover for a normal centred dialog in the OS's milk
+  // white, and swaps react-day-picker for our own MilkCalendar. Same filter, same state —
+  // only where it appears and what it is made of.
+  //
+  // Behind a prop because Branch Admin and Consultations anchor this to a toolbar inside a
+  // dense board, where a full-screen overlay for picking a date would be a heavier gesture
+  // than the job deserves.
+  if (centered) {
+    const railBtn = (on) => `w-full rounded-md px-3 py-2 text-left text-sm transition-colors ${
+      on ? "bg-amber-100 font-semibold text-amber-800" : "text-slate-700 hover:bg-[#F3EFE6]"
+    }`;
+    return (
+      <div className="inline-flex items-center">
+        <Button
+          variant="outline"
+          onClick={() => setOpen(true)}
+          className={`h-10 ${isActive ? "rounded-r-none border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100" : ""}`}
+          data-testid={`${testid}-btn`}
+        >
+          <CalendarIcon className="mr-2 h-4 w-4" />
+          {activeLabel}
+        </Button>
+        {isActive && (
+          <button
+            type="button"
+            onClick={clear}
+            className="flex h-10 items-center rounded-r-md border border-l-0 border-amber-300 bg-amber-50 px-2 text-amber-800 hover:bg-amber-100"
+            title="Clear date filter"
+            aria-label="Clear date filter"
+            data-testid={`${testid}-clear-x`}
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        )}
+
+        {open && (
+          <div
+            className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/50 p-3 backdrop-blur-sm sm:p-4"
+            onClick={(e) => { if (e.target === e.currentTarget) setOpen(false); }}
+            data-testid={`${testid}-modal`}
+          >
+            <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-[#EFEAE0] bg-[#FDFCF8] shadow-2xl sm:max-w-lg" data-testid={`${testid}-panel`}>
+              <div className="flex items-center justify-between border-b border-[#EFEAE0] px-4 py-3">
+                <p className="text-sm font-bold text-slate-800">Filter by Date</p>
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  className="rounded-full p-1.5 text-slate-400 hover:bg-[#F3EFE6] hover:text-slate-600"
+                  title="Close"
+                  aria-label="Close"
+                  data-testid={`${testid}-exit`}
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              {/* Presets across the top on a phone, down the side from sm — the same two
+                  halves either way, never a sideways scroll. */}
+              <div className="flex flex-col sm:flex-row">
+                <div className="grid grid-cols-2 gap-1 border-b border-[#EFEAE0] p-2 sm:w-40 sm:shrink-0 sm:grid-cols-1 sm:gap-0.5 sm:border-b-0 sm:border-r" data-testid={`${testid}-presets`}>
+                  {list.map((p) => (
+                    <button key={p.key} type="button" onClick={() => apply(p)} className={railBtn(value?.key === p.key)} data-testid={`${testid}-preset-${p.key}`}>
+                      {p.label}
+                    </button>
+                  ))}
+                  <button type="button" onClick={openRange} className={railBtn(value?.key === "range" || showRange)} data-testid={`${testid}-preset-range`}>
+                    Custom Range
+                  </button>
+                </div>
+
+                <div className="min-w-0 flex-1 p-3">
+                  {showRange ? (
+                    <div className="space-y-3" data-testid={`${testid}-range-panel`}>
+                      <p className="text-sm font-semibold text-slate-700">Custom Range</p>
+                      <div>
+                        <label className="text-xs font-medium text-slate-500">From</label>
+                        <MilkDateInput value={rangeFrom} onChange={(e) => setRangeFrom(e.target.value)} data-testid={`${testid}-range-from`} />
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-slate-500">To</label>
+                        <MilkDateInput value={rangeTo} onChange={(e) => setRangeTo(e.target.value)} min={rangeFrom || undefined} data-testid={`${testid}-range-to`} />
+                      </div>
+                      <Button className="w-full" onClick={applyRange} disabled={!rangeFrom || !rangeTo} data-testid={`${testid}-range-apply`}>
+                        Apply
+                      </Button>
+                    </div>
+                  ) : (
+                    <MilkCalendar
+                      value={value?.key === "exact" ? toInputValue(value.from) : ""}
+                      accent="amber"
+                      onChange={(d) => applyExact(new Date(`${d}T00:00:00`))}
+                      testid={`${testid}-calendar`}
+                    />
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="inline-flex items-center">
