@@ -28,7 +28,7 @@ import uuid
 
 from database import v3_col
 from utils import now_iso
-from deps import v3_current_user
+from deps import v3_current_user, is_hr_role
 from constants import V3_RECRUITMENT_STAGES
 from schemas.v3 import V3UserOut
 from routers.v3_marketing import extract_spreadsheet_id, normalize_phone
@@ -46,25 +46,13 @@ INTERVIEW_MODES = ["In-person", "Phone", "Video"]
 
 # ---------------------------------------------------------------- access
 
-def _is_hr_role(role: str) -> bool:
-    """Whether this role may work the recruitment board.
-
-    The HR role is created by hand in Super Admin -> HR Admin, so its slug is whatever
-    label was typed ("Human Resource" -> human_resource). Rather than pin one literal and
-    have the board silently 403 if a different label was used, any role whose slug reads as
-    HR/recruitment is accepted. Matched on whole underscore-separated tokens so an
-    unrelated future role can't slip in on a substring.
-    """
-    r = (role or "").strip().lower()
-    if r == "super_admin":
-        return True
-    if "human_resource" in r:
-        return True
-    return bool(set(r.split("_")) & {"hr", "recruiter", "recruitment", "talent"})
+# The predicate lives in deps.py: the HR Admin endpoints gate on the same rule, and two
+# copies of "which slugs count as HR" would drift apart.
+_is_hr_role = is_hr_role
 
 
 async def require_hr(user: V3UserOut = Depends(v3_current_user)) -> V3UserOut:
-    if not _is_hr_role(user.role):
+    if not is_hr_role(user.role):
         raise HTTPException(status_code=403, detail="Not allowed")
     return user
 
@@ -506,12 +494,25 @@ CANDIDATE_TEXT_FIELDS = {"full_name", "phone", "email", "position", "department"
 CANDIDATE_NUMBER_FIELDS = {"experience_years", "current_ctc", "expected_ctc"}
 
 
+def _norm_header(h: Any) -> str:
+    """Reduce a header to words, so separators and case stop mattering.
+
+    "Full Name", "full_name", "FULL-NAME" and "full  name" are the same column to a human
+    and must be the same column here. Sheets built *for* this system tend to use the field
+    names the connect form lists — full_name, current_ctc, experience_years — and those went
+    unmatched while every human phrasing worked, which is exactly backwards.
+    """
+    return re.sub(r"[^a-z0-9]+", " ", str(h or "").strip().lower()).strip()
+
+
 def auto_map_candidate_columns(headers: List[str]) -> Dict[str, str]:
     mapping: Dict[str, str] = {}
-    lowered = {str(h).strip().lower(): h for h in headers}
+    lowered = {_norm_header(h): h for h in headers}
     used: set = set()
     for std, aliases in CANDIDATE_FIELD_ALIASES.items():
-        for alias in aliases:
+        # The field's own name counts as an alias, ahead of the human phrasings: a header
+        # that is literally `expected_ctc` should never lose to a looser match.
+        for alias in [_norm_header(std)] + [_norm_header(a) for a in aliases]:
             if alias in lowered and lowered[alias] not in used:
                 mapping[std] = lowered[alias]
                 used.add(lowered[alias])

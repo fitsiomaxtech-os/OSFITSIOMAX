@@ -5,7 +5,7 @@ import uuid
 
 from database import v3_col
 from utils import now_iso
-from deps import v3_require_roles
+from deps import v3_require_roles, v3_require_roles_or_hr, is_hr_role
 from security import hash_password
 from schemas.v3 import V3UserOut
 
@@ -150,7 +150,7 @@ async def _next_emp_code() -> str:
 # ---------- Dashboard ----------
 
 @router.get("/dashboard")
-async def hr_dashboard(_: V3UserOut = Depends(v3_require_roles("super_admin", "marketing_head"))):
+async def hr_dashboard(_: V3UserOut = Depends(v3_require_roles_or_hr("super_admin", "marketing_head"))):
     active_employees = await v3_col("employees").count_documents({"status": "active"})
     total_users = await v3_col("users").count_documents({"is_active": True})
 
@@ -188,7 +188,7 @@ async def _next_emp_code_legacy() -> str:
 
 
 @router.get("/employees")
-async def list_employees(status: Optional[str] = None, _: V3UserOut = Depends(v3_require_roles("super_admin", "marketing_head"))):
+async def list_employees(status: Optional[str] = None, _: V3UserOut = Depends(v3_require_roles_or_hr("super_admin", "marketing_head"))):
     q: Dict[str, Any] = {}
     if status:
         q["status"] = status
@@ -197,7 +197,7 @@ async def list_employees(status: Optional[str] = None, _: V3UserOut = Depends(v3
 
 
 @router.post("/employees")
-async def create_employee(payload: EmployeeCreate, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def create_employee(payload: EmployeeCreate, _: V3UserOut = Depends(v3_require_roles_or_hr("super_admin"))):
     # Department and Designation are what every downstream view groups and colour-codes
     # employees by, so an employee without them is unusable — required at the API too,
     # not just in the form.
@@ -216,7 +216,7 @@ async def create_employee(payload: EmployeeCreate, _: V3UserOut = Depends(v3_req
 
 
 @router.patch("/employees/{emp_id}")
-async def update_employee(emp_id: str, payload: EmployeeUpdate, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def update_employee(emp_id: str, payload: EmployeeUpdate, _: V3UserOut = Depends(v3_require_roles_or_hr("super_admin"))):
     updates = {k: v for k, v in payload.model_dump().items() if v is not None}
     if not updates:
         raise HTTPException(status_code=400, detail="No updates")
@@ -240,7 +240,7 @@ async def update_employee(emp_id: str, payload: EmployeeUpdate, _: V3UserOut = D
 
 
 @router.delete("/employees/{emp_id}")
-async def delete_employee(emp_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def delete_employee(emp_id: str, _: V3UserOut = Depends(v3_require_roles_or_hr("super_admin"))):
     res = await v3_col("employees").delete_one({"id": emp_id})
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Employee not found")
@@ -252,7 +252,7 @@ async def delete_employee(emp_id: str, _: V3UserOut = Depends(v3_require_roles("
 # ---------- Roles & Credentials ----------
 
 @router.get("/users")
-async def list_users(search: Optional[str] = None, role: Optional[str] = None, _: V3UserOut = Depends(v3_require_roles("super_admin", "marketing_head"))):
+async def list_users(search: Optional[str] = None, role: Optional[str] = None, _: V3UserOut = Depends(v3_require_roles_or_hr("super_admin", "marketing_head"))):
     q: Dict[str, Any] = {}
     if role and role != "all":
         q["role"] = role
@@ -272,7 +272,7 @@ async def list_users(search: Optional[str] = None, role: Optional[str] = None, _
 
 
 @router.post("/users")
-async def create_user_account(payload: UserAccountCreate, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def create_user_account(payload: UserAccountCreate, _: V3UserOut = Depends(v3_require_roles_or_hr("super_admin"))):
     if payload.role == "super_admin":
         raise HTTPException(status_code=403, detail="Super Admin accounts can only be created via the OTP-approved Super Admin creation page")
     if payload.role not in await _all_role_names():
@@ -334,8 +334,24 @@ async def create_user_account(payload: UserAccountCreate, _: V3UserOut = Depends
     return safe
 
 
+async def _guard_super_admin_target(user_id: str, caller: V3UserOut) -> None:
+    """Only a Super Admin may act on a Super Admin's account.
+
+    HR now reaches these endpoints, and without this an HR user could deactivate, delete,
+    rename or reset the password of the Super Admin who granted them the role — locking the
+    owner out of their own OS. Creating or promoting *to* super_admin was already blocked
+    elsewhere; this closes the other direction.
+    """
+    if caller.role == "super_admin":
+        return
+    target = await v3_col("users").find_one({"id": user_id}, {"_id": 0, "role": 1})
+    if target and target.get("role") == "super_admin":
+        raise HTTPException(status_code=403, detail="Only a Super Admin can change a Super Admin account")
+
+
 @router.patch("/users/{user_id}")
-async def update_user_account(user_id: str, payload: UserAccountUpdate, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def update_user_account(user_id: str, payload: UserAccountUpdate, caller: V3UserOut = Depends(v3_require_roles_or_hr("super_admin"))):
+    await _guard_super_admin_target(user_id, caller)
     updates = {k: v for k, v in payload.model_dump().items() if v is not None}
     if not updates:
         raise HTTPException(status_code=400, detail="No updates provided")
@@ -390,7 +406,8 @@ async def update_user_account(user_id: str, payload: UserAccountUpdate, _: V3Use
 
 
 @router.patch("/users/{user_id}/role")
-async def update_user_role(user_id: str, role: str, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def update_user_role(user_id: str, role: str, caller: V3UserOut = Depends(v3_require_roles_or_hr("super_admin"))):
+    await _guard_super_admin_target(user_id, caller)
     if role not in await _all_role_names():
         raise HTTPException(status_code=400, detail="Invalid role")
     if role == "super_admin":
@@ -424,7 +441,8 @@ async def update_user_role(user_id: str, role: str, _: V3UserOut = Depends(v3_re
 
 
 @router.patch("/users/{user_id}/reset-password")
-async def reset_password(user_id: str, password: str, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def reset_password(user_id: str, password: str, caller: V3UserOut = Depends(v3_require_roles_or_hr("super_admin"))):
+    await _guard_super_admin_target(user_id, caller)
     if len(password) < 6:
         raise HTTPException(status_code=400, detail="Password too short (min 6)")
     res = await v3_col("users").update_one({"id": user_id}, {"$set": {"password": hash_password(password)}})
@@ -434,7 +452,8 @@ async def reset_password(user_id: str, password: str, _: V3UserOut = Depends(v3_
 
 
 @router.delete("/users/{user_id}")
-async def deactivate_user(user_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def deactivate_user(user_id: str, caller: V3UserOut = Depends(v3_require_roles_or_hr("super_admin"))):
+    await _guard_super_admin_target(user_id, caller)
     res = await v3_col("users").update_one({"id": user_id}, {"$set": {"is_active": False}})
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="User not found")
@@ -442,7 +461,8 @@ async def deactivate_user(user_id: str, _: V3UserOut = Depends(v3_require_roles(
 
 
 @router.patch("/users/{user_id}/activate")
-async def activate_user(user_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def activate_user(user_id: str, caller: V3UserOut = Depends(v3_require_roles_or_hr("super_admin"))):
+    await _guard_super_admin_target(user_id, caller)
     res = await v3_col("users").update_one({"id": user_id}, {"$set": {"is_active": True}})
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="User not found")
@@ -450,9 +470,10 @@ async def activate_user(user_id: str, _: V3UserOut = Depends(v3_require_roles("s
 
 
 @router.delete("/users/{user_id}/permanent")
-async def delete_user_permanent(user_id: str, current: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def delete_user_permanent(user_id: str, current: V3UserOut = Depends(v3_require_roles_or_hr("super_admin"))):
     if user_id == current.id:
         raise HTTPException(status_code=400, detail="You cannot delete your own account")
+    await _guard_super_admin_target(user_id, current)
     res = await v3_col("users").delete_one({"id": user_id})
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="User not found")
@@ -462,7 +483,7 @@ async def delete_user_permanent(user_id: str, current: V3UserOut = Depends(v3_re
 # ---------- Branch Admin Picker (for super-admin Branch creation flow) ----------
 
 @router.get("/branch-admin-candidates")
-async def branch_admin_candidates(_: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def branch_admin_candidates(_: V3UserOut = Depends(v3_require_roles_or_hr("super_admin"))):
     rows = await v3_col("users").find({"role": "branch_admin", "is_active": True}, {"_id": 0, "password": 0}).to_list(500)
     branches = {}
     async for b in v3_col("branches").find({}, {"_id": 0}):
@@ -480,7 +501,7 @@ async def branch_admin_candidates(_: V3UserOut = Depends(v3_require_roles("super
 
 
 @router.post("/roles")
-async def add_custom_role(payload: CustomRoleCreate, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+async def add_custom_role(payload: CustomRoleCreate, _: V3UserOut = Depends(v3_require_roles_or_hr("super_admin"))):
     """Add a new selectable Role name (e.g. "Tech Manager" -> tech_manager) so it
     shows up in Create User Account going forward. This only registers the name —
     it has no page/permission access wired up on its own; that's a separate,
@@ -499,7 +520,7 @@ async def add_custom_role(payload: CustomRoleCreate, _: V3UserOut = Depends(v3_r
 
 
 @router.get("/meta")
-async def hr_meta(_: V3UserOut = Depends(v3_require_roles("super_admin", "marketing_head"))):
+async def hr_meta(_: V3UserOut = Depends(v3_require_roles_or_hr("super_admin", "marketing_head"))):
     custom = await _custom_roles()
     return {
         "departments": DEFAULT_DEPARTMENTS,

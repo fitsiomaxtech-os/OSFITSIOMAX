@@ -75,3 +75,33 @@ def v3_require_roles(*roles: str):
         return user
 
     return checker
+
+
+def is_hr_role(role: str) -> bool:
+    """Whether a role slug reads as Human Resources.
+
+    The HR role is created by hand in Super Admin -> HR Admin, so its slug is whatever
+    label was typed ("Human Resource" -> human_resource). Pinning one literal would leave
+    the board 403ing for anyone who worded it differently, so the shape of the slug is
+    matched instead — on whole underscore-separated tokens, so an unrelated future role
+    can't slip through on a substring.
+
+    Lives here rather than in a router because both the recruitment board and the HR Admin
+    endpoints gate on it, and two copies would drift.
+    """
+    r = (role or "").strip().lower()
+    if r == "super_admin":
+        return True
+    if "human_resource" in r:
+        return True
+    return bool(set(r.split("_")) & {"hr", "recruiter", "recruitment", "talent"})
+
+
+def v3_require_roles_or_hr(*roles: str):
+    """Allow the listed roles, plus anyone whose role reads as HR."""
+    async def checker(user: V3UserOut = Depends(v3_current_user)) -> V3UserOut:
+        if user.role in roles or is_hr_role(user.role):
+            return user
+        raise HTTPException(status_code=403, detail="Not allowed")
+
+    return checker

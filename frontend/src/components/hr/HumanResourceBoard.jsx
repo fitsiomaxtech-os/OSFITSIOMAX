@@ -7,6 +7,7 @@ import {
   Clock,
   FileSpreadsheet,
   FileText,
+  IdCard,
   IndianRupee,
   Mail,
   MapPin,
@@ -25,7 +26,8 @@ import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { MilkDateInput, MilkTimeInput } from "@/components/ui/milk-calendar";
 import { CandidateSheetPanel } from "@/components/hr/CandidateSheetPanel";
-import { RecruitmentStagesModal } from "@/components/hr/RecruitmentStagesModal";
+import { RecruitmentStagesPanel } from "@/components/hr/RecruitmentStagesPanel";
+import { HRBoard } from "@/components/hr/HRBoard";
 import { to12h } from "@/lib/time";
 import {
   recruitmentBoard,
@@ -86,6 +88,14 @@ const emptyCandidate = {
 // would make the box 4rem and the number no longer mean anything.
 const STAGE_BOX_STYLE = { lineHeight: "3rem", fontFamily: "Lexend, sans-serif" };
 
+// What this board is for, in three parts: the candidates you work today, the people already
+// employed, and the plumbing that feeds and shapes the pipeline.
+const VIEWS = [
+  { key: "pipeline", label: "Candidates", icon: Users },
+  { key: "employees", label: "Employee Manage", icon: IdCard },
+  { key: "sources", label: "Source Manage", icon: FileSpreadsheet },
+];
+
 // The four cards are the board's filter, the same way the Head Physio's cards are. Each
 // one answers a question HR actually asks, not just "how many rows are there".
 const CARDS = [
@@ -106,7 +116,6 @@ export const HumanResourceBoard = ({ user }) => {
   // The sheet connections are setup, not day-to-day work, so they sit behind their own
   // view rather than above the pipeline where they'd be scrolled past every morning.
   const [view, setView] = useState("pipeline");
-  const [showStages, setShowStages] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -159,44 +168,41 @@ export const HumanResourceBoard = ({ user }) => {
 
   return (
     <div className="space-y-4 pb-24 sm:pb-6" data-testid="hr-recruitment-board">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="grid grid-cols-2 gap-2 rounded-lg bg-slate-100 p-1 sm:max-w-md sm:flex-1" data-testid="hr-view-switch">
-          {[
-            { key: "pipeline", label: "Candidates", icon: Users },
-            { key: "sheets", label: "Lead Sheets", icon: FileSpreadsheet },
-          ].map((v) => {
-            const Icon = v.icon;
-            return (
-              <button
-                key={v.key}
-                type="button"
-                onClick={() => setView(v.key)}
-                className={`inline-flex items-center justify-center gap-1.5 rounded-md py-2 text-sm font-semibold transition ${
-                  view === v.key ? "bg-white text-indigo-600 shadow" : "text-slate-500"
-                }`}
-                data-testid={`hr-view-${v.key}`}
-              >
-                <Icon className="h-4 w-4" /> {v.label}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Shaping the pipeline is HR's to do, so it lives on their board rather than only
-            under Super Admin's Pipeline Stage Management. Same stages, same records — this
-            is a second door onto them, not a copy. */}
-        <button
-          type="button"
-          onClick={() => setShowStages(true)}
-          className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 shadow-sm transition hover:border-indigo-300 hover:text-indigo-700"
-          data-testid="hr-manage-stages-button"
-        >
-          <SlidersHorizontal className="h-4 w-4" /> Manage Stage ({stages.length})
-        </button>
+      {/* The board's three jobs. Candidates is the daily one and stays first; the other two
+          are administration and sit behind it rather than beside the pipeline, where they
+          were scrolled past every morning. */}
+      <div className="grid grid-cols-3 gap-2 rounded-lg bg-slate-100 p-1" data-testid="hr-view-switch">
+        {VIEWS.map((v) => {
+          const Icon = v.icon;
+          return (
+            <button
+              key={v.key}
+              type="button"
+              onClick={() => setView(v.key)}
+              className={`inline-flex items-center justify-center gap-1.5 rounded-md px-2 py-2 text-xs font-semibold transition sm:text-sm ${
+                view === v.key ? "bg-white text-indigo-600 shadow" : "text-slate-500 hover:text-slate-700"
+              }`}
+              data-testid={`hr-view-${v.key}`}
+            >
+              <Icon className="h-4 w-4 shrink-0" />
+              <span className="truncate">{v.label}</span>
+            </button>
+          );
+        })}
       </div>
 
-      {view === "sheets" && (
-        <CandidateSheetPanel onImported={() => { load(); setView("pipeline"); }} />
+      {view === "employees" && (
+        <div data-testid="hr-employee-manage">
+          <HRBoard />
+        </div>
+      )}
+
+      {view === "sources" && (
+        <SourceManageView
+          stageCount={stages.length}
+          onImported={() => { load(); setView("pipeline"); }}
+          onStagesChanged={load}
+        />
       )}
 
       {view === "pipeline" && (
@@ -310,15 +316,6 @@ export const HumanResourceBoard = ({ user }) => {
       </>
       )}
 
-      {showStages && (
-        <RecruitmentStagesModal
-          onClose={() => setShowStages(false)}
-          // A renamed or reordered stage changes what every pill and card on the board
-          // says, so the board reloads behind the modal rather than after it closes.
-          onChanged={load}
-        />
-      )}
-
       {showAdd && (
         <AddCandidateModal
           sources={board.sources || []}
@@ -336,6 +333,43 @@ export const HumanResourceBoard = ({ user }) => {
           onChanged={load}
         />
       )}
+    </div>
+  );
+};
+
+
+/** Where candidates come from, and the shape they move through — the two halves of the
+    pipeline's plumbing, kept side by side because they are usually set up together and
+    then rarely touched again. */
+const SourceManageView = ({ stageCount, onImported, onStagesChanged }) => {
+  const [sub, setSub] = useState("sheets");
+  return (
+    <div className="space-y-4" data-testid="hr-source-manage">
+      <div className="grid grid-cols-2 gap-2 rounded-lg bg-slate-100 p-1 sm:max-w-md" data-testid="hr-source-subtabs">
+        {[
+          { key: "sheets", label: "Google Sheets", icon: FileSpreadsheet },
+          { key: "stages", label: `Manage Stage (${stageCount})`, icon: SlidersHorizontal },
+        ].map((t) => {
+          const Icon = t.icon;
+          return (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setSub(t.key)}
+              className={`inline-flex items-center justify-center gap-1.5 rounded-md px-2 py-2 text-xs font-semibold transition sm:text-sm ${
+                sub === t.key ? "bg-white text-indigo-600 shadow" : "text-slate-500 hover:text-slate-700"
+              }`}
+              data-testid={`hr-source-sub-${t.key}`}
+            >
+              <Icon className="h-4 w-4 shrink-0" />
+              <span className="truncate">{t.label}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {sub === "sheets" && <CandidateSheetPanel onImported={onImported} />}
+      {sub === "stages" && <RecruitmentStagesPanel onChanged={onStagesChanged} />}
     </div>
   );
 };
