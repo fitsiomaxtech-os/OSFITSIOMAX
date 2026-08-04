@@ -205,9 +205,14 @@ export const HumanResourceBoard = ({ user }) => {
           it to the card, the same move the summary cards made in indigo. */}
       {/* Five to a row on a phone, so nine stages land as 5 + 4 and the whole pipeline is
           visible at once. It used to scroll sideways, which hid every stage past Screening
-          behind a swipe nobody knew to make. */}
+          behind a swipe nobody knew to make.
+
+          flex-wrap rather than a 5-column grid: a grid pins the last four to columns 1-4
+          and leaves a hole on the right, and there is no way to centre a partial final row.
+          The cards are sized to fit exactly five, so full rows still reach both edges and
+          only the short row centres. */}
       <div
-        className="grid grid-cols-5 gap-1.5 sm:grid-cols-3 sm:gap-3 lg:grid-cols-5 xl:grid-cols-9"
+        className="flex flex-wrap justify-center gap-1.5 sm:grid sm:grid-cols-3 sm:gap-3 lg:grid-cols-5 xl:grid-cols-9"
         style={{ fontFamily: "Lexend, sans-serif" }}
         data-testid="hr-stage-pills"
       >
@@ -350,7 +355,10 @@ const StageCard = ({ label, count, color, active, onClick, testid }) => (
   <button
     type="button"
     onClick={onClick}
-    className={`w-full min-w-0 rounded-lg border-2 px-1 py-1.5 text-center transition hover:shadow-sm sm:rounded-xl sm:px-4 sm:py-4 sm:text-left ${
+    /* 20% minus its share of the four 0.375rem gaps — five across exactly, so a full row
+       spans the container and the leftover row can centre under it. w-full from sm up,
+       where the layout is a grid and the cell decides the width. */
+    className={`w-[calc(20%-0.3rem)] min-w-0 rounded-lg border-2 px-1 py-1.5 text-center transition hover:shadow-sm sm:w-full sm:rounded-xl sm:px-4 sm:py-4 sm:text-left ${
       active ? "shadow-sm" : "border-slate-200 bg-white"
     }`}
     style={active ? { borderColor: color, backgroundColor: `${color}14` } : undefined}
