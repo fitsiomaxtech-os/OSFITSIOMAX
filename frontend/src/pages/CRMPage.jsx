@@ -632,8 +632,11 @@ export const CRMPage = ({ auth, onLogout }) => {
                 <p className="text-[10px] font-semibold tracking-wide text-sky-600 sm:text-xs" data-testid="role-board-brand-subtitle">
                   FitsiomaxOS
                 </p>
+                {/* On a phone the board title costs a whole line to say something the user
+                    already knows, so these two boards show who is signed in instead. The
+                    desktop header is untouched. */}
                 <h1 className="truncate text-base font-bold text-slate-900 sm:text-2xl" data-testid="role-board-title">
-                  {showHeadPhysioBoard ? (
+                  {showHeadPhysioBoard || showHumanResourceBoard ? (
                     <>
                       <span className="sm:hidden">{auth.user.full_name}</span>
                       <span className="hidden sm:inline">{boardTitle}</span>

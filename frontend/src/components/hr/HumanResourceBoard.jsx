@@ -167,11 +167,15 @@ export const HumanResourceBoard = ({ user }) => {
   }, [board.candidates, finalIds, today]);
 
   return (
-    <div className="space-y-4 pb-24 sm:pb-6" data-testid="hr-recruitment-board">
+    <div className="space-y-4 pb-24 md:pb-6" data-testid="hr-recruitment-board">
       {/* The board's three jobs. Candidates is the daily one and stays first; the other two
           are administration and sit behind it rather than beside the pipeline, where they
-          were scrolled past every morning. */}
-      <div className="grid grid-cols-3 gap-2 rounded-lg bg-slate-100 p-1" data-testid="hr-view-switch">
+          were scrolled past every morning.
+
+          Plain tabs on a rule, matching the Super Admin nav — this is top-level navigation,
+          and a segmented control reads as a filter on the thing below it. On a phone the
+          same three live in the bottom bar instead, thumb-high. */}
+      <div className="hidden flex-wrap gap-2 border-b border-slate-200 pb-2 md:flex" data-testid="hr-view-switch">
         {VIEWS.map((v) => {
           const Icon = v.icon;
           return (
@@ -179,13 +183,12 @@ export const HumanResourceBoard = ({ user }) => {
               key={v.key}
               type="button"
               onClick={() => setView(v.key)}
-              className={`inline-flex items-center justify-center gap-1.5 rounded-md px-2 py-2 text-xs font-semibold transition sm:text-sm ${
-                view === v.key ? "bg-white text-indigo-600 shadow" : "text-slate-500 hover:text-slate-700"
+              className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${
+                view === v.key ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-100"
               }`}
               data-testid={`hr-view-${v.key}`}
             >
-              <Icon className="h-4 w-4 shrink-0" />
-              <span className="truncate">{v.label}</span>
+              <Icon className="h-4 w-4" /> {v.label}
             </button>
           );
         })}
@@ -303,11 +306,12 @@ export const HumanResourceBoard = ({ user }) => {
 
       <CandidateList rows={rows} onOpen={setSelected} loading={loading} />
 
-      {/* On a phone the header button is a scroll away by the time you've read the list. */}
+      {/* On a phone the header button is a scroll away by the time you've read the list.
+          Sits above the bottom bar rather than on top of it. */}
       <button
         type="button"
         onClick={() => setShowAdd(true)}
-        className="fixed bottom-5 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-indigo-600 text-white shadow-lg sm:hidden"
+        className="fixed bottom-20 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-indigo-600 text-white shadow-lg sm:hidden"
         aria-label="Add candidate"
         data-testid="hr-add-candidate-fab"
       >
@@ -315,6 +319,29 @@ export const HumanResourceBoard = ({ user }) => {
       </button>
       </>
       )}
+
+      {/* Same three destinations as the desktop tabs above, from the one VIEWS array so
+          the two surfaces can't drift apart. */}
+      <nav className="fixed inset-x-0 bottom-0 z-50 flex border-t border-slate-200 bg-white shadow-[0_-2px_10px_rgba(0,0,0,0.06)] md:hidden" data-testid="hr-bottom-nav">
+        {VIEWS.map((v) => {
+          const Icon = v.icon;
+          const active = view === v.key;
+          return (
+            <button
+              key={v.key}
+              type="button"
+              onClick={() => setView(v.key)}
+              className={`flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-medium leading-tight ${
+                active ? "text-indigo-600" : "text-slate-400"
+              }`}
+              data-testid={`hr-nav-${v.key}`}
+            >
+              <Icon className="h-5 w-5" />
+              {v.label}
+            </button>
+          );
+        })}
+      </nav>
 
       {showAdd && (
         <AddCandidateModal
