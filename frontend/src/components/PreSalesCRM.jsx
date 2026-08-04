@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Eye, Plus, Search, Settings as Cog, Calendar as CalendarIcon, Phone, FileText, StickyNote, ArrowRight, CheckCircle2, X, Pencil, PhoneOff, Clock, Bell, Building2, Trash2, Lock, Users, CalendarCheck, UserRound, LogOut, Mail, Youtube, ChevronDown, ChevronUp } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -72,6 +72,122 @@ const WhatsAppIcon = ({ className }) => (
     <path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2 22l5.29-1.39a9.9 9.9 0 0 0 4.75 1.21h.01c5.46 0 9.9-4.45 9.9-9.91C21.96 6.45 17.5 2 12.04 2m0 18.15a8.2 8.2 0 0 1-4.19-1.15l-.3-.18-3.14.82.84-3.06-.2-.31a8.22 8.22 0 0 1-1.26-4.36c0-4.54 3.7-8.24 8.25-8.24 2.2 0 4.27.86 5.83 2.42a8.18 8.18 0 0 1 2.41 5.83c0 4.55-3.7 8.24-8.24 8.24m4.52-6.17c-.25-.12-1.47-.72-1.69-.81-.23-.08-.39-.12-.56.13-.17.24-.64.81-.78.97-.15.17-.29.19-.54.06-.25-.12-1.05-.39-1.99-1.24-.74-.66-1.23-1.47-1.38-1.72-.14-.25-.02-.38.11-.5.11-.11.25-.29.37-.43.13-.15.17-.25.25-.42.08-.17.04-.31-.02-.43-.06-.12-.56-1.36-.77-1.86-.2-.48-.41-.42-.56-.43h-.48c-.17 0-.43.06-.66.31s-.87.85-.87 2.08.89 2.41 1.02 2.58c.12.17 1.75 2.67 4.24 3.74.59.26 1.05.41 1.41.52.59.19 1.13.16 1.56.1.48-.07 1.47-.6 1.67-1.18.21-.58.21-1.08.15-1.18-.06-.1-.23-.16-.48-.28"/>
   </svg>
 );
+
+// Each branch keeps one colour wherever it appears, picked from its name rather than
+// its position in the list — so a branch added or reordered later doesn't recolour
+// every row that already reads as "the green branch".
+const BRANCH_TONES = [
+  { chip: "border-emerald-300 bg-emerald-50 text-emerald-700", dot: "bg-emerald-500", hover: "hover:bg-emerald-100" },
+  { chip: "border-sky-300 bg-sky-50 text-sky-700", dot: "bg-sky-500", hover: "hover:bg-sky-100" },
+  { chip: "border-violet-300 bg-violet-50 text-violet-700", dot: "bg-violet-500", hover: "hover:bg-violet-100" },
+  { chip: "border-amber-300 bg-amber-50 text-amber-700", dot: "bg-amber-500", hover: "hover:bg-amber-100" },
+  { chip: "border-rose-300 bg-rose-50 text-rose-700", dot: "bg-rose-500", hover: "hover:bg-rose-100" },
+  { chip: "border-teal-300 bg-teal-50 text-teal-700", dot: "bg-teal-500", hover: "hover:bg-teal-100" },
+  { chip: "border-indigo-300 bg-indigo-50 text-indigo-700", dot: "bg-indigo-500", hover: "hover:bg-indigo-100" },
+  { chip: "border-orange-300 bg-orange-50 text-orange-700", dot: "bg-orange-500", hover: "hover:bg-orange-100" },
+];
+
+const branchTone = (name) => {
+  const s = (name || "").trim().toUpperCase();
+  let h = 0;
+  for (let i = 0; i < s.length; i += 1) h = (h * 31 + s.charCodeAt(i)) % 1000003;
+  return BRANCH_TONES[h % BRANCH_TONES.length];
+};
+
+const branchLabel = (b) => b?.branch_name || b?.name || "";
+
+/**
+ * Assign-to-branch picker for the leads table.
+ *
+ * A native <select> can only be coloured on its closed box — the option list is drawn
+ * by the OS and ignores CSS, which is why this column looked like a plain system
+ * dropdown next to the rest of the board. This draws its own list instead, giving each
+ * branch its own colour in both the trigger and the list.
+ *
+ * The list is position:fixed, measured off the trigger, because the table sits in an
+ * overflow-auto wrapper that would otherwise clip an absolutely-positioned panel. A
+ * fixed panel can't follow the row, so any scroll or resize closes it rather than
+ * leaving it stranded beside a different lead.
+ */
+const BranchAssignSelect = ({ value, branches, onAssign, testid }) => {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState(null);
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDocClick = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
+    const dismiss = () => setOpen(false);
+    document.addEventListener("mousedown", onDocClick);
+    window.addEventListener("scroll", dismiss, true);
+    window.addEventListener("resize", dismiss);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      window.removeEventListener("scroll", dismiss, true);
+      window.removeEventListener("resize", dismiss);
+    };
+  }, [open]);
+
+  const current = branches.find((b) => b.id === value);
+  const tone = current ? branchTone(branchLabel(current)) : null;
+
+  const toggle = () => {
+    if (open) { setOpen(false); return; }
+    const r = wrapRef.current.getBoundingClientRect();
+    const room = window.innerHeight - r.bottom;
+    const height = Math.min(48 + branches.length * 34, 260);
+    setPos({
+      left: r.left,
+      width: Math.max(r.width, 168),
+      ...(room > height ? { top: r.bottom + 4 } : { bottom: window.innerHeight - r.top + 4 }),
+    });
+    setOpen(true);
+  };
+
+  return (
+    <div className="relative inline-block" ref={wrapRef}>
+      <button
+        type="button"
+        onClick={toggle}
+        className={`flex h-8 w-full min-w-[7.5rem] items-center justify-between gap-1.5 rounded-md border px-2 text-xs font-semibold transition ${tone ? tone.chip : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"}`}
+        data-testid={testid}
+      >
+        <span className="flex min-w-0 items-center gap-1.5">
+          {tone && <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tone.dot}`} />}
+          <span className="truncate">{current ? branchLabel(current) : "— Assign —"}</span>
+        </span>
+        <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
+      </button>
+
+      {open && pos && (
+        <div
+          className="fixed z-50 max-h-64 space-y-1 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1.5 shadow-xl"
+          style={pos}
+          data-testid={`${testid}-list`}
+        >
+          {branches.length === 0 ? (
+            <p className="px-2 py-1.5 text-xs text-slate-400">No branches available.</p>
+          ) : branches.map((b) => {
+            const t = branchTone(branchLabel(b));
+            const active = b.id === value;
+            return (
+              <button
+                key={b.id}
+                type="button"
+                onClick={() => { setOpen(false); if (b.id !== value) onAssign(b.id); }}
+                className={`flex w-full items-center gap-1.5 whitespace-nowrap rounded-md border px-2 py-1.5 text-left text-xs font-semibold transition ${t.chip} ${t.hover} ${active ? "ring-1 ring-slate-400" : ""}`}
+              >
+                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${t.dot}`} />
+                <span className="truncate">{branchLabel(b)}</span>
+                {active && <CheckCircle2 className="ml-auto h-3.5 w-3.5 shrink-0 opacity-70" />}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
 
 const testimonialsUrl = () => `${window.location.origin}/testimonials`;
 
@@ -359,25 +475,18 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
                       })()}
                       <td className="border-y border-slate-200 bg-white px-3 py-3 text-center text-xs text-slate-400 transition-colors group-hover:bg-slate-50">{(l.created_at || "").slice(0, 10)}</td>
                       <td className="border-y border-slate-200 bg-white px-3 py-3 text-center transition-colors group-hover:bg-slate-50" onClick={(e) => e.stopPropagation()}>
-                        <select
+                        <BranchAssignSelect
                           value={l.branch_id || ""}
-                          onChange={async (e) => {
-                            const branchId = e.target.value;
-                            if (!branchId) return;
+                          branches={branches}
+                          onAssign={async (branchId) => {
                             try {
                               await scheduleAppointment(l.id, { department: "physio", mode: "offline", branch_id: branchId });
-                              toast.success(`Assigned to ${branches.find((b) => b.id === branchId)?.branch_name || branches.find((b) => b.id === branchId)?.name || "branch"}`);
+                              toast.success(`Assigned to ${branchLabel(branches.find((b) => b.id === branchId)) || "branch"}`);
                               load();
                             } catch (err) { toast.error(err?.response?.data?.detail || "Failed to assign branch"); }
                           }}
-                          className="h-8 rounded-md border border-slate-200 px-2 text-xs focus:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-400"
-                          data-testid={`presales-assign-branch-${l.id}`}
-                        >
-                          <option value="">— Assign —</option>
-                          {branches.map((b) => (
-                            <option key={b.id} value={b.id}>{b.branch_name || b.name}</option>
-                          ))}
-                        </select>
+                          testid={`presales-assign-branch-${l.id}`}
+                        />
                       </td>
                       <td className="rounded-r-[5px] border-y border-r border-slate-200 bg-white px-3 py-3 text-center transition-colors group-hover:bg-slate-50">
                         <div className="flex items-center justify-center gap-1">
