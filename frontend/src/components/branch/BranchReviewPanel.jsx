@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Send, CheckCircle2, X, Search, RefreshCw, ChevronLeft, ChevronRight, Calendar as CalendarIcon } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { StageTab } from "@/components/ui/stage-tab";
 import { branchReviews, branchSendReview, getAvailableExperts, getAvailableDates } from "@/lib/api";
@@ -276,19 +274,45 @@ export const BranchReviewPanel = ({ branchId }) => {
         </div>
       </div>
 
-      <Card>
-        <CardContent className="flex items-center gap-2 p-3 sm:gap-3">
-          <div className="relative min-w-0 flex-1">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search patient, number, phone or Head Physio..." className="pl-9" data-testid="branch-review-search" />
-          </div>
-          {/* Icon-only on a phone: the word cost a whole second row under the search box. */}
-          <Button variant="outline" size="sm" className="shrink-0 px-2.5 sm:px-3" onClick={load} disabled={loading} data-testid="branch-review-refresh">
-            <RefreshCw className={`h-3.5 w-3.5 sm:mr-1.5 ${loading ? "animate-spin" : ""}`} />
-            <span className="hidden sm:inline">Refresh</span>
-          </Button>
-        </CardContent>
-      </Card>
+      {/* No Card around this row any more. A bordered input sitting inside a bordered
+          card is two rectangles drawing the same edge twice, which is what made the bar
+          look boxed-in. The field is now the surface itself. */}
+      <div className="flex items-center gap-2 sm:gap-3">
+        <div className="group relative min-w-0 flex-1">
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 transition-colors group-focus-within:text-sky-500" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search patient, number, phone or Head Physio..."
+            className="h-11 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-10 text-sm text-slate-700 shadow-sm outline-none transition placeholder:text-slate-400 hover:border-slate-300 focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+            data-testid="branch-review-search"
+          />
+          {/* Clearing a search by backspacing a long phrase is needless work. */}
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch("")}
+              aria-label="Clear search"
+              className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+              data-testid="branch-review-search-clear"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+        {/* Icon-only on a phone: the word cost a whole second row under the search box. */}
+        <button
+          type="button"
+          onClick={load}
+          disabled={loading}
+          title="Refresh"
+          className="flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-sky-200 bg-sky-50 px-3 text-sm font-semibold text-sky-700 shadow-sm transition hover:border-sky-300 hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-60 sm:px-4"
+          data-testid="branch-review-refresh"
+        >
+          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+          <span className="hidden sm:inline">Refresh</span>
+        </button>
+      </div>
 
       {loading && rows.length === 0 ? (
         <p className="py-10 text-center text-sm text-slate-400">Loading reviews...</p>
