@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Calendar, CheckCircle2, ChevronLeft, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2, Ban, ClipboardCheck, IndianRupee, Printer, Share2, Download } from "lucide-react";
+import { Calendar, CheckCircle2, ChevronLeft, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2, Ban, ClipboardCheck, IndianRupee, Printer, Share2, Download, Eye } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1378,14 +1378,15 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
           <table className="w-full min-w-[1000px] table-fixed text-sm">
             <thead className="bg-slate-50 text-xs uppercase text-slate-500">
               <tr>
-                <th className="w-[15%] px-4 py-2 text-left align-middle">Patient</th>
-                <th className="w-[12%] px-4 py-2 text-left align-middle">Patient No.</th>
-                <th className="w-[13%] px-4 py-2 text-left align-middle">Phone</th>
-                <th className="w-[15%] px-4 py-2 text-left align-middle">Email</th>
-                <th className="w-[15%] px-4 py-2 text-left align-middle">{isConsultant ? "Live Stage" : "Consultation Stage"}</th>
-                <th className="w-[12%] px-4 py-2 text-left align-middle">Assigned Expert</th>
+                <th className="w-[14%] px-4 py-2 text-left align-middle">Patient</th>
+                <th className="w-[11%] px-4 py-2 text-left align-middle">Patient No.</th>
+                <th className="w-[12%] px-4 py-2 text-left align-middle">Phone</th>
+                <th className="w-[14%] px-4 py-2 text-left align-middle">Email</th>
+                <th className="w-[14%] px-4 py-2 text-left align-middle">{isConsultant ? "Live Stage" : "Consultation Stage"}</th>
+                <th className="w-[11%] px-4 py-2 text-left align-middle">Assigned Expert</th>
                 <th className="w-[9%] px-3 py-2 text-left align-middle">Appointment</th>
                 <th className="w-[9%] px-3 py-2 text-left align-middle">Updated</th>
+                <th className="w-[6%] px-3 py-2 text-center align-middle">Action</th>
               </tr>
             </thead>
             <tbody>
@@ -1420,11 +1421,26 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       ) : "—"}
                     </td>
                     <td className="whitespace-nowrap px-3 py-3 align-middle text-xs text-slate-400">{(l.updated_at || "").slice(0, 10) || "—"}</td>
+                    {/* The whole row already opens the detail dialog, but nothing on screen
+                        said so. This is the same action made visible — stopPropagation so
+                        the row's own handler doesn't fire a second time behind it. */}
+                    <td className="px-3 py-3 text-center align-middle">
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); setSelectedLead(l); setDetailTab("overview"); }}
+                        title="View details"
+                        aria-label={`View ${l.name || "patient"} details`}
+                        className="rounded p-1.5 text-slate-400 transition hover:bg-sky-50 hover:text-sky-600"
+                        data-testid={`cons-row-view-${l.id}`}
+                      >
+                        <Eye className="h-4 w-4" />
+                      </button>
+                    </td>
                   </tr>
                 );
               })}
               {filtered.length === 0 && (
-                <tr><td colSpan="8" className="px-4 py-8 text-center text-sm text-slate-400">
+                <tr><td colSpan="9" className="px-4 py-8 text-center text-sm text-slate-400">
                   {loading ? "Loading…" : "No leads in consultations yet. Book an appointment with a Head Physio to populate this list."}
                 </td></tr>
               )}
