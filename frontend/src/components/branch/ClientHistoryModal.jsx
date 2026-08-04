@@ -247,7 +247,11 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
         </div>
 
         <div className="flex gap-2 border-b border-slate-100 px-5 pt-3">
-          {[{ key: "overview", label: "Overview" }, { key: "timeline", label: "Timeline" }].map((t) => (
+          {[
+            { key: "overview", label: "Overview" },
+            { key: "transactions", label: "Transaction History" },
+            { key: "timeline", label: "Timeline" },
+          ].map((t) => (
             <button
               key={t.key}
               onClick={() => setTab(t.key)}
@@ -338,50 +342,6 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
               )}
 
               <div>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Transaction History</p>
-                <div className="space-y-2">
-                  {transactions.length === 0 ? (
-                    <p className="py-4 text-center text-xs text-slate-400">No transactions yet.</p>
-                  ) : transactions.map((tx) => (
-                    <div key={tx.id} className="rounded-lg border border-slate-100 px-3 py-2 text-xs" data-testid={`client-history-tx-${tx.id}`}>
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="font-medium text-slate-700 capitalize">{tx.source} · <span className="text-slate-500">{formatMode(tx.payment_mode)}</span></p>
-                          <p className="text-[10px] text-slate-400">{fmtDate(tx.date)} {tx.receipt_no && `· ${tx.receipt_no}`}</p>
-                          {/* The UPI/card/cheque reference recorded with this payment,
-                              lifted back out of the activity line it was written into. */}
-                          {detailReference(tx.details) && (
-                            <p className="mt-0.5 text-[10px] text-slate-500" data-testid={`client-history-tx-ref-${tx.id}`}>{detailReference(tx.details)}</p>
-                          )}
-                        </div>
-                        <div className="text-right">
-                          <p className="font-semibold text-emerald-700">{fmt(tx.amount)}</p>
-                          <p className="text-[10px] font-medium text-emerald-600">Paid</p>
-                        </div>
-                      </div>
-                      {!!tx.discount_amount && (
-                        <div className="mt-1.5 grid grid-cols-3 gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5" data-testid={`client-history-tx-discount-${tx.id}`}>
-                          <div>
-                            <p className="text-[9px] uppercase tracking-wide text-amber-700">Actual Price</p>
-                            <p className="text-[11px] font-semibold text-slate-700">{fmt(tx.original_amount)}</p>
-                          </div>
-                          <div>
-                            <p className="text-[9px] uppercase tracking-wide text-amber-700">Collected</p>
-                            <p className="text-[11px] font-semibold text-slate-700">{fmt(tx.amount)}</p>
-                          </div>
-                          <div>
-                            <p className="text-[9px] uppercase tracking-wide text-amber-700">{tx.discount_amount > 0 ? "Discount" : "Extra"}</p>
-                            <p className="text-[11px] font-semibold text-amber-700">{fmt(Math.abs(tx.discount_amount))}</p>
-                          </div>
-                          <p className="col-span-3 mt-0.5 text-[10px] font-medium text-amber-700">{tx.discount_reason}</p>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div>
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Quick Actions</p>
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                   <button
@@ -420,6 +380,47 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
                 )}
               </div>
             </>
+          ) : tab === "transactions" ? (
+            <div className="space-y-2" data-testid="client-history-transactions">
+              {transactions.length === 0 ? (
+                <p className="py-10 text-center text-sm text-slate-400">No transactions yet.</p>
+              ) : transactions.map((tx) => (
+                <div key={tx.id} className="rounded-lg border border-slate-100 px-3 py-2 text-xs" data-testid={`client-history-tx-${tx.id}`}>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-medium text-slate-700 capitalize">{tx.source} · <span className="text-slate-500">{formatMode(tx.payment_mode)}</span></p>
+                      <p className="text-[10px] text-slate-400">{fmtDate(tx.date)} {tx.receipt_no && `· ${tx.receipt_no}`}</p>
+                      {/* The UPI/card/cheque reference recorded with this payment,
+                          lifted back out of the activity line it was written into. */}
+                      {detailReference(tx.details) && (
+                        <p className="mt-0.5 text-[10px] text-slate-500" data-testid={`client-history-tx-ref-${tx.id}`}>{detailReference(tx.details)}</p>
+                      )}
+                    </div>
+                    <div className="text-right">
+                      <p className="font-semibold text-emerald-700">{fmt(tx.amount)}</p>
+                      <p className="text-[10px] font-medium text-emerald-600">Paid</p>
+                    </div>
+                  </div>
+                  {!!tx.discount_amount && (
+                    <div className="mt-1.5 grid grid-cols-3 gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5" data-testid={`client-history-tx-discount-${tx.id}`}>
+                      <div>
+                        <p className="text-[9px] uppercase tracking-wide text-amber-700">Actual Price</p>
+                        <p className="text-[11px] font-semibold text-slate-700">{fmt(tx.original_amount)}</p>
+                      </div>
+                      <div>
+                        <p className="text-[9px] uppercase tracking-wide text-amber-700">Collected</p>
+                        <p className="text-[11px] font-semibold text-slate-700">{fmt(tx.amount)}</p>
+                      </div>
+                      <div>
+                        <p className="text-[9px] uppercase tracking-wide text-amber-700">{tx.discount_amount > 0 ? "Discount" : "Extra"}</p>
+                        <p className="text-[11px] font-semibold text-amber-700">{fmt(Math.abs(tx.discount_amount))}</p>
+                      </div>
+                      <p className="col-span-3 mt-0.5 text-[10px] font-medium text-amber-700">{tx.discount_reason}</p>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           ) : (
             <div className="space-y-2">
               {timeline.length === 0 ? (
