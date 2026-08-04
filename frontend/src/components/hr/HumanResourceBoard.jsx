@@ -203,8 +203,11 @@ export const HumanResourceBoard = ({ user }) => {
           left. Each keeps its own colour on the label and number so the pipeline is still
           readable at a glance; selecting one brings that colour to the border and a wash of
           it to the card, the same move the summary cards made in indigo. */}
+      {/* Five to a row on a phone, so nine stages land as 5 + 4 and the whole pipeline is
+          visible at once. It used to scroll sideways, which hid every stage past Screening
+          behind a swipe nobody knew to make. */}
       <div
-        className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 sm:mx-0 sm:grid sm:grid-cols-3 sm:gap-3 sm:overflow-visible sm:px-0 sm:pb-0 lg:grid-cols-5 xl:grid-cols-9"
+        className="grid grid-cols-5 gap-1.5 sm:grid-cols-3 sm:gap-3 lg:grid-cols-5 xl:grid-cols-9"
         style={{ fontFamily: "Lexend, sans-serif" }}
         data-testid="hr-stage-pills"
       >
@@ -246,7 +249,9 @@ export const HumanResourceBoard = ({ user }) => {
           )}
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        {/* Centred on a phone: Add Candidate is a FAB down there, so the row is three
+            controls that would otherwise sit hard left with a hole where the button isn't. */}
+        <div className="flex flex-wrap items-center justify-center gap-2 lg:justify-start">
           {/* Filters by when the candidate was added, which is what "0d / 19d" in the Age
               column counts from — the two answer the same question. */}
           <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="hr-date-filter" centered />
@@ -345,20 +350,23 @@ const StageCard = ({ label, count, color, active, onClick, testid }) => (
   <button
     type="button"
     onClick={onClick}
-    className={`w-[8.5rem] shrink-0 rounded-xl border-2 px-3 py-2.5 text-left transition hover:shadow-sm sm:w-auto sm:px-4 sm:py-4 ${
+    className={`w-full min-w-0 rounded-lg border-2 px-1 py-1.5 text-center transition hover:shadow-sm sm:rounded-xl sm:px-4 sm:py-4 sm:text-left ${
       active ? "shadow-sm" : "border-slate-200 bg-white"
     }`}
     style={active ? { borderColor: color, backgroundColor: `${color}14` } : undefined}
     data-testid={testid}
   >
+    {/* In a fifth of a phone's width a long stage name has to wrap rather than truncate —
+        "Consultation" and "Consultatio…" are the same width and only one is readable. The
+        wide tracking goes too; at 9px it costs a character per line and buys nothing. */}
     <span
-      className="block truncate text-[10px] font-bold uppercase tracking-wider sm:text-xs"
+      className="block break-words text-[9px] font-bold uppercase leading-[1.15] [hyphens:auto] sm:truncate sm:text-xs sm:tracking-wider"
       style={{ color }}
       title={label}
     >
       {label}
     </span>
-    <span className="mt-0.5 block text-2xl font-extrabold sm:mt-1 sm:text-3xl" style={{ color }}>
+    <span className="mt-0.5 block text-lg font-extrabold leading-tight sm:mt-1 sm:text-3xl" style={{ color }}>
       {count}
     </span>
   </button>
