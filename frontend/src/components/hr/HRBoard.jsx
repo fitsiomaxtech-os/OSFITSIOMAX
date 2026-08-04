@@ -1243,7 +1243,14 @@ const CreateUserModal = ({ meta, reloadMeta, onClose, onSaved }) => {
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" data-testid="hr-create-user-modal">
-      <div className="w-full max-w-md space-y-3 rounded-lg bg-white p-5 shadow-xl">
+      {/* Scaled to 80% so the whole form — heading through Create User — is on screen at
+          once. This panel had no height limit at all, which is why it ran off the top
+          and bottom and cut its own header and buttons off.
+          The max-height reads oddly on purpose: `zoom` scales the computed box, so a vh
+          limit set here is multiplied by 0.8 before it lands. 110vh is what leaves the
+          panel occupying ~88% of the screen, and the overflow is the safety net for a
+          window short enough that even 80% doesn't fit. */}
+      <div className="max-h-[110vh] w-full max-w-md space-y-3 overflow-y-auto rounded-lg bg-white p-5 shadow-xl" style={{ zoom: 0.8 }}>
         <div className="flex items-center justify-between">
           <div><h3 className="text-base font-semibold">Create User Account</h3><p className="text-xs text-slate-500">Create login credentials for an employee.</p></div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600" data-testid="hr-create-user-close"><X className="h-4 w-4" /></button>
