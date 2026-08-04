@@ -14,7 +14,7 @@ import {
   assignPhysioWithSessions, getDoctorCalendar,
   scheduleConsultationFollowUp, rescheduleConsultationFollowUp,
   getLeadRemarks, getLeadActivity,
-  saveConsultationDecision, markConsultationCompleted,
+  saveConsultationDecision, markConsultationCompleted, getBranches,
 } from "@/lib/api";
 import { waNumber } from "@/lib/phone";
 import { endTime12h, to12h } from "@/lib/time";
@@ -65,6 +65,7 @@ const receiptRows = (r) => [
   ["Patient", r.patient],
   ["Patient No.", r.patientNo],
   ["Phone", r.phone],
+  r.branch ? ["Branch", r.branch] : null,
   [isSchedule(r) ? "Scheduled For" : "Paid For", r.paidFor],
   r.packageName ? ["Package", r.packageName] : null,
   r.sessionsCovered ? ["Sessions Covered", r.sessionsCovered] : null,
@@ -195,6 +196,22 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // closing on the last fee.
   const [receipt, setReceipt] = useState(null);
 
+  // A lead carries branch_id but no branch name — the schema has never had one — so the
+  // receipt's branch line was silently falling back to the generic strapline. Resolve it
+  // from the branch list, keyed by the lead's own branch_id rather than this board's
+  // branchId, because a Head Physio's board runs across every branch at once.
+  const [branchNames, setBranchNames] = useState({});
+  useEffect(() => {
+    let alive = true;
+    getBranches()
+      .then((rows) => {
+        if (!alive) return;
+        setBranchNames(Object.fromEntries((rows || []).map((b) => [b.id, b.branch_name])));
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
   /** Every fee path builds its receipt here, so they can't drift apart field by field. */
   const makeReceipt = ({ lead, payload, prefix, paidFor, packageName, assignedPrice, kind = "paid", sessionsCovered, balanceDue, installments }) => {
     const amount = payload.amount;
@@ -210,7 +227,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       patient: lead.name || "—",
       patientNo: lead.patient_number || "—",
       phone: lead.phone || "—",
-      branch: lead.branch_name || "",
+      branch: lead.branch_name || branchNames[lead.branch_id] || "",
       paidFor,
       packageName: packageName || "",
       sessionsCovered: sessionsCovered || "",
