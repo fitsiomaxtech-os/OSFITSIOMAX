@@ -8,7 +8,6 @@ import {
   Clock,
   FileSpreadsheet,
   FileText,
-  IdCard,
   IndianRupee,
   Mail,
   MapPin,
@@ -31,7 +30,6 @@ import { StageTab } from "@/components/ui/stage-tab";
 import { CandidatePullButton } from "@/components/hr/CandidatePullButton";
 import { CandidateSheetPanel } from "@/components/hr/CandidateSheetPanel";
 import { RecruitmentStagesPanel } from "@/components/hr/RecruitmentStagesPanel";
-import { HRBoard } from "@/components/hr/HRBoard";
 import { to12h } from "@/lib/time";
 import {
   recruitmentBoard,
@@ -87,11 +85,11 @@ const emptyCandidate = {
   notes: "",
 };
 
-// What this board is for, in three parts: the candidates you work today, the people already
-// employed, and the plumbing that feeds and shapes the pipeline.
+// This board is about candidates and nothing else: the people you are hiring, and the
+// plumbing that feeds and shapes that pipeline. Employees already on staff are HR Admin's
+// job, under Super Admin.
 const VIEWS = [
   { key: "pipeline", label: "Candidates", icon: Users },
-  { key: "employees", label: "Employee Manage", icon: IdCard },
   { key: "sources", label: "Source Manage", icon: FileSpreadsheet },
 ];
 
@@ -184,13 +182,13 @@ export const HumanResourceBoard = ({ user }) => {
 
   return (
     <div className="space-y-4 pb-24 md:pb-6" data-testid="hr-recruitment-board">
-      {/* The board's three jobs. Candidates is the daily one and stays first; the other two
-          are administration and sit behind it rather than beside the pipeline, where they
-          were scrolled past every morning.
+      {/* Candidates is the daily work and stays first; Source Manage is setup, and sits
+          behind it rather than beside the pipeline where it was scrolled past every
+          morning.
 
           Plain tabs on a rule, matching the Super Admin nav — this is top-level navigation,
           and a segmented control reads as a filter on the thing below it. On a phone the
-          same three live in the bottom bar instead, thumb-high. */}
+          same two live in the bottom bar instead, thumb-high. */}
       <div className="hidden flex-wrap gap-2 border-b border-slate-200 pb-2 md:flex" data-testid="hr-view-switch">
         {VIEWS.map((v) => {
           const Icon = v.icon;
@@ -209,12 +207,6 @@ export const HumanResourceBoard = ({ user }) => {
           );
         })}
       </div>
-
-      {view === "employees" && (
-        <div data-testid="hr-employee-manage">
-          <HRBoard hideHeading />
-        </div>
-      )}
 
       {view === "sources" && (
         <SourceManageView
@@ -355,8 +347,8 @@ export const HumanResourceBoard = ({ user }) => {
       </>
       )}
 
-      {/* Same three destinations as the desktop tabs above, from the one VIEWS array so
-          the two surfaces can't drift apart. */}
+      {/* Same destinations as the desktop tabs above, from the one VIEWS array so the two
+          surfaces can't drift apart. */}
       <nav className="fixed inset-x-0 bottom-0 z-50 flex border-t border-slate-200 bg-white shadow-[0_-2px_10px_rgba(0,0,0,0.06)] md:hidden" data-testid="hr-bottom-nav">
         {VIEWS.map((v) => {
           const Icon = v.icon;

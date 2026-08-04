@@ -86,8 +86,8 @@ def is_hr_role(role: str) -> bool:
     matched instead — on whole underscore-separated tokens, so an unrelated future role
     can't slip through on a substring.
 
-    Lives here rather than in a router because both the recruitment board and the HR Admin
-    endpoints gate on it, and two copies would drift.
+    Lives here rather than in a router so the recruitment endpoints and anything that gates
+    on HR in future share one definition instead of drifting copies.
     """
     r = (role or "").strip().lower()
     if r == "super_admin":
@@ -95,13 +95,3 @@ def is_hr_role(role: str) -> bool:
     if "human_resource" in r:
         return True
     return bool(set(r.split("_")) & {"hr", "recruiter", "recruitment", "talent"})
-
-
-def v3_require_roles_or_hr(*roles: str):
-    """Allow the listed roles, plus anyone whose role reads as HR."""
-    async def checker(user: V3UserOut = Depends(v3_current_user)) -> V3UserOut:
-        if user.role in roles or is_hr_role(user.role):
-            return user
-        raise HTTPException(status_code=403, detail="Not allowed")
-
-    return checker
