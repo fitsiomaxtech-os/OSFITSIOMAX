@@ -264,7 +264,7 @@ export const HumanResourceBoard = ({ user }) => {
 
           <Button
             onClick={() => setShowAdd(true)}
-            className="hidden h-10 shrink-0 bg-indigo-600 text-white hover:bg-indigo-700 sm:inline-flex"
+            className="hidden h-10 shrink-0 bg-orange-500 text-white hover:bg-orange-600 sm:inline-flex"
             data-testid="hr-add-candidate-button"
           >
             <UserPlus className="mr-1.5 h-4 w-4" /> Add Candidate
@@ -281,7 +281,7 @@ export const HumanResourceBoard = ({ user }) => {
       <button
         type="button"
         onClick={() => setShowAdd(true)}
-        className="fixed bottom-20 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-indigo-600 text-white shadow-lg sm:hidden"
+        className="fixed bottom-20 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-orange-500 text-white shadow-lg sm:hidden"
         aria-label="Add candidate"
         data-testid="hr-add-candidate-fab"
       >
