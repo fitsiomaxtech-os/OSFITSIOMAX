@@ -344,6 +344,89 @@ const EmployeeViewModal = ({ employee: e, onClose, onEdit, onDelete }) => (
   </div>
 );
 
+// ---------- Manual date entry ----------
+
+const isoToDmy = (iso) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || "");
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : "";
+};
+
+/** "07-03-1994" -> "1994-03-07", but only for a date that actually exists. The
+ *  round-trip check is what rejects 31-02: the Date constructor rolls that forward
+ *  to 3 March rather than failing, so comparing the parts back is the only way to
+ *  catch it. */
+const dmyToIso = (text) => {
+  const m = /^\s*(\d{1,2})\s*[-/.]\s*(\d{1,2})\s*[-/.]\s*(\d{4})\s*$/.exec(text || "");
+  if (!m) return "";
+  const day = Number(m[1]);
+  const month = Number(m[2]);
+  const year = Number(m[3]);
+  const iso = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  const d = new Date(`${iso}T00:00:00`);
+  if (d.getFullYear() !== year || d.getMonth() + 1 !== month || d.getDate() !== day) return "";
+  return iso;
+};
+
+/** Digits in, DD-MM-YYYY out — the separators appear as you type so nobody has to
+ *  reach for the dash key, and pasting a date with slashes or dots still works. */
+const formatDmyTyping = (text) => {
+  const d = (text || "").replace(/\D/g, "").slice(0, 8);
+  if (d.length <= 2) return d;
+  if (d.length <= 4) return `${d.slice(0, 2)}-${d.slice(2)}`;
+  return `${d.slice(0, 2)}-${d.slice(2, 4)}-${d.slice(4)}`;
+};
+
+/**
+ * Typed date entry, for a field where picking is the slow way round.
+ *
+ * A calendar is right for a date near today — an appointment, a due date. A date of
+ * birth is decades back, which is twenty-odd clicks through months, so this takes it
+ * typed instead. Emits the same `{ target: { value } }` ISO shape the picker does, so
+ * the form it feeds doesn't know the difference.
+ */
+const ManualDateInput = ({ value, onChange, placeholder = "DD-MM-YYYY", testid }) => {
+  const [text, setText] = useState(isoToDmy(value));
+  const [touched, setTouched] = useState(false);
+
+  // Follow the record when it changes underneath — opening Edit on another employee
+  // reuses this component rather than remounting it.
+  useEffect(() => { setText(isoToDmy(value)); setTouched(false); }, [value]);
+
+  const handle = (e) => {
+    const next = formatDmyTyping(e.target.value);
+    setText(next);
+    const iso = dmyToIso(next);
+    if (iso) onChange({ target: { value: iso } });
+    else if (next === "") onChange({ target: { value: "" } });
+  };
+
+  const complete = text.replace(/\D/g, "").length === 8;
+  const invalid = touched && text !== "" && !dmyToIso(text);
+  const future = !invalid && dmyToIso(text) && dmyToIso(text) > new Date().toISOString().slice(0, 10);
+
+  return (
+    <div>
+      <input
+        value={text}
+        onChange={handle}
+        onBlur={() => setTouched(true)}
+        placeholder={placeholder}
+        inputMode="numeric"
+        maxLength={10}
+        className={`h-9 w-full rounded-md border px-3 text-sm outline-none transition placeholder:text-slate-400 focus:ring-1 ${
+          invalid || future ? "border-rose-300 focus:border-rose-400 focus:ring-rose-300" : "border-slate-200 focus:border-orange-400 focus:ring-orange-300"
+        }`}
+        data-testid={testid}
+      />
+      {(invalid || future) && (
+        <p className="mt-1 text-[11px] font-medium text-rose-600" data-testid={`${testid}-error`}>
+          {future ? "That date is in the future." : complete ? "That date doesn't exist." : "Use DD-MM-YYYY."}
+        </p>
+      )}
+    </div>
+  );
+};
+
 // ---------- Add Employee Modal (multi-tab) ----------
 
 const EMP_TABS = [
@@ -416,9 +499,10 @@ const AddEmployeeModal = ({ employee, meta, onClose, onSaved }) => {
               <Field label="Full Name *"><Input value={form.full_name} onChange={(e) => set("full_name", e.target.value)} data-testid="hr-emp-name" /></Field>
               <Field label="Email"><Input value={form.email} onChange={(e) => set("email", e.target.value)} data-testid="hr-emp-email" /></Field>
               <Field label="Phone"><Input value={form.phone} onChange={(e) => set("phone", e.target.value)} data-testid="hr-emp-phone" /></Field>
-              {/* Centred, not anchored: this form scrolls inside a 60vh box, so an anchored
-                  calendar opens half-clipped by the panel edge or the footer. */}
-              <Field label="Date of Birth"><MilkDateInput centered title="Date of Birth" value={form.dob} onChange={(e) => set("dob", e.target.value)} data-testid="hr-emp-dob" /></Field>
+              {/* Typed, not picked. A birth date is decades back — reaching it in a
+                  calendar is twenty-odd clicks through months, where typing it is eight
+                  keystrokes. Joining Date keeps its picker; that one is near today. */}
+              <Field label="Date of Birth"><ManualDateInput value={form.dob} onChange={(e) => set("dob", e.target.value)} testid="hr-emp-dob" /></Field>
               <Field label="Gender"><Select value={form.gender} onChange={(v) => set("gender", v)} options={["", "Male", "Female", "Other"]} testid="hr-emp-gender" /></Field>
               <Field label="Blood Group"><Select value={form.blood_group} onChange={(v) => set("blood_group", v)} options={["", "O+", "O-", "A+", "A-", "B+", "B-", "AB+", "AB-"]} testid="hr-emp-bg" /></Field>
               <Field label="Marital Status"><Select value={form.marital_status} onChange={(v) => set("marital_status", v)} options={["", "Single", "Married", "Divorced", "Widowed"]} testid="hr-emp-marital" /></Field>
