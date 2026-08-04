@@ -73,9 +73,9 @@ const WhatsAppIcon = ({ className }) => (
   </svg>
 );
 
-// Each branch keeps one colour wherever it appears, picked from its name rather than
-// its position in the list — so a branch added or reordered later doesn't recolour
-// every row that already reads as "the green branch".
+// Each branch or source keeps one colour wherever it appears, picked from its name
+// rather than its position in the list — so one added or reordered later doesn't
+// recolour every row that already reads as "the green branch".
 const BRANCH_TONES = [
   { chip: "border-emerald-300 bg-emerald-50 text-emerald-700", dot: "bg-emerald-500", hover: "hover:bg-emerald-100" },
   { chip: "border-sky-300 bg-sky-50 text-sky-700", dot: "bg-sky-500", hover: "hover:bg-sky-100" },
@@ -97,19 +97,27 @@ const branchTone = (name) => {
 const branchLabel = (b) => b?.branch_name || b?.name || "";
 
 /**
- * Assign-to-branch picker for the leads table.
+ * The board's coloured dropdown, shared by the Assigned To column and the Sources
+ * filter.
  *
  * A native <select> can only be coloured on its closed box — the option list is drawn
- * by the OS and ignores CSS, which is why this column looked like a plain system
- * dropdown next to the rest of the board. This draws its own list instead, giving each
- * branch its own colour in both the trigger and the list.
+ * by the OS and ignores CSS, which is why both of these looked like plain system
+ * dropdowns next to the rest of the board. This draws its own list instead, giving
+ * every entry its own colour in the trigger and the list alike.
  *
- * The list is position:fixed, measured off the trigger, because the table sits in an
- * overflow-auto wrapper that would otherwise clip an absolutely-positioned panel. A
- * fixed panel can't follow the row, so any scroll or resize closes it rather than
- * leaving it stranded beside a different lead.
+ * The panel is position:fixed and measured off the trigger, because the leads table
+ * sits in an overflow-auto wrapper that would otherwise clip an absolutely-positioned
+ * one. A fixed panel can't follow what it is anchored to, so any scroll or resize
+ * closes it rather than leaving it stranded beside a different row.
+ *
+ * `options` is [{ value, label }]. `resetLabel`, when given, adds a neutral first row
+ * that clears the selection — that's the filter's "All Sources"; the assign column has
+ * no such row because unassigning a lead isn't a thing you can do here.
  */
-const BranchAssignSelect = ({ value, branches, onAssign, testid }) => {
+const ColorSelect = ({
+  value, options, onChange, placeholder, resetLabel, testid,
+  triggerClass = "h-8 min-w-[7.5rem] text-xs", emptyText = "Nothing to choose from.",
+}) => {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState(null);
   const wrapRef = useRef(null);
@@ -128,14 +136,14 @@ const BranchAssignSelect = ({ value, branches, onAssign, testid }) => {
     };
   }, [open]);
 
-  const current = branches.find((b) => b.id === value);
-  const tone = current ? branchTone(branchLabel(current)) : null;
+  const current = options.find((o) => o.value === value);
+  const tone = current ? branchTone(current.label) : null;
 
   const toggle = () => {
     if (open) { setOpen(false); return; }
     const r = wrapRef.current.getBoundingClientRect();
     const room = window.innerHeight - r.bottom;
-    const height = Math.min(48 + branches.length * 34, 260);
+    const height = Math.min(48 + options.length * 34, 288);
     setPos({
       left: r.left,
       width: Math.max(r.width, 168),
@@ -144,41 +152,53 @@ const BranchAssignSelect = ({ value, branches, onAssign, testid }) => {
     setOpen(true);
   };
 
+  const pick = (v) => { setOpen(false); if (v !== value) onChange(v); };
+
   return (
     <div className="relative inline-block" ref={wrapRef}>
       <button
         type="button"
         onClick={toggle}
-        className={`flex h-8 w-full min-w-[7.5rem] items-center justify-between gap-1.5 rounded-md border px-2 text-xs font-semibold transition ${tone ? tone.chip : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"}`}
+        className={`flex w-full items-center justify-between gap-1.5 rounded-md border px-2 font-semibold transition ${triggerClass} ${tone ? tone.chip : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"}`}
         data-testid={testid}
       >
         <span className="flex min-w-0 items-center gap-1.5">
           {tone && <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tone.dot}`} />}
-          <span className="truncate">{current ? branchLabel(current) : "— Assign —"}</span>
+          <span className="truncate">{current ? current.label : placeholder}</span>
         </span>
         <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
       </button>
 
       {open && pos && (
         <div
-          className="fixed z-50 max-h-64 space-y-1 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1.5 shadow-xl"
+          className="fixed z-50 max-h-72 space-y-1 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1.5 shadow-xl"
           style={pos}
           data-testid={`${testid}-list`}
         >
-          {branches.length === 0 ? (
-            <p className="px-2 py-1.5 text-xs text-slate-400">No branches available.</p>
-          ) : branches.map((b) => {
-            const t = branchTone(branchLabel(b));
-            const active = b.id === value;
+          {resetLabel && (
+            <button
+              type="button"
+              onClick={() => pick("")}
+              className={`flex w-full items-center gap-1.5 whitespace-nowrap rounded-md border px-2 py-1.5 text-left text-xs font-semibold transition hover:bg-slate-100 ${!value ? "border-slate-400 bg-slate-100 text-slate-700" : "border-slate-200 bg-white text-slate-600"}`}
+            >
+              <span className="truncate">{resetLabel}</span>
+              {!value && <CheckCircle2 className="ml-auto h-3.5 w-3.5 shrink-0 opacity-70" />}
+            </button>
+          )}
+          {options.length === 0 ? (
+            <p className="px-2 py-1.5 text-xs text-slate-400">{emptyText}</p>
+          ) : options.map((o) => {
+            const t = branchTone(o.label);
+            const active = o.value === value;
             return (
               <button
-                key={b.id}
+                key={o.value}
                 type="button"
-                onClick={() => { setOpen(false); if (b.id !== value) onAssign(b.id); }}
+                onClick={() => pick(o.value)}
                 className={`flex w-full items-center gap-1.5 whitespace-nowrap rounded-md border px-2 py-1.5 text-left text-xs font-semibold transition ${t.chip} ${t.hover} ${active ? "ring-1 ring-slate-400" : ""}`}
               >
                 <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${t.dot}`} />
-                <span className="truncate">{branchLabel(b)}</span>
+                <span className="truncate">{o.label}</span>
                 {active && <CheckCircle2 className="ml-auto h-3.5 w-3.5 shrink-0 opacity-70" />}
               </button>
             );
@@ -312,6 +332,10 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
     return [...set].sort((a, b) => a.localeCompare(b));
   }, [leads]);
 
+  // Both dropdowns take the same {value,label} shape, so they share one component.
+  const sourceSelectOptions = useMemo(() => sourceOptions.map((s) => ({ value: s, label: s })), [sourceOptions]);
+  const branchOptions = useMemo(() => branches.map((b) => ({ value: b.id, label: branchLabel(b) })), [branches]);
+
   const filtered = useMemo(() => {
     let rows = dateSourceFiltered;
     if (stageFilter !== "All") rows = rows.filter((l) => l.stage === stageFilter);
@@ -376,15 +400,16 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
         <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="presales-date-filter" centered />
         <PullFromSheetButton onPulled={load} />
         <Button onClick={() => setShowCreate(true)} className="h-10 bg-sky-600 hover:bg-sky-700" data-testid="presales-create-lead-btn"><Plus className="h-4 w-4 mr-1" />Create Lead</Button>
-        <select
-          className="h-10 w-[200px] rounded-md border border-slate-200 px-3 text-sm"
+        <ColorSelect
           value={sourceFilter}
-          onChange={(e) => setSourceFilter(e.target.value)}
-          data-testid="presales-source-filter"
-        >
-          <option value="">All Sources</option>
-          {sourceOptions.map((s) => <option key={s} value={s}>{s}</option>)}
-        </select>
+          options={sourceSelectOptions}
+          placeholder="All Sources"
+          resetLabel="All Sources"
+          emptyText="No sources yet."
+          triggerClass="h-10 w-[200px] text-sm"
+          onChange={setSourceFilter}
+          testid="presales-source-filter"
+        />
         {role === "super_admin" && (
           <Button variant="outline" className="h-10" onClick={onManageStages} data-testid="presales-manage-stages-btn"><Cog className="h-4 w-4 mr-1" />Manage Stages</Button>
         )}
@@ -475,10 +500,13 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
                       })()}
                       <td className="border-y border-slate-200 bg-white px-3 py-3 text-center text-xs text-slate-400 transition-colors group-hover:bg-slate-50">{(l.created_at || "").slice(0, 10)}</td>
                       <td className="border-y border-slate-200 bg-white px-3 py-3 text-center transition-colors group-hover:bg-slate-50" onClick={(e) => e.stopPropagation()}>
-                        <BranchAssignSelect
+                        <ColorSelect
                           value={l.branch_id || ""}
-                          branches={branches}
-                          onAssign={async (branchId) => {
+                          options={branchOptions}
+                          placeholder="— Assign —"
+                          emptyText="No branches available."
+                          onChange={async (branchId) => {
+                            if (!branchId) return;
                             try {
                               await scheduleAppointment(l.id, { department: "physio", mode: "offline", branch_id: branchId });
                               toast.success(`Assigned to ${branchLabel(branches.find((b) => b.id === branchId)) || "branch"}`);
