@@ -144,9 +144,15 @@ const ColorSelect = ({
     const r = wrapRef.current.getBoundingClientRect();
     const room = window.innerHeight - r.bottom;
     const height = Math.min(48 + options.length * 34, 288);
+    // Wide enough to read a long source name, but never wider than the window on a
+    // phone. Then pinned inside the viewport: a control sitting near the right edge
+    // would otherwise open a panel that runs straight off the screen, which is what
+    // made this one unreadable and half of it unclickable.
+    const width = Math.min(Math.max(r.width, 232), window.innerWidth - 16);
+    const left = Math.min(Math.max(8, r.left), window.innerWidth - width - 8);
     setPos({
-      left: r.left,
-      width: Math.max(r.width, 168),
+      left,
+      width,
       ...(room > height ? { top: r.bottom + 4 } : { bottom: window.innerHeight - r.top + 4 }),
     });
     setOpen(true);
@@ -195,6 +201,7 @@ const ColorSelect = ({
                 key={o.value}
                 type="button"
                 onClick={() => pick(o.value)}
+                title={o.label}
                 className={`flex w-full items-center gap-1.5 whitespace-nowrap rounded-md border px-2 py-1.5 text-left text-xs font-semibold transition ${t.chip} ${t.hover} ${active ? "ring-1 ring-slate-400" : ""}`}
               >
                 <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${t.dot}`} />
