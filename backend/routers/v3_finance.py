@@ -583,6 +583,9 @@ async def client_transaction_history(
             "payment_mode": mode,
             "details": details,
             "collected_by": act.get("created_by", ""),
+            # Who took it, in their role at the time — "Priya R. · Branch Admin" reads as
+            # a record; the name alone doesn't say in what capacity.
+            "collected_by_role": act.get("created_by_role", ""),
             "receipt_no": f"RCPT-{act.get('id', '')[-6:].upper()}" if act.get("id") else None,
             "original_amount": act.get("original_amount"),
             "discount_amount": act.get("discount_amount"),
@@ -632,6 +635,12 @@ async def client_transaction_history(
             "phone": lead.get("phone", ""),
             "email": lead.get("email", ""),
             "branch_name": branch_name,
+            # Identity and provenance the Client Details header shows. All of it already
+            # lives on the lead; it simply wasn't being returned here.
+            "patient_number": lead.get("patient_number"),
+            "first_seen": lead.get("created_at"),
+            "source": lead.get("source_tab") or lead.get("source_type") or "",
+            "assigned_physio_name": lead.get("assigned_physio_name") or "",
         },
         "balance": balance,
         "balance_status": outstanding_detail["status"] if balance > 0 else "paid",
@@ -648,6 +657,11 @@ async def client_transaction_history(
             "installments_total": len(installments) if installments else None,
             "installments_paid": len([i for i in installments if i.get("paid")]) if installments else None,
             "session_package_label": session["package_label"],
+            # The course as quoted by the consultant: how many sessions and at what price.
+            # Distinct from session_total, which is only what has actually been scheduled
+            # for collection — a quoted-but-unpurchased package has a price and no total.
+            "session_package_sessions": lead.get("session_package_sessions"),
+            "session_package_price": lead.get("session_package_price"),
             "session_total": session["total"],
             "session_paid": session["paid"],
             "session_due": session["due"],

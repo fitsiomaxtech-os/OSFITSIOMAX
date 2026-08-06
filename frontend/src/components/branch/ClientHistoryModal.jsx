@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { X, Phone, Mail, MapPin, Printer, FileText, MessageCircle, Wallet, PhoneCall } from "lucide-react";
+import { X, Mail, Printer, FileText, MessageCircle, Wallet, PhoneCall, ChevronDown } from "lucide-react";
 import { toast } from "@/components/ui/sonner";
 import { getClientTransactionHistory, markInstallmentPaid } from "@/lib/api";
 
@@ -30,6 +30,34 @@ const Badge = ({ meta }) => (
   <span className={`inline-flex items-center rounded-[5px] border px-2 py-0.5 text-[10px] font-semibold ${meta.classes}`}>
     {meta.label}
   </span>
+);
+
+/** "2026-08-06T07:26:11Z" -> "06 Aug 2026" */
+const fmtDay = (d) => {
+  if (!d) return "";
+  const dt = new Date(d);
+  if (Number.isNaN(dt.getTime())) return String(d).slice(0, 10);
+  return dt.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+};
+
+/** "2026-08-06T07:26:11Z" -> "06 Aug, 07:26" */
+const fmtDayTime = (d) => {
+  if (!d) return "—";
+  const dt = new Date(d);
+  if (Number.isNaN(dt.getTime())) return String(d).slice(0, 16).replace("T", " ");
+  return `${dt.toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}, ${dt.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}`;
+};
+
+/** One figure in the money strip, with a colour tick tying it to its share of the bar. */
+const MoneyStat = ({ tick, label, value, sub, valueClass = "text-slate-900" }) => (
+  <div>
+    <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+      <span className={`inline-block h-0.5 w-2.5 rounded-full ${tick}`} />
+      {label}
+    </p>
+    <p className={`mt-0.5 font-mono text-lg font-semibold tabular-nums ${valueClass}`}>{value}</p>
+    {sub && <p className="text-[11px] text-slate-400">{sub}</p>}
+  </div>
 );
 
 const INFO_BOX_NEUTRAL = "border-slate-200 bg-slate-50 text-slate-700";
@@ -101,6 +129,163 @@ const InfoBox = ({ children, className = INFO_BOX_NEUTRAL }) => (
     {children}
   </div>
 );
+
+/** Label left, value right, hairline between — for facts that are read, not scanned. */
+const StatRows = ({ rows }) => (
+  <dl className="divide-y divide-slate-100 border-y border-slate-100">
+    {rows.filter(Boolean).map(([label, value]) => (
+      <div key={label} className="flex items-baseline justify-between gap-4 py-1.5">
+        <dt className="shrink-0 text-[11px] text-slate-400">{label}</dt>
+        <dd className="text-right text-xs text-slate-700">{value}</dd>
+      </div>
+    ))}
+  </dl>
+);
+
+/**
+ * One expandable card per collection. Collapsed it answers "how much, when, how"; opened
+ * it shows the arithmetic and the references an accountant needs to trace it.
+ *
+ * Everything here comes off the transaction record — nothing is inferred. A field with no
+ * value is dropped rather than shown blank, so what remains is all true.
+ */
+const PaymentCards = ({ transactions, servicedBy }) => {
+  const [openId, setOpenId] = useState(transactions[0]?.id || null);
+  if (transactions.length === 0) {
+    return <p className="rounded-lg border border-dashed border-slate-200 py-8 text-center text-xs text-slate-400">No payments recorded yet.</p>;
+  }
+  return (
+    <div className="space-y-2" data-testid="client-history-transactions">
+      {transactions.map((tx) => {
+        const open = openId === tx.id;
+        const off = Number(tx.discount_amount) || 0;
+        const pct = discountPct(tx);
+        return (
+          <div key={tx.id} className="overflow-hidden rounded-lg border border-slate-200" data-testid={`client-history-tx-${tx.id}`}>
+            <button
+              type="button"
+              onClick={() => setOpenId(open ? null : tx.id)}
+              className="flex w-full items-start justify-between gap-3 px-3 py-2.5 text-left hover:bg-slate-50"
+              data-testid={`client-history-tx-toggle-${tx.id}`}
+            >
+              <span className="flex min-w-0 items-center gap-2">
+                <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform ${open ? "" : "-rotate-90"}`} />
+                <span className="min-w-0">
+                  <span className="text-sm font-semibold capitalize text-slate-800">{tx.source}</span>
+                  <span className="ml-2 text-[11px] text-slate-400">{fmtDayTime(tx.date)} · {formatMode(tx.payment_mode)}</span>
+                </span>
+              </span>
+              <span className="shrink-0 text-right">
+                <span className="block font-mono text-sm font-semibold tabular-nums text-slate-900">{fmt(tx.amount)}</span>
+                <span className="block text-[10px] font-semibold uppercase tracking-wide text-teal-700">Paid in full</span>
+              </span>
+            </button>
+
+            {open && (
+              <div className="border-t border-slate-100 px-3 py-2.5">
+                {/* The arithmetic in one line, so a discounted payment explains itself
+                    rather than needing three labelled boxes to say the same thing. */}
+                {off > 0 && (
+                  <p className="mb-2.5 font-mono text-xs tabular-nums text-slate-500" data-testid={`client-history-tx-maths-${tx.id}`}>
+                    {fmt(tx.original_amount).replace("Rs.", "")} <span className="text-slate-300">−</span>{" "}
+                    <span className="text-amber-700">{fmt(off).replace("Rs.", "")}</span>
+                    {pct != null && (
+                      <span className="ml-1 rounded bg-amber-100 px-1 py-px text-[10px] font-bold text-amber-800" data-testid={`client-history-tx-discount-pct-${tx.id}`}>{pct}%</span>
+                    )}{" "}
+                    <span className="text-slate-300">=</span>{" "}
+                    <span className="font-semibold text-slate-800">{fmt(tx.amount).replace("Rs.", "")}</span>{" "}
+                    <span className="text-slate-400">collected</span>
+                  </p>
+                )}
+                <StatRows rows={[
+                  tx.transaction_id && ["Transaction", <span key="t" className="font-mono">{tx.transaction_id}</span>],
+                  !tx.transaction_id && tx.receipt_no && ["Receipt", <span key="r" className="font-mono">{tx.receipt_no}</span>],
+                  tx.collected_by && ["Collected by", tx.collected_by_role ? `${tx.collected_by} · ${formatMode(tx.collected_by_role).replace(/_/g, " ")}` : tx.collected_by],
+                  off > 0 && tx.discount_reason && ["Discount", tx.discount_reason],
+                  detailReference(tx.details) && ["Reference", <span key="ref" className="break-all font-mono">{detailReference(tx.details)}</span>],
+                  servicedBy && ["Service by", servicedBy],
+                ]} />
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+/** The treatment course as quoted, and how much of it has been paid for. Deliberately
+ *  silent on sessions *used* — attendance isn't recorded anywhere, so any "0 of 6 used"
+ *  would be a claim this screen can't stand behind. */
+const SessionPackageCard = ({ pd }) => {
+  const count = Number(pd.session_package_sessions) || 0;
+  const price = Number(pd.session_package_price) || 0;
+  const paid = Number(pd.session_paid) || 0;
+  const purchased = paid > 0;
+  const perSession = count > 0 && price > 0 ? Math.round(price / count) : null;
+  return (
+    <div className="rounded-lg border border-slate-200 p-3" data-testid="client-history-session-package">
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-sm font-semibold text-slate-800">{count > 0 ? `${count}-session course` : "Treatment package"}</p>
+        <span className={`shrink-0 text-[10px] font-semibold uppercase tracking-wide ${purchased ? "text-teal-700" : "text-slate-400"}`}>
+          {purchased ? (pd.session_due > 0 ? "Part paid" : "Purchased") : "Not purchased"}
+        </span>
+      </div>
+      {count > 0 && count <= 24 && (
+        <div className="mt-2.5 flex flex-wrap gap-1">
+          {Array.from({ length: count }, (_, i) => (
+            <span
+              key={i}
+              className={`flex h-6 min-w-6 items-center justify-center rounded border px-1.5 font-mono text-[11px] ${purchased ? "border-teal-200 bg-teal-50 text-teal-700" : "border-slate-200 bg-slate-50 text-slate-300"}`}
+            >
+              {i + 1}
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="mt-2.5 flex flex-wrap items-baseline justify-between gap-2 text-[11px]">
+        <span className="text-slate-400">{purchased ? `${fmt(paid)} paid` : "Nothing paid yet"}</span>
+        {price > 0 && (
+          <span className="text-slate-500">
+            Quoted <span className="font-mono">{fmt(price)}</span>
+            {perSession && <span className="text-slate-400"> · {fmt(perSession)}/session</span>}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+};
+
+/** What to do about this client, worked out from their actual state. No recommendation is
+ *  stored anywhere, so this reports the position rather than inventing clinical advice. */
+const NextStep = ({ pd, balance, hasSchedule }) => {
+  const quoted = Number(pd.session_package_price) || 0;
+  const paid = Number(pd.session_paid) || 0;
+  let tone = "border-slate-300 bg-slate-50";
+  let title = "Nothing outstanding";
+  let body = "This client is fully settled. No action needed.";
+
+  if (balance > 0 && hasSchedule) {
+    tone = "border-amber-500 bg-amber-50/60";
+    title = `${fmt(balance)} outstanding`;
+    body = `Installment #${pd.next_installment_number} is the next one due. Collect it from this screen.`;
+  } else if (balance > 0) {
+    tone = "border-amber-500 bg-amber-50/60";
+    title = `${fmt(balance)} outstanding`;
+    body = "Not on an installment schedule — collect it from the client's card in Consultations.";
+  } else if (quoted > 0 && paid <= 0) {
+    tone = "border-amber-500 bg-amber-50/60";
+    title = "Package not purchased";
+    body = `A course was quoted at ${fmt(quoted)} during the consultation but nothing has been collected for it yet.`;
+  }
+
+  return (
+    <div className={`rounded-r-md border-l-2 px-3 py-2.5 ${tone}`} data-testid="client-history-next-step">
+      <p className="text-xs font-semibold text-slate-800">{title}</p>
+      <p className="mt-0.5 text-[11px] leading-relaxed text-slate-600">{body}</p>
+    </div>
+  );
+};
 
 const downloadInvoice = (client, data) => {
   const lines = [
@@ -239,45 +424,121 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" data-testid="client-history-modal">
-      <div className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
-        <div className="flex items-center justify-between border-b border-slate-100 p-5">
-          <div>
+      <div className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-3 px-5 pt-4 pb-3">
+          <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <h3 className="text-base font-semibold text-slate-900" data-testid="client-history-name">{client?.name || "Loading..."}</h3>
+              <h3 className="text-lg font-semibold text-slate-900" data-testid="client-history-name">{client?.name || "Loading..."}</h3>
               {client && (
-                <span className={`inline-flex items-center gap-1 rounded-[5px] border px-2 py-0.5 text-[10px] font-semibold ${STATUS_STYLES[status]}`} data-testid="client-history-status">
+                <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${STATUS_STYLES[status]}`} data-testid="client-history-status">
                   <span className={`h-1.5 w-1.5 rounded-full ${status === "done" ? "bg-emerald-500" : "bg-amber-500"}`} />
                   {status === "done" ? "Completed" : "In Progress"}
                 </span>
               )}
             </div>
+            {/* Identity in one line: who, where, their file number, and when they first
+                came in. Each part is dropped rather than shown blank when absent. */}
             {client && (
-              <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-slate-500">
-                {client.phone && <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{client.phone}</span>}
-                {client.email && <span className="flex items-center gap-1"><Mail className="h-3 w-3" />{client.email}</span>}
-                {client.branch_name && <span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{client.branch_name}</span>}
+              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500" data-testid="client-history-meta">
+                {[
+                  client.phone,
+                  client.branch_name,
+                  client.patient_number && <span key="pn" className="font-mono">{client.patient_number}</span>,
+                  client.first_seen && `First seen ${fmtDay(client.first_seen)}`,
+                ].filter(Boolean).map((part, i, arr) => (
+                  <span key={i} className="flex items-center gap-2">
+                    {part}
+                    {i < arr.length - 1 && <span className="text-slate-300">·</span>}
+                  </span>
+                ))}
               </div>
             )}
           </div>
           <button onClick={onClose} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="client-history-close"><X className="h-4 w-4" /></button>
         </div>
 
-        <div className="flex gap-2 border-b border-slate-100 px-5 pt-3">
+        <div className="flex gap-1 border-b border-slate-200 px-5">
           {[
-            { key: "overview", label: "Overview" },
-            { key: "transactions", label: "Transaction History" },
-            { key: "timeline", label: "Timeline" },
+            { key: "overview", label: "Overview", count: null },
+            { key: "transactions", label: "Transactions", count: transactions.length },
+            { key: "timeline", label: "Timeline", count: timeline.length },
           ].map((t) => (
             <button
               key={t.key}
               onClick={() => setTab(t.key)}
-              className={`rounded-t-md px-3 py-2 text-sm font-medium transition ${tab === t.key ? "border-b-2 border-sky-600 text-sky-700" : "text-slate-500 hover:text-slate-700"}`}
+              className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium transition ${tab === t.key ? "border-teal-600 text-teal-700" : "border-transparent text-slate-500 hover:text-slate-700"}`}
               data-testid={`client-history-tab-${t.key}`}
             >
               {t.label}
+              {/* The count belongs on the tab: it says whether opening it is worth the
+                  click, which the label alone never does. */}
+              {t.count != null && <span className="ml-1.5 text-[11px] tabular-nums text-slate-400">{t.count}</span>}
             </button>
           ))}
         </div>
+
+        {/* The money strip — the whole financial position in one line, kept above the
+            tabs' content so it reads the same wherever you are. Billed is derived, not
+            stored: what was collected, plus what was given away, plus what is still
+            owed, is by definition what was billed. */}
+        {!loading && data && (() => {
+          const collected = transactions.reduce((s, t) => s + (Number(t.amount) || 0), 0);
+          const discount = transactions.reduce((s, t) => s + Math.max(Number(t.discount_amount) || 0, 0), 0);
+          const due = Number(data.balance) || 0;
+          const billed = collected + discount + due;
+          const pct = (n) => (billed > 0 ? Math.max((n / billed) * 100, 0) : 0);
+          // The single discount's own percentage, quoted only when there is exactly one —
+          // averaging several across different prices would be a made-up number.
+          const discounted = transactions.filter((t) => Number(t.discount_amount) > 0);
+          const solePct = discounted.length === 1 ? discountPct(discounted[0]) : null;
+          return (
+            <div className="border-b border-slate-200 bg-slate-50/60 px-5 py-3" data-testid="client-history-money-strip">
+              <div className="flex h-1.5 overflow-hidden rounded-full bg-slate-200">
+                <div className="bg-teal-600" style={{ width: `${pct(collected)}%` }} title={`Collected ${fmt(collected)}`} />
+                {/* Hatched, because a discount is money that was never taken — it should
+                    not read as solidly as money that was. */}
+                <div
+                  style={{
+                    width: `${pct(discount)}%`,
+                    backgroundImage: "repeating-linear-gradient(45deg, #f59e0b 0 3px, #fde68a 3px 6px)",
+                  }}
+                  title={`Discount ${fmt(discount)}`}
+                />
+                <div className="bg-rose-300" style={{ width: `${pct(due)}%` }} title={`Due ${fmt(due)}`} />
+              </div>
+
+              <div className="mt-2.5 flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
+                <div className="flex flex-wrap items-start gap-x-8 gap-y-3">
+                  <MoneyStat tick="bg-slate-400" label="Billed" value={fmt(billed)} />
+                  <MoneyStat
+                    tick="bg-amber-400" label="Discount"
+                    value={discount > 0 ? `−${fmt(discount)}` : fmt(0)}
+                    valueClass={discount > 0 ? "text-amber-700" : "text-slate-400"}
+                    sub={solePct != null ? `${solePct}% off` : null}
+                  />
+                  <MoneyStat
+                    tick="bg-teal-600" label="Collected" value={fmt(collected)}
+                    valueClass="text-teal-700"
+                    sub={pd.consultation_payment_mode ? formatMode(pd.consultation_payment_mode) : null}
+                  />
+                  <MoneyStat
+                    tick="bg-rose-300" label="Due" value={fmt(due)}
+                    valueClass={due > 0 ? "text-rose-700" : "text-slate-400"}
+                    sub={`Next due ${data.next_due_date || "—"}`}
+                  />
+                </div>
+                <div className="text-right">
+                  <p className={`text-xs font-semibold ${due > 0 ? "text-rose-700" : "text-teal-700"}`}>
+                    {due > 0 ? balanceMeta.label : "Settled"}
+                  </p>
+                  <p className="text-[11px] text-slate-400">
+                    {data.last_payment_date ? `Last payment ${fmtDayTime(data.last_payment_date)}` : "No payments yet"}
+                  </p>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         <div className="flex-1 overflow-y-auto p-5 space-y-5">
           {loading ? (
@@ -286,52 +547,59 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
             <p className="py-10 text-center text-sm text-slate-400">Failed to load client details.</p>
           ) : tab === "overview" ? (
             <>
-              <div className={`rounded-xl border p-4 ${data.balance > 0 ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-50"}`}>
-                <div className="flex items-center justify-between">
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Outstanding Balance</p>
-                  <Badge meta={balanceMeta} />
+              <div className="grid grid-cols-1 items-start gap-x-8 gap-y-6 lg:grid-cols-[1.15fr_1fr]">
+              {/* ---- left: what has actually been paid ---- */}
+              <div className="space-y-3">
+                <div className="flex items-baseline justify-between">
+                  <h4 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Payments</h4>
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                    {transactions.length === 0 ? "None yet" : `${transactions.length} of ${transactions.length} settled`}
+                  </span>
                 </div>
-                <p className={`mt-1 text-2xl font-bold ${data.balance > 0 ? "text-amber-700" : "text-emerald-700"}`}>{fmt(data.balance)}</p>
-                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500">
-                  <span>Last Payment: <span className="font-medium text-slate-700">{data.last_payment_date ? fmtDate(data.last_payment_date) : "—"}</span></span>
-                  <span>Next Due: <span className="font-medium text-slate-700">{data.next_due_date || "—"}</span></span>
-                </div>
+                <PaymentCards transactions={transactions} servicedBy={client?.assigned_physio_name} />
+                {data.balance <= 0 && transactions.length > 0 && (
+                  <div className="rounded-r-md border-l-2 border-teal-600 bg-teal-50/60 px-3 py-2.5" data-testid="client-history-collect-note">
+                    <p className="text-xs font-semibold text-teal-800">Nothing left to collect</p>
+                    <p className="mt-0.5 text-[11px] text-teal-700">This client is fully paid. Print the receipt or send it on WhatsApp to close the visit.</p>
+                  </div>
+                )}
+                {data.balance > 0 && !pd.next_installment_number && (
+                  <div className="rounded-r-md border-l-2 border-amber-500 bg-amber-50/60 px-3 py-2.5" data-testid="client-history-collect-note">
+                    <p className="text-xs font-semibold text-amber-800">{fmt(data.balance)} outstanding</p>
+                    <p className="mt-0.5 text-[11px] text-amber-700">This balance isn't on an installment schedule — collect it from the client's card in Consultations.</p>
+                  </div>
+                )}
               </div>
 
-              <div>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Payment Summary</p>
-                <div className="grid grid-cols-2 gap-3 text-xs">
-                  <div className="rounded-lg border border-slate-100 p-3">
-                    <p className="mb-2 font-semibold text-slate-600">Consultation Fee</p>
-                    <div className="space-y-1.5">
-                      <InfoBox>Total: {fmt(pd.consultation_fee_total)}</InfoBox>
-                      <InfoBox className="border-emerald-200 bg-emerald-50 font-medium text-emerald-700">Paid: {fmt(pd.consultation_fee_paid)}</InfoBox>
-                      {pd.consultation_status && (
-                        <InfoBox className={pd.consultation_status === "paid" ? "border-emerald-200 bg-emerald-50 font-medium text-emerald-700" : "border-amber-200 bg-amber-50 font-medium text-amber-700"}>
-                          Status: {pd.consultation_status === "paid" ? "Paid" : "Pending"}
-                        </InfoBox>
-                      )}
-                      {pd.consultation_payment_mode && <InfoBox className={INFO_BOX_NEUTRAL}>{formatMode(pd.consultation_payment_mode)}</InfoBox>}
-                    </div>
+              {/* ---- right: the course, what to do next, how to reach them ---- */}
+              <div className="space-y-6">
+                {(pd.session_package_sessions || pd.session_package_price || pd.session_total > 0) && (
+                  <div className="space-y-2">
+                    <h4 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Session Package</h4>
+                    <SessionPackageCard pd={pd} />
                   </div>
-                  <div className="rounded-lg border border-slate-100 p-3">
-                    <p className="mb-2 font-semibold text-slate-600">{pd.session_package_label && pd.session_package_label !== "—" ? `Session Package (${pd.session_package_label})` : "Treatment Fee"}</p>
-                    <div className="space-y-1.5">
-                      <InfoBox>Total: {pd.session_total > 0 ? fmt(pd.session_total) : "—"}</InfoBox>
-                      <InfoBox className="border-emerald-200 bg-emerald-50 font-medium text-emerald-700">Paid: {pd.session_paid != null ? fmt(pd.session_paid) : "—"}</InfoBox>
-                      <InfoBox className={pd.session_due > 0 ? "border-rose-200 bg-rose-50 font-medium text-rose-700" : INFO_BOX_NEUTRAL}>Due: {pd.session_due > 0 ? fmt(pd.session_due) : "Rs.0"}</InfoBox>
-                      {pd.treatment_payment_mode && pd.treatment_payment_mode !== "partial" && <InfoBox className={INFO_BOX_NEUTRAL}>{formatMode(pd.treatment_payment_mode)}</InfoBox>}
-                      {pd.installments_total != null && (
-                        <InfoBox className="border-orange-200 bg-orange-50 font-medium text-orange-700">Installments: {pd.installments_paid}/{pd.installments_total} paid</InfoBox>
-                      )}
-                    </div>
-                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <h4 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Next Step</h4>
+                  <NextStep pd={pd} balance={data.balance} hasSchedule={schedule.length > 0} />
                 </div>
+
+                <div className="space-y-2">
+                  <h4 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Contact</h4>
+                  <StatRows rows={[
+                    ["Phone", client?.phone || "Not on file"],
+                    ["Email", client?.email || "Not on file"],
+                    client?.source && ["Source", client.source],
+                    client?.assigned_physio_name && ["Expert", client.assigned_physio_name],
+                  ]} />
+                </div>
+              </div>
               </div>
 
               {schedule.length > 0 && (
                 <div>
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Payment Schedule</p>
+                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Payment Schedule</p>
                   <div className="space-y-1.5">
                     {schedule.map((s) => (
                       <div key={s.installment_number} className="rounded-lg border border-slate-100 px-3 py-1.5 text-xs" data-testid={`client-history-schedule-${s.installment_number}`}>
@@ -357,99 +625,9 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
                 </div>
               )}
 
-              <div>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Quick Actions</p>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                  <button
-                    type="button" onClick={openCollect} disabled={!pd.next_installment_number || recording}
-                    title={pd.next_installment_number ? `Collect installment #${pd.next_installment_number}` : "Nothing left to collect on an installment schedule for this client"}
-                    className="flex items-center justify-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-2 text-xs font-medium text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-white disabled:text-slate-600 disabled:opacity-40"
-                    data-testid="client-history-record-payment"
-                  >
-                    <Wallet className="h-3.5 w-3.5" /> {recording ? "Saving..." : "Collect Payment"}
-                  </button>
-                  <button type="button" onClick={() => window.print()} className="flex items-center justify-center gap-1.5 rounded-md border border-slate-200 px-2 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50" data-testid="client-history-print">
-                    <Printer className="h-3.5 w-3.5" /> Print Receipt
-                  </button>
-                  <button type="button" onClick={() => downloadInvoice(client, data)} className="flex items-center justify-center gap-1.5 rounded-md border border-slate-200 px-2 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50" data-testid="client-history-invoice">
-                    <FileText className="h-3.5 w-3.5" /> Download Invoice
-                  </button>
-                  <button type="button" onClick={sendReminder} disabled={!client?.phone} className="flex items-center justify-center gap-1.5 rounded-md border border-slate-200 px-2 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40" data-testid="client-history-reminder">
-                    <MessageCircle className="h-3.5 w-3.5" /> WhatsApp Reminder
-                  </button>
-                  <button type="button" onClick={sendEmailReminder} disabled={!client?.email} className="flex items-center justify-center gap-1.5 rounded-md border border-slate-200 px-2 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40" data-testid="client-history-email">
-                    <Mail className="h-3.5 w-3.5" /> Email Reminder
-                  </button>
-                  <button type="button" onClick={callClient} disabled={!client?.phone} className="flex items-center justify-center gap-1.5 rounded-md border border-slate-200 px-2 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40" data-testid="client-history-call">
-                    <PhoneCall className="h-3.5 w-3.5" /> Call Client
-                  </button>
-                </div>
-                {/* A dead grey button tells nobody why. This screen can only collect
-                    against an installment schedule; a consultation fee or a one-shot
-                    treatment fee is collected from the lead's own Consultations card. */}
-                {!pd.next_installment_number && (
-                  <p className="mt-2 text-[11px] text-slate-400" data-testid="client-history-collect-note">
-                    {data.balance > 0
-                      ? "This client's balance isn't on an installment schedule — collect it from their card in Consultations."
-                      : "Nothing left to collect — this client is fully paid."}
-                  </p>
-                )}
-              </div>
             </>
           ) : tab === "transactions" ? (
-            <div className="space-y-2" data-testid="client-history-transactions">
-              {transactions.length === 0 ? (
-                <p className="py-10 text-center text-sm text-slate-400">No transactions yet.</p>
-              ) : transactions.map((tx) => (
-                <div key={tx.id} className="rounded-lg border border-slate-100 px-3 py-2 text-xs" data-testid={`client-history-tx-${tx.id}`}>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium text-slate-700 capitalize">{tx.source} · <span className="text-slate-500">{formatMode(tx.payment_mode)}</span></p>
-                      {/* The Transaction ID printed on the patient's own receipt, so the
-                          two can be matched. Older collections predate it and fall back to
-                          the RCPT- number derived from the activity id. */}
-                      <p className="text-[10px] text-slate-400">{fmtDate(tx.date)}{(tx.transaction_id || tx.receipt_no) && ` · ${tx.transaction_id || tx.receipt_no}`}</p>
-                      {/* The UPI/card/cheque reference recorded with this payment,
-                          lifted back out of the activity line it was written into. */}
-                      {detailReference(tx.details) && (
-                        <p className="mt-0.5 text-[10px] text-slate-500" data-testid={`client-history-tx-ref-${tx.id}`}>{detailReference(tx.details)}</p>
-                      )}
-                    </div>
-                    <div className="text-right">
-                      <p className="font-semibold text-emerald-700">{fmt(tx.amount)}</p>
-                      <p className="text-[10px] font-medium text-emerald-600">Paid</p>
-                    </div>
-                  </div>
-                  {!!tx.discount_amount && (
-                    <div className="mt-1.5 grid grid-cols-3 gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5" data-testid={`client-history-tx-discount-${tx.id}`}>
-                      <div>
-                        <p className="text-[9px] uppercase tracking-wide text-amber-700">Actual Price</p>
-                        <p className="text-[11px] font-semibold text-slate-700">{fmt(tx.original_amount)}</p>
-                      </div>
-                      <div>
-                        <p className="text-[9px] uppercase tracking-wide text-amber-700">Collected</p>
-                        <p className="text-[11px] font-semibold text-slate-700">{fmt(tx.amount)}</p>
-                      </div>
-                      <div>
-                        <p className="text-[9px] uppercase tracking-wide text-amber-700">{tx.discount_amount > 0 ? "Discount" : "Extra"}</p>
-                        <p className="flex flex-wrap items-baseline gap-1">
-                          <span className="text-[11px] font-semibold text-amber-700">{fmt(Math.abs(tx.discount_amount))}</span>
-                          {/* What the rupee figure means against the price it came off.
-                              Guarded on a non-zero original, since a percentage of nothing
-                              is meaningless rather than 0%. */}
-                          {discountPct(tx) !== null && (
-                            <span className="rounded bg-amber-100 px-1 py-px text-[10px] font-bold text-amber-800" data-testid={`client-history-tx-discount-pct-${tx.id}`}>
-                              {discountPct(tx)}%
-                            </span>
-                          )}
-                        </p>
-                      </div>
-                      <p className="col-span-3 mt-0.5 text-[10px] font-medium text-amber-700">{tx.discount_reason}</p>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
+            <PaymentCards transactions={transactions} servicedBy={client?.assigned_physio_name} />
           ) : (
             <div className="space-y-2">
               {timeline.length === 0 ? (
@@ -466,6 +644,48 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
             </div>
           )}
         </div>
+
+        {/* The actions live in a fixed footer rather than a grid inside the scroll area:
+            they apply to the client, not to whichever tab happens to be open, and they
+            should still be reachable at the bottom of a long timeline. */}
+        {!loading && data && (
+          <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 bg-slate-50/60 px-5 py-3">
+            <button type="button" onClick={() => window.print()} className="flex items-center gap-1.5 rounded-md bg-teal-700 px-3 py-2 text-xs font-semibold text-white hover:bg-teal-800" data-testid="client-history-print">
+              <Printer className="h-3.5 w-3.5" /> Print receipt
+            </button>
+            <button type="button" onClick={() => downloadInvoice(client, data)} className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50" data-testid="client-history-invoice">
+              <FileText className="h-3.5 w-3.5" /> Download invoice
+            </button>
+            <button type="button" onClick={sendReminder} disabled={!client?.phone} className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40" data-testid="client-history-reminder">
+              <MessageCircle className="h-3.5 w-3.5" /> Send on WhatsApp
+            </button>
+            <button type="button" onClick={callClient} disabled={!client?.phone} className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40" data-testid="client-history-call">
+              <PhoneCall className="h-3.5 w-3.5" /> Call
+            </button>
+            {/* Not in the design, kept anyway: emailing a reminder already worked, and a
+                layout change is no reason to take a working action away. */}
+            <button type="button" onClick={sendEmailReminder} disabled={!client?.email} className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40" data-testid="client-history-email">
+              <Mail className="h-3.5 w-3.5" /> Email
+            </button>
+            {/* Collecting from here only ever works against an installment schedule, so
+                rather than a dead grey button the footer says why it's unavailable. */}
+            <div className="ml-auto text-right text-[11px] text-slate-400">
+              {pd.next_installment_number ? (
+                <button
+                  type="button" onClick={openCollect} disabled={recording}
+                  className="flex items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-40"
+                  data-testid="client-history-record-payment"
+                >
+                  <Wallet className="h-3.5 w-3.5" /> {recording ? "Saving..." : `Collect installment #${pd.next_installment_number}`}
+                </button>
+              ) : (
+                <span data-testid="client-history-collect-note">
+                  Collect payment is off — <span className="font-semibold text-slate-500">{data.balance > 0 ? "not on a schedule" : "nothing outstanding"}</span>
+                </span>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {collectDraft && (
