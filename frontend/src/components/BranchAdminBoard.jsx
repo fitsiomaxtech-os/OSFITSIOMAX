@@ -1477,9 +1477,14 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                     })}
                   </div>
                 )}
-                {apptDraft.appointment_time && apptDraft.duration && (
+                {/* Start time only. A consultation runs as long as it needs to, so printing
+                    an end time and a duration here stated something the branch cannot
+                    promise. The slot's duration is still recorded and still drives the
+                    expert's calendar and clash checks -- it is just not shown as a
+                    commitment to the patient. */}
+                {apptDraft.appointment_time && (
                   <p className="mt-4 rounded-lg border-2 border-teal-300 bg-teal-50 px-4 py-2.5 text-sm font-bold text-teal-700" data-testid="branch-appt-slot-summary">
-                    {to12h(apptDraft.appointment_time)} – {endTime12h(apptDraft.appointment_time, apptDraft.duration)} · {apptDraft.duration} minute consultation
+                    Consultation starts {to12h(apptDraft.appointment_time)}
                   </p>
                 )}
 
