@@ -555,6 +555,13 @@ function ReviewTab({ physioId, onCountChange }) {
   useEffect(() => { load(); }, [load]);
 
   const submitRaise = async () => {
+    // The notes are the whole point of the hand-off: the Head Physio writes their review
+    // off the back of what the treating physio observed. A review raised without them
+    // arrives as a name and a reason, which is not enough to review anything.
+    if (!draft.physio_notes.trim()) {
+      toast.error("Add your notes for the Head Physio — they can't review the patient without them");
+      return;
+    }
     setSaving(true);
     try {
       await physioRaiseReview(draft.patient.lead_id, { reason: draft.reason, physio_notes: draft.physio_notes }, physioId);
@@ -810,7 +817,9 @@ function ReviewTab({ physioId, onCountChange }) {
                 />
               </div>
               <div>
-                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">Notes for the Head Physio</label>
+                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">
+                  Notes for the Head Physio <span className="text-rose-500">*</span>
+                </label>
                 <textarea
                   rows={4}
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400"

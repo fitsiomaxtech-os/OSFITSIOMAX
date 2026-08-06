@@ -183,6 +183,10 @@ async def physio_raise_review(
     """Physio sends a patient up for review. Lands in Branch Admin > Review > Send to Review.
     Only raisable at a fresh 7-treatment-day milestone (7, 14, 21...) — mirrors the same
     _review_eligibility check /physio/reviews uses to decide who shows under New Review."""
+    # Enforced here as well as in the form: the Head Physio writes their review off the
+    # back of these notes, so a review raised without them cannot be acted on.
+    if not (payload.physio_notes or "").strip():
+        raise HTTPException(status_code=400, detail="Notes for the Head Physio are required")
     lead = await _lead_or_404(lead_id)
     existing_for_lead = await v3_col("reviews").find({"lead_id": lead_id}, {"_id": 0}).to_list(50)
     days = await _treatment_days(lead_id)

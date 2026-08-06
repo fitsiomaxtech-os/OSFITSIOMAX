@@ -168,12 +168,21 @@ export const HeadPhysioReviewTab = ({ selectedDate, compact = false, onCountChan
                   <p className="mt-1 text-sm text-slate-700">{draft.review.reason}</p>
                 </div>
               )}
-              {draft.review.physio_notes && (
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Physio's Notes</p>
+              {/* Always rendered, even when empty. Notes are required when raising a
+                  review now, but reviews raised before that rule have none — and silently
+                  omitting the block made it look as though the physio's remarks had gone
+                  missing rather than never having been written. */}
+              <div className={`rounded-lg border p-3 ${draft.review.physio_notes ? "border-sky-200 bg-sky-50" : "border-slate-200 bg-slate-50"}`} data-testid="hp-review-physio-notes">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                  Physio's Notes
+                  {draft.review.physio_name && <span className="ml-1 font-semibold normal-case tracking-normal text-slate-500">· {draft.review.physio_name}</span>}
+                </p>
+                {draft.review.physio_notes ? (
                   <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{draft.review.physio_notes}</p>
-                </div>
-              )}
+                ) : (
+                  <p className="mt-1 text-sm italic text-slate-400">The physio raised this review without notes.</p>
+                )}
+              </div>
               <div>
                 <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">Review Notes *</label>
                 <textarea
