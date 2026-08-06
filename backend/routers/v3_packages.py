@@ -13,6 +13,7 @@ from schemas.v3 import (
     V3CollectPackagePaymentInput, V3CollectTreatmentFeeInput,
     V3PhysioDiagnosisInput, V3TreatmentSummaryInput,
 )
+from utils import generate_transaction_id
 
 router = APIRouter(prefix="/api/v3", tags=["packages"])
 
@@ -255,18 +256,23 @@ async def collect_package_payment(lead_id: str, payload: V3CollectPackagePayment
         detail_suffix = f" · A/C ****{last4}, {payload.account_holder_name.strip()}, {payload.bank_name.strip()} ({payload.ifsc_code.strip().upper()}) · Ref {payload.transfer_reference.strip()}"
 
     is_update = lead.get("package_paid") is not None
+    # One id per collection, cash included. A correction re-collects and is a fresh
+    # transaction, so it gets its own id rather than overwriting the original's.
+    transaction_id = await generate_transaction_id(lead.get("branch_id"))
+    payment_details["transaction_id"] = transaction_id
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {
         "package_paid": amount,
         "package_payment_mode": payload.payment_mode,
-        "package_payment_details": payment_details or None,
+        "package_payment_details": payment_details,
         "consultation_stage": "Fee Collected",
         "updated_at": _now(),
     }})
     await v3_col("lead_activity").insert_one({
         "id": str(uuid.uuid4()),
+        "transaction_id": transaction_id,
         "lead_id": lead_id,
         "action": "package_payment_collected",
-        "details": f"{'Updated' if is_update else 'Collected'} Consultation Fee Rs.{amount} for package '{lead.get('package_name')}' via {payload.payment_mode}{detail_suffix}{discount_suffix}",
+        "details": f"{'Updated' if is_update else 'Collected'} Consultation Fee Rs.{amount} for package '{lead.get('package_name')}' via {payload.payment_mode}{detail_suffix}{discount_suffix} · Txn {transaction_id}",
         "original_amount": original_price,
         "collected_amount": amount,
         "discount_amount": discount_amount if discount_amount != 0 else None,
@@ -276,7 +282,7 @@ async def collect_package_payment(lead_id: str, payload: V3CollectPackagePayment
         "created_at": _now(),
     })
     updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
-    return {"message": "Payment collected", "lead": V3LeadOut(**updated).model_dump()}
+    return {"message": "Payment collected", "transaction_id": transaction_id, "lead": V3LeadOut(**updated).model_dump()}
 
 
 @router.post("/leads/{lead_id}/collect-treatment-fee", response_model=dict)
@@ -431,6 +437,13 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
         ]
         balance_suffix = f" · covers {sessions_now} of {total_sessions} sessions, balance Rs.{remaining_amount} ({remaining_sessions} sessions) due {payload.balance_due_date}"
 
+    # Partial Payment only schedules a plan here -- no money moves, so it gets no
+    # transaction id. Each installment is collected separately and earns its own.
+    transaction_id = None
+    if payload.payment_mode != "partial":
+        transaction_id = await generate_transaction_id(lead.get("branch_id"))
+        payment_details["transaction_id"] = transaction_id
+
     is_update = lead.get("treatment_fee_paid") is not None
     # Rests at 'Fee Collected' on first collection — Physio Assign only happens via
     # the separate assign-consultation-physio action. If this is just a payment-mode
@@ -450,9 +463,10 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
     if payload.payment_mode == "partial":
         details = f"{'Updated' if is_update else 'Created'} Payment Schedule for session package '{lead.get('session_package_name')}' ({lead.get('session_package_sessions')} sessions) · Rs.{amount} across {len(installments)} installments{detail_suffix}"
     else:
-        details = f"{'Updated' if is_update else 'Collected'} Treatment Fee for session package '{lead.get('session_package_name')}' ({lead.get('session_package_sessions')} sessions) · Rs.{amount} via {payload.payment_mode}{detail_suffix}{discount_suffix}{balance_suffix}"
+        details = f"{'Updated' if is_update else 'Collected'} Treatment Fee for session package '{lead.get('session_package_name')}' ({lead.get('session_package_sessions')} sessions) · Rs.{amount} via {payload.payment_mode}{detail_suffix}{discount_suffix}{balance_suffix} · Txn {transaction_id}"
     await v3_col("lead_activity").insert_one({
         "id": str(uuid.uuid4()),
+        "transaction_id": transaction_id,
         "lead_id": lead_id,
         "action": "treatment_fee_collected",
         "details": details,
@@ -465,7 +479,7 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
         "created_at": _now(),
     })
     updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
-    return {"message": "Payment collected", "lead": V3LeadOut(**updated).model_dump()}
+    return {"message": "Payment collected", "transaction_id": transaction_id, "lead": V3LeadOut(**updated).model_dump()}
 
 
 @router.post("/leads/{lead_id}/mark-consultation-completed", response_model=dict)

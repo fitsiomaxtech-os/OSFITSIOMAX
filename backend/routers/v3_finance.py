@@ -8,6 +8,7 @@ from database import v3_col
 from deps import v3_require_roles
 from schemas.v3 import V3UserOut, V3MarkInstallmentPaidInput
 from stage_utils import get_first_stage_name
+from utils import generate_transaction_id
 
 
 def _now():
@@ -140,6 +141,9 @@ async def get_branch_finance(
 
         transactions.append({
             "id": act.get("id", ""),
+            # The readable id printed on the patient's receipt. Empty on collections taken
+            # before this existed, so every reader has to tolerate a blank.
+            "transaction_id": act.get("transaction_id") or "",
             "lead_id": act.get("lead_id", ""),
             "patient_name": lead.get("name", "Unknown"),
             "patient_phone": lead.get("phone", ""),
@@ -408,6 +412,7 @@ async def revenue_overview(
         session = lead_session_map.get(act.get("lead_id")) or {}
         transactions.append({
             "id": act.get("id", ""),
+            "transaction_id": act.get("transaction_id") or "",
             "date": act.get("created_at", ""),
             "branch_name": bname,
             "source": category,
@@ -571,6 +576,7 @@ async def client_transaction_history(
             amount = first_installment_amount
         transactions.append({
             "id": act.get("id", ""),
+            "transaction_id": act.get("transaction_id") or "",
             "date": act.get("created_at", ""),
             "source": category,
             "amount": amount,
@@ -607,6 +613,7 @@ async def client_transaction_history(
             "ifsc_code": inst.get("ifsc_code"),
             "cheque_number": inst.get("cheque_number"),
             "transfer_reference": inst.get("transfer_reference"),
+            "transaction_id": inst.get("transaction_id"),
         }
         for idx, inst in enumerate(installments, start=1)
     ]
@@ -683,6 +690,7 @@ async def mark_installment_paid(
         raise HTTPException(status_code=400, detail="This installment has already been collected")
 
     activity_details = None
+    transaction_id = None
     if payload.payment_mode:
         mode = payload.payment_mode
         amount = payload.amount if payload.amount is not None else installments[idx].get("amount", 0)
@@ -727,8 +735,11 @@ async def mark_installment_paid(
             }
             detail_suffix = f" · A/C ****{last4}, {payload.account_holder_name.strip()}, {payload.bank_name.strip()} ({payload.ifsc_code.strip().upper()}) · Ref {payload.transfer_reference.strip()}"
 
-        installments[idx] = {**installments[idx], "paid": True, "amount": amount, "payment_mode": mode, **mode_fields}
-        activity_details = f"Collected Installment #{installment_number} for session package '{lead.get('session_package_name')}' · Rs.{amount} via {mode}{detail_suffix}"
+        # Each installment is its own collection, so each earns its own transaction id --
+        # the schedule they belong to has none, since scheduling moves no money.
+        transaction_id = await generate_transaction_id(lead.get("branch_id"))
+        installments[idx] = {**installments[idx], "paid": True, "amount": amount, "payment_mode": mode, "transaction_id": transaction_id, **mode_fields}
+        activity_details = f"Collected Installment #{installment_number} for session package '{lead.get('session_package_name')}' · Rs.{amount} via {mode}{detail_suffix} · Txn {transaction_id}"
     else:
         installments[idx]["paid"] = True
 
@@ -740,6 +751,7 @@ async def mark_installment_paid(
     if activity_details:
         await v3_col("lead_activity").insert_one({
             "id": str(uuid.uuid4()),
+            "transaction_id": transaction_id,
             "lead_id": lead_id,
             "action": "treatment_fee_collected",
             "details": activity_details,
@@ -749,4 +761,4 @@ async def mark_installment_paid(
         })
 
     updated_details = {**details, "installments": installments}
-    return {"message": "Installment marked as paid", "balance": _lead_outstanding_balance({**lead, "treatment_fee_payment_details": updated_details})}
+    return {"message": "Installment marked as paid", "transaction_id": transaction_id, "balance": _lead_outstanding_balance({**lead, "treatment_fee_payment_details": updated_details})}

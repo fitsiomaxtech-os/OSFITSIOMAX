@@ -134,7 +134,14 @@ export const SessionCollectionsBoard = ({ rows, onView }) => {
   };
 
   const filtered = useMemo(() => rows.filter((r) => {
-    if (search && !(r.client_name || "").toLowerCase().includes(search.toLowerCase())) return false;
+    // Matches the transaction id as well as the name, so a receipt handed back over the
+    // desk can be found by the number printed on it.
+    if (search) {
+      const q = search.toLowerCase();
+      const hit = (r.client_name || "").toLowerCase().includes(q)
+        || (r.transaction_id || "").toLowerCase().includes(q);
+      if (!hit) return false;
+    }
     if (branch !== "all" && r.branch_name !== branch) return false;
     if (mode !== "all" && r.payment_mode !== mode) return false;
     if (status !== "all" && r.session_status !== status) return false;
@@ -177,7 +184,7 @@ export const SessionCollectionsBoard = ({ rows, onView }) => {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search client..."
+            placeholder="Search client or transaction ID..."
             className="h-9 min-w-[180px] flex-1 rounded-md border border-slate-200 px-3 text-sm"
             data-testid="session-collections-search"
           />

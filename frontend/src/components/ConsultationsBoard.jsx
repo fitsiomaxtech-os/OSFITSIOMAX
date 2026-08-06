@@ -74,7 +74,7 @@ const isSchedule = (r) => r.kind === "schedule";
 // The receipt's own document content. The branding, styles and the open/print/download/
 // share mechanics are shared with every other printable in lib/printable.js.
 const receiptRows = (r) => [
-  [isSchedule(r) ? "Reference No." : "Receipt No.", r.receiptNo],
+  [isSchedule(r) ? "Reference No." : "Transaction ID", r.receiptNo],
   ["Date", r.dateLabel],
   ["Patient", r.patient],
   ["Patient No.", r.patientNo],
@@ -228,7 +228,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   }, []);
 
   /** Every fee path builds its receipt here, so they can't drift apart field by field. */
-  const makeReceipt = ({ lead, payload, prefix, paidFor, packageName, assignedPrice, kind = "paid", sessionsCovered, balanceDue, installments }) => {
+  const makeReceipt = ({ lead, payload, prefix, paidFor, packageName, assignedPrice, kind = "paid", sessionsCovered, balanceDue, installments, transactionId }) => {
     const amount = payload.amount;
     // A Branch-Admin-negotiated amount below the assigned price is a discount, and the
     // receipt has to show both numbers or it reads as though the price was simply lower.
@@ -237,7 +237,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       : null;
     return {
       kind,
-      receiptNo: `${prefix}-${(lead.patient_number || lead.id || "").toString().slice(-8).toUpperCase()}-${Date.now().toString().slice(-6)}`,
+      // The server's Transaction ID, assigned when the money was taken and stored on the
+      // record — so reprinting this receipt shows the same number, and the number can be
+      // searched for. A Partial Payment *schedule* moves no money and has no transaction,
+      // so it keeps a local reference built from the patient number instead.
+      receiptNo: transactionId
+        || `${prefix}-${(lead.patient_number || lead.id || "").toString().slice(-8).toUpperCase()}-${Date.now().toString().slice(-6)}`,
       dateLabel: new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }),
       patient: lead.name || "—",
       patientNo: lead.patient_number || "—",
@@ -836,6 +841,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       paidFor: "Consultation Fee",
       packageName: selectedLead.package_name || "",
       assignedPrice: selectedLead.package_price,
+      transactionId: res.transaction_id,
     }));
   };
 
@@ -931,6 +937,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
         ? `Rs.${unpaid.reduce((s, i) => s + (i.amount || 0), 0)}${unpaid[0]?.due_date ? ` · due ${unpaid[0].due_date}` : ""}`
         : "",
       installments: scheduleOnly ? savedInst : [],
+      transactionId: res.transaction_id,
     }));
     // Same as the installment path: the receipt is the confirmation and closes on
     // its own button, so the patient stays open behind it rather than the whole
@@ -1002,9 +1009,9 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
         const res = await collectTreatmentFee(lead.id, schedulePayload);
         lead = res.lead;
       }
-      await markInstallmentPaid(lead.id, draft.idx + 1, payload);
+      const paidRes = await markInstallmentPaid(lead.id, draft.idx + 1, payload);
       const installments = (lead.treatment_fee_payment_details?.installments || []).map((inst, i) =>
-        i === draft.idx ? { ...inst, paid: true, amount, payment_mode: mode } : inst
+        i === draft.idx ? { ...inst, paid: true, amount, payment_mode: mode, transaction_id: paidRes?.transaction_id } : inst
       );
       const updatedLead = { ...lead, treatment_fee_payment_details: { ...lead.treatment_fee_payment_details, installments } };
       toast.success(`Payment #${draft.idx + 1} collected`);
@@ -1023,6 +1030,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
         balanceDue: stillOwed.length
           ? `Rs.${stillOwed.reduce((s, i) => s + (i.amount || 0), 0)}${stillOwed[0]?.due_date ? ` · due ${stillOwed[0].due_date}` : ""}`
           : "",
+        transactionId: paidRes?.transaction_id,
       }));
       // The receipt above is the confirmation and closes on its own button, so the
       // patient stays open behind it — collecting one installment shouldn't throw the
@@ -3377,7 +3385,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 <img src={LOGO_URL} alt="FITSIOMAX" className="h-11 w-11 shrink-0 rounded-lg bg-white/90 object-contain p-1" />
                 <div className="min-w-0">
                   <p className="text-lg font-bold">{isSchedule(receipt) ? "Payment Schedule Created" : "Payment Received"}</p>
-                  <p className="truncate text-xs text-white/80">{isSchedule(receipt) ? "Reference" : "Receipt"} {receipt.receiptNo}</p>
+                  <p className="truncate text-xs text-white/80">{isSchedule(receipt) ? "Reference" : "Txn"} {receipt.receiptNo}</p>
                 </div>
               </div>
               <button onClick={() => setReceipt(null)} className="shrink-0 rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="cons-receipt-close">

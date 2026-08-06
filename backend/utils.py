@@ -59,6 +59,36 @@ async def generate_patient_number(branch_id: Optional[str], at: Optional[str] = 
     return f"{code}-{day_key}-{seq:04d}"
 
 
+async def generate_transaction_id(branch_id: Optional[str]) -> str:
+    """Unique, human-readable id for one collection: TXN-BRANCHCODE-YYMMDD-SEQUENCE
+    (e.g. TXN-ANN-260806-0000). Same shape and same atomic per-branch-per-day counter as
+    generate_patient_number, so two tills collecting at once can't land on one number.
+
+    Every payment gets one, cash included -- it's the only identifier a cash payment has,
+    and the receipt printed for the patient is traced by it. A branch with no code yet
+    (or a payment with no branch, e.g. an online consultation) falls back to 'GEN' rather
+    than returning nothing, because a payment without an id is the case this exists to
+    stop."""
+    from database import v3_col
+    from pymongo import ReturnDocument
+
+    code = None
+    if branch_id:
+        branch = await v3_col("branches").find_one({"id": branch_id}, {"_id": 0, "code": 1})
+        code = (branch or {}).get("code")
+    code = code or "GEN"
+
+    day_key = now_utc().strftime("%y%m%d")
+    counter = await v3_col("counters").find_one_and_update(
+        {"_id": f"transaction_id:{code}:{day_key}"},
+        {"$inc": {"seq": 1}},
+        upsert=True,
+        return_document=ReturnDocument.AFTER,
+    )
+    seq = counter["seq"] - 1
+    return f"TXN-{code}-{day_key}-{seq:04d}"
+
+
 def normalize_slot_time(value: str) -> str:
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
