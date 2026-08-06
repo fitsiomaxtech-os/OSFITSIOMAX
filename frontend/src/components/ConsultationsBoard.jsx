@@ -165,6 +165,126 @@ const PAYMENT_MODE_COLORS = {
   partial: "#e11d48",
 };
 
+const round2 = (n) => Math.round(n * 100) / 100;
+
+// A discount above this reads as a mistyped amount (120 for 1200) more often than a real
+// decision, so it's called out — but never blocked. Talking a price down is the Branch
+// Admin's call to make; the popup's job is to make sure they meant it.
+const STEEP_DISCOUNT_PCT = 25;
+
+/**
+ * Amount-to-collect with its discount worked out both ways: type a percentage or a rupee
+ * discount and the amount follows; type the amount and the discount follows it.
+ *
+ * `amount` stays the single source of truth that gets submitted -- the two discount boxes
+ * are only ever a way of arriving at it. They keep their own text state so a half-typed
+ * "0." or "4." isn't destroyed by rounding mid-keystroke, and `selfEdit` stops the sync
+ * back from the amount from overwriting the box being typed into.
+ */
+const DiscountCalculator = ({ assignedPrice, amount, onAmountChange, label, testPrefix }) => {
+  const price = Number(assignedPrice);
+  const hasPrice = Number.isFinite(price) && price > 0;
+  const amt = parseFloat(amount);
+  const validAmt = Number.isFinite(amt);
+
+  const [pctText, setPctText] = useState("");
+  const [rsText, setRsText] = useState("");
+  const selfEdit = useRef(false);
+
+  // Re-derive both boxes whenever the amount changes from outside this component.
+  useEffect(() => {
+    if (selfEdit.current) { selfEdit.current = false; return; }
+    if (!hasPrice || !validAmt) { setPctText(""); setRsText(""); return; }
+    const off = round2(price - amt);
+    setRsText(off > 0 ? String(off) : "");
+    setPctText(off > 0 ? String(round2((off / price) * 100)) : "");
+  }, [amount, price, hasPrice, validAmt, amt]);
+
+  const applyDiscountRs = (offRaw) => {
+    const off = parseFloat(offRaw);
+    if (!hasPrice || !Number.isFinite(off)) return;
+    selfEdit.current = true;
+    onAmountChange(String(round2(price - off)));
+  };
+
+  const onPct = (v) => {
+    setPctText(v);
+    const pct = parseFloat(v);
+    if (!hasPrice || !Number.isFinite(pct)) return;
+    const off = round2((price * pct) / 100);
+    setRsText(String(off));
+    applyDiscountRs(off);
+  };
+
+  const onRs = (v) => {
+    setRsText(v);
+    const off = parseFloat(v);
+    if (!hasPrice || !Number.isFinite(off)) return;
+    setPctText(String(round2((off / price) * 100)));
+    applyDiscountRs(off);
+  };
+
+  const discountRs = hasPrice && validAmt ? round2(price - amt) : 0;
+  const discountPct = hasPrice && discountRs ? round2((discountRs / price) * 100) : 0;
+  const steep = discountPct > STEEP_DISCOUNT_PCT;
+  const overpaid = discountRs < 0;
+
+  return (
+    <div className="space-y-2.5">
+      {hasPrice && (
+        <div className="flex items-center justify-between rounded-md bg-slate-50 px-2.5 py-1.5 text-[11px]">
+          <span className="text-slate-500">Assigned Price</span>
+          <span className="font-semibold text-slate-700">Rs.{price}</span>
+        </div>
+      )}
+
+      {hasPrice && (
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="mb-1 block text-[11px] font-medium text-slate-500">Discount %</label>
+            <Input type="number" min="0" value={pctText} onChange={(e) => onPct(e.target.value)} className="h-9" placeholder="0" data-testid={`${testPrefix}-discount-pct`} />
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] font-medium text-slate-500">Discount (₹)</label>
+            <Input type="number" min="0" value={rsText} onChange={(e) => onRs(e.target.value)} className="h-9" placeholder="0" data-testid={`${testPrefix}-discount-rs`} />
+          </div>
+        </div>
+      )}
+
+      <div>
+        <label className="mb-1 block text-[11px] font-medium text-slate-500">{label}</label>
+        <Input
+          type="number"
+          min="0"
+          value={amount}
+          onChange={(e) => onAmountChange(e.target.value)}
+          className="h-9"
+          data-testid={`${testPrefix}-amount`}
+        />
+      </div>
+
+      {hasPrice && discountRs > 0 && (
+        <div
+          className={`rounded-md border p-2.5 text-[11px] ${steep ? "border-amber-300 bg-amber-50 text-amber-800" : "border-emerald-200 bg-emerald-50 text-emerald-800"}`}
+          data-testid={`${testPrefix}-discount-summary`}
+        >
+          <p>
+            Discount <span className="font-semibold">Rs.{discountRs}</span> ({discountPct}%) — collecting{" "}
+            <span className="font-semibold">Rs.{round2(amt)}</span> of Rs.{price}.
+          </p>
+          {steep && <p className="mt-1 font-semibold">That is over {STEEP_DISCOUNT_PCT}% off. Please confirm this is correct.</p>}
+        </div>
+      )}
+
+      {overpaid && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 p-2.5 text-[11px] text-amber-800" data-testid={`${testPrefix}-overpaid-warning`}>
+          <span className="font-semibold">Rs.{Math.abs(discountRs)}</span> above the assigned Rs.{price}. Please confirm this is correct.
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened, externalDate, hideDateFilter = false, onCountChange, onRowsChange, externalSearch, mobileCards = false }) => {
   const isConsultant = viewerRole === "head_physio";
   // Head Physio tracks progress on their own independent pipeline (head_consultation_stage),
@@ -2237,9 +2357,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 entered amount doesn't match the assigned package price and/or the mode
                 (UPI/Card) needs its own fields. Layered above the main popup. */}
             {packageConfirmDraft && collectFeeDraft && (() => {
-              const amount = parseFloat(collectFeeDraft.amount);
               const expected = selectedLead.package_price;
-              const mismatch = expected != null && Math.round(amount * 100) !== Math.round(expected * 100);
               const mode = collectFeeDraft.payment_mode;
               return (
                 <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" data-testid="cons-collect-fee-confirm-modal">
@@ -2249,23 +2367,16 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       <button onClick={() => setPackageConfirmDraft(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-collect-fee-confirm-close"><X className="h-4 w-4" /></button>
                     </div>
 
-                    <div>
-                      <label className="mb-1 block text-[11px] font-medium text-slate-500">Consultation Fee (₹)</label>
-                      <Input
-                        type="number"
-                        min="0"
-                        value={collectFeeDraft.amount}
-                        onChange={(e) => setCollectFeeDraft({ ...collectFeeDraft, amount: e.target.value })}
-                        className="h-9"
-                        data-testid="cons-collect-fee-confirm-amount"
-                      />
-                    </div>
-
-                    {mismatch && (
-                      <div className="rounded-md border border-amber-200 bg-amber-50 p-2.5 text-[11px] text-amber-800" data-testid="cons-collect-fee-mismatch-warning">
-                        Entered amount <span className="font-semibold">Rs.{amount}</span> differs from the assigned Consultation Fee <span className="font-semibold">Rs.{expected}</span>. Please confirm this is correct.
-                      </div>
-                    )}
+                    {/* Replaces the old bare amount box and its "differs from" warning: the
+                        discount is now worked out for you either way round, and the same
+                        panel is what flags an unusually steep one. */}
+                    <DiscountCalculator
+                      assignedPrice={expected}
+                      amount={collectFeeDraft.amount}
+                      onAmountChange={(v) => setCollectFeeDraft({ ...collectFeeDraft, amount: v })}
+                      label="Consultation Fee (₹)"
+                      testPrefix="cons-collect-fee-confirm"
+                    />
 
                     {mode === "upi" && (
                       <>
@@ -2407,13 +2518,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 whichever of the two Treatment Fee popups (combined or standalone) is
                 currently open. */}
             {treatmentConfirmDraft && treatmentFeeDraft && (() => {
-              const amount = parseFloat(treatmentFeeDraft.amount);
-              const expected = selectedLead.session_package_price;
-              // When this collection only covers some sessions, "expected" is what
-              // those sessions should cost, not the whole package's price — so
-              // collecting a fair partial amount is never flagged as a discount.
-              const expectedForSessionsNow = treatmentIsPartialSessions ? treatmentComputedAmount : expected;
-              const mismatch = expectedForSessionsNow != null && Math.round(amount * 100) !== Math.round(expectedForSessionsNow * 100);
+              // When this collection only covers some sessions, the price to measure a
+              // discount against is what *those* sessions cost, not the whole package's —
+              // so collecting a fair partial amount is never counted as a discount.
+              const expectedForSessionsNow = treatmentIsPartialSessions
+                ? treatmentComputedAmount
+                : selectedLead.session_package_price;
               const mode = treatmentFeeDraft.payment_mode;
               const modeLabel = TREATMENT_FEE_PAYMENT_MODES.find((m) => m.value === mode)?.label || "";
               return (
@@ -2430,20 +2540,25 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
 
                     {mode !== "partial" && (
                       <div>
-                        <label className="mb-1 block text-[11px] font-medium text-slate-500">{modeLabel} Amount (₹)</label>
                         {SETTLED_NOW_MODES.includes(mode) ? (
-                          <Input
-                            type="number"
-                            min="0"
-                            value={treatmentFeeDraft.amount}
-                            onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, amount: e.target.value })}
-                            className="h-9"
-                            data-testid="cons-treatment-fee-amount"
+                          // Discount is measured against what *these* sessions cost, not the
+                          // whole package — collecting for fewer sessions is not a discount.
+                          <DiscountCalculator
+                            assignedPrice={expectedForSessionsNow}
+                            amount={treatmentFeeDraft.amount}
+                            onAmountChange={(v) => setTreatmentFeeDraft({ ...treatmentFeeDraft, amount: v })}
+                            label={`${modeLabel} Amount (₹)`}
+                            testPrefix="cons-treatment-fee"
                           />
                         ) : (
-                          <div className="flex h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-700" data-testid="cons-treatment-fee-amount">
-                            {treatmentFeeTotalSessions ? `Rs.${treatmentComputedAmount}` : (selectedLead.session_package_price != null ? `Rs.${selectedLead.session_package_price}` : "—")}
-                          </div>
+                          // Cheque keeps the locked price — nothing to discount, so no
+                          // calculator, but it still needs its own label.
+                          <>
+                            <label className="mb-1 block text-[11px] font-medium text-slate-500">{modeLabel} Amount (₹)</label>
+                            <div className="flex h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-700" data-testid="cons-treatment-fee-amount">
+                              {treatmentFeeTotalSessions ? `Rs.${treatmentComputedAmount}` : (selectedLead.session_package_price != null ? `Rs.${selectedLead.session_package_price}` : "—")}
+                            </div>
+                          </>
                         )}
                         {selectedLead.session_package_sessions && selectedLead.session_package_price != null && (
                           <p className="mt-1 text-[11px] text-slate-500" data-testid="cons-treatment-fee-breakdown">
@@ -2487,12 +2602,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     {treatmentIsPartialSessions && (
                       <div className="rounded-md border border-sky-200 bg-sky-50 p-2.5 text-[11px] text-sky-800" data-testid="cons-treatment-fee-partial-sessions-note">
                         Covers <span className="font-semibold">{treatmentSessionsNow} of {treatmentFeeTotalSessions}</span> sessions. Balance <span className="font-semibold">Rs.{treatmentRemainingAmount}</span> ({treatmentRemainingSessions} sessions) due {treatmentFeeDraft.balance_due_date || "—"}.
-                      </div>
-                    )}
-
-                    {mismatch && (
-                      <div className="rounded-md border border-amber-200 bg-amber-50 p-2.5 text-[11px] text-amber-800" data-testid="cons-treatment-fee-mismatch-warning">
-                        Entered amount <span className="font-semibold">Rs.{amount}</span> differs from {treatmentIsPartialSessions ? `the Rs.${expectedForSessionsNow} price for these ${treatmentSessionsNow} sessions` : <>the assigned Treatment Fee <span className="font-semibold">Rs.{expected}</span></>}. Please confirm this is correct.
                       </div>
                     )}
 

@@ -172,7 +172,7 @@ CONSULTATION_FEE_PAYMENT_MODES = {"cash", "upi", "card", "account_transfer"}
 TREATMENT_FEE_PAYMENT_MODES = {"cash", "upi", "card", "cheque", "partial", "account_transfer"}
 
 # The modes where money lands in full, there and then: the amount is editable, a
-# negotiated discount is tracked against it, and an explicit confirmation is required
+# discount is tracked against it, and an explicit confirmation is required
 # before it's accepted. Cheque and Partial Payment are promises of money rather than
 # money, so they're deliberately outside this set.
 SETTLED_NOW_MODES = ("cash", "upi", "card", "account_transfer")
@@ -215,8 +215,8 @@ async def collect_package_payment(lead_id: str, payload: V3CollectPackagePayment
     discount_suffix = ""
     discount_reason = None
     if discount_amount > 0:
-        discount_reason = "Negotiated discount"
-        discount_suffix = f" · Actual Price Rs.{original_price}, Negotiated Discount Rs.{discount_amount}"
+        discount_reason = "Discount"
+        discount_suffix = f" · Actual Price Rs.{original_price}, Discount Rs.{discount_amount}"
     elif discount_amount < 0:
         discount_reason = "Additional amount collected"
         discount_suffix = f" · Actual Price Rs.{original_price}, Rs.{abs(discount_amount)} above assigned fee"
@@ -341,7 +341,7 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
     if payload.payment_mode in SETTLED_NOW_MODES and not payload.confirmed:
         raise HTTPException(status_code=400, detail="Please confirm the payment before submitting")
 
-    # Same negotiated-discount tracking as the Consultation Fee — compared against
+    # Same discount tracking as the Consultation Fee — compared against
     # what these specific sessions should cost (not the whole package's price),
     # so collecting for fewer sessions is never mistaken for a discount.
     discount_amount = 0
@@ -350,8 +350,8 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
     if payload.payment_mode in SETTLED_NOW_MODES:
         discount_amount = round(computed_amount - amount, 2)
         if discount_amount > 0:
-            discount_reason = "Negotiated discount"
-            discount_suffix = f" · Actual Price Rs.{computed_amount}, Negotiated Discount Rs.{discount_amount}"
+            discount_reason = "Discount"
+            discount_suffix = f" · Actual Price Rs.{computed_amount}, Discount Rs.{discount_amount}"
         elif discount_amount < 0:
             discount_reason = "Additional amount collected"
             discount_suffix = f" · Actual Price Rs.{computed_amount}, Rs.{abs(discount_amount)} above assigned fee"
