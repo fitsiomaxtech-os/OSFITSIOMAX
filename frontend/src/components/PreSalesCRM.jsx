@@ -423,16 +423,11 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
         )}
       </div>
 
-      {/* Stage Tabs — one continuous strip (divide-x between segments, rounding only
-          on the outer edges) rather than separate gapped pills. */}
-      <div className="-mx-1" data-testid="presales-stage-tabs">
-        <div className="flex flex-wrap divide-x divide-slate-200 overflow-hidden rounded-xl border border-slate-200 bg-white/95">
-          <StageTab label="All" active={stageFilter === "All"} onClick={() => setStageFilter("All")} color="#0ea5e9" testid="presales-chip-all" />
-          {stages.map((s) => (
-            <StageTab key={s.id} label={s.name} active={stageFilter === s.name} onClick={() => setStageFilter(s.name)} color={s.color} testid={`presales-chip-${s.name}`} />
-          ))}
-        </div>
-      </div>
+      {/* The stage strip that used to sit here is gone. It set the same `stageFilter`
+          the KPI cards above already set, so every stage was on screen twice, four
+          rows apart, with the pair drifting out of step as you clicked either one.
+          The cards win: they carry the counts. The mobile block below keeps its own
+          StageTabBar — it has no KPI row, so that one isn't a duplicate. */}
 
       {/* Leads table */}
       <Card data-testid="presales-leads-card">
@@ -988,21 +983,6 @@ const KpiCard = ({ label, value, color, active, onClick, testid }) => (
     <p className="mt-1 text-3xl font-bold" style={{ color }}>{value}</p>
   </button>
 );
-
-const StageTab = ({ label, active, onClick, color, testid }) => {
-  const tint = color || "#0ea5e9";
-  return (
-    <button
-      onClick={onClick}
-      data-testid={testid}
-      type="button"
-      className="relative flex flex-1 min-w-[110px] items-center justify-center px-4 py-3 text-center transition-colors hover:brightness-95"
-      style={active ? { background: tint, color: "#ffffff" } : { background: `${tint}14`, color: tint }}
-    >
-      <span className="text-xs font-semibold uppercase tracking-wider leading-tight">{label}</span>
-    </button>
-  );
-};
 
 // Legacy compact chip kept for callers that haven't migrated yet (unused after redesign).
 const ChipTab = ({ label, active, onClick, color, testid }) => (
