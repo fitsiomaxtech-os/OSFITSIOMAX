@@ -29,7 +29,6 @@ import {
   physioWeeklyAssessment,
   physioReviews,
   physioRaiseReview,
-  getClientTransactionHistory,
 } from "@/lib/api";
 import { to12h, slotTo12h } from "@/lib/time";
 
@@ -1431,10 +1430,11 @@ export function PatientDetailPage({ patient, physioId, onClose, onRefresh }) {
     )
   );
 
+  // No Payment History here: what a patient owes and has paid is the branch's business,
+  // not the treating physio's. It stays available to Branch Admin and Accountant Manage.
   const TABS = [
     { key: "sessions", label: "Sessions" },
     { key: "treatment", label: "Treatment" },
-    { key: "payment", label: "Payment History" },
     { key: "profile", label: "Profile" },
   ];
 
@@ -1550,7 +1550,6 @@ export function PatientDetailPage({ patient, physioId, onClose, onRefresh }) {
           </div>
         )}
 
-        {detailTab === "payment" && <PaymentHistoryTab leadId={patient.lead_id} lead={lead} />}
 
         {detailTab === "profile" && lead && (
           <div className="grid grid-cols-2 gap-3" data-testid="physio-patient-profile-tab">
@@ -1576,115 +1575,6 @@ export function PatientDetailPage({ patient, physioId, onClose, onRefresh }) {
           onDone={() => { setViewSession(null); load(); onRefresh?.(); }}
         />
       )}
-    </div>
-  );
-}
-
-// Total/Collected/Pending across both fees, then a card each for Consultation Fee and
-// Treatment Fee — reuses the same finance history the Accountant's Transactions History
-// popup calls, just read-only and scoped to this physio's own patient.
-function PaymentHistoryTab({ leadId, lead }) {
-  const [payment, setPayment] = useState(null);
-  const [loading, setLoading] = useState(false);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try { setPayment(await getClientTransactionHistory(leadId)); } catch { /* silent */ }
-    setLoading(false);
-  }, [leadId]);
-
-  useEffect(() => { load(); }, [load]);
-
-  if (!payment) {
-    return <p className="py-10 text-center text-xs text-slate-400">{loading ? "Loading..." : "Could not load payment history"}</p>;
-  }
-
-  const pd = payment.payment_details || {};
-  const consultationTotal = pd.consultation_fee_total || 0;
-  const consultationPaid = pd.consultation_fee_paid ?? 0;
-  const treatmentTotal = lead?.session_package_price || 0;
-  const isPartial = lead?.treatment_fee_payment_mode === "partial";
-  const installments = (lead?.treatment_fee_payment_details || {}).installments || [];
-  const treatmentPaid = isPartial
-    ? installments.filter((i) => i.paid).reduce((sum, i) => sum + (i.amount || 0), 0)
-    : (pd.treatment_fee_paid ?? 0);
-  const totalAll = consultationTotal + treatmentTotal;
-  const collectedAll = consultationPaid + treatmentPaid;
-  const pendingAll = Math.max(totalAll - collectedAll, 0);
-  const nextDue = isPartial
-    ? installments.filter((i) => !i.paid).sort((a, b) => (a.due_date || "").localeCompare(b.due_date || ""))[0]
-    : null;
-
-  return (
-    <div className="space-y-4" data-testid="physio-patient-payment-tab">
-      <div className="grid grid-cols-3 gap-2">
-        <StatTile label="Total" value={`₹${totalAll}`} valueClass="text-sky-700" />
-        <StatTile label="Collected" value={`₹${collectedAll}`} valueClass="text-emerald-600" />
-        <StatTile label="Pending" value={`₹${pendingAll}`} solidClass={pendingAll > 0 ? "bg-amber-600" : "bg-slate-400"} />
-      </div>
-
-      <div className="rounded-lg border border-slate-200 bg-white p-3" data-testid="physio-patient-consultation-fee">
-        <div className="mb-2 flex items-center justify-between">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Consultation Fee</p>
-          <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${consultationPaid ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
-            {consultationPaid ? "Paid" : "Pending"}
-          </span>
-        </div>
-        {consultationPaid ? (
-          <div className="space-y-1 text-xs text-slate-600">
-            <p>Amount: <span className="font-semibold text-slate-800">₹{consultationPaid}</span></p>
-            <p>Payment Mode: <span className="font-semibold capitalize text-slate-800">{lead?.package_payment_mode || "—"}</span></p>
-            <p>Consultation Mode: <span className="font-semibold capitalize text-slate-800">{lead?.consultation_mode || "—"}</span></p>
-            {lead?.package_payment_details?.upi_transaction_id && (
-              <p>UPI Txn {lead.package_payment_details.upi_transaction_id} · UTR {lead.package_payment_details.upi_utr}</p>
-            )}
-            {lead?.package_payment_details?.account_last4 && (
-              <p>Card ****{lead.package_payment_details.account_last4} · {lead.package_payment_details.bank_name}</p>
-            )}
-          </div>
-        ) : (
-          <p className="text-xs text-slate-400">Not yet collected{consultationTotal ? ` — ₹${consultationTotal} due` : ""}</p>
-        )}
-      </div>
-
-      <div className="rounded-lg border border-slate-200 bg-white p-3" data-testid="physio-patient-treatment-fee">
-        <div className="mb-2 flex items-center justify-between">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Treatment Fee</p>
-          {lead?.treatment_fee_paid == null ? (
-            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">Not Collected</span>
-          ) : isPartial ? (
-            <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold text-sky-700">Partial</span>
-          ) : (
-            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">Paid in Full</span>
-          )}
-        </div>
-        {lead?.treatment_fee_paid == null ? (
-          <p className="text-xs text-slate-400">No treatment fee collected yet</p>
-        ) : !isPartial ? (
-          <div className="space-y-1 text-xs text-slate-600">
-            <p>Amount: <span className="font-semibold text-slate-800">₹{lead.treatment_fee_paid}</span></p>
-            <p>Payment Mode: <span className="font-semibold capitalize text-slate-800">{lead.treatment_fee_payment_mode}</span></p>
-            {lead?.treatment_fee_payment_details?.cheque_number && (
-              <p>Cheque #{lead.treatment_fee_payment_details.cheque_number} · {lead.treatment_fee_payment_details.bank_name}</p>
-            )}
-            {lead?.treatment_fee_payment_details?.upi_transaction_id && (
-              <p>UPI Txn {lead.treatment_fee_payment_details.upi_transaction_id} · UTR {lead.treatment_fee_payment_details.upi_utr}</p>
-            )}
-          </div>
-        ) : (
-          <div className="space-y-2">
-            <p className="text-[11px] text-slate-500">{installments.filter((i) => i.paid).length} of {installments.length} payments collected</p>
-            {nextDue ? (
-              <div className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-800">
-                Next payment <span className="font-semibold">₹{nextDue.amount}</span> due {nextDue.due_date}
-                <span className="ml-1 text-[10px] text-amber-500">(also visible to Branch Admin)</span>
-              </div>
-            ) : (
-              <p className="rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-2 text-xs text-emerald-700">All installments collected</p>
-            )}
-          </div>
-        )}
-      </div>
     </div>
   );
 }
