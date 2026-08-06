@@ -32,8 +32,6 @@ const Badge = ({ meta }) => (
   </span>
 );
 
-const INFO_BOX_NEUTRAL = "border-slate-200 bg-slate-50 text-slate-700";
-
 // The same four modes, colours and mode-specific fields the Consultations board
 // collects with — a payment recorded from here has to be indistinguishable from one
 // recorded there, or Accountant Manage ends up with two grades of record.
@@ -115,7 +113,12 @@ const TransactionList = ({ transactions }) => (
                 )}
               </p>
             </div>
-            <p className="col-span-3 mt-0.5 text-[10px] font-medium text-amber-700">{tx.discount_reason}</p>
+            {/* Only worth a line when it says something the "Discount"/"Extra" heading
+                above doesn't already — which, since the reason is now recorded as plain
+                "Discount", is usually never. */}
+            {tx.discount_reason && tx.discount_reason.toLowerCase() !== "discount" && (
+              <p className="col-span-3 mt-0.5 text-[10px] font-medium text-amber-700">{tx.discount_reason}</p>
+            )}
           </div>
         )}
       </div>
@@ -156,10 +159,30 @@ const detailReference = (details) => {
   return m ? details.slice(m.index + 1).trim() : "";
 };
 
-const InfoBox = ({ children, className = INFO_BOX_NEUTRAL }) => (
-  <div className={`rounded-md border px-2.5 py-1.5 ${className}`}>
+/** One bordered block with a small-caps heading. Every section of the Overview is one of
+ *  these, so the eye has a single shape to follow instead of a different treatment per
+ *  block — and an empty area reads as an empty panel rather than a broken layout. */
+const Panel = ({ title, action, children, className = "" }) => (
+  <section className={`overflow-hidden rounded-xl border border-slate-200 ${className}`}>
+    <header className="flex items-center justify-between border-b border-slate-100 bg-slate-50/60 px-3 py-2">
+      <h4 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{title}</h4>
+      {action}
+    </header>
     {children}
-  </div>
+  </section>
+);
+
+/** Label left, figure right, hairline between. Replaces stacking each value in its own
+ *  bordered box, which turned a four-line summary into four competing rectangles. */
+const StatRows = ({ rows }) => (
+  <dl className="divide-y divide-slate-100">
+    {rows.filter(Boolean).map(([label, value, tone]) => (
+      <div key={label} className="flex items-center justify-between gap-3 px-3 py-1.5">
+        <dt className="text-[11px] text-slate-500">{label}</dt>
+        <dd className={`text-xs font-semibold ${tone || "text-slate-800"}`}>{value}</dd>
+      </div>
+    ))}
+  </dl>
 );
 
 const downloadInvoice = (client, data) => {
@@ -299,10 +322,9 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" data-testid="client-history-modal">
-      {/* Wider than it was: the Overview now runs two columns side by side, and at the old
-          max-w-2xl each one was too narrow to read. Still capped, so it doesn't sprawl on
-          a large monitor. */}
-      <div className="flex max-h-[85vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
+      {/* Wide enough for two columns, but no wider: at 5xl the content was swimming in
+          space and the whole thing read as empty. */}
+      <div className="flex max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
         <div className="flex items-center justify-between border-b border-slate-100 p-5">
           <div>
             <div className="flex items-center gap-2">
@@ -349,65 +371,60 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
             <p className="py-10 text-center text-sm text-slate-400">Failed to load client details.</p>
           ) : tab === "overview" ? (
             <>
-              {/* Two columns from lg up, stacked below it — the money story on the left,
-                  what is still owed and how it breaks down on the right. Quick Actions
-                  stays full width underneath, since its buttons need the room. */}
-              <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-              <div className="space-y-2">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Transaction History</p>
-                <TransactionList transactions={transactions} />
-              </div>
+              {/* Two columns from lg up, stacked below it — what has been paid on the
+                  left, what is still owed and how it breaks down on the right. Every block
+                  is a Panel so the two sides read as one grid rather than loose cards, and
+                  items-start stops a short left column being stretched to match the right.
+                  Quick Actions spans underneath, where its buttons have room. */}
+              <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
+                <Panel title="Transaction History">
+                  {/* Capped so a client with a long history doesn't push Quick Actions off
+                      the fold; the modal's own scroll stays for everything else. */}
+                  <div className="max-h-[26rem] overflow-y-auto p-2.5">
+                    <TransactionList transactions={transactions} />
+                  </div>
+                </Panel>
 
-              <div className="space-y-5">
-              <div className={`rounded-xl border p-4 ${data.balance > 0 ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-50"}`}>
-                <div className="flex items-center justify-between">
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Outstanding Balance</p>
-                  <Badge meta={balanceMeta} />
-                </div>
-                <p className={`mt-1 text-2xl font-bold ${data.balance > 0 ? "text-amber-700" : "text-emerald-700"}`}>{fmt(data.balance)}</p>
-                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500">
-                  <span>Last Payment: <span className="font-medium text-slate-700">{data.last_payment_date ? fmtDate(data.last_payment_date) : "—"}</span></span>
-                  <span>Next Due: <span className="font-medium text-slate-700">{data.next_due_date || "—"}</span></span>
-                </div>
-              </div>
-
-              <div>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Payment Summary</p>
-                {/* The two fee cards sit side by side only where the column is wide enough
-                    for them; inside the Overview's right-hand column they stack. */}
-                <div className="grid grid-cols-1 gap-3 text-xs xl:grid-cols-2">
-                  <div className="rounded-lg border border-slate-100 p-3">
-                    <p className="mb-2 font-semibold text-slate-600">Consultation Fee</p>
-                    <div className="space-y-1.5">
-                      <InfoBox>Total: {fmt(pd.consultation_fee_total)}</InfoBox>
-                      <InfoBox className="border-emerald-200 bg-emerald-50 font-medium text-emerald-700">Paid: {fmt(pd.consultation_fee_paid)}</InfoBox>
-                      {pd.consultation_status && (
-                        <InfoBox className={pd.consultation_status === "paid" ? "border-emerald-200 bg-emerald-50 font-medium text-emerald-700" : "border-amber-200 bg-amber-50 font-medium text-amber-700"}>
-                          Status: {pd.consultation_status === "paid" ? "Paid" : "Pending"}
-                        </InfoBox>
-                      )}
-                      {pd.consultation_payment_mode && <InfoBox className={INFO_BOX_NEUTRAL}>{formatMode(pd.consultation_payment_mode)}</InfoBox>}
+                <div className="space-y-4">
+                  {/* The one figure this screen exists to answer, so it keeps its colour
+                      and its size — everything else on the right is supporting detail. */}
+                  <div className={`rounded-xl border px-4 py-3 ${data.balance > 0 ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-50"}`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Outstanding Balance</p>
+                        <p className={`mt-0.5 text-3xl font-bold leading-none ${data.balance > 0 ? "text-amber-700" : "text-emerald-700"}`}>{fmt(data.balance)}</p>
+                      </div>
+                      <Badge meta={balanceMeta} />
+                    </div>
+                    <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500">
+                      <span>Last Payment <span className="font-semibold text-slate-700">{data.last_payment_date ? fmtDate(data.last_payment_date) : "—"}</span></span>
+                      <span>Next Due <span className="font-semibold text-slate-700">{data.next_due_date || "—"}</span></span>
                     </div>
                   </div>
-                  <div className="rounded-lg border border-slate-100 p-3">
-                    <p className="mb-2 font-semibold text-slate-600">{pd.session_package_label && pd.session_package_label !== "—" ? `Session Package (${pd.session_package_label})` : "Treatment Fee"}</p>
-                    <div className="space-y-1.5">
-                      <InfoBox>Total: {pd.session_total > 0 ? fmt(pd.session_total) : "—"}</InfoBox>
-                      <InfoBox className="border-emerald-200 bg-emerald-50 font-medium text-emerald-700">Paid: {pd.session_paid != null ? fmt(pd.session_paid) : "—"}</InfoBox>
-                      <InfoBox className={pd.session_due > 0 ? "border-rose-200 bg-rose-50 font-medium text-rose-700" : INFO_BOX_NEUTRAL}>Due: {pd.session_due > 0 ? fmt(pd.session_due) : "Rs.0"}</InfoBox>
-                      {pd.treatment_payment_mode && pd.treatment_payment_mode !== "partial" && <InfoBox className={INFO_BOX_NEUTRAL}>{formatMode(pd.treatment_payment_mode)}</InfoBox>}
-                      {pd.installments_total != null && (
-                        <InfoBox className="border-orange-200 bg-orange-50 font-medium text-orange-700">Installments: {pd.installments_paid}/{pd.installments_total} paid</InfoBox>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
+
+                  <Panel title="Consultation Fee" action={pd.consultation_status ? <Badge meta={pd.consultation_status === "paid" ? { label: "Paid", classes: "border-emerald-200 bg-emerald-50 text-emerald-700" } : { label: "Pending", classes: "border-amber-200 bg-amber-50 text-amber-700" }} /> : null}>
+                    <StatRows rows={[
+                      ["Total", fmt(pd.consultation_fee_total)],
+                      ["Paid", fmt(pd.consultation_fee_paid), "text-emerald-700"],
+                      pd.consultation_payment_mode && ["Mode", formatMode(pd.consultation_payment_mode)],
+                    ]} />
+                  </Panel>
+
+                  <Panel
+                    title={pd.session_package_label && pd.session_package_label !== "—" ? `Session Package · ${pd.session_package_label}` : "Treatment Fee"}
+                    action={pd.installments_total != null ? <Badge meta={{ label: `${pd.installments_paid}/${pd.installments_total} paid`, classes: "border-orange-200 bg-orange-50 text-orange-700" }} /> : null}
+                  >
+                    <StatRows rows={[
+                      ["Total", pd.session_total > 0 ? fmt(pd.session_total) : "—"],
+                      ["Paid", pd.session_paid != null ? fmt(pd.session_paid) : "—", "text-emerald-700"],
+                      ["Due", pd.session_due > 0 ? fmt(pd.session_due) : "Rs.0", pd.session_due > 0 ? "text-rose-700" : "text-slate-500"],
+                      pd.treatment_payment_mode && pd.treatment_payment_mode !== "partial" && ["Mode", formatMode(pd.treatment_payment_mode)],
+                    ]} />
+                  </Panel>
 
               {schedule.length > 0 && (
-                <div>
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Payment Schedule</p>
-                  <div className="space-y-1.5">
+                <Panel title="Payment Schedule">
+                  <div className="space-y-1.5 p-2.5">
                     {schedule.map((s) => (
                       <div key={s.installment_number} className="rounded-lg border border-slate-100 px-3 py-1.5 text-xs" data-testid={`client-history-schedule-${s.installment_number}`}>
                         <div className="flex items-center justify-between">
@@ -429,15 +446,13 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
                       </div>
                     ))}
                   </div>
-                </div>
+                </Panel>
               )}
-
+                </div>
               </div>
-              </div>
 
-              <div>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Quick Actions</p>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              <Panel title="Quick Actions">
+                <div className="grid grid-cols-2 gap-2 p-2.5 sm:grid-cols-3">
                   <button
                     type="button" onClick={openCollect} disabled={!pd.next_installment_number || recording}
                     title={pd.next_installment_number ? `Collect installment #${pd.next_installment_number}` : "Nothing left to collect on an installment schedule for this client"}
@@ -466,13 +481,13 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
                     against an installment schedule; a consultation fee or a one-shot
                     treatment fee is collected from the lead's own Consultations card. */}
                 {!pd.next_installment_number && (
-                  <p className="mt-2 text-[11px] text-slate-400" data-testid="client-history-collect-note">
+                  <p className="px-2.5 pb-2.5 text-[11px] text-slate-400" data-testid="client-history-collect-note">
                     {data.balance > 0
                       ? "This client's balance isn't on an installment schedule — collect it from their card in Consultations."
                       : "Nothing left to collect — this client is fully paid."}
                   </p>
                 )}
-              </div>
+              </Panel>
             </>
           ) : tab === "transactions" ? (
             <TransactionList transactions={transactions} />
