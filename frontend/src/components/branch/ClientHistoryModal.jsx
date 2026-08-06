@@ -63,6 +63,66 @@ const discountPct = (tx) => {
   return Number((Math.abs(discount) / original * 100).toFixed(2));
 };
 
+/**
+ * The client's collections, newest first. Rendered in two places — the Overview's left
+ * column and the Transaction History tab — from this one definition, so the two can't
+ * drift apart. Only one tab is mounted at a time, so the per-row test ids stay unique.
+ */
+const TransactionList = ({ transactions }) => (
+  <div className="space-y-2" data-testid="client-history-transactions">
+    {transactions.length === 0 ? (
+      <p className="py-10 text-center text-sm text-slate-400">No transactions yet.</p>
+    ) : transactions.map((tx) => (
+      <div key={tx.id} className="rounded-lg border border-slate-100 px-3 py-2 text-xs" data-testid={`client-history-tx-${tx.id}`}>
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <p className="font-medium text-slate-700 capitalize">{tx.source} · <span className="text-slate-500">{formatMode(tx.payment_mode)}</span></p>
+            {/* The Transaction ID printed on the patient's own receipt, so the two can be
+                matched. Older collections predate it and fall back to the RCPT- number
+                derived from the activity id. */}
+            <p className="break-all text-[10px] text-slate-400">{fmtDate(tx.date)}{(tx.transaction_id || tx.receipt_no) && ` · ${tx.transaction_id || tx.receipt_no}`}</p>
+            {/* The UPI/card/cheque reference recorded with this payment, lifted back out
+                of the activity line it was written into. */}
+            {detailReference(tx.details) && (
+              <p className="mt-0.5 break-all text-[10px] text-slate-500" data-testid={`client-history-tx-ref-${tx.id}`}>{detailReference(tx.details)}</p>
+            )}
+          </div>
+          <div className="shrink-0 text-right">
+            <p className="font-semibold text-emerald-700">{fmt(tx.amount)}</p>
+            <p className="text-[10px] font-medium text-emerald-600">Paid</p>
+          </div>
+        </div>
+        {!!tx.discount_amount && (
+          <div className="mt-1.5 grid grid-cols-3 gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5" data-testid={`client-history-tx-discount-${tx.id}`}>
+            <div>
+              <p className="text-[9px] uppercase tracking-wide text-amber-700">Actual Price</p>
+              <p className="text-[11px] font-semibold text-slate-700">{fmt(tx.original_amount)}</p>
+            </div>
+            <div>
+              <p className="text-[9px] uppercase tracking-wide text-amber-700">Collected</p>
+              <p className="text-[11px] font-semibold text-slate-700">{fmt(tx.amount)}</p>
+            </div>
+            <div>
+              <p className="text-[9px] uppercase tracking-wide text-amber-700">{tx.discount_amount > 0 ? "Discount" : "Extra"}</p>
+              <p className="flex flex-wrap items-baseline gap-1">
+                <span className="text-[11px] font-semibold text-amber-700">{fmt(Math.abs(tx.discount_amount))}</span>
+                {/* What the rupee figure means against the price it came off. Guarded on a
+                    non-zero original, since a percentage of nothing is meaningless. */}
+                {discountPct(tx) !== null && (
+                  <span className="rounded bg-amber-100 px-1 py-px text-[10px] font-bold text-amber-800" data-testid={`client-history-tx-discount-pct-${tx.id}`}>
+                    {discountPct(tx)}%
+                  </span>
+                )}
+              </p>
+            </div>
+            <p className="col-span-3 mt-0.5 text-[10px] font-medium text-amber-700">{tx.discount_reason}</p>
+          </div>
+        )}
+      </div>
+    ))}
+  </div>
+);
+
 const CollectField = ({ label, value, onChange, placeholder, testid }) => (
   <label className="block">
     <span className="mb-1 block text-[11px] font-semibold text-slate-600">{label}</span>
@@ -239,7 +299,10 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" data-testid="client-history-modal">
-      <div className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
+      {/* Wider than it was: the Overview now runs two columns side by side, and at the old
+          max-w-2xl each one was too narrow to read. Still capped, so it doesn't sprawl on
+          a large monitor. */}
+      <div className="flex max-h-[85vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
         <div className="flex items-center justify-between border-b border-slate-100 p-5">
           <div>
             <div className="flex items-center gap-2">
@@ -286,6 +349,16 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
             <p className="py-10 text-center text-sm text-slate-400">Failed to load client details.</p>
           ) : tab === "overview" ? (
             <>
+              {/* Two columns from lg up, stacked below it — the money story on the left,
+                  what is still owed and how it breaks down on the right. Quick Actions
+                  stays full width underneath, since its buttons need the room. */}
+              <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Transaction History</p>
+                <TransactionList transactions={transactions} />
+              </div>
+
+              <div className="space-y-5">
               <div className={`rounded-xl border p-4 ${data.balance > 0 ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-50"}`}>
                 <div className="flex items-center justify-between">
                   <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Outstanding Balance</p>
@@ -300,7 +373,9 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
 
               <div>
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Payment Summary</p>
-                <div className="grid grid-cols-2 gap-3 text-xs">
+                {/* The two fee cards sit side by side only where the column is wide enough
+                    for them; inside the Overview's right-hand column they stack. */}
+                <div className="grid grid-cols-1 gap-3 text-xs xl:grid-cols-2">
                   <div className="rounded-lg border border-slate-100 p-3">
                     <p className="mb-2 font-semibold text-slate-600">Consultation Fee</p>
                     <div className="space-y-1.5">
@@ -357,6 +432,9 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
                 </div>
               )}
 
+              </div>
+              </div>
+
               <div>
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Quick Actions</p>
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -397,59 +475,7 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
               </div>
             </>
           ) : tab === "transactions" ? (
-            <div className="space-y-2" data-testid="client-history-transactions">
-              {transactions.length === 0 ? (
-                <p className="py-10 text-center text-sm text-slate-400">No transactions yet.</p>
-              ) : transactions.map((tx) => (
-                <div key={tx.id} className="rounded-lg border border-slate-100 px-3 py-2 text-xs" data-testid={`client-history-tx-${tx.id}`}>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium text-slate-700 capitalize">{tx.source} · <span className="text-slate-500">{formatMode(tx.payment_mode)}</span></p>
-                      {/* The Transaction ID printed on the patient's own receipt, so the
-                          two can be matched. Older collections predate it and fall back to
-                          the RCPT- number derived from the activity id. */}
-                      <p className="text-[10px] text-slate-400">{fmtDate(tx.date)}{(tx.transaction_id || tx.receipt_no) && ` · ${tx.transaction_id || tx.receipt_no}`}</p>
-                      {/* The UPI/card/cheque reference recorded with this payment,
-                          lifted back out of the activity line it was written into. */}
-                      {detailReference(tx.details) && (
-                        <p className="mt-0.5 text-[10px] text-slate-500" data-testid={`client-history-tx-ref-${tx.id}`}>{detailReference(tx.details)}</p>
-                      )}
-                    </div>
-                    <div className="text-right">
-                      <p className="font-semibold text-emerald-700">{fmt(tx.amount)}</p>
-                      <p className="text-[10px] font-medium text-emerald-600">Paid</p>
-                    </div>
-                  </div>
-                  {!!tx.discount_amount && (
-                    <div className="mt-1.5 grid grid-cols-3 gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5" data-testid={`client-history-tx-discount-${tx.id}`}>
-                      <div>
-                        <p className="text-[9px] uppercase tracking-wide text-amber-700">Actual Price</p>
-                        <p className="text-[11px] font-semibold text-slate-700">{fmt(tx.original_amount)}</p>
-                      </div>
-                      <div>
-                        <p className="text-[9px] uppercase tracking-wide text-amber-700">Collected</p>
-                        <p className="text-[11px] font-semibold text-slate-700">{fmt(tx.amount)}</p>
-                      </div>
-                      <div>
-                        <p className="text-[9px] uppercase tracking-wide text-amber-700">{tx.discount_amount > 0 ? "Discount" : "Extra"}</p>
-                        <p className="flex flex-wrap items-baseline gap-1">
-                          <span className="text-[11px] font-semibold text-amber-700">{fmt(Math.abs(tx.discount_amount))}</span>
-                          {/* What the rupee figure means against the price it came off.
-                              Guarded on a non-zero original, since a percentage of nothing
-                              is meaningless rather than 0%. */}
-                          {discountPct(tx) !== null && (
-                            <span className="rounded bg-amber-100 px-1 py-px text-[10px] font-bold text-amber-800" data-testid={`client-history-tx-discount-pct-${tx.id}`}>
-                              {discountPct(tx)}%
-                            </span>
-                          )}
-                        </p>
-                      </div>
-                      <p className="col-span-3 mt-0.5 text-[10px] font-medium text-amber-700">{tx.discount_reason}</p>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
+            <TransactionList transactions={transactions} />
           ) : (
             <div className="space-y-2">
               {timeline.length === 0 ? (
