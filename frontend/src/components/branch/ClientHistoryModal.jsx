@@ -53,6 +53,16 @@ const emptyCollectDraft = {
   cheque_number: "", transfer_reference: "",
 };
 
+/** A payment's discount as a percentage of the price it was taken off, to 2dp with any
+ *  trailing zeros dropped (25, not 25.00). Null when there's no original price to measure
+ *  against, so the caller shows nothing rather than a meaningless 0%. */
+const discountPct = (tx) => {
+  const original = Number(tx.original_amount);
+  const discount = Number(tx.discount_amount);
+  if (!Number.isFinite(original) || original <= 0 || !Number.isFinite(discount) || !discount) return null;
+  return Number((Math.abs(discount) / original * 100).toFixed(2));
+};
+
 const CollectField = ({ label, value, onChange, placeholder, testid }) => (
   <label className="block">
     <span className="mb-1 block text-[11px] font-semibold text-slate-600">{label}</span>
@@ -395,7 +405,10 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="font-medium text-slate-700 capitalize">{tx.source} · <span className="text-slate-500">{formatMode(tx.payment_mode)}</span></p>
-                      <p className="text-[10px] text-slate-400">{fmtDate(tx.date)} {tx.receipt_no && `· ${tx.receipt_no}`}</p>
+                      {/* The Transaction ID printed on the patient's own receipt, so the
+                          two can be matched. Older collections predate it and fall back to
+                          the RCPT- number derived from the activity id. */}
+                      <p className="text-[10px] text-slate-400">{fmtDate(tx.date)}{(tx.transaction_id || tx.receipt_no) && ` · ${tx.transaction_id || tx.receipt_no}`}</p>
                       {/* The UPI/card/cheque reference recorded with this payment,
                           lifted back out of the activity line it was written into. */}
                       {detailReference(tx.details) && (
@@ -419,7 +432,17 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
                       </div>
                       <div>
                         <p className="text-[9px] uppercase tracking-wide text-amber-700">{tx.discount_amount > 0 ? "Discount" : "Extra"}</p>
-                        <p className="text-[11px] font-semibold text-amber-700">{fmt(Math.abs(tx.discount_amount))}</p>
+                        <p className="flex flex-wrap items-baseline gap-1">
+                          <span className="text-[11px] font-semibold text-amber-700">{fmt(Math.abs(tx.discount_amount))}</span>
+                          {/* What the rupee figure means against the price it came off.
+                              Guarded on a non-zero original, since a percentage of nothing
+                              is meaningless rather than 0%. */}
+                          {discountPct(tx) !== null && (
+                            <span className="rounded bg-amber-100 px-1 py-px text-[10px] font-bold text-amber-800" data-testid={`client-history-tx-discount-pct-${tx.id}`}>
+                              {discountPct(tx)}%
+                            </span>
+                          )}
+                        </p>
                       </div>
                       <p className="col-span-3 mt-0.5 text-[10px] font-medium text-amber-700">{tx.discount_reason}</p>
                     </div>

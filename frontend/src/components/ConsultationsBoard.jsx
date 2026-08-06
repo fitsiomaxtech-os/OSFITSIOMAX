@@ -86,7 +86,13 @@ const receiptRows = (r) => [
   ["Payment Mode", r.modeLabel],
   r.reference ? ["Reference", r.reference] : null,
   r.originalAmount != null && r.originalAmount !== r.amount ? ["Original Price", `Rs.${r.originalAmount}`] : null,
-  r.discount ? ["Discount", `- Rs.${r.discount}`] : null,
+  // The percentage alongside the rupees, so the receipt says how big the discount was and
+  // not just how much came off. Omitted when there's no original price to measure against.
+  r.discount
+    ? ["Discount", r.originalAmount > 0
+        ? `- Rs.${r.discount} (${Number(((r.discount / r.originalAmount) * 100).toFixed(2))}%)`
+        : `- Rs.${r.discount}`]
+    : null,
   [isSchedule(r) ? "Total Payable" : "Amount Paid", `Rs.${r.amount}`],
   r.balanceDue ? ["Balance Due", r.balanceDue] : null,
   [isSchedule(r) ? "Prepared By" : "Collected By", r.collectedBy],
