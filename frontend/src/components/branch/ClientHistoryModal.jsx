@@ -261,28 +261,36 @@ const SessionPackageCard = ({ pd }) => {
 const NextStep = ({ pd, balance, hasSchedule }) => {
   const quoted = Number(pd.session_package_price) || 0;
   const paid = Number(pd.session_paid) || 0;
+
+  // Money owed is red and loud; a package merely never taken up is amber and quieter;
+  // nothing due is grey. The amount carries the weight, so it's set larger than the body
+  // rather than being another line of the same small text.
   let tone = "border-slate-300 bg-slate-50";
+  let titleClass = "text-slate-800";
+  let bodyClass = "text-slate-600";
   let title = "Nothing outstanding";
   let body = "This client is fully settled. No action needed.";
 
-  if (balance > 0 && hasSchedule) {
-    tone = "border-amber-500 bg-amber-50/60";
+  if (balance > 0) {
+    tone = "border-rose-600 bg-rose-50";
+    titleClass = "text-rose-900";
+    bodyClass = "text-rose-800";
     title = `${fmt(balance)} outstanding`;
-    body = `Installment #${pd.next_installment_number} is the next one due. Collect it from this screen.`;
-  } else if (balance > 0) {
-    tone = "border-amber-500 bg-amber-50/60";
-    title = `${fmt(balance)} outstanding`;
-    body = "Not on an installment schedule — collect it from the client's card in Consultations.";
+    body = hasSchedule
+      ? `Installment #${pd.next_installment_number} is the next one due. Collect it from this screen.`
+      : "Not on an installment schedule — collect it from the client's card in Consultations.";
   } else if (quoted > 0 && paid <= 0) {
-    tone = "border-amber-500 bg-amber-50/60";
+    tone = "border-amber-500 bg-amber-50";
+    titleClass = "text-amber-900";
+    bodyClass = "text-amber-800";
     title = "Package not purchased";
     body = `A course was quoted at ${fmt(quoted)} during the consultation but nothing has been collected for it yet.`;
   }
 
   return (
-    <div className={`rounded-r-md border-l-2 px-3 py-2.5 ${tone}`} data-testid="client-history-next-step">
-      <p className="text-xs font-semibold text-slate-800">{title}</p>
-      <p className="mt-0.5 text-[11px] leading-relaxed text-slate-600">{body}</p>
+    <div className={`rounded-r-md border-l-4 px-3 py-2.5 ${tone}`} data-testid="client-history-next-step">
+      <p className={`text-sm font-bold ${titleClass}`}>{title}</p>
+      <p className={`mt-0.5 text-[11px] font-medium leading-relaxed ${bodyClass}`}>{body}</p>
     </div>
   );
 };
@@ -564,9 +572,9 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
                   </div>
                 )}
                 {data.balance > 0 && !pd.next_installment_number && (
-                  <div className="rounded-r-md border-l-2 border-amber-500 bg-amber-50/60 px-3 py-2.5" data-testid="client-history-collect-note">
-                    <p className="text-xs font-semibold text-amber-800">{fmt(data.balance)} outstanding</p>
-                    <p className="mt-0.5 text-[11px] text-amber-700">This balance isn't on an installment schedule — collect it from the client's card in Consultations.</p>
+                  <div className="rounded-r-md border-l-4 border-rose-600 bg-rose-50 px-3 py-2.5" data-testid="client-history-collect-note">
+                    <p className="text-sm font-bold text-rose-900">{fmt(data.balance)} outstanding</p>
+                    <p className="mt-0.5 text-[11px] font-medium text-rose-800">This balance isn't on an installment schedule — collect it from the client's card in Consultations.</p>
                   </div>
                 )}
               </div>
