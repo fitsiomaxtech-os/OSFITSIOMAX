@@ -500,7 +500,12 @@ function TreatmentTab({ physioId, onCountChange }) {
   );
 }
 
+// In pipeline order, earliest first. "Not Due" exists because bucketOf() has always
+// returned it for patients short of their next milestone, but there was no tab to reach
+// them through — so Total counted five patients while the tabs between them showed one,
+// which read as the review flow being broken when it was working correctly.
 const REVIEW_TABS = [
+  { key: "not_due", label: "Not Due", color: "#64748b" },
   { key: "new_review", label: "New Review", color: "#f59e0b" },
   { key: "requests", label: "Requests", color: "#0ea5e9" },
   { key: "assigned", label: "Assigned", color: "#a855f7" },
@@ -596,7 +601,7 @@ function ReviewTab({ physioId, onCountChange }) {
   }, [patients, filterValue]);
 
   const counts = useMemo(() => {
-    const c = { new_review: 0, requests: 0, assigned: 0, completed: 0 };
+    const c = { not_due: 0, new_review: 0, requests: 0, assigned: 0, completed: 0 };
     dateFiltered.forEach((p) => { const b = bucketOf(p); if (b in c) c[b] += 1; });
     return c;
   }, [dateFiltered]);
@@ -626,6 +631,7 @@ function ReviewTab({ physioId, onCountChange }) {
   };
 
   const EMPTY_TEXT = {
+    not_due: "Every patient is either due a review or already in one",
     new_review: "No one has reached a new review milestone yet",
     requests: "No requests waiting on the Branch Admin",
     assigned: "No reviews assigned to a Head Physio",
@@ -714,11 +720,19 @@ function ReviewTab({ physioId, onCountChange }) {
                       {p.phone || "—"}{p.patient_number ? ` · ${p.patient_number}` : ""}
                     </p>
                     <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                      {/* "11 / 7 sessions" was nonsense for anyone past their first
+                          milestone. Show what they've done, then either that they've
+                          reached a milestone or which session brings the next one. */}
                       <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-bold ${
                         p.due_for_review ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-600"
                       }`}>
-                        {p.treatment_days} / {threshold} sessions
+                        {p.treatment_days} session{p.treatment_days === 1 ? "" : "s"} done
                       </span>
+                      {!p.due_for_review && !p.review_status && (
+                        <span className="inline-flex items-center rounded-md bg-slate-50 px-2 py-0.5 text-[10px] font-medium text-slate-500">
+                          next review at {(Math.floor(p.treatment_days / threshold) + 1) * threshold}
+                        </span>
+                      )}
                       {p.review_number > 0 && (
                         <span className="inline-flex items-center rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-semibold text-violet-700">
                           {ordinal(p.review_number)} Review
