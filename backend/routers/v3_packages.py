@@ -167,8 +167,17 @@ async def sell_store_item(lead_id: str, payload: V3SellStoreItemInput, user: V3U
     return {"message": "Sold", "lead_id": lead_id, "item": item, "mode": payload.mode, "paid": paid, "lead": V3LeadOut(**updated).model_dump()}
 
 
-CONSULTATION_FEE_PAYMENT_MODES = {"cash", "upi", "card"}
-TREATMENT_FEE_PAYMENT_MODES = {"cash", "upi", "card", "cheque", "partial"}
+CONSULTATION_FEE_PAYMENT_MODES = {"cash", "upi", "card", "account_transfer"}
+TREATMENT_FEE_PAYMENT_MODES = {"cash", "upi", "card", "cheque", "partial", "account_transfer"}
+
+# The modes where money lands in full, there and then: the amount is editable, a
+# negotiated discount is tracked against it, and an explicit confirmation is required
+# before it's accepted. Cheque and Partial Payment are promises of money rather than
+# money, so they're deliberately outside this set.
+SETTLED_NOW_MODES = ("cash", "upi", "card", "account_transfer")
+# The above plus Cheque — every mode that can cover only part of a session package now
+# and leave the rest as a scheduled balance. Partial Payment can't: it *is* the schedule.
+PART_SESSION_MODES = ("cash", "upi", "card", "cheque", "account_transfer")
 
 
 @router.post("/leads/{lead_id}/collect-package-payment", response_model=dict)
@@ -230,6 +239,20 @@ async def collect_package_payment(lead_id: str, payload: V3CollectPackagePayment
             "ifsc_code": payload.ifsc_code.strip().upper(),
         }
         detail_suffix = f" · A/C ****{last4}, {payload.account_holder_name.strip()}, {payload.bank_name.strip()} ({payload.ifsc_code.strip().upper()})"
+    elif payload.payment_mode == "account_transfer":
+        if not all([payload.account_number and payload.account_number.strip(), payload.account_holder_name and payload.account_holder_name.strip(),
+                    payload.bank_name and payload.bank_name.strip(), payload.ifsc_code and payload.ifsc_code.strip(),
+                    payload.transfer_reference and payload.transfer_reference.strip()]):
+            raise HTTPException(status_code=400, detail="Account Number, Account Holder Name, Bank Name, IFSC Code and Reference/UTR No. are required")
+        last4 = "".join(ch for ch in payload.account_number if ch.isdigit())[-4:]
+        payment_details = {
+            "account_last4": last4,
+            "account_holder_name": payload.account_holder_name.strip(),
+            "bank_name": payload.bank_name.strip(),
+            "ifsc_code": payload.ifsc_code.strip().upper(),
+            "transfer_reference": payload.transfer_reference.strip(),
+        }
+        detail_suffix = f" · A/C ****{last4}, {payload.account_holder_name.strip()}, {payload.bank_name.strip()} ({payload.ifsc_code.strip().upper()}) · Ref {payload.transfer_reference.strip()}"
 
     is_update = lead.get("package_paid") is not None
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {
@@ -290,7 +313,7 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
     # full-collection behavior) when the caller doesn't specify it.
     sessions_now = total_sessions
     is_partial_sessions = False
-    if payload.payment_mode in ("cash", "upi", "card", "cheque") and payload.sessions_now is not None:
+    if payload.payment_mode in PART_SESSION_MODES and payload.sessions_now is not None:
         sessions_now = payload.sessions_now
         if total_sessions and (sessions_now <= 0 or sessions_now > total_sessions):
             raise HTTPException(status_code=400, detail="Sessions Covered Now must be between 1 and the package's total sessions")
@@ -300,7 +323,7 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
 
     computed_amount = round(sessions_now * per_session_rate, 2) if total_sessions else original_price
 
-    if payload.payment_mode in ("cash", "upi", "card"):
+    if payload.payment_mode in SETTLED_NOW_MODES:
         amount = payload.amount if payload.amount is not None else computed_amount
         if amount <= 0:
             raise HTTPException(status_code=400, detail="Amount must be greater than zero")
@@ -309,7 +332,7 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
     else:
         amount = original_price
 
-    if payload.payment_mode in ("cash", "upi", "card") and not payload.confirmed:
+    if payload.payment_mode in SETTLED_NOW_MODES and not payload.confirmed:
         raise HTTPException(status_code=400, detail="Please confirm the payment before submitting")
 
     # Same negotiated-discount tracking as the Consultation Fee — compared against
@@ -318,7 +341,7 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
     discount_amount = 0
     discount_reason = None
     discount_suffix = ""
-    if payload.payment_mode in ("cash", "upi", "card"):
+    if payload.payment_mode in SETTLED_NOW_MODES:
         discount_amount = round(computed_amount - amount, 2)
         if discount_amount > 0:
             discount_reason = "Negotiated discount"
@@ -358,6 +381,20 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
             "amount": amount,
         }
         detail_suffix = f" · Cheque #{payload.cheque_number.strip()}, {payload.bank_name.strip()}"
+    elif payload.payment_mode == "account_transfer":
+        if not all([payload.account_number and payload.account_number.strip(), payload.account_holder_name and payload.account_holder_name.strip(),
+                    payload.bank_name and payload.bank_name.strip(), payload.ifsc_code and payload.ifsc_code.strip(),
+                    payload.transfer_reference and payload.transfer_reference.strip()]):
+            raise HTTPException(status_code=400, detail="Account Number, Account Holder Name, Bank Name, IFSC Code and Reference/UTR No. are required")
+        last4 = "".join(ch for ch in payload.account_number if ch.isdigit())[-4:]
+        payment_details = {
+            "account_last4": last4,
+            "account_holder_name": payload.account_holder_name.strip(),
+            "bank_name": payload.bank_name.strip(),
+            "ifsc_code": payload.ifsc_code.strip().upper(),
+            "transfer_reference": payload.transfer_reference.strip(),
+        }
+        detail_suffix = f" · A/C ****{last4}, {payload.account_holder_name.strip()}, {payload.bank_name.strip()} ({payload.ifsc_code.strip().upper()}) · Ref {payload.transfer_reference.strip()}"
     elif payload.payment_mode == "partial":
         installments = payload.partial_installments or []
         if len(installments) < 2:
@@ -385,7 +422,7 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
     # `installments` shape Partial Payment uses so Payment Schedules / Outstanding
     # Amount / the client's own Payment Schedule panel all pick it up for free.
     balance_suffix = ""
-    if payload.payment_mode in ("cash", "upi", "card", "cheque") and is_partial_sessions:
+    if payload.payment_mode in PART_SESSION_MODES and is_partial_sessions:
         remaining_sessions = total_sessions - sessions_now
         remaining_amount = round(original_price - amount, 2)
         payment_details["installments"] = [
@@ -419,8 +456,8 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
         "lead_id": lead_id,
         "action": "treatment_fee_collected",
         "details": details,
-        "original_amount": computed_amount if payload.payment_mode in ("cash", "upi", "card") else None,
-        "collected_amount": amount if payload.payment_mode in ("cash", "upi", "card") else None,
+        "original_amount": computed_amount if payload.payment_mode in SETTLED_NOW_MODES else None,
+        "collected_amount": amount if payload.payment_mode in SETTLED_NOW_MODES else None,
         "discount_amount": discount_amount if discount_amount != 0 else None,
         "discount_reason": discount_reason,
         "created_by": user.full_name,

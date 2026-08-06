@@ -41,6 +41,7 @@ const COLLECT_MODES = [
   { value: "cash", label: "Cash", classes: "border-emerald-300 bg-emerald-50 text-emerald-700", active: "border-emerald-500 bg-emerald-600 text-white" },
   { value: "upi", label: "UPI", classes: "border-sky-300 bg-sky-50 text-sky-700", active: "border-sky-500 bg-sky-600 text-white" },
   { value: "card", label: "Card", classes: "border-violet-300 bg-violet-50 text-violet-700", active: "border-violet-500 bg-violet-600 text-white" },
+  { value: "account_transfer", label: "Account Transfer", classes: "border-cyan-300 bg-cyan-50 text-cyan-700", active: "border-cyan-500 bg-cyan-600 text-white" },
   { value: "cheque", label: "Cheque", classes: "border-amber-300 bg-amber-50 text-amber-700", active: "border-amber-500 bg-amber-600 text-white" },
 ];
 
@@ -49,7 +50,7 @@ const emptyCollectDraft = {
   payment_mode: "cash",
   upi_transaction_id: "", upi_utr: "",
   account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "",
-  cheque_number: "",
+  cheque_number: "", transfer_reference: "",
 };
 
 const CollectField = ({ label, value, onChange, placeholder, testid }) => (
@@ -190,15 +191,20 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
     if (mode === "upi") {
       payload.upi_transaction_id = draft.upi_transaction_id.trim();
       payload.upi_utr = draft.upi_utr.trim();
-    } else if (mode === "card") {
+    } else if (mode === "card" || mode === "account_transfer") {
       if (!draft.account_number.trim() || !draft.account_holder_name.trim() || !draft.bank_name.trim() || !draft.ifsc_code.trim()) {
         toast.error("Account Number, Account Holder Name, Bank Name and IFSC Code are required");
+        return;
+      }
+      if (mode === "account_transfer" && !draft.transfer_reference.trim()) {
+        toast.error("Reference / UTR No. is required for an Account Transfer");
         return;
       }
       payload.account_number = draft.account_number.trim();
       payload.account_holder_name = draft.account_holder_name.trim();
       payload.bank_name = draft.bank_name.trim();
       payload.ifsc_code = draft.ifsc_code.trim();
+      if (mode === "account_transfer") payload.transfer_reference = draft.transfer_reference.trim();
     } else if (mode === "cheque") {
       if (!draft.bank_name.trim() || !draft.cheque_number.trim()) {
         toast.error("Bank Name and Cheque Number are required");
@@ -480,7 +486,7 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
 
                 <div>
                   <span className="mb-1 block text-[11px] font-semibold text-slate-600">Payment Mode</span>
-                  <div className="grid grid-cols-4 gap-1.5">
+                  <div className="grid grid-cols-3 gap-1.5">
                     {COLLECT_MODES.map((m) => (
                       <button
                         key={m.value}
@@ -508,6 +514,16 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
                     <CollectField label="Account Holder Name *" value={collectDraft.account_holder_name} onChange={(e) => setDraft({ account_holder_name: e.target.value })} placeholder="Name on the card" testid="client-collect-account-holder" />
                     <CollectField label="Bank Name *" value={collectDraft.bank_name} onChange={(e) => setDraft({ bank_name: e.target.value })} placeholder="e.g. HDFC Bank" testid="client-collect-bank" />
                     <CollectField label="IFSC Code *" value={collectDraft.ifsc_code} onChange={(e) => setDraft({ ifsc_code: e.target.value })} placeholder="e.g. HDFC0001234" testid="client-collect-ifsc" />
+                  </div>
+                )}
+
+                {collectDraft.payment_mode === "account_transfer" && (
+                  <div className="space-y-3 rounded-lg border border-cyan-100 bg-cyan-50/50 p-3">
+                    <CollectField label="Account Number *" value={collectDraft.account_number} onChange={(e) => setDraft({ account_number: e.target.value })} placeholder="Only the last 4 digits are stored" testid="client-collect-transfer-account-number" />
+                    <CollectField label="Account Holder Name *" value={collectDraft.account_holder_name} onChange={(e) => setDraft({ account_holder_name: e.target.value })} placeholder="Name on the account" testid="client-collect-transfer-account-holder" />
+                    <CollectField label="Bank Name *" value={collectDraft.bank_name} onChange={(e) => setDraft({ bank_name: e.target.value })} placeholder="e.g. HDFC Bank" testid="client-collect-transfer-bank" />
+                    <CollectField label="IFSC Code *" value={collectDraft.ifsc_code} onChange={(e) => setDraft({ ifsc_code: e.target.value })} placeholder="e.g. HDFC0001234" testid="client-collect-transfer-ifsc" />
+                    <CollectField label="Reference / UTR No. *" value={collectDraft.transfer_reference} onChange={(e) => setDraft({ transfer_reference: e.target.value })} placeholder="e.g. 302411223344" testid="client-collect-transfer-reference" />
                   </div>
                 )}
 

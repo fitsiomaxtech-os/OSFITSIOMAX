@@ -25,11 +25,13 @@ const CONSULTATION_FEE_PAYMENT_MODES = [
   { value: "cash", label: "Cash" },
   { value: "upi", label: "UPI" },
   { value: "card", label: "Card" },
+  { value: "account_transfer", label: "Account Transfer" },
 ];
 const TREATMENT_FEE_PAYMENT_MODES = [
   { value: "cash", label: "Cash" },
   { value: "upi", label: "UPI" },
   { value: "card", label: "Card" },
+  { value: "account_transfer", label: "Account Transfer" },
   { value: "cheque", label: "Cheque" },
   { value: "partial", label: "Partial Payment" },
 ];
@@ -37,8 +39,19 @@ const INSTALLMENT_PAYMENT_MODES = [
   { value: "cash", label: "Cash" },
   { value: "upi", label: "UPI" },
   { value: "card", label: "Card" },
+  { value: "account_transfer", label: "Account Transfer" },
   { value: "cheque", label: "Cheque" },
 ];
+// Modes that collect the bank's own account details. Card and Account Transfer ask for
+// the same four fields; Account Transfer additionally needs the transfer's reference.
+const BANK_DETAIL_MODES = ["card", "account_transfer"];
+// These two mirror SETTLED_NOW_MODES / PART_SESSION_MODES in the backend's
+// v3_packages.py and must be kept in step with them. The first is every mode where the
+// money lands in full right now, so the amount is editable and a confirmation is
+// required; the second adds Cheque — every mode that can cover only some of a package's
+// sessions today and leave the rest as a scheduled balance.
+const SETTLED_NOW_MODES = ["cash", "upi", "card", "account_transfer"];
+const PART_SESSION_MODES = ["cash", "upi", "card", "cheque", "account_transfer"];
 const PARTIAL_ORDINALS = ["First", "Second", "Third", "Fourth", "Fifth", "Sixth", "Seventh", "Eighth", "Ninth", "Tenth"];
 const partialInstallmentLabel = (idx) => `${PARTIAL_ORDINALS[idx] || `#${idx + 1}`} Payment`;
 
@@ -46,10 +59,11 @@ const partialInstallmentLabel = (idx) => `${PARTIAL_ORDINALS[idx] || `#${idx + 1
 // The receipt is built as a standalone HTML document rather than printed from the page:
 // window.print() here would send the whole board — modals, sidebar and all — to the
 // printer, and the same document is what gets downloaded, so paper and file always match.
-const ALL_PAYMENT_MODE_LABELS = { cash: "Cash", upi: "UPI", card: "Card", cheque: "Cheque", partial: "Partial Payment" };
+const ALL_PAYMENT_MODE_LABELS = { cash: "Cash", upi: "UPI", card: "Card", account_transfer: "Account Transfer", cheque: "Cheque", partial: "Partial Payment" };
 
 /** Whatever identifies this payment with the bank — the thing a dispute is traced by. */
-const paymentReference = (p) => p.upi_utr || p.upi_transaction_id
+const paymentReference = (p) => p.transfer_reference
+  || p.upi_utr || p.upi_transaction_id
   || (p.cheque_number ? `Cheque ${p.cheque_number}${p.bank_name ? ` · ${p.bank_name}` : ""}` : "")
   || (p.account_number ? `Card ****${String(p.account_number).replace(/\D/g, "").slice(-4)}` : "");
 
@@ -146,6 +160,7 @@ const PAYMENT_MODE_COLORS = {
   cash: "#059669",
   upi: "#2563eb",
   card: "#7c3aed",
+  account_transfer: "#0891b2",
   cheque: "#d97706",
   partial: "#e11d48",
 };
@@ -753,11 +768,31 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       toast.error("Enter a valid Consultation Fee amount");
       return;
     }
-    setPackageConfirmDraft({ upi_transaction_id: "", upi_utr: "", account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "" });
+    setPackageConfirmDraft({ upi_transaction_id: "", upi_utr: "", account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "", transfer_reference: "" });
+  };
+
+  // Card and Account Transfer share the same four bank fields; Account Transfer also
+  // needs the reference the money arrived under. Returns false (after a toast) if any
+  // required field is blank, so both fee flows validate them identically.
+  const attachBankDetails = (payload, draft, mode) => {
+    if (!draft.account_number.trim() || !draft.account_holder_name.trim() || !draft.bank_name.trim() || !draft.ifsc_code.trim()) {
+      toast.error("Account Number, Account Holder Name, Bank Name and IFSC Code are required");
+      return false;
+    }
+    if (mode === "account_transfer" && !draft.transfer_reference.trim()) {
+      toast.error("Reference / UTR No. is required for an Account Transfer");
+      return false;
+    }
+    payload.account_number = draft.account_number.trim();
+    payload.account_holder_name = draft.account_holder_name.trim();
+    payload.bank_name = draft.bank_name.trim();
+    payload.ifsc_code = draft.ifsc_code.trim();
+    if (mode === "account_transfer") payload.transfer_reference = draft.transfer_reference.trim();
+    return true;
   };
 
   // Confirm button inside the second "Confirm Payment" popup — validates
-  // UPI/Card's own fields (Cash just needed the mismatch acknowledged).
+  // UPI/Card/Account Transfer's own fields (Cash just needed the mismatch acknowledged).
   const confirmCollectConsultationFee = () => {
     const amount = parseFloat(collectFeeDraft.amount);
     const mode = collectFeeDraft.payment_mode;
@@ -765,15 +800,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     if (mode === "upi") {
       payload.upi_transaction_id = packageConfirmDraft.upi_transaction_id.trim();
       payload.upi_utr = packageConfirmDraft.upi_utr.trim();
-    } else if (mode === "card") {
-      if (!packageConfirmDraft.account_number.trim() || !packageConfirmDraft.account_holder_name.trim() || !packageConfirmDraft.bank_name.trim() || !packageConfirmDraft.ifsc_code.trim()) {
-        toast.error("Account Number, Account Holder Name, Bank Name and IFSC Code are required");
-        return;
-      }
-      payload.account_number = packageConfirmDraft.account_number.trim();
-      payload.account_holder_name = packageConfirmDraft.account_holder_name.trim();
-      payload.bank_name = packageConfirmDraft.bank_name.trim();
-      payload.ifsc_code = packageConfirmDraft.ifsc_code.trim();
+    } else if (BANK_DETAIL_MODES.includes(mode)) {
+      if (!attachBankDetails(payload, packageConfirmDraft, mode)) return;
     }
     submitConsultationFee(payload);
   };
@@ -816,7 +844,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // "Collect" step there, rather than sharing one form with a mode selector.
   const chooseTreatmentPaymentMode = (mode) => {
     setTreatmentFeeDraft({ ...treatmentFeeDraft, payment_mode: mode });
-    setTreatmentConfirmDraft({ upi_transaction_id: "", upi_utr: "", account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "" });
+    setTreatmentConfirmDraft({ upi_transaction_id: "", upi_utr: "", account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "", transfer_reference: "" });
   };
 
   // The dedicated popup's own submit button — dispatches to whichever path
@@ -842,15 +870,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     if (mode === "upi") {
       payload.upi_transaction_id = treatmentConfirmDraft.upi_transaction_id.trim();
       payload.upi_utr = treatmentConfirmDraft.upi_utr.trim();
-    } else if (mode === "card") {
-      if (!treatmentConfirmDraft.account_number.trim() || !treatmentConfirmDraft.account_holder_name.trim() || !treatmentConfirmDraft.bank_name.trim() || !treatmentConfirmDraft.ifsc_code.trim()) {
-        toast.error("Account Number, Account Holder Name, Bank Name and IFSC Code are required");
-        return;
-      }
-      payload.account_number = treatmentConfirmDraft.account_number.trim();
-      payload.account_holder_name = treatmentConfirmDraft.account_holder_name.trim();
-      payload.bank_name = treatmentConfirmDraft.bank_name.trim();
-      payload.ifsc_code = treatmentConfirmDraft.ifsc_code.trim();
+    } else if (BANK_DETAIL_MODES.includes(mode)) {
+      if (!attachBankDetails(payload, treatmentConfirmDraft, mode)) return;
     }
     const splitPayload = attachSessionsSplit(payload);
     if (!splitPayload) return;
@@ -935,7 +956,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       payment_mode: "cash",
       upi_transaction_id: "", upi_utr: "",
       account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "",
-      cheque_number: "",
+      cheque_number: "", transfer_reference: "",
     });
   };
 
@@ -957,15 +978,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     if (mode === "upi") {
       payload.upi_transaction_id = draft.upi_transaction_id.trim();
       payload.upi_utr = draft.upi_utr.trim();
-    } else if (mode === "card") {
-      if (!draft.account_number.trim() || !draft.account_holder_name.trim() || !draft.bank_name.trim() || !draft.ifsc_code.trim()) {
-        toast.error("Account Number, Account Holder Name, Bank Name and IFSC Code are required");
-        return;
-      }
-      payload.account_number = draft.account_number.trim();
-      payload.account_holder_name = draft.account_holder_name.trim();
-      payload.bank_name = draft.bank_name.trim();
-      payload.ifsc_code = draft.ifsc_code.trim();
+    } else if (BANK_DETAIL_MODES.includes(mode)) {
+      if (!attachBankDetails(payload, draft, mode)) return;
     } else if (mode === "cheque") {
       if (!draft.bank_name.trim() || !draft.cheque_number.trim()) {
         toast.error("Bank Name and Cheque Number are required");
@@ -2268,7 +2282,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       </>
                     )}
 
-                    {mode === "card" && (
+                    {BANK_DETAIL_MODES.includes(mode) && (
                       <>
                         <div>
                           <label className="mb-1 block text-[11px] font-medium text-slate-500">Account Number</label>
@@ -2306,6 +2320,17 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             data-testid="cons-collect-fee-ifsc"
                           />
                         </div>
+                        {mode === "account_transfer" && (
+                          <div>
+                            <label className="mb-1 block text-[11px] font-medium text-slate-500">Reference / UTR No.</label>
+                            <Input
+                              value={packageConfirmDraft.transfer_reference}
+                              onChange={(e) => setPackageConfirmDraft({ ...packageConfirmDraft, transfer_reference: e.target.value })}
+                              className="h-9"
+                              data-testid="cons-collect-fee-transfer-reference"
+                            />
+                          </div>
+                        )}
                       </>
                     )}
 
@@ -2325,7 +2350,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         disabled={
                           collectingFee ||
                           !(parseFloat(collectFeeDraft.amount) > 0) ||
-                          (mode === "card" && (!packageConfirmDraft.account_number.trim() || !packageConfirmDraft.account_holder_name.trim() || !packageConfirmDraft.bank_name.trim() || !packageConfirmDraft.ifsc_code.trim()))
+                          (BANK_DETAIL_MODES.includes(mode) && (!packageConfirmDraft.account_number.trim() || !packageConfirmDraft.account_holder_name.trim() || !packageConfirmDraft.bank_name.trim() || !packageConfirmDraft.ifsc_code.trim())) ||
+                          (mode === "account_transfer" && !packageConfirmDraft.transfer_reference.trim())
                         }
                         data-testid="cons-collect-fee-confirm-submit"
                       >
@@ -2397,7 +2423,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     {mode !== "partial" && (
                       <div>
                         <label className="mb-1 block text-[11px] font-medium text-slate-500">{modeLabel} Amount (₹)</label>
-                        {["cash", "upi", "card"].includes(mode) ? (
+                        {SETTLED_NOW_MODES.includes(mode) ? (
                           <Input
                             type="number"
                             min="0"
@@ -2485,7 +2511,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       </>
                     )}
 
-                    {mode === "card" && (
+                    {BANK_DETAIL_MODES.includes(mode) && (
                       <>
                         <div>
                           <label className="mb-1 block text-[11px] font-medium text-slate-500">Account Number</label>
@@ -2523,6 +2549,17 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             data-testid="cons-treatment-fee-ifsc"
                           />
                         </div>
+                        {mode === "account_transfer" && (
+                          <div>
+                            <label className="mb-1 block text-[11px] font-medium text-slate-500">Reference / UTR No.</label>
+                            <Input
+                              value={treatmentConfirmDraft.transfer_reference}
+                              onChange={(e) => setTreatmentConfirmDraft({ ...treatmentConfirmDraft, transfer_reference: e.target.value })}
+                              className="h-9"
+                              data-testid="cons-treatment-fee-transfer-reference"
+                            />
+                          </div>
+                        )}
                       </>
                     )}
 
@@ -2566,11 +2603,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       disabled={
                         collectingTreatmentFee ||
                         selectedLead.session_package_price == null ||
-                        (["cash", "upi", "card"].includes(mode) && !(parseFloat(treatmentFeeDraft.amount) > 0)) ||
+                        (SETTLED_NOW_MODES.includes(mode) && !(parseFloat(treatmentFeeDraft.amount) > 0)) ||
                         (mode === "cheque" && (!treatmentFeeDraft.bank_name.trim() || !treatmentFeeDraft.cheque_number.trim())) ||
                         (mode === "partial" && (!partialAllFilled || partialMismatch)) ||
-                        (["cash", "upi", "card", "cheque"].includes(mode) && treatmentIsPartialSessions && !treatmentFeeDraft.balance_due_date) ||
-                        (mode === "card" && (!treatmentConfirmDraft.account_number.trim() || !treatmentConfirmDraft.account_holder_name.trim() || !treatmentConfirmDraft.bank_name.trim() || !treatmentConfirmDraft.ifsc_code.trim()))
+                        (PART_SESSION_MODES.includes(mode) && treatmentIsPartialSessions && !treatmentFeeDraft.balance_due_date) ||
+                        (BANK_DETAIL_MODES.includes(mode) && (!treatmentConfirmDraft.account_number.trim() || !treatmentConfirmDraft.account_holder_name.trim() || !treatmentConfirmDraft.bank_name.trim() || !treatmentConfirmDraft.ifsc_code.trim())) ||
+                        (mode === "account_transfer" && !treatmentConfirmDraft.transfer_reference.trim())
                       }
                       data-testid="cons-treatment-fee-confirm-submit"
                     >
@@ -2641,7 +2679,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       </>
                     )}
 
-                    {mode === "card" && (
+                    {BANK_DETAIL_MODES.includes(mode) && (
                       <>
                         <div>
                           <label className="mb-1 block text-[11px] font-medium text-slate-500">Account Number</label>
@@ -2679,6 +2717,17 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             data-testid="cons-partial-collect-ifsc"
                           />
                         </div>
+                        {mode === "account_transfer" && (
+                          <div>
+                            <label className="mb-1 block text-[11px] font-medium text-slate-500">Reference / UTR No.</label>
+                            <Input
+                              value={partialCollectDraft.transfer_reference}
+                              onChange={(e) => setPartialCollectDraft({ ...partialCollectDraft, transfer_reference: e.target.value })}
+                              className="h-9"
+                              data-testid="cons-partial-collect-transfer-reference"
+                            />
+                          </div>
+                        )}
                       </>
                     )}
 
@@ -2711,7 +2760,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       disabled={
                         collectingTreatmentFee ||
                         !(parseFloat(partialCollectDraft.amount) > 0) ||
-                        (mode === "card" && (!partialCollectDraft.account_number.trim() || !partialCollectDraft.account_holder_name.trim() || !partialCollectDraft.bank_name.trim() || !partialCollectDraft.ifsc_code.trim())) ||
+                        (BANK_DETAIL_MODES.includes(mode) && (!partialCollectDraft.account_number.trim() || !partialCollectDraft.account_holder_name.trim() || !partialCollectDraft.bank_name.trim() || !partialCollectDraft.ifsc_code.trim())) ||
+                        (mode === "account_transfer" && !partialCollectDraft.transfer_reference.trim()) ||
                         (mode === "cheque" && (!partialCollectDraft.bank_name.trim() || !partialCollectDraft.cheque_number.trim()))
                       }
                       data-testid="cons-partial-collect-submit"

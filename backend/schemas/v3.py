@@ -302,6 +302,9 @@ class V3CollectPackagePaymentInput(BaseModel):
     account_holder_name: Optional[str] = None
     bank_name: Optional[str] = None
     ifsc_code: Optional[str] = None
+    # Account Transfer — reuses the four bank fields above (same last-4 rule) and adds
+    # the bank's own reference for the transfer, which is what a dispute is traced by.
+    transfer_reference: Optional[str] = None
 
 
 class V3PartialInstallment(BaseModel):
@@ -331,6 +334,9 @@ class V3CollectTreatmentFeeInput(BaseModel):
     bank_name: Optional[str] = None
     cheque_number: Optional[str] = None
     ifsc_code: Optional[str] = None
+    # Account Transfer — reuses the four bank fields above (same last-4 rule) and adds
+    # the bank's own reference for the transfer, which is what a dispute is traced by.
+    transfer_reference: Optional[str] = None
     # Partial Payment — an arbitrary-length installment schedule (some clients want 2
     # payments, others want 5 or 6); every installment needs its own amount and due
     # date, and they must sum to the locked-in session_package_price.
@@ -351,7 +357,7 @@ class V3MarkInstallmentPaidInput(BaseModel):
     # Payment schedule's own per-row Collect button records a real payment (mode,
     # UTR/cheque number, and an activity-log entry so it surfaces in Session
     # Collections / Accountant Manage), same as every other Treatment Fee mode.
-    payment_mode: Optional[Literal["cash", "upi", "card", "cheque"]] = None
+    payment_mode: Optional[Literal["cash", "upi", "card", "cheque", "account_transfer"]] = None
     amount: Optional[float] = None
     upi_transaction_id: Optional[str] = None
     upi_utr: Optional[str] = None
@@ -360,6 +366,7 @@ class V3MarkInstallmentPaidInput(BaseModel):
     bank_name: Optional[str] = None
     ifsc_code: Optional[str] = None
     cheque_number: Optional[str] = None
+    transfer_reference: Optional[str] = None
 
 
 class V3PortalAccountInput(BaseModel):

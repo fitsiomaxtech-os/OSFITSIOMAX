@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Eye, Banknote, CreditCard, Smartphone, ChevronDown } from "lucide-react";
+import { Eye, Banknote, CreditCard, Smartphone, Landmark, ChevronDown } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { MilkDateInput } from "@/components/ui/milk-calendar";
 
@@ -10,6 +10,7 @@ const MODE_META = {
   cash: { label: "Cash", icon: Banknote, classes: "bg-emerald-50 text-emerald-700 border-emerald-200" },
   upi: { label: "UPI", icon: Smartphone, classes: "bg-sky-50 text-sky-700 border-sky-200" },
   card: { label: "Card", icon: CreditCard, classes: "bg-violet-50 text-violet-700 border-violet-200" },
+  account_transfer: { label: "Account Transfer", icon: Landmark, classes: "bg-cyan-50 text-cyan-700 border-cyan-200" },
 };
 
 const PaymentModeBadge = ({ mode }) => {
@@ -180,6 +181,7 @@ export const ConsultationCollectionsBoard = ({ rows, onView }) => {
               { value: "cash", label: "Cash", classes: MODE_META.cash.classes },
               { value: "upi", label: "UPI", classes: MODE_META.upi.classes },
               { value: "card", label: "Card", classes: MODE_META.card.classes },
+              { value: "account_transfer", label: "Account Transfer", classes: MODE_META.account_transfer.classes },
             ]}
             onChange={(v) => {
               setMode(v);

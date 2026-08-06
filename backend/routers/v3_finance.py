@@ -606,6 +606,7 @@ async def client_transaction_history(
             "bank_name": inst.get("bank_name"),
             "ifsc_code": inst.get("ifsc_code"),
             "cheque_number": inst.get("cheque_number"),
+            "transfer_reference": inst.get("transfer_reference"),
         }
         for idx, inst in enumerate(installments, start=1)
     ]
@@ -711,6 +712,20 @@ async def mark_installment_paid(
                 raise HTTPException(status_code=400, detail="Bank Name and Cheque Number are required")
             mode_fields = {"bank_name": payload.bank_name.strip(), "cheque_number": payload.cheque_number.strip()}
             detail_suffix = f" · Cheque #{payload.cheque_number.strip()}, {payload.bank_name.strip()}"
+        elif mode == "account_transfer":
+            if not all([payload.account_number and payload.account_number.strip(), payload.account_holder_name and payload.account_holder_name.strip(),
+                        payload.bank_name and payload.bank_name.strip(), payload.ifsc_code and payload.ifsc_code.strip(),
+                        payload.transfer_reference and payload.transfer_reference.strip()]):
+                raise HTTPException(status_code=400, detail="Account Number, Account Holder Name, Bank Name, IFSC Code and Reference/UTR No. are required")
+            last4 = "".join(ch for ch in payload.account_number if ch.isdigit())[-4:]
+            mode_fields = {
+                "account_last4": last4,
+                "account_holder_name": payload.account_holder_name.strip(),
+                "bank_name": payload.bank_name.strip(),
+                "ifsc_code": payload.ifsc_code.strip().upper(),
+                "transfer_reference": payload.transfer_reference.strip(),
+            }
+            detail_suffix = f" · A/C ****{last4}, {payload.account_holder_name.strip()}, {payload.bank_name.strip()} ({payload.ifsc_code.strip().upper()}) · Ref {payload.transfer_reference.strip()}"
 
         installments[idx] = {**installments[idx], "paid": True, "amount": amount, "payment_mode": mode, **mode_fields}
         activity_details = f"Collected Installment #{installment_number} for session package '{lead.get('session_package_name')}' · Rs.{amount} via {mode}{detail_suffix}"

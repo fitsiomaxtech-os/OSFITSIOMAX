@@ -45,11 +45,15 @@ const PAYMENT_MODE_STYLES = {
   cash: "bg-emerald-50 text-emerald-700 border-emerald-200",
   upi: "bg-sky-50 text-sky-700 border-sky-200",
   card: "bg-violet-50 text-violet-700 border-violet-200",
+  account_transfer: "bg-cyan-50 text-cyan-700 border-cyan-200",
   cheque: "bg-amber-50 text-amber-700 border-amber-200",
   partial: "bg-orange-50 text-orange-700 border-orange-200",
 };
 
-const formatMode = (mode) => (mode ? (mode === "upi" ? "UPI" : mode.charAt(0).toUpperCase() + mode.slice(1)) : "—");
+// Modes whose display name isn't just their key capitalised — without these,
+// "account_transfer" would render as "Account_transfer".
+const MODE_LABELS = { upi: "UPI", account_transfer: "Account Transfer" };
+const formatMode = (mode) => (mode ? (MODE_LABELS[mode] || mode.charAt(0).toUpperCase() + mode.slice(1)) : "—");
 
 const PaymentModeBadge = ({ mode }) => (
   <span className={`inline-flex items-center rounded-[5px] border px-2 py-0.5 text-[10px] font-semibold ${PAYMENT_MODE_STYLES[mode] || "bg-slate-50 text-slate-600 border-slate-200"}`}>

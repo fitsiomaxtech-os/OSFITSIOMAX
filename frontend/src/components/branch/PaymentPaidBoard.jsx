@@ -4,12 +4,16 @@ import { Card, CardContent } from "@/components/ui/card";
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 const todayIso = () => new Date().toISOString().slice(0, 10);
-const formatMode = (mode) => (mode ? (mode === "upi" ? "UPI" : mode.charAt(0).toUpperCase() + mode.slice(1)) : "—");
+// Modes whose display name isn't just their key capitalised — without these,
+// "account_transfer" would render as "Account_transfer".
+const MODE_LABELS = { upi: "UPI", account_transfer: "Account Transfer" };
+const formatMode = (mode) => (mode ? (MODE_LABELS[mode] || mode.charAt(0).toUpperCase() + mode.slice(1)) : "—");
 
 const PAYMENT_MODE_STYLES = {
   cash: "bg-emerald-50 text-emerald-700 border-emerald-200",
   upi: "bg-sky-50 text-sky-700 border-sky-200",
   card: "bg-violet-50 text-violet-700 border-violet-200",
+  account_transfer: "bg-cyan-50 text-cyan-700 border-cyan-200",
   cheque: "bg-amber-50 text-amber-700 border-amber-200",
   partial: "bg-orange-50 text-orange-700 border-orange-200",
 };
@@ -142,6 +146,7 @@ export const PaymentPaidBoard = ({ rows, onView }) => {
               { value: "cash", label: "Cash", classes: PAYMENT_MODE_STYLES.cash },
               { value: "upi", label: "UPI", classes: PAYMENT_MODE_STYLES.upi },
               { value: "card", label: "Card", classes: PAYMENT_MODE_STYLES.card },
+              { value: "account_transfer", label: "Account Transfer", classes: PAYMENT_MODE_STYLES.account_transfer },
               { value: "cheque", label: "Cheque", classes: PAYMENT_MODE_STYLES.cheque },
               { value: "partial", label: "Partial Payment", classes: PAYMENT_MODE_STYLES.partial },
             ]}
