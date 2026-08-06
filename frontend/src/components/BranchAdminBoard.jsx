@@ -75,6 +75,22 @@ const weekdayLabel = (d) => (d
   ? new Date(`${d}T00:00:00`).toLocaleDateString("en-US", { weekday: "long", day: "numeric", month: "long" })
   : "—");
 
+/** The slot on a lead, for the Branch Leads list — "06 Aug" + "10:30 AM".
+ *  Pre-Sales writes appointment_date/time when it schedules, and assigning the Fitsiomax
+ *  Expert later overwrites them with the branch's own confirmed slot. So while no physio
+ *  is assigned this is still Pre-Sales' requested time, which is what New Appointment
+ *  needs to show. Dates are plain "YYYY-MM-DD" calendar days, not instants, so they are
+ *  parsed at local midnight and never shift a day. */
+const apptSlotLabel = (lead) => {
+  const date = lead?.appointment_date;
+  const time = lead?.appointment_time;
+  if (!date && !time) return null;
+  return {
+    date: date ? new Date(`${date}T00:00:00`).toLocaleDateString("en-GB", { day: "2-digit", month: "short" }) : "",
+    time: time ? to12h(time) : "",
+  };
+};
+
 // `compact` drops the three facts the confirmation's own hero already states in bigger
 // type — the on-screen popup shows that hero, so repeating them underneath is noise. The
 // printed sheet keeps them, where the row list has to stand on its own as the record.
@@ -589,6 +605,17 @@ export const BranchAdminBoard = ({ branchId, embedded = false }) => {
                         {lead.patient_number && <p className="truncate font-mono text-[10px] text-slate-400">{lead.patient_number}</p>}
                         <p className="mt-1 truncate text-xs text-slate-600">{lead.phone || "—"}</p>
                         {lead.email && <p className="truncate text-xs text-slate-500">{lead.email}</p>}
+                        {(() => {
+                          const slot = apptSlotLabel(lead);
+                          if (!slot) return null;
+                          return (
+                            <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-[11px]" data-testid={`branch-card-appt-${lead.id}`}>
+                              <Calendar className="h-3 w-3 text-slate-400" />
+                              <span className="font-semibold text-slate-700">{[slot.date, slot.time].filter(Boolean).join(" · ")}</span>
+                              {!lead.assigned_physio_name && <span className="font-medium text-amber-600">Pre-Sales request</span>}
+                            </p>
+                          );
+                        })()}
                         <div className="mt-1 flex flex-wrap items-center gap-x-2 text-[10px] text-slate-400">
                           {lead.assigned_physio_name && <span className="truncate">Physio: {lead.assigned_physio_name}</span>}
                           <span>Updated {(lead.updated_at || "").slice(0, 10)}</span>
@@ -639,19 +666,21 @@ export const BranchAdminBoard = ({ branchId, embedded = false }) => {
                       only for this stage filter — every other view keeps it. */}
                   {stageFilter === firstStageName ? (
                     <>
-                      <th className="w-[26%] px-4 py-3">Patient</th>
-                      <th className="w-[16%] px-4 py-3">Phone</th>
-                      <th className="w-[26%] px-4 py-3">Email</th>
-                      <th className="w-[20%] px-4 py-3">Stage</th>
-                      <th className="w-[12%] px-4 py-3 text-right">Updated</th>
-                    </>
-                  ) : (
-                    <>
-                      <th className="w-[22%] px-4 py-3">Patient</th>
+                      <th className="w-[24%] px-4 py-3">Patient</th>
                       <th className="w-[14%] px-4 py-3">Phone</th>
                       <th className="w-[22%] px-4 py-3">Email</th>
                       <th className="w-[16%] px-4 py-3">Stage</th>
-                      <th className="w-[16%] px-4 py-3">Assigned Physio</th>
+                      <th className="w-[14%] px-4 py-3">Appointment</th>
+                      <th className="w-[10%] px-4 py-3 text-right">Updated</th>
+                    </>
+                  ) : (
+                    <>
+                      <th className="w-[20%] px-4 py-3">Patient</th>
+                      <th className="w-[12%] px-4 py-3">Phone</th>
+                      <th className="w-[18%] px-4 py-3">Email</th>
+                      <th className="w-[14%] px-4 py-3">Stage</th>
+                      <th className="w-[14%] px-4 py-3">Assigned Physio</th>
+                      <th className="w-[12%] px-4 py-3">Appointment</th>
                       <th className="w-[10%] px-4 py-3 text-right">Updated</th>
                     </>
                   )}
@@ -664,7 +693,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false }) => {
                   if (visible.length === 0) {
                     return (
                       <tr>
-                        <td colSpan={showAssignedPhysio ? 6 : 5} className="px-4 py-10 text-center text-sm text-slate-400" data-testid="branch-list-empty">
+                        <td colSpan={showAssignedPhysio ? 7 : 6} className="px-4 py-10 text-center text-sm text-slate-400" data-testid="branch-list-empty">
                           No patients {stageFilter ? `in stage "${stageDisplayLabel(stageFilter)}"` : "yet"}.
                         </td>
                       </tr>
@@ -703,6 +732,24 @@ export const BranchAdminBoard = ({ branchId, embedded = false }) => {
                         {showAssignedPhysio && (
                           <td className="truncate px-4 py-3 text-slate-600" title={lead.assigned_physio_name}>{lead.assigned_physio_name || <span className="text-slate-400">—</span>}</td>
                         )}
+                        <td className="px-4 py-3">
+                          {(() => {
+                            const slot = apptSlotLabel(lead);
+                            if (!slot) return <span className="text-slate-400">—</span>;
+                            return (
+                              <div className="flex flex-col gap-0.5" data-testid={`branch-row-appt-${lead.id}`}>
+                                <span className="whitespace-nowrap text-xs font-semibold text-slate-700">
+                                  {[slot.date, slot.time].filter(Boolean).join(" · ")}
+                                </span>
+                                {/* Until an expert is assigned, this is the slot Pre-Sales asked
+                                    for rather than one the branch has committed to. */}
+                                {!lead.assigned_physio_name && (
+                                  <span className="text-[10px] font-medium text-amber-600">Pre-Sales request</span>
+                                )}
+                              </div>
+                            );
+                          })()}
+                        </td>
                         <td className="px-4 py-3 text-right text-xs text-slate-400">{(lead.updated_at || "").slice(0, 10)}</td>
                       </tr>
                     );
