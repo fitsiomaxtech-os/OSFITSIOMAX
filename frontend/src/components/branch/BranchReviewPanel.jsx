@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Send, CheckCircle2, X, Search, RefreshCw, ChevronLeft, ChevronRight, Calendar as CalendarIcon } from "lucide-react";
+import { Send, CheckCircle2, Clock, X, Search, RefreshCw, ChevronLeft, ChevronRight, Calendar as CalendarIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
-import { StageTab } from "@/components/ui/stage-tab";
 import { branchReviews, branchSendReview, getAvailableExperts, getAvailableDates } from "@/lib/api";
 import { to12h, endTime12h } from "@/lib/time";
 
@@ -10,9 +9,9 @@ import { to12h, endTime12h } from "@/lib/time";
 // Each row already names the Head Physio it went to, so the branch can see who has what
 // without a separate view for it.
 const SUB_TABS = [
-  { key: "send", label: "Send to Review", color: "#f59e0b" },
-  { key: "pending", label: "Pending Review", color: "#0ea5e9" },
-  { key: "complete", label: "Review Complete", color: "#22c55e" },
+  { key: "send", label: "Send to Review", icon: Send },
+  { key: "pending", label: "Pending Review", icon: Clock },
+  { key: "complete", label: "Review Complete", icon: CheckCircle2 },
 ];
 
 const dmy = (d) => {
@@ -253,25 +252,38 @@ export const BranchReviewPanel = ({ branchId }) => {
 
   return (
     <div className="space-y-4" data-testid="branch-review-panel">
-      {/* Same coloured count pills the Branch Leads stage bar uses, so the three
-          stages of the review pipeline read the same way as the lead stages above. */}
-      <div className="-mx-1 rounded-xl border border-slate-200 bg-white/95 p-1 shadow-sm" data-testid="branch-review-subtabs">
-        {/* Three across on a phone rather than a sideways scroll — they fit, and the
-            third was otherwise behind a swipe. One flex row from sm up, as before. */}
-        <div className="grid grid-cols-3 gap-1 sm:flex sm:flex-nowrap sm:overflow-visible">
-          {SUB_TABS.map((t) => (
-            <StageTab
+      {/* The Head Physio board's work cards, so both ends of the review chain read the
+          same way. These replaced the coloured stage pills the Branch Leads bar uses:
+          three permanently tinted pills gave every stage the same shout, and a filled
+          orange "Send to Review" read as urgent whether it held two reviews or none.
+          Selection is what the colour marks now. Still three across on a phone — they
+          fit, and the third was otherwise behind a sideways swipe. */}
+      <div className="grid grid-cols-3 gap-2 sm:gap-3" data-testid="branch-review-subtabs">
+        {SUB_TABS.map((t) => {
+          const Icon = t.icon;
+          const active = sub === t.key;
+          return (
+            <button
               key={t.key}
-              label={t.label}
-              count={countFor(t.key)}
-              active={sub === t.key}
+              type="button"
               onClick={() => setSub(t.key)}
-              color={t.color}
-              testid={`branch-review-subtab-${t.key}`}
-              gridded
-            />
-          ))}
-        </div>
+              className={`w-full rounded-xl border-2 px-3 py-2.5 text-left transition sm:px-4 sm:py-4 ${
+                active
+                  ? "border-teal-600 bg-teal-50 shadow-sm"
+                  : "border-slate-200 bg-white hover:border-teal-300 hover:shadow-sm"
+              }`}
+              data-testid={`branch-review-subtab-${t.key}`}
+            >
+              <span className={`flex items-center gap-1.5 ${active ? "text-teal-700" : "text-slate-500"}`}>
+                <Icon className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />
+                <span className="truncate text-[10px] font-bold uppercase tracking-wider sm:text-xs">{t.label}</span>
+              </span>
+              <span className={`mt-0.5 block text-2xl font-extrabold sm:mt-1 sm:text-3xl ${active ? "text-teal-700" : "text-slate-800"}`}>
+                {countFor(t.key)}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {/* No Card around this row any more. A bordered input sitting inside a bordered
