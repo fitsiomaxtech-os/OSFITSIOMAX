@@ -15,6 +15,7 @@ import { PullFromSheetButton } from "@/components/PullFromSheetButton";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { StageTabBar } from "@/components/ui/stage-tab";
 import { MilkDateInput, MilkTimeInput } from "@/components/ui/milk-calendar";
+import { callTimeStamp, callDateStamp } from "@/lib/time";
 
 const initials = (name) => (name || "?").split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
 
@@ -439,7 +440,7 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
           <div className="overflow-auto">
             <table className="min-w-full border-separate border-spacing-x-0 border-spacing-y-2 text-sm">
               <thead className="text-center text-xs text-slate-500">
-                <tr><th className="px-3 py-2 text-left">LEAD</th><th className="px-3 py-2">PHONE</th><th className="px-3 py-2">EMAIL</th><th className="px-3 py-2">SOURCE</th><th className="px-3 py-2">STAGE</th>{stageFilter === "Appointment" && <th className="px-3 py-2">BRANCH ADMIN STATUS</th>}<th className="px-3 py-2">CREATED</th><th className="px-3 py-2">ASSIGNED TO</th><th className="px-3 py-2">ACTIONS</th></tr>
+                <tr><th className="px-3 py-2 text-left">LEAD</th><th className="px-3 py-2">PHONE</th><th className="px-3 py-2">EMAIL</th><th className="px-3 py-2">SOURCE</th><th className="px-3 py-2">STAGE</th>{stageFilter === "Appointment" && <th className="px-3 py-2">BRANCH ADMIN STATUS</th>}{stageFilter === "RNR" && <th className="px-3 py-2">LAST CALL</th>}<th className="px-3 py-2">CREATED</th><th className="px-3 py-2">ASSIGNED TO</th><th className="px-3 py-2">ACTIONS</th></tr>
               </thead>
               <tbody>
                 {visibleLeads.map((l) => {
@@ -505,6 +506,20 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
                           </td>
                         );
                       })()}
+                      {stageFilter === "RNR" && (
+                        <td className="border-y border-slate-200 bg-white px-3 py-3 text-center transition-colors group-hover:bg-slate-50">
+                          {l.rnr_last_attempt_at ? (
+                            <div className="flex flex-col items-center gap-0.5" data-testid={`presales-rnr-lastcall-${l.id}`}>
+                              <span className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700">
+                                <Clock className="h-2.5 w-2.5" />{callTimeStamp(l.rnr_last_attempt_at)}
+                              </span>
+                              <span className="text-[10px] text-slate-400">{callDateStamp(l.rnr_last_attempt_at)}</span>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-slate-400">—</span>
+                          )}
+                        </td>
+                      )}
                       <td className="border-y border-slate-200 bg-white px-3 py-3 text-center text-xs text-slate-400 transition-colors group-hover:bg-slate-50">{(l.created_at || "").slice(0, 10)}</td>
                       <td className="border-y border-slate-200 bg-white px-3 py-3 text-center transition-colors group-hover:bg-slate-50" onClick={(e) => e.stopPropagation()}>
                         <ColorSelect
@@ -606,6 +621,11 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
                       {l.stage === "RNR" && (l.rnr_attempts || 0) > 0 && (
                         <span className="inline-flex items-center gap-0.5 font-semibold text-rose-600">
                           <PhoneOff className="h-2.5 w-2.5" />×{l.rnr_attempts}
+                        </span>
+                      )}
+                      {l.stage === "RNR" && l.rnr_last_attempt_at && (
+                        <span className="inline-flex items-center gap-0.5 font-semibold text-rose-600">
+                          <Clock className="h-2.5 w-2.5" />{callTimeStamp(l.rnr_last_attempt_at)}
                         </span>
                       )}
                       {l.stage === "Follow Up" && l.next_follow_up_at && (
@@ -1266,8 +1286,15 @@ const LeadDetailDialog = ({ lead, stages, currentUser, onClose, onSaved, onMoveS
                   <p className="text-xs font-semibold text-rose-700">Client Not Answered</p>
                   <p className="text-[11px] text-rose-500">
                     Attempts so far: <span className="font-bold">{currentLead.rnr_attempts || 0}</span>
-                    {currentLead.rnr_last_attempt_at && <span className="ml-2">· last {new Date(currentLead.rnr_last_attempt_at).toLocaleString()}</span>}
                   </p>
+                  {currentLead.rnr_last_attempt_at && (
+                    <p className="mt-0.5 flex items-center gap-1 text-[11px] text-rose-600" data-testid="presales-detail-rnr-lastcall">
+                      <Clock className="h-3 w-3" />
+                      Last call
+                      <span className="font-bold">{callTimeStamp(currentLead.rnr_last_attempt_at)}</span>
+                      <span className="text-rose-400">· {callDateStamp(currentLead.rnr_last_attempt_at)}</span>
+                    </p>
+                  )}
                 </div>
               </div>
               <Button
