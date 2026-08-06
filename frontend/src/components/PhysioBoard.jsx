@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   Calendar,
@@ -907,6 +907,26 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
   const upcomingSession = sessions.find((s) => s.status === "upcoming") || null;
   const lastCompleted = completedSessions[completedSessions.length - 1] || null;
 
+  // Days still to do come first, then the ones already done — a finished day is a record,
+  // an unfinished one is work, and the work should not be below thirty rows of history.
+  // Both halves stay in session order, so a day is always where its number says it is
+  // within its half; only the halves move.
+  //
+  // The day actually opened from the date strip is pinned above both, whatever its
+  // status: it is the only one that can be ticked off, and once it is completed it would
+  // otherwise drop below every pending day the moment you finish it.
+  const orderedSessions = useMemo(() => {
+    const bySessionNumber = (a, b) => (a.session_number || 0) - (b.session_number || 0);
+    const isOpened = (s) => !!activeDate && (s.slot_time || "").startsWith(activeDate);
+    const opened = sessions.filter(isOpened).sort(bySessionNumber);
+    const rest = sessions.filter((s) => !isOpened(s));
+    return [
+      ...opened,
+      ...rest.filter((s) => s.status !== "completed").sort(bySessionNumber),
+      ...rest.filter((s) => s.status === "completed").sort(bySessionNumber),
+    ];
+  }, [sessions, activeDate]);
+
   // Each week of days goes to the Head Physio for a review appointment; that review
   // is only "completed" once they've written it up (status flips to reviewed).
   const totalWeeks = sessions.length ? Math.max(...sessions.map((s) => s.week_number || 1)) : 0;
@@ -1010,15 +1030,29 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
               </div>
             ) : (
               <div className="space-y-2">
-                {sessions.map((s) => {
+                {orderedSessions.map((s, i) => {
                   const done = s.status === "completed";
+                  // Where the list crosses from work to history, so the jump back to
+                  // Day 1 reads as a divider rather than as the order being wrong.
+                  const firstDone = done && i > 0 && orderedSessions[i - 1].status !== "completed";
                   // Only the day being viewed can be ticked off — a day is completed on
                   // the date it actually falls on, so the others stay read-only until
                   // their own date is picked in the strip behind this popup.
                   const isActiveDay = !activeDate || (s.slot_time || "").startsWith(activeDate);
                   return (
+                    <Fragment key={s.id}>
+                    {firstDone && (
+                      <div className="flex items-center gap-2 pt-2" data-testid="physio-treatment-days-divider">
+                        <span className="h-px flex-1 bg-slate-200" />
+                        {/* Counted from here down, not the overall total — the opened day
+                            is pinned above and may already be complete. */}
+                        <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                          {orderedSessions.slice(i).filter((x) => x.status === "completed").length} completed
+                        </span>
+                        <span className="h-px flex-1 bg-slate-200" />
+                      </div>
+                    )}
                     <div
-                      key={s.id}
                       className={`flex items-center gap-3 rounded-lg border p-3 ${
                         done ? "border-emerald-200 bg-emerald-50/50"
                         : isActiveDay ? "border-sky-200 bg-sky-50/40"
@@ -1030,7 +1064,16 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
                         {s.session_number}
                       </div>
                       <div className="min-w-0 flex-1">
-                        <p className="text-xs font-semibold text-slate-700">Day {s.session_number} of {s.total_sessions} · Week {s.week_number}</p>
+                        <p className="flex flex-wrap items-center gap-1.5 text-xs font-semibold text-slate-700">
+                          Day {s.session_number} of {s.total_sessions} · Week {s.week_number}
+                          {/* Says why this row is at the top, which is not obvious once it
+                              has been completed and every pending day sits below it. */}
+                          {isActiveDay && activeDate && (
+                            <span className="rounded bg-sky-100 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-sky-700">
+                              Opened
+                            </span>
+                          )}
+                        </p>
                         <p className="text-[10px] text-slate-400">
                           {s.slot_time ? `${fmtDate(s.slot_time)} at ${slotTo12h(s.slot_time)}` : "—"}
                         </p>
@@ -1059,6 +1102,7 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
                         </Button>
                       )}
                     </div>
+                    </Fragment>
                   );
                 })}
               </div>
