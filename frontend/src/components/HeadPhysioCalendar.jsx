@@ -477,20 +477,28 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
                         key={day}
                         type="button"
                         onClick={() => toggleDate(d)}
+                        // A day that already has slots published is filled dark green
+                        // rather than flagged with a dot — at a glance the month should
+                        // show which days are open, and a 4px dot doesn't carry that far.
+                        // Violet still wins for days picked in this editing session, since
+                        // that is what Save Changes is about to act on.
                         className={`h-11 rounded-lg text-sm font-medium relative transition-all ${
                           isPicked
                             ? `bg-violet-600 text-white shadow-sm${isFocused ? " ring-2 ring-violet-300 ring-offset-1" : ""}`
+                            : slotCount > 0
+                            ? `bg-green-800 text-white shadow-sm hover:bg-green-900${isToday ? " ring-2 ring-green-300 ring-offset-1" : ""}`
                             : isToday
                             ? "bg-violet-50 text-violet-700 border border-violet-200"
                             : "text-slate-600 hover:bg-slate-100"
                         }`}
-                        title={isPicked ? "Click again to deselect" : undefined}
+                        title={
+                          isPicked ? "Click again to deselect"
+                            : slotCount > 0 ? `${slotCount} slot${slotCount === 1 ? "" : "s"} open`
+                            : undefined
+                        }
                         data-testid={`cal-day-${day}`}
                       >
                         {day}
-                        {slotCount > 0 && !isPicked && (
-                          <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 h-1 w-1 rounded-full bg-emerald-400" />
-                        )}
                       </button>
                     );
                   })}
