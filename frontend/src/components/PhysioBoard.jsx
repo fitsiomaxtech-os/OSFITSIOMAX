@@ -3,10 +3,12 @@ import {
   ArrowLeft,
   Calendar,
   Check,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   ClipboardCheck,
   ClipboardList,
+  Clock,
   PhoneCall,
   Search,
   Send,
@@ -138,29 +140,33 @@ const WhatsAppIcon = ({ className }) => (
   </svg>
 );
 
-// Summary tile. `solidClass` fills the tile — used on the one figure in each group
-// that the physio is actually acting on, so it carries the group rather than
-// sitting level with the counts either side of it.
-const StatTile = ({ label, value, sub, valueClass, solidClass, onClick, active, testid }) => {
+// Summary tile — the same card the Head Physio board uses for its work tabs, so both
+// Master Views read as one system rather than two products. Each tile is also the
+// list's filter: the count and the control that narrows to it are one thing.
+//
+// The filled tile this replaced (a solid violet Pending) singled one figure out by
+// weight, which only worked while it was the figure being acted on. Selection is the
+// state worth showing, and the teal carries that on whichever tile is picked.
+const StatTile = ({ label, value, sub, icon: Icon, onClick, active, testid }) => {
   const Tag = onClick ? "button" : "div";
   const tagProps = onClick ? { type: "button", onClick, "data-testid": testid } : { "data-testid": testid };
-  return solidClass ? (
+  return (
     <Tag
       {...tagProps}
-      className={`w-full text-left rounded-lg px-3 py-2.5 transition ${solidClass} ${active ? "ring-2 ring-white/70" : ""} ${onClick ? "hover:opacity-90" : ""}`}
+      className={`w-full rounded-xl border-2 px-3 py-2.5 text-left transition sm:px-4 sm:py-4 ${
+        active
+          ? "border-teal-600 bg-teal-50 shadow-sm"
+          : `border-slate-200 bg-white ${onClick ? "hover:border-teal-300 hover:shadow-sm" : ""}`
+      }`}
     >
-      <p className="text-[10px] font-semibold uppercase tracking-wider text-white/75">{label}</p>
-      <p className="text-xl font-bold text-white">{value}</p>
-      {sub && <p className="text-[10px] text-white/70">{sub}</p>}
-    </Tag>
-  ) : (
-    <Tag
-      {...tagProps}
-      className={`w-full text-left rounded-lg border px-3 py-2.5 transition ${active ? "border-sky-400 bg-sky-50" : "border-slate-200 bg-white"} ${onClick ? "hover:border-sky-300" : ""}`}
-    >
-      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{label}</p>
-      <p className={`text-xl font-bold ${valueClass || "text-slate-700"}`}>{value}</p>
-      {sub && <p className="text-[10px] text-slate-400">{sub}</p>}
+      <span className={`flex items-center gap-1.5 ${active ? "text-teal-700" : "text-slate-500"}`}>
+        {Icon && <Icon className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />}
+        <span className="truncate text-[10px] font-bold uppercase tracking-wider sm:text-xs">{label}</span>
+      </span>
+      <span className={`mt-0.5 block text-2xl font-extrabold sm:mt-1 sm:text-3xl ${active ? "text-teal-700" : "text-slate-800"}`}>
+        {value}
+      </span>
+      {sub && <span className={`mt-0.5 block text-[10px] ${active ? "text-teal-600" : "text-slate-400"}`}>{sub}</span>}
     </Tag>
   );
 };
@@ -327,20 +333,23 @@ function TreatmentTab({ physioId, onCountChange }) {
 
   return (
     <div data-testid="physio-treatment-tab">
-      <div className="mb-4 rounded-xl border border-sky-100 bg-sky-50/40 p-3" data-testid="physio-treatment-summary">
-        <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-sky-700">{filterValue ? filterValue.label : "Overall Treatment"}</p>
-        <div className="grid grid-cols-3 gap-2">
+      {/* The tinted panel these sat in is gone — the Head Physio cards sit straight on
+          the page, and boxing the same cards here made two identical controls look like
+          two different ones. The heading stays: it names the range the counts answer to. */}
+      <div className="mb-4" data-testid="physio-treatment-summary">
+        <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">{filterValue ? filterValue.label : "Overall Treatment"}</p>
+        <div className="grid grid-cols-3 gap-2 sm:gap-3">
           <StatTile
-            label="Total Days" value={filterStats.total} valueClass="text-sky-700"
+            icon={Calendar} label="Total Days" value={filterStats.total}
             onClick={() => setRowFilter("all")} active={rowFilter === "all"} testid="physio-stat-total"
           />
           <StatTile
-            label="Completed" value={filterStats.completed} valueClass="text-emerald-600"
+            icon={CheckCircle2} label="Completed" value={filterStats.completed}
             sub={filterStats.total ? `${Math.round((filterStats.completed / filterStats.total) * 100)}% done` : null}
             onClick={() => setRowFilter(rowFilter === "completed" ? "all" : "completed")} active={rowFilter === "completed"} testid="physio-stat-completed"
           />
           <StatTile
-            label="Pending" value={filterStats.pending} solidClass="bg-violet-600" sub="Days left"
+            icon={Clock} label="Pending" value={filterStats.pending} sub="Days left"
             onClick={() => setRowFilter(rowFilter === "pending" ? "all" : "pending")} active={rowFilter === "pending"} testid="physio-stat-pending"
           />
         </div>
@@ -1538,15 +1547,15 @@ export function PatientDetailPage({ patient, physioId, onClose, onRefresh }) {
           <div className="space-y-3" data-testid="physio-patient-sessions-tab">
             <div className="grid grid-cols-3 gap-2">
               <StatTile
-                label="Pending" value={pendingSessions} solidClass="bg-amber-600"
+                icon={Clock} label="Pending" value={pendingSessions}
                 onClick={() => setSessionFilter("pending")} active={sessionFilter === "pending"} testid="physio-patient-stat-pending"
               />
               <StatTile
-                label="Completed" value={completedSessions} valueClass="text-emerald-600"
+                icon={CheckCircle2} label="Completed" value={completedSessions}
                 onClick={() => setSessionFilter("completed")} active={sessionFilter === "completed"} testid="physio-patient-stat-completed"
               />
               <StatTile
-                label="Total" value={sessions.length} valueClass="text-sky-700"
+                icon={Calendar} label="Total" value={sessions.length}
                 onClick={() => setSessionFilter("all")} active={sessionFilter === "all"} testid="physio-patient-stat-total"
               />
             </div>

@@ -63,7 +63,7 @@ const ColorFilterDropdown = ({ value, options, onChange, testId }) => {
 };
 
 const SummaryCard = ({ label, value, color }) => (
-  <div className="rounded-xl border bg-white p-4 shadow-sm" style={{ borderLeftColor: color, borderLeftWidth: 4 }}>
+  <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
     <p className="text-xs text-slate-500">{label}</p>
     <p className="mt-1 text-2xl font-bold" style={{ color }}>{value}</p>
   </div>

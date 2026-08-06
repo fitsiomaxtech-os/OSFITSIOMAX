@@ -92,8 +92,8 @@ const SummaryCard = ({ label, value, color, active, onClick }) => (
   <button
     type="button"
     onClick={onClick}
-    className={`rounded-xl border bg-white p-4 text-left shadow-sm transition ${active ? "ring-2 ring-offset-1" : "hover:shadow-md"}`}
-    style={{ borderLeftColor: color, borderLeftWidth: 4, ...(active ? { boxShadow: `0 0 0 2px ${color}33` } : {}) }}
+    className={`rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm transition ${active ? "ring-2 ring-offset-1" : "hover:shadow-md"}`}
+    style={active ? { boxShadow: `0 0 0 2px ${color}33` } : undefined}
     data-testid={`consultation-summary-${label.toLowerCase().replace(/\s+/g, "-")}`}
   >
     <p className="text-xs text-slate-500">{label}</p>
