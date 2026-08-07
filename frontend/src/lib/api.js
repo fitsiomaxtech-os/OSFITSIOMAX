@@ -229,6 +229,8 @@ export const mkGetDistribution = async () => (await api.get("/marketing/distribu
 export const mkPatchDistribution = async (payload) => (await api.patch("/marketing/distribution-settings", payload)).data;
 export const mkRefreshDistribution = async () => (await api.post("/marketing/distribution-settings/refresh")).data;
 export const mkGetTeam = async () => (await api.get("/marketing/team-members")).data;
+export const mkUnassignedCount = async () => (await api.get("/marketing/unassigned-count")).data;
+export const mkDistributeUnassigned = async () => (await api.post("/marketing/distribute-unassigned")).data;
 export const mkCreateTeamMember = async (payload) => (await api.post("/marketing/team-members", payload)).data;
 export const mkAllLeads = async (params = {}) => {
   const q = new URLSearchParams();

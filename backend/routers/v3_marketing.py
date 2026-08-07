@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Optional, Dict, List, Any
 from urllib.parse import urlparse
+from pymongo import UpdateOne
 import uuid
 import re
 
@@ -217,6 +218,86 @@ async def refresh_distribution_settings(_: V3UserOut = Depends(v3_require_roles(
         {"$set": {"pre_sales_team": pre_ids, "sales_team": sales_ids, "updated_at": now_iso()}},
     )
     return await v3_col("marketing_settings").find_one({"id": "_singleton_"}, {"_id": 0})
+
+
+# A lead with no Pre-Sales owner. Three shapes mean the same thing depending on how the
+# lead arrived: the field absent entirely (created before distribution existed), null
+# (round_robin_assign returned None), or empty string.
+UNOWNED_LEAD = {"$or": [
+    {"assigned_user_id": {"$exists": False}},
+    {"assigned_user_id": None},
+    {"assigned_user_id": ""},
+]}
+
+
+@router.get("/unassigned-count")
+async def unassigned_lead_count(_: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    """How many leads carry no Pre-Sales agent — the backlog the button below clears."""
+    return {"count": await v3_col("leads").count_documents(UNOWNED_LEAD)}
+
+
+@router.post("/distribute-unassigned")
+async def distribute_unassigned_leads(_: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    """Share out every lead that has no Pre-Sales agent, round-robin across the team.
+
+    Round-robin only ever ran at the moment a lead arrived from a source sync, and only
+    if distribution was already switched on with a non-empty team. Every lead that
+    predates that — or arrived while the team list was empty — has no owner and no way to
+    acquire one, which is why per-agent counts read zero however the leads were counted.
+    Nothing else in the system can attribute those leads after the fact.
+
+    Only untouched leads are moved: a lead already assigned keeps its agent, so running
+    this twice does not reshuffle anyone's book.
+    """
+    settings = await ensure_settings_doc()
+    team_ids: List[str] = settings.get("pre_sales_team") or []
+    users = await v3_col("users").find(
+        {"id": {"$in": team_ids}, "is_active": True}, {"_id": 0, "id": 1, "full_name": 1}
+    ).to_list(500)
+    by_id = {u["id"]: u for u in users}
+    # Keep the configured order, minus anyone since deactivated or deleted.
+    team = [t for t in team_ids if t in by_id]
+    if not team:
+        raise HTTPException(
+            status_code=400,
+            detail="No active Pre-Sales team is set. Use 'Refresh Team from Users' first.",
+        )
+
+    rows = await v3_col("leads").find(UNOWNED_LEAD, {"_id": 0, "id": 1}).to_list(100000)
+    if not rows:
+        return {"assigned": 0, "per_agent": {}, "message": "Every lead already has an agent."}
+
+    # Continue from the stored index rather than restarting at the first agent, so a
+    # second run doesn't pile the next batch onto whoever happens to be first.
+    idx = int(settings.get("pre_sales_current_index", 0) or 0) % len(team)
+    ops = []
+    per_agent: Dict[str, int] = {}
+    for r in rows:
+        uid = team[idx]
+        u = by_id[uid]
+        ops.append(UpdateOne(
+            {"id": r["id"]},
+            {"$set": {
+                "assigned_user_id": uid,
+                "assigned_user_name": u.get("full_name", ""),
+                "updated_at": now_iso(),
+            }},
+        ))
+        per_agent[u.get("full_name", "")] = per_agent.get(u.get("full_name", ""), 0) + 1
+        idx = (idx + 1) % len(team)
+
+    # Chunked so one oversized command can't be rejected wholesale, leaving the backlog
+    # half-assigned with no record of where it stopped.
+    assigned = 0
+    for i in range(0, len(ops), 1000):
+        res = await v3_col("leads").bulk_write(ops[i:i + 1000], ordered=False)
+        assigned += res.modified_count
+
+    await v3_col("marketing_settings").update_one(
+        {"id": "_singleton_"},
+        {"$set": {"pre_sales_current_index": idx, "updated_at": now_iso()}},
+    )
+    return {"assigned": assigned, "per_agent": per_agent}
 
 
 # ============ team members ============

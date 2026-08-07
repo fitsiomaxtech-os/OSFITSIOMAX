@@ -9,13 +9,13 @@ import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import {
   mkGetDistribution, mkPatchDistribution, mkRefreshDistribution,
+  mkUnassignedCount, mkDistributeUnassigned,
   mkGetTeam, mkCreateTeamMember, mkAllLeads, mkAssignLead, mkDeleteLead, mkBulkDelete,
   mkGetSources, mkCreateSource, mkUpdateSource, mkDeleteSource, mkSyncSource,
   gsStatus, gsAuthUrl, gsDisconnect, gsVerifySecret, gsPull,
 } from "@/lib/api";
 import { MaskedContact } from "@/components/MaskedContact";
 import { SourcePill } from "@/components/marketing/SourcePill";
-import { TeamCard } from "@/components/marketing/TeamCard";
 
 const SUB_TABS = [
   { key: "all_leads", label: "All Leads", icon: Layers },
@@ -827,9 +827,17 @@ const TeamTab = ({ team, reloadTeam, branches }) => {
   const [settings, setSettings] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({ full_name: "", email: "", password: "", team_type: "pre_sales", branch_id: "" });
+  const [unassigned, setUnassigned] = useState(0);
+  const [distributing, setDistributing] = useState(false);
 
   const loadSettings = useCallback(() => mkGetDistribution().then(setSettings).catch((e) => console.warn("[load failed]", e?.message || e)), []);
   useEffect(() => { loadSettings(); }, [loadSettings]);
+
+  const loadUnassigned = useCallback(
+    () => mkUnassignedCount().then((r) => setUnassigned(r?.count || 0)).catch(() => setUnassigned(0)),
+    [],
+  );
+  useEffect(() => { loadUnassigned(); }, [loadUnassigned]);
 
   const patch = async (updates) => {
     const next = await mkPatchDistribution(updates);
@@ -841,6 +849,24 @@ const TeamTab = ({ team, reloadTeam, branches }) => {
     setSettings(next);
     toast.success("Teams refreshed");
     reloadTeam();
+  };
+
+  // Assigning a few thousand leads is not something to do by mis-click, and there is no
+  // undo — the previous owner of each lead was nobody, so there is nothing to restore to.
+  const distribute = async () => {
+    if (!window.confirm(
+      `Assign ${unassigned.toLocaleString("en-IN")} unassigned leads across the Pre-Sales team?\n\n`
+      + "Leads that already have an agent are left alone. This cannot be undone."
+    )) return;
+    setDistributing(true);
+    try {
+      const res = await mkDistributeUnassigned();
+      toast.success(`${(res.assigned || 0).toLocaleString("en-IN")} leads assigned`);
+      await Promise.all([loadUnassigned(), reloadTeam()]);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not distribute the leads");
+    }
+    setDistributing(false);
   };
 
   const submit = async () => {
@@ -878,27 +904,34 @@ const TeamTab = ({ team, reloadTeam, branches }) => {
             <label className="inline-flex items-center gap-1 text-xs"><input type="radio" checked={settings.distribution_type === "round_robin"} onChange={() => patch({ distribution_type: "round_robin" })} data-testid="mk-dist-round-robin" />Round Robin</label>
             <label className="inline-flex items-center gap-1 text-xs"><input type="radio" checked={settings.distribution_type === "manual"} onChange={() => patch({ distribution_type: "manual" })} data-testid="mk-dist-manual" />Manual Only</label>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="outline" onClick={refresh} data-testid="mk-dist-refresh"><RefreshCw className="mr-1 h-4 w-4" />Refresh Team from Users</Button>
             <Button size="sm" onClick={() => setShowAdd(true)} data-testid="mk-add-team-btn"><Plus className="mr-1 h-4 w-4" />Add Team Member</Button>
           </div>
+
+          {/* Round-robin only ever runs at the moment a lead arrives from a source sync,
+              and only if distribution was already on with a team set. Everything that
+              predates that has no agent and no way to get one — which is what makes every
+              per-agent figure read zero. This is the only thing that can assign them
+              after the fact. */}
+          {unassigned > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3" data-testid="mk-unassigned-banner">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-amber-800">
+                  {unassigned.toLocaleString("en-IN")} leads have no Pre-Sales agent
+                </p>
+                <p className="text-xs text-amber-700">
+                  They arrived before auto-distribute was on, so nothing counts them against anyone. Leads that already have an agent are left alone.
+                </p>
+              </div>
+              <Button size="sm" onClick={distribute} disabled={distributing} className="shrink-0 bg-amber-600 text-white hover:bg-amber-700" data-testid="mk-distribute-unassigned">
+                <ArrowRightLeft className="mr-1 h-4 w-4" />
+                {distributing ? "Distributing..." : "Distribute Them"}
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        <TeamCard
-          title="Pre-Sales Team"
-          subtitle="Lead qualification and appointment booking"
-          members={team.pre_sales || []}
-          kind="pre_sales"
-        />
-        <TeamCard
-          title="Sales Team (Post-Sales)"
-          subtitle="Deal closure and conversion"
-          members={team.sales || []}
-          kind="sales"
-        />
-      </div>
 
       {showAdd && (
         <DialogShell title="Add Team Member" onClose={() => setShowAdd(false)} testid="mk-add-team-dialog">
@@ -922,9 +955,10 @@ const TeamTab = ({ team, reloadTeam, branches }) => {
   );
 };
 
-// TeamCard now lives in its own file — the Super Admin Dashboard shows the same two
-// panels as tabs, and one component keeps the two screens from drifting into reporting
-// the same person differently.
+// The Pre-Sales Team and Sales Team panels are gone from here. The Super Admin Dashboard
+// carries them as its own tabs now, and two screens showing the same figures is one
+// screen too many — this tab is for configuring distribution, not reading it back.
+// TeamCard itself lives in components/marketing/TeamCard.jsx.
 
 // ============ Dialog shell ============
 
