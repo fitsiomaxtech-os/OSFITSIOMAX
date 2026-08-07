@@ -33,10 +33,11 @@ import {
 } from "@/lib/api";
 import { to12h, slotTo12h } from "@/lib/time";
 
-// Bottom nav (mobile-first): Treatment and Patients keep their old icons; Review
-// takes the slot Calendar used to hold there — Calendar moved to the top-right
-// page button instead, alongside Profile on the top-left.
-const BOTTOM_TABS = [
+// The board's three views, rendered twice: an underlined strip along the top on a
+// desk, a fixed bar at the bottom on a phone. Treatment and Patients keep their old
+// icons; Review takes the slot Calendar used to hold — Calendar moved to the
+// top-right page button instead, alongside Profile on the top-left.
+const VIEW_TABS = [
   { key: "treatment", label: "Treatment", icon: ClipboardList },
   { key: "review", label: "Review", icon: ClipboardCheck },
   { key: "patients", label: "Patients", icon: Users },
@@ -44,7 +45,7 @@ const BOTTOM_TABS = [
 
 export const PhysioBoard = ({ physioId } = {}) => {
   const [activeTab, setActiveTab] = useState("treatment");
-  // Round badge counts on the bottom nav — every one of them is what's still
+  // Counts shown on both switchers — every one of them is what's still
   // outstanding, so it counts down as the physio works through it rather than
   // holding at a fixed total: Treatment is today's pending sessions/appointments
   // (the date filter defaults to Today already), Review is patients newly due (drops
@@ -57,7 +58,42 @@ export const PhysioBoard = ({ physioId } = {}) => {
   const badgeFor = { treatment: treatmentCount, review: reviewCount, patients: patientsCount };
 
   return (
-    <div className="space-y-3 pb-20" data-testid="physio-board-root">
+    <div className="space-y-3 pb-20 md:pb-0" data-testid="physio-board-root">
+      {/* Desk only — a phone gets the fixed bar at the end of this file. The same
+          underlined strip Branch Admin uses, so moving between boards doesn't mean
+          learning a second way to switch view. The counts come with it rather than
+          being dropped on desktop: an outstanding count is the reason to look at a
+          tab you aren't already on. */}
+      <div className="hidden items-center gap-1 overflow-x-auto border-b border-slate-200 md:flex" data-testid="physio-view-tabs">
+        {VIEW_TABS.map((tab) => {
+          const Icon = tab.icon;
+          const active = activeTab === tab.key;
+          const count = badgeFor[tab.key] || 0;
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => setActiveTab(tab.key)}
+              aria-current={active ? "page" : undefined}
+              className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
+                active ? "border-sky-500 text-sky-700" : "border-transparent text-slate-400 hover:text-slate-600"
+              }`}
+              data-testid={`physio-view-tab-${tab.key}`}
+            >
+              <Icon className="h-4 w-4" /> {tab.label}
+              {count > 0 && (
+                <span
+                  className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ${active ? "bg-sky-100 text-sky-700" : "bg-slate-100 text-slate-500"}`}
+                  data-testid={`physio-view-tab-badge-${tab.key}`}
+                >
+                  {count > 99 ? "99+" : count}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
       <div style={{ display: activeTab === "treatment" ? "block" : "none" }}>
         <TreatmentTab physioId={physioId} onCountChange={setTreatmentCount} />
       </div>
@@ -68,9 +104,11 @@ export const PhysioBoard = ({ physioId } = {}) => {
         <PatientsTab physioId={physioId} onCountChange={setPatientsCount} />
       </div>
 
-      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white" data-testid="physio-bottom-nav">
+      {/* Phones only. It used to render at every width, so a desk got a bar pinned
+          across the bottom of the window for a switcher that belongs at the top. */}
+      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white pb-[env(safe-area-inset-bottom)] md:hidden" data-testid="physio-bottom-nav">
         <div className="mx-auto flex max-w-lg items-stretch justify-around">
-          {BOTTOM_TABS.map((tab) => {
+          {VIEW_TABS.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.key;
             const count = badgeFor[tab.key] || 0;
