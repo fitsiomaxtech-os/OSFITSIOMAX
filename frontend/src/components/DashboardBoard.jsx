@@ -170,29 +170,37 @@ export const DashboardBoard = () => {
                 <CardContent className="p-4">
                   <p className="text-xs font-semibold uppercase tracking-wider text-amber-700">Total Spot Joining Revenue</p>
                   <p className="mt-1 text-3xl font-bold text-amber-700">{fmtValue("revenue", activeData.spot_joining)}</p>
-                  <p className="mt-1 text-[11px] text-slate-400">Joined the same day as their consultation · part of Session</p>
                 </CardContent>
               </Card>
             </div>
           )}
 
+          {/* One row, always — branches read as a comparison, and 2x2 made the two on
+              the bottom row look like a second, lesser group. Columns counted off the
+              data rather than hardcoded, so opening a fifth branch re-divides the row
+              instead of dropping one underneath. On a phone the row scrolls sideways
+              rather than wrapping, which is the same thing by another name. */}
           <div>
             <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Physiotherapy Branches</p>
-            <div className="grid grid-cols-2 gap-3">
-              {activeData.physio_branches.map((b) => (
-                <Card key={b.branch_id} data-testid={`dashboard-physio-${b.branch_id}`}>
-                  <CardContent className="p-4">
-                    <p className="truncate text-sm font-semibold text-slate-700">{b.branch_name}</p>
-                    <p className="mt-1 text-2xl font-bold text-sky-600">{fmtValue(activeTab, b.value)}</p>
-                  </CardContent>
-                </Card>
-              ))}
-              {activeData.physio_branches.length === 0 && (
-                <p className="col-span-2 rounded-xl border border-dashed border-slate-200 py-6 text-center text-sm text-slate-400">
-                  No Physiotherapy branches yet.
-                </p>
-              )}
-            </div>
+            {activeData.physio_branches.length === 0 ? (
+              <p className="rounded-xl border border-dashed border-slate-200 py-6 text-center text-sm text-slate-400">
+                No Physiotherapy branches yet.
+              </p>
+            ) : (
+              <div
+                className="-mx-1 flex gap-3 overflow-x-auto px-1 pb-1 sm:mx-0 sm:grid sm:overflow-visible sm:px-0 sm:pb-0"
+                style={{ gridTemplateColumns: `repeat(${activeData.physio_branches.length}, minmax(0, 1fr))` }}
+              >
+                {activeData.physio_branches.map((b) => (
+                  <Card key={b.branch_id} className="min-w-[9rem] shrink-0 sm:min-w-0" data-testid={`dashboard-physio-${b.branch_id}`}>
+                    <CardContent className="p-4">
+                      <p className="truncate text-sm font-semibold text-slate-700">{b.branch_name}</p>
+                      <p className="mt-1 truncate text-2xl font-bold text-sky-600">{fmtValue(activeTab, b.value)}</p>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
           </div>
 
           <div>
