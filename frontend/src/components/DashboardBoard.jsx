@@ -1,16 +1,29 @@
 import { useEffect, useState } from "react";
-import { Users, CalendarCheck, Activity, IndianRupee, X } from "lucide-react";
+import { Users, CalendarCheck, Activity, IndianRupee, X, Target } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { toast } from "@/components/ui/sonner";
-import { getDashboardOverview, getDashboardBranchBreakdown } from "@/lib/api";
+import { getDashboardOverview, getDashboardBranchBreakdown, mkGetTeam } from "@/lib/api";
+import { TeamCard } from "@/components/marketing/TeamCard";
 
+// The first four read the same branch/vertical payload; the two team tabs are a different
+// shape entirely — people rather than branches — and come from their own endpoint. They
+// sit between Leads and Appointments because that is the order the work happens in: a
+// lead arrives, Pre-Sales qualifies it, Sales closes it, and only then is there an
+// appointment to count.
 const DASH_TABS = [
   { key: "leads", label: "Leads", icon: Users },
+  { key: "pre_sales_team", label: "Pre-Sales Team", icon: Users, team: "pre_sales" },
+  { key: "sales_team", label: "Sales Team", icon: Target, team: "sales" },
   { key: "appointments", label: "Appointments", icon: CalendarCheck },
   { key: "treatments", label: "Treatments", icon: Activity },
   { key: "revenue", label: "Revenue", icon: IndianRupee },
 ];
+
+const TEAM_PANELS = {
+  pre_sales: { title: "Pre-Sales Team", subtitle: "Lead qualification and appointment booking" },
+  sales: { title: "Sales Team (Post-Sales)", subtitle: "Deal closure and conversion" },
+};
 
 const startOfDay = (d) => { const n = new Date(d); n.setHours(0, 0, 0, 0); return n; };
 const endOfDay = (d) => { const n = new Date(d); n.setHours(23, 59, 59, 999); return n; };
@@ -54,15 +67,18 @@ const defaultFilter = () => presetFilter(DASH_PRESETS[0]);
 
 const fmtValue = (tabKey, value) => (tabKey === "revenue" ? `₹${(value || 0).toLocaleString("en-IN")}` : value);
 
-// Super Admin's new default landing page — Leads / Appointments / Treatments / Revenue,
-// each scoped to a date range and split into the Physiotherapy branches (2x2) plus one
-// card per other vertical (Offline Fitness, Online Physiotherapy, Online Fitness).
+// Super Admin's default landing page — Leads / Appointments / Treatments / Revenue split
+// per Physiotherapy branch, plus the two sales-team tabs, each scoped to a date range.
 export const DashboardBoard = () => {
   const [dateFilter, setDateFilter] = useState(defaultFilter);
   const [activeTab, setActiveTab] = useState("leads");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [drillBranch, setDrillBranch] = useState(null); // the branch card being opened
+  const [team, setTeam] = useState(null);
+  const [teamLoading, setTeamLoading] = useState(false);
+
+  const activeTeam = DASH_TABS.find((t) => t.key === activeTab)?.team || null;
 
   useEffect(() => {
     setLoading(true);
@@ -75,6 +91,19 @@ export const DashboardBoard = () => {
       .catch(() => toast.error("Failed to load dashboard"))
       .finally(() => setLoading(false));
   }, [dateFilter]);
+
+  // Fetched once, on the first visit to either team tab, and not refetched when the date
+  // range changes — /marketing/team-members counts a person's whole book and takes no
+  // dates. Refetching on every range change would burn a request to return the same
+  // numbers, and would imply the figures answer to the filter when they don't.
+  useEffect(() => {
+    if (!activeTeam || team || teamLoading) return;
+    setTeamLoading(true);
+    mkGetTeam()
+      .then(setTeam)
+      .catch(() => { toast.error("Failed to load the team"); setTeam({ pre_sales: [], sales: [] }); })
+      .finally(() => setTeamLoading(false));
+  }, [activeTeam, team, teamLoading]);
 
   const activeData = data?.[activeTab];
 
@@ -134,7 +163,18 @@ export const DashboardBoard = () => {
         })}
       </div>
 
-      {loading || !activeData ? (
+      {activeTeam ? (
+        teamLoading || !team ? (
+          <p className="py-16 text-center text-sm text-slate-400">{teamLoading ? "Loading..." : "No data."}</p>
+        ) : (
+          <TeamCard
+            title={TEAM_PANELS[activeTeam].title}
+            subtitle={TEAM_PANELS[activeTeam].subtitle}
+            members={team[activeTeam] || []}
+            kind={activeTeam}
+          />
+        )
+      ) : loading || !activeData ? (
         <p className="py-16 text-center text-sm text-slate-400">{loading ? "Loading..." : "No data."}</p>
       ) : (
         <div className="space-y-4">
