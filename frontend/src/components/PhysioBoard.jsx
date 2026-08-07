@@ -18,7 +18,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
-import { StageTab } from "@/components/ui/stage-tab";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import {
   physioConsultations,
@@ -514,11 +513,11 @@ function TreatmentTab({ physioId, onCountChange }) {
 // them through — so Total counted five patients while the tabs between them showed one,
 // which read as the review flow being broken when it was working correctly.
 const REVIEW_TABS = [
-  { key: "not_due", label: "Not Due", color: "#64748b" },
-  { key: "new_review", label: "New Review", color: "#f59e0b" },
-  { key: "requests", label: "Requests", color: "#0ea5e9" },
-  { key: "assigned", label: "Assigned", color: "#a855f7" },
-  { key: "completed", label: "Completed", color: "#22c55e" },
+  { key: "not_due", label: "Not Due", icon: Clock },
+  { key: "new_review", label: "New Review", icon: ClipboardCheck },
+  { key: "requests", label: "Requests", icon: Send },
+  { key: "assigned", label: "Assigned", icon: Users },
+  { key: "completed", label: "Completed", icon: CheckCircle2 },
 ];
 
 const ordinal = (n) => {
@@ -691,21 +690,22 @@ function ReviewTab({ physioId, onCountChange }) {
       </div>
 
       {/* New Review / Requests / Assigned / Completed — same hand-off the patient
-          actually moves through, one bucket at a time; New Review is the default. */}
-      <div className="mb-3 -mx-1 rounded-xl border border-slate-200 bg-white/95 p-1 shadow-sm" data-testid="physio-review-buckets">
-        <div className="flex flex-nowrap gap-1 overflow-x-auto sm:overflow-visible">
-          {REVIEW_TABS.map((t) => (
-            <StageTab
-              key={t.key}
-              label={t.label}
-              count={counts[t.key]}
-              active={bucket === t.key}
-              onClick={() => setBucket(t.key)}
-              color={t.color}
-              testid={`physio-review-bucket-${t.key}`}
-            />
-          ))}
-        </div>
+          actually moves through, one bucket at a time; New Review is the default.
+          The same tile the Treatment summary uses, so both tabs of this board filter
+          through one control rather than two that happen to sit on the same screen.
+          Three across on a phone; all five from sm up. */}
+      <div className="mb-3 grid grid-cols-3 gap-2 sm:grid-cols-5 sm:gap-3" data-testid="physio-review-buckets">
+        {REVIEW_TABS.map((t) => (
+          <StatTile
+            key={t.key}
+            icon={t.icon}
+            label={t.label}
+            value={counts[t.key]}
+            active={bucket === t.key}
+            onClick={() => setBucket(t.key)}
+            testid={`physio-review-bucket-${t.key}`}
+          />
+        ))}
       </div>
 
       {visible.length === 0 && !loading ? (
