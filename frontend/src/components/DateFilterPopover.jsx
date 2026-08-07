@@ -62,7 +62,7 @@ const manualToIso = (text) => {
   return real ? iso : "";
 };
 
-export const DateFilterPopover = ({ value, onChange, testid = "date-filter", centered = false }) => {
+export const DateFilterPopover = ({ value, onChange, testid = "date-filter", centered = false, placeholder = "Date Filter" }) => {
   const [open, setOpen] = useState(false);
   const [showRange, setShowRange] = useState(false);
   const [rangeFrom, setRangeFrom] = useState("");
@@ -122,7 +122,10 @@ export const DateFilterPopover = ({ value, onChange, testid = "date-filter", cen
 
   const clear = () => { onChange(null); setShowRange(false); setOpen(false); };
 
-  const activeLabel = value?.label || "Date Filter";
+  // What the trigger reads when nothing is set. Defaulted, so the boards that call this
+  // the plain way are unaffected; the Dashboard overrides it to "Custom" because there it
+  // sits at the end of a row of preset buttons that already cover the common ranges.
+  const activeLabel = value?.label || placeholder;
   const isActive = !!value;
 
   // `centered` swaps the anchored popover for a normal centred dialog in the OS's milk

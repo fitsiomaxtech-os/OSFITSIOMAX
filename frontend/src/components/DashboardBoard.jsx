@@ -16,14 +16,41 @@ const startOfDay = (d) => { const n = new Date(d); n.setHours(0, 0, 0, 0); retur
 const endOfDay = (d) => { const n = new Date(d); n.setHours(23, 59, 59, 999); return n; };
 const toIso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
-// The Dashboard always reports over some range — the overview endpoint takes a start and
-// an end, and there is no "all time" to fall back to. So the shared filter's cleared
-// state (null) resolves back to Today rather than leaving the board with no range and
-// the cards reading from whatever was last fetched.
-const todayFilter = () => {
-  const t = new Date();
-  return { key: "today", label: "Today", from: startOfDay(t), to: endOfDay(t) };
+// A real Monday→Sunday calendar week, not a rolling last-7-days window.
+const mondayOf = (d) => {
+  const n = startOfDay(d);
+  const day = n.getDay(); // 0 = Sun .. 6 = Sat
+  n.setDate(n.getDate() + (day === 0 ? -6 : 1 - day));
+  return n;
 };
+const sundayOf = (d) => { const m = mondayOf(d); const n = new Date(m); n.setDate(n.getDate() + 6); return n; };
+const daysBack = (d, n) => { const x = startOfDay(d); x.setDate(x.getDate() - n); return x; };
+
+// One-tap ranges, widest first, then the day, the week, the month and the quarter.
+// Anything else is a Custom Range away.
+//
+// All carries no dates at all — the overview endpoint treats a missing start and end as
+// unfiltered rather than needing some sentinel "since the beginning" date, so All is the
+// absence of a range rather than a very wide one.
+//
+// Last 90 Days counts today as one of the ninety, so it runs today-89 → today. The
+// alternative — ninety whole days ending yesterday — makes the figure exclude the
+// morning's takings, which is the one thing a Super Admin opening this board is
+// most likely to be checking.
+const DASH_PRESETS = [
+  { key: "all", label: "All", range: () => ({ from: null, to: null }) },
+  { key: "today", label: "Today", range: () => ({ from: startOfDay(new Date()), to: endOfDay(new Date()) }) },
+  { key: "this_week", label: "This Week", range: () => ({ from: mondayOf(new Date()), to: endOfDay(sundayOf(new Date())) }) },
+  { key: "this_month", label: "This Month", range: () => { const t = new Date(); return { from: startOfDay(new Date(t.getFullYear(), t.getMonth(), 1)), to: endOfDay(new Date(t.getFullYear(), t.getMonth() + 1, 0)) }; } },
+  { key: "last_90", label: "Last 90 Days", range: () => ({ from: daysBack(new Date(), 89), to: endOfDay(new Date()) }) },
+];
+
+const presetFilter = (p) => ({ key: p.key, label: p.label, ...p.range() });
+
+// What the board opens on, and where clearing the Custom filter lands: All. The shared
+// filter's cleared state is null, which this board can't hold — every card reads from
+// `dateFilter` — so it resolves to the preset that means the same thing.
+const defaultFilter = () => presetFilter(DASH_PRESETS[0]);
 
 const fmtValue = (tabKey, value) => (tabKey === "revenue" ? `₹${(value || 0).toLocaleString("en-IN")}` : value);
 
@@ -31,14 +58,18 @@ const fmtValue = (tabKey, value) => (tabKey === "revenue" ? `₹${(value || 0).t
 // each scoped to a date range and split into the Physiotherapy branches (2x2) plus one
 // card per other vertical (Offline Fitness, Online Physiotherapy, Online Fitness).
 export const DashboardBoard = () => {
-  const [dateFilter, setDateFilter] = useState(todayFilter);
+  const [dateFilter, setDateFilter] = useState(defaultFilter);
   const [activeTab, setActiveTab] = useState("leads");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     setLoading(true);
-    getDashboardOverview({ start_date: toIso(dateFilter.from), end_date: toIso(dateFilter.to) })
+    // No dates on All — the endpoint reads that as unfiltered.
+    const params = dateFilter.from && dateFilter.to
+      ? { start_date: toIso(dateFilter.from), end_date: toIso(dateFilter.to) }
+      : {};
+    getDashboardOverview(params)
       .then(setData)
       .catch(() => toast.error("Failed to load dashboard"))
       .finally(() => setLoading(false));
@@ -53,16 +84,33 @@ export const DashboardBoard = () => {
         <p className="text-sm text-slate-500">Leads, appointments, treatments and revenue across every branch and vertical.</p>
       </div>
 
-      {/* The same Date Filter every other board carries, rather than this board's own
-          preset buttons plus a raw react-day-picker popup — the one calendar in the OS
-          that still looked like the library's default. Its presets differ slightly from
-          the buttons they replace: Today and This Month carry over, Week (Mon-Sun) has
-          no equivalent and is picked through Custom Range instead. */}
+      {/* Five one-tap ranges, then Custom for everything else — the OS's shared date
+          filter, which also carries Yesterday, Last Month and an exact day.
+
+          Custom only shows a label when the range came from inside it. Picking Today or
+          This Month in there sets the same key a button owns, so the button lights up
+          and Custom goes back to reading "Custom" rather than the two of them naming the
+          same range side by side. */}
       <div className="flex flex-wrap items-center gap-2" data-testid="dashboard-date-filter">
+        {DASH_PRESETS.map((p) => {
+          const active = dateFilter.key === p.key;
+          return (
+            <button
+              key={p.key}
+              type="button"
+              onClick={() => setDateFilter(presetFilter(p))}
+              className={`h-10 rounded-md px-3 text-sm font-medium transition ${active ? "bg-sky-600 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}
+              data-testid={`dashboard-preset-${p.key}`}
+            >
+              {p.label}
+            </button>
+          );
+        })}
         <DateFilterPopover
-          value={dateFilter}
-          onChange={(next) => setDateFilter(next || todayFilter())}
+          value={DASH_PRESETS.some((p) => p.key === dateFilter.key) ? null : dateFilter}
+          onChange={(next) => setDateFilter(next || defaultFilter())}
           testid="dashboard-date-filter-popover"
+          placeholder="Custom"
           centered
         />
       </div>
