@@ -226,23 +226,33 @@ async def get_team_members(_: V3UserOut = Depends(v3_require_roles("super_admin"
     pre = await v3_col("users").find({"role": "pre_sales", "is_active": True}, {"_id": 0, "password": 0}).to_list(500)
     sales = await v3_col("users").find({"role": "branch_admin", "is_active": True}, {"_id": 0, "password": 0}).to_list(500)
 
-    async def enrich(users: List[Dict[str, Any]], tier: str) -> List[Dict[str, Any]]:
+    branch_docs = await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1}).to_list(500)
+    branch_names = {b["id"]: b.get("branch_name", "") for b in branch_docs}
+
+    async def enrich_pre_sales(users: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """A Pre-Sales agent owns leads by assignment, so every figure keys off
+        assigned_user_id."""
         out = []
         for u in users:
-            lead_filter = {"assigned_user_id": u["id"]}
-            if tier == "sales":
-                lead_filter = {"assigned_user_id": u["id"], "stage": "Appointment"}
-            else:
-                lead_filter = {"assigned_user_id": u["id"], "stage": {"$in": ["New Leads", "Follow Up"]}}
-            current_leads = await v3_col("leads").count_documents(lead_filter)
+            current_leads = await v3_col("leads").count_documents(
+                {"assigned_user_id": u["id"], "stage": {"$in": ["New Leads", "Follow Up"]}}
+            )
             total_assigned = await v3_col("leads").count_documents({"assigned_user_id": u["id"]})
-            closed = await v3_col("leads").count_documents({"assigned_user_id": u["id"], "branch_stage": "Assigned Physio"})
+            # Converted means the lead reached a physio. Read off assigned_physio_id
+            # rather than a stage name: stages are renamed from Pipeline Stage
+            # Management, and this used to test branch_stage == "Assigned Physio",
+            # which is not a stage any pipeline has — so it counted zero for everyone,
+            # forever, and looked like nobody had ever converted anything.
+            closed = await v3_col("leads").count_documents(
+                {"assigned_user_id": u["id"], "assigned_physio_id": {"$nin": [None, ""]}}
+            )
             conv = (closed / total_assigned * 100.0) if total_assigned else 0.0
             out.append({
                 "id": u["id"],
                 "full_name": u.get("full_name", ""),
                 "email": u.get("email", ""),
                 "branch_id": u.get("branch_id"),
+                "branch_name": branch_names.get(u.get("branch_id"), ""),
                 "current_leads": current_leads,
                 "deals_closed": closed,
                 "total_assigned": total_assigned,
@@ -250,9 +260,51 @@ async def get_team_members(_: V3UserOut = Depends(v3_require_roles("super_admin"
             })
         return out
 
+    async def enrich_branch(users: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """A Branch Admin owns work by *branch*, not by assignment — nothing sets
+        assigned_user_id to a Branch Admin, which is why every one of these read zero.
+
+        Appointments and Deals Closed are deliberately measured over the same
+        population: the patients booked in to this branch. Counting closures branch-wide
+        while counting appointments per booking would let the rate exceed 100% whenever a
+        patient reached a physio without a consultation appointment on record.
+        """
+        out = []
+        for u in users:
+            bid = u.get("branch_id")
+            if not bid:
+                out.append({
+                    "id": u["id"], "full_name": u.get("full_name", ""), "email": u.get("email", ""),
+                    "branch_id": None, "branch_name": "", "current_leads": 0,
+                    "deals_closed": 0, "total_assigned": 0, "conversion_rate": 0.0,
+                })
+                continue
+            appt_lead_ids = await v3_col("appointments").distinct(
+                "lead_id", {"branch_id": bid, "appt_kind": "consultation"}
+            )
+            appt_lead_ids = [i for i in appt_lead_ids if i]
+            appointments = len(appt_lead_ids)
+            closed = await v3_col("leads").count_documents(
+                {"id": {"$in": appt_lead_ids}, "assigned_physio_id": {"$nin": [None, ""]}}
+            ) if appt_lead_ids else 0
+            total_leads = await v3_col("leads").count_documents({"branch_id": bid})
+            rate = (closed / appointments * 100.0) if appointments else 0.0
+            out.append({
+                "id": u["id"],
+                "full_name": u.get("full_name", ""),
+                "email": u.get("email", ""),
+                "branch_id": bid,
+                "branch_name": branch_names.get(bid, ""),
+                "current_leads": appointments,
+                "deals_closed": closed,
+                "total_assigned": total_leads,
+                "conversion_rate": round(rate, 1),
+            })
+        return out
+
     return {
-        "pre_sales": await enrich(pre, "pre_sales"),
-        "sales": await enrich(sales, "sales"),
+        "pre_sales": await enrich_pre_sales(pre),
+        "sales": await enrich_branch(sales),
     }
 
 

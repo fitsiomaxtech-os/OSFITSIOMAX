@@ -1,4 +1,4 @@
-import { Users, Target } from "lucide-react";
+import { Users, Target, Building2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 /**
@@ -38,6 +38,22 @@ export const TEAM_TIERS = {
       { key: "conversion_rate", label: "Close Rate", tone: "text-violet-600", suffix: "%" },
     ],
   },
+  // Same rows, same numbers — but the Dashboard names this tab Branch, because each of
+  // these accounts *is* a branch. So the row leads with the branch it stands for and
+  // carries the branch's whole lead count as a fourth tile: on this reading the
+  // question is how a branch is doing, not how one login is.
+  branch: {
+    icon: Building2,
+    accent: "text-emerald-600",
+    avatar: "bg-emerald-500",
+    subline: "branch_name",
+    tiles: [
+      { key: "total_assigned", label: "Leads", tone: "text-sky-600" },
+      { key: "current_leads", label: "Appointments", tone: "text-emerald-600" },
+      { key: "deals_closed", label: "Converted", tone: "text-emerald-600" },
+      { key: "conversion_rate", label: "Close Rate", tone: "text-violet-600", suffix: "%" },
+    ],
+  },
 };
 
 export const TeamCard = ({ title, subtitle, members, kind }) => {
@@ -58,14 +74,18 @@ export const TeamCard = ({ title, subtitle, members, kind }) => {
           <div key={m.id} className="rounded-xl border border-slate-200 bg-slate-50/60 p-3" data-testid={`mk-team-row-${m.id}`}>
             <div className="flex items-center gap-3">
               <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-base font-bold text-white ${tier.avatar}`}>
-                {(m.full_name || "?").trim().charAt(0).toUpperCase()}
+                {(((tier.subline && m[tier.subline]) || m.full_name) || "?").trim().charAt(0).toUpperCase()}
               </span>
               <div className="min-w-0">
-                <p className="truncate text-base font-bold text-slate-800">{m.full_name}</p>
-                <p className="truncate text-xs text-slate-500">{m.email}</p>
+                <p className="truncate text-base font-bold text-slate-800">
+                  {(tier.subline && m[tier.subline]) || m.full_name}
+                </p>
+                <p className="truncate text-xs text-slate-500">
+                  {tier.subline && m[tier.subline] ? m.full_name : m.email}
+                </p>
               </div>
             </div>
-            <div className="mt-3 grid grid-cols-3 gap-2">
+            <div className={`mt-3 grid gap-2 ${tier.tiles.length > 3 ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-3"}`}>
               {tier.tiles.map((t) => (
                 <div key={t.key} className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-center" data-testid={`mk-team-tile-${m.id}-${t.key}`}>
                   <p className={`truncate text-xl font-bold ${t.tone}`}>{m[t.key] ?? 0}{t.suffix || ""}</p>

@@ -1,20 +1,23 @@
 import { useEffect, useState } from "react";
-import { Users, CalendarCheck, Activity, IndianRupee, X, Target } from "lucide-react";
+import { Users, CalendarCheck, Activity, IndianRupee, X, Building2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { toast } from "@/components/ui/sonner";
 import { getDashboardOverview, getDashboardBranchBreakdown, mkGetTeam } from "@/lib/api";
 import { TeamCard } from "@/components/marketing/TeamCard";
 
-// The first four read the same branch/vertical payload; the two team tabs are a different
-// shape entirely — people rather than branches — and come from their own endpoint. They
-// sit between Leads and Appointments because that is the order the work happens in: a
-// lead arrives, Pre-Sales qualifies it, Sales closes it, and only then is there an
-// appointment to count.
+// The four count tabs read the same branch/vertical payload; the two people tabs are a
+// different shape entirely and come from their own endpoint. They sit between Leads and
+// Appointments because that is the order the work happens in: a lead arrives, Pre-Sales
+// qualifies it, the branch converts it, and only then is there an appointment to count.
+//
+// `panel` names which TeamCard tier to render, and is not the same as the API key the
+// rows come back under — Branch reads the endpoint's `sales` list but presents it as
+// branches, which is what those accounts actually are.
 const DASH_TABS = [
   { key: "leads", label: "Leads", icon: Users },
-  { key: "pre_sales_team", label: "Pre-Sales Team", icon: Users, team: "pre_sales" },
-  { key: "sales_team", label: "Sales Team", icon: Target, team: "sales" },
+  { key: "pre_sales_team", label: "Pre-Sales Team", icon: Users, team: "pre_sales", panel: "pre_sales" },
+  { key: "branch", label: "Branch", icon: Building2, team: "sales", panel: "branch" },
   { key: "appointments", label: "Appointments", icon: CalendarCheck },
   { key: "treatments", label: "Treatments", icon: Activity },
   { key: "revenue", label: "Revenue", icon: IndianRupee },
@@ -22,7 +25,7 @@ const DASH_TABS = [
 
 const TEAM_PANELS = {
   pre_sales: { title: "Pre-Sales Team", subtitle: "Lead qualification and appointment booking" },
-  sales: { title: "Sales Team (Post-Sales)", subtitle: "Deal closure and conversion" },
+  branch: { title: "Branch", subtitle: "Consultations booked in, and how many reached a physio" },
 };
 
 const startOfDay = (d) => { const n = new Date(d); n.setHours(0, 0, 0, 0); return n; };
@@ -78,7 +81,9 @@ export const DashboardBoard = () => {
   const [team, setTeam] = useState(null);
   const [teamLoading, setTeamLoading] = useState(false);
 
-  const activeTeam = DASH_TABS.find((t) => t.key === activeTab)?.team || null;
+  const activeTabDef = DASH_TABS.find((t) => t.key === activeTab);
+  const activeTeam = activeTabDef?.team || null;   // which list on the payload
+  const activePanel = activeTabDef?.panel || null; // which tier to render it as
 
   useEffect(() => {
     setLoading(true);
@@ -168,10 +173,10 @@ export const DashboardBoard = () => {
           <p className="py-16 text-center text-sm text-slate-400">{teamLoading ? "Loading..." : "No data."}</p>
         ) : (
           <TeamCard
-            title={TEAM_PANELS[activeTeam].title}
-            subtitle={TEAM_PANELS[activeTeam].subtitle}
+            title={TEAM_PANELS[activePanel].title}
+            subtitle={TEAM_PANELS[activePanel].subtitle}
             members={team[activeTeam] || []}
-            kind={activeTeam}
+            kind={activePanel}
           />
         )
       ) : loading || !activeData ? (
