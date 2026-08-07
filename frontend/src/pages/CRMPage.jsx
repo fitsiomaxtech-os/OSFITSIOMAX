@@ -5,7 +5,6 @@ import {
   Briefcase,
   Building2,
   CalendarDays,
-  Database,
   Headphones,
   LayoutDashboard,
   LogOut,
@@ -61,7 +60,6 @@ import { HeadPhysioBoard, HeadPhysioCalendarModal } from "@/components/HeadPhysi
 import { PhysioBoard, CalendarPage as PhysioCalendarPage } from "@/components/PhysioBoard";
 import { MarketingBoard } from "@/components/marketing/MarketingBoard";
 import { PreSalesCRM } from "@/components/PreSalesCRM";
-import { MasterControlBoard } from "@/components/MasterControlBoard";
 import { DashboardBoard } from "@/components/DashboardBoard";
 import { PipelineStageManagement } from "@/components/PipelineStageManagement";
 import { HRBoard } from "@/components/hr/HRBoard";
@@ -99,10 +97,10 @@ const isHumanResourceRole = (role) => {
 // Same 9 destinations as the desktop tab strip below. On a phone, the 5 most-used
 // get a direct bottom-nav slot each; the rest sit behind a "More" popover — both
 // derived from this one array so the two surfaces can't drift out of sync.
-// Dashboard is the default landing view; Master View moved into "More" to make room.
+// Dashboard is the default landing view. Master View was retired from here — the
+// Dashboard now carries the same headline counts, per branch and per date range.
 const SUPER_ADMIN_TABS = [
   { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { key: "master", label: "Master View", icon: Database },
   { key: "marketing", label: "Marketing Source", icon: Megaphone },
   { key: "stages", label: "Rehabilitation Phase", icon: Activity },
   { key: "hr", label: "HR Admin", icon: Users },
@@ -880,13 +878,6 @@ export const CRMPage = ({ auth, onLogout }) => {
           <DashboardBoard />
         )}
 
-        {(showSuperAdminBoard && superAdminView === "master") && (
-          <div className="space-y-4" data-testid="super-admin-master-snapshot">
-            {/* Master Control Board + Live Analytics Overview */}
-            <MasterControlBoard />
-          </div>
-        )}
-
         {showBusinessDevBoard && (
           <BusinessLeadsDashboard />
         )}
@@ -915,10 +906,6 @@ export const CRMPage = ({ auth, onLogout }) => {
             </div>
             <FinanceBoard />
           </div>
-        )}
-
-        {showSuperAdminBoard && superAdminView === "master" && (
-          <div data-testid="doctor-appointments-section" />
         )}
 
         </div>

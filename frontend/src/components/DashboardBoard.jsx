@@ -17,7 +17,7 @@ import { TeamCard } from "@/components/marketing/TeamCard";
 const DASH_TABS = [
   { key: "leads", label: "Leads", icon: Users },
   { key: "pre_sales_team", label: "Pre-Sales Team", icon: Users, team: "pre_sales", panel: "pre_sales" },
-  { key: "branch", label: "Branch", icon: Building2, team: "sales", panel: "branch" },
+  { key: "branch", label: "BRANCHS", icon: Building2, team: "sales", panel: "branch" },
   { key: "appointments", label: "Appointments", icon: CalendarCheck },
   { key: "treatments", label: "Treatments", icon: Activity },
   { key: "revenue", label: "Revenue", icon: IndianRupee },
@@ -277,9 +277,125 @@ export const DashboardBoard = () => {
           </div>
           {/* Other Verticals removed from the board. The endpoint still returns them —
               other callers read the same payload — they just aren't drawn here. */}
+
+          {activeTab === "leads" && <BranchShareDonut branches={activeData.physio_branches} />}
         </div>
       )}
     </div>
+  );
+};
+
+// Categorical slots 1-4, in the fixed validated order. Assigned by the branch's position
+// in the payload — which is stable across requests — and never by rank, so filtering or
+// re-sorting can't repaint a branch someone has already learned the colour of.
+//
+// Validated against the white card surface: lightness band, chroma floor, CVD separation
+// (worst adjacent pair ΔE 9.1 protan) and normal-vision separation (22.9) all pass. Two
+// of the four sit under 3:1 contrast, which obliges visible labels rather than
+// colour-only identity — hence every value printed in the legend beside its swatch.
+const SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"];
+const OTHER_HUE = "#898781";
+
+/**
+ * Share of leads across the Physiotherapy branches.
+ *
+ * The centre total is the sum of the segments, NOT the Dashboard's grand total — that
+ * one also counts the other verticals and anything sitting outside a branch, so printing
+ * it here would put a whole in the middle that its own parts don't add up to.
+ *
+ * Part-to-whole at a glance is the one job a donut is right for, and it holds here
+ * because the shares are far apart. If branch volumes ever converge this should become a
+ * bar chart: a ring can't be read for close values.
+ */
+const BranchShareDonut = ({ branches }) => {
+  const [hover, setHover] = useState(null);
+
+  const rows = (branches || []).map((b, i) => ({
+    ...b,
+    // Past eight the tail folds into one grey "Other" rather than inventing a ninth hue
+    // that nothing could tell from an existing one.
+    color: i < SERIES.length ? SERIES[i] : OTHER_HUE,
+  }));
+  const total = rows.reduce((n, b) => n + (Number(b.value) || 0), 0);
+
+  if (rows.length === 0) return null;
+
+  const R = 70;
+  const C = 2 * Math.PI * R;
+  const GAP = 2; // surface gap, in path units — white doing the separating, not a stroke
+  let offset = 0;
+  const arcs = rows.map((b) => {
+    const len = total ? ((Number(b.value) || 0) / total) * C : 0;
+    const arc = { ...b, len, drawLen: Math.max(len - GAP, 0), offset };
+    offset += len;
+    return arc;
+  });
+
+  const focus = hover !== null ? arcs[hover] : null;
+  const pct = (v) => (total ? Math.round((v / total) * 1000) / 10 : 0);
+
+  return (
+    <Card data-testid="dashboard-branch-share">
+      <CardContent className="flex flex-col items-center gap-6 p-5 sm:flex-row sm:items-center sm:gap-8">
+        <div className="min-w-0 flex-1 order-2 sm:order-1">
+          <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">Leads by branch</p>
+          {/* The legend carries every value in text. That is what discharges the
+              contrast warning on the lighter two hues, and it is why a branch too small
+              to render an arc is still readable. */}
+          <ul className="space-y-1.5">
+            {arcs.map((b, i) => (
+              <li
+                key={b.branch_id}
+                onMouseEnter={() => setHover(i)}
+                onMouseLeave={() => setHover(null)}
+                className={`flex items-center gap-2 rounded-md px-2 py-1 transition ${hover === i ? "bg-slate-100" : ""}`}
+                data-testid={`dashboard-branch-share-legend-${b.branch_id}`}
+              >
+                <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: b.color }} />
+                <span className="min-w-0 flex-1 truncate text-sm text-slate-700">{b.branch_name}</span>
+                <span className="shrink-0 text-sm font-bold text-slate-900">{(Number(b.value) || 0).toLocaleString("en-IN")}</span>
+                <span className="w-12 shrink-0 text-right text-xs tabular-nums text-slate-500">{pct(Number(b.value) || 0)}%</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div className="relative order-1 shrink-0 sm:order-2">
+          <svg width="180" height="180" viewBox="0 0 180 180" role="img" aria-label="Leads by branch">
+            <g transform="rotate(-90 90 90)">
+              {total === 0 ? (
+                <circle cx="90" cy="90" r={R} fill="none" stroke="#e1e0d9" strokeWidth="22" />
+              ) : arcs.map((b, i) => b.drawLen > 0 && (
+                <circle
+                  key={b.branch_id}
+                  cx="90" cy="90" r={R}
+                  fill="none"
+                  stroke={b.color}
+                  strokeWidth={hover === i ? 26 : 22}
+                  strokeDasharray={`${b.drawLen} ${C - b.drawLen}`}
+                  strokeDashoffset={-b.offset}
+                  className="cursor-pointer transition-[stroke-width]"
+                  onMouseEnter={() => setHover(i)}
+                  onMouseLeave={() => setHover(null)}
+                  data-testid={`dashboard-branch-share-arc-${b.branch_id}`}
+                >
+                  <title>{`${b.branch_name}: ${(Number(b.value) || 0).toLocaleString("en-IN")} (${pct(Number(b.value) || 0)}%)`}</title>
+                </circle>
+              ))}
+            </g>
+          </svg>
+          {/* Hovering swaps the centre to that branch. The legend already holds every
+              value, so this enhances rather than gates anything. */}
+          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center px-8 text-center">
+            <p className="max-w-full truncate text-[11px] text-slate-500">{focus ? focus.branch_name : "Branch Leads"}</p>
+            <p className="text-2xl font-bold text-slate-900">
+              {(focus ? Number(focus.value) || 0 : total).toLocaleString("en-IN")}
+            </p>
+            {focus && <p className="text-[11px] text-slate-500">{pct(Number(focus.value) || 0)}%</p>}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   );
 };
 
