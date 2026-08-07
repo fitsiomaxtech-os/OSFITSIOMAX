@@ -192,32 +192,47 @@ export const DashboardBoard = () => {
                 className="-mx-1 flex gap-3 overflow-x-auto px-1 pb-1 sm:mx-0 sm:grid sm:overflow-visible sm:px-0 sm:pb-0"
                 style={{ gridTemplateColumns: `repeat(${activeData.physio_branches.length}, minmax(0, 1fr))` }}
               >
-                {activeData.physio_branches.map((b) => (
-                  <Card
-                    key={b.branch_id}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => setDrillBranch(b)}
-                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDrillBranch(b); } }}
-                    className="min-w-[9rem] shrink-0 cursor-pointer transition hover:border-sky-300 hover:shadow-md sm:min-w-0"
-                    data-testid={`dashboard-physio-${b.branch_id}`}
-                  >
-                    <CardContent className="p-4">
-                      <p className="truncate text-sm font-semibold text-slate-700">{b.branch_name}</p>
-                      <p className="mt-1 truncate text-2xl font-bold text-sky-600">{fmtValue(activeTab, b.value)}</p>
-                    </CardContent>
-                  </Card>
-                ))}
+                {activeData.physio_branches.map((b) => {
+                  const open = drillBranch?.branch_id === b.branch_id;
+                  return (
+                    <Card
+                      key={b.branch_id}
+                      role="button"
+                      aria-expanded={open}
+                      tabIndex={0}
+                      // Clicking the open branch closes it — the card is the toggle, so
+                      // there's no separate control to hunt for.
+                      onClick={() => setDrillBranch(open ? null : b)}
+                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDrillBranch(open ? null : b); } }}
+                      className={`min-w-[9rem] shrink-0 cursor-pointer transition sm:min-w-0 ${
+                        open ? "border-sky-500 bg-sky-50/60 shadow-sm" : "hover:border-sky-300 hover:shadow-md"
+                      }`}
+                      data-testid={`dashboard-physio-${b.branch_id}`}
+                    >
+                      <CardContent className="p-4">
+                        <p className="truncate text-sm font-semibold text-slate-700">{b.branch_name}</p>
+                        <p className="mt-1 truncate text-2xl font-bold text-sky-600">{fmtValue(activeTab, b.value)}</p>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
               </div>
+            )}
+
+            {/* Opens in place, under the row it belongs to, rather than over the board
+                in a modal. A branch's breakdown is something to read against the other
+                branches' numbers, and a dialog hides exactly what you'd compare it to. */}
+            {drillBranch && (
+              <BranchBreakdown
+                branch={drillBranch}
+                dateFilter={dateFilter}
+                onClose={() => setDrillBranch(null)}
+              />
             )}
           </div>
           {/* Other Verticals removed from the board. The endpoint still returns them —
               other callers read the same payload — they just aren't drawn here. */}
         </div>
-      )}
-
-      {drillBranch && (
-        <BranchBreakdownModal branch={drillBranch} dateFilter={dateFilter} onClose={() => setDrillBranch(null)} />
       )}
     </div>
   );
@@ -230,8 +245,11 @@ export const DashboardBoard = () => {
  * actually working a lead already exist under Pre-Sales CRM and Branch Wise, and putting
  * a second editing surface on a reporting board would mean Super Admin edits bypassing
  * the branch's own flow.
+ *
+ * Each column scrolls on its own past a dozen or so people. A branch with thirty physios
+ * would otherwise push the rest of the page out of reach to show one list.
  */
-const BranchBreakdownModal = ({ branch, dateFilter, onClose }) => {
+const BranchBreakdown = ({ branch, dateFilter, onClose }) => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -248,71 +266,55 @@ const BranchBreakdownModal = ({ branch, dateFilter, onClose }) => {
       .finally(() => setLoading(false));
   }, [branch.branch_id, dateFilter]);
 
-  // Esc closes, same as clicking the backdrop — a keyboard user shouldn't have to reach
-  // for the mouse to get out of a read-only panel.
-  useEffect(() => {
-    const onKey = (e) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   return (
-    <div
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/50 p-3 backdrop-blur-sm sm:p-4"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-      data-testid="dashboard-branch-breakdown"
-    >
-      <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
-          <div className="min-w-0">
-            <p className="truncate text-lg font-bold text-slate-900">{branch.branch_name}</p>
-            <p className="text-xs text-slate-500">{dateFilter.label}</p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-            title="Close"
-            aria-label="Close"
-            data-testid="dashboard-branch-breakdown-close"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-4">
-          {loading ? (
-            <p className="py-16 text-center text-sm text-slate-400">Loading...</p>
-          ) : !data ? (
-            <p className="py-16 text-center text-sm text-slate-400">No breakdown available.</p>
-          ) : (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              {data.groups.map((g) => (
-                <div key={g.key} className="rounded-xl border border-slate-200" data-testid={`dashboard-breakdown-${g.key}`}>
-                  <div className="flex items-center justify-between border-b border-slate-100 px-4 py-2.5">
-                    <p className="text-xs font-bold uppercase tracking-wider text-slate-500">{g.label}</p>
-                    <p className="text-lg font-bold text-sky-600">{g.total}</p>
-                  </div>
-                  {g.members.length === 0 ? (
-                    <p className="px-4 py-6 text-center text-xs text-slate-400">No one assigned yet.</p>
-                  ) : (
-                    <ul className="divide-y divide-slate-100">
-                      {g.members.map((m) => (
-                        <li key={m.key} className="flex items-center justify-between gap-3 px-4 py-2">
-                          <span className="min-w-0 truncate text-sm text-slate-700">{m.name}</span>
-                          <span className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-bold ${m.count ? "bg-sky-50 text-sky-700" : "bg-slate-100 text-slate-400"}`}>
-                            {m.count}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+    <div className="mt-3 rounded-xl border border-sky-200 bg-sky-50/40 p-3" data-testid="dashboard-branch-breakdown">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <p className="min-w-0 truncate text-xs font-bold uppercase tracking-wider text-sky-700">
+          {branch.branch_name}
+          <span className="ml-2 font-medium normal-case tracking-normal text-slate-500">{dateFilter.label}</span>
+        </p>
+        <button
+          type="button"
+          onClick={onClose}
+          className="shrink-0 rounded-full p-1.5 text-slate-400 hover:bg-white hover:text-slate-600"
+          title="Close"
+          aria-label="Close breakdown"
+          data-testid="dashboard-branch-breakdown-close"
+        >
+          <X className="h-4 w-4" />
+        </button>
       </div>
+
+      {loading ? (
+        <p className="py-10 text-center text-sm text-slate-400">Loading...</p>
+      ) : !data ? (
+        <p className="py-10 text-center text-sm text-slate-400">No breakdown available.</p>
+      ) : (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {data.groups.map((g) => (
+            <div key={g.key} className="overflow-hidden rounded-xl border border-slate-200 bg-white" data-testid={`dashboard-breakdown-${g.key}`}>
+              <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-3 py-2.5">
+                <p className="min-w-0 text-[11px] font-bold uppercase leading-tight tracking-wider text-slate-500">{g.label}</p>
+                <p className="shrink-0 text-lg font-bold text-sky-600">{g.total}</p>
+              </div>
+              {g.members.length === 0 ? (
+                <p className="px-3 py-6 text-center text-xs text-slate-400">No one assigned yet.</p>
+              ) : (
+                <ul className="max-h-72 divide-y divide-slate-100 overflow-y-auto">
+                  {g.members.map((m) => (
+                    <li key={m.key} className="flex items-center justify-between gap-2 px-3 py-2">
+                      <span className="min-w-0 truncate text-sm text-slate-700">{m.name}</span>
+                      <span className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-bold ${m.count ? "bg-sky-50 text-sky-700" : "bg-slate-100 text-slate-400"}`}>
+                        {m.count}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 };

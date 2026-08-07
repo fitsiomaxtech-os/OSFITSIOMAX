@@ -615,9 +615,16 @@ async def v3_dashboard_branch_breakdown(
         {"branch_id": branch_id}, {"_id": 0, "id": 1, "full_name": 1, "profile_type": 1}
     ).to_list(500)
 
-    def build(roster, rows, key_of, name_of):
+    def build(roster, rows, key_of, name_of, unassigned_as=None):
         """roster seeds the zeros; rows supply the counts. Keyed by id where there is
-        one, otherwise by name — appointments record `created_by` as a name only."""
+        one, otherwise by name — appointments record `created_by` as a name only.
+
+        `unassigned_as` names a bucket for rows carrying nobody. Without it those rows
+        are dropped, which is right for "how many leads has a physio" but wrong for a
+        group whose total is meant to match a branch card: Pre Sales read 0 against a
+        card of 2230 purely because none of those leads had ever been assigned to an
+        agent. Dropped rows make that look like no data; a named bucket makes it look
+        like what it is."""
         counts: dict = {}
         labels: dict = {}
         for r in roster:
@@ -626,11 +633,15 @@ async def v3_dashboard_branch_breakdown(
         total = 0
         for row in rows:
             k = key_of(row)
-            if not k:
+            if k:
+                nm = name_of(row) or "Unknown"
+            elif unassigned_as:
+                k, nm = "__unassigned__", unassigned_as
+            else:
                 continue
             total += 1
             counts[k] = counts.get(k, 0) + 1
-            labels.setdefault(k, name_of(row) or "Unknown")
+            labels.setdefault(k, nm)
         members = [
             {"key": k, "name": labels.get(k) or "Unknown", "count": counts[k]}
             for k in counts
@@ -662,7 +673,13 @@ async def v3_dashboard_branch_breakdown(
             {
                 "key": "pre_sales",
                 "label": "Pre Sales (Total Leads)",
-                **build(pre_sales_roster, lead_rows, lambda r: r.get("assigned_user_id"), lambda r: r.get("assigned_user_name")),
+                # Labelled "Total Leads", so its total has to be the branch's lead count
+                # off the Dashboard card — including the ones no agent ever owned.
+                **build(
+                    pre_sales_roster, lead_rows,
+                    lambda r: r.get("assigned_user_id"), lambda r: r.get("assigned_user_name"),
+                    unassigned_as="No agent assigned",
+                ),
             },
             {
                 "key": "branch_appointment",
