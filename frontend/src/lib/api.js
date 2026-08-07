@@ -181,6 +181,7 @@ export const scheduleConsultationFollowUp = async (leadId, payload) => (await ap
 export const rescheduleConsultationFollowUp = async (leadId, followupId, payload) => (await api.post(`/leads/${leadId}/consultation-follow-up/${followupId}/reschedule`, payload)).data;
 
 export const getDoctorCalendar = async (doctorId) => (await api.get(`/doctors/${doctorId}/calendar`)).data;
+export const setDoctorSlotCapacity = async (doctorId, slotCapacity) => (await api.patch(`/doctors/${doctorId}/slot-capacity`, { slot_capacity: slotCapacity })).data;
 export const addCalendarSlots = async (doctorId, payload) => (await api.post(`/doctors/${doctorId}/calendar-slots`, payload)).data;
 export const removeCalendarSlots = async (doctorId, payload) => (await api.post(`/doctors/${doctorId}/remove-slots`, payload)).data;
 

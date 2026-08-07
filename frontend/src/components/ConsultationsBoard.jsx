@@ -1220,13 +1220,31 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
 
   const totalSessionsNeeded = selectedLead?.session_package_sessions || 0;
 
-  // A slot this same lead already holds (re-opening this for the physio they're already
-  // assigned to) is still selectable — it'd just be re-booked as itself. Only someone
-  // else's booking genuinely takes a slot off the table.
-  const slotTakenByOther = useCallback((slot) => {
-    const b = physioCalendarData?.booked?.[slot];
-    return !!b && b.lead_id !== selectedLead?.id;
+  // A physio treats two or three patients in the same hour, so a slot is only off the
+  // table once it is FULL — not once it has anyone in it. Capacity comes from the
+  // physio's own record; a Head Physio is always 1, because a consultation is one-to-one.
+  const slotCapacity = physioCalendarData?.slot_capacity || 1;
+
+  // This lead's own bookings don't count against the slot. Re-opening the picker for the
+  // physio they're already with would otherwise see their own sessions as a clash and
+  // refuse to let them keep the times they already have.
+  const slotSeatsTaken = useCallback((slot) => {
+    const occ = physioCalendarData?.occupancy?.[slot] || 0;
+    const mine = (physioCalendarData?.occupants?.[slot] || [])
+      .filter((o) => o.lead_id === selectedLead?.id).length;
+    return Math.max(0, occ - mine);
   }, [physioCalendarData, selectedLead]);
+
+  const slotFull = useCallback(
+    (slot) => slotSeatsTaken(slot) >= slotCapacity,
+    [slotSeatsTaken, slotCapacity],
+  );
+
+  const slotOccupantNames = useCallback((slot) => (physioCalendarData?.occupants?.[slot] || [])
+    .filter((o) => o.lead_id !== selectedLead?.id)
+    .map((o) => o.lead_name)
+    .filter(Boolean)
+    .join(", "), [physioCalendarData, selectedLead]);
 
   // Every published slot of the picked physio, grouped by date, so the picker's month grid
   // can flag which days actually have availability and the day panel can list its times.
@@ -1242,8 +1260,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   }, [physioCalendarData]);
 
   const openSlotCount = useMemo(
-    () => (physioCalendarData?.slots || []).filter((s) => !slotTakenByOther(s)).length,
-    [physioCalendarData, slotTakenByOther],
+    () => (physioCalendarData?.slots || []).filter((s) => !slotFull(s)).length,
+    [physioCalendarData, slotFull],
   );
 
   // Re-opening this for the physio the lead is already with: start from the sessions they
@@ -1330,11 +1348,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   const nextOpenDateAfter = (after, alreadyFixed) => Object.keys(physioSlotsByDate)
     .filter((d) => d > after
       && !alreadyFixed.has(d)
-      && physioSlotsByDate[d].some((t) => !slotTakenByOther(`${d}T${t}`)))
+      && physioSlotsByDate[d].some((t) => !slotFull(`${d}T${t}`)))
     .sort()[0];
 
   const togglePickedSlot = (slot) => {
-    if (slotTakenByOther(slot)) return;
+    if (slotFull(slot)) return;
     const day = slot.split("T")[0];
     const prev = pickedSessionSlots;
 
@@ -3099,7 +3117,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           {Array.from({ length: new Date(pickerYear, pickerMonth + 1, 0).getDate() }, (_, i) => {
                             const day = i + 1;
                             const d = isoDate(pickerYear, pickerMonth, day);
-                            const dayOpen = (physioSlotsByDate[d] || []).filter((t) => !slotTakenByOther(`${d}T${t}`)).length;
+                            const dayOpen = (physioSlotsByDate[d] || []).filter((t) => !slotFull(`${d}T${t}`)).length;
                             const planned = planByDate[d];
                             const isFocused = pickerDate === d;
                             return (
@@ -3203,7 +3221,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                               <div className="grid grid-cols-3 gap-1.5 sm:gap-2" data-testid="cons-slot-picker-grid">
                                 {(physioSlotsByDate[pickerDate] || []).map((time) => {
                                   const slot = `${pickerDate}T${time}`;
-                                  const taken = slotTakenByOther(slot);
+                                  const taken = slotFull(slot);
+                                  const seats = slotSeatsTaken(slot);
                                   const picked = planByDate[pickerDate]?.slot === slot;
                                   const pickedPaid = picked && isPaidSession(planByDate[pickerDate].day);
                                   return (
@@ -3222,8 +3241,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                                           : "border-emerald-200 bg-emerald-50 hover:border-emerald-400 hover:shadow-sm"
                                       }`}
                                       title={taken
-                                        ? `Booked · ${physioCalendarData?.booked?.[slot]?.lead_name || "—"}`
-                                        : `${to12h(time)} – ${endTime12h(time, sessionMinutes)}${picked ? ` · Day ${planByDate[pickerDate].day} · ${pickedPaid ? "PAID" : "UNPAID"}` : ""}`}
+                                        ? `Full · ${seats}/${slotCapacity} · ${slotOccupantNames(slot) || "—"}`
+                                        : `${to12h(time)} – ${endTime12h(time, sessionMinutes)} · ${seats}/${slotCapacity} taken${seats ? ` · ${slotOccupantNames(slot)}` : ""}${picked ? ` · Day ${planByDate[pickerDate].day} · ${pickedPaid ? "PAID" : "UNPAID"}` : ""}`}
                                       data-testid={`cons-slot-pick-${time}`}
                                     >
                                       {/* Two lines, always. Both nowrap and sized to a third
@@ -3239,10 +3258,16 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                                           and whether it's paid matter more than its end time,
                                           which is fixed by the package and named in the header. */}
                                       <p className={`mt-0.5 truncate text-[10px] font-medium sm:text-xs ${taken ? "text-amber-600" : picked ? (pickedPaid ? "text-emerald-700" : "text-rose-700") : "text-emerald-600"}`}>
+                                        {/* A part-filled slot says how full it is rather than
+                                            who is in it — the physio takes several at once, so
+                                            the seat count is what decides whether it's bookable.
+                                            Names stay in the tooltip. */}
                                         {taken
-                                          ? `Booked · ${physioCalendarData?.booked?.[slot]?.lead_name || "—"}`
+                                          ? `Full · ${seats}/${slotCapacity}`
                                           : picked
                                           ? `Day ${planByDate[pickerDate].day} · ${pickedPaid ? "PAID" : "UNPAID"}`
+                                          : seats > 0
+                                          ? `${seats}/${slotCapacity} · ends ${endTime12h(time, sessionMinutes)}`
                                           : `ends ${endTime12h(time, sessionMinutes)}`}
                                       </p>
                                     </button>

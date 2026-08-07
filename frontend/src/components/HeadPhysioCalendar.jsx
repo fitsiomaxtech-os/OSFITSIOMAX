@@ -6,6 +6,7 @@ import {
   Clock,
   Stethoscope,
   Trash2,
+  Users,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
@@ -15,6 +16,7 @@ import {
   getDoctors,
   listStoreItems,
   removeCalendarSlots,
+  setDoctorSlotCapacity,
 } from "@/lib/api";
 import { to12h } from "@/lib/time";
 
@@ -135,6 +137,24 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
   }, [selectedDoctor]);
 
   useEffect(() => { loadCalendar(); }, [loadCalendar]);
+
+  const [savingCapacity, setSavingCapacity] = useState(false);
+
+  // Lowering this never evicts anyone. Slots already over the new number stay booked and
+  // simply stop accepting more — cancelling a patient's treatment day as a side effect of
+  // a settings change is not something a dropdown should be able to do.
+  const saveCapacity = async (n) => {
+    if (!selectedDoctor) return;
+    setSavingCapacity(true);
+    try {
+      await setDoctorSlotCapacity(selectedDoctor.id, n);
+      toast.success(`${selectedDoctor.full_name} now takes ${n} patient${n > 1 ? "s" : ""} per slot`);
+      await loadCalendar();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not change the slot capacity");
+    }
+    setSavingCapacity(false);
+  };
 
   const selectDoctor = (doc) => {
     setSelectedDoctor(doc);
@@ -405,10 +425,30 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
                   <h3 className="text-sm font-semibold text-slate-800">{selectedDoctor.full_name}</h3>
                   <p className="text-[11px] text-slate-400">
                     {purpose} · {slotDuration} min · {(calendarData?.slots || []).length} slots open
+                    {isPhysio && ` · ${calendarData?.slot_capacity ?? 3} per slot`}
                   </p>
                 </div>
               </div>
               <div className="flex flex-wrap items-center justify-end gap-2">
+                {/* A physio runs a floor — two or three patients in the same hour. Set
+                    here rather than assumed, because it varies by physio and by room.
+                    Head Physio has no control: a consultation is one-to-one and the
+                    backend pins them to 1 whatever is sent. */}
+                {isPhysio && (
+                  <label className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-1" title="Patients this physio treats in the same slot">
+                    <Users className="h-3.5 w-3.5 text-slate-400" />
+                    <span className="text-[11px] font-medium text-slate-500">Per slot</span>
+                    <select
+                      value={calendarData?.slot_capacity ?? 3}
+                      onChange={(e) => saveCapacity(Number(e.target.value))}
+                      disabled={savingCapacity}
+                      className="rounded border border-slate-200 bg-white px-1 py-0.5 text-xs font-semibold text-slate-700"
+                      data-testid="physio-slot-capacity"
+                    >
+                      {[1, 2, 3, 4, 5, 6].map((n) => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                  </label>
+                )}
                 {selectedDates.length > 0 && (
                   <span className="text-xs font-medium text-slate-500" data-testid="selected-days-count">
                     {selectedDates.length} day{selectedDates.length > 1 ? "s" : ""} selected

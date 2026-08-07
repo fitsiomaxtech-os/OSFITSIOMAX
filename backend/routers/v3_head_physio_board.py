@@ -5,7 +5,7 @@ from datetime import date
 import uuid
 
 from database import v3_col
-from utils import now_iso
+from utils import now_iso, slot_capacity_of
 from deps import v3_current_user, v3_require_roles
 from constants import V3_HEAD_CONSULTATION_STAGES
 from stage_utils import get_closing_stage_name, get_stage_name_at
@@ -449,13 +449,23 @@ async def hp_assign_physio_with_sessions(
     # replaced wholesale by the one just submitted either way.
     await v3_col("sessions").delete_many({"lead_id": lead_id, "status": "upcoming"})
 
+    # A physio runs a floor — two or three patients share a slot — so a slot is only
+    # unavailable once it is FULL. This used to reject on a single existing booking,
+    # which made the second and third patient of every hour unbookable.
+    capacity = slot_capacity_of(physio)
     already_booked = await v3_col("sessions").find(
         {"physio_id": payload.physio_id, "status": "upcoming", "slot_time": {"$in": sorted_slots}},
         {"_id": 0, "slot_time": 1},
-    ).to_list(200)
-    if already_booked:
-        clashing = ", ".join(sorted(b["slot_time"] for b in already_booked))
-        raise HTTPException(status_code=400, detail=f"Already booked for this physio: {clashing}")
+    ).to_list(1000)
+    taken: dict = {}
+    for b in already_booked:
+        taken[b["slot_time"]] = taken.get(b["slot_time"], 0) + 1
+    full = sorted(s for s in sorted_slots if taken.get(s, 0) >= capacity)
+    if full:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Full for this physio ({capacity} per slot): {', '.join(full)}",
+        )
 
     now = now_iso()
     first_date = date.fromisoformat(sorted_slots[0].split("T")[0])

@@ -124,6 +124,10 @@ class V3DoctorOut(BaseModel):
     employee_id: Optional[str] = None
     joining_date: Optional[str] = None
     slots: List[str] = []
+    # Patients this physio takes in one slot — a treatment floor runs two or three at
+    # once. None means the default; a Head Physio is pinned to 1 whatever is stored.
+    # See slot_capacity_of() in utils.py.
+    slot_capacity: Optional[int] = None
     created_at: str
 
 

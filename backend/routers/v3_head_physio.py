@@ -1,8 +1,9 @@
 from fastapi import APIRouter, HTTPException, Depends
+from pydantic import BaseModel
 from typing import List, Optional
 
 from database import v3_col
-from utils import now_iso, normalize_slot_time
+from utils import now_iso, normalize_slot_time, slot_capacity_of, MAX_PHYSIO_SLOT_CAPACITY
 from deps import v3_require_roles
 from schemas.v3 import (
     V3UserOut, V3DoctorOut,
@@ -31,7 +32,18 @@ async def get_doctor_calendar(doctor_id: str, _: V3UserOut = Depends(v3_require_
         {"physio_id": doctor_id, "status": "upcoming"},
         {"_id": 0, "slot_time": 1, "lead_name": 1, "lead_id": 1, "id": 1},
     ).to_list(1000)
-    booked_map = {row["slot_time"]: row for row in [*appt_rows, *session_rows]}
+    rows = [*appt_rows, *session_rows]
+
+    # `booked` keeps its old shape — one row per slot — because callers read it to answer
+    # "is this slot mine or someone else's". It cannot answer "how full is this slot",
+    # which is why `occupancy` exists alongside rather than replacing it.
+    booked_map = {row["slot_time"]: row for row in rows}
+    occupancy: dict = {}
+    occupants: dict = {}
+    for row in rows:
+        st = row["slot_time"]
+        occupancy[st] = occupancy.get(st, 0) + 1
+        occupants.setdefault(st, []).append({"lead_id": row.get("lead_id"), "lead_name": row.get("lead_name", "")})
 
     return {
         "doctor_id": doctor["id"],
@@ -40,7 +52,43 @@ async def get_doctor_calendar(doctor_id: str, _: V3UserOut = Depends(v3_require_
         "slots": doctor.get("slots", []),
         "slot_details": doctor.get("slot_details", []),
         "booked": booked_map,
+        "slot_capacity": slot_capacity_of(doctor),
+        "occupancy": occupancy,
+        "occupants": occupants,
     }
+
+
+class SlotCapacityInput(BaseModel):
+    slot_capacity: int
+
+
+@router.patch("/doctors/{doctor_id}/slot-capacity")
+async def set_slot_capacity(
+    doctor_id: str,
+    payload: SlotCapacityInput,
+    _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+):
+    """How many patients this physio takes at once. Two or three is the normal floor."""
+    doctor = await v3_col("doctors").find_one({"id": doctor_id}, {"_id": 0, "id": 1, "profile_type": 1})
+    if not doctor:
+        raise HTTPException(status_code=404, detail="Doctor not found")
+    if doctor.get("profile_type") != "physio":
+        # Refused rather than silently ignored: storing a 3 on a Head Physio would sit in
+        # the record looking effective while slot_capacity_of pins them to 1 forever.
+        raise HTTPException(
+            status_code=400,
+            detail="Only a Physio can take more than one patient per slot — a consultation is one-to-one.",
+        )
+    if payload.slot_capacity < 1 or payload.slot_capacity > MAX_PHYSIO_SLOT_CAPACITY:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Slot capacity must be between 1 and {MAX_PHYSIO_SLOT_CAPACITY}",
+        )
+    await v3_col("doctors").update_one(
+        {"id": doctor_id},
+        {"$set": {"slot_capacity": payload.slot_capacity, "updated_at": now_iso()}},
+    )
+    return {"doctor_id": doctor_id, "slot_capacity": payload.slot_capacity}
 
 
 @router.post("/doctors/{doctor_id}/calendar-slots")

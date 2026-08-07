@@ -97,3 +97,29 @@ def normalize_slot_time(value: str) -> str:
         return parsed.replace(second=0, microsecond=0).isoformat(timespec="minutes")
     except Exception:
         return value.strip()[:16]
+
+
+# How many patients one physio takes in a single slot. A physio runs a floor: two or
+# three people on adjacent beds inside the same hour is how the treatment room actually
+# works, so one-per-slot was blocking bookings that happen in real life.
+DEFAULT_PHYSIO_SLOT_CAPACITY = 3
+MAX_PHYSIO_SLOT_CAPACITY = 10
+
+
+def slot_capacity_of(doctor: dict) -> int:
+    """Patients this doctor can hold in one slot.
+
+    A Head Physio consultation stays strictly one-to-one however this is configured —
+    it is a conversation, not a floor — so their capacity is always 1 regardless of any
+    value stored on the record.
+    """
+    if (doctor or {}).get("profile_type") != "physio":
+        return 1
+    raw = (doctor or {}).get("slot_capacity")
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_PHYSIO_SLOT_CAPACITY
+    # Clamped rather than trusted: a 0 or a negative would take the physio off the
+    # calendar entirely, which no one would set on purpose and nothing else would explain.
+    return max(1, min(n, MAX_PHYSIO_SLOT_CAPACITY))
