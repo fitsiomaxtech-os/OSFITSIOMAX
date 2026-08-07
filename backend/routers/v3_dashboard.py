@@ -7,7 +7,7 @@ from stage_utils import get_closing_stage_name
 from deps import v3_current_user, v3_require_roles
 from constants import V3_STAGES, V3_BRANCH_STAGES
 from schemas.v3 import V3UserOut, V3LeadOut
-from routers.v3_finance import REVENUE_ACTIONS, _parse_rs_amount
+from routers.v3_finance import REVENUE_ACTIONS, _parse_rs_amount, _revenue_category
 
 router = APIRouter(prefix="/api/v3")
 
@@ -505,24 +505,56 @@ async def v3_dashboard_overview(
         add_to_bucket(treat_bucket, bid, branch_vertical(bid))
 
     revenue_bucket = new_bucket()
+    # The same Consultation / Session split Accountant Manage reports, so the Dashboard's
+    # headline figures and the Collections boards can't disagree about what a payment was
+    # for. `action` and `created_at` have to be projected for this — the branch buckets
+    # below never needed either.
+    revenue_split = {"consultation": 0.0, "session": 0.0, "spot_joining": 0.0}
     activity_query = {"action": {"$in": REVENUE_ACTIONS}}
     activity_query.update(_date_range_query("created_at", start_date, end_date))
-    activities = await v3_col("lead_activity").find(activity_query, {"_id": 0, "lead_id": 1, "details": 1}).to_list(50000)
+    activities = await v3_col("lead_activity").find(
+        activity_query, {"_id": 0, "lead_id": 1, "details": 1, "action": 1, "created_at": 1}
+    ).to_list(50000)
     activity_lead_ids = list({a["lead_id"] for a in activities if a.get("lead_id")})
     activity_leads = await v3_col("leads").find(
         {"id": {"$in": activity_lead_ids}}, {"_id": 0, "id": 1, "branch_id": 1, "vertical": 1}
     ).to_list(50000)
     activity_lead_map = {l["id"]: l for l in activity_leads}
+
+    # Which days each patient paid a consultation fee on. Spot joining is a treatment fee
+    # collected on one of those same days — the patient signed up on the spot rather than
+    # going away to think about it.
+    #
+    # Reading this off the in-range activities alone is safe: the filter is whole days
+    # either way, so a same-day pair is either both inside the range or both outside it.
+    # A treatment fee whose consultation fell in some earlier range isn't spot joining
+    # anyway.
+    consult_days: dict[str, set] = {}
+    for a in activities:
+        if _revenue_category(a.get("action", "")) == "consultation":
+            consult_days.setdefault(a.get("lead_id"), set()).add(str(a.get("created_at", ""))[:10])
+
     for a in activities:
         lead = activity_lead_map.get(a.get("lead_id"), {})
         bid = lead.get("branch_id")
         amount = _parse_rs_amount(a.get("details", ""))
         add_to_bucket(revenue_bucket, bid, lead.get("vertical") or branch_vertical(bid), amount)
+        category = _revenue_category(a.get("action", ""))
+        revenue_split[category] += amount
+        if category == "session" and str(a.get("created_at", ""))[:10] in consult_days.get(a.get("lead_id"), ()):
+            revenue_split["spot_joining"] += amount
 
     return {
         "applied_filters": {"start_date": start_date, "end_date": end_date},
         "leads": format_bucket(leads_bucket),
         "appointments": format_bucket(appt_bucket),
         "treatments": format_bucket(treat_bucket),
-        "revenue": format_bucket(revenue_bucket, currency=True),
+        # spot_joining is a slice of session, not money on top of it — total stays
+        # consultation + session.
+        "revenue": {
+            **format_bucket(revenue_bucket, currency=True),
+            "consultation": round(revenue_split["consultation"], 2),
+            "session": round(revenue_split["session"], 2),
+            "spot_joining": round(revenue_split["spot_joining"], 2),
+        },
     }

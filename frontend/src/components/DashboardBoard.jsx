@@ -137,13 +137,43 @@ export const DashboardBoard = () => {
         <p className="py-16 text-center text-sm text-slate-400">{loading ? "Loading..." : "No data."}</p>
       ) : (
         <div className="space-y-4">
+          {/* The headline split, on the same Consultation / Session line Accountant
+              Manage draws, so the two boards can't disagree about what a payment was
+              for. Total stays alongside them — it is the pair added up, and dropping it
+              would mean reading two figures to answer "how much came in".
+
+              Spot Joining is a slice of Session, not money on top: a treatment fee
+              collected on the same day as the consultation, i.e. the patient signed up
+              on the spot. So the four don't sum — hence the note under it, which is
+              there to stop someone adding all four and finding it over. */}
           {activeTab === "revenue" && (
-            <Card className="border-emerald-200 bg-emerald-50/60" data-testid="dashboard-total-revenue">
-              <CardContent className="p-4">
-                <p className="text-xs font-semibold uppercase tracking-wider text-emerald-700">Total Revenue</p>
-                <p className="mt-1 text-3xl font-bold text-emerald-700">{fmtValue("revenue", activeData.total)}</p>
-              </CardContent>
-            </Card>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4" data-testid="dashboard-revenue-totals">
+              <Card className="border-emerald-200 bg-emerald-50/60" data-testid="dashboard-total-revenue">
+                <CardContent className="p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-emerald-700">Total Revenue</p>
+                  <p className="mt-1 text-3xl font-bold text-emerald-700">{fmtValue("revenue", activeData.total)}</p>
+                </CardContent>
+              </Card>
+              <Card data-testid="dashboard-consultation-revenue">
+                <CardContent className="p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-sky-700">Total Consultation Revenue</p>
+                  <p className="mt-1 text-3xl font-bold text-sky-700">{fmtValue("revenue", activeData.consultation)}</p>
+                </CardContent>
+              </Card>
+              <Card data-testid="dashboard-session-revenue">
+                <CardContent className="p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-violet-700">Total Session Revenue</p>
+                  <p className="mt-1 text-3xl font-bold text-violet-700">{fmtValue("revenue", activeData.session)}</p>
+                </CardContent>
+              </Card>
+              <Card data-testid="dashboard-spot-joining-revenue">
+                <CardContent className="p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-amber-700">Total Spot Joining Revenue</p>
+                  <p className="mt-1 text-3xl font-bold text-amber-700">{fmtValue("revenue", activeData.spot_joining)}</p>
+                  <p className="mt-1 text-[11px] text-slate-400">Joined the same day as their consultation · part of Session</p>
+                </CardContent>
+              </Card>
+            </div>
           )}
 
           <div>
