@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   ArrowLeft,
   Calendar,
@@ -57,14 +58,27 @@ export const PhysioBoard = ({ physioId } = {}) => {
   const [patientsCount, setPatientsCount] = useState(0);
   const badgeFor = { treatment: treatmentCount, review: reviewCount, patients: patientsCount };
 
+  // Where the open tab's search and date filter render. A callback ref rather than
+  // useRef: the node has to arrive as state so the tabs re-render once it exists,
+  // otherwise the first paint sees null and nothing ever portals in.
+  const [toolbarSlot, setToolbarSlot] = useState(null);
+  // Only the tab on screen gets the slot. All three stay mounted, so handing it to
+  // every tab would stack three toolbars in the one row.
+  const slotFor = (key) => (activeTab === key ? toolbarSlot : null);
+
   return (
     <div className="space-y-3 pb-20 md:pb-0" data-testid="physio-board-root">
-      {/* Desk only — a phone gets the fixed bar at the end of this file. The same
-          underlined strip Branch Admin uses, so moving between boards doesn't mean
-          learning a second way to switch view. The counts come with it rather than
-          being dropped on desktop: an outstanding count is the reason to look at a
-          tab you aren't already on. */}
-      <div className="hidden items-center gap-1 overflow-x-auto border-b border-slate-200 md:flex" data-testid="physio-view-tabs">
+      {/* Tabs on the left, the open tab's search and date filter on the right. The
+          strip is desk-only — a phone gets the fixed bar at the end of this file —
+          but the toolbar slot is not, so on a phone this row is just the toolbar,
+          which is why the border and the tab baseline are both md-only.
+
+          Same underlined tabs Branch Admin uses, so moving between boards doesn't
+          mean learning a second way to switch view. The counts come along rather
+          than being dropped on desktop: an outstanding count is the reason to look
+          at a tab you aren't already on. */}
+      <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between md:gap-4 md:border-b md:border-slate-200" data-testid="physio-view-bar">
+      <div className="hidden items-center gap-1 overflow-x-auto md:flex" data-testid="physio-view-tabs">
         {VIEW_TABS.map((tab) => {
           const Icon = tab.icon;
           const active = activeTab === tab.key;
@@ -93,12 +107,14 @@ export const PhysioBoard = ({ physioId } = {}) => {
           );
         })}
       </div>
+        <div ref={setToolbarSlot} className="flex flex-wrap items-center gap-2 md:pb-1.5" data-testid="physio-view-toolbar" />
+      </div>
 
       <div style={{ display: activeTab === "treatment" ? "block" : "none" }}>
-        <TreatmentTab physioId={physioId} onCountChange={setTreatmentCount} />
+        <TreatmentTab physioId={physioId} onCountChange={setTreatmentCount} toolbarSlot={slotFor("treatment")} />
       </div>
       <div style={{ display: activeTab === "review" ? "block" : "none" }}>
-        <ReviewTab physioId={physioId} onCountChange={setReviewCount} />
+        <ReviewTab physioId={physioId} onCountChange={setReviewCount} toolbarSlot={slotFor("review")} />
       </div>
       <div style={{ display: activeTab === "patients" ? "block" : "none" }}>
         <PatientsTab physioId={physioId} onCountChange={setPatientsCount} />
@@ -208,7 +224,7 @@ const StatTile = ({ label, value, sub, icon: Icon, onClick, active, testid }) =>
   );
 };
 
-function TreatmentTab({ physioId, onCountChange }) {
+function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
   const [leads, setLeads] = useState([]);
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -368,6 +384,50 @@ function TreatmentTab({ physioId, onCountChange }) {
 
   const [searchOpen, setSearchOpen] = useState(false);
 
+  // Icon-only search that expands on tap, plus the Meta-style date filter. Rendered
+  // into the board's tab row rather than here, so on a desk it sits beside the tabs
+  // instead of below the summary. Portaled rather than lifted into the board so this
+  // tab keeps its own search text and date range — Review has its own pair, and one
+  // shared filter would let a range picked over there silently narrow this tab.
+  //
+  // When nothing's picked the summary above shows Overall; the week strip below
+  // always keeps today selected by default regardless.
+  const toolbar = (
+    <div className="flex flex-wrap items-center gap-2" data-testid="physio-treatment-toolbar">
+      {searchOpen ? (
+        <div className="relative w-full sm:w-[240px]">
+          <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
+          <Input
+            autoFocus
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search patient by name or phone..."
+            className="h-10 pl-9 pr-9"
+            data-testid="physio-treatment-search"
+          />
+          <button
+            type="button"
+            onClick={() => { setSearchOpen(false); setSearch(""); }}
+            className="absolute right-2 top-2 rounded p-1 text-slate-400 hover:bg-slate-100"
+            data-testid="physio-treatment-search-close"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setSearchOpen(true)}
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+          data-testid="physio-treatment-search-open"
+        >
+          <Search className="h-4 w-4" />
+        </button>
+      )}
+      <DateFilterPopover value={filterValue} onChange={handleFilterChange} testid="physio-treatment-date-filter" centered />
+    </div>
+  );
+
   return (
     <div data-testid="physio-treatment-tab">
       {/* The tinted panel these sat in is gone — the Head Physio cards sit straight on
@@ -392,42 +452,7 @@ function TreatmentTab({ physioId, onCountChange }) {
         </div>
       </div>
 
-      {/* Icon-only search that expands on tap, plus the Meta-style date filter —
-          when nothing's picked the summary above shows Overall; the week strip
-          below always keeps today selected by default regardless. */}
-      <div className="mb-3 flex flex-wrap items-center gap-2" data-testid="physio-treatment-toolbar">
-        {searchOpen ? (
-          <div className="relative min-w-[200px] flex-1">
-            <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-            <Input
-              autoFocus
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search patient by name or phone..."
-              className="h-10 pl-9 pr-9"
-              data-testid="physio-treatment-search"
-            />
-            <button
-              type="button"
-              onClick={() => { setSearchOpen(false); setSearch(""); }}
-              className="absolute right-2 top-2 rounded p-1 text-slate-400 hover:bg-slate-100"
-              data-testid="physio-treatment-search-close"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setSearchOpen(true)}
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
-            data-testid="physio-treatment-search-open"
-          >
-            <Search className="h-4 w-4" />
-          </button>
-        )}
-        <DateFilterPopover value={filterValue} onChange={handleFilterChange} testid="physio-treatment-date-filter" centered />
-      </div>
+      {toolbarSlot ? createPortal(toolbar, toolbarSlot) : toolbar}
 
       {/* Sun-Sat week strip — today is always the default selection. */}
       <div className="mb-4 rounded-xl border border-slate-200 bg-white p-3" data-testid="physio-treatment-week-strip">
@@ -577,7 +602,7 @@ const ordinal = (n) => {
  * dispatches it to a named Head Physio, who writes it up. Requests / Assigned / Completed
  * follow a patient along that hand-off, and the weekly write-up hangs off the same rows.
  */
-function ReviewTab({ physioId, onCountChange }) {
+function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
   const [patients, setPatients] = useState([]);
   const [threshold, setThreshold] = useState(7);
   const [loading, setLoading] = useState(false);
@@ -684,48 +709,53 @@ function ReviewTab({ physioId, onCountChange }) {
     completed: "No completed reviews yet",
   };
 
-  return (
-    <div data-testid="physio-review-tab">
-      {/* Icon-only search, the Meta-style date filter, and a small Total pill next to
-          it — everything the bucket tabs below read from is filtered by this date
-          range first, so Total and every bucket count move together. */}
-      <div className="mb-3 flex flex-wrap items-center gap-2" data-testid="physio-review-toolbar">
-        {searchOpen ? (
-          <div className="relative min-w-[200px] flex-1">
-            <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-            <Input
-              autoFocus
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search patient by name, phone or patient no..."
-              className="h-10 pl-9 pr-9"
-              data-testid="physio-review-search"
-            />
-            <button
-              type="button"
-              onClick={() => { setSearchOpen(false); setSearch(""); }}
-              className="absolute right-2 top-2 rounded p-1 text-slate-400 hover:bg-slate-100"
-              data-testid="physio-review-search-close"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        ) : (
+  // Icon-only search, the Meta-style date filter, and a small Total pill next to it —
+  // everything the bucket cards below read from is filtered by this date range first,
+  // so Total and every bucket count move together. Rendered into the board's tab row;
+  // see the note on TreatmentTab's toolbar for why it's portaled rather than lifted.
+  const toolbar = (
+    <div className="flex flex-wrap items-center gap-2" data-testid="physio-review-toolbar">
+      {searchOpen ? (
+        <div className="relative w-full sm:w-[240px]">
+          <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
+          <Input
+            autoFocus
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search patient by name, phone or patient no..."
+            className="h-10 pl-9 pr-9"
+            data-testid="physio-review-search"
+          />
           <button
             type="button"
-            onClick={() => setSearchOpen(true)}
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
-            data-testid="physio-review-search-open"
+            onClick={() => { setSearchOpen(false); setSearch(""); }}
+            className="absolute right-2 top-2 rounded p-1 text-slate-400 hover:bg-slate-100"
+            data-testid="physio-review-search-close"
           >
-            <Search className="h-4 w-4" />
+            <X className="h-4 w-4" />
           </button>
-        )}
-        <DateFilterPopover value={filterValue} onChange={setFilterValue} testid="physio-review-date-filter" centered />
-        <div className="flex h-10 shrink-0 items-center gap-1.5 rounded-md border border-sky-200 bg-sky-50 px-3" data-testid="physio-review-total">
-          <span className="text-[10px] font-semibold uppercase tracking-wide text-sky-600">Total</span>
-          <span className="text-sm font-bold text-sky-700">{dateFiltered.length}</span>
         </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setSearchOpen(true)}
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+          data-testid="physio-review-search-open"
+        >
+          <Search className="h-4 w-4" />
+        </button>
+      )}
+      <DateFilterPopover value={filterValue} onChange={setFilterValue} testid="physio-review-date-filter" centered />
+      <div className="flex h-10 shrink-0 items-center gap-1.5 rounded-md border border-sky-200 bg-sky-50 px-3" data-testid="physio-review-total">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-sky-600">Total</span>
+        <span className="text-sm font-bold text-sky-700">{dateFiltered.length}</span>
       </div>
+    </div>
+  );
+
+  return (
+    <div data-testid="physio-review-tab">
+      {toolbarSlot ? createPortal(toolbar, toolbarSlot) : toolbar}
 
       {/* New Review / Requests / Assigned / Completed — same hand-off the patient
           actually moves through, one bucket at a time; New Review is the default.
