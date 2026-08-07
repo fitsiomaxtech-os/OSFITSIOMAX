@@ -78,12 +78,9 @@ export const DashboardBoard = () => {
   const activeData = data?.[activeTab];
 
   return (
+    // No title block. The tab above already reads Dashboard, and the strapline named the
+    // four tabs sitting right below it.
     <div className="space-y-4" data-testid="dashboard-board">
-      <div className="hidden md:block">
-        <h2 className="text-2xl font-bold text-slate-900">Dashboard</h2>
-        <p className="text-sm text-slate-500">Leads, appointments, treatments and revenue across every branch and vertical.</p>
-      </div>
-
       {/* Five one-tap ranges, then Custom for everything else — the OS's shared date
           filter, which also carries Yesterday, Last Month and an exact day.
 
