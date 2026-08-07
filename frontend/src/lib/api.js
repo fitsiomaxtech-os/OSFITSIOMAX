@@ -119,6 +119,7 @@ export const getMasterBoard = async () => (await api.get("/boards/master")).data
 export const getBranchMasterBoard = async () => (await api.get("/boards/branch-master")).data;
 export const getMasterControl = async (params = {}) => (await api.get("/boards/master-control", { params })).data;
 export const getDashboardOverview = async (params = {}) => (await api.get("/dashboard/overview", { params })).data;
+export const getDashboardBranchBreakdown = async (params = {}) => (await api.get("/dashboard/branch-breakdown", { params })).data;
 export const getBranchBoardOld = async (branchId) => (await api.get(`/boards/branch/${branchId}`)).data;
 
 export const getTeamMembers = async (params) => (await api.get("/team-members", { params })).data;

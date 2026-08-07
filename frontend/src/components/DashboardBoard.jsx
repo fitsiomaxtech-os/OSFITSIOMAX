@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { Users, CalendarCheck, Activity, IndianRupee } from "lucide-react";
+import { Users, CalendarCheck, Activity, IndianRupee, X } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { toast } from "@/components/ui/sonner";
-import { getDashboardOverview } from "@/lib/api";
+import { getDashboardOverview, getDashboardBranchBreakdown } from "@/lib/api";
 
 const DASH_TABS = [
   { key: "leads", label: "Leads", icon: Users },
@@ -62,6 +62,7 @@ export const DashboardBoard = () => {
   const [activeTab, setActiveTab] = useState("leads");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [drillBranch, setDrillBranch] = useState(null); // the branch card being opened
 
   useEffect(() => {
     setLoading(true);
@@ -192,7 +193,15 @@ export const DashboardBoard = () => {
                 style={{ gridTemplateColumns: `repeat(${activeData.physio_branches.length}, minmax(0, 1fr))` }}
               >
                 {activeData.physio_branches.map((b) => (
-                  <Card key={b.branch_id} className="min-w-[9rem] shrink-0 sm:min-w-0" data-testid={`dashboard-physio-${b.branch_id}`}>
+                  <Card
+                    key={b.branch_id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setDrillBranch(b)}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDrillBranch(b); } }}
+                    className="min-w-[9rem] shrink-0 cursor-pointer transition hover:border-sky-300 hover:shadow-md sm:min-w-0"
+                    data-testid={`dashboard-physio-${b.branch_id}`}
+                  >
                     <CardContent className="p-4">
                       <p className="truncate text-sm font-semibold text-slate-700">{b.branch_name}</p>
                       <p className="mt-1 truncate text-2xl font-bold text-sky-600">{fmtValue(activeTab, b.value)}</p>
@@ -202,22 +211,108 @@ export const DashboardBoard = () => {
               </div>
             )}
           </div>
-
-          <div>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Other Verticals</p>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              {activeData.verticals.map((v) => (
-                <Card key={v.vertical} data-testid={`dashboard-vertical-${v.vertical}`}>
-                  <CardContent className="p-4">
-                    <p className="truncate text-sm font-semibold text-slate-700">{v.label}</p>
-                    <p className="mt-1 text-2xl font-bold text-indigo-600">{fmtValue(activeTab, v.value)}</p>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          </div>
+          {/* Other Verticals removed from the board. The endpoint still returns them —
+              other callers read the same payload — they just aren't drawn here. */}
         </div>
       )}
+
+      {drillBranch && (
+        <BranchBreakdownModal branch={drillBranch} dateFilter={dateFilter} onClose={() => setDrillBranch(null)} />
+      )}
+    </div>
+  );
+};
+
+/**
+ * Who did the work behind one branch's number, over the range the board is showing.
+ *
+ * Counts only — no lead lists. Super Admin is reading performance here; the screens for
+ * actually working a lead already exist under Pre-Sales CRM and Branch Wise, and putting
+ * a second editing surface on a reporting board would mean Super Admin edits bypassing
+ * the branch's own flow.
+ */
+const BranchBreakdownModal = ({ branch, dateFilter, onClose }) => {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    const params = { branch_id: branch.branch_id };
+    if (dateFilter.from && dateFilter.to) {
+      params.start_date = toIso(dateFilter.from);
+      params.end_date = toIso(dateFilter.to);
+    }
+    getDashboardBranchBreakdown(params)
+      .then(setData)
+      .catch(() => { toast.error("Failed to load the branch breakdown"); setData(null); })
+      .finally(() => setLoading(false));
+  }, [branch.branch_id, dateFilter]);
+
+  // Esc closes, same as clicking the backdrop — a keyboard user shouldn't have to reach
+  // for the mouse to get out of a read-only panel.
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/50 p-3 backdrop-blur-sm sm:p-4"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      data-testid="dashboard-branch-breakdown"
+    >
+      <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+          <div className="min-w-0">
+            <p className="truncate text-lg font-bold text-slate-900">{branch.branch_name}</p>
+            <p className="text-xs text-slate-500">{dateFilter.label}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+            title="Close"
+            aria-label="Close"
+            data-testid="dashboard-branch-breakdown-close"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4">
+          {loading ? (
+            <p className="py-16 text-center text-sm text-slate-400">Loading...</p>
+          ) : !data ? (
+            <p className="py-16 text-center text-sm text-slate-400">No breakdown available.</p>
+          ) : (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {data.groups.map((g) => (
+                <div key={g.key} className="rounded-xl border border-slate-200" data-testid={`dashboard-breakdown-${g.key}`}>
+                  <div className="flex items-center justify-between border-b border-slate-100 px-4 py-2.5">
+                    <p className="text-xs font-bold uppercase tracking-wider text-slate-500">{g.label}</p>
+                    <p className="text-lg font-bold text-sky-600">{g.total}</p>
+                  </div>
+                  {g.members.length === 0 ? (
+                    <p className="px-4 py-6 text-center text-xs text-slate-400">No one assigned yet.</p>
+                  ) : (
+                    <ul className="divide-y divide-slate-100">
+                      {g.members.map((m) => (
+                        <li key={m.key} className="flex items-center justify-between gap-3 px-4 py-2">
+                          <span className="min-w-0 truncate text-sm text-slate-700">{m.name}</span>
+                          <span className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-bold ${m.count ? "bg-sky-50 text-sky-700" : "bg-slate-100 text-slate-400"}`}>
+                            {m.count}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 };

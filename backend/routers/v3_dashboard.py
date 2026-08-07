@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
@@ -557,4 +557,127 @@ async def v3_dashboard_overview(
             "session": round(revenue_split["session"], 2),
             "spot_joining": round(revenue_split["spot_joining"], 2),
         },
+    }
+
+
+ROLE_LABELS = {
+    "branch_admin": "Branch Admin",
+    "pre_sales": "Pre-Sales",
+    "super_admin": "Super Admin",
+    "head_physio": "Head Physio",
+    "physio": "Physio",
+}
+
+
+@router.get("/dashboard/branch-breakdown")
+async def v3_dashboard_branch_breakdown(
+    branch_id: str = Query(...),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    _: V3UserOut = Depends(v3_require_roles("super_admin")),
+):
+    """Who did the work behind one branch's Dashboard number, for the same date range.
+
+    Four groups, each a total and a per-person count:
+
+      Pre Sales           leads owned by a Pre-Sales agent  (leads.assigned_user_id)
+      Branch Appointment  consultation appointments, by who booked them
+                          (appointments.created_by — the only record of *who*; nothing
+                          assigns an appointment to a person the way a lead is assigned)
+      Head Physio         those same appointments, by the doctor seen
+      Physio              leads with a physio assigned  (leads.assigned_physio_id)
+
+    Every roster is drawn from the branch's own staff first, so someone who did nothing
+    in the period still shows with 0 rather than vanishing — an empty week is a fact
+    about that person, not an absence of one. Anyone who appears in the data but isn't
+    on the roster (left the branch, moved role) is appended, so the member counts always
+    add up to the group total.
+    """
+    branch = await v3_col("branches").find_one({"id": branch_id}, {"_id": 0, "id": 1, "branch_name": 1})
+    if not branch:
+        raise HTTPException(status_code=404, detail="Branch not found")
+
+    lead_rows = await v3_col("leads").find(
+        {"branch_id": branch_id, **_date_range_query("created_at", start_date, end_date)},
+        {"_id": 0, "assigned_user_id": 1, "assigned_user_name": 1, "assigned_physio_id": 1, "assigned_physio_name": 1},
+    ).to_list(50000)
+
+    appt_rows = await v3_col("appointments").find(
+        {"branch_id": branch_id, "appt_kind": "consultation", **_date_range_query("created_at", start_date, end_date)},
+        {"_id": 0, "doctor_id": 1, "doctor_name": 1, "created_by": 1, "created_by_role": 1},
+    ).to_list(50000)
+
+    users = await v3_col("users").find(
+        {"$or": [{"branch_id": branch_id}, {"branch_ids": branch_id}]},
+        {"_id": 0, "id": 1, "full_name": 1, "role": 1},
+    ).to_list(500)
+    doctors = await v3_col("doctors").find(
+        {"branch_id": branch_id}, {"_id": 0, "id": 1, "full_name": 1, "profile_type": 1}
+    ).to_list(500)
+
+    def build(roster, rows, key_of, name_of):
+        """roster seeds the zeros; rows supply the counts. Keyed by id where there is
+        one, otherwise by name — appointments record `created_by` as a name only."""
+        counts: dict = {}
+        labels: dict = {}
+        for r in roster:
+            counts[r["key"]] = 0
+            labels[r["key"]] = r["name"]
+        total = 0
+        for row in rows:
+            k = key_of(row)
+            if not k:
+                continue
+            total += 1
+            counts[k] = counts.get(k, 0) + 1
+            labels.setdefault(k, name_of(row) or "Unknown")
+        members = [
+            {"key": k, "name": labels.get(k) or "Unknown", "count": counts[k]}
+            for k in counts
+        ]
+        # Busiest first; the zeros settle at the bottom in name order.
+        members.sort(key=lambda m: (-m["count"], m["name"].lower()))
+        return {"total": total, "members": members}
+
+    pre_sales_roster = [
+        {"key": u["id"], "name": u.get("full_name") or "Unknown"} for u in users if u.get("role") == "pre_sales"
+    ]
+    # Keyed by name, to match what appointments store.
+    booker_roster = [
+        {"key": u.get("full_name") or "", "name": f"{u.get('full_name') or 'Unknown'} · {ROLE_LABELS.get(u.get('role'), u.get('role') or '')}".strip(" ·")}
+        for u in users if u.get("role") == "branch_admin" and u.get("full_name")
+    ]
+    head_physio_roster = [
+        {"key": d["id"], "name": d.get("full_name") or "Unknown"} for d in doctors if d.get("profile_type") == "head_physio"
+    ]
+    physio_roster = [
+        {"key": d["id"], "name": d.get("full_name") or "Unknown"} for d in doctors if d.get("profile_type") == "physio"
+    ]
+
+    return {
+        "branch_id": branch_id,
+        "branch_name": branch.get("branch_name", ""),
+        "applied_filters": {"start_date": start_date, "end_date": end_date},
+        "groups": [
+            {
+                "key": "pre_sales",
+                "label": "Pre Sales (Total Leads)",
+                **build(pre_sales_roster, lead_rows, lambda r: r.get("assigned_user_id"), lambda r: r.get("assigned_user_name")),
+            },
+            {
+                "key": "branch_appointment",
+                "label": "Branch Appointment",
+                **build(booker_roster, appt_rows, lambda r: r.get("created_by"), lambda r: r.get("created_by")),
+            },
+            {
+                "key": "head_physio",
+                "label": "Head Physio",
+                **build(head_physio_roster, appt_rows, lambda r: r.get("doctor_id"), lambda r: r.get("doctor_name")),
+            },
+            {
+                "key": "physio",
+                "label": "Physio",
+                **build(physio_roster, lead_rows, lambda r: r.get("assigned_physio_id"), lambda r: r.get("assigned_physio_name")),
+            },
+        ],
     }
