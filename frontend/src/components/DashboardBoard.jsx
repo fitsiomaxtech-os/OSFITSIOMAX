@@ -53,12 +53,17 @@ const daysBack = (d, n) => { const x = startOfDay(d); x.setDate(x.getDate() - n)
 // alternative — ninety whole days ending yesterday — makes the figure exclude the
 // morning's takings, which is the one thing a Super Admin opening this board is
 // most likely to be checking.
+// `short` is the phone label. Six full labels cannot share a phone's width, and the
+// alternatives are worse: truncating gives "Last 9…", wrapping costs a row, scrolling
+// hides the last two off the edge. Shortening is the only one that keeps all six on
+// screen and readable. `label` is still what the chip and the filter state carry, so
+// nothing downstream sees the abbreviation.
 const DASH_PRESETS = [
-  { key: "all", label: "All", range: () => ({ from: null, to: null }) },
-  { key: "today", label: "Today", range: () => ({ from: startOfDay(new Date()), to: endOfDay(new Date()) }) },
-  { key: "this_week", label: "This Week", range: () => ({ from: mondayOf(new Date()), to: endOfDay(sundayOf(new Date())) }) },
-  { key: "this_month", label: "This Month", range: () => { const t = new Date(); return { from: startOfDay(new Date(t.getFullYear(), t.getMonth(), 1)), to: endOfDay(new Date(t.getFullYear(), t.getMonth() + 1, 0)) }; } },
-  { key: "last_90", label: "Last 90 Days", range: () => ({ from: daysBack(new Date(), 89), to: endOfDay(new Date()) }) },
+  { key: "all", label: "All", short: "All", range: () => ({ from: null, to: null }) },
+  { key: "today", label: "Today", short: "Today", range: () => ({ from: startOfDay(new Date()), to: endOfDay(new Date()) }) },
+  { key: "this_week", label: "This Week", short: "Week", range: () => ({ from: mondayOf(new Date()), to: endOfDay(sundayOf(new Date())) }) },
+  { key: "this_month", label: "This Month", short: "Month", range: () => { const t = new Date(); return { from: startOfDay(new Date(t.getFullYear(), t.getMonth(), 1)), to: endOfDay(new Date(t.getFullYear(), t.getMonth() + 1, 0)) }; } },
+  { key: "last_90", label: "Last 90 Days", short: "90d", range: () => ({ from: daysBack(new Date(), 89), to: endOfDay(new Date()) }) },
 ];
 
 const presetFilter = (p) => ({ key: p.key, label: p.label, ...p.range() });
@@ -123,11 +128,18 @@ export const DashboardBoard = () => {
           This Month in there sets the same key a button owns, so the button lights up
           and Custom goes back to reading "Custom" rather than the two of them naming the
           same range side by side. */}
-      {/* Six ranges, three to a row on a phone, so the whole set is on screen at once.
-          A single scrolling row put Last 90 Days half off the edge and Custom out of
-          sight entirely — a range you have to swipe to find is one you stop using. Two
-          rows cost less than that, and match the tab bar directly below. */}
-      <div className="grid grid-cols-3 items-center gap-2 sm:flex sm:flex-wrap" data-testid="dashboard-date-filter">
+      {/* One row on a phone, six equal columns, nothing off screen. An earlier pass used
+          overflow-x-auto here, which is what put Last 90 Days half past the edge — that
+          row was built to extend beyond the viewport and scroll. A six-column grid can't:
+          every cell is a sixth of the width the container already has.
+          Short labels on a phone, full ones from sm up, and the Custom trigger drops its
+          calendar icon on a phone to spend that width on its label instead.
+
+          Natural widths rather than six equal columns: "All" needs a third of what
+          "Custom" does, and equal columns would spend that surplus on padding while
+          Custom truncated. Each item can still shrink (min-w-0 + truncate), so a narrow
+          screen degrades to an ellipsis rather than to overflow. */}
+      <div className="flex items-center gap-1 sm:flex-wrap sm:gap-2" data-testid="dashboard-date-filter">
         {DASH_PRESETS.map((p) => {
           const active = dateFilter.key === p.key;
           return (
@@ -135,16 +147,18 @@ export const DashboardBoard = () => {
               key={p.key}
               type="button"
               onClick={() => setDateFilter(presetFilter(p))}
-              className={`h-10 min-w-0 truncate rounded-md px-2 text-xs font-medium transition sm:px-3 sm:text-sm ${active ? "bg-sky-600 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}
+              className={`h-10 min-w-0 truncate rounded-md px-2 text-[11px] font-medium transition sm:px-3 sm:text-sm ${active ? "bg-sky-600 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}
               data-testid={`dashboard-preset-${p.key}`}
             >
-              {p.label}
+              <span className="sm:hidden">{p.short}</span>
+              <span className="hidden sm:inline">{p.label}</span>
             </button>
           );
         })}
-        {/* The popover's trigger is a fixed-width Button, so it needs a grid cell of its
-            own to sit in rather than being allowed to set the column width. */}
-        <span className="min-w-0 [&_button]:w-full [&_button]:px-2 sm:[&_button]:w-auto sm:[&_button]:px-4">
+        {/* The trigger is a Button this component doesn't own, so its width, padding, text
+            size and icon are pinned from out here rather than by adding breakpoint props
+            to a control five other boards share. */}
+        <span className="min-w-0 [&_button]:h-10 [&_button]:max-w-full [&_button]:px-2 [&_button]:text-[11px] [&_svg]:hidden sm:[&_button]:px-4 sm:[&_button]:text-sm sm:[&_svg]:inline-block">
           <DateFilterPopover
             value={DASH_PRESETS.some((p) => p.key === dateFilter.key) ? null : dateFilter}
             onChange={(next) => setDateFilter(next || defaultFilter())}
