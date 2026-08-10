@@ -15,8 +15,6 @@ import {
   LayoutDashboard,
   FileText,
   Share2,
-  Copy,
-  Link as LinkIcon,
   Download,
   ShoppingCart,
   ClipboardList,
@@ -35,7 +33,6 @@ import { StageTabBar, stageDisplayLabel } from "@/components/ui/stage-tab";
 import { apptCardPng, REASSURANCE } from "@/lib/apptCard";
 import {
   scheduleBranchAppointment,
-  publicAppointmentUrl,
   getBranches,
   getBranchBoard,
   getAvailableExperts,
@@ -123,11 +120,6 @@ const randomToken = () => {
   (window.crypto || window.msCrypto).getRandomValues(bytes);
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 };
-
-/** Where the patient opens their own copy of this confirmation. Keyed by an unguessable
- *  token rather than the reference number, which is printed on the sheet and derived
- *  from the patient number — guessable, and not something to hang access on. */
-const apptLink = (a) => (a.shareToken ? publicAppointmentUrl(a.shareToken) : "");
 
 /** A stored phone in E.164 for wa.me, which takes digits only — no +, spaces or the
  *  "p:" prefix some records carry. A bare 10-digit number is assumed Indian, matching
@@ -286,30 +278,6 @@ const apptHtml = (a) => `<!doctype html><html><head><meta charset="utf-8">
   <hr>
   <div class="foot">This is a computer-generated confirmation and needs no signature.<br>Thank you for choosing FITSIOMAX.</div>
 </div></body></html>`;
-
-/** Clipboard write, with the execCommand fallback for the non-HTTPS/older-browser case
- *  where navigator.clipboard simply isn't there. */
-const copyApptText = async (text, successMsg) => {
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-    } else {
-      const el = document.createElement("textarea");
-      el.value = text;
-      el.style.position = "fixed";
-      el.style.opacity = "0";
-      document.body.appendChild(el);
-      el.select();
-      document.execCommand("copy");
-      document.body.removeChild(el);
-    }
-    toast.success(successMsg);
-  } catch {
-    toast.error("Couldn't copy on this device");
-  }
-};
-
-const copyApptMessage = (a) => copyApptText(apptMessage(a), "Confirmation copied — paste it into WhatsApp or SMS");
 
 export const BranchAdminBoard = ({ branchId, embedded = false }) => {
   const [boardData, setBoardData] = useState({ leads: [], stage_counts: {} });
@@ -1683,19 +1651,9 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
               <Button variant="outline" className="w-full" onClick={() => shareApptCard(apptConfirm)} data-testid="branch-appt-confirm-share-card">
                 <Share2 className="mr-1.5 h-4 w-4" /> Send Card + Message
               </Button>
-              <div className="grid grid-cols-2 gap-2">
-                <Button variant="outline" onClick={() => copyApptMessage(apptConfirm)} data-testid="branch-appt-confirm-copy">
-                  <Copy className="mr-1.5 h-4 w-4" /> Copy
-                </Button>
-                <Button variant="outline" onClick={() => downloadApptCard(apptConfirm)} data-testid="branch-appt-confirm-download">
-                  <Download className="mr-1.5 h-4 w-4" /> Card
-                </Button>
-              </div>
-              {apptLink(apptConfirm) && (
-                <Button variant="outline" className="w-full" onClick={() => copyApptText(apptLink(apptConfirm), "Link copied")} data-testid="branch-appt-confirm-copy-link">
-                  <LinkIcon className="mr-1.5 h-4 w-4" /> Copy Link
-                </Button>
-              )}
+              <Button variant="outline" className="w-full" onClick={() => downloadApptCard(apptConfirm)} data-testid="branch-appt-confirm-download">
+                <Download className="mr-1.5 h-4 w-4" /> Card
+              </Button>
               <Button
                 variant="ghost"
                 className="w-full text-slate-500"
