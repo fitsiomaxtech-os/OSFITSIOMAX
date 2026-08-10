@@ -47,6 +47,26 @@ const isoToManual = (iso) => {
   return m ? `${m[3]}-${m[2]}-${m[1]}` : "";
 };
 
+/** Types the separators so the person doesn't have to: 1 0 0 8 2 0 2 6 becomes
+ *  10-08-2026 as they go. Only digits are kept, so a pasted "10/08/2026" or a stray
+ *  keystroke lands in the same shape as anything typed by hand.
+ *
+ *  The separator is appended the moment a group is complete — after the day, after the
+ *  month — rather than waiting for the next digit, so the field always shows where the
+ *  cursor is in the date. That has to be suppressed while deleting, or backspacing over
+ *  a separator would re-add it immediately and the field could never be cleared past it.
+ *  Hence `prev`: the only reliable way to tell a delete from an insert here is that the
+ *  value got shorter. */
+const maskDayMonthYear = (value, prev = "") => {
+  const digits = value.replace(/\D/g, "").slice(0, 8);
+  const deleting = value.length < prev.length;
+  if (digits.length <= 2) return digits + (digits.length === 2 && !deleting ? "-" : "");
+  if (digits.length <= 4) {
+    return `${digits.slice(0, 2)}-${digits.slice(2)}` + (digits.length === 4 && !deleting ? "-" : "");
+  }
+  return `${digits.slice(0, 2)}-${digits.slice(2, 4)}-${digits.slice(4)}`;
+};
+
 /** "04-08-2026" -> "2026-08-04", or "" if it isn't a real date.
  *
  *  Accepts - / and . as separators and a single-digit day or month, because that is what
@@ -222,9 +242,10 @@ export const DateFilterPopover = ({ value, onChange, testid = "date-filter", cen
                         <label className="text-xs font-medium text-slate-500">From</label>
                         <input
                           value={rangeFromText}
-                          onChange={(e) => setRangeFromText(e.target.value)}
+                          onChange={(e) => setRangeFromText(maskDayMonthYear(e.target.value, rangeFromText))}
                           onKeyDown={(e) => { if (e.key === "Enter") applyManualRange(); }}
                           inputMode="numeric"
+                          maxLength={10}
                           placeholder="DD-MM-YYYY"
                           className={`h-9 w-full rounded-md border bg-white px-3 text-sm outline-none focus:ring-1 ${
                             rangeFromText && !rangeFromIso
@@ -238,9 +259,10 @@ export const DateFilterPopover = ({ value, onChange, testid = "date-filter", cen
                         <label className="text-xs font-medium text-slate-500">To</label>
                         <input
                           value={rangeToText}
-                          onChange={(e) => setRangeToText(e.target.value)}
+                          onChange={(e) => setRangeToText(maskDayMonthYear(e.target.value, rangeToText))}
                           onKeyDown={(e) => { if (e.key === "Enter") applyManualRange(); }}
                           inputMode="numeric"
+                          maxLength={10}
                           placeholder="DD-MM-YYYY"
                           className={`h-9 w-full rounded-md border bg-white px-3 text-sm outline-none focus:ring-1 ${
                             (rangeToText && !rangeToIso) || !manualOrderOk
