@@ -99,11 +99,12 @@ const DashboardTab = ({ onNavigate }) => {
   if (!data) return <p className="text-sm text-slate-500">Loading...</p>;
   const k = data.kpis;
 
-  // Sorted, so the biggest department is the one the eye lands on, and measured against
-  // the largest rather than the total — the question this answers is "who is biggest",
-  // not "what share of the company".
+  // Sorted, so the biggest department is the one the eye lands on. Share is taken against
+  // the sum of the departments rather than active_employees: the two count different
+  // things (one is every employee record, the other only active ones), and dividing by the
+  // wrong one would print percentages that don't reach 100.
   const depts = [...(data.department_strength || [])].sort((a, b) => b.count - a.count);
-  const peak = depts.length ? Math.max(...depts.map((d) => d.count)) : 0;
+  const headcount = depts.reduce((n, d) => n + (d.count || 0), 0);
 
   return (
     <div className="space-y-5" data-testid="hr-dashboard-tab">
@@ -121,12 +122,15 @@ const DashboardTab = ({ onNavigate }) => {
         <KPI icon={CalendarOff} label="Pending Leaves" value={k.pending_leaves} hint="Leave not tracked yet" testid="hr-kpi-leaves" />
       </div>
 
-      {/* Bars rather than five equal boxes: the question is which departments are big and
-          which are thin, and five boxes of identical size answer it only if you read every
-          number. Length carries the comparison; the count stays printed beside it so no
-          value is reachable only by eyeballing a bar.
-          One hue for every bar — the departments have no order of their own, so shading
-          them by size would spend the colour channel restating the length. */}
+      {/* Cards, in the same shape as the KPI row above so the page reads as one set of
+          controls rather than two. Ordered biggest first — the original grid was in
+          whatever order the aggregation returned, which put the largest department
+          wherever it happened to land.
+
+          Each card carries its share of headcount as well as the count. That is the one
+          thing the count alone cannot tell you, and it is what the bars were really for:
+          11 means little until you know whether it is most of the company or a corner
+          of it. */}
       <Card data-testid="hr-dept-strength">
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Department Strength</CardTitle>
@@ -134,23 +138,20 @@ const DashboardTab = ({ onNavigate }) => {
         </CardHeader>
         <CardContent>
           {depts.length === 0 ? <p className="text-sm text-slate-400">No employees yet.</p> : (
-            <div className="space-y-1">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
               {depts.map((d) => (
                 <button
                   key={d.name}
                   type="button"
                   onClick={() => onNavigate("employees", { department: d.name })}
-                  className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition hover:bg-orange-50"
+                  className="rounded-xl border-2 border-slate-200 bg-white px-4 py-3.5 text-left transition hover:border-orange-300 hover:shadow-sm"
                   data-testid={`hr-dept-${d.name}`}
                 >
-                  <span className="w-28 shrink-0 truncate text-sm font-medium text-slate-700 sm:w-40">{d.name}</span>
-                  <span className="h-2.5 min-w-0 flex-1 overflow-hidden rounded-full bg-slate-100">
-                    <span
-                      className="block h-full rounded-full bg-orange-500"
-                      style={{ width: peak ? `${Math.max((d.count / peak) * 100, 2)}%` : "0%" }}
-                    />
+                  <span className="block truncate text-[11px] font-bold uppercase tracking-wider text-slate-500">{d.name}</span>
+                  <span className="mt-1 block text-3xl font-extrabold text-orange-500">{d.count}</span>
+                  <span className="mt-0.5 block text-[10px] text-slate-400">
+                    {headcount ? `${Math.round((d.count / headcount) * 100)}% of staff` : ""}
                   </span>
-                  <span className="w-8 shrink-0 text-right text-sm font-bold tabular-nums text-slate-800">{d.count}</span>
                 </button>
               ))}
             </div>
