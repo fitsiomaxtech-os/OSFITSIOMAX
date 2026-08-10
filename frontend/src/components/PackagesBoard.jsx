@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Stethoscope, CalendarRange, Pill, Dumbbell, ShoppingCart, Activity, Plus, X, FlaskConical, Pencil, Trash2, ImagePlus, Wifi, MapPin, Clock, Eye, History } from "lucide-react";
+import { Stethoscope, CalendarRange, Pill, Dumbbell, ShoppingCart, Activity, Plus, X, FlaskConical, Pencil, Trash2, ImagePlus, Wifi, MapPin, Clock, Eye, History, Salad } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,6 +9,7 @@ import { uploadStoreImage, createStoreItem, updateStoreItem, deleteStoreItem, li
 export const TABS = [
   { key: "consultations", label: "Consultations", icon: Stethoscope },
   { key: "sessions", label: "Sessions", icon: CalendarRange },
+  { key: "diet", label: "Diet Package", icon: Salad },
   { key: "tablet", label: "Tablet", icon: Pill },
   { key: "supplementary", label: "Supplementary", icon: FlaskConical },
   { key: "equipment", label: "Equipment", icon: Dumbbell },
@@ -64,7 +65,28 @@ const PriceFields = ({ priceOnline, setPriceOnline, priceOffline, setPriceOfflin
   </div>
 );
 
-const CreateConsultationModal = ({ item, onClose, onSaved }) => {
+// Diet Consultation is priced and timed exactly like a physio consultation, so it reuses
+// the same panel and the same modal. Only the wording, the item_type and the header colour
+// differ — a second copy of 200 lines would drift the moment one of them was edited.
+const PACKAGE_KINDS = {
+  consultation: {
+    itemType: "consultation",
+    noun: "Consultation",
+    header: "from-sky-500 to-indigo-600",
+    durationLabel: "Consultation Duration",
+    emptyText: "No consultations yet. Click Create to add one.",
+  },
+  diet: {
+    itemType: "diet",
+    noun: "Diet Package",
+    header: "from-emerald-500 to-teal-600",
+    durationLabel: "Diet Consultation Duration",
+    emptyText: "No diet packages yet. Click Create to add one.",
+  },
+};
+
+const CreateConsultationModal = ({ item, onClose, onSaved, kind = "consultation" }) => {
+  const cfg = PACKAGE_KINDS[kind] || PACKAGE_KINDS.consultation;
   const isEdit = Boolean(item);
   const [name, setName] = useState(item?.name || "");
   const [description, setDescription] = useState(item?.description || "");
@@ -84,7 +106,7 @@ const CreateConsultationModal = ({ item, onClose, onSaved }) => {
   };
 
   const submit = async () => {
-    if (!name.trim()) { toast.error("Consultation name is required"); return; }
+    if (!name.trim()) { toast.error(`${cfg.noun} name is required`); return; }
     setSaving(true);
     try {
       let image_url = item?.image_url || null;
@@ -93,7 +115,7 @@ const CreateConsultationModal = ({ item, onClose, onSaved }) => {
         image_url = uploaded.url;
       }
       const payload = {
-        item_type: "consultation",
+        item_type: cfg.itemType,
         category: "physiotherapy",
         name: name.trim(),
         description,
@@ -104,10 +126,10 @@ const CreateConsultationModal = ({ item, onClose, onSaved }) => {
       };
       if (isEdit) {
         await updateStoreItem(item.id, payload);
-        toast.success("Consultation updated");
+        toast.success(`${cfg.noun} updated`);
       } else {
         await createStoreItem(payload);
-        toast.success("Consultation created");
+        toast.success(`${cfg.noun} created`);
       }
       onSaved();
       onClose();
@@ -121,8 +143,8 @@ const CreateConsultationModal = ({ item, onClose, onSaved }) => {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} data-testid="consultation-create-modal">
       <div className="flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-        <div className="flex shrink-0 items-center justify-between bg-gradient-to-r from-sky-500 to-indigo-600 px-5 py-3 text-white">
-          <p className="text-base font-semibold">{isEdit ? "Edit Consultation" : "Consultation"}</p>
+        <div className={`flex shrink-0 items-center justify-between bg-gradient-to-r ${cfg.header} px-5 py-3 text-white`}>
+          <p className="text-base font-semibold">{isEdit ? `Edit ${cfg.noun}` : cfg.noun}</p>
           <button onClick={onClose} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="consultation-create-close">
             <X className="h-4 w-4" />
           </button>
@@ -279,7 +301,7 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved }) => {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} data-testid="session-create-modal">
       <div className="flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-        <div className="flex shrink-0 items-center justify-between bg-gradient-to-r from-sky-500 to-indigo-600 px-5 py-3 text-white">
+        <div className={`flex shrink-0 items-center justify-between bg-gradient-to-r ${cfg.header} px-5 py-3 text-white`}>
           <p className="text-base font-semibold">{isEdit ? "Edit Session Package" : "Add Session Package"}</p>
           <button onClick={onClose} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="session-create-close">
             <X className="h-4 w-4" />
@@ -443,7 +465,7 @@ export const ViewItemModal = ({ item, kind, onClose, onEdit, canEdit = true }) =
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} data-testid="item-view-modal">
       <div className="flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-        <div className="flex shrink-0 items-center justify-between bg-gradient-to-r from-sky-500 to-indigo-600 px-5 py-3 text-white">
+        <div className={`flex shrink-0 items-center justify-between bg-gradient-to-r ${cfg.header} px-5 py-3 text-white`}>
           <p className="flex-1 truncate text-base font-semibold" data-testid="item-view-name">{item.name}</p>
           <div className="flex shrink-0 items-center gap-1">
             {canEdit && (
@@ -594,20 +616,21 @@ const SessionsPanel = () => {
   );
 };
 
-const PhysiotherapyPanel = () => {
+const PhysiotherapyPanel = ({ kind = "consultation" }) => {
+  const cfg = PACKAGE_KINDS[kind] || PACKAGE_KINDS.consultation;
   const [items, setItems] = useState([]);
   const [showCreate, setShowCreate] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
   const [viewingItem, setViewingItem] = useState(null);
 
-  const loadItems = () => listStoreItems("physiotherapy", "consultation").then(setItems).catch(() => {});
-  useEffect(() => { loadItems(); }, []);
+  const loadItems = () => listStoreItems("physiotherapy", cfg.itemType).then(setItems).catch(() => {});
+  useEffect(() => { loadItems(); }, [cfg.itemType]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDelete = async (it) => {
     if (!window.confirm(`Permanently delete "${it.name}"? This cannot be undone.`)) return;
     try {
       await deleteStoreItem(it.id);
-      toast.success("Consultation deleted permanently");
+      toast.success(`${cfg.noun} deleted permanently`);
       loadItems();
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed to delete");
@@ -625,7 +648,7 @@ const PhysiotherapyPanel = () => {
       {items.length === 0 ? (
         <Card>
           <CardContent className="p-8 text-center text-sm text-slate-400">
-            No consultations yet. Click Create to add one.
+            {cfg.emptyText}
           </CardContent>
         </Card>
       ) : (
@@ -662,7 +685,7 @@ const PhysiotherapyPanel = () => {
                   {it.duration_minutes && (
                     <div className="mt-1.5 flex items-center justify-between rounded-lg bg-sky-50 px-2.5 py-1.5">
                       <span className="inline-flex items-center gap-1.5 text-xs font-bold text-sky-800">
-                        <Clock className="h-3.5 w-3.5" />Consultation Duration
+                        <Clock className="h-3.5 w-3.5" />{cfg.durationLabel}
                       </span>
                       <span className="text-sm font-extrabold text-sky-900">
                         {DURATION_OPTIONS.find((d) => d.minutes === it.duration_minutes)?.label || `${it.duration_minutes} mins`}
@@ -676,8 +699,8 @@ const PhysiotherapyPanel = () => {
         </div>
       )}
 
-      {showCreate && <CreateConsultationModal onClose={() => setShowCreate(false)} onSaved={loadItems} />}
-      {editingItem && <CreateConsultationModal item={editingItem} onClose={() => setEditingItem(null)} onSaved={loadItems} />}
+      {showCreate && <CreateConsultationModal kind={kind} onClose={() => setShowCreate(false)} onSaved={loadItems} />}
+      {editingItem && <CreateConsultationModal kind={kind} item={editingItem} onClose={() => setEditingItem(null)} onSaved={loadItems} />}
       {viewingItem && (
         <ViewItemModal
           item={viewingItem}
@@ -900,7 +923,7 @@ export const PackagesBoard = () => {
     <div className="space-y-4" data-testid="packages-board">
       <div>
         <h2 className="text-2xl font-bold text-slate-900">FITSIO STORE</h2>
-        <p className="text-sm text-slate-500">Manage Consultations, Sessions, Tablet, Supplementary, Equipment, and Vending Machine.</p>
+        <p className="text-sm text-slate-500">Manage Consultations, Sessions, Diet Packages, Tablet, Supplementary, Equipment, and Vending Machine.</p>
       </div>
 
       <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="packages-subtabs">
@@ -922,8 +945,9 @@ export const PackagesBoard = () => {
 
       {tab === "consultations" && <ConsultationsPanel />}
       {tab === "sessions" && <SessionsPanel />}
+      {tab === "diet" && <PhysiotherapyPanel kind="diet" />}
       {tab === "history" && <HistoryPanel />}
-      {tab !== "consultations" && tab !== "sessions" && tab !== "history" && TABS.map((t) => tab === t.key && (
+      {tab !== "consultations" && tab !== "sessions" && tab !== "diet" && tab !== "history" && TABS.map((t) => tab === t.key && (
         <PlaceholderPanel key={t.key} label={t.label} testid={`packages-panel-${t.key}`} />
       ))}
     </div>

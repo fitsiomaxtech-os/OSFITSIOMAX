@@ -40,6 +40,12 @@ async def upload_store_image(file: UploadFile = File(...), _: V3UserOut = Depend
 
 VALID_DURATIONS_MINUTES = {15, 30, 45, 60, 120}
 
+# "diet" is the Diet Consultation package — priced and timed exactly like a physio
+# consultation, which is why it validates against the same rules rather than getting its
+# own. Sessions are the odd one out: they carry a session count instead of a duration.
+ITEM_TYPES = ("consultation", "session", "diet")
+TIMED_ITEM_TYPES = ("consultation", "diet")
+
 
 class StoreItemIn(BaseModel):
     item_type: str = "consultation"  # "consultation" | "session"
@@ -84,9 +90,9 @@ async def create_store_item(payload: StoreItemIn, _: V3UserOut = Depends(v3_requ
         raise HTTPException(status_code=400, detail="Name is required")
     if payload.price_online < 0 or payload.price_offline < 0:
         raise HTTPException(status_code=400, detail="Price cannot be negative")
-    if payload.item_type not in ("consultation", "session"):
-        raise HTTPException(status_code=400, detail="item_type must be 'consultation' or 'session'")
-    if payload.item_type == "consultation" and payload.duration_minutes not in VALID_DURATIONS_MINUTES:
+    if payload.item_type not in ITEM_TYPES:
+        raise HTTPException(status_code=400, detail=f"item_type must be one of: {', '.join(ITEM_TYPES)}")
+    if payload.item_type in TIMED_ITEM_TYPES and payload.duration_minutes not in VALID_DURATIONS_MINUTES:
         raise HTTPException(status_code=400, detail="Duration must be one of 15, 30, 45, 60, or 120 minutes")
     if payload.item_type == "session" and (not payload.sessions_online or payload.sessions_online < 1):
         raise HTTPException(status_code=400, detail="Online sessions count must be at least 1")
@@ -106,9 +112,9 @@ async def update_store_item(item_id: str, payload: StoreItemIn, _: V3UserOut = D
         raise HTTPException(status_code=400, detail="Name is required")
     if payload.price_online < 0 or payload.price_offline < 0:
         raise HTTPException(status_code=400, detail="Price cannot be negative")
-    if payload.item_type not in ("consultation", "session"):
-        raise HTTPException(status_code=400, detail="item_type must be 'consultation' or 'session'")
-    if payload.item_type == "consultation" and payload.duration_minutes not in VALID_DURATIONS_MINUTES:
+    if payload.item_type not in ITEM_TYPES:
+        raise HTTPException(status_code=400, detail=f"item_type must be one of: {', '.join(ITEM_TYPES)}")
+    if payload.item_type in TIMED_ITEM_TYPES and payload.duration_minutes not in VALID_DURATIONS_MINUTES:
         raise HTTPException(status_code=400, detail="Duration must be one of 15, 30, 45, 60, or 120 minutes")
     if payload.item_type == "session" and (not payload.sessions_online or payload.sessions_online < 1):
         raise HTTPException(status_code=400, detail="Online sessions count must be at least 1")
