@@ -19,15 +19,15 @@ const DASH_TABS = [
   // Overview first, and the landing tab: it answers "how are we doing" in one screen,
   // which is the question a Super Admin opens this board with. The four tabs after it
   // answer "how are we doing at X", which is the follow-up.
-  { key: "overview", label: "Executive Overview", icon: LayoutDashboard },
+  { key: "overview", label: "Executive Overview", short: "Overview", icon: LayoutDashboard },
   { key: "leads", label: "Leads", icon: Users },
   // BRANCHS carries both halves of the sales chain: the branches, and the Pre-Sales
   // agents who fed them. Pre-Sales had its own tab and it didn't earn one — the two
   // are read against each other, and a tab apiece meant switching back and forth to
   // compare what was handed over with what was closed.
-  { key: "branch", label: "BRANCHS", icon: Building2, team: "sales", panel: "branch" },
-  { key: "appointments", label: "Appointments", icon: CalendarCheck },
-  { key: "treatments", label: "Treatments", icon: Activity },
+  { key: "branch", label: "BRANCHS", short: "Branch", icon: Building2, team: "sales", panel: "branch" },
+  { key: "appointments", label: "Appointments", short: "Appts", icon: CalendarCheck },
+  { key: "treatments", label: "Treatments", short: "Treat", icon: Activity },
   { key: "revenue", label: "Revenue", icon: IndianRupee },
 ];
 
@@ -179,7 +179,10 @@ export const DashboardBoard = () => {
         </span>
       </div>
 
-      <SegmentedTabs tabs={DASH_TABS} value={activeTab} onChange={setActiveTab} testid="dashboard-tab" />
+      {/* Two rows of three on a phone. Six tabs in one row leaves each about a sixth of
+          the width, which even the short labels can't survive — and one of them is
+          "Executive Overview". Desktop keeps the single row. */}
+      <SegmentedTabs tabs={DASH_TABS} value={activeTab} onChange={setActiveTab} testid="dashboard-tab" mobileCols={3} />
 
       {activeTab === "overview" ? (
         <ExecutiveOverview data={data} loading={loading} dateFilter={dateFilter} />
@@ -392,17 +395,20 @@ const ExecutiveOverview = ({ data, loading, dateFilter }) => {
 
   return (
     <div className="space-y-4" data-testid="dashboard-overview">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {/* Two up on a phone rather than one. Four full-width cards stacked pushed the
+          branch table two screens down, and these figures are short enough to share a
+          row. */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {metrics.map((m) => {
           const before = prev?.[m.key]?.total;
           return (
             <Card key={m.key} data-testid={`dashboard-overview-${m.key}`}>
-              <CardContent className="p-4">
+              <CardContent className="p-3 sm:p-4">
                 <div className="flex items-start justify-between gap-2">
-                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">{m.label}</p>
+                  <p className="min-w-0 truncate text-[10px] font-bold uppercase tracking-wider text-slate-500 sm:text-[11px]">{m.label}</p>
                   <m.icon className="h-4 w-4 shrink-0 text-slate-300" />
                 </div>
-                <p className="mt-1 truncate text-3xl font-extrabold text-slate-800">
+                <p className="mt-1 truncate text-2xl font-extrabold text-slate-800 sm:text-3xl">
                   {m.currency ? fmtValue("revenue", m.value) : (m.value || 0).toLocaleString("en-IN")}
                 </p>
                 <Delta now={m.value} before={before} loading={prevLoading} available={!!from && !!to} />
@@ -423,7 +429,7 @@ const ExecutiveOverview = ({ data, loading, dateFilter }) => {
                   numeric columns don't fit a phone, and the alternative is the page
                   scrolling sideways. */}
               <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
-                <table className="min-w-full text-sm">
+                <table className="min-w-full text-xs sm:text-sm">
                   <thead>
                     <tr className="border-b border-slate-200 text-left text-[10px] uppercase tracking-wider text-slate-400">
                       <th className="py-2 pr-3 font-semibold">Branch</th>
@@ -456,7 +462,11 @@ const ExecutiveOverview = ({ data, loading, dateFilter }) => {
                   </tbody>
                 </table>
               </div>
-              <BranchShareDonut branches={branches} bare />
+              {/* Centred on a phone, where it stacks under the table and would otherwise
+                  sit against the left edge with a column of dead space beside it. */}
+              <div className="flex justify-center lg:block">
+                <BranchShareDonut branches={branches} bare />
+              </div>
             </div>
           )}
         </CardContent>
