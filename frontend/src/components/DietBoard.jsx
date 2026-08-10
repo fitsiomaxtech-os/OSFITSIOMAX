@@ -72,7 +72,7 @@ const StatTile = ({ label, value, sub, icon: Icon, onClick, active, testid }) =>
         <span className="truncate text-[10px] font-bold uppercase tracking-wider sm:text-xs">{label}</span>
       </span>
       <span className={`mt-0.5 block text-2xl font-extrabold sm:mt-1 sm:text-3xl ${active ? "text-teal-700" : "text-slate-800"}`}>{value}</span>
-      {sub && <span className={`mt-0.5 block text-[10px] ${active ? "text-teal-600" : "text-slate-400"}`}>{sub}</span>}
+      {sub && <span className={`mt-0.5 block truncate text-[10px] ${active ? "text-teal-600" : "text-slate-400"}`}>{sub}</span>}
     </Tag>
   );
 };
@@ -120,7 +120,7 @@ export const DietBoard = ({ coachId } = {}) => {
       </div>
 
       <div style={{ display: activeTab === "consultations" ? "block" : "none" }}>
-        <ConsultationsTab coachId={coachId} onCountChange={setConsultCount} />
+        <ConsultationsTab coachId={coachId} onCountChange={setConsultCount} toolbarSlot={slotFor("consultations")} />
       </div>
       <div style={{ display: activeTab === "checkins" ? "block" : "none" }}>
         <CheckinsTab coachId={coachId} onCountChange={setCheckinCount} toolbarSlot={slotFor("checkins")} />
@@ -173,7 +173,7 @@ export const DietBoard = ({ coachId } = {}) => {
  * coach needs to see what they have done as much as what is waiting, and a queue that
  * empties itself leaves no way to check the day back.
  */
-function ConsultationsTab({ coachId, onCountChange }) {
+function ConsultationsTab({ coachId, onCountChange, toolbarSlot }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -203,18 +203,23 @@ function ConsultationsTab({ coachId, onCountChange }) {
       return (r.lead_name || "").toLowerCase().includes(q) || (r.phone || "").includes(q);
     });
 
+  const toolbar = (
+    <div className="relative w-full sm:w-[260px]" data-testid="diet-consult-toolbar">
+      <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
+      <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search patient..." className="h-10 pl-9" data-testid="diet-consult-search" />
+    </div>
+  );
+
   return (
     <div data-testid="diet-consultations-tab">
+      {toolbarSlot ? createPortal(toolbar, toolbarSlot) : toolbar}
+
       <div className="mb-4 grid grid-cols-3 gap-2 sm:gap-3">
         <StatTile icon={Stethoscope} label="Referred" value={rows.length} onClick={() => setFilter("all")} active={filter === "all"} testid="diet-consult-stat-all" />
         <StatTile icon={Clock} label="Waiting" value={waiting.length} sub="Not yet on a plan" onClick={() => setFilter("waiting")} active={filter === "waiting"} testid="diet-consult-stat-waiting" />
         <StatTile icon={CheckCircle2} label="On a plan" value={seen.length} onClick={() => setFilter("seen")} active={filter === "seen"} testid="diet-consult-stat-seen" />
       </div>
 
-      <div className="mb-3 relative">
-        <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-        <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search patient by name or phone..." className="h-10 pl-9" data-testid="diet-consult-search" />
-      </div>
 
       {loading ? (
         <p className="py-16 text-center text-sm text-slate-400">Loading…</p>
@@ -249,7 +254,12 @@ function ConsultationsTab({ coachId, onCountChange }) {
                 </p>
               </div>
               <span className={`shrink-0 rounded-md px-2.5 py-1 text-[11px] font-bold ${p.assigned ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
-                {p.assigned ? (p.diet_stage || "ON A PLAN") : "AWAITING CONSULTATION"}
+                {p.assigned ? (p.diet_stage || "ON A PLAN") : (
+                  <>
+                    <span className="sm:hidden">WAITING</span>
+                    <span className="hidden sm:inline">AWAITING CONSULTATION</span>
+                  </>
+                )}
               </span>
             </div>
           ))}
