@@ -1,10 +1,8 @@
 import { useEffect, useState } from "react";
-import { Users, CalendarCheck, Activity, IndianRupee, X, Building2, LayoutDashboard, TrendingUp, TrendingDown, Minus, Plus, Settings2 } from "lucide-react";
+import { Users, CalendarCheck, Activity, IndianRupee, X, Building2, LayoutDashboard, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { SegmentedTabs } from "@/components/ui/segmented-tabs";
-import { CreateLeadModal } from "@/components/CreateLeadModal";
 import { toast } from "@/components/ui/sonner";
 import { getDashboardOverview, getDashboardBranchBreakdown, getDashboardLeadsTrend, mkGetTeam } from "@/lib/api";
 import { TeamCard } from "@/components/marketing/TeamCard";
@@ -87,12 +85,8 @@ const fmtValue = (tabKey, value) => (tabKey === "revenue" ? `₹${(value || 0).t
 
 // Super Admin's default landing page — Leads / Appointments / Treatments / Revenue split
 // per Physiotherapy branch, plus the two sales-team tabs, each scoped to a date range.
-export const DashboardBoard = ({ onNavigate }) => {
+export const DashboardBoard = () => {
   const [dateFilter, setDateFilter] = useState(defaultFilter);
-  // Bumped to re-run the overview fetch after something on this board changes the data,
-  // rather than asking the user to reload to see a lead they just created.
-  const [refreshKey, setRefreshKey] = useState(0);
-  const reload = () => setRefreshKey((n) => n + 1);
   const [activeTab, setActiveTab] = useState("overview");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -114,7 +108,7 @@ export const DashboardBoard = ({ onNavigate }) => {
       .then(setData)
       .catch(() => toast.error("Failed to load dashboard"))
       .finally(() => setLoading(false));
-  }, [dateFilter, refreshKey]);
+  }, [dateFilter]);
 
   // Fetched once, on the first visit to either team tab, and not refetched when the date
   // range changes — /marketing/team-members counts a person's whole book and takes no
@@ -341,18 +335,11 @@ export const DashboardBoard = ({ onNavigate }) => {
           {/* Other Verticals removed from the board. The endpoint still returns them —
               other callers read the same payload — they just aren't drawn here. */}
 
-          {activeTab === "leads" && (
-            <>
-              {/* Share on the left, the two things you'd do about it on the right. The
-                  donut used to run the full width, which gave a five-row legend the same
-                  space as a chart that needs about a third of it. */}
-              <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-                <BranchShareDonut branches={activeData.physio_branches} />
-                <QuickActions onNavigate={onNavigate} onLeadCreated={reload} />
-              </div>
-              <LeadsTrend />
-            </>
-          )}
+          {/* The share breakdown and Quick Actions used to sit here. The share is on
+              Executive Overview, beside a table that says more than the donut's legend
+              did; the branch cards above are the same numbers again. What's left is the
+              one thing this tab had that nothing else showed: the trend. */}
+          {activeTab === "leads" && <LeadsTrend />}
         </div>
       )}
     </div>
@@ -482,7 +469,7 @@ const ExecutiveOverview = ({ data, loading, dateFilter }) => {
               {/* Centred on a phone, where it stacks under the table and would otherwise
                   sit against the left edge with a column of dead space beside it. */}
               <div className="flex justify-center lg:block">
-                <BranchShareDonut branches={branches} bare />
+                <BranchShareDonut branches={branches} />
               </div>
             </div>
           )}
@@ -513,45 +500,6 @@ const Delta = ({ now, before, loading, available }) => {
       {flat ? "0%" : `${pct > 0 ? "+" : ""}${pct.toFixed(1)}%`}
       <span className="font-normal text-slate-400">vs prior period</span>
     </p>
-  );
-};
-
-/**
- * The two things a Super Admin reading the Leads tab actually goes on to do.
- *
- * Both genuinely work: Add New Lead opens the same modal the CRM uses and refreshes the
- * board behind it, Route Settings goes to where round-robin distribution is configured.
- * Nothing here is a placeholder — a panel of buttons that look actionable and aren't is
- * worse than no panel.
- */
-const QuickActions = ({ onNavigate, onLeadCreated }) => {
-  const [creating, setCreating] = useState(false);
-  return (
-    <Card data-testid="dashboard-quick-actions">
-      <CardContent className="p-5">
-        <p className="text-sm font-bold text-slate-800">Quick Actions</p>
-        <p className="mt-0.5 text-xs text-slate-500">Add a lead, or change how new ones are shared out.</p>
-        <div className="mt-4 space-y-2">
-          <Button className="w-full bg-sky-600 hover:bg-sky-700" onClick={() => setCreating(true)} data-testid="dashboard-add-lead">
-            <Plus className="mr-1.5 h-4 w-4" /> Add New Lead
-          </Button>
-          {/* Only offered when the parent can actually switch tabs. Rendered as a dead
-              button when it can't would be the placeholder this panel is meant to avoid. */}
-          {onNavigate && (
-            <Button variant="outline" className="w-full" onClick={() => onNavigate("marketing")} data-testid="dashboard-route-settings">
-              <Settings2 className="mr-1.5 h-4 w-4" /> Route Settings
-            </Button>
-          )}
-        </div>
-      </CardContent>
-      {creating && (
-        <CreateLeadModal
-          isSuperAdmin
-          onClose={() => setCreating(false)}
-          onSaved={() => { setCreating(false); onLeadCreated?.(); }}
-        />
-      )}
-    </Card>
   );
 };
 
@@ -731,7 +679,7 @@ const OTHER_HUE = "#898781";
  * because the shares are far apart. If branch volumes ever converge this should become a
  * bar chart: a ring can't be read for close values.
  */
-const BranchShareDonut = ({ branches, bare = false }) => {
+const BranchShareDonut = ({ branches }) => {
   const [hover, setHover] = useState(null);
 
   const rows = (branches || []).map((b, i) => ({
@@ -796,42 +744,11 @@ const BranchShareDonut = ({ branches, bare = false }) => {
     </div>
   );
 
-  // `bare` drops the card and the legend: in Executive Overview the ring sits beside a
-  // table that already prints every branch, its count and its share, so a legend there
-  // would be the same list twice.
-  if (bare) return ring;
-
-  return (
-    <Card data-testid="dashboard-branch-share">
-      <CardContent className="flex flex-col items-center gap-6 p-5 sm:flex-row sm:items-center sm:gap-8">
-        <div className="min-w-0 flex-1 order-2 sm:order-1">
-          <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">Leads by branch</p>
-          {/* The legend carries every value in text. That is what discharges the
-              contrast warning on the lighter two hues, and it is why a branch too small
-              to render an arc is still readable. */}
-          <ul className="space-y-1.5">
-            {arcs.map((b, i) => (
-              <li
-                key={b.branch_id}
-                onMouseEnter={() => setHover(i)}
-                onMouseLeave={() => setHover(null)}
-                className={`flex items-center gap-2 rounded-md px-2 py-1 transition ${hover === i ? "bg-slate-100" : ""}`}
-                data-testid={`dashboard-branch-share-legend-${b.branch_id}`}
-              >
-                <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: b.color }} />
-                <span className="min-w-0 flex-1 truncate text-sm text-slate-700">{b.branch_name}</span>
-                <span className="shrink-0 text-sm font-bold text-slate-900">{(Number(b.value) || 0).toLocaleString("en-IN")}</span>
-                <span className="w-12 shrink-0 text-right text-xs tabular-nums text-slate-500">{pct(Number(b.value) || 0)}%</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        <div className="order-1 sm:order-2">{ring}</div>
-      </CardContent>
-    </Card>
-  );
+  // The ring alone. It renders beside a table that already prints every branch, its
+  // count and its share, so a legend here would be that same list a second time.
+  return ring;
 };
+
 
 /**
  * Who did the work behind one branch's number, over the range the board is showing.
