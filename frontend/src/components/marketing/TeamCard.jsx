@@ -89,7 +89,10 @@ export const TeamCard = ({ title, subtitle, members, kind }) => {
               {tier.tiles.map((t) => (
                 <div key={t.key} className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-center" data-testid={`mk-team-tile-${m.id}-${t.key}`}>
                   <p className={`truncate text-xl font-bold ${t.tone}`}>{m[t.key] ?? 0}{t.suffix || ""}</p>
-                  <p className="truncate text-[11px] text-slate-500">{t.label}</p>
+                  {/* Uppercase and letter-spaced: the same treatment every other tile label
+                      in the OS wears, so the figure stays the loud part of the tile and the
+                      label reads as a caption rather than as a second value. */}
+                  <p className="truncate text-[10px] font-semibold uppercase tracking-wider text-slate-500">{t.label}</p>
                 </div>
               ))}
             </div>

@@ -33,7 +33,7 @@ const DASH_TABS = [
 
 const TEAM_PANELS = {
   pre_sales: { title: "Pre-Sales Team", subtitle: "Lead qualification and appointment booking" },
-  branch: { title: "Branch", subtitle: "Consultations booked in, and how many reached a physio" },
+  branch: { title: "Branch Performance", subtitle: "Consultations booked in, and how many reached a physio" },
 };
 
 const startOfDay = (d) => { const n = new Date(d); n.setHours(0, 0, 0, 0); return n; };
