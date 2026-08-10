@@ -135,10 +135,12 @@ export const DashboardBoard = () => {
           Short labels on a phone, full ones from sm up, and the Custom trigger drops its
           calendar icon on a phone to spend that width on its label instead.
 
-          Natural widths rather than six equal columns: "All" needs a third of what
-          "Custom" does, and equal columns would spend that surplus on padding while
-          Custom truncated. Each item can still shrink (min-w-0 + truncate), so a narrow
-          screen degrades to an ellipsis rather than to overflow. */}
+          On a phone the six share the row edge to edge (flex-1) rather than sitting at
+          their natural widths — six controls bunched to the left with dead space beside
+          them reads like something failed to load. The labels are short enough that an
+          even sixth still fits the longest of them on a 320px screen; min-w-0 + truncate
+          is the fallback if it ever isn't. Desktop keeps natural widths, since stretching
+          six buttons across a 1400px board would be absurd. */}
       <div className="flex items-center gap-1 sm:flex-wrap sm:gap-2" data-testid="dashboard-date-filter">
         {DASH_PRESETS.map((p) => {
           const active = dateFilter.key === p.key;
@@ -147,7 +149,7 @@ export const DashboardBoard = () => {
               key={p.key}
               type="button"
               onClick={() => setDateFilter(presetFilter(p))}
-              className={`h-10 min-w-0 truncate rounded-md px-2 text-[11px] font-medium transition sm:px-3 sm:text-sm ${active ? "bg-sky-600 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}
+              className={`h-10 min-w-0 flex-1 truncate rounded-md px-1 text-[11px] font-medium transition sm:flex-none sm:px-3 sm:text-sm ${active ? "bg-sky-600 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}
               data-testid={`dashboard-preset-${p.key}`}
             >
               <span className="sm:hidden">{p.short}</span>
@@ -158,7 +160,7 @@ export const DashboardBoard = () => {
         {/* The trigger is a Button this component doesn't own, so its width, padding, text
             size and icon are pinned from out here rather than by adding breakpoint props
             to a control five other boards share. */}
-        <span className="min-w-0 [&_button]:h-10 [&_button]:max-w-full [&_button]:px-2 [&_button]:text-[11px] [&_svg]:hidden sm:[&_button]:px-4 sm:[&_button]:text-sm sm:[&_svg]:inline-block">
+        <span className="min-w-0 flex-1 sm:flex-none [&_button]:h-10 [&_button]:w-full [&_button]:justify-center [&_button]:px-1 [&_button]:text-[11px] [&_svg]:hidden sm:[&_button]:w-auto sm:[&_button]:px-4 sm:[&_button]:text-sm sm:[&_svg]:inline-block">
           <DateFilterPopover
             value={DASH_PRESETS.some((p) => p.key === dateFilter.key) ? null : dateFilter}
             onChange={(next) => setDateFilter(next || defaultFilter())}
