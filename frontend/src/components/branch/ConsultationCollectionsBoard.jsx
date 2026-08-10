@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Eye, Banknote, CreditCard, Smartphone, Landmark, ChevronDown } from "lucide-react";
+import { Eye, Banknote, CreditCard, Smartphone, Landmark, ChevronDown, CalendarDays, CalendarRange, AlertCircle } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { MilkDateInput } from "@/components/ui/milk-calendar";
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 const todayIso = () => new Date().toISOString().slice(0, 10);
+const plural = (n, noun) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 
 const MODE_META = {
   cash: { label: "Cash", icon: Banknote, classes: "bg-emerald-50 text-emerald-700 border-emerald-200" },
@@ -88,16 +89,38 @@ const StatusBadge = ({ paid }) => (
   </span>
 );
 
-const SummaryCard = ({ label, value, color, active, onClick }) => (
+/**
+ * A figure, what it counts, and the card's colour carried by a disc bleeding out of the
+ * top-right corner rather than by the whole tile — six filled tiles side by side is six
+ * things shouting, and none of them is the number.
+ *
+ * Every colour is an inline style built from one hex per card. Tailwind reads class names
+ * out of the source, so a `bg-${tone}-100` built at runtime compiles to nothing and the
+ * disc would come out invisible; a hex needs no such care and adding a card later needs
+ * no class map kept in step.
+ */
+const SummaryCard = ({ label, value, sub, icon: Icon, color, active, onClick }) => (
   <button
     type="button"
     onClick={onClick}
-    className={`rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm transition ${active ? "ring-2 ring-offset-1" : "hover:shadow-md"}`}
-    style={active ? { boxShadow: `0 0 0 2px ${color}33` } : undefined}
+    className={`relative overflow-hidden rounded-xl border bg-white p-4 text-left shadow-sm transition ${
+      active ? "border-transparent" : "border-slate-200 hover:shadow-md"
+    }`}
+    style={active ? { boxShadow: `0 0 0 2px ${color}` } : undefined}
     data-testid={`consultation-summary-${label.toLowerCase().replace(/\s+/g, "-")}`}
   >
-    <p className="text-xs text-slate-500">{label}</p>
-    <p className="mt-1 text-2xl font-bold" style={{ color }}>{value}</p>
+    <span
+      aria-hidden
+      className="pointer-events-none absolute -right-6 -top-6 h-20 w-20 rounded-full"
+      style={{ background: `linear-gradient(135deg, ${color}2E, ${color}0D)` }}
+    />
+    <Icon aria-hidden className="absolute right-3.5 top-3.5 h-4 w-4" style={{ color }} />
+    <p className="pr-9 text-[11px] font-bold uppercase leading-tight tracking-wider text-slate-500">{label}</p>
+    {/* Smaller on a phone: two cards to a row leaves about 130px of usable width, and
+        "Rs.1,04,000" at text-2xl is wider than that with nowhere to wrap — which the
+        card's own clipping would now cut off rather than let spill. */}
+    <p className="mt-1 text-xl font-extrabold sm:text-2xl" style={{ color }}>{value}</p>
+    <p className="mt-0.5 text-[10px] text-slate-400">{sub}</p>
   </button>
 );
 
@@ -140,27 +163,38 @@ export const ConsultationCollectionsBoard = ({ rows, onView }) => {
     return true;
   }), [rows, search, branch, mode, fromDate, toDate, activeCard, today, monthPrefix]);
 
+  // Each card carries its own count as well as its sum, so the line under the figure says
+  // how many transactions clicking it will leave in the table.
   const totals = useMemo(() => {
+    const bucket = (pred) => {
+      const hits = rows.filter(pred);
+      return { total: hits.reduce((s, r) => s + r.gross, 0), count: hits.length };
+    };
     const uniqueBalances = new Map();
     rows.forEach((r) => uniqueBalances.set(r.lead_id, r.client_balance || 0));
-    const todayTotal = rows.filter((r) => (r.date || "").slice(0, 10) === today).reduce((s, r) => s + r.gross, 0);
-    const monthTotal = rows.filter((r) => (r.date || "").slice(0, 7) === monthPrefix).reduce((s, r) => s + r.gross, 0);
-    const cash = rows.filter((r) => r.payment_mode === "cash").reduce((s, r) => s + r.gross, 0);
-    const card = rows.filter((r) => r.payment_mode === "card").reduce((s, r) => s + r.gross, 0);
-    const upi = rows.filter((r) => r.payment_mode === "upi").reduce((s, r) => s + r.gross, 0);
-    const outstanding = [...uniqueBalances.values()].reduce((s, b) => s + b, 0);
-    return { todayTotal, monthTotal, cash, card, upi, outstanding };
+    const balances = [...uniqueBalances.values()];
+    return {
+      today: bucket((r) => (r.date || "").slice(0, 10) === today),
+      month: bucket((r) => (r.date || "").slice(0, 7) === monthPrefix),
+      cash: bucket((r) => r.payment_mode === "cash"),
+      card: bucket((r) => r.payment_mode === "card"),
+      upi: bucket((r) => r.payment_mode === "upi"),
+      // Summed over every client rather than only those in the red, so an overpayment
+      // still nets off the branch's total the way it did before. The count is of clients
+      // actually owing, which is what the figure is read as.
+      outstanding: { total: balances.reduce((s, b) => s + b, 0), count: balances.filter((b) => b > 0).length },
+    };
   }, [rows, today, monthPrefix]);
 
   return (
     <div className="space-y-4" data-testid="consultation-collections-board">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
-        <SummaryCard label="Today's Collection" value={fmt(totals.todayTotal)} color="#059669" active={activeCard === "today"} onClick={() => toggleCard("today")} />
-        <SummaryCard label="This Month" value={fmt(totals.monthTotal)} color="#0284c7" active={activeCard === "month"} onClick={() => toggleCard("month")} />
-        <SummaryCard label="Cash" value={fmt(totals.cash)} color="#16a34a" active={activeCard === "cash"} onClick={() => toggleCard("cash", "cash")} />
-        <SummaryCard label="Card" value={fmt(totals.card)} color="#7c3aed" active={activeCard === "card"} onClick={() => toggleCard("card", "card")} />
-        <SummaryCard label="UPI" value={fmt(totals.upi)} color="#0ea5e9" active={activeCard === "upi"} onClick={() => toggleCard("upi", "upi")} />
-        <SummaryCard label="Outstanding" value={fmt(totals.outstanding)} color="#d97706" active={activeCard === "outstanding"} onClick={() => toggleCard("outstanding")} />
+        <SummaryCard label="Today's Collection" value={fmt(totals.today.total)} sub={plural(totals.today.count, "payment")} icon={CalendarDays} color="#059669" active={activeCard === "today"} onClick={() => toggleCard("today")} />
+        <SummaryCard label="This Month" value={fmt(totals.month.total)} sub={plural(totals.month.count, "payment")} icon={CalendarRange} color="#0284c7" active={activeCard === "month"} onClick={() => toggleCard("month")} />
+        <SummaryCard label="Cash" value={fmt(totals.cash.total)} sub={plural(totals.cash.count, "payment")} icon={Banknote} color="#16a34a" active={activeCard === "cash"} onClick={() => toggleCard("cash", "cash")} />
+        <SummaryCard label="Card" value={fmt(totals.card.total)} sub={plural(totals.card.count, "payment")} icon={CreditCard} color="#7c3aed" active={activeCard === "card"} onClick={() => toggleCard("card", "card")} />
+        <SummaryCard label="UPI" value={fmt(totals.upi.total)} sub={plural(totals.upi.count, "payment")} icon={Smartphone} color="#0ea5e9" active={activeCard === "upi"} onClick={() => toggleCard("upi", "upi")} />
+        <SummaryCard label="Outstanding" value={fmt(totals.outstanding.total)} sub={plural(totals.outstanding.count, "client")} icon={AlertCircle} color="#d97706" active={activeCard === "outstanding"} onClick={() => toggleCard("outstanding")} />
       </div>
 
       <Card>
