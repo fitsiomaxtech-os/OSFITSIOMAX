@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Users, CalendarCheck, Activity, IndianRupee, X, Building2 } from "lucide-react";
+import { Users, CalendarCheck, Activity, IndianRupee, X, Building2, LayoutDashboard, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
+import { SegmentedTabs } from "@/components/ui/segmented-tabs";
 import { toast } from "@/components/ui/sonner";
 import { getDashboardOverview, getDashboardBranchBreakdown, mkGetTeam } from "@/lib/api";
 import { TeamCard } from "@/components/marketing/TeamCard";
@@ -15,6 +16,10 @@ import { TeamCard } from "@/components/marketing/TeamCard";
 // rows come back under — Branch reads the endpoint's `sales` list but presents it as
 // branches, which is what those accounts actually are.
 const DASH_TABS = [
+  // Overview first, and the landing tab: it answers "how are we doing" in one screen,
+  // which is the question a Super Admin opens this board with. The four tabs after it
+  // answer "how are we doing at X", which is the follow-up.
+  { key: "overview", label: "Executive Overview", icon: LayoutDashboard },
   { key: "leads", label: "Leads", icon: Users },
   // BRANCHS carries both halves of the sales chain: the branches, and the Pre-Sales
   // agents who fed them. Pre-Sales had its own tab and it didn't earn one — the two
@@ -82,7 +87,7 @@ const fmtValue = (tabKey, value) => (tabKey === "revenue" ? `₹${(value || 0).t
 // per Physiotherapy branch, plus the two sales-team tabs, each scoped to a date range.
 export const DashboardBoard = () => {
   const [dateFilter, setDateFilter] = useState(defaultFilter);
-  const [activeTab, setActiveTab] = useState("leads");
+  const [activeTab, setActiveTab] = useState("overview");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [drillBranch, setDrillBranch] = useState(null); // the branch card being opened
@@ -174,31 +179,11 @@ export const DashboardBoard = () => {
         </span>
       </div>
 
-      {/* Two rows of three on a phone, one row of six from sm up. Six tabs sharing a
-          phone's width truncated every label past the third — "Pre…", "BR…", "App…" —
-          which is a tab bar that can't be read. Three per row fits the full label, and
-          the grid falls out of DASH_TABS' own order: Leads / Pre-Sales Team / BRANCHS,
-          then Appointments / Treatments / Revenue. */}
-      <div className="grid grid-cols-3 gap-1 rounded-xl border border-slate-200 bg-white/95 p-1 sm:flex" data-testid="dashboard-tabs">
-        {DASH_TABS.map((t) => {
-          const Icon = t.icon;
-          const active = activeTab === t.key;
-          return (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => setActiveTab(t.key)}
-              className={`flex min-w-0 items-center justify-center gap-1 rounded-lg px-1.5 py-2 text-[11px] font-semibold transition sm:flex-1 sm:gap-1.5 sm:px-3 sm:text-sm ${active ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100"}`}
-              data-testid={`dashboard-tab-${t.key}`}
-            >
-              <Icon className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />
-              <span className="truncate">{t.label}</span>
-            </button>
-          );
-        })}
-      </div>
+      <SegmentedTabs tabs={DASH_TABS} value={activeTab} onChange={setActiveTab} testid="dashboard-tab" />
 
-      {activeTeam ? (
+      {activeTab === "overview" ? (
+        <ExecutiveOverview data={data} loading={loading} dateFilter={dateFilter} />
+      ) : activeTeam ? (
         teamLoading || !team ? (
           <p className="py-16 text-center text-sm text-slate-400">{teamLoading ? "Loading..." : "No data."}</p>
         ) : (
@@ -354,6 +339,156 @@ export const DashboardBoard = () => {
   );
 };
 
+/**
+ * Executive Overview — the whole business on one screen, before any of the per-metric
+ * tabs narrow it down.
+ *
+ * The four headline figures come from the same payload every other tab reads, so this
+ * can't disagree with them. Each carries a change against the immediately preceding
+ * window of the same length — last 30 days against the 30 before it — fetched separately
+ * because the endpoint answers for one range at a time.
+ *
+ * `All` has no preceding window, so it shows no deltas rather than inventing a baseline.
+ */
+const ExecutiveOverview = ({ data, loading, dateFilter }) => {
+  const [prev, setPrev] = useState(null);
+  const [prevLoading, setPrevLoading] = useState(false);
+
+  const from = dateFilter?.from;
+  const to = dateFilter?.to;
+
+  useEffect(() => {
+    if (!from || !to) { setPrev(null); return undefined; }
+    // The window immediately before this one, the same number of days long, ending the
+    // day before it starts. Anything else ("last month" for a 7-day range) would compare
+    // spans of different lengths and call the difference performance.
+    const days = Math.max(1, Math.round((startOfDay(to) - startOfDay(from)) / 86400000) + 1);
+    const prevTo = new Date(startOfDay(from).getTime() - 86400000);
+    const prevFrom = new Date(prevTo.getTime() - (days - 1) * 86400000);
+    let cancelled = false;
+    setPrevLoading(true);
+    getDashboardOverview({ start_date: toIso(prevFrom), end_date: toIso(prevTo) })
+      .then((r) => { if (!cancelled) setPrev(r); })
+      .catch(() => { if (!cancelled) setPrev(null); })
+      .finally(() => { if (!cancelled) setPrevLoading(false); });
+    return () => { cancelled = true; };
+  }, [from, to]);
+
+  if (loading || !data) {
+    return <p className="py-16 text-center text-sm text-slate-400">{loading ? "Loading..." : "No data."}</p>;
+  }
+
+  const metrics = [
+    { key: "leads", label: "Total Leads", icon: Users, value: data.leads?.total ?? 0 },
+    { key: "appointments", label: "Appointments", icon: CalendarCheck, value: data.appointments?.total ?? 0 },
+    { key: "treatments", label: "Treatments", icon: Activity, value: data.treatments?.total ?? 0 },
+    { key: "revenue", label: "Revenue", icon: IndianRupee, value: data.revenue?.total ?? 0, currency: true },
+  ];
+
+  const branches = data.leads?.physio_branches || [];
+  const apptByBranch = Object.fromEntries((data.appointments?.physio_branches || []).map((b) => [b.branch_id, b.value]));
+  const revByBranch = Object.fromEntries((data.revenue?.physio_branches || []).map((b) => [b.branch_id, b.value]));
+  const rows = [...branches].sort((a, b) => b.value - a.value);
+
+  return (
+    <div className="space-y-4" data-testid="dashboard-overview">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {metrics.map((m) => {
+          const before = prev?.[m.key]?.total;
+          return (
+            <Card key={m.key} data-testid={`dashboard-overview-${m.key}`}>
+              <CardContent className="p-4">
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">{m.label}</p>
+                  <m.icon className="h-4 w-4 shrink-0 text-slate-300" />
+                </div>
+                <p className="mt-1 truncate text-3xl font-extrabold text-slate-800">
+                  {m.currency ? fmtValue("revenue", m.value) : (m.value || 0).toLocaleString("en-IN")}
+                </p>
+                <Delta now={m.value} before={before} loading={prevLoading} available={!!from && !!to} />
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+
+      <Card data-testid="dashboard-overview-branches">
+        <CardContent className="p-4 sm:p-5">
+          <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">Leads by Branch</p>
+          {rows.length === 0 ? (
+            <p className="py-8 text-center text-sm text-slate-400">No Physiotherapy branches yet.</p>
+          ) : (
+            <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+              {/* Scrolls inside its own container rather than widening the card — four
+                  numeric columns don't fit a phone, and the alternative is the page
+                  scrolling sideways. */}
+              <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-left text-[10px] uppercase tracking-wider text-slate-400">
+                      <th className="py-2 pr-3 font-semibold">Branch</th>
+                      <th className="py-2 px-3 text-right font-semibold">Leads</th>
+                      {/* Of the leads this branch took, how many reached a booked
+                          appointment. Both sides come from the same date range, so a
+                          branch can't look better by having old leads. */}
+                      <th className="py-2 px-3 text-right font-semibold">Conversion</th>
+                      <th className="py-2 pl-3 text-right font-semibold">Revenue</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((b, i) => {
+                      const appts = apptByBranch[b.branch_id] || 0;
+                      const conv = b.value ? (appts / b.value) * 100 : 0;
+                      return (
+                        <tr key={b.branch_id} className="border-b border-slate-100 last:border-0" data-testid={`dashboard-overview-row-${b.branch_id}`}>
+                          <td className="py-2.5 pr-3">
+                            <span className="flex items-center gap-2">
+                              <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: i < SERIES.length ? SERIES[i] : OTHER_HUE }} />
+                              <span className="truncate font-medium text-slate-700">{b.branch_name}</span>
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-bold tabular-nums text-slate-800">{(b.value || 0).toLocaleString("en-IN")}</td>
+                          <td className="py-2.5 px-3 text-right tabular-nums text-slate-600">{b.value ? `${conv.toFixed(1)}%` : "—"}</td>
+                          <td className="py-2.5 pl-3 text-right tabular-nums text-slate-600">{fmtValue("revenue", revByBranch[b.branch_id] || 0)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <BranchShareDonut branches={branches} bare />
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
+
+/** Change against the preceding window. Silent rather than "0%" when there is nothing to
+ *  compare against — an unknown and a flat period are different things, and printing 0%
+ *  for the first is the kind of number people act on. */
+const Delta = ({ now, before, loading, available }) => {
+  if (!available) return <p className="mt-1 text-[11px] text-slate-400">All time · no prior period</p>;
+  if (loading) return <p className="mt-1 text-[11px] text-slate-300">Comparing…</p>;
+  if (before == null) return <p className="mt-1 text-[11px] text-slate-400">No prior period</p>;
+  if (!before) {
+    // Growth from zero has no percentage — any increase is infinite. Say what happened.
+    return <p className="mt-1 text-[11px] text-slate-400">{now ? "New this period" : "None either period"}</p>;
+  }
+  const pct = ((now - before) / before) * 100;
+  const flat = Math.abs(pct) < 0.05;
+  const Icon = flat ? Minus : pct > 0 ? TrendingUp : TrendingDown;
+  const tone = flat ? "text-slate-400" : pct > 0 ? "text-emerald-600" : "text-rose-600";
+  return (
+    <p className={`mt-1 flex items-center gap-1 text-[11px] font-semibold ${tone}`}>
+      <Icon className="h-3 w-3 shrink-0" />
+      {flat ? "0%" : `${pct > 0 ? "+" : ""}${pct.toFixed(1)}%`}
+      <span className="font-normal text-slate-400">vs prior period</span>
+    </p>
+  );
+};
+
 // Categorical slots 1-4, in the fixed validated order. Assigned by the branch's position
 // in the payload — which is stable across requests — and never by rank, so filtering or
 // re-sorting can't repaint a branch someone has already learned the colour of.
@@ -376,7 +511,7 @@ const OTHER_HUE = "#898781";
  * because the shares are far apart. If branch volumes ever converge this should become a
  * bar chart: a ring can't be read for close values.
  */
-const BranchShareDonut = ({ branches }) => {
+const BranchShareDonut = ({ branches, bare = false }) => {
   const [hover, setHover] = useState(null);
 
   const rows = (branches || []).map((b, i) => ({
@@ -402,6 +537,49 @@ const BranchShareDonut = ({ branches }) => {
 
   const focus = hover !== null ? arcs[hover] : null;
   const pct = (v) => (total ? Math.round((v / total) * 1000) / 10 : 0);
+
+  const ring = (
+    <div className="relative shrink-0">
+      <svg width="180" height="180" viewBox="0 0 180 180" role="img" aria-label="Leads by branch">
+        <g transform="rotate(-90 90 90)">
+          {total === 0 ? (
+            <circle cx="90" cy="90" r={R} fill="none" stroke="#e1e0d9" strokeWidth="22" />
+          ) : arcs.map((b, i) => b.drawLen > 0 && (
+            <circle
+              key={b.branch_id}
+              cx="90" cy="90" r={R}
+              fill="none"
+              stroke={b.color}
+              strokeWidth={hover === i ? 26 : 22}
+              strokeDasharray={`${b.drawLen} ${C - b.drawLen}`}
+              strokeDashoffset={-b.offset}
+              className="cursor-pointer transition-[stroke-width]"
+              onMouseEnter={() => setHover(i)}
+              onMouseLeave={() => setHover(null)}
+              data-testid={`dashboard-branch-share-arc-${b.branch_id}`}
+            >
+              <title>{`${b.branch_name}: ${(Number(b.value) || 0).toLocaleString("en-IN")} (${pct(Number(b.value) || 0)}%)`}</title>
+            </circle>
+          ))}
+        </g>
+      </svg>
+      {/* Hovering swaps the centre to that branch. Every value is already in text beside
+          the ring — the legend here, the table in Executive Overview — so this enhances
+          rather than gates anything. */}
+      <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center px-8 text-center">
+        <p className="max-w-full truncate text-[11px] text-slate-500">{focus ? focus.branch_name : "Branch Leads"}</p>
+        <p className="text-2xl font-bold text-slate-900">
+          {(focus ? Number(focus.value) || 0 : total).toLocaleString("en-IN")}
+        </p>
+        {focus && <p className="text-[11px] text-slate-500">{pct(Number(focus.value) || 0)}%</p>}
+      </div>
+    </div>
+  );
+
+  // `bare` drops the card and the legend: in Executive Overview the ring sits beside a
+  // table that already prints every branch, its count and its share, so a legend there
+  // would be the same list twice.
+  if (bare) return ring;
 
   return (
     <Card data-testid="dashboard-branch-share">
@@ -429,40 +607,7 @@ const BranchShareDonut = ({ branches }) => {
           </ul>
         </div>
 
-        <div className="relative order-1 shrink-0 sm:order-2">
-          <svg width="180" height="180" viewBox="0 0 180 180" role="img" aria-label="Leads by branch">
-            <g transform="rotate(-90 90 90)">
-              {total === 0 ? (
-                <circle cx="90" cy="90" r={R} fill="none" stroke="#e1e0d9" strokeWidth="22" />
-              ) : arcs.map((b, i) => b.drawLen > 0 && (
-                <circle
-                  key={b.branch_id}
-                  cx="90" cy="90" r={R}
-                  fill="none"
-                  stroke={b.color}
-                  strokeWidth={hover === i ? 26 : 22}
-                  strokeDasharray={`${b.drawLen} ${C - b.drawLen}`}
-                  strokeDashoffset={-b.offset}
-                  className="cursor-pointer transition-[stroke-width]"
-                  onMouseEnter={() => setHover(i)}
-                  onMouseLeave={() => setHover(null)}
-                  data-testid={`dashboard-branch-share-arc-${b.branch_id}`}
-                >
-                  <title>{`${b.branch_name}: ${(Number(b.value) || 0).toLocaleString("en-IN")} (${pct(Number(b.value) || 0)}%)`}</title>
-                </circle>
-              ))}
-            </g>
-          </svg>
-          {/* Hovering swaps the centre to that branch. The legend already holds every
-              value, so this enhances rather than gates anything. */}
-          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center px-8 text-center">
-            <p className="max-w-full truncate text-[11px] text-slate-500">{focus ? focus.branch_name : "Branch Leads"}</p>
-            <p className="text-2xl font-bold text-slate-900">
-              {(focus ? Number(focus.value) || 0 : total).toLocaleString("en-IN")}
-            </p>
-            {focus && <p className="text-[11px] text-slate-500">{pct(Number(focus.value) || 0)}%</p>}
-          </div>
-        </div>
+        <div className="order-1 sm:order-2">{ring}</div>
       </CardContent>
     </Card>
   );

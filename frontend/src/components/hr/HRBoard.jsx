@@ -10,6 +10,7 @@ import {
   getBranches,
 } from "@/lib/api";
 import { MilkDateInput } from "@/components/ui/milk-calendar";
+import { SegmentedTabs } from "@/components/ui/segmented-tabs";
 
 const TABS = [
   { key: "dashboard", label: "Dashboard", icon: BarChart3 },
@@ -48,22 +49,7 @@ export const HRBoard = () => {
         <h2 className="text-2xl font-bold text-slate-900">HR Admin</h2>
         <p className="text-sm text-slate-500">Manage employees, attendance, leave & payroll.</p>
       </div>
-      <div className="flex gap-1 rounded-lg border border-slate-200 bg-white p-1 sm:gap-2" data-testid="hr-subtabs">
-        {TABS.map((t) => {
-          const Icon = t.icon;
-          const active = tab === t.key;
-          return (
-            <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
-              data-testid={`hr-subtab-${t.key}`}
-              className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-md px-1 py-2 text-center text-[11px] font-medium leading-tight transition sm:flex-row sm:px-3 sm:text-sm ${active ? "bg-orange-50 text-orange-600" : "text-slate-600 hover:bg-slate-50"}`}
-            >
-              <Icon className="h-4 w-4 shrink-0" /><span className="truncate">{t.label}</span>
-            </button>
-          );
-        })}
-      </div>
+      <SegmentedTabs tabs={TABS} value={tab} onChange={setTab} testid="hr-subtab" />
       {tab === "dashboard" && <DashboardTab onNavigate={(t, f) => { setEmpFilter(f || null); setTab(t); }} />}
       {tab === "employees" && <EmployeesTab meta={meta} initialFilter={empFilter} />}
       {tab === "roles" && <RolesTab meta={meta} reloadMeta={reloadMeta} />}
