@@ -194,6 +194,24 @@ export const listNutritionCoaches = async () => (await api.get("/branch/nutritio
 export const createNutritionCoach = async (payload) => (await api.post("/branch/nutrition-coaches", payload)).data;
 export const assignDiet = async (payload) => (await api.post("/branch/assign-diet", payload)).data;
 export const branchDietPatients = async () => (await api.get("/branch/diet-patients")).data;
+
+// ---- Client documents ----
+// Never served from the static /uploads mount — these are patient records, so the bytes
+// come back through an authenticated route as a blob.
+export const leadDocuments = async (leadId) => (await api.get(`/leads/${leadId}/documents`)).data;
+export const uploadLeadDocument = async (leadId, file, label = "") => {
+  const body = new FormData();
+  body.append("file", file);
+  body.append("label", label);
+  // No explicit Content-Type: the browser has to set the multipart boundary itself, and
+  // naming the header strips it and the request arrives unparseable.
+  return (await api.post(`/leads/${leadId}/documents`, body)).data;
+};
+export const deleteLeadDocument = async (leadId, docId) => (await api.delete(`/leads/${leadId}/documents/${docId}`)).data;
+export const openLeadDocument = async (leadId, docId) => {
+  const res = await api.get(`/leads/${leadId}/documents/${docId}/download`, { responseType: "blob" });
+  return URL.createObjectURL(res.data);
+};
 export const addCalendarSlots = async (doctorId, payload) => (await api.post(`/doctors/${doctorId}/calendar-slots`, payload)).data;
 export const removeCalendarSlots = async (doctorId, payload) => (await api.post(`/doctors/${doctorId}/remove-slots`, payload)).data;
 

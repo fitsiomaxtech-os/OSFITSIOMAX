@@ -7,6 +7,7 @@ import { toast } from "@/components/ui/sonner";
 import { StageTabBar } from "@/components/ui/stage-tab";
 import { WhatsAppIcon } from "@/components/ui/whatsapp-icon";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
+import { LeadDocuments } from "@/components/LeadDocuments";
 import {
   getConsultationsBoard, moveConsultationStage, listStoreItems,
   collectPackagePayment, collectTreatmentFee, markInstallmentPaid, savePhysioDiagnosis, unlockPhysioDiagnosis,
@@ -1659,6 +1660,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               {[
                 { key: "overview", label: "Overview" },
                 { key: "followup", label: "Follow up" },
+                { key: "documents", label: "Documents" },
                 { key: "timeline", label: "Timeline" },
                 { key: "profile", label: "Profile" },
               ].map((t) => (
@@ -2176,6 +2178,16 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                   })
                 )}
               </div>
+            )}
+
+            {/* Physio and Nutrition Coach can read a patient's documents but not add or
+                remove them — a report is ordered and filed by the branch or the Head
+                Physio, and a treating clinician deleting one is not a workflow. */}
+            {detailTab === "documents" && (
+              <LeadDocuments
+                leadId={selectedLead.id}
+                canEdit={["branch_admin", "super_admin", "head_physio"].includes(viewerRole)}
+              />
             )}
 
             {detailTab === "timeline" && (
