@@ -15,7 +15,33 @@ import { leadDocuments, uploadLeadDocument, deleteLeadDocument, openLeadDocument
  * copy, which is the point rather than a limitation.
  */
 
+/**
+ * Says what actually went wrong instead of "Upload failed".
+ *
+ * Our API always answers with a JSON `detail`, so an error without one did not come from
+ * the API — it came from the web server in front of it, or the request never arrived. The
+ * commonest case by far is nginx's client_max_body_size, which defaults to 1MB: it rejects
+ * the upload with a 413 and an HTML page, the `detail` lookup finds nothing, and every
+ * cause collapses into the same unhelpful sentence. Naming the status turns "it doesn't
+ * work" into something someone can fix.
+ */
+const uploadError = (err, file) => {
+  const status = err?.response?.status;
+  const detail = err?.response?.data?.detail;
+  if (detail) return detail;
+  if (status === 413) {
+    return `Rejected by the server as too large (${fmtSize(file?.size || 0)}). The upload limit on the web server needs raising — nginx client_max_body_size.`;
+  }
+  if (status === 401 || status === 403) return "You don't have permission to upload here.";
+  if (status) return `Upload failed (HTTP ${status}).`;
+  return "Upload failed — no response from the server. Check the connection and try again.";
+};
+
 const KB = 1024;
+// Kept in step with MAX_UPLOAD_BYTES in backend/routers/v3_lead_documents.py. The server
+// is the one that enforces it; this copy only exists to fail fast.
+const MAX_UPLOAD_MB = 500;
+const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * KB * KB;
 const fmtSize = (n) => (n >= KB * KB ? `${(n / KB / KB).toFixed(1)} MB` : `${Math.max(1, Math.round(n / KB))} KB`);
 const isImage = (t) => String(t || "").startsWith("image/");
 const fmtWhen = (iso) => (iso ? `${String(iso).slice(8, 10)}/${String(iso).slice(5, 7)}/${String(iso).slice(0, 4)}` : "—");
@@ -43,6 +69,12 @@ export const LeadDocuments = ({ leadId, canEdit = true, kind = "general", fixedL
     // re-uploading a corrected scan under the same name is a normal thing to do.
     e.target.value = "";
     if (!file) return;
+    // Checked here as well as on the server, so an oversized file fails in the moment
+    // rather than after however long it takes to push it up and be told no.
+    if (file.size > MAX_UPLOAD_BYTES) {
+      toast.error(`That file is ${fmtSize(file.size)} — the limit is ${MAX_UPLOAD_MB}MB.`);
+      return;
+    }
     setBusy(true);
     try {
       // A fixed label names the pages for you — the consultation form is always the
@@ -53,7 +85,7 @@ export const LeadDocuments = ({ leadId, canEdit = true, kind = "general", fixedL
       setLabel("");
       load();
     } catch (err) {
-      toast.error(err?.response?.data?.detail || "Upload failed");
+      toast.error(uploadError(err, file));
     }
     setBusy(false);
   };
@@ -86,7 +118,7 @@ export const LeadDocuments = ({ leadId, canEdit = true, kind = "general", fixedL
       {canEdit && (
         <div className="rounded-xl border border-sky-100 bg-sky-50/60 p-3">
           <p className="text-[11px] font-bold uppercase tracking-wider text-sky-700">{fixedLabel ? `Upload ${fixedLabel.toLowerCase()} pages` : "Upload a document"}</p>
-          <p className="mt-0.5 text-[11px] text-slate-500">Scans, reports, prescriptions · JPG, PNG, WEBP or PDF, up to 10MB</p>
+          <p className="mt-0.5 text-[11px] text-slate-500">{hint || "Scans, reports, prescriptions · JPG, PNG, WEBP or PDF"}</p>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {!fixedLabel && (
               <Input
