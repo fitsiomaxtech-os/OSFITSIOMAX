@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Users, ShieldCheck, BarChart3, Plus, Pencil, Trash2, Eye, EyeOff, KeyRound, X, UserPlus, MoreVertical, CheckCircle2, XCircle, AlertOctagon, ChevronDown } from "lucide-react";
+import { Users, ShieldCheck, BarChart3, Plus, Pencil, Trash2, Eye, EyeOff, KeyRound, X, UserPlus, MoreVertical, CheckCircle2, XCircle, AlertOctagon, CalendarOff, ChevronDown } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,6 +27,10 @@ const ORG_WIDE_ROLES = new Set(["head_physio"]);
 
 export const HRBoard = () => {
   const [tab, setTab] = useState("dashboard");
+  // Set by a Dashboard card or a department bar, consumed once by the Employees tab. Held
+  // here rather than inside EmployeesTab because the thing that decides the filter and the
+  // thing that applies it are on opposite sides of the tab switch.
+  const [empFilter, setEmpFilter] = useState(null);
   const [meta, setMeta] = useState({ departments: [], roles: [], custom_roles: [] });
   const reloadMeta = useCallback(() => hrMeta().then(setMeta).catch((e) => console.warn("[load failed]", e?.message || e)), []);
   useEffect(() => { reloadMeta(); }, [reloadMeta]);
@@ -55,8 +59,8 @@ export const HRBoard = () => {
           );
         })}
       </div>
-      {tab === "dashboard" && <DashboardTab />}
-      {tab === "employees" && <EmployeesTab meta={meta} />}
+      {tab === "dashboard" && <DashboardTab onNavigate={(t, f) => { setEmpFilter(f || null); setTab(t); }} />}
+      {tab === "employees" && <EmployeesTab meta={meta} initialFilter={empFilter} />}
       {tab === "roles" && <RolesTab meta={meta} reloadMeta={reloadMeta} />}
     </div>
   );
@@ -64,41 +68,90 @@ export const HRBoard = () => {
 
 // ---------- Dashboard ----------
 
-const KPI = ({ label, value, color, testid }) => (
-  <div className="rounded-xl border bg-white p-4 shadow-sm" style={{ borderLeftColor: color, borderLeftWidth: 4 }} data-testid={testid}>
-    <p className="text-xs text-slate-500">{label}</p>
-    <p className="mt-1 text-3xl font-bold text-slate-900">{value}</p>
-  </div>
-);
+/**
+ * A figure, and — where there is somewhere to go — the control that takes you to the rows
+ * behind it. A tile with no `onClick` renders as plain text rather than a button, so a
+ * card that leads nowhere never invites a click that does nothing.
+ */
+const KPI = ({ label, value, icon: Icon, onClick, hint, testid }) => {
+  const Tag = onClick ? "button" : "div";
+  return (
+    <Tag
+      {...(onClick ? { type: "button", onClick } : {})}
+      className={`w-full rounded-xl border-2 border-slate-200 bg-white px-4 py-3.5 text-left transition ${
+        onClick ? "cursor-pointer hover:border-orange-300 hover:shadow-sm" : ""
+      }`}
+      data-testid={testid}
+    >
+      <span className="flex items-center gap-1.5 text-slate-500">
+        {Icon && <Icon className="h-4 w-4 shrink-0" />}
+        <span className="truncate text-[11px] font-bold uppercase tracking-wider">{label}</span>
+      </span>
+      <span className="mt-1 block text-3xl font-extrabold text-slate-800">{value}</span>
+      {hint && <span className="mt-0.5 block text-[10px] text-slate-400">{hint}</span>}
+    </Tag>
+  );
+};
 
-const DashboardTab = () => {
+const DashboardTab = ({ onNavigate }) => {
   const [data, setData] = useState(null);
   useEffect(() => { hrDashboard().then(setData).catch(() => toast.error("Failed to load")); }, []);
   if (!data) return <p className="text-sm text-slate-500">Loading...</p>;
   const k = data.kpis;
+
+  // Sorted, so the biggest department is the one the eye lands on, and measured against
+  // the largest rather than the total — the question this answers is "who is biggest",
+  // not "what share of the company".
+  const depts = [...(data.department_strength || [])].sort((a, b) => b.count - a.count);
+  const peak = depts.length ? Math.max(...depts.map((d) => d.count)) : 0;
+
   return (
     <div className="space-y-5" data-testid="hr-dashboard-tab">
+      {/* Active Employees and Total Users open the list behind them. The three attendance
+          figures do not, because there is nothing behind them to open: present_today,
+          late_today and pending_leaves are returned as literal 0 by /hr/dashboard — no
+          attendance or leave data is recorded anywhere in the OS. They are rendered as
+          plain figures rather than buttons so they cannot promise a drill-in that would
+          land on an empty screen. */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <KPI label="Active Employees" value={k.active_employees} color="#f97316" testid="hr-kpi-active" />
-        <KPI label="Total Users" value={k.total_users} color="#3b82f6" testid="hr-kpi-users" />
-        <KPI label="Present Today" value={k.present_today} color="#22c55e" testid="hr-kpi-present" />
-        <KPI label="Late Today" value={k.late_today} color="#ef4444" testid="hr-kpi-late" />
-        <KPI label="Pending Leaves" value={k.pending_leaves} color="#a855f7" testid="hr-kpi-leaves" />
+        <KPI icon={Users} label="Active Employees" value={k.active_employees} onClick={() => onNavigate("employees", { status: "active" })} testid="hr-kpi-active" />
+        <KPI icon={ShieldCheck} label="Total Users" value={k.total_users} onClick={() => onNavigate("roles")} testid="hr-kpi-users" />
+        <KPI icon={CheckCircle2} label="Present Today" value={k.present_today} hint="Attendance not tracked yet" testid="hr-kpi-present" />
+        <KPI icon={AlertOctagon} label="Late Today" value={k.late_today} hint="Attendance not tracked yet" testid="hr-kpi-late" />
+        <KPI icon={CalendarOff} label="Pending Leaves" value={k.pending_leaves} hint="Leave not tracked yet" testid="hr-kpi-leaves" />
       </div>
-      <div className="grid gap-3 lg:grid-cols-2">
-        <Card data-testid="hr-monthly-salary"><CardHeader><CardTitle className="text-base">Monthly Salary Budget</CardTitle></CardHeader><CardContent><p className="text-3xl font-bold text-emerald-600">₹{(k.monthly_salary_budget || 0).toLocaleString("en-IN")}</p></CardContent></Card>
-        <Card data-testid="hr-dept-count"><CardHeader><CardTitle className="text-base">Departments</CardTitle></CardHeader><CardContent><p className="text-3xl font-bold text-slate-900">{k.departments}</p></CardContent></Card>
-      </div>
+
+      {/* Bars rather than five equal boxes: the question is which departments are big and
+          which are thin, and five boxes of identical size answer it only if you read every
+          number. Length carries the comparison; the count stays printed beside it so no
+          value is reachable only by eyeballing a bar.
+          One hue for every bar — the departments have no order of their own, so shading
+          them by size would spend the colour channel restating the length. */}
       <Card data-testid="hr-dept-strength">
-        <CardHeader><CardTitle className="text-base">Department Strength</CardTitle></CardHeader>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Department Strength</CardTitle>
+          <p className="text-xs text-slate-500">Open a department to see its people.</p>
+        </CardHeader>
         <CardContent>
-          {data.department_strength.length === 0 ? <p className="text-sm text-slate-400">No employees yet.</p> : (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-              {data.department_strength.map((d) => (
-                <div key={d.name} className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-center" data-testid={`hr-dept-${d.name}`}>
-                  <p className="text-sm text-slate-600">{d.name}</p>
-                  <p className="mt-1 text-2xl font-bold text-orange-500">{d.count}</p>
-                </div>
+          {depts.length === 0 ? <p className="text-sm text-slate-400">No employees yet.</p> : (
+            <div className="space-y-1">
+              {depts.map((d) => (
+                <button
+                  key={d.name}
+                  type="button"
+                  onClick={() => onNavigate("employees", { department: d.name })}
+                  className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition hover:bg-orange-50"
+                  data-testid={`hr-dept-${d.name}`}
+                >
+                  <span className="w-28 shrink-0 truncate text-sm font-medium text-slate-700 sm:w-40">{d.name}</span>
+                  <span className="h-2.5 min-w-0 flex-1 overflow-hidden rounded-full bg-slate-100">
+                    <span
+                      className="block h-full rounded-full bg-orange-500"
+                      style={{ width: peak ? `${Math.max((d.count / peak) * 100, 2)}%` : "0%" }}
+                    />
+                  </span>
+                  <span className="w-8 shrink-0 text-right text-sm font-bold tabular-nums text-slate-800">{d.count}</span>
+                </button>
               ))}
             </div>
           )}
@@ -110,10 +163,13 @@ const DashboardTab = () => {
 
 // ---------- Employees ----------
 
-const EmployeesTab = ({ meta }) => {
+const EmployeesTab = ({ meta, initialFilter }) => {
   const [employees, setEmployees] = useState([]);
   const [search, setSearch] = useState("");
-  const [filterStatus, setFilterStatus] = useState("active");
+  const [filterStatus, setFilterStatus] = useState(initialFilter?.status || "active");
+  // Arrived at from a Department Strength bar. Cleared by its own chip rather than by
+  // going back to the Dashboard, so the way out is next to the thing that narrowed the list.
+  const [department, setDepartment] = useState(initialFilter?.department || "");
   const [sortAZ, setSortAZ] = useState(null); // null = as-loaded | "asc" | "desc"
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -123,6 +179,9 @@ const EmployeesTab = ({ meta }) => {
   useEffect(() => { load(); }, [load]);
 
   const filtered = employees.filter((e) => {
+    // "Unassigned" is what the Dashboard calls an employee with no department, so it has
+    // to match the empty field here or that bar would open an empty list.
+    if (department && (e.department || "Unassigned") !== department) return false;
     if (!search) return true;
     const q = search.toLowerCase();
     return (e.full_name || "").toLowerCase().includes(q) || (e.email || "").toLowerCase().includes(q) || (e.employee_code || "").toLowerCase().includes(q);
@@ -146,6 +205,16 @@ const EmployeesTab = ({ meta }) => {
       <div className="flex flex-wrap items-center gap-2">
         <button onClick={() => setFilterStatus("active")} className={`rounded-md px-3 py-2 text-sm font-medium ${filterStatus === "active" ? "bg-orange-500 text-white" : "bg-slate-100 text-slate-600"}`} data-testid="hr-emp-tab-active">Active Employees ({active})</button>
         <button onClick={() => setFilterStatus("left")} className={`rounded-md px-3 py-2 text-sm font-medium ${filterStatus === "left" ? "bg-slate-700 text-white" : "bg-slate-100 text-slate-600"}`} data-testid="hr-emp-tab-left">Left ({left})</button>
+        {department && (
+          <button
+            onClick={() => setDepartment("")}
+            className="inline-flex items-center gap-1.5 rounded-md border border-orange-300 bg-orange-50 px-3 py-2 text-sm font-medium text-orange-700 hover:bg-orange-100"
+            title="Clear the department filter"
+            data-testid="hr-emp-dept-chip"
+          >
+            {department} <X className="h-3.5 w-3.5" />
+          </button>
+        )}
         <div className="flex-1" />
         <button
           onClick={() => setSortAZ((s) => (s === "asc" ? "desc" : "asc"))}
