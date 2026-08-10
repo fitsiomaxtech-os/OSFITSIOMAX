@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
-import { Users, CalendarCheck, Activity, IndianRupee, X, Building2, LayoutDashboard, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { Users, CalendarCheck, Activity, IndianRupee, X, Building2, LayoutDashboard, TrendingUp, TrendingDown, Minus, Plus, Settings2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { SegmentedTabs } from "@/components/ui/segmented-tabs";
+import { CreateLeadModal } from "@/components/CreateLeadModal";
 import { toast } from "@/components/ui/sonner";
-import { getDashboardOverview, getDashboardBranchBreakdown, mkGetTeam } from "@/lib/api";
+import { getDashboardOverview, getDashboardBranchBreakdown, getDashboardLeadsTrend, mkGetTeam } from "@/lib/api";
 import { TeamCard } from "@/components/marketing/TeamCard";
 
 // The four count tabs read the same branch/vertical payload; the two people tabs are a
@@ -85,8 +87,12 @@ const fmtValue = (tabKey, value) => (tabKey === "revenue" ? `₹${(value || 0).t
 
 // Super Admin's default landing page — Leads / Appointments / Treatments / Revenue split
 // per Physiotherapy branch, plus the two sales-team tabs, each scoped to a date range.
-export const DashboardBoard = () => {
+export const DashboardBoard = ({ onNavigate }) => {
   const [dateFilter, setDateFilter] = useState(defaultFilter);
+  // Bumped to re-run the overview fetch after something on this board changes the data,
+  // rather than asking the user to reload to see a lead they just created.
+  const [refreshKey, setRefreshKey] = useState(0);
+  const reload = () => setRefreshKey((n) => n + 1);
   const [activeTab, setActiveTab] = useState("overview");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -108,7 +114,7 @@ export const DashboardBoard = () => {
       .then(setData)
       .catch(() => toast.error("Failed to load dashboard"))
       .finally(() => setLoading(false));
-  }, [dateFilter]);
+  }, [dateFilter, refreshKey]);
 
   // Fetched once, on the first visit to either team tab, and not refetched when the date
   // range changes — /marketing/team-members counts a person's whole book and takes no
@@ -335,7 +341,18 @@ export const DashboardBoard = () => {
           {/* Other Verticals removed from the board. The endpoint still returns them —
               other callers read the same payload — they just aren't drawn here. */}
 
-          {activeTab === "leads" && <BranchShareDonut branches={activeData.physio_branches} />}
+          {activeTab === "leads" && (
+            <>
+              {/* Share on the left, the two things you'd do about it on the right. The
+                  donut used to run the full width, which gave a five-row legend the same
+                  space as a chart that needs about a third of it. */}
+              <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+                <BranchShareDonut branches={activeData.physio_branches} />
+                <QuickActions onNavigate={onNavigate} onLeadCreated={reload} />
+              </div>
+              <LeadsTrend />
+            </>
+          )}
         </div>
       )}
     </div>
@@ -496,6 +513,199 @@ const Delta = ({ now, before, loading, available }) => {
       {flat ? "0%" : `${pct > 0 ? "+" : ""}${pct.toFixed(1)}%`}
       <span className="font-normal text-slate-400">vs prior period</span>
     </p>
+  );
+};
+
+/**
+ * The two things a Super Admin reading the Leads tab actually goes on to do.
+ *
+ * Both genuinely work: Add New Lead opens the same modal the CRM uses and refreshes the
+ * board behind it, Route Settings goes to where round-robin distribution is configured.
+ * Nothing here is a placeholder — a panel of buttons that look actionable and aren't is
+ * worse than no panel.
+ */
+const QuickActions = ({ onNavigate, onLeadCreated }) => {
+  const [creating, setCreating] = useState(false);
+  return (
+    <Card data-testid="dashboard-quick-actions">
+      <CardContent className="p-5">
+        <p className="text-sm font-bold text-slate-800">Quick Actions</p>
+        <p className="mt-0.5 text-xs text-slate-500">Add a lead, or change how new ones are shared out.</p>
+        <div className="mt-4 space-y-2">
+          <Button className="w-full bg-sky-600 hover:bg-sky-700" onClick={() => setCreating(true)} data-testid="dashboard-add-lead">
+            <Plus className="mr-1.5 h-4 w-4" /> Add New Lead
+          </Button>
+          {/* Only offered when the parent can actually switch tabs. Rendered as a dead
+              button when it can't would be the placeholder this panel is meant to avoid. */}
+          {onNavigate && (
+            <Button variant="outline" className="w-full" onClick={() => onNavigate("marketing")} data-testid="dashboard-route-settings">
+              <Settings2 className="mr-1.5 h-4 w-4" /> Route Settings
+            </Button>
+          )}
+        </div>
+      </CardContent>
+      {creating && (
+        <CreateLeadModal
+          isSuperAdmin
+          onClose={() => setCreating(false)}
+          onSaved={() => { setCreating(false); onLeadCreated?.(); }}
+        />
+      )}
+    </Card>
+  );
+};
+
+/**
+ * Leads per branch over the last six months.
+ *
+ * Not filtered by the board's date range, deliberately: a trend answers "which way is
+ * this going", and a six-month line inside a one-day filter would be a single point.
+ * The range control narrows the figures above; this is the history behind them.
+ *
+ * A line per branch rather than one total line — the total already sits in the cards
+ * above, and the question this leaves open is which branch is moving.
+ */
+const LeadsTrend = () => {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [hoverIdx, setHoverIdx] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getDashboardLeadsTrend(6)
+      .then((r) => { if (!cancelled) setData(r); })
+      .catch(() => { if (!cancelled) setData(null); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  if (loading) return <Card><CardContent className="p-5"><p className="py-10 text-center text-sm text-slate-400">Loading trend…</p></CardContent></Card>;
+  if (!data || !data.months?.length) return null;
+
+  const series = (data.branches || []).map((b, i) => ({ ...b, color: i < SERIES.length ? SERIES[i] : OTHER_HUE }));
+  const peak = Math.max(1, ...series.flatMap((s) => s.values));
+
+  // A 1 / 2 / 5 × power-of-ten step, with the axis topping out at a multiple of it rather
+  // than at the data. Scaling straight to the peak leaves the highest point sitting on the
+  // frame with no gridline above it — and a step derived from the peak alone gave figures
+  // like 560, which makes the reader do the arithmetic the gridline was there to save.
+  const step = (() => {
+    const raw = peak / 4;
+    const mag = 10 ** Math.floor(Math.log10(raw));
+    const norm = raw / mag;
+    return Math.max(1, (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * mag);
+  })();
+  const axisMax = step * Math.ceil(peak / step);
+
+  // viewBox units, not pixels — the svg scales to its container and the maths stays in
+  // one coordinate space.
+  const W = 720;
+  const H = 220;
+  const PAD_L = 40;
+  const PAD_R = 12;
+  const PAD_T = 12;
+  const PAD_B = 28;
+  const plotW = W - PAD_L - PAD_R;
+  const plotH = H - PAD_T - PAD_B;
+  const x = (i) => PAD_L + (data.months.length === 1 ? plotW / 2 : (i / (data.months.length - 1)) * plotW);
+  const y = (v) => PAD_T + plotH - (v / axisMax) * plotH;
+
+  const ticks = [];
+  for (let v = 0; v <= axisMax + 1e-9; v += step) ticks.push(Math.round(v));
+
+  const monthLabel = (k) => new Date(`${k}-01T00:00:00`).toLocaleDateString("en-US", { month: "short" });
+
+  return (
+    <Card data-testid="dashboard-leads-trend">
+      <CardContent className="p-4 sm:p-5">
+        <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
+          <p className="text-sm font-bold text-slate-800">Leads Trend</p>
+          <p className="text-[11px] text-slate-400">Last 6 months · not affected by the date filter</p>
+        </div>
+
+        {/* Legend always, for five series — identity never rests on colour alone. */}
+        <div className="mb-3 flex flex-wrap gap-x-4 gap-y-1">
+          {series.map((s) => (
+            <span key={s.branch_id} className="flex items-center gap-1.5 text-[11px] text-slate-600">
+              <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: s.color }} />
+              {s.branch_name}
+            </span>
+          ))}
+        </div>
+
+        <div className="-mx-1 overflow-x-auto px-1">
+          <svg viewBox={`0 0 ${W} ${H}`} className="h-56 w-full min-w-[560px]" role="img" aria-label="Leads per branch over the last six months">
+            {/* Hairline grid, solid, one step off the surface — never dashed. */}
+            {ticks.map((v) => (
+              <g key={v}>
+                <line x1={PAD_L} x2={W - PAD_R} y1={y(v)} y2={y(v)} stroke="#e1e0d9" strokeWidth="1" />
+                <text x={PAD_L - 6} y={y(v) + 3} textAnchor="end" className="fill-slate-400" style={{ fontSize: 9 }}>
+                  {v.toLocaleString("en-IN")}
+                </text>
+              </g>
+            ))}
+            {data.months.map((k, i) => (
+              <text key={k} x={x(i)} y={H - 8} textAnchor="middle" className="fill-slate-400" style={{ fontSize: 9 }}>
+                {monthLabel(k)}
+              </text>
+            ))}
+
+            {/* The column under the cursor, so a reader can line up all five branches at
+                one month instead of eyeballing across. */}
+            {hoverIdx !== null && (
+              <line x1={x(hoverIdx)} x2={x(hoverIdx)} y1={PAD_T} y2={PAD_T + plotH} stroke="#c3c2b7" strokeWidth="1" />
+            )}
+
+            {series.map((s) => (
+              <polyline
+                key={s.branch_id}
+                fill="none"
+                stroke={s.color}
+                strokeWidth="2"
+                strokeLinejoin="round"
+                strokeLinecap="round"
+                points={s.values.map((v, i) => `${x(i)},${y(v)}`).join(" ")}
+              />
+            ))}
+            {/* Markers carry a surface ring so lines crossing under them stay legible. */}
+            {hoverIdx !== null && series.map((s) => (
+              <circle key={s.branch_id} cx={x(hoverIdx)} cy={y(s.values[hoverIdx])} r="4" fill={s.color} stroke="#ffffff" strokeWidth="2" />
+            ))}
+
+            {/* One hit band per month, full plot height — a 2px line is impossible to
+                land on, and the band is what makes the crosshair usable. */}
+            {data.months.map((k, i) => (
+              <rect
+                key={k}
+                x={x(i) - plotW / (data.months.length - 1) / 2}
+                y={PAD_T}
+                width={plotW / (data.months.length - 1)}
+                height={plotH}
+                fill="transparent"
+                onMouseEnter={() => setHoverIdx(i)}
+                onMouseLeave={() => setHoverIdx(null)}
+              />
+            ))}
+          </svg>
+        </div>
+
+        {/* The hovered month in text. Tooltips enhance; every value is also reachable
+            here and in the table on Executive Overview. */}
+        <div className="mt-2 min-h-[20px] text-[11px] text-slate-500">
+          {hoverIdx !== null && (
+            <span className="flex flex-wrap gap-x-3 gap-y-1">
+              <span className="font-semibold text-slate-700">{monthLabel(data.months[hoverIdx])} {data.months[hoverIdx].slice(0, 4)}</span>
+              {series.map((s) => (
+                <span key={s.branch_id}>
+                  <span className="inline-block h-2 w-2 rounded-full align-middle" style={{ background: s.color }} />{" "}
+                  {s.branch_name} <b className="text-slate-700">{s.values[hoverIdx].toLocaleString("en-IN")}</b>
+                </span>
+              ))}
+            </span>
+          )}
+        </div>
+      </CardContent>
+    </Card>
   );
 };
 

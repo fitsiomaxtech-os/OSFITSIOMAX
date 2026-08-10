@@ -560,6 +560,62 @@ async def v3_dashboard_overview(
     }
 
 
+@router.get("/dashboard/leads-trend")
+async def v3_dashboard_leads_trend(
+    months: int = Query(6, ge=2, le=24),
+    _: V3UserOut = Depends(v3_require_roles("super_admin")),
+):
+    """Leads per Physiotherapy branch, by calendar month, most recent last.
+
+    Takes no date filter of its own. A trend answers "which way is this going", and a
+    six-month line inside a one-day filter would be a single point — the board's range
+    control narrows the figures above it, not the shape of the history behind them.
+
+    Every branch gets a full-length row, zeros included. A branch that took no leads in
+    March has a real value of 0 there, and dropping the point would draw a line straight
+    from February to April as though the month never happened.
+    """
+    branches = await v3_col("branches").find(
+        {"vertical": "offline_physiotherapy"}, {"_id": 0, "id": 1, "branch_name": 1}
+    ).to_list(500)
+    if not branches:
+        return {"months": [], "branches": []}
+
+    now = datetime.now(timezone.utc)
+    keys: list = []
+    y, m = now.year, now.month
+    for _i in range(months):
+        keys.append(f"{y}-{str(m).zfill(2)}")
+        m -= 1
+        if m == 0:
+            m = 12
+            y -= 1
+    keys.reverse()
+
+    rows = await v3_col("leads").find(
+        {"branch_id": {"$in": [b["id"] for b in branches]}, "created_at": {"$gte": f"{keys[0]}-01"}},
+        {"_id": 0, "branch_id": 1, "created_at": 1},
+    ).to_list(100000)
+
+    counts: dict = {b["id"]: {k: 0 for k in keys} for b in branches}
+    for r in rows:
+        key = str(r.get("created_at", ""))[:7]
+        bucket = counts.get(r.get("branch_id"))
+        # `key in bucket` rather than a date comparison: the $gte above is a string bound,
+        # so a malformed created_at can slip past it and would otherwise land in no month
+        # at all — or worse, create one.
+        if bucket is not None and key in bucket:
+            bucket[key] += 1
+
+    return {
+        "months": keys,
+        "branches": [
+            {"branch_id": b["id"], "branch_name": b.get("branch_name", ""), "values": [counts[b["id"]][k] for k in keys]}
+            for b in branches
+        ],
+    }
+
+
 ROLE_LABELS = {
     "branch_admin": "Branch Admin",
     "pre_sales": "Pre-Sales",

@@ -879,7 +879,7 @@ export const CRMPage = ({ auth, onLogout }) => {
         )}
 
         {showSuperAdminBoard && superAdminView === "dashboard" && (
-          <DashboardBoard />
+          <DashboardBoard onNavigate={setSuperAdminView} />
         )}
 
         {showBusinessDevBoard && (
