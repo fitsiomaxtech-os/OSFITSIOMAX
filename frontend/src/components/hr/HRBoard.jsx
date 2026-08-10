@@ -694,12 +694,90 @@ const RoleFilterDropdown = ({ value, options, onChange }) => {
   );
 };
 
+/**
+ * Add a role on its own, without starting a user you may not want.
+ *
+ * The role list already on screen is shown underneath, because the commonest mistake here
+ * is adding a second role that means the same as one that exists — "Nutrition Coach"
+ * beside "Diet Manage" — and the only thing that prevents it is being able to see what is
+ * already there while typing.
+ */
+const CreateRoleModal = ({ meta, reloadMeta, onClose }) => {
+  const [label, setLabel] = useState("");
+  const [saving, setSaving] = useState(false);
+  const existing = meta.roles || [];
+  // Compared on letters alone, so "Head Physio", "head_physio" and "HEAD PHYSIO" are all
+  // recognised as the role that already exists.
+  const key = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const duplicate = !!label.trim() && existing.some((r) => key(r.label ?? r.name ?? r) === key(label));
+
+  const submit = async () => {
+    if (!label.trim()) { toast.error("Enter a role name"); return; }
+    if (duplicate) { toast.error("That role already exists"); return; }
+    setSaving(true);
+    try {
+      const created = await hrAddCustomRole(label.trim());
+      toast.success(`Role "${created.label || label.trim()}" added`);
+      await reloadMeta?.();
+      onClose();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Failed to add role");
+    }
+    setSaving(false);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} data-testid="hr-create-role-modal">
+      <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl">
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-base font-semibold text-slate-900">Create Role</h3>
+            <p className="text-xs text-slate-500">Adds a role that can then be given to a user.</p>
+          </div>
+          <button onClick={onClose} className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100" aria-label="Close"><X className="h-4 w-4" /></button>
+        </div>
+
+        <Input
+          autoFocus
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && !duplicate) submit(); }}
+          placeholder="e.g. Nutrition Coach"
+          data-testid="hr-create-role-input"
+        />
+        {duplicate && <p className="mt-1.5 text-xs font-semibold text-red-500" data-testid="hr-create-role-duplicate">That role already exists.</p>}
+
+        {existing.length > 0 && (
+          <div className="mt-4">
+            <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">Roles that already exist</p>
+            <div className="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto">
+              {existing.map((r) => (
+                <span key={r.name ?? r} className="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+                  {r.label ?? r.name ?? r}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="mt-5 flex gap-2">
+          <Button variant="outline" onClick={onClose} className="flex-1" data-testid="hr-create-role-cancel">Cancel</Button>
+          <Button onClick={submit} disabled={saving || !label.trim() || duplicate} className="flex-1 bg-sky-600 hover:bg-sky-700" data-testid="hr-create-role-submit">
+            {saving ? "Adding..." : "Add Role"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const RolesTab = ({ meta, reloadMeta }) => {
   const [users, setUsers] = useState([]);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
   const [sortAZ, setSortAZ] = useState(null); // null = as-loaded | "asc" | "desc"
   const [showCreate, setShowCreate] = useState(false);
+  const [showCreateRole, setShowCreateRole] = useState(false);
   const [actionTarget, setActionTarget] = useState(null);
 
   const load = useCallback(() => hrUsers({ search, role: roleFilter !== "all" ? roleFilter : undefined }).then(setUsers).catch((e) => console.warn("[load failed]", e?.message || e)), [search, roleFilter]);
@@ -728,7 +806,8 @@ const RolesTab = ({ meta, reloadMeta }) => {
         </button>
         <RoleFilterDropdown value={roleFilter} options={meta.roles} onChange={setRoleFilter} />
         <Input placeholder="Search name or email..." value={search} onChange={(e) => setSearch(e.target.value)} className="w-full" data-testid="hr-roles-search-mobile" />
-        <Button onClick={() => setShowCreate(true)} className="w-full bg-sky-600 hover:bg-sky-700" data-testid="hr-roles-create-btn-mobile"><UserPlus className="h-4 w-4 mr-1" />Create User</Button>
+        <Button variant="outline" onClick={() => setShowCreateRole(true)} className="flex-1" data-testid="hr-roles-create-role-btn-mobile"><ShieldCheck className="mr-1 h-4 w-4" />Create Role</Button>
+        <Button onClick={() => setShowCreate(true)} className="flex-1 bg-sky-600 hover:bg-sky-700" data-testid="hr-roles-create-btn-mobile"><UserPlus className="h-4 w-4 mr-1" />Create User</Button>
       </div>
 
       <div className="space-y-2 md:hidden" data-testid="hr-user-cards">
@@ -780,6 +859,11 @@ const RolesTab = ({ meta, reloadMeta }) => {
             </button>
             <Input placeholder="Search name or email..." value={search} onChange={(e) => setSearch(e.target.value)} className="w-64" data-testid="hr-roles-search" />
             <RoleFilterDropdown value={roleFilter} options={meta.roles} onChange={setRoleFilter} />
+            {/* Roles could only be added from inside the Create User form, so adding one
+                meant starting a user you might not want. Outlined rather than filled:
+                creating a user is the everyday action on this screen, adding a role is
+                occasional, and two solid buttons side by side would say otherwise. */}
+            <Button variant="outline" onClick={() => setShowCreateRole(true)} data-testid="hr-roles-create-role-btn"><ShieldCheck className="mr-1 h-4 w-4" />Create Role</Button>
             <Button onClick={() => setShowCreate(true)} className="bg-sky-600 hover:bg-sky-700" data-testid="hr-roles-create-btn"><UserPlus className="h-4 w-4 mr-1" />Create User</Button>
           </div>
         </CardHeader>
@@ -825,6 +909,7 @@ const RolesTab = ({ meta, reloadMeta }) => {
       </Card>
 
       {showCreate && <CreateUserModal meta={meta} reloadMeta={reloadMeta} onClose={() => setShowCreate(false)} onSaved={() => { setShowCreate(false); load(); }} />}
+      {showCreateRole && <CreateRoleModal meta={meta} reloadMeta={reloadMeta} onClose={() => setShowCreateRole(false)} />}
 
       {actionTarget && (
         <UserActionsModal
