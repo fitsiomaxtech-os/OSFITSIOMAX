@@ -4,7 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
 import { listStoreItems } from "@/lib/api";
-import { TabletInventoryPanel } from "@/components/branch/TabletInventoryPanel";
+import { StoreInventoryPanel } from "@/components/branch/StoreInventoryPanel";
 import {
   TABS,
   CONSULTATIONS_SUBTABS,
@@ -166,9 +166,13 @@ export const BranchSessionsPanel = () => {
 
 const BRANCH_STORE_TABS = TABS.filter((t) => t.key !== "history");
 
+// The three shelves that are stock: a catalogue, a count per branch, and the same add,
+// sell and move. One panel serves all of them, told which by its category.
+const INVENTORY_TABS = new Set(["tablet", "supplementary", "equipment"]);
+
 // Which tabs have a panel of their own. The rest fall through to the placeholder, and a
 // tab graduates by being added here rather than by another branch in the JSX below.
-const PANELS_BUILT = new Set(["consultations", "sessions", "tablet"]);
+const PANELS_BUILT = new Set(["consultations", "sessions", ...INVENTORY_TABS]);
 
 export const FitsiomaxStorePanel = () => {
   const [tab, setTab] = useState("consultations");
@@ -194,7 +198,9 @@ export const FitsiomaxStorePanel = () => {
 
       {tab === "consultations" && <BranchConsultationsPanel />}
       {tab === "sessions" && <BranchSessionsPanel />}
-      {tab === "tablet" && <TabletInventoryPanel />}
+      {/* Keyed by category: without it React keeps the same instance across a tab switch
+          and the previous shelf's rows sit there until the new ones land. */}
+      {INVENTORY_TABS.has(tab) && <StoreInventoryPanel key={tab} category={tab} />}
       {!PANELS_BUILT.has(tab) && BRANCH_STORE_TABS.map((t) => tab === t.key && (
         <PlaceholderPanel key={t.key} label={t.label} testid={`branch-store-panel-${t.key}`} />
       ))}

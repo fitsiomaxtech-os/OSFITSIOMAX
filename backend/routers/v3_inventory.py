@@ -38,8 +38,11 @@ router = APIRouter(prefix="/api/v3/inventory", tags=["inventory"])
 VALID_CATEGORIES = {"tablet", "supplementary", "equipment"}
 
 # What a unit of stock is. A "strip of 10" sold as one thing is one unit — the OS counts
-# packages the branch hands over, not the tablets inside them.
-VALID_UNITS = {"Strip", "Bottle", "Tube", "Sachet", "Pack", "Piece", "Box"}
+# packages the branch hands over, not the tablets inside them. Set and Pair are here for
+# Equipment, which is bought as a pair of dumbbells or a set of bands rather than singly.
+# The panel offers each category a subset of these; anything added there must be added
+# here too, or the save is refused.
+VALID_UNITS = {"Strip", "Bottle", "Tube", "Sachet", "Pack", "Piece", "Box", "Set", "Pair"}
 
 VALID_PAYMENT_MODES = {"cash", "upi", "card", "account_transfer"}
 

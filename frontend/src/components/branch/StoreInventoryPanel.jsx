@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Pill, Plus, PackagePlus, ShoppingCart, ArrowRightLeft, Pencil, Trash2,
+  Pill, FlaskConical, Dumbbell, Plus, PackagePlus, ShoppingCart, ArrowRightLeft, Pencil, Trash2,
   Search, AlertTriangle, Boxes, IndianRupee, X, History,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -13,7 +13,45 @@ import {
   getBranches,
 } from "@/lib/api";
 
-const UNITS = ["Strip", "Bottle", "Tube", "Sachet", "Pack", "Piece", "Box"];
+/**
+ * What differs between the three shelves this panel serves.
+ *
+ * Stock is the same problem on all of them — a count, a sale, a transfer — but the words
+ * are not. A treadmill does not come in strips and a protein tub is not a piece, and a
+ * unit list that has to cover everything ends up meaning nothing on any of them. The
+ * `units` here are a subset of what the backend accepts; anything added to one must be
+ * added there too or the save is refused.
+ *
+ * `low` is the default alert level for a new item. Ten is a shelf of tablets and a
+ * fortnight of sachets; two is a lot of treadmills.
+ */
+const CATEGORIES = {
+  tablet: {
+    noun: "Tablet", plural: "Tablets", icon: Pill,
+    units: ["Strip", "Bottle", "Tube", "Sachet", "Pack", "Box"], defaultUnit: "Strip", low: 10,
+    searchHint: "Search tablet or brand...",
+    empty: "No tablets yet — add one to start tracking stock.",
+    namePlaceholder: "e.g. Paracetamol 500mg",
+    brandPlaceholder: "e.g. Calpol",
+  },
+  supplementary: {
+    noun: "Supplement", plural: "Supplements", icon: FlaskConical,
+    units: ["Bottle", "Sachet", "Pack", "Box", "Tube"], defaultUnit: "Bottle", low: 10,
+    searchHint: "Search supplement or brand...",
+    empty: "No supplements yet — add one to start tracking stock.",
+    namePlaceholder: "e.g. Whey Protein 1kg",
+    brandPlaceholder: "e.g. Optimum Nutrition",
+  },
+  equipment: {
+    noun: "Equipment", plural: "Equipment", icon: Dumbbell,
+    units: ["Piece", "Set", "Pair", "Box", "Pack"], defaultUnit: "Piece", low: 2,
+    searchHint: "Search equipment or brand...",
+    empty: "No equipment yet — add one to start tracking stock.",
+    namePlaceholder: "e.g. Resistance Band (Medium)",
+    brandPlaceholder: "e.g. Decathlon",
+  },
+};
+
 const PAYMENT_MODES = [
   { value: "cash", label: "Cash" },
   { value: "upi", label: "UPI" },
@@ -97,7 +135,20 @@ const StatTile = ({ label, value, sub, icon: Icon, color }) => (
   </div>
 );
 
-export const TabletInventoryPanel = () => {
+/**
+ * Stock for one Fitsiomax Store shelf. Tablet, Supplementary and Equipment are the same
+ * board with different words on it — the counting, selling and moving are identical, so
+ * they are one component rather than three that drift.
+ *
+ * Mounted with a `key` of the category so switching tabs remounts rather than showing the
+ * previous shelf's rows while the new ones load.
+ */
+export const StoreInventoryPanel = ({ category = "tablet" }) => {
+  const CAT = CATEGORIES[category] || CATEGORIES.tablet;
+  // Test ids carry the category, so the three shelves stay distinguishable in a run and
+  // the Tablet ones keep the names they already had.
+  const tid = (s) => `${category}-${s}`;
+
   const [items, setItems] = useState([]);
   const [summary, setSummary] = useState(null);
   const [movements, setMovements] = useState([]);
@@ -116,18 +167,18 @@ export const TabletInventoryPanel = () => {
     setLoading(true);
     try {
       const [rows, totals, ledger] = await Promise.all([
-        listInventoryItems(),
-        inventorySummary(),
-        inventoryMovements({ limit: 50 }),
+        listInventoryItems({ category }),
+        inventorySummary({ category }),
+        inventoryMovements({ category, limit: 50 }),
       ]);
       setItems(rows);
       setSummary(totals);
       setMovements(ledger.movements || []);
     } catch (e) {
-      toast.error(errText(e, "Couldn't load the tablet stock"));
+      toast.error(errText(e, `Couldn't load the ${CAT.noun.toLowerCase()} stock`));
     }
     setLoading(false);
-  }, []);
+  }, [category, CAT.noun]);
 
   useEffect(() => { load(); }, [load]);
   // Only needed by the move form, but fetched once here rather than on each open.
@@ -165,7 +216,7 @@ export const TabletInventoryPanel = () => {
     const d = itemDraft;
     if (!d.name.trim()) { toast.error("Name is required"); return; }
     const payload = {
-      category: "tablet",
+      category,
       name: d.name.trim(),
       brand: d.brand.trim(),
       unit: d.unit,
@@ -176,7 +227,7 @@ export const TabletInventoryPanel = () => {
     };
     const ok = await run(
       () => (d.id ? updateInventoryItem(d.id, payload) : createInventoryItem(payload)),
-      d.id ? "Tablet updated" : "Tablet added to the catalogue",
+      d.id ? `${CAT.noun} updated` : `${CAT.noun} added to the catalogue`,
     );
     if (ok) setItemDraft(null);
   };
@@ -185,7 +236,7 @@ export const TabletInventoryPanel = () => {
     // The server refuses while any branch still holds stock and says where it is, so the
     // only thing worth confirming here is the intent.
     if (!window.confirm(`Remove ${item.name} from the catalogue?`)) return;
-    await run(() => deleteInventoryItem(item.id), "Tablet removed");
+    await run(() => deleteInventoryItem(item.id), `${CAT.noun} removed`);
   };
 
   const submitAdd = async () => {
@@ -228,14 +279,14 @@ export const TabletInventoryPanel = () => {
   };
 
   const newItem = () => setItemDraft({
-    id: null, name: "", brand: "", unit: "Strip",
-    sale_price: "", cost_price: "", low_stock_at: 10, notes: "",
+    id: null, name: "", brand: "", unit: CAT.defaultUnit,
+    sale_price: "", cost_price: "", low_stock_at: CAT.low, notes: "",
   });
 
   const editItem = (it) => setItemDraft({
-    id: it.id, name: it.name, brand: it.brand || "", unit: it.unit || "Strip",
+    id: it.id, name: it.name, brand: it.brand || "", unit: it.unit || CAT.defaultUnit,
     sale_price: it.sale_price ?? "", cost_price: it.cost_price ?? "",
-    low_stock_at: it.low_stock_at ?? 10, notes: it.notes || "",
+    low_stock_at: it.low_stock_at ?? CAT.low, notes: it.notes || "",
   });
 
   const sellTotal = sellDraft
@@ -252,7 +303,7 @@ export const TabletInventoryPanel = () => {
       <Button
         size="sm" variant="outline" className="h-8 border-sky-200 text-sky-700 hover:bg-sky-50"
         onClick={() => setAddDraft({ item, qty: "", cost_price: "", supplier: "", note: "" })}
-        data-testid={`tablet-add-stock-${item.id}`}
+        data-testid={tid(`add-stock-${item.id}`)}
       >
         <PackagePlus className="mr-1 h-3.5 w-3.5" /> Add
       </Button>
@@ -260,7 +311,7 @@ export const TabletInventoryPanel = () => {
         size="sm" variant="outline" className="h-8 border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:opacity-40"
         disabled={item.stock <= 0}
         onClick={() => setSellDraft({ item, qty: 1, unit_price: item.sale_price ?? "", customer_name: "", payment_mode: "cash", note: "" })}
-        data-testid={`tablet-sell-${item.id}`}
+        data-testid={tid(`sell-${item.id}`)}
       >
         <ShoppingCart className="mr-1 h-3.5 w-3.5" /> Sell
       </Button>
@@ -268,21 +319,21 @@ export const TabletInventoryPanel = () => {
         size="sm" variant="outline" className="h-8 border-amber-200 text-amber-700 hover:bg-amber-50 disabled:opacity-40"
         disabled={item.stock <= 0}
         onClick={() => setMoveDraft({ item, qty: 1, to_branch_id: "", note: "" })}
-        data-testid={`tablet-move-${item.id}`}
+        data-testid={tid(`move-${item.id}`)}
       >
         <ArrowRightLeft className="mr-1 h-3.5 w-3.5" /> Move
       </Button>
       <button
         onClick={() => editItem(item)}
         className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-violet-600"
-        title="Edit" data-testid={`tablet-edit-${item.id}`}
+        title="Edit" data-testid={tid(`edit-${item.id}`)}
       >
         <Pencil className="h-3.5 w-3.5" />
       </button>
       <button
         onClick={() => removeItem(item)}
         className="rounded p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
-        title="Delete" data-testid={`tablet-delete-${item.id}`}
+        title="Delete" data-testid={tid(`delete-${item.id}`)}
       >
         <Trash2 className="h-3.5 w-3.5" />
       </button>
@@ -290,9 +341,9 @@ export const TabletInventoryPanel = () => {
   );
 
   return (
-    <div className="space-y-4" data-testid="tablet-inventory-panel">
+    <div className="space-y-4" data-testid={tid("inventory-panel")}>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatTile label="Tablets" value={summary?.items ?? "—"} sub="in the catalogue" icon={Pill} color="#7c3aed" />
+        <StatTile label={CAT.plural} value={summary?.items ?? "—"} sub="in the catalogue" icon={CAT.icon} color="#7c3aed" />
         <StatTile label="In Stock" value={summary?.units ?? "—"} sub={`worth ${fmt(summary?.stock_value)}`} icon={Boxes} color="#0284c7" />
         <StatTile label="Low Stock" value={summary?.low_stock ?? "—"} sub={`${summary?.out_of_stock ?? 0} fully out`} icon={AlertTriangle} color="#d97706" />
         <StatTile label="Sold Today" value={fmt(summary?.sold_today_amount)} sub={`${summary?.sold_today_qty ?? 0} units`} icon={IndianRupee} color="#059669" />
@@ -305,27 +356,27 @@ export const TabletInventoryPanel = () => {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search tablet or brand..."
+              placeholder={CAT.searchHint}
               className={`${inputCls} pl-9`}
-              data-testid="tablet-inventory-search"
+              data-testid={tid("inventory-search")}
             />
           </div>
-          <Button onClick={newItem} className="bg-violet-600 text-white hover:bg-violet-700" data-testid="tablet-inventory-new">
-            <Plus className="mr-1.5 h-4 w-4" /> New Tablet
+          <Button onClick={newItem} className="bg-violet-600 text-white hover:bg-violet-700" data-testid={tid("inventory-new")}>
+            <Plus className="mr-1.5 h-4 w-4" /> New {CAT.noun}
           </Button>
         </CardContent>
       </Card>
 
-      <Card className="overflow-hidden" data-testid="tablet-inventory-table-card">
+      <Card className="overflow-hidden" data-testid={tid("inventory-table-card")}>
         <CardContent className="p-0">
           <div className="border-b border-slate-100 px-4 py-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Tablet Stock</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{CAT.noun} Stock</p>
           </div>
 
           {empty ? (
-            <p className="px-4 py-14 text-center text-sm text-slate-400" data-testid="tablet-inventory-empty">
+            <p className="px-4 py-14 text-center text-sm text-slate-400" data-testid={tid("inventory-empty")}>
               {loading ? "Loading stock..."
-                : items.length === 0 ? "No tablets yet — add one to start tracking stock."
+                : items.length === 0 ? CAT.empty
                   : "Nothing matches that search."}
             </p>
           ) : (
@@ -333,9 +384,9 @@ export const TabletInventoryPanel = () => {
               {/* A phone gets cards. The desktop table is 720px before it is readable, and
                   a row whose whole point is three buttons is the worst thing to make
                   someone find by scrolling sideways. */}
-              <div className="space-y-2 p-3 sm:hidden" data-testid="tablet-list-mobile">
+              <div className="space-y-2 p-3 sm:hidden" data-testid={tid("list-mobile")}>
                 {visible.map((it) => (
-                  <div key={it.id} className="rounded-xl border border-slate-200 bg-white p-3" data-testid={`tablet-card-${it.id}`}>
+                  <div key={it.id} className="rounded-xl border border-slate-200 bg-white p-3" data-testid={tid(`card-${it.id}`)}>
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <p className="truncate text-sm font-bold text-slate-800">{it.name}</p>
@@ -351,11 +402,11 @@ export const TabletInventoryPanel = () => {
                 ))}
               </div>
 
-              <div className="hidden overflow-x-auto sm:block" data-testid="tablet-list-desktop">
+              <div className="hidden overflow-x-auto sm:block" data-testid={tid("list-desktop")}>
                 <table className="w-full min-w-[720px] text-sm">
                   <thead className="bg-slate-50 text-left text-[10px] uppercase tracking-wider text-slate-400">
                     <tr>
-                      <th className="px-4 py-2.5 font-semibold">Tablet</th>
+                      <th className="px-4 py-2.5 font-semibold">{CAT.noun}</th>
                       <th className="px-4 py-2.5 font-semibold">Unit</th>
                       <th className="px-4 py-2.5 font-semibold">Price</th>
                       <th className="px-4 py-2.5 font-semibold">Stock</th>
@@ -364,7 +415,7 @@ export const TabletInventoryPanel = () => {
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {visible.map((it) => (
-                      <tr key={it.id} className="hover:bg-slate-50" data-testid={`tablet-row-${it.id}`}>
+                      <tr key={it.id} className="hover:bg-slate-50" data-testid={tid(`row-${it.id}`)}>
                         <td className="px-4 py-3">
                           <p className="font-medium text-slate-800">{it.name}</p>
                           <p className="text-[11px] text-slate-400">{it.brand || "—"}</p>
@@ -393,7 +444,7 @@ export const TabletInventoryPanel = () => {
         </CardContent>
       </Card>
 
-      <Card className="overflow-hidden" data-testid="tablet-inventory-movements">
+      <Card className="overflow-hidden" data-testid={tid("inventory-movements")}>
         <CardContent className="p-0">
           <div className="border-b border-slate-100 px-4 py-3">
             <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -408,7 +459,7 @@ export const TabletInventoryPanel = () => {
                 <thead className="bg-slate-50 text-left text-[10px] uppercase tracking-wider text-slate-400">
                   <tr>
                     <th className="px-4 py-2.5 font-semibold">When</th>
-                    <th className="px-4 py-2.5 font-semibold">Tablet</th>
+                    <th className="px-4 py-2.5 font-semibold">{CAT.noun}</th>
                     <th className="px-4 py-2.5 font-semibold">What</th>
                     <th className="px-4 py-2.5 font-semibold">Qty</th>
                     <th className="px-4 py-2.5 font-semibold">Amount</th>
@@ -423,7 +474,7 @@ export const TabletInventoryPanel = () => {
                         : m.kind === "transfer_out" ? `to ${m.to_branch_name || "another branch"}`
                           : `from ${m.from_branch_name || "another branch"}`;
                     return (
-                      <tr key={m.id} className="hover:bg-slate-50" data-testid={`tablet-movement-${m.id}`}>
+                      <tr key={m.id} className="hover:bg-slate-50" data-testid={tid(`movement-${m.id}`)}>
                         <td className="whitespace-nowrap px-4 py-3 text-slate-500">{when(m.created_at)}</td>
                         <td className="px-4 py-3 font-medium text-slate-800">{m.item_name}</td>
                         <td className="px-4 py-3">
@@ -447,43 +498,47 @@ export const TabletInventoryPanel = () => {
 
       {itemDraft && (
         <Modal
-          title={itemDraft.id ? "Edit Tablet" : "New Tablet"}
+          title={itemDraft.id ? `Edit ${CAT.noun}` : `New ${CAT.noun}`}
           subtitle="Shared across branches — each branch keeps its own count"
           onClose={() => setItemDraft(null)}
-          testid="tablet-item-modal"
+          testid={tid("item-modal")}
           footer={<>
-            <Button variant="outline" onClick={() => setItemDraft(null)} data-testid="tablet-item-cancel">Cancel</Button>
-            <Button className="bg-violet-600 text-white hover:bg-violet-700" disabled={busy} onClick={saveItem} data-testid="tablet-item-save">
-              {itemDraft.id ? "Save Changes" : "Add Tablet"}
+            <Button variant="outline" onClick={() => setItemDraft(null)} data-testid={tid("item-cancel")}>Cancel</Button>
+            <Button className="bg-violet-600 text-white hover:bg-violet-700" disabled={busy} onClick={saveItem} data-testid={tid("item-save")}>
+              {itemDraft.id ? "Save Changes" : `Add ${CAT.noun}`}
             </Button>
           </>}
         >
           <Field label="Name *">
-            <input className={inputCls} value={itemDraft.name} onChange={(e) => setItemDraft({ ...itemDraft, name: e.target.value })} placeholder="e.g. Paracetamol 500mg" data-testid="tablet-item-name" />
+            <input className={inputCls} value={itemDraft.name} onChange={(e) => setItemDraft({ ...itemDraft, name: e.target.value })} placeholder={CAT.namePlaceholder} data-testid={tid("item-name")} />
           </Field>
           <Field label="Brand">
-            <input className={inputCls} value={itemDraft.brand} onChange={(e) => setItemDraft({ ...itemDraft, brand: e.target.value })} placeholder="e.g. Calpol" data-testid="tablet-item-brand" />
+            <input className={inputCls} value={itemDraft.brand} onChange={(e) => setItemDraft({ ...itemDraft, brand: e.target.value })} placeholder={CAT.brandPlaceholder} data-testid={tid("item-brand")} />
           </Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Sold As">
-              <select className={inputCls} value={itemDraft.unit} onChange={(e) => setItemDraft({ ...itemDraft, unit: e.target.value })} data-testid="tablet-item-unit">
-                {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+              {/* The stored unit is kept as an option even when this shelf no longer
+                  offers it. The backend's list is wider than any one panel's, so an item
+                  saved as something not on this list would otherwise open on a blank
+                  dropdown and read as though its unit had been lost. */}
+              <select className={inputCls} value={itemDraft.unit} onChange={(e) => setItemDraft({ ...itemDraft, unit: e.target.value })} data-testid={tid("item-unit")}>
+                {[...new Set([...CAT.units, itemDraft.unit].filter(Boolean))].map((u) => <option key={u} value={u}>{u}</option>)}
               </select>
             </Field>
             <Field label="Low Stock At" hint="Flagged at or below this">
-              <input type="number" min="0" className={inputCls} value={itemDraft.low_stock_at} onChange={(e) => setItemDraft({ ...itemDraft, low_stock_at: e.target.value })} data-testid="tablet-item-low" />
+              <input type="number" min="0" className={inputCls} value={itemDraft.low_stock_at} onChange={(e) => setItemDraft({ ...itemDraft, low_stock_at: e.target.value })} data-testid={tid("item-low")} />
             </Field>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Sale Price">
-              <input type="number" min="0" className={inputCls} value={itemDraft.sale_price} onChange={(e) => setItemDraft({ ...itemDraft, sale_price: e.target.value })} placeholder="0" data-testid="tablet-item-sale-price" />
+              <input type="number" min="0" className={inputCls} value={itemDraft.sale_price} onChange={(e) => setItemDraft({ ...itemDraft, sale_price: e.target.value })} placeholder="0" data-testid={tid("item-sale-price")} />
             </Field>
             <Field label="Cost Price">
-              <input type="number" min="0" className={inputCls} value={itemDraft.cost_price} onChange={(e) => setItemDraft({ ...itemDraft, cost_price: e.target.value })} placeholder="0" data-testid="tablet-item-cost-price" />
+              <input type="number" min="0" className={inputCls} value={itemDraft.cost_price} onChange={(e) => setItemDraft({ ...itemDraft, cost_price: e.target.value })} placeholder="0" data-testid={tid("item-cost-price")} />
             </Field>
           </div>
           <Field label="Notes">
-            <textarea rows={2} className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-violet-400 focus:outline-none focus:ring-1 focus:ring-violet-400" value={itemDraft.notes} onChange={(e) => setItemDraft({ ...itemDraft, notes: e.target.value })} placeholder="Storage, dosage, anything worth remembering" data-testid="tablet-item-notes" />
+            <textarea rows={2} className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-violet-400 focus:outline-none focus:ring-1 focus:ring-violet-400" value={itemDraft.notes} onChange={(e) => setItemDraft({ ...itemDraft, notes: e.target.value })} placeholder="Storage, handling, anything worth remembering" data-testid={tid("item-notes")} />
           </Field>
         </Modal>
       )}
@@ -494,65 +549,65 @@ export const TabletInventoryPanel = () => {
           subtitle={`${addDraft.item.name} · ${addDraft.item.stock} in stock now`}
           accent="bg-sky-600"
           onClose={() => setAddDraft(null)}
-          testid="tablet-add-modal"
+          testid={tid("add-modal")}
           footer={<>
-            <Button variant="outline" onClick={() => setAddDraft(null)} data-testid="tablet-add-cancel">Cancel</Button>
-            <Button className="bg-sky-600 text-white hover:bg-sky-700" disabled={busy} onClick={submitAdd} data-testid="tablet-add-save">
+            <Button variant="outline" onClick={() => setAddDraft(null)} data-testid={tid("add-cancel")}>Cancel</Button>
+            <Button className="bg-sky-600 text-white hover:bg-sky-700" disabled={busy} onClick={submitAdd} data-testid={tid("add-save")}>
               <PackagePlus className="mr-1.5 h-4 w-4" /> Add to Stock
             </Button>
           </>}
         >
           <Field label={`Quantity (${addDraft.item.unit}) *`}>
-            <input type="number" min="1" className={inputCls} value={addDraft.qty} onChange={(e) => setAddDraft({ ...addDraft, qty: e.target.value })} placeholder="0" data-testid="tablet-add-qty" />
+            <input type="number" min="1" className={inputCls} value={addDraft.qty} onChange={(e) => setAddDraft({ ...addDraft, qty: e.target.value })} placeholder="0" data-testid={tid("add-qty")} />
           </Field>
-          <Field label="Cost Price" hint="Leave blank to keep the price already on the tablet">
-            <input type="number" min="0" className={inputCls} value={addDraft.cost_price} onChange={(e) => setAddDraft({ ...addDraft, cost_price: e.target.value })} placeholder={String(addDraft.item.cost_price ?? 0)} data-testid="tablet-add-cost" />
+          <Field label="Cost Price" hint={`Leave blank to keep the price already on the ${CAT.noun.toLowerCase()}`}>
+            <input type="number" min="0" className={inputCls} value={addDraft.cost_price} onChange={(e) => setAddDraft({ ...addDraft, cost_price: e.target.value })} placeholder={String(addDraft.item.cost_price ?? 0)} data-testid={tid("add-cost")} />
           </Field>
           <Field label="Supplier">
-            <input className={inputCls} value={addDraft.supplier} onChange={(e) => setAddDraft({ ...addDraft, supplier: e.target.value })} placeholder="Who it came from" data-testid="tablet-add-supplier" />
+            <input className={inputCls} value={addDraft.supplier} onChange={(e) => setAddDraft({ ...addDraft, supplier: e.target.value })} placeholder="Who it came from" data-testid={tid("add-supplier")} />
           </Field>
           <Field label="Note">
-            <input className={inputCls} value={addDraft.note} onChange={(e) => setAddDraft({ ...addDraft, note: e.target.value })} placeholder="Invoice number, batch, anything" data-testid="tablet-add-note" />
+            <input className={inputCls} value={addDraft.note} onChange={(e) => setAddDraft({ ...addDraft, note: e.target.value })} placeholder="Invoice number, batch, anything" data-testid={tid("add-note")} />
           </Field>
         </Modal>
       )}
 
       {sellDraft && (
         <Modal
-          title="Sell Tablet"
+          title={`Sell ${CAT.noun}`}
           subtitle={`${sellDraft.item.name} · ${sellDraft.item.stock} in stock`}
           accent="bg-emerald-600"
           onClose={() => setSellDraft(null)}
-          testid="tablet-sell-modal"
+          testid={tid("sell-modal")}
           footer={<>
-            <Button variant="outline" onClick={() => setSellDraft(null)} data-testid="tablet-sell-cancel">Cancel</Button>
-            <Button className="bg-emerald-600 text-white hover:bg-emerald-700" disabled={busy} onClick={submitSell} data-testid="tablet-sell-save">
+            <Button variant="outline" onClick={() => setSellDraft(null)} data-testid={tid("sell-cancel")}>Cancel</Button>
+            <Button className="bg-emerald-600 text-white hover:bg-emerald-700" disabled={busy} onClick={submitSell} data-testid={tid("sell-save")}>
               <ShoppingCart className="mr-1.5 h-4 w-4" /> Record Sale
             </Button>
           </>}
         >
           <div className="grid grid-cols-2 gap-3">
             <Field label={`Quantity (${sellDraft.item.unit}) *`}>
-              <input type="number" min="1" max={sellDraft.item.stock} className={inputCls} value={sellDraft.qty} onChange={(e) => setSellDraft({ ...sellDraft, qty: e.target.value })} data-testid="tablet-sell-qty" />
+              <input type="number" min="1" max={sellDraft.item.stock} className={inputCls} value={sellDraft.qty} onChange={(e) => setSellDraft({ ...sellDraft, qty: e.target.value })} data-testid={tid("sell-qty")} />
             </Field>
             <Field label="Price Each">
-              <input type="number" min="0" className={inputCls} value={sellDraft.unit_price} onChange={(e) => setSellDraft({ ...sellDraft, unit_price: e.target.value })} data-testid="tablet-sell-price" />
+              <input type="number" min="0" className={inputCls} value={sellDraft.unit_price} onChange={(e) => setSellDraft({ ...sellDraft, unit_price: e.target.value })} data-testid={tid("sell-price")} />
             </Field>
           </div>
           <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5">
             <span className="text-xs font-bold uppercase tracking-wider text-emerald-700">Total</span>
-            <span className="text-lg font-extrabold text-emerald-700" data-testid="tablet-sell-total">{fmt(sellTotal)}</span>
+            <span className="text-lg font-extrabold text-emerald-700" data-testid={tid("sell-total")}>{fmt(sellTotal)}</span>
           </div>
           <Field label="Patient / Customer">
-            <input className={inputCls} value={sellDraft.customer_name} onChange={(e) => setSellDraft({ ...sellDraft, customer_name: e.target.value })} placeholder="Who is buying it" data-testid="tablet-sell-customer" />
+            <input className={inputCls} value={sellDraft.customer_name} onChange={(e) => setSellDraft({ ...sellDraft, customer_name: e.target.value })} placeholder="Who is buying it" data-testid={tid("sell-customer")} />
           </Field>
           <Field label="Payment Mode">
-            <select className={inputCls} value={sellDraft.payment_mode} onChange={(e) => setSellDraft({ ...sellDraft, payment_mode: e.target.value })} data-testid="tablet-sell-mode">
+            <select className={inputCls} value={sellDraft.payment_mode} onChange={(e) => setSellDraft({ ...sellDraft, payment_mode: e.target.value })} data-testid={tid("sell-mode")}>
               {PAYMENT_MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
             </select>
           </Field>
           <Field label="Note">
-            <input className={inputCls} value={sellDraft.note} onChange={(e) => setSellDraft({ ...sellDraft, note: e.target.value })} placeholder="Optional" data-testid="tablet-sell-note" />
+            <input className={inputCls} value={sellDraft.note} onChange={(e) => setSellDraft({ ...sellDraft, note: e.target.value })} placeholder="Optional" data-testid={tid("sell-note")} />
           </Field>
         </Modal>
       )}
@@ -563,25 +618,25 @@ export const TabletInventoryPanel = () => {
           subtitle={`${moveDraft.item.name} · ${moveDraft.item.stock} in stock here`}
           accent="bg-amber-600"
           onClose={() => setMoveDraft(null)}
-          testid="tablet-move-modal"
+          testid={tid("move-modal")}
           footer={<>
-            <Button variant="outline" onClick={() => setMoveDraft(null)} data-testid="tablet-move-cancel">Cancel</Button>
-            <Button className="bg-amber-600 text-white hover:bg-amber-700" disabled={busy} onClick={submitMove} data-testid="tablet-move-save">
+            <Button variant="outline" onClick={() => setMoveDraft(null)} data-testid={tid("move-cancel")}>Cancel</Button>
+            <Button className="bg-amber-600 text-white hover:bg-amber-700" disabled={busy} onClick={submitMove} data-testid={tid("move-save")}>
               <ArrowRightLeft className="mr-1.5 h-4 w-4" /> Move Stock
             </Button>
           </>}
         >
           <Field label={`Quantity (${moveDraft.item.unit}) *`}>
-            <input type="number" min="1" max={moveDraft.item.stock} className={inputCls} value={moveDraft.qty} onChange={(e) => setMoveDraft({ ...moveDraft, qty: e.target.value })} data-testid="tablet-move-qty" />
+            <input type="number" min="1" max={moveDraft.item.stock} className={inputCls} value={moveDraft.qty} onChange={(e) => setMoveDraft({ ...moveDraft, qty: e.target.value })} data-testid={tid("move-qty")} />
           </Field>
           <Field label="Move To *" hint="It lands in that branch's stock straight away">
-            <select className={inputCls} value={moveDraft.to_branch_id} onChange={(e) => setMoveDraft({ ...moveDraft, to_branch_id: e.target.value })} data-testid="tablet-move-branch">
+            <select className={inputCls} value={moveDraft.to_branch_id} onChange={(e) => setMoveDraft({ ...moveDraft, to_branch_id: e.target.value })} data-testid={tid("move-branch")}>
               <option value="">-- choose a branch --</option>
               {branchOptions.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
           </Field>
           <Field label="Note">
-            <input className={inputCls} value={moveDraft.note} onChange={(e) => setMoveDraft({ ...moveDraft, note: e.target.value })} placeholder="Why it is moving" data-testid="tablet-move-note" />
+            <input className={inputCls} value={moveDraft.note} onChange={(e) => setMoveDraft({ ...moveDraft, note: e.target.value })} placeholder="Why it is moving" data-testid={tid("move-note")} />
           </Field>
         </Modal>
       )}
@@ -589,4 +644,4 @@ export const TabletInventoryPanel = () => {
   );
 };
 
-export default TabletInventoryPanel;
+export default StoreInventoryPanel;
