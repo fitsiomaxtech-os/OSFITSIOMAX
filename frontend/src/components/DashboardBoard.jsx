@@ -123,12 +123,11 @@ export const DashboardBoard = () => {
           This Month in there sets the same key a button owns, so the button lights up
           and Custom goes back to reading "Custom" rather than the two of them naming the
           same range side by side. */}
-      {/* One row on a phone, scrolled sideways rather than wrapped. Six ranges cannot
-          fit a phone's width at a readable size, so the choice is wrap or scroll — and
-          wrapping pushed the tabs and the first card down a whole row to show a control
-          most visits never touch. The negative margin lets the row bleed to the screen
-          edge, which is what makes it read as scrollable instead of cut off. */}
-      <div className="-mx-1 flex items-center gap-2 overflow-x-auto px-1 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0" data-testid="dashboard-date-filter">
+      {/* Six ranges, three to a row on a phone, so the whole set is on screen at once.
+          A single scrolling row put Last 90 Days half off the edge and Custom out of
+          sight entirely — a range you have to swipe to find is one you stop using. Two
+          rows cost less than that, and match the tab bar directly below. */}
+      <div className="grid grid-cols-3 items-center gap-2 sm:flex sm:flex-wrap" data-testid="dashboard-date-filter">
         {DASH_PRESETS.map((p) => {
           const active = dateFilter.key === p.key;
           return (
@@ -136,14 +135,16 @@ export const DashboardBoard = () => {
               key={p.key}
               type="button"
               onClick={() => setDateFilter(presetFilter(p))}
-              className={`h-10 shrink-0 whitespace-nowrap rounded-md px-3 text-sm font-medium transition ${active ? "bg-sky-600 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}
+              className={`h-10 min-w-0 truncate rounded-md px-2 text-xs font-medium transition sm:px-3 sm:text-sm ${active ? "bg-sky-600 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}
               data-testid={`dashboard-preset-${p.key}`}
             >
               {p.label}
             </button>
           );
         })}
-        <span className="shrink-0">
+        {/* The popover's trigger is a fixed-width Button, so it needs a grid cell of its
+            own to sit in rather than being allowed to set the column width. */}
+        <span className="min-w-0 [&_button]:w-full [&_button]:px-2 sm:[&_button]:w-auto sm:[&_button]:px-4">
           <DateFilterPopover
             value={DASH_PRESETS.some((p) => p.key === dateFilter.key) ? null : dateFilter}
             onChange={(next) => setDateFilter(next || defaultFilter())}
@@ -236,12 +237,11 @@ export const DashboardBoard = () => {
               data rather than hardcoded, so opening a fifth branch re-divides the row
               instead of dropping one underneath.
 
-              A phone gets a plain stacked list instead. Sideways scrolling hid every
-              branch past the second behind a swipe, and a branch you have to go looking
-              for is a branch nobody compares — a list shows the whole set at once, which
-              is the only reason these sit side by side in the first place. Each row puts
-              the name and the figure on one line rather than stacking them, so four
-              branches still fit above the fold. */}
+              A phone gets one dropdown instead of a card each. Five branches stacked ate
+              the whole screen before the breakdown they open had anywhere to appear, so
+              picking a branch meant scrolling past every other branch to see it. Each
+              option carries its own figure, so the numbers are still all readable in one
+              gesture — they just don't hold the screen open. */}
           <div>
             <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Physiotherapy Branches</p>
             {activeData.physio_branches.length === 0 ? (
@@ -249,8 +249,26 @@ export const DashboardBoard = () => {
                 No Physiotherapy branches yet.
               </p>
             ) : (
+              <>
+              <select
+                className="h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 sm:hidden"
+                value={drillBranch?.branch_id || ""}
+                onChange={(e) => {
+                  const next = activeData.physio_branches.find((b) => b.branch_id === e.target.value);
+                  setDrillBranch(next || null);
+                }}
+                data-testid="dashboard-physio-select"
+              >
+                <option value="">Pick a branch…</option>
+                {activeData.physio_branches.map((b) => (
+                  <option key={b.branch_id} value={b.branch_id}>
+                    {b.branch_name} · {fmtValue(activeTab, b.value)}
+                  </option>
+                ))}
+              </select>
+
               <div
-                className="flex flex-col gap-2 sm:grid sm:gap-3"
+                className="hidden sm:grid sm:gap-3"
                 style={{ gridTemplateColumns: `repeat(${activeData.physio_branches.length}, minmax(0, 1fr))` }}
               >
                 {activeData.physio_branches.map((b) => {
@@ -272,14 +290,15 @@ export const DashboardBoard = () => {
                       }`}
                       data-testid={`dashboard-physio-${b.branch_id}`}
                     >
-                      <CardContent className="flex items-center justify-between gap-3 p-3 sm:block sm:p-4">
+                      <CardContent className="p-4">
                         <p className="min-w-0 truncate text-sm font-semibold text-slate-700">{b.branch_name}</p>
-                        <p className="shrink-0 truncate text-xl font-bold text-sky-600 sm:mt-1 sm:text-2xl">{fmtValue(activeTab, b.value)}</p>
+                        <p className="mt-1 truncate text-2xl font-bold text-sky-600">{fmtValue(activeTab, b.value)}</p>
                       </CardContent>
                     </Card>
                   );
                 })}
               </div>
+              </>
             )}
 
             {/* Opens in place, under the row it belongs to, rather than over the board
