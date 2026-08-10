@@ -22,6 +22,7 @@ import {
   ClipboardList,
   Bell,
   BadgeIndianRupee,
+  Salad,
   UserCog,
   User,
 } from "lucide-react";
@@ -435,6 +436,10 @@ export const BranchAdminBoard = ({ branchId, embedded = false }) => {
   const MANAGEMENT_SUB_TABS = [
     { key: "head_physio", label: "HEAD PHYSIO CALENDAR", icon: Calendar },
     { key: "physio", label: "PHYSIO CALENDAR", icon: Activity },
+    // Diet is the third vertical, so its calendar sits beside the other two rather than
+    // anywhere new — the Branch Admin publishes a Nutrition Coach's days exactly the way
+    // they publish a Physio's.
+    { key: "diet", label: "DIET CALENDAR", icon: Salad },
     { key: "manager", label: "MANAGER", icon: UserCog },
     { key: "calendar", label: "CALENDAR", icon: Calendar },
   ];
@@ -493,6 +498,8 @@ export const BranchAdminBoard = ({ branchId, embedded = false }) => {
           </div>
           {consultationsSubTab === "physio" ? (
             <HeadPhysioCalendar branchId={branchId} profileType="physio" />
+          ) : consultationsSubTab === "diet" ? (
+            <HeadPhysioCalendar branchId={branchId} profileType="nutrition_coach" />
           ) : consultationsSubTab === "manager" ? (
             <BranchDetailPage branchId={branchId} readOnly />
           ) : consultationsSubTab === "calendar" ? (

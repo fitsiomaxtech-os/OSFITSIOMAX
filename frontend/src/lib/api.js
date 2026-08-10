@@ -182,6 +182,17 @@ export const rescheduleConsultationFollowUp = async (leadId, followupId, payload
 
 export const getDoctorCalendar = async (doctorId) => (await api.get(`/doctors/${doctorId}/calendar`)).data;
 export const setDoctorSlotCapacity = async (doctorId, slotCapacity) => (await api.patch(`/doctors/${doctorId}/slot-capacity`, { slot_capacity: slotCapacity })).data;
+
+// ---- Diet Consultation (Nutrition Coach) ----
+export const dietToday = async (params = {}) => (await api.get("/diet/today", { params })).data;
+export const dietCalendar = async (month, year, coachId) => (await api.get("/diet/calendar", { params: { month, year, coach_id: coachId } })).data;
+export const dietPatients = async (coachId) => (await api.get("/diet/patients", { params: { coach_id: coachId } })).data;
+export const dietSessions = async (leadId) => (await api.get(`/diet/sessions/${leadId}`)).data;
+export const dietCompleteDay = async (sessionId, payload) => (await api.post(`/diet/sessions/${sessionId}/complete`, payload)).data;
+export const listNutritionCoaches = async () => (await api.get("/branch/nutrition-coaches")).data;
+export const createNutritionCoach = async (payload) => (await api.post("/branch/nutrition-coaches", payload)).data;
+export const assignDiet = async (payload) => (await api.post("/branch/assign-diet", payload)).data;
+export const branchDietPatients = async () => (await api.get("/branch/diet-patients")).data;
 export const addCalendarSlots = async (doctorId, payload) => (await api.post(`/doctors/${doctorId}/calendar-slots`, payload)).data;
 export const removeCalendarSlots = async (doctorId, payload) => (await api.post(`/doctors/${doctorId}/remove-slots`, payload)).data;
 

@@ -43,27 +43,37 @@ function getFirstDayOfMonth(year, month) {
   return new Date(year, month, 1).getDay();
 }
 
-// Two distinct scheduling workflows share this shell, and they are NOT interchangeable:
+// Three distinct scheduling workflows share this shell, and they are NOT interchangeable:
 //
-//   profileType "head_physio"  ->  HEAD PHYSIO CALENDAR  — consultations only. Booked
-//                                  from Branch Leads -> Appointment, one per lead, and
-//                                  the day is cut at the store's Consultation Duration.
-//   profileType "physio"       ->  PHYSIO CALENDAR       — treatment sessions only.
-//                                  Booked against a patient's session package (many per
-//                                  lead), cut at the session item's duration.
+//   profileType "head_physio"      ->  HEAD PHYSIO CALENDAR — consultations only. Booked
+//                                      from Branch Leads -> Appointment, one per lead, and
+//                                      the day is cut at the store's Consultation Duration.
+//   profileType "physio"           ->  PHYSIO CALENDAR      — treatment sessions only.
+//                                      Booked against a patient's session package (many per
+//                                      lead), cut at the session item's duration.
+//   profileType "nutrition_coach"  ->  DIET CALENDAR        — diet check-in days, booked
+//                                      against a patient's diet plan. Same shape as the
+//                                      physio's, against diet_sessions rather than sessions.
 //
 // What varies with it: which experts are listed, where slot length comes from, and the
-// language throughout. Publishing availability is the one step both genuinely share.
+// language throughout. Publishing availability is the one step all three genuinely share.
 export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) => {
   const isPhysio = profileType === "physio";
-  const roleLabel = isPhysio ? "Physio" : "Head Physio";
-  const roleLabelPlural = isPhysio ? "Physios" : "Head Physios";
-  const SLOT_TYPES = isPhysio ? SESSION_TYPES : CONSULTATION_TYPES;
-  // The two calendars schedule different things and must not be read as interchangeable:
+  const isCoach = profileType === "nutrition_coach";
+  // Both the physio and the coach book repeat visits against a plan, so they share the
+  // slot-type vocabulary and the per-slot capacity control; only the Head Physio's
+  // one-per-lead consultation flow differs.
+  const isRecurring = isPhysio || isCoach;
+  const roleLabel = isCoach ? "Nutrition Coach" : isPhysio ? "Physio" : "Head Physio";
+  const roleLabelPlural = isCoach ? "Nutrition Coaches" : isPhysio ? "Physios" : "Head Physios";
+  const SLOT_TYPES = isRecurring ? SESSION_TYPES : CONSULTATION_TYPES;
+  // The three calendars schedule different things and must not be read as interchangeable:
   // a Head Physio's day holds consultations (booked from Branch Leads → Appointment);
-  // a Physio's day holds treatment sessions (booked when a package is assigned).
-  const purpose = isPhysio ? "Treatment Sessions" : "Consultations";
-  const purposeLine = isPhysio
+  // a Physio's day holds treatment sessions; a Coach's day holds diet check-ins.
+  const purpose = isCoach ? "Diet Check-ins" : isPhysio ? "Treatment Sessions" : "Consultations";
+  const purposeLine = isCoach
+    ? "Diet check-in days only — booked against a patient's diet plan."
+    : isPhysio
     ? "Treatment sessions only — booked against a patient's session package."
     : "Consultations only — booked from Branch Leads → Appointment.";
 
@@ -89,14 +99,16 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
   // there must produce 45-minute slots here, not a hardcoded 30.
   useEffect(() => {
     let cancelled = false;
-    listStoreItems(undefined, isPhysio ? "session" : "consultation")
+    // A diet check-in is a repeat visit against a plan, so it takes its length from the
+    // same store item a treatment session does until Diet gets its own.
+    listStoreItems(undefined, isRecurring ? "session" : "consultation")
       .then((items) => {
         const configured = (items || []).map((i) => i.duration_minutes).find((d) => Number(d) > 0);
         if (!cancelled && configured) setSlotDuration(Number(configured));
       })
       .catch(() => { /* keep the fallback */ });
     return () => { cancelled = true; };
-  }, [isPhysio]);
+  }, [isRecurring]);
 
   // Head Physios are common to every branch — they're created once in HR Admin and take
   // consultations wherever they're needed, so this lists all of them rather than only the
@@ -366,9 +378,7 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
         <div className="flex gap-1.5 overflow-x-auto p-2 lg:flex-1 lg:flex-col lg:overflow-y-auto lg:overflow-x-visible" data-testid="doctor-list">
           {doctors.length === 0 && (
             <p className="text-xs text-slate-400 text-center py-6">
-              {isPhysio
-                ? "No Physios assigned to this branch yet — ask HR Admin to add one."
-                : "No Head Physios created yet — ask HR Admin to add one."}
+              {`No ${roleLabelPlural} ${isCoach || isPhysio ? "assigned to this branch" : "created"} yet — ask HR Admin to add one.`}
             </p>
           )}
           {doctors.map((doc) => {

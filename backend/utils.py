@@ -109,9 +109,11 @@ MAX_PHYSIO_SLOT_CAPACITY = 10
 def slot_capacity_of(doctor: dict) -> int:
     """Patients this doctor can hold in one slot.
 
-    A Head Physio consultation stays strictly one-to-one however this is configured —
-    it is a conversation, not a floor — so their capacity is always 1 regardless of any
-    value stored on the record.
+    Only a Physio runs a floor. A Head Physio consultation is one-to-one however this is
+    configured — it is a conversation, not a treatment room — and a Nutrition Coach's
+    check-in is the same shape: a weigh-in and a talk, one patient at a time. Both stay at
+    1 regardless of any value stored on the record. If group check-ins are ever wanted,
+    this is the one line that changes.
     """
     if (doctor or {}).get("profile_type") != "physio":
         return 1

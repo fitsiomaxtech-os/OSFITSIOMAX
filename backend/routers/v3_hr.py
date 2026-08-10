@@ -21,7 +21,10 @@ DEFAULT_ROLES = ["super_admin", "business_dev", "pre_sales", "branch_admin", "he
 # Physios are assigned to branches — they deliver treatment where they work, and may cover
 # more than one. Head Physios are not: they take consultations across the whole
 # organisation, so they get a single branchless expert record and are offered everywhere.
-MULTI_BRANCH_ROLES = {"physio"}
+# A Nutrition Coach belongs to a branch and holds a calendar there, exactly like a Physio,
+# so hiring one has to create the matching `doctors` record or they log in to a board with
+# no calendar behind it and nothing explains why.
+MULTI_BRANCH_ROLES = {"physio", "nutrition_coach"}
 ORG_WIDE_ROLES = {"head_physio"}
 EXPERT_ROLES = MULTI_BRANCH_ROLES | ORG_WIDE_ROLES
 

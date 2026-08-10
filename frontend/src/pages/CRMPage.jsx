@@ -12,6 +12,7 @@ import {
   Megaphone,
   MoreHorizontal,
   Network,
+  Salad,
   Search,
   ShieldCheck,
   Store,
@@ -58,6 +59,7 @@ import { PreSalesBoard } from "@/components/PreSalesBoard";
 import { BranchAdminBoard } from "@/components/BranchAdminBoard";
 import { HeadPhysioBoard, HeadPhysioCalendarModal } from "@/components/HeadPhysioBoard";
 import { PhysioBoard, CalendarPage as PhysioCalendarPage } from "@/components/PhysioBoard";
+import { DietBoard } from "@/components/DietBoard";
 import { MarketingBoard } from "@/components/marketing/MarketingBoard";
 import { PreSalesCRM } from "@/components/PreSalesCRM";
 import { DashboardBoard } from "@/components/DashboardBoard";
@@ -78,6 +80,7 @@ const ROLE_META = {
   physio: { label: "Physio", icon: Activity },
   accountant: { label: "Accountant", icon: BadgeIndianRupee },
   human_resource: { label: "Human Resource", icon: UserPlus },
+  nutrition_coach: { label: "Diet", icon: Salad },
 };
 
 /** Whether a role slug should land on the recruitment board.
@@ -602,6 +605,7 @@ export const CRMPage = ({ auth, onLogout }) => {
   const showBranchBoard = role === "branch_admin";
   const showHeadPhysioBoard = role === "head_physio";
   const showPhysioBoard = role === "physio";
+  const showDietBoard = role === "nutrition_coach";
   const showAccountantBoard = role === "accountant";
   const showHumanResourceBoard = isHumanResourceRole(role);
 
@@ -892,6 +896,10 @@ export const CRMPage = ({ auth, onLogout }) => {
 
         {showPhysioBoard && (
           <PhysioBoard />
+        )}
+
+        {showDietBoard && (
+          <DietBoard />
         )}
 
         {showHumanResourceBoard && (

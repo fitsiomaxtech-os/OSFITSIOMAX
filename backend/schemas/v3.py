@@ -102,7 +102,7 @@ class V3BranchUpdate(BaseModel):
 
 class V3DoctorCreate(BaseModel):
     full_name: str
-    profile_type: Literal["head_physio", "physio", "doctor"]
+    profile_type: Literal["head_physio", "physio", "doctor", "nutrition_coach"]
     branch_id: Optional[str] = None
     specialization: Optional[str] = ""
     employee_id: Optional[str] = None

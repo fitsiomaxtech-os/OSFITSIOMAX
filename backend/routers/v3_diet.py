@@ -1,0 +1,375 @@
+"""Diet Consultation — the third service vertical, alongside Consultations and Sessions.
+
+Shaped deliberately like the physio side, because it is the same pattern a third time:
+
+    Head Physio  -> consultation      -> `appointments`
+    Physio       -> treatment days    -> `sessions`
+    Nutrition Coach -> check-in days  -> `diet_sessions`     <- this file
+
+One Nutrition Coach does both halves — the diet consultation AND the check-in days that
+follow it. That is the one place diet departs from physio, where a senior consults and a
+junior delivers. It has a consequence: there is no senior above the coach, so there is no
+review chain here, and none is faked.
+
+WHY diet check-ins live in their own collection, not in `sessions` with a discriminator:
+
+`sessions` is read in several places by physio_id or lead_id with no filter on what kind
+of session a row is. The clearest is v3_reviews._treatment_days, which counts every
+completed row for a lead to decide when a physio is due a review — diet rows landing there
+would fire a physio's week-one review after four physio days and three diet check-ins. The
+physio calendar, the treatment-day grid and the Physio Master View counts read it the same
+way. Adding a `track` field would mean auditing every one of those and every query written
+after today. A separate collection makes that mistake impossible rather than merely
+avoided, which matters because v3_reviews' own module docstring records that this exact
+class of mistake in this exact collection has already taken the OS down once.
+"""
+
+from fastapi import APIRouter, HTTPException, Depends
+from pydantic import BaseModel
+from typing import List, Optional
+from datetime import datetime, timezone
+import uuid
+
+from database import v3_col
+from utils import now_iso, normalize_slot_time, slot_capacity_of
+from security import hash_password
+from deps import v3_require_roles
+from schemas.v3 import V3UserOut
+
+router = APIRouter(prefix="/api/v3")
+
+COACH = "nutrition_coach"
+
+
+async def _resolve_coach(user: V3UserOut, coach_id: Optional[str] = None) -> Optional[dict]:
+    """The doctors record for the logged-in Nutrition Coach.
+
+    Same three-step resolution the physio board uses: a coach created here is linked by
+    user_id, one hired through HR is linked only by employee_id, and Super Admin driving a
+    specific coach's board passes the id outright — a branch can have several coaches, so
+    branch_id alone would not disambiguate.
+    """
+    if coach_id and user.role == "super_admin":
+        doctor = await v3_col("doctors").find_one({"id": coach_id, "profile_type": COACH}, {"_id": 0})
+        if doctor:
+            return doctor
+    doctor = await v3_col("doctors").find_one({"user_id": user.id, "profile_type": COACH}, {"_id": 0})
+    if doctor:
+        return doctor
+    raw = await v3_col("users").find_one({"id": user.id}, {"_id": 0, "employee_id": 1})
+    if raw and raw.get("employee_id"):
+        doctor = await v3_col("doctors").find_one(
+            {"employee_id": raw["employee_id"], "profile_type": COACH}, {"_id": 0}
+        )
+    return doctor
+
+
+# ============ Branch Admin: staffing ============
+
+class CreateCoachInput(BaseModel):
+    full_name: str
+    email: str
+    password: str
+    specialization: Optional[str] = ""
+
+
+@router.post("/branch/nutrition-coaches")
+async def create_nutrition_coach(
+    payload: CreateCoachInput,
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+):
+    """A coach is two records that must both exist: a `users` row so they can log in, and a
+    `doctors` row so they can hold a calendar. Created together and linked by user_id, so
+    neither can be left orphaned by a half-finished setup."""
+    branch_id = user.branch_id
+    if not branch_id:
+        raise HTTPException(status_code=400, detail="No branch assigned")
+
+    email = payload.email.lower().strip()
+    if await v3_col("users").find_one({"email": email}, {"_id": 0, "id": 1}):
+        raise HTTPException(status_code=409, detail="User with this email already exists")
+
+    user_id = str(uuid.uuid4())
+    doctor_id = str(uuid.uuid4())
+    now = now_iso()
+
+    await v3_col("users").insert_one({
+        "id": user_id,
+        "full_name": payload.full_name.strip(),
+        "email": email,
+        "password": hash_password(payload.password),
+        "role": COACH,
+        "branch_id": branch_id,
+        "is_active": True,
+        "created_at": now,
+    })
+    await v3_col("doctors").insert_one({
+        "id": doctor_id,
+        "user_id": user_id,
+        "full_name": payload.full_name.strip(),
+        "profile_type": COACH,
+        "branch_id": branch_id,
+        "specialization": (payload.specialization or "").strip(),
+        "slots": [],
+        "slot_details": [],
+        "created_at": now,
+    })
+    return {"user_id": user_id, "doctor_id": doctor_id, "full_name": payload.full_name.strip()}
+
+
+@router.get("/branch/nutrition-coaches")
+async def list_nutrition_coaches(user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", COACH))):
+    query = {"profile_type": COACH}
+    if user.branch_id:
+        query["branch_id"] = user.branch_id
+    coaches = await v3_col("doctors").find(query, {"_id": 0}).sort("full_name", 1).to_list(200)
+    return {"coaches": coaches}
+
+
+# ============ Branch Admin: putting a patient on a diet plan ============
+
+class AssignDietInput(BaseModel):
+    lead_id: str
+    coach_id: str
+    slot_times: List[str]
+
+
+@router.post("/branch/assign-diet")
+async def assign_diet(
+    payload: AssignDietInput,
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+):
+    """Put a patient with a Nutrition Coach and book their check-in days.
+
+    Mirrors assign-physio-sessions, including the two things that flow learned the hard
+    way: this lead's own upcoming days are cleared first so a re-assignment doesn't clash
+    with itself, and a slot is refused only once it is FULL rather than merely occupied.
+    """
+    lead = await v3_col("leads").find_one({"id": payload.lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    coach = await v3_col("doctors").find_one({"id": payload.coach_id, "profile_type": COACH}, {"_id": 0})
+    if not coach:
+        raise HTTPException(status_code=404, detail="Nutrition Coach not found")
+
+    slots = sorted({normalize_slot_time(s) for s in payload.slot_times})
+    if not slots:
+        raise HTTPException(status_code=400, detail="Pick at least one check-in day")
+    if len(slots) != len(payload.slot_times):
+        raise HTTPException(status_code=400, detail="Duplicate check-in times were submitted")
+
+    # Cleared before the conflict check, or this lead's own existing days would read as a
+    # clash against themselves on a re-assignment.
+    await v3_col("diet_sessions").delete_many({"lead_id": payload.lead_id, "status": "upcoming"})
+
+    capacity = slot_capacity_of(coach)
+    booked = await v3_col("diet_sessions").find(
+        {"coach_id": payload.coach_id, "status": "upcoming", "slot_time": {"$in": slots}},
+        {"_id": 0, "slot_time": 1},
+    ).to_list(1000)
+    taken: dict = {}
+    for b in booked:
+        taken[b["slot_time"]] = taken.get(b["slot_time"], 0) + 1
+    full = sorted(s for s in slots if taken.get(s, 0) >= capacity)
+    if full:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Full for this coach ({capacity} per slot): {', '.join(full)}",
+        )
+
+    now = now_iso()
+    docs = [{
+        "id": str(uuid.uuid4()),
+        "lead_id": payload.lead_id,
+        "lead_name": lead.get("name", "Unknown"),
+        "branch_id": lead.get("branch_id") or user.branch_id,
+        "coach_id": coach["id"],
+        "coach_name": coach["full_name"],
+        "day_number": i + 1,
+        "total_days": len(slots),
+        "slot_time": slot_time,
+        "status": "upcoming",
+        "coach_remarks": "",
+        "weight_kg": None,
+        "created_at": now,
+        "updated_at": now,
+    } for i, slot_time in enumerate(slots)]
+    await v3_col("diet_sessions").insert_many([d.copy() for d in docs])
+
+    await v3_col("leads").update_one(
+        {"id": payload.lead_id},
+        {"$set": {
+            "diet_coach_id": coach["id"],
+            "diet_coach_name": coach["full_name"],
+            "diet_assigned_at": now,
+            "diet_stage": "Diet Plan Assigned",
+            "updated_at": now,
+        }},
+    )
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": payload.lead_id,
+        "action": "diet_coach_assigned",
+        "details": f"{coach['full_name']} assigned with {len(slots)} check-in days",
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": now,
+    })
+    return {"days_booked": len(docs), "coach_name": coach["full_name"]}
+
+
+@router.get("/branch/diet-patients")
+async def branch_diet_patients(user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
+    """Everyone at this branch already on a diet plan, for the Branch Admin's own view."""
+    query = {"diet_coach_id": {"$nin": [None, ""]}}
+    if user.branch_id:
+        query["branch_id"] = user.branch_id
+    leads = await v3_col("leads").find(
+        query, {"_id": 0, "id": 1, "name": 1, "phone": 1, "diet_coach_id": 1, "diet_coach_name": 1, "diet_stage": 1}
+    ).sort("updated_at", -1).to_list(500)
+    lead_ids = [l["id"] for l in leads]
+    rows = await v3_col("diet_sessions").find({"lead_id": {"$in": lead_ids}}, {"_id": 0}).to_list(5000)
+    by_lead: dict = {}
+    for r in rows:
+        by_lead.setdefault(r["lead_id"], []).append(r)
+    for l in leads:
+        days = by_lead.get(l["id"], [])
+        l["total_days"] = len(days)
+        l["completed_days"] = sum(1 for d in days if d.get("status") == "completed")
+    return {"patients": leads}
+
+
+# ============ The Nutrition Coach's own board ============
+
+@router.get("/diet/today")
+async def diet_today(coach_id: Optional[str] = None, user: V3UserOut = Depends(v3_require_roles(COACH, "super_admin"))):
+    coach = await _resolve_coach(user, coach_id)
+    if not coach:
+        return {"days": [], "coach_id": None, "coach_name": ""}
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    days = await v3_col("diet_sessions").find(
+        {"coach_id": coach["id"], "slot_time": {"$regex": f"^{today}"}}, {"_id": 0}
+    ).sort("slot_time", 1).to_list(200)
+    return {"days": days, "coach_id": coach["id"], "coach_name": coach["full_name"]}
+
+
+@router.get("/diet/calendar")
+async def diet_calendar(
+    month: Optional[int] = None,
+    year: Optional[int] = None,
+    coach_id: Optional[str] = None,
+    user: V3UserOut = Depends(v3_require_roles(COACH, "super_admin")),
+):
+    coach = await _resolve_coach(user, coach_id)
+    if not coach:
+        return {"days": [], "slots": [], "slot_details": []}
+    now = datetime.now(timezone.utc)
+    prefix = f"{year or now.year}-{str(month or now.month).zfill(2)}"
+    days = await v3_col("diet_sessions").find(
+        {"coach_id": coach["id"], "slot_time": {"$regex": f"^{prefix}"}}, {"_id": 0}
+    ).sort("slot_time", 1).to_list(500)
+    return {
+        "days": days,
+        "slots": coach.get("slots", []),
+        "slot_details": coach.get("slot_details", []),
+        "coach_id": coach["id"],
+        "coach_name": coach["full_name"],
+    }
+
+
+@router.get("/diet/patients")
+async def diet_patients(coach_id: Optional[str] = None, user: V3UserOut = Depends(v3_require_roles(COACH, "super_admin"))):
+    """Every patient assigned to this coach, whether or not their days are booked yet —
+    same reasoning as the physio board: a patient who has just been assigned should appear
+    immediately rather than only once a plan exists."""
+    coach = await _resolve_coach(user, coach_id)
+    if not coach:
+        return {"patients": []}
+    leads = await v3_col("leads").find(
+        {"diet_coach_id": coach["id"]}, {"_id": 0}
+    ).sort("updated_at", -1).to_list(500)
+    lead_ids = [l["id"] for l in leads]
+    rows = await v3_col("diet_sessions").find(
+        {"coach_id": coach["id"], "lead_id": {"$in": lead_ids}}, {"_id": 0}
+    ).sort("slot_time", 1).to_list(5000)
+    by_lead: dict = {}
+    for r in rows:
+        by_lead.setdefault(r["lead_id"], []).append(r)
+
+    patients = []
+    for lead in leads:
+        days = by_lead.get(lead["id"], [])
+        completed = sum(1 for d in days if d.get("status") == "completed")
+        patients.append({
+            "lead_id": lead["id"],
+            "lead_name": lead.get("name", "Unknown"),
+            "phone": lead.get("phone", ""),
+            "total_days": len(days),
+            "completed_days": completed,
+            "remaining_days": len(days) - completed,
+            "next_day": next((d for d in days if d.get("status") == "upcoming"), None),
+            "diet_stage": lead.get("diet_stage"),
+            "updated_at": lead.get("updated_at"),
+        })
+    return {"patients": patients}
+
+
+@router.get("/diet/sessions/{lead_id}")
+async def diet_sessions_for_lead(
+    lead_id: str,
+    _: V3UserOut = Depends(v3_require_roles(COACH, "branch_admin", "super_admin", "head_physio")),
+):
+    days = await v3_col("diet_sessions").find({"lead_id": lead_id}, {"_id": 0}).sort("slot_time", 1).to_list(500)
+    return {"days": days}
+
+
+class CompleteDayInput(BaseModel):
+    coach_remarks: Optional[str] = ""
+    weight_kg: Optional[float] = None
+
+
+@router.post("/diet/sessions/{session_id}/complete")
+async def complete_diet_day(
+    session_id: str,
+    payload: CompleteDayInput,
+    user: V3UserOut = Depends(v3_require_roles(COACH, "super_admin")),
+):
+    day = await v3_col("diet_sessions").find_one({"id": session_id}, {"_id": 0})
+    if not day:
+        raise HTTPException(status_code=404, detail="Check-in day not found")
+    if day.get("status") == "completed":
+        raise HTTPException(status_code=400, detail="This check-in is already completed")
+
+    now = now_iso()
+    await v3_col("diet_sessions").update_one(
+        {"id": session_id},
+        {"$set": {
+            "status": "completed",
+            "coach_remarks": (payload.coach_remarks or "").strip(),
+            "weight_kg": payload.weight_kg,
+            "completed_at": now,
+            "updated_at": now,
+        }},
+    )
+    remaining = await v3_col("diet_sessions").count_documents(
+        {"lead_id": day["lead_id"], "status": "upcoming"}
+    )
+    # The plan closes itself on the last check-in rather than waiting for someone to
+    # remember to close it — the same way a treatment course ends.
+    if remaining == 0:
+        await v3_col("leads").update_one(
+            {"id": day["lead_id"]},
+            {"$set": {"diet_stage": "Diet Completed", "updated_at": now}},
+        )
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": day["lead_id"],
+        "action": "diet_checkin_completed",
+        "details": f"Check-in day {day.get('day_number')} of {day.get('total_days')} completed"
+                   + (f" · {payload.weight_kg} kg" if payload.weight_kg is not None else ""),
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": now,
+    })
+    return {"status": "completed", "remaining": remaining}
