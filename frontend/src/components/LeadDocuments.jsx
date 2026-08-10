@@ -20,7 +20,7 @@ const fmtSize = (n) => (n >= KB * KB ? `${(n / KB / KB).toFixed(1)} MB` : `${Mat
 const isImage = (t) => String(t || "").startsWith("image/");
 const fmtWhen = (iso) => (iso ? `${String(iso).slice(8, 10)}/${String(iso).slice(5, 7)}/${String(iso).slice(0, 4)}` : "—");
 
-export const LeadDocuments = ({ leadId, canEdit = true }) => {
+export const LeadDocuments = ({ leadId, canEdit = true, kind = "general", fixedLabel = "", hint }) => {
   const [docs, setDocs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -29,11 +29,11 @@ export const LeadDocuments = ({ leadId, canEdit = true }) => {
 
   const load = useCallback(() => {
     setLoading(true);
-    leadDocuments(leadId)
+    leadDocuments(leadId, kind)
       .then((r) => setDocs(r.documents || []))
       .catch(() => setDocs([]))
       .finally(() => setLoading(false));
-  }, [leadId]);
+  }, [leadId, kind]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -45,7 +45,10 @@ export const LeadDocuments = ({ leadId, canEdit = true }) => {
     if (!file) return;
     setBusy(true);
     try {
-      await uploadLeadDocument(leadId, file, label);
+      // A fixed label names the pages for you — the consultation form is always the
+      // consultation form, and asking someone to type that on every page is a field
+      // they will leave blank.
+      await uploadLeadDocument(leadId, file, fixedLabel || label, kind);
       toast.success("Document uploaded");
       setLabel("");
       load();
@@ -82,16 +85,18 @@ export const LeadDocuments = ({ leadId, canEdit = true }) => {
     <div className="space-y-3" data-testid="lead-documents">
       {canEdit && (
         <div className="rounded-xl border border-sky-100 bg-sky-50/60 p-3">
-          <p className="text-[11px] font-bold uppercase tracking-wider text-sky-700">Upload a document</p>
+          <p className="text-[11px] font-bold uppercase tracking-wider text-sky-700">{fixedLabel ? `Upload ${fixedLabel.toLowerCase()} pages` : "Upload a document"}</p>
           <p className="mt-0.5 text-[11px] text-slate-500">Scans, reports, prescriptions · JPG, PNG, WEBP or PDF, up to 10MB</p>
           <div className="mt-2 flex flex-wrap items-center gap-2">
-            <Input
-              value={label}
-              onChange={(e) => setLabel(e.target.value)}
-              placeholder="What is it? e.g. MRI report"
-              className="h-9 min-w-0 flex-1 bg-white sm:max-w-xs"
-              data-testid="lead-doc-label"
-            />
+            {!fixedLabel && (
+              <Input
+                value={label}
+                onChange={(e) => setLabel(e.target.value)}
+                placeholder="What is it? e.g. MRI report"
+                className="h-9 min-w-0 flex-1 bg-white sm:max-w-xs"
+                data-testid="lead-doc-label"
+              />
+            )}
             <input
               ref={fileRef}
               type="file"
@@ -118,7 +123,7 @@ export const LeadDocuments = ({ leadId, canEdit = true }) => {
         <p className="py-8 text-center text-sm text-slate-400">Loading documents…</p>
       ) : docs.length === 0 ? (
         <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">
-          No documents yet.
+          {fixedLabel ? `No ${fixedLabel.toLowerCase()} pages uploaded yet.` : "No documents yet."}
         </p>
       ) : (
         <ul className="space-y-2" data-testid="lead-doc-list">

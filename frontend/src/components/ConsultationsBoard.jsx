@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Calendar, CheckCircle2, ChevronLeft, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2, Ban, ClipboardCheck, IndianRupee, Printer, Share2, Download, Eye } from "lucide-react";
+import { Calendar, CheckCircle2, ChevronLeft, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2, Ban, ClipboardCheck, IndianRupee, Printer, Share2, Download, Eye, FileText } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -2139,6 +2139,26 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 </div>
               );
             })()}
+
+            {/* The paper Offline Consultation Form, photographed and filed against the
+                patient. Appears only once the Consultation Fee is collected, because
+                that is when the form has actually been filled in — offering it before
+                the consultation invites a blank scan, and the whole point of the record
+                is that it is the completed one. */}
+            {selectedLead.package_paid != null && (
+              <div className="rounded-xl border border-slate-200 p-3" data-testid="cons-consultation-form">
+                <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-sky-700">
+                  <FileText className="h-3.5 w-3.5" /> Consultation Form
+                </p>
+                <LeadDocuments
+                  leadId={selectedLead.id}
+                  kind="consultation_form"
+                  fixedLabel="Consultation Form"
+                  hint="Photograph or scan each page · JPG, PNG, WEBP or PDF, up to 500MB"
+                  canEdit={["branch_admin", "super_admin", "head_physio"].includes(viewerRole)}
+                />
+              </div>
+            )}
             </>
             )}
 

@@ -198,11 +198,12 @@ export const branchDietPatients = async () => (await api.get("/branch/diet-patie
 // ---- Client documents ----
 // Never served from the static /uploads mount — these are patient records, so the bytes
 // come back through an authenticated route as a blob.
-export const leadDocuments = async (leadId) => (await api.get(`/leads/${leadId}/documents`)).data;
-export const uploadLeadDocument = async (leadId, file, label = "") => {
+export const leadDocuments = async (leadId, kind) => (await api.get(`/leads/${leadId}/documents`, { params: kind ? { kind } : {} })).data;
+export const uploadLeadDocument = async (leadId, file, label = "", kind = "general") => {
   const body = new FormData();
   body.append("file", file);
   body.append("label", label);
+  body.append("kind", kind);
   // No explicit Content-Type: the browser has to set the multipart boundary itself, and
   // naming the header strips it and the request arrives unparseable.
   return (await api.post(`/leads/${leadId}/documents`, body)).data;

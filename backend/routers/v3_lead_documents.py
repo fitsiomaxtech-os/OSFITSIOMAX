@@ -32,7 +32,15 @@ os.makedirs(DOC_DIR, exist_ok=True)
 # Scans and reports arrive as images or PDFs. Nothing executable, and nothing that a
 # browser will run if it is ever opened directly.
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".pdf"}
-MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+MAX_UPLOAD_BYTES = 500 * 1024 * 1024
+CHUNK = 1024 * 1024
+
+# What the document is. "consultation_form" is the photographed paper form filled during
+# the consultation; everything else is a report, scan or letter filed against the patient.
+# Kept as a field rather than a separate collection — same bytes, same permissions, same
+# lifecycle, and only the screen that lists them cares about the difference.
+CONSULTATION_FORM = "consultation_form"
+GENERAL = "general"
 
 # Everyone who treats the patient can read their documents; the front desk and the
 # clinicians who order them can add. A Physio can read a report without being able to
@@ -42,10 +50,20 @@ WRITE_ROLES = ("branch_admin", "super_admin", "head_physio")
 
 
 @router.get("/leads/{lead_id}/documents")
-async def list_lead_documents(lead_id: str, _: V3UserOut = Depends(v3_require_roles(*READ_ROLES))):
+async def list_lead_documents(
+    lead_id: str,
+    kind: Optional[str] = None,
+    _: V3UserOut = Depends(v3_require_roles(*READ_ROLES)),
+):
+    query = {"lead_id": lead_id}
+    if kind:
+        # Documents saved before `kind` existed have no field at all. Asking for the
+        # general list has to include them, or every existing document would vanish from
+        # the screen that used to show it.
+        query["kind"] = {"$in": [kind, None]} if kind == GENERAL else kind
     docs = await v3_col("lead_documents").find(
-        {"lead_id": lead_id}, {"_id": 0, "stored_name": 0}
-    ).sort("created_at", -1).to_list(500)
+        query, {"_id": 0, "stored_name": 0}
+    ).sort("created_at", 1 if kind == CONSULTATION_FORM else -1).to_list(500)
     return {"documents": docs}
 
 
@@ -54,6 +72,7 @@ async def upload_lead_document(
     lead_id: str,
     file: UploadFile = File(...),
     label: Optional[str] = Form(""),
+    kind: Optional[str] = Form(GENERAL),
     user: V3UserOut = Depends(v3_require_roles(*WRITE_ROLES)),
 ):
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0, "id": 1, "name": 1})
@@ -64,19 +83,36 @@ async def upload_lead_document(
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Only JPG, PNG, WEBP or PDF files are allowed")
 
-    contents = await file.read()
-    if not contents:
-        raise HTTPException(status_code=400, detail="That file is empty")
-    if len(contents) > MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=400, detail="File must be under 10MB")
-
     # The name on disk is generated, never taken from the upload. A filename is attacker
     # controlled — "../../server.py" would otherwise be written wherever that resolves to.
     # The original is kept as data, for display only.
     doc_id = str(uuid.uuid4())
     stored_name = f"{doc_id}{ext}"
-    with open(os.path.join(DOC_DIR, stored_name), "wb") as f:
-        f.write(contents)
+    path = os.path.join(DOC_DIR, stored_name)
+
+    # Streamed to disk a megabyte at a time rather than read whole. At a 500MB ceiling,
+    # reading first and checking after would hold half a gigabyte in RAM per concurrent
+    # upload before finding out it was too big — enough to take the box down from a
+    # request that was always going to be rejected.
+    size = 0
+    try:
+        with open(path, "wb") as f:
+            while True:
+                chunk = await file.read(CHUNK)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > MAX_UPLOAD_BYTES:
+                    raise HTTPException(status_code=400, detail="File must be under 500MB")
+                f.write(chunk)
+        if not size:
+            raise HTTPException(status_code=400, detail="That file is empty")
+    except Exception:
+        # A rejected or failed upload leaves nothing behind. Without this the partial file
+        # stays on disk forever, unreferenced by any row and invisible to every screen.
+        if os.path.exists(path):
+            os.remove(path)
+        raise
 
     doc = {
         "id": doc_id,
@@ -84,8 +120,9 @@ async def upload_lead_document(
         "stored_name": stored_name,
         "original_name": os.path.basename(file.filename or "document")[:200],
         "label": (label or "").strip()[:120],
+        "kind": CONSULTATION_FORM if kind == CONSULTATION_FORM else GENERAL,
         "content_type": file.content_type or "application/octet-stream",
-        "size_bytes": len(contents),
+        "size_bytes": size,
         "uploaded_by": user.full_name,
         "uploaded_by_role": user.role,
         "created_at": now_iso(),
