@@ -30,11 +30,13 @@ const endOfPrevMonth = (d) => endOfDay(new Date(d.getFullYear(), d.getMonth(), 0
 
 const fmtShort = (d) => d ? d.toLocaleDateString(undefined, { day: "2-digit", month: "short" }) : "";
 
+// `short` is the phone label, used only where all five presets share one row. `label` is
+// what the chip and the filter state carry, so nothing downstream sees the abbreviation.
 const presets = (today) => ([
-  { key: "today",      label: "Today",      from: startOfDay(today),           to: endOfDay(today) },
-  { key: "yesterday",  label: "Yesterday",  from: startOfDay(addDays(today, -1)), to: endOfDay(addDays(today, -1)) },
-  { key: "last_month", label: "Last Month", from: startOfPrevMonth(today),     to: endOfPrevMonth(today) },
-  { key: "this_month", label: "This Month", from: startOfMonth(today),         to: endOfMonth(today) },
+  { key: "today",      label: "Today",      short: "Today",   from: startOfDay(today),           to: endOfDay(today) },
+  { key: "yesterday",  label: "Yesterday",  short: "Yest",    from: startOfDay(addDays(today, -1)), to: endOfDay(addDays(today, -1)) },
+  { key: "last_month", label: "Last Month", short: "Last Mo", from: startOfPrevMonth(today),     to: endOfPrevMonth(today) },
+  { key: "this_month", label: "This Month", short: "This Mo", from: startOfMonth(today),         to: endOfMonth(today) },
 ]);
 
 const toInputValue = (d) => d ? new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10) : "";
@@ -136,7 +138,9 @@ export const DateFilterPopover = ({ value, onChange, testid = "date-filter", cen
   // dense board, where a full-screen overlay for picking a date would be a heavier gesture
   // than the job deserves.
   if (centered) {
-    const railBtn = (on) => `w-full rounded-md px-3 py-2 text-left text-sm transition-colors ${
+    // One row on a phone, so the five share the width evenly and centre their labels;
+    // a left-aligned column from sm up, where the rail runs down the side.
+    const railBtn = (on) => `min-w-0 flex-1 truncate rounded-md px-1 py-2 text-center text-[11px] transition-colors sm:w-full sm:flex-none sm:px-3 sm:text-left sm:text-sm ${
       on ? "bg-amber-100 font-semibold text-amber-800" : "text-slate-700 hover:bg-[#F3EFE6]"
     }`;
     return (
@@ -187,18 +191,23 @@ export const DateFilterPopover = ({ value, onChange, testid = "date-filter", cen
               {/* Presets across the top on a phone, down the side from sm — the same two
                   halves either way, never a sideways scroll. */}
               <div className="flex flex-col sm:flex-row">
-                {/* flex, not a one-column grid, from sm up: grid rows stretch to fill the
-                    dialog's height, which spread five presets out over the whole calendar
-                    beside them. Flex keeps them at their natural height, stacked at the
-                    top. Two columns on a phone, where the rail sits above the calendar. */}
-                <div className="grid grid-cols-2 gap-1 border-b border-[#EFEAE0] p-2 sm:flex sm:w-40 sm:shrink-0 sm:flex-col sm:gap-0.5 sm:border-b-0 sm:border-r" data-testid={`${testid}-presets`}>
+                {/* One row on a phone. Two columns took three rows to show five presets
+                    and pushed the calendar — the thing most people came here for — below
+                    the fold. Abbreviated labels are what buy the single row; the full
+                    wording returns from sm up, where the rail is a column with space for
+                    it. flex, not a one-column grid, from sm up: grid rows stretch to fill
+                    the dialog's height, which spread five presets over the whole calendar
+                    beside them. */}
+                <div className="flex gap-1 border-b border-[#EFEAE0] p-2 sm:w-40 sm:shrink-0 sm:flex-col sm:gap-0.5 sm:border-b-0 sm:border-r" data-testid={`${testid}-presets`}>
                   {list.map((p) => (
                     <button key={p.key} type="button" onClick={() => apply(p)} className={railBtn(value?.key === p.key)} data-testid={`${testid}-preset-${p.key}`}>
-                      {p.label}
+                      <span className="sm:hidden">{p.short}</span>
+                      <span className="hidden sm:inline">{p.label}</span>
                     </button>
                   ))}
                   <button type="button" onClick={openRange} className={railBtn(value?.key === "range" || showRange)} data-testid={`${testid}-preset-range`}>
-                    Custom Range
+                    <span className="sm:hidden">Custom</span>
+                    <span className="hidden sm:inline">Custom Range</span>
                   </button>
                 </div>
 
