@@ -195,7 +195,7 @@ const CreateConsultationModal = ({ item, onClose, onSaved, kind = "consultation"
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600">Consultation Duration</label>
+            <label className="mb-1 block text-xs font-semibold text-slate-600">{cfg.durationLabel}</label>
             <div className="flex flex-wrap gap-2" data-testid="consultation-create-duration">
               {DURATION_OPTIONS.map((d) => (
                 <button
@@ -301,7 +301,7 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved }) => {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} data-testid="session-create-modal">
       <div className="flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-        <div className={`flex shrink-0 items-center justify-between bg-gradient-to-r ${cfg.header} px-5 py-3 text-white`}>
+        <div className="flex shrink-0 items-center justify-between bg-gradient-to-r from-sky-500 to-indigo-600 px-5 py-3 text-white">
           <p className="text-base font-semibold">{isEdit ? "Edit Session Package" : "Add Session Package"}</p>
           <button onClick={onClose} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="session-create-close">
             <X className="h-4 w-4" />
@@ -462,10 +462,13 @@ export const SessionPriceBoxes = ({ item, testid }) => (
 
 export const ViewItemModal = ({ item, kind, onClose, onEdit, canEdit = true }) => {
   const isSession = kind === "session";
+  // Sessions are not a PACKAGE_KINDS entry — they carry a session count, not a duration —
+  // so this falls back rather than assuming every kind has one.
+  const viewCfg = PACKAGE_KINDS[kind] || PACKAGE_KINDS.consultation;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} data-testid="item-view-modal">
       <div className="flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-        <div className={`flex shrink-0 items-center justify-between bg-gradient-to-r ${cfg.header} px-5 py-3 text-white`}>
+        <div className={`flex shrink-0 items-center justify-between bg-gradient-to-r ${viewCfg.header} px-5 py-3 text-white`}>
           <p className="flex-1 truncate text-base font-semibold" data-testid="item-view-name">{item.name}</p>
           <div className="flex shrink-0 items-center gap-1">
             {canEdit && (
@@ -490,7 +493,7 @@ export const ViewItemModal = ({ item, kind, onClose, onEdit, canEdit = true }) =
               {item.duration_minutes && (
                 <div className="mt-1.5 flex items-center justify-between rounded-lg bg-sky-50 px-2.5 py-1.5">
                   <span className="inline-flex items-center gap-1.5 text-xs font-bold text-sky-800">
-                    <Clock className="h-3.5 w-3.5" />Consultation Duration
+                    <Clock className="h-3.5 w-3.5" />{viewCfg.durationLabel}
                   </span>
                   <span className="text-sm font-extrabold text-sky-900">
                     {DURATION_OPTIONS.find((d) => d.minutes === item.duration_minutes)?.label || `${item.duration_minutes} mins`}
@@ -704,7 +707,7 @@ const PhysiotherapyPanel = ({ kind = "consultation" }) => {
       {viewingItem && (
         <ViewItemModal
           item={viewingItem}
-          kind="consultation"
+          kind={kind}
           onClose={() => setViewingItem(null)}
           onEdit={() => { setEditingItem(viewingItem); setViewingItem(null); }}
         />
