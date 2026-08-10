@@ -5,7 +5,7 @@ import uuid
 
 from database import v3_col
 from utils import now_iso
-from deps import v3_require_roles
+from deps import v3_require_roles, is_diet_role
 from security import hash_password
 from schemas.v3 import V3UserOut
 
@@ -314,7 +314,21 @@ async def create_user_account(payload: UserAccountCreate, _: V3UserOut = Depends
         "created_at": now_iso(),
     }
     await v3_col("users").insert_one(user.copy())
-    if payload.role in ORG_WIDE_ROLES:
+    if is_diet_role(payload.role) and payload.role != "super_admin":
+        # A diet role belongs to a branch and holds a calendar there, exactly like a Physio.
+        for b_id in (payload.branch_ids or [payload.branch_id]):
+            await v3_col("doctors").insert_one({
+                "id": str(uuid.uuid4()),
+                "full_name": payload.full_name,
+                "profile_type": "nutrition_coach",
+                "branch_id": b_id,
+                "specialization": "",
+                "slots": [],
+                "slot_details": [],
+                "user_id": user["id"],
+                "created_at": now_iso(),
+            })
+    elif payload.role in ORG_WIDE_ROLES:
         # One branchless record — a Head Physio has one calendar the whole organisation
         # books against, not a separate one per branch.
         await v3_col("doctors").insert_one({

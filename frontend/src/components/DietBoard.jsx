@@ -9,6 +9,7 @@ import {
   Clock,
   Salad,
   Search,
+  Stethoscope,
   Users,
   X,
 } from "lucide-react";
@@ -16,7 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
-import { dietCalendar, dietPatients, dietSessions, dietCompleteDay } from "@/lib/api";
+import { dietCalendar, dietConsultations, dietPatients, dietSessions, dietCompleteDay } from "@/lib/api";
 import { to12h } from "@/lib/time";
 
 /**
@@ -49,6 +50,7 @@ const DAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"];
 const fmtDate = (iso) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}` : "—");
 
 const VIEW_TABS = [
+  { key: "consultations", label: "Consultations", icon: Stethoscope },
   { key: "checkins", label: "Check-ins", icon: Salad },
   { key: "patients", label: "Patients", icon: Users },
 ];
@@ -76,10 +78,11 @@ const StatTile = ({ label, value, sub, icon: Icon, onClick, active, testid }) =>
 };
 
 export const DietBoard = ({ coachId } = {}) => {
-  const [activeTab, setActiveTab] = useState("checkins");
+  const [activeTab, setActiveTab] = useState("consultations");
+  const [consultCount, setConsultCount] = useState(0);
   const [checkinCount, setCheckinCount] = useState(0);
   const [patientsCount, setPatientsCount] = useState(0);
-  const badgeFor = { checkins: checkinCount, patients: patientsCount };
+  const badgeFor = { consultations: consultCount, checkins: checkinCount, patients: patientsCount };
 
   const [toolbarSlot, setToolbarSlot] = useState(null);
   const slotFor = (key) => (activeTab === key ? toolbarSlot : null);
@@ -116,6 +119,9 @@ export const DietBoard = ({ coachId } = {}) => {
         <div ref={setToolbarSlot} className="flex flex-wrap items-center gap-2 md:pb-1.5" data-testid="diet-view-toolbar" />
       </div>
 
+      <div style={{ display: activeTab === "consultations" ? "block" : "none" }}>
+        <ConsultationsTab coachId={coachId} onCountChange={setConsultCount} />
+      </div>
       <div style={{ display: activeTab === "checkins" ? "block" : "none" }}>
         <CheckinsTab coachId={coachId} onCountChange={setCheckinCount} toolbarSlot={slotFor("checkins")} />
       </div>
@@ -155,6 +161,103 @@ export const DietBoard = ({ coachId } = {}) => {
     </div>
   );
 };
+
+/**
+ * Diet Consultations — who is coming in, and who has already been seen.
+ *
+ * The list is everyone the Head Physio referred: `diet_recommended`, set when they chose
+ * the patient's plan. That flag is the referral, so this queue and that decision cannot
+ * disagree.
+ *
+ * Patients who already have a plan stay in the list, marked, rather than dropping out. A
+ * coach needs to see what they have done as much as what is waiting, and a queue that
+ * empties itself leaves no way to check the day back.
+ */
+function ConsultationsTab({ coachId, onCountChange }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState("waiting");
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    dietConsultations(coachId)
+      .then((r) => { if (!cancelled) setRows(r.patients || []); })
+      .catch(() => { if (!cancelled) setRows([]); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [coachId]);
+
+  const waiting = rows.filter((r) => !r.assigned);
+  const seen = rows.filter((r) => r.assigned);
+
+  // The badge counts who is still waiting, so it falls to zero as the coach works
+  // through them rather than holding at the referral total.
+  useEffect(() => { onCountChange?.(waiting.length); }, [waiting.length, onCountChange]);
+
+  const visible = (filter === "seen" ? seen : filter === "all" ? rows : waiting)
+    .filter((r) => {
+      if (!search) return true;
+      const q = search.toLowerCase();
+      return (r.lead_name || "").toLowerCase().includes(q) || (r.phone || "").includes(q);
+    });
+
+  return (
+    <div data-testid="diet-consultations-tab">
+      <div className="mb-4 grid grid-cols-3 gap-2 sm:gap-3">
+        <StatTile icon={Stethoscope} label="Referred" value={rows.length} onClick={() => setFilter("all")} active={filter === "all"} testid="diet-consult-stat-all" />
+        <StatTile icon={Clock} label="Waiting" value={waiting.length} sub="Not yet on a plan" onClick={() => setFilter("waiting")} active={filter === "waiting"} testid="diet-consult-stat-waiting" />
+        <StatTile icon={CheckCircle2} label="On a plan" value={seen.length} onClick={() => setFilter("seen")} active={filter === "seen"} testid="diet-consult-stat-seen" />
+      </div>
+
+      <div className="mb-3 relative">
+        <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
+        <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search patient by name or phone..." className="h-10 pl-9" data-testid="diet-consult-search" />
+      </div>
+
+      {loading ? (
+        <p className="py-16 text-center text-sm text-slate-400">Loading…</p>
+      ) : visible.length === 0 ? (
+        <div className="py-16 text-center">
+          <Stethoscope className="mx-auto mb-3 h-10 w-10 text-slate-200" />
+          <p className="text-sm text-slate-400">
+            {filter === "seen"
+              ? "Nobody is on a diet plan yet."
+              : "No diet referrals yet. A Head Physio sends patients here by choosing a plan with Diet on it."}
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {visible.map((p) => (
+            <div key={p.lead_id} className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border p-3 ${p.assigned ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-white"}`} data-testid={`diet-consult-${p.lead_id}`}>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="truncate text-sm font-bold text-slate-800">{p.lead_name}</p>
+                  {p.patient_number && <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-slate-500">{p.patient_number}</span>}
+                  {/* Says whether this patient is also on a physio course — it changes how
+                      a diet plan should be pitched, and the coach cannot see it anywhere
+                      else on this board. */}
+                  {p.consultation_decision === "consultation_treatment" && (
+                    <span className="rounded-md bg-violet-100 px-2 py-0.5 text-[10px] font-bold text-violet-700">+ TREATMENT</span>
+                  )}
+                </div>
+                <p className="mt-0.5 text-[11px] text-slate-500">
+                  {p.phone || "—"}
+                  {p.appointment_date ? ` · seen ${fmtDate(p.appointment_date)}` : ""}
+                  {p.assigned ? ` · ${p.completed_days}/${p.total_days} check-ins` : ""}
+                </p>
+              </div>
+              <span className={`shrink-0 rounded-md px-2.5 py-1 text-[11px] font-bold ${p.assigned ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+                {p.assigned ? (p.diet_stage || "ON A PLAN") : "AWAITING CONSULTATION"}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function CheckinsTab({ coachId, onCountChange, toolbarSlot }) {
   const todayIso = isoOf(new Date());

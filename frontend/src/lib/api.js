@@ -187,6 +187,7 @@ export const setDoctorSlotCapacity = async (doctorId, slotCapacity) => (await ap
 // ---- Diet Consultation (Nutrition Coach) ----
 export const dietToday = async (params = {}) => (await api.get("/diet/today", { params })).data;
 export const dietCalendar = async (month, year, coachId) => (await api.get("/diet/calendar", { params: { month, year, coach_id: coachId } })).data;
+export const dietConsultations = async (coachId) => (await api.get("/diet/consultations", { params: { coach_id: coachId } })).data;
 export const dietPatients = async (coachId) => (await api.get("/diet/patients", { params: { coach_id: coachId } })).data;
 export const dietSessions = async (leadId) => (await api.get(`/diet/sessions/${leadId}`)).data;
 export const dietCompleteDay = async (sessionId, payload) => (await api.post(`/diet/sessions/${sessionId}/complete`, payload)).data;

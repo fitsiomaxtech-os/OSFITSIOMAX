@@ -91,6 +91,21 @@ const ROLE_META = {
  * to a blank screen. Kept in step with _is_hr_role in backend/routers/v3_recruitment.py —
  * a role that passes here and fails there would render the board and 403 every call.
  */
+/** Whether a role slug reads as the Diet vertical.
+ *
+ * Same reason isHumanResourceRole exists: the role is typed by hand in Roles &
+ * Credentials, so its slug is whatever wording was used — this install has "diet_manage",
+ * not "nutrition_coach", and that user logged in to a blank page. Kept in step with
+ * is_diet_role in backend/deps.py; a role that passes here and fails there would render
+ * the board and 403 every call.
+ */
+const isDietRole = (role) => {
+  const r = String(role || "").trim().toLowerCase();
+  if (r === "super_admin") return false;
+  if (r.includes("nutrition_coach")) return true;
+  return r.split("_").some((t) => ["diet", "nutrition", "nutritionist", "dietician", "dietitian"].includes(t));
+};
+
 const isHumanResourceRole = (role) => {
   const r = String(role || "").trim().toLowerCase();
   if (r.includes("human_resource")) return true;
@@ -247,7 +262,12 @@ export const CRMPage = ({ auth, onLogout }) => {
   const role = auth.user.role;
   // A hand-created HR role can carry any slug, so fall back to the board's own name
   // rather than printing "hr_manager Master View" in the header.
-  const roleLabel = ROLE_META[role]?.label || (isHumanResourceRole(role) ? "Human Resource" : role);
+  // A hand-created role's slug is not a title — "diet_manage Master View" is what the
+  // raw value gives. Named roles come from ROLE_META; the two families that accept
+  // arbitrary wording are named by what they are.
+  const roleLabel = ROLE_META[role]?.label
+    || (isDietRole(role) ? "Diet" : null)
+    || (isHumanResourceRole(role) ? "Human Resource" : role);
   const boardTitle = role === "pre_sales" ? "Pre-sales Master View" : `${roleLabel} Master View`;
   const myBranch = branches.find((b) => b.id === auth.user.branch_id);
   const myBranchName = myBranch?.branch_name || "";
@@ -605,7 +625,7 @@ export const CRMPage = ({ auth, onLogout }) => {
   const showBranchBoard = role === "branch_admin";
   const showHeadPhysioBoard = role === "head_physio";
   const showPhysioBoard = role === "physio";
-  const showDietBoard = role === "nutrition_coach";
+  const showDietBoard = isDietRole(role);
   const showAccountantBoard = role === "accountant";
   const showHumanResourceBoard = isHumanResourceRole(role);
 

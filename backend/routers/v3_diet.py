@@ -33,7 +33,7 @@ import uuid
 from database import v3_col
 from utils import now_iso, normalize_slot_time, slot_capacity_of
 from security import hash_password
-from deps import v3_require_roles
+from deps import v3_require_roles, v3_require_diet, is_diet_role
 from schemas.v3 import V3UserOut
 
 router = APIRouter(prefix="/api/v3")
@@ -48,6 +48,12 @@ async def _resolve_coach(user: V3UserOut, coach_id: Optional[str] = None) -> Opt
     user_id, one hired through HR is linked only by employee_id, and Super Admin driving a
     specific coach's board passes the id outright — a branch can have several coaches, so
     branch_id alone would not disambiguate.
+
+    If none of those find one, it creates it. That is a write in a read path and is
+    deliberate: the record is derived — a calendar holder, not business data — and its
+    absence is a setup gap the coach cannot fix from any screen they can reach. Anyone
+    hired under a diet role before HR knew to create one logs in to a permanently empty
+    board otherwise, which is exactly what happened to this install's diet_manage user.
     """
     if coach_id and user.role == "super_admin":
         doctor = await v3_col("doctors").find_one({"id": coach_id, "profile_type": COACH}, {"_id": 0})
@@ -56,11 +62,29 @@ async def _resolve_coach(user: V3UserOut, coach_id: Optional[str] = None) -> Opt
     doctor = await v3_col("doctors").find_one({"user_id": user.id, "profile_type": COACH}, {"_id": 0})
     if doctor:
         return doctor
-    raw = await v3_col("users").find_one({"id": user.id}, {"_id": 0, "employee_id": 1})
+    raw = await v3_col("users").find_one({"id": user.id}, {"_id": 0, "employee_id": 1, "branch_id": 1, "full_name": 1})
     if raw and raw.get("employee_id"):
         doctor = await v3_col("doctors").find_one(
             {"employee_id": raw["employee_id"], "profile_type": COACH}, {"_id": 0}
         )
+        if doctor:
+            return doctor
+
+    if not is_diet_role(user.role) or user.role == "super_admin":
+        return None
+    doctor = {
+        "id": str(uuid.uuid4()),
+        "user_id": user.id,
+        "full_name": user.full_name or (raw or {}).get("full_name", ""),
+        "profile_type": COACH,
+        "branch_id": user.branch_id or (raw or {}).get("branch_id"),
+        "specialization": "",
+        "slots": [],
+        "slot_details": [],
+        "created_at": now_iso(),
+    }
+    await v3_col("doctors").insert_one(doctor.copy())
+    doctor.pop("_id", None)
     return doctor
 
 
@@ -242,8 +266,64 @@ async def branch_diet_patients(user: V3UserOut = Depends(v3_require_roles("branc
 
 # ============ The Nutrition Coach's own board ============
 
+@router.get("/diet/consultations")
+async def diet_consultations(coach_id: Optional[str] = None, user: V3UserOut = Depends(v3_require_diet)):
+    """Patients coming in for a Diet Consultation.
+
+    The list is everyone the Head Physio referred — `diet_recommended` set on their
+    consultation decision — at this coach's branch. That flag IS the referral: it is set
+    at the moment the Head Physio decides, and nothing else in the OS records the
+    intention, so reading anything else here would mean the coach's queue disagreeing
+    with the decision that filled it.
+
+    Already-assigned patients stay in the list rather than disappearing, marked as such.
+    A coach needs to see who they have seen as well as who is waiting, and a queue that
+    empties itself gives no way to check the day's work.
+    """
+    coach = await _resolve_coach(user, coach_id)
+    if not coach:
+        return {"patients": []}
+
+    query = {"diet_recommended": True}
+    if coach.get("branch_id"):
+        query["branch_id"] = coach["branch_id"]
+    leads = await v3_col("leads").find(query, {"_id": 0}).sort("updated_at", -1).to_list(500)
+
+    lead_ids = [l["id"] for l in leads]
+    booked = await v3_col("diet_sessions").find(
+        {"lead_id": {"$in": lead_ids}}, {"_id": 0, "lead_id": 1, "status": 1}
+    ).to_list(5000)
+    days_by_lead: dict = {}
+    for d in booked:
+        row = days_by_lead.setdefault(d["lead_id"], {"total": 0, "done": 0})
+        row["total"] += 1
+        if d.get("status") == "completed":
+            row["done"] += 1
+
+    out = []
+    for l in leads:
+        days = days_by_lead.get(l["id"], {"total": 0, "done": 0})
+        out.append({
+            "lead_id": l["id"],
+            "lead_name": l.get("name", "Unknown"),
+            "phone": l.get("phone", ""),
+            "patient_number": l.get("patient_number", ""),
+            "appointment_date": l.get("appointment_date"),
+            "appointment_time": l.get("appointment_time"),
+            # What the Head Physio sent them here with, so the coach can see at a glance
+            # whether this patient is also on a physio course.
+            "consultation_decision": l.get("consultation_decision"),
+            "diet_stage": l.get("diet_stage"),
+            "diet_coach_name": l.get("diet_coach_name"),
+            "assigned": bool(l.get("diet_coach_id")),
+            "total_days": days["total"],
+            "completed_days": days["done"],
+            "updated_at": l.get("updated_at"),
+        })
+    return {"patients": out}
+
 @router.get("/diet/today")
-async def diet_today(coach_id: Optional[str] = None, user: V3UserOut = Depends(v3_require_roles(COACH, "super_admin"))):
+async def diet_today(coach_id: Optional[str] = None, user: V3UserOut = Depends(v3_require_diet)):
     coach = await _resolve_coach(user, coach_id)
     if not coach:
         return {"days": [], "coach_id": None, "coach_name": ""}
@@ -259,7 +339,7 @@ async def diet_calendar(
     month: Optional[int] = None,
     year: Optional[int] = None,
     coach_id: Optional[str] = None,
-    user: V3UserOut = Depends(v3_require_roles(COACH, "super_admin")),
+    user: V3UserOut = Depends(v3_require_diet),
 ):
     coach = await _resolve_coach(user, coach_id)
     if not coach:
@@ -279,7 +359,7 @@ async def diet_calendar(
 
 
 @router.get("/diet/patients")
-async def diet_patients(coach_id: Optional[str] = None, user: V3UserOut = Depends(v3_require_roles(COACH, "super_admin"))):
+async def diet_patients(coach_id: Optional[str] = None, user: V3UserOut = Depends(v3_require_diet)):
     """Every patient assigned to this coach, whether or not their days are booked yet —
     same reasoning as the physio board: a patient who has just been assigned should appear
     immediately rather than only once a plan exists."""
@@ -333,7 +413,7 @@ class CompleteDayInput(BaseModel):
 async def complete_diet_day(
     session_id: str,
     payload: CompleteDayInput,
-    user: V3UserOut = Depends(v3_require_roles(COACH, "super_admin")),
+    user: V3UserOut = Depends(v3_require_diet),
 ):
     day = await v3_col("diet_sessions").find_one({"id": session_id}, {"_id": 0})
     if not day:

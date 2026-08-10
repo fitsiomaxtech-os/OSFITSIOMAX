@@ -95,3 +95,29 @@ def is_hr_role(role: str) -> bool:
     if "human_resource" in r:
         return True
     return bool(set(r.split("_")) & {"hr", "recruiter", "recruitment", "talent"})
+
+
+def is_diet_role(role: str) -> bool:
+    """Whether a role slug reads as the Diet vertical.
+
+    Same problem the HR predicate solves, arriving the same way: the role is created by
+    hand in Roles & Credentials, so its slug is whatever label was typed — this install
+    has `diet_manage`, not the `nutrition_coach` the Diet board was written against, and
+    that user logged in to a blank screen. Pinning one literal leaves the board 403ing
+    for anyone who worded it differently.
+
+    Matched on whole underscore-separated tokens so an unrelated role can't slip through
+    on a substring — "audit_manage" shares no token with this set.
+    """
+    r = (role or "").strip().lower()
+    if r == "super_admin":
+        return True
+    if "nutrition_coach" in r:
+        return True
+    return bool(set(r.split("_")) & {"diet", "nutrition", "nutritionist", "dietician", "dietitian"})
+
+
+def v3_require_diet(user: V3UserOut = Depends(v3_current_user)) -> V3UserOut:
+    if not is_diet_role(user.role):
+        raise HTTPException(status_code=403, detail="Not allowed")
+    return user
