@@ -151,6 +151,23 @@ const weekOf = (d, firstDay) => Math.floor((new Date(`${d}T00:00:00`) - new Date
 // always exactly one treatment session.
 const FALLBACK_SESSION_MINUTES = 30;
 
+/**
+ * What the Head Physio is sending the patient away with. Four choices on screen, two
+ * independent yes/nos underneath — treatment, and diet.
+ *
+ * Kept as a pair rather than one four-valued field because diet is orthogonal to
+ * treatment: folding them together would give six values once Cancel and the legacy
+ * states are counted, and every `consultation_decision === "consultation_treatment"`
+ * check already in the codebase would quietly stop matching half the cases it used to.
+ */
+const CONSULTATION_PLANS = [
+  { key: "only", label: "Only Consultation", decision: "consultation_only", diet: false, tone: "#2a78d6" },
+  { key: "treatment", label: "Consultation + Treatment", decision: "consultation_treatment", diet: false, tone: "#1baf7a" },
+  { key: "treatment_diet", label: "Consultation + Treatment + Diet", decision: "consultation_treatment", diet: true, tone: "#7c3aed" },
+  { key: "diet", label: "Consultation + Diet", decision: "consultation_only", diet: true, tone: "#eb6834" },
+];
+const planOf = (key) => CONSULTATION_PLANS.find((p) => p.key === key) || null;
+
 // One distinct color per Treatment Package option (cycles if there are ever more than 5).
 const TREATMENT_PACKAGE_COLORS = ["#2563eb", "#059669", "#d97706", "#7c3aed", "#e11d48"];
 
@@ -442,7 +459,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // sessions once Diagnosis Report + Treatment Summary are written; only the Treatment
   // Package (names only, no prices shown here) is chosen. "consultation_only" is a legacy
   // decision value some existing leads already carry — no longer offered as a choice.
-  const [decisionDraft, setDecisionDraft] = useState({ decision: "consultation_treatment", item_id: "", mode: "offline", sessionsPerWeek: "" });
+  // `plan` starts empty on purpose: the Head Physio has to pick one. Defaulting to
+  // Consultation + Treatment is how a patient ends up on a treatment package nobody
+  // consciously chose, which is the thing this control exists to prevent.
+  const [decisionDraft, setDecisionDraft] = useState({ plan: "", decision: "consultation_treatment", item_id: "", mode: "offline", sessionsPerWeek: "" });
   const [savingDecision, setSavingDecision] = useState(false);
 
   // Mark Consultation Completed (Branch Admin only) — "Consultation Only" patients, at
@@ -632,20 +652,24 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   const submitConsultationDecision = async () => {
     if (!(selectedLead.physio_diagnosis_report || "").trim()) { toast.error("Write the Diagnosis Report first"); return; }
     if (!(selectedLead.treatment_summary || "").trim()) { toast.error("Write the Treatment Summary first"); return; }
-    if (!decisionDraft.item_id) { toast.error("Select a Treatment Package"); return; }
-    const item = treatmentPackageItems.find((i) => i.id === decisionDraft.item_id);
-    const weeks = weeksFromPackageName(item?.name);
-    if (!weeks) { toast.error("Couldn't read a week count from this package's name"); return; }
-    const perWeek = parseInt(decisionDraft.sessionsPerWeek, 10) || 0;
-    if (!perWeek) { toast.error("Enter sessions per week"); return; }
+    const plan = planOf(decisionDraft.plan);
+    if (!plan) { toast.error("Choose what this patient is going away with"); return; }
+
+    // The package only exists for the two plans that include treatment. Demanding one for
+    // "Only Consultation" would make that choice unpickable.
+    let payload = { decision: plan.decision, diet_recommended: plan.diet, mode: decisionDraft.mode };
+    if (plan.decision === "consultation_treatment") {
+      if (!decisionDraft.item_id) { toast.error("Select a Treatment Package"); return; }
+      const item = treatmentPackageItems.find((i) => i.id === decisionDraft.item_id);
+      const weeks = weeksFromPackageName(item?.name);
+      if (!weeks) { toast.error("Couldn't read a week count from this package's name"); return; }
+      const perWeek = parseInt(decisionDraft.sessionsPerWeek, 10) || 0;
+      if (!perWeek) { toast.error("Enter sessions per week"); return; }
+      payload = { ...payload, item_id: decisionDraft.item_id, sessions_override: weeks * perWeek };
+    }
     setSavingDecision(true);
     try {
-      const res = await saveConsultationDecision(selectedLead.id, {
-        decision: decisionDraft.decision,
-        item_id: decisionDraft.item_id,
-        mode: decisionDraft.mode,
-        sessions_override: weeks * perWeek,
-      });
+      const res = await saveConsultationDecision(selectedLead.id, payload);
       toast.success("Saved & moved to Branch Admin");
       setSelectedLead(null);
       setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === res.lead.id ? res.lead : l) }));
@@ -1747,7 +1771,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               const summaryReady = !!(selectedLead.treatment_summary || "").trim();
               const selectedPackage = treatmentPackageItems.find((i) => i.id === decisionDraft.item_id);
               const selectedPackageWeeks = selectedPackage ? weeksFromPackageName(selectedPackage.name) : null;
-              const canSave = diagnosisReady && summaryReady && !!decisionDraft.item_id && !!selectedPackageWeeks && !!parseInt(decisionDraft.sessionsPerWeek, 10);
+              const plan = planOf(decisionDraft.plan);
+              const needsPackage = plan?.decision === "consultation_treatment";
+              const packageReady = !needsPackage
+                || (!!decisionDraft.item_id && !!selectedPackageWeeks && !!parseInt(decisionDraft.sessionsPerWeek, 10));
+              const canSave = diagnosisReady && summaryReady && !!plan && packageReady;
 
               if (alreadyMoved) {
                 return (
@@ -1755,8 +1783,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-emerald-700">
                       <ClipboardCheck className="h-3.5 w-3.5" /> Treatment
                     </p>
+                    {/* Read back as the plan that was chosen, rather than as the two
+                        flags it is stored as. */}
                     <p className="text-sm font-semibold text-slate-800">
-                      {selectedLead.consultation_decision === "consultation_treatment" ? "Treatment" : "Consultation Only"}
+                      {[
+                        selectedLead.consultation_decision === "consultation_treatment" ? "Consultation + Treatment" : "Only Consultation",
+                        selectedLead.diet_recommended ? "Diet" : null,
+                      ].filter(Boolean).join(" + ")}
                     </p>
                     {selectedLead.consultation_decision === "consultation_treatment" && selectedLead.session_package_name && (
                       <p className="mt-0.5 text-xs text-slate-600">
@@ -1778,7 +1811,51 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       Write the Diagnosis Report and Treatment Summary above before Save & Move.
                     </p>
                   )}
-                  <div>
+                  {/* The plan comes first because it decides whether the rest of this
+                      panel applies at all. One row, scrolled sideways on a narrow screen
+                      rather than wrapped — these four read as one choice, and a wrapped
+                      row reads as two groups. */}
+                  <div className="mb-3">
+                    <label className="mb-1 block text-[11px] font-medium text-slate-500">
+                      Treatment Plan <span className="text-rose-500">*</span>
+                    </label>
+                    <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1" data-testid="cons-decision-plan-options">
+                      {CONSULTATION_PLANS.map((p) => {
+                        const selected = decisionDraft.plan === p.key;
+                        return (
+                          <button
+                            key={p.key}
+                            type="button"
+                            // Switching away from a treatment plan clears the package with
+                            // it, so an abandoned choice can't be submitted by a later plan
+                            // that never showed the picker.
+                            onClick={() => setDecisionDraft((d) => ({
+                              ...d,
+                              plan: p.key,
+                              decision: p.decision,
+                              ...(p.decision === "consultation_treatment" ? {} : { item_id: "", sessionsPerWeek: "" }),
+                            }))}
+                            className="shrink-0 whitespace-nowrap rounded-md border px-3 py-1.5 text-xs font-semibold transition hover:brightness-95"
+                            style={selected
+                              ? { background: `${p.tone}22`, color: p.tone, borderColor: p.tone, boxShadow: `inset 0 0 0 1px ${p.tone}` }
+                              : { background: `${p.tone}14`, color: p.tone, borderColor: `${p.tone}33` }}
+                            data-testid={`cons-decision-plan-${p.key}`}
+                          >
+                            {p.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {!decisionDraft.plan && (
+                      <p className="mt-1 text-[11px] font-medium text-amber-600" data-testid="cons-decision-plan-hint">
+                        Choose one to continue.
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Only the two plans that include treatment need a package. Showing it
+                      for the others would ask for a decision that has no meaning. */}
+                  <div className={needsPackage ? "" : "hidden"}>
                     <label className="mb-1 block text-[11px] font-medium text-slate-500">Treatment Package</label>
                     <div className="flex flex-wrap gap-2" data-testid="cons-decision-package-options">
                       {treatmentPackageItems.map((i, idx) => {

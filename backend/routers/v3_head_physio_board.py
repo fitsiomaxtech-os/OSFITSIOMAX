@@ -308,11 +308,17 @@ async def hp_consultation_decision(
     # is the one hand-off point between the two.
     updates = {
         "consultation_decision": payload.decision,
+        "diet_recommended": bool(payload.diet_recommended),
         "head_consultation_stage": await _head_closing_stage(),
         "consultation_stage": await _branch_consultation_visit_stage(),
         "updated_at": now_iso(),
     }
-    detail = f"Consultation decision: {'Consultation Only' if payload.decision == 'consultation_only' else 'Consultation + Treatment'}"
+    # Named the way the Head Physio picked it, so the activity log reads back as the
+    # choice that was made rather than as two flags to recombine.
+    chosen = "Consultation" if payload.decision == "consultation_only" else "Consultation + Treatment"
+    if payload.diet_recommended:
+        chosen += " + Diet"
+    detail = f"Consultation decision: {chosen}"
 
     # Consultation Fee has a single fixed price (FITSIO STORE > Consultation) — there's
     # nothing for the Head Physio to pick, so it's auto-assigned the first time a lead

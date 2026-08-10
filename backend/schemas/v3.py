@@ -225,6 +225,9 @@ class V3LeadOut(BaseModel):
     session_package_sessions: Optional[int] = None
     session_package_mode: Optional[str] = None
     consultation_decision: Optional[str] = None  # "consultation_only" | "consultation_treatment" — set by Head Physio at Save & Move
+    # Whether the Head Physio also referred this patient to a Nutrition Coach. Orthogonal
+    # to consultation_decision — see V3ConsultationDecisionInput.
+    diet_recommended: Optional[bool] = False
     diagnosis: Optional[str] = None  # Pre-Sales' basic diagnosis — read-only reference for the Head Physio
     physio_diagnosis_report: Optional[str] = None  # Head Physio's own diagnosis report
     physio_diagnosis_locked: Optional[bool] = False
@@ -399,6 +402,13 @@ class V3TestimonialInput(BaseModel):
 
 class V3ConsultationDecisionInput(BaseModel):
     decision: Literal["consultation_only", "consultation_treatment"]
+    # Diet is orthogonal to treatment, not another value of it: a patient can be sent to a
+    # Nutrition Coach with or without physio. Kept as its own flag so the four choices the
+    # Head Physio actually picks from stay two independent yes/nos underneath — folding
+    # them into one enum would make six values, and every existing `== "consultation_
+    # treatment"` check in the codebase would silently stop matching half the cases it
+    # used to.
+    diet_recommended: bool = False
     # Required only when decision == "consultation_treatment" — the Treatment/Session
     # package (FITSIO STORE > Sessions) the Head Physio is choosing on the patient's behalf.
     item_id: Optional[str] = None
