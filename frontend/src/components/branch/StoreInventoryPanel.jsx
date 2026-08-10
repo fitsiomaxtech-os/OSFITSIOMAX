@@ -385,11 +385,15 @@ export const StoreInventoryPanel = ({ category = "tablet" }) => {
                   a row whose whole point is three buttons is the worst thing to make
                   someone find by scrolling sideways. */}
               <div className="space-y-2 p-3 sm:hidden" data-testid={tid("list-mobile")}>
-                {visible.map((it) => (
+                {visible.map((it, i) => (
                   <div key={it.id} className="rounded-xl border border-slate-200 bg-white p-3" data-testid={tid(`card-${it.id}`)}>
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-bold text-slate-800">{it.name}</p>
+                        {/* The same number the table shows, so a count read off a phone
+                            and one read off the desk agree. */}
+                        <p className="truncate text-sm font-bold text-slate-800">
+                          <span className="mr-1.5 font-semibold text-slate-300">{i + 1}.</span>{it.name}
+                        </p>
                         <p className="truncate text-xs text-slate-500">{it.brand || "No brand"}</p>
                       </div>
                       <StockBadge qty={it.stock} low={it.low} />
@@ -403,9 +407,12 @@ export const StoreInventoryPanel = ({ category = "tablet" }) => {
               </div>
 
               <div className="hidden overflow-x-auto sm:block" data-testid={tid("list-desktop")}>
-                <table className="w-full min-w-[720px] text-sm">
+                {/* Widened with the S.No column rather than left alone: the actions were
+                    already the tightest thing in the row. */}
+                <table className="w-full min-w-[780px] text-sm">
                   <thead className="bg-slate-50 text-left text-[10px] uppercase tracking-wider text-slate-400">
                     <tr>
+                      <th className="w-12 px-4 py-2.5 font-semibold">S.No</th>
                       <th className="px-4 py-2.5 font-semibold">{CAT.noun}</th>
                       <th className="px-4 py-2.5 font-semibold">Unit</th>
                       <th className="px-4 py-2.5 font-semibold">Price</th>
@@ -414,8 +421,13 @@ export const StoreInventoryPanel = ({ category = "tablet" }) => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {visible.map((it) => (
+                    {visible.map((it, i) => (
                       <tr key={it.id} className="hover:bg-slate-50" data-testid={tid(`row-${it.id}`)}>
+                        {/* Numbers the rows on screen, not the catalogue: filter or search
+                            and it counts what is left, the way the collections tables do.
+                            It is a position in a list, never an id — the item's own id is
+                            what every action here is sent against. */}
+                        <td className="px-4 py-3 text-slate-400">{i + 1}</td>
                         <td className="px-4 py-3">
                           <p className="font-medium text-slate-800">{it.name}</p>
                           <p className="text-[11px] text-slate-400">{it.brand || "—"}</p>
