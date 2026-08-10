@@ -16,7 +16,10 @@ import { TeamCard } from "@/components/marketing/TeamCard";
 // branches, which is what those accounts actually are.
 const DASH_TABS = [
   { key: "leads", label: "Leads", icon: Users },
-  { key: "pre_sales_team", label: "Pre-Sales Team", icon: Users, team: "pre_sales", panel: "pre_sales" },
+  // BRANCHS carries both halves of the sales chain: the branches, and the Pre-Sales
+  // agents who fed them. Pre-Sales had its own tab and it didn't earn one — the two
+  // are read against each other, and a tab apiece meant switching back and forth to
+  // compare what was handed over with what was closed.
   { key: "branch", label: "BRANCHS", icon: Building2, team: "sales", panel: "branch" },
   { key: "appointments", label: "Appointments", icon: CalendarCheck },
   { key: "treatments", label: "Treatments", icon: Activity },
@@ -199,12 +202,25 @@ export const DashboardBoard = () => {
         teamLoading || !team ? (
           <p className="py-16 text-center text-sm text-slate-400">{teamLoading ? "Loading..." : "No data."}</p>
         ) : (
-          <TeamCard
-            title={TEAM_PANELS[activePanel].title}
-            subtitle={TEAM_PANELS[activePanel].subtitle}
-            members={team[activeTeam] || []}
-            kind={activePanel}
-          />
+          // Branches first, then the Pre-Sales agents who fed them — the order the work
+          // happens in reversed, because the branch figures are what this tab is named
+          // for and Pre-Sales is the context behind them. Both come out of the one
+          // /marketing/team-members response already fetched, so showing them together
+          // costs no extra request.
+          <div className="space-y-4">
+            <TeamCard
+              title={TEAM_PANELS[activePanel].title}
+              subtitle={TEAM_PANELS[activePanel].subtitle}
+              members={team[activeTeam] || []}
+              kind={activePanel}
+            />
+            <TeamCard
+              title={TEAM_PANELS.pre_sales.title}
+              subtitle={TEAM_PANELS.pre_sales.subtitle}
+              members={team.pre_sales || []}
+              kind="pre_sales"
+            />
+          </div>
         )
       ) : loading || !activeData ? (
         <p className="py-16 text-center text-sm text-slate-400">{loading ? "Loading..." : "No data."}</p>
