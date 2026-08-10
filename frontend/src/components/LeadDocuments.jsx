@@ -42,6 +42,55 @@ const KB = 1024;
 // is the one that enforces it; this copy only exists to fail fast.
 const MAX_UPLOAD_MB = 500;
 const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * KB * KB;
+
+// A phone camera writes 3-6MB for one sheet of A4, almost all of it detail that a form
+// filled in biro does not have. Resized to 2000px on the long edge and re-encoded, the
+// same page lands around 300-600KB and reads identically — the handwriting is legible
+// well below the resolution the sensor captured.
+//
+// This exists because it makes the upload smaller everywhere it travels: quicker over a
+// phone connection at the front desk, smaller on the VPS disk, and comfortably under any
+// web-server body limit sitting in front of the app. It is not a substitute for raising
+// that limit — a multi-page PDF cannot be shrunk here and will still be refused if it is
+// over the cap.
+const MAX_IMAGE_EDGE = 2000;
+const IMAGE_QUALITY = 0.82;
+const LEAVE_ALONE_UNDER = 900 * KB;
+
+const compressImage = (file) => new Promise((resolve) => {
+  if (!String(file.type || "").startsWith("image/")) return resolve(file);
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    URL.revokeObjectURL(url);
+    const longest = Math.max(img.width, img.height);
+    const scale = Math.min(1, MAX_IMAGE_EDGE / (longest || 1));
+    // Already modest and already small — re-encoding would only lose detail for nothing.
+    if (scale === 1 && file.size <= LEAVE_ALONE_UNDER) return resolve(file);
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(img.width * scale));
+    canvas.height = Math.max(1, Math.round(img.height * scale));
+    canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(
+      (blob) => {
+        // Keep whichever is smaller. Re-encoding a screenshot or an already-optimised
+        // PNG can come out bigger, and shipping the larger one would be worse than
+        // having done nothing.
+        if (!blob || blob.size >= file.size) return resolve(file);
+        // Renamed to .jpg because that is now what it is — the backend checks the
+        // extension, and a JPEG called .png would be refused.
+        const base = (file.name || "page").replace(/\.[^.]+$/, "");
+        resolve(new File([blob], `${base}.jpg`, { type: "image/jpeg" }));
+      },
+      "image/jpeg",
+      IMAGE_QUALITY,
+    );
+  };
+  // A format the browser can't decode (HEIC straight off an iPhone, say) goes up
+  // untouched and is judged by the server's own extension check.
+  img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+  img.src = url;
+});
 const fmtSize = (n) => (n >= KB * KB ? `${(n / KB / KB).toFixed(1)} MB` : `${Math.max(1, Math.round(n / KB))} KB`);
 const isImage = (t) => String(t || "").startsWith("image/");
 const fmtWhen = (iso) => (iso ? `${String(iso).slice(8, 10)}/${String(iso).slice(5, 7)}/${String(iso).slice(0, 4)}` : "—");
@@ -76,16 +125,24 @@ export const LeadDocuments = ({ leadId, canEdit = true, kind = "general", fixedL
       return;
     }
     setBusy(true);
+    let sent = file;
     try {
+      sent = await compressImage(file);
       // A fixed label names the pages for you — the consultation form is always the
       // consultation form, and asking someone to type that on every page is a field
       // they will leave blank.
-      await uploadLeadDocument(leadId, file, fixedLabel || label, kind);
-      toast.success("Document uploaded");
+      await uploadLeadDocument(leadId, sent, fixedLabel || label, kind);
+      toast.success(
+        sent.size < file.size
+          ? `Uploaded · ${fmtSize(file.size)} shrunk to ${fmtSize(sent.size)}`
+          : "Document uploaded",
+      );
       setLabel("");
       load();
     } catch (err) {
-      toast.error(uploadError(err, file));
+      // Reports the size actually sent, so a 413 names the number the server refused
+      // rather than the one on disk before compression.
+      toast.error(uploadError(err, sent));
     }
     setBusy(false);
   };

@@ -2154,7 +2154,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                   leadId={selectedLead.id}
                   kind="consultation_form"
                   fixedLabel="Consultation Form"
-                  hint="Photograph or scan each page · JPG, PNG, WEBP or PDF, up to 500MB"
+                  hint="Photograph or scan each page · JPG, PNG, WEBP or PDF · photos are shrunk automatically"
                   canEdit={["branch_admin", "super_admin", "head_physio"].includes(viewerRole)}
                 />
               </div>
