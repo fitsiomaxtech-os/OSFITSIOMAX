@@ -228,6 +228,13 @@ class V3LeadOut(BaseModel):
     # Whether the Head Physio also referred this patient to a Nutrition Coach. Orthogonal
     # to consultation_decision — see V3ConsultationDecisionInput.
     diet_recommended: Optional[bool] = False
+    # Who is actually delivering that diet plan, set by branch/assign-diet. This model
+    # ignores extras, so without these three the Consultations board could never tell an
+    # already-assigned patient from a new one and its Reassign control would never appear.
+    diet_coach_id: Optional[str] = None
+    diet_coach_name: Optional[str] = None
+    diet_assigned_at: Optional[str] = None
+    diet_stage: Optional[str] = None  # "Diet Plan Assigned" | "Diet Completed"
     diagnosis: Optional[str] = None  # Pre-Sales' basic diagnosis — read-only reference for the Head Physio
     physio_diagnosis_report: Optional[str] = None  # Head Physio's own diagnosis report
     physio_diagnosis_locked: Optional[bool] = False

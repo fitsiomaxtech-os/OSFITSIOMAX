@@ -228,6 +228,12 @@ async def assign_diet(
             "diet_coach_name": coach["full_name"],
             "diet_assigned_at": now,
             "diet_stage": "Diet Plan Assigned",
+            # Set here as well as by the Head Physio's decision, because /diet/consultations
+            # reads this flag as "is in the diet vertical". A patient the branch books onto
+            # a plan afterwards — asked for one later, or was referred by phone — would
+            # otherwise hold check-in days with the coach while being absent from the very
+            # queue that lists who those days belong to.
+            "diet_recommended": True,
             "updated_at": now,
         }},
     )

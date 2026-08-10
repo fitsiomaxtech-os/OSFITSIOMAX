@@ -32,7 +32,15 @@ async def get_doctor_calendar(doctor_id: str, _: V3UserOut = Depends(v3_require_
         {"physio_id": doctor_id, "status": "upcoming"},
         {"_id": 0, "slot_time": 1, "lead_name": 1, "lead_id": 1, "id": 1},
     ).to_list(1000)
-    rows = [*appt_rows, *session_rows]
+    # And a Nutrition Coach from `diet_sessions` (coach_id) — a third collection, keyed on
+    # a third field, for the same reason the diet vertical keeps its own: nothing else
+    # reads a coach's bookings, so without this their calendar comes back permanently
+    # empty and the assign-diet picker offers a slot that is already taken.
+    diet_rows = await v3_col("diet_sessions").find(
+        {"coach_id": doctor_id, "status": "upcoming"},
+        {"_id": 0, "slot_time": 1, "lead_name": 1, "lead_id": 1, "id": 1},
+    ).to_list(1000)
+    rows = [*appt_rows, *session_rows, *diet_rows]
 
     # `booked` keeps its old shape — one row per slot — because callers read it to answer
     # "is this slot mine or someone else's". It cannot answer "how full is this slot",
@@ -144,7 +152,14 @@ async def remove_calendar_slots(doctor_id: str, payload: V3RemoveSlotsInput, _: 
         {"physio_id": doctor_id, "status": "upcoming", "slot_time": {"$in": list(normalized_remove)}},
         {"_id": 0, "slot_time": 1},
     ).to_list(100)
-    booked_times = {b["slot_time"] for b in [*booked_appts, *booked_sessions]}
+    # Diet check-ins guard the same way. Left out, a Nutrition Coach's published slot could
+    # be deleted out from under a patient who is booked into it, and the check-in would
+    # survive in `diet_sessions` pointing at a time the calendar no longer offers.
+    booked_checkins = await v3_col("diet_sessions").find(
+        {"coach_id": doctor_id, "status": "upcoming", "slot_time": {"$in": list(normalized_remove)}},
+        {"_id": 0, "slot_time": 1},
+    ).to_list(100)
+    booked_times = {b["slot_time"] for b in [*booked_appts, *booked_sessions, *booked_checkins]}
     blocked = normalized_remove.intersection(booked_times)
     if blocked:
         raise HTTPException(status_code=400, detail=f"Cannot remove booked slots: {', '.join(sorted(blocked))}")

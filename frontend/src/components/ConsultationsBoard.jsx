@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Calendar, CheckCircle2, ChevronLeft, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2, Ban, ClipboardCheck, IndianRupee, Printer, Share2, Download, Eye, FileText } from "lucide-react";
+import { Calendar, CheckCircle2, ChevronLeft, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2, Ban, ClipboardCheck, IndianRupee, Printer, Share2, Download, Eye, FileText, Salad } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,6 +13,7 @@ import {
   collectPackagePayment, collectTreatmentFee, markInstallmentPaid, savePhysioDiagnosis, unlockPhysioDiagnosis,
   saveTreatmentSummary, unlockTreatmentSummary, stagesList, getDoctors,
   assignPhysioWithSessions, getDoctorCalendar,
+  listNutritionCoaches, assignDiet,
   scheduleConsultationFollowUp, rescheduleConsultationFollowUp,
   getLeadRemarks, getLeadActivity,
   saveConsultationDecision, markConsultationCompleted, getBranches,
@@ -454,6 +455,20 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   const [pickerYear, setPickerYear] = useState(new Date().getFullYear());
   const [pickerDate, setPickerDate] = useState(null); // "YYYY-MM-DD"
   const [sessionMinutes, setSessionMinutes] = useState(FALLBACK_SESSION_MINUTES);
+
+  // Assign to Diet Head (Branch Admin only) — the diet vertical's counterpart to Physio
+  // Assign, and the only route a patient has onto a Nutrition Coach's check-in calendar.
+  // One popup rather than the physio flow's two: a diet plan has no fixed number of days
+  // to place (there is no session count on a Diet Package), so there is nothing to count
+  // down and no reason to send the Branch Admin through a full-screen month grid. The
+  // coach's published days are listed and as many as the plan needs get ticked.
+  const [showDietModal, setShowDietModal] = useState(false);
+  const [coachOptions, setCoachOptions] = useState([]);
+  const [coachPick, setCoachPick] = useState("");
+  const [coachCalendar, setCoachCalendar] = useState(null);
+  const [loadingCoachCalendar, setLoadingCoachCalendar] = useState(false);
+  const [pickedCheckinSlots, setPickedCheckinSlots] = useState([]); // ["YYYY-MM-DDTHH:MM", ...]
+  const [assigningDiet, setAssigningDiet] = useState(false);
 
   // Treatment (Head Physio only) — "Save & Move": every patient goes on to treatment
   // sessions once Diagnosis Report + Treatment Summary are written; only the Treatment
@@ -1442,6 +1457,118 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     setAssigningPhysio(false);
   };
 
+  // ---- Assign to Diet Head (Branch Admin) ----
+  const openDietModal = async () => {
+    setShowDietModal(true);
+    setCoachPick(selectedLead.diet_coach_id || "");
+    setCoachCalendar(null);
+    setPickedCheckinSlots([]);
+    try {
+      const res = await listNutritionCoaches();
+      setCoachOptions(res?.coaches || []);
+    } catch {
+      setCoachOptions([]);
+    }
+  };
+
+  // The picked coach's own calendar — the same DIET CALENDAR the Branch Admin publishes
+  // under MANAGEMENT. Only days that coach has actually put up can be booked.
+  useEffect(() => {
+    if (!showDietModal || !coachPick) { setCoachCalendar(null); return; }
+    let cancelled = false;
+    setLoadingCoachCalendar(true);
+    getDoctorCalendar(coachPick)
+      .then((data) => { if (!cancelled) setCoachCalendar(data); })
+      .catch(() => { if (!cancelled) setCoachCalendar(null); })
+      .finally(() => { if (!cancelled) setLoadingCoachCalendar(false); });
+    return () => { cancelled = true; };
+  }, [showDietModal, coachPick]);
+
+  // A coach takes one patient at a time, so a slot is gone once anyone holds it — but this
+  // lead's own check-ins don't count against themselves, or re-opening the picker for the
+  // coach they're already with would refuse the days they already have.
+  const checkinSeatsTaken = useCallback((slot) => {
+    const occ = coachCalendar?.occupancy?.[slot] || 0;
+    const mine = (coachCalendar?.occupants?.[slot] || []).filter((o) => o.lead_id === selectedLead?.id).length;
+    return Math.max(0, occ - mine);
+  }, [coachCalendar, selectedLead]);
+
+  const checkinSlotFull = useCallback(
+    (slot) => checkinSeatsTaken(slot) >= (coachCalendar?.slot_capacity || 1),
+    [checkinSeatsTaken, coachCalendar],
+  );
+
+  const checkinSlotHeldBy = useCallback((slot) => (coachCalendar?.occupants?.[slot] || [])
+    .filter((o) => o.lead_id !== selectedLead?.id)
+    .map((o) => o.lead_name)
+    .filter(Boolean)
+    .join(", "), [coachCalendar, selectedLead]);
+
+  // Published days from today onward, grouped by date. Past days are dropped rather than
+  // shown greyed: a coach's calendar accumulates months of them, and a picker that opens
+  // on last March is a picker nobody can use.
+  const coachSlotsByDate = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    const map = {};
+    for (const slot of coachCalendar?.slots || []) {
+      const [d, t] = slot.split("T");
+      if (!d || !t || d < today) continue;
+      (map[d] = map[d] || []).push(t);
+    }
+    Object.values(map).forEach((times) => times.sort());
+    return map;
+  }, [coachCalendar]);
+
+  // Re-opening for the coach this patient is already with starts from the check-ins they
+  // already hold, so an adjustment only means moving the few days that actually change.
+  useEffect(() => {
+    if (!coachCalendar || !selectedLead || coachPick !== selectedLead.diet_coach_id) return;
+    const mine = Object.entries(coachCalendar.booked || {})
+      .filter(([, b]) => b.lead_id === selectedLead.id)
+      .map(([slot]) => slot)
+      .sort();
+    if (mine.length === 0) return;
+    setPickedCheckinSlots((prev) => (prev.length === 0 ? mine : prev));
+  }, [coachCalendar, coachPick, selectedLead]);
+
+  const sortedCheckinSlots = useMemo(() => [...pickedCheckinSlots].sort(), [pickedCheckinSlots]);
+
+  const toggleCheckinSlot = (slot) => {
+    if (checkinSlotFull(slot)) return;
+    const day = slot.split("T")[0];
+    const prev = pickedCheckinSlots;
+    if (prev.includes(slot)) { setPickedCheckinSlots(prev.filter((s) => s !== slot)); return; }
+    // One check-in a day, the same rule the treatment picker enforces — picking another
+    // time on a day already taken moves that day rather than stacking a second onto it.
+    const sameDay = prev.find((s) => s.startsWith(`${day}T`));
+    setPickedCheckinSlots(sameDay ? [...prev.filter((s) => s !== sameDay), slot] : [...prev, slot]);
+  };
+
+  const submitDietAssign = async () => {
+    if (!coachPick) { toast.error("Choose a Nutrition Coach"); return; }
+    if (sortedCheckinSlots.length === 0) { toast.error("Pick at least one check-in day"); return; }
+    setAssigningDiet(true);
+    try {
+      const res = await assignDiet({ lead_id: selectedLead.id, coach_id: coachPick, slot_times: sortedCheckinSlots });
+      toast.success(`${res.coach_name} assigned — ${res.days_booked} check-in ${res.days_booked === 1 ? "day" : "days"} booked`);
+      setShowDietModal(false);
+      // assign-diet answers with the booking, not the lead, so the row is patched with the
+      // fields it sets. The patient card stays open on purpose: unlike Physio Assign this
+      // isn't the end of their consultation — the physio side may still be mid-flow.
+      const patch = {
+        diet_coach_id: coachPick,
+        diet_coach_name: res.coach_name,
+        diet_stage: "Diet Plan Assigned",
+        diet_recommended: true,
+      };
+      setSelectedLead((l) => (l ? { ...l, ...patch } : l));
+      setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => (l.id === selectedLead.id ? { ...l, ...patch } : l)) }));
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to assign the Nutrition Coach");
+    }
+    setAssigningDiet(false);
+  };
+
   return (
     <div className="space-y-3" data-testid="consultations-board">
       {/* Stage Head Bar — Pre-Sales / Branch Leads style sticky segmented tabs.
@@ -1960,6 +2087,30 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 </Button>
               ) : null;
 
+              // "Assign to Diet Head" sits beside Assign Physio because it is the same kind
+              // of act: handing a paid-up patient to the clinician who will actually see
+              // them. Offered from the moment the Consultation Fee is in, which is when the
+              // consultation that recommends a diet plan has happened.
+              //
+              // Deliberately NOT gated on diet_recommended. That flag records what the Head
+              // Physio advised at the time; a patient who asks for a plan a week later would
+              // otherwise have no way in at all, and the flag is set by the assignment
+              // itself so the coach's queue agrees with the booking either way.
+              const dietAssigned = !!selectedLead.diet_coach_id;
+              const DietButton = selectedLead.package_paid != null ? (
+                <Button
+                  size="sm"
+                  variant={dietAssigned ? "outline" : undefined}
+                  className={dietAssigned
+                    ? "border-orange-200 text-xs text-orange-700 hover:bg-orange-50"
+                    : "bg-orange-500 text-xs text-white hover:bg-orange-600"}
+                  onClick={openDietModal}
+                  data-testid="cons-open-diet-assign"
+                >
+                  <Salad className="mr-1 h-3.5 w-3.5" /> {dietAssigned ? "Reassign Diet Head" : "Assign to Diet Head"}
+                </Button>
+              ) : null;
+
               const panel = (() => {
                 if (stage === "New Appointment") {
                   return (
@@ -2067,10 +2218,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         </p>
                         {ConsultationFeeSummary}
                         <p className="mb-2 mt-3 text-xs text-slate-600">Consultation Only — no treatment sessions. Mark this consultation as completed to close it out.</p>
-                        <Button size="sm" className="bg-emerald-600 text-xs hover:bg-emerald-700" onClick={submitMarkCompleted} disabled={completingConsultation} data-testid="cons-mark-completed">
-                          {completingConsultation ? "Saving..." : "Mark Consultation Completed"}
-                        </Button>
-                        <div className="mt-2 flex flex-wrap gap-1.5">{CancelButton}</div>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <Button size="sm" className="bg-emerald-600 text-xs hover:bg-emerald-700" onClick={submitMarkCompleted} disabled={completingConsultation} data-testid="cons-mark-completed">
+                            {completingConsultation ? "Saving..." : "Mark Consultation Completed"}
+                          </Button>
+                          {DietButton}
+                          {CancelButton}
+                        </div>
                       </div>
                     );
                   }
@@ -2151,14 +2305,22 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         )}
                       </div>
                       {treatmentPaid && (
-                        <div className="mt-3 border-t border-indigo-100 pt-3">
-                          <p className="mb-2 text-xs text-slate-600">Both fees collected. Choose the physiotherapist who will deliver the sessions.</p>
+                        <p className="mt-3 border-t border-indigo-100 pt-3 text-xs text-slate-600">
+                          Both fees collected. Choose the physiotherapist who will deliver the sessions.
+                        </p>
+                      )}
+                      {/* Every action this patient can be sent to next, on one line — the
+                          two assignments and the way out. They were stacked, which read as
+                          three unrelated steps instead of one choice. Wraps on a phone. */}
+                      <div className={`${treatmentPaid ? "mt-2" : "mt-3"} flex flex-wrap items-center gap-1.5`}>
+                        {treatmentPaid && (
                           <Button size="sm" className="bg-violet-600 text-xs hover:bg-violet-700" onClick={openPhysioModal} data-testid="cons-open-physio-assign-from-fee-collected">
                             Assign Physio
                           </Button>
-                        </div>
-                      )}
-                      <div className="mt-3 flex flex-wrap gap-1.5">{CancelButton}</div>
+                        )}
+                        {DietButton}
+                        {CancelButton}
+                      </div>
                     </div>
                   );
                 }
@@ -2171,10 +2333,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           <Users className="h-3.5 w-3.5" /> Physio Assign
                         </p>
                         <p className="text-xs text-slate-600">Treatment Fee collected. Choose the physiotherapist who will deliver the sessions.</p>
-                        <Button size="sm" className="mt-3 bg-violet-600 text-xs hover:bg-violet-700" onClick={openPhysioModal} data-testid="cons-open-physio-assign">
-                          Assign Physio
-                        </Button>
-                        <div className="mt-2 flex flex-wrap gap-1.5">{CancelButton}</div>
+                        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                          <Button size="sm" className="bg-violet-600 text-xs hover:bg-violet-700" onClick={openPhysioModal} data-testid="cons-open-physio-assign">
+                            Assign Physio
+                          </Button>
+                          {DietButton}
+                          {CancelButton}
+                        </div>
                       </div>
                     );
                   }
@@ -2182,9 +2347,15 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3" data-testid="cons-stage-panel-assigned">
                       <p className="text-sm font-semibold text-emerald-800">Treatment sessions in progress</p>
                       <p className="mt-1 text-xs text-slate-600">Assigned Physio: <span className="font-semibold text-slate-800">{selectedLead.assigned_physio_name}</span></p>
-                      <Button size="sm" variant="outline" className="mt-3 text-xs" onClick={openPhysioModal} data-testid="cons-reassign-physio">
-                        Reassign Physio
-                      </Button>
+                      {selectedLead.diet_coach_name && (
+                        <p className="mt-0.5 text-xs text-slate-600">Diet Head: <span className="font-semibold text-slate-800">{selectedLead.diet_coach_name}</span></p>
+                      )}
+                      <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                        <Button size="sm" variant="outline" className="text-xs" onClick={openPhysioModal} data-testid="cons-reassign-physio">
+                          Reassign Physio
+                        </Button>
+                        {DietButton}
+                      </div>
                     </div>
                   );
                 }
@@ -2194,6 +2365,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     <div className="rounded-lg border border-slate-200 bg-slate-50 p-3" data-testid="cons-stage-panel-completed">
                       <p className="text-sm font-semibold text-slate-700">Consultation completed</p>
                       <p className="mt-1 text-xs text-slate-500">Consultation Only — no treatment sessions were required.</p>
+                      {selectedLead.diet_coach_name && (
+                        <p className="mt-1 text-xs text-slate-600">Diet Head: <span className="font-semibold text-slate-800">{selectedLead.diet_coach_name}</span></p>
+                      )}
+                      {/* A closed consultation can still start a diet plan. "Consultation +
+                          Diet" patients land here the moment the consultation is marked
+                          completed, and that is exactly when their plan gets booked. */}
+                      {DietButton && <div className="mt-3 flex flex-wrap items-center gap-1.5">{DietButton}</div>}
                     </div>
                   );
                 }
@@ -3022,6 +3200,139 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 </div>
               );
             })()}
+
+            {/* Assign to Diet Head popup (Branch Admin) — picks the Nutrition Coach and
+                books the check-in days, in one step. The days come from that coach's own
+                DIET CALENDAR, so nothing can be booked into a day they haven't published. */}
+            {showDietModal && (
+              <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-3 sm:p-4" data-testid="cons-diet-modal">
+                <div className="flex max-h-[92vh] w-full max-w-md flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
+                  <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+                    <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-800">
+                      <Salad className="h-4 w-4 text-orange-500" /> Assign to Diet Head
+                    </p>
+                    <button onClick={() => setShowDietModal(false)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-diet-close">
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  <div className="space-y-3 overflow-y-auto px-4 py-3">
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600" data-testid="cons-diet-context">
+                      <p className="font-semibold text-slate-700">{selectedLead.name}</p>
+                      <p className="mt-0.5">
+                        {selectedLead.diet_recommended
+                          ? <span className="font-semibold text-orange-600">Diet recommended by the Head Physio</span>
+                          : "No diet was recommended at the consultation — assigning one now puts this patient on the Nutrition Coach's list."}
+                      </p>
+                      {selectedLead.diet_coach_name && (
+                        <p className="mt-0.5">Currently with <span className="font-semibold text-slate-700">{selectedLead.diet_coach_name}</span></p>
+                      )}
+                    </div>
+
+                    <p className="text-[11px] text-slate-500">Nutrition Coaches in this branch — pick one to choose their check-in days</p>
+
+                    {coachOptions.length === 0 ? (
+                      <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-4 text-center text-xs text-slate-400" data-testid="cons-diet-no-coaches">
+                        No Nutrition Coach for this branch yet. Add one under HR Admin, then publish their days in MANAGEMENT &gt; DIET CALENDAR.
+                      </p>
+                    ) : (
+                      <div className="max-h-32 space-y-1.5 overflow-y-auto">
+                        {coachOptions.map((c) => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => { setCoachPick(c.id); if (c.id !== selectedLead.diet_coach_id) setPickedCheckinSlots([]); }}
+                            className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-xs font-semibold transition ${
+                              coachPick === c.id ? "border-orange-500 bg-orange-50 text-orange-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                            }`}
+                            data-testid={`cons-diet-coach-option-${c.id}`}
+                          >
+                            <span className="truncate">{c.full_name}{c.specialization ? ` · ${c.specialization}` : ""}</span>
+                            {coachPick === c.id && <CheckCircle2 className="ml-1.5 h-3.5 w-3.5 shrink-0" />}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {coachPick && (
+                      loadingCoachCalendar ? (
+                        <p className="py-4 text-center text-xs text-slate-400">Loading their calendar...</p>
+                      ) : Object.keys(coachSlotsByDate).length === 0 ? (
+                        <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-center text-xs text-amber-700" data-testid="cons-diet-no-slots">
+                          This coach has no upcoming days published. Add them under MANAGEMENT &gt; DIET CALENDAR first.
+                        </p>
+                      ) : (
+                        <div data-testid="cons-diet-slot-picker">
+                          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-orange-700">
+                            Check-in days · one a day · {sortedCheckinSlots.length} picked
+                          </p>
+                          <div className="max-h-56 space-y-2 overflow-y-auto rounded-lg border border-slate-200 p-2">
+                            {Object.keys(coachSlotsByDate).sort().map((date) => (
+                              <div key={date}>
+                                <p className="mb-1 text-[11px] font-semibold text-slate-500">{shortDayLabel(date)}</p>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {coachSlotsByDate[date].map((time) => {
+                                    const slot = `${date}T${time}`;
+                                    const full = checkinSlotFull(slot);
+                                    const picked = pickedCheckinSlots.includes(slot);
+                                    return (
+                                      <button
+                                        key={slot}
+                                        type="button"
+                                        disabled={full}
+                                        onClick={() => toggleCheckinSlot(slot)}
+                                        title={full ? `Taken by ${checkinSlotHeldBy(slot) || "another patient"}` : undefined}
+                                        className={`rounded-md border px-2 py-1 text-[11px] font-semibold transition ${
+                                          full
+                                            ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400 line-through"
+                                            : picked
+                                            ? "border-orange-500 bg-orange-500 text-white"
+                                            : "border-slate-200 text-slate-600 hover:border-orange-300 hover:bg-orange-50"
+                                        }`}
+                                        data-testid={`cons-diet-slot-${slot}`}
+                                      >
+                                        {to12h(time)}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )
+                    )}
+
+                    {sortedCheckinSlots.length > 0 && (
+                      <div className="rounded-lg border border-orange-200 bg-orange-50 p-3" data-testid="cons-diet-plan-preview">
+                        <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-orange-700">Check-in days fixed</p>
+                        <div className="max-h-28 space-y-1 overflow-y-auto text-xs text-slate-700">
+                          {sortedCheckinSlots.map((slot, i) => {
+                            const [d, t] = slot.split("T");
+                            return <p key={slot}><b>Day {i + 1}</b> · {dayLabel(d)} · {to12h(t)}</p>;
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="border-t border-slate-100 px-4 py-3">
+                    <Button
+                      className="w-full bg-orange-500 text-xs hover:bg-orange-600"
+                      onClick={submitDietAssign}
+                      disabled={assigningDiet || !coachPick || sortedCheckinSlots.length === 0}
+                      data-testid="cons-diet-submit"
+                    >
+                      {assigningDiet
+                        ? "Assigning..."
+                        : sortedCheckinSlots.length === 0
+                        ? "Pick the check-in days"
+                        : `Assign & Book ${sortedCheckinSlots.length} Check-in ${sortedCheckinSlots.length === 1 ? "Day" : "Days"}`}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Physio Assign popup (Branch Admin) — after fees are collected */}
             {showPhysioModal && (
