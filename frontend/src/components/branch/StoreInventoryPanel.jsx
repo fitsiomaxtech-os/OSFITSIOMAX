@@ -6,6 +6,7 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
+import { StatTile } from "@/components/ui/stat-tile";
 import {
   listInventoryItems, inventorySummary, inventoryMovements,
   createInventoryItem, updateInventoryItem, deleteInventoryItem,
@@ -120,20 +121,6 @@ const StockBadge = ({ qty, low }) => {
     </span>
   );
 };
-
-const StatTile = ({ label, value, sub, icon: Icon, color }) => (
-  <div className="relative overflow-hidden rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-    <span
-      aria-hidden
-      className="pointer-events-none absolute -right-6 -top-6 h-20 w-20 rounded-full"
-      style={{ background: `linear-gradient(135deg, ${color}2E, ${color}0D)` }}
-    />
-    <Icon aria-hidden className="absolute right-3.5 top-3.5 h-4 w-4" style={{ color }} />
-    <p className="pr-9 text-[11px] font-bold uppercase leading-tight tracking-wider text-slate-500">{label}</p>
-    <p className="mt-1 text-xl font-extrabold sm:text-2xl" style={{ color }}>{value}</p>
-    <p className="mt-0.5 text-[10px] text-slate-400">{sub}</p>
-  </div>
-);
 
 /**
  * Stock for one Fitsiomax Store shelf. Tablet, Supplementary and Equipment are the same

@@ -1,8 +1,10 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { Eye, ChevronDown, ChevronRight, Printer, FileSpreadsheet, CheckCircle2 } from "lucide-react";
+import { Eye, ChevronDown, ChevronRight, Printer, FileSpreadsheet, CheckCircle2, Wallet, Stethoscope, Activity } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { StatTile } from "@/components/ui/stat-tile";
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+const plural = (n, noun) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 const todayIso = () => new Date().toISOString().slice(0, 10);
 // Modes whose display name isn't just their key capitalised — without these,
 // "account_transfer" would render as "Account_transfer".
@@ -62,11 +64,8 @@ const ColorFilterDropdown = ({ value, options, onChange, testId }) => {
   );
 };
 
-const SummaryCard = ({ label, value, color }) => (
-  <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-    <p className="text-xs text-slate-500">{label}</p>
-    <p className="mt-1 text-2xl font-bold" style={{ color }}>{value}</p>
-  </div>
+const SummaryCard = ({ label, ...rest }) => (
+  <StatTile label={label} testid={`payment-paid-summary-${label.toLowerCase().replace(/\s+/g, "-")}`} {...rest} />
 );
 
 const toCsv = (rows) => {
@@ -124,10 +123,10 @@ export const PaymentPaidBoard = ({ rows, onView }) => {
   return (
     <div className="space-y-4" data-testid="payment-paid-board">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <SummaryCard label="Total Received" value={fmt(totals.total_paid)} color="#059669" />
-        <SummaryCard label="Consultation Paid" value={fmt(totals.consultation_paid)} color="#0284c7" />
-        <SummaryCard label="Session Paid" value={fmt(totals.session_paid)} color="#7c3aed" />
-        <SummaryCard label="Fully Paid Clients" value={filtered.length} color="#059669" />
+        <SummaryCard label="Total Received" value={fmt(totals.total_paid)} sub={plural(filtered.length, "client")} icon={Wallet} color="#059669" />
+        <SummaryCard label="Consultation Paid" value={fmt(totals.consultation_paid)} sub="of the total received" icon={Stethoscope} color="#0284c7" />
+        <SummaryCard label="Session Paid" value={fmt(totals.session_paid)} sub="of the total received" icon={Activity} color="#7c3aed" />
+        <SummaryCard label="Fully Paid Clients" value={filtered.length} sub="nothing left owing" icon={CheckCircle2} color="#059669" />
       </div>
 
       <Card>

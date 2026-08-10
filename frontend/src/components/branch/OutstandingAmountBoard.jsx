@@ -1,9 +1,11 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { Eye, ChevronDown, ChevronRight, ChevronLeft, Printer, FileSpreadsheet } from "lucide-react";
+import { Eye, ChevronDown, ChevronRight, ChevronLeft, Printer, FileSpreadsheet, AlertCircle, AlarmClock, CalendarClock, Users } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { StatTile } from "@/components/ui/stat-tile";
 import { getClientTransactionHistory } from "@/lib/api";
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+const plural = (n, noun) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 const todayIso = () => new Date().toISOString().slice(0, 10);
 const formatMode = (mode) => (mode ? (mode === "upi" ? "UPI" : mode.charAt(0).toUpperCase() + mode.slice(1)) : "");
 
@@ -161,11 +163,8 @@ const MonthFilterBar = ({ month, setMonth }) => {
   );
 };
 
-const SummaryCard = ({ label, value, color }) => (
-  <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-    <p className="text-xs text-slate-500">{label}</p>
-    <p className="mt-1 text-2xl font-bold" style={{ color }}>{value}</p>
-  </div>
+const SummaryCard = ({ label, ...rest }) => (
+  <StatTile label={label} testid={`outstanding-summary-${label.toLowerCase().replace(/\s+/g, "-")}`} {...rest} />
 );
 
 const toCsv = (rows) => {
@@ -239,11 +238,19 @@ export const OutstandingAmountBoard = ({ rows, onView }) => {
     return true;
   }), [rows, search, status, month, minAmount, maxAmount]);
 
+  // Counts alongside the sums, so each card's second line says how many clients are behind
+  // the figure rather than leaving a number with no sense of scale.
   const totals = useMemo(() => {
-    const totalOutstanding = filtered.reduce((s, r) => s + r.balance, 0);
-    const overdue = filtered.filter((r) => r.status === "overdue").reduce((s, r) => s + r.balance, 0);
-    const dueToday = filtered.filter((r) => r.due_date === today).reduce((s, r) => s + r.balance, 0);
-    return { totalOutstanding, overdue, dueToday, pendingClients: filtered.length };
+    const overdueRows = filtered.filter((r) => r.status === "overdue");
+    const dueTodayRows = filtered.filter((r) => r.due_date === today);
+    return {
+      totalOutstanding: filtered.reduce((s, r) => s + r.balance, 0),
+      overdue: overdueRows.reduce((s, r) => s + r.balance, 0),
+      overdueClients: overdueRows.length,
+      dueToday: dueTodayRows.reduce((s, r) => s + r.balance, 0),
+      dueTodayClients: dueTodayRows.length,
+      pendingClients: filtered.length,
+    };
   }, [filtered, today]);
 
   const footer = useMemo(() => filtered.reduce((acc, r) => ({
@@ -257,10 +264,10 @@ export const OutstandingAmountBoard = ({ rows, onView }) => {
       <MonthFilterBar month={month} setMonth={setMonth} />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <SummaryCard label="Total Outstanding" value={fmt(totals.totalOutstanding)} color="#d97706" />
-        <SummaryCard label="Overdue Amount" value={fmt(totals.overdue)} color="#e11d48" />
-        <SummaryCard label="Due Today" value={fmt(totals.dueToday)} color="#0284c7" />
-        <SummaryCard label="Pending Clients" value={totals.pendingClients} color="#7c3aed" />
+        <SummaryCard label="Total Outstanding" value={fmt(totals.totalOutstanding)} sub={plural(totals.pendingClients, "client")} icon={AlertCircle} color="#d97706" />
+        <SummaryCard label="Overdue Amount" value={fmt(totals.overdue)} sub={plural(totals.overdueClients, "client")} icon={AlarmClock} color="#e11d48" />
+        <SummaryCard label="Due Today" value={fmt(totals.dueToday)} sub={plural(totals.dueTodayClients, "client")} icon={CalendarClock} color="#0284c7" />
+        <SummaryCard label="Pending Clients" value={totals.pendingClients} sub="still owing something" icon={Users} color="#7c3aed" />
       </div>
 
       <Card>

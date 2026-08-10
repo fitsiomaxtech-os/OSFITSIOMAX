@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Pill, FlaskConical, Dumbbell, ShoppingBag } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { StatTile } from "@/components/ui/stat-tile";
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 
@@ -48,26 +49,8 @@ const when = (iso) => {
   } catch { return iso.slice(0, 16); }
 };
 
-const Tile = ({ label, value, sub, icon: Icon, color, active, onClick }) => (
-  <button
-    type="button"
-    onClick={onClick}
-    className={`relative overflow-hidden rounded-xl border bg-white p-4 text-left shadow-sm transition ${
-      active ? "border-transparent" : "border-slate-200 hover:shadow-md"
-    }`}
-    style={active ? { boxShadow: `0 0 0 2px ${color}` } : undefined}
-    data-testid={`store-payment-tile-${label.toLowerCase().replace(/\s+/g, "-")}`}
-  >
-    <span
-      aria-hidden
-      className="pointer-events-none absolute -right-6 -top-6 h-20 w-20 rounded-full"
-      style={{ background: `linear-gradient(135deg, ${color}2E, ${color}0D)` }}
-    />
-    <Icon aria-hidden className="absolute right-3.5 top-3.5 h-4 w-4" style={{ color }} />
-    <p className="pr-9 text-[11px] font-bold uppercase leading-tight tracking-wider text-slate-500">{label}</p>
-    <p className="mt-1 text-xl font-extrabold sm:text-2xl" style={{ color }}>{value}</p>
-    <p className="mt-0.5 text-[10px] text-slate-400">{sub}</p>
-  </button>
+const Tile = ({ label, ...rest }) => (
+  <StatTile label={label} testid={`store-payment-tile-${label.toLowerCase().replace(/\s+/g, "-")}`} {...rest} />
 );
 
 /**

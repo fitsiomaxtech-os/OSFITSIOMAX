@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Eye, Banknote, CreditCard, Smartphone, Landmark, ChevronDown, CalendarDays, CalendarRange, AlertCircle } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { MilkDateInput } from "@/components/ui/milk-calendar";
+import { StatTile } from "@/components/ui/stat-tile";
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 const todayIso = () => new Date().toISOString().slice(0, 10);
@@ -89,39 +90,8 @@ const StatusBadge = ({ paid }) => (
   </span>
 );
 
-/**
- * A figure, what it counts, and the card's colour carried by a disc bleeding out of the
- * top-right corner rather than by the whole tile — six filled tiles side by side is six
- * things shouting, and none of them is the number.
- *
- * Every colour is an inline style built from one hex per card. Tailwind reads class names
- * out of the source, so a `bg-${tone}-100` built at runtime compiles to nothing and the
- * disc would come out invisible; a hex needs no such care and adding a card later needs
- * no class map kept in step.
- */
-const SummaryCard = ({ label, value, sub, icon: Icon, color, active, onClick }) => (
-  <button
-    type="button"
-    onClick={onClick}
-    className={`relative overflow-hidden rounded-xl border bg-white p-4 text-left shadow-sm transition ${
-      active ? "border-transparent" : "border-slate-200 hover:shadow-md"
-    }`}
-    style={active ? { boxShadow: `0 0 0 2px ${color}` } : undefined}
-    data-testid={`consultation-summary-${label.toLowerCase().replace(/\s+/g, "-")}`}
-  >
-    <span
-      aria-hidden
-      className="pointer-events-none absolute -right-6 -top-6 h-20 w-20 rounded-full"
-      style={{ background: `linear-gradient(135deg, ${color}2E, ${color}0D)` }}
-    />
-    <Icon aria-hidden className="absolute right-3.5 top-3.5 h-4 w-4" style={{ color }} />
-    <p className="pr-9 text-[11px] font-bold uppercase leading-tight tracking-wider text-slate-500">{label}</p>
-    {/* Smaller on a phone: two cards to a row leaves about 130px of usable width, and
-        "Rs.1,04,000" at text-2xl is wider than that with nowhere to wrap — which the
-        card's own clipping would now cut off rather than let spill. */}
-    <p className="mt-1 text-xl font-extrabold sm:text-2xl" style={{ color }}>{value}</p>
-    <p className="mt-0.5 text-[10px] text-slate-400">{sub}</p>
-  </button>
+const SummaryCard = ({ label, ...rest }) => (
+  <StatTile label={label} testid={`consultation-summary-${label.toLowerCase().replace(/\s+/g, "-")}`} {...rest} />
 );
 
 export const ConsultationCollectionsBoard = ({ rows, onView }) => {

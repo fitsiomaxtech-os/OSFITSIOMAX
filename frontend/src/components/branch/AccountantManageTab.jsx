@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Eye } from "lucide-react";
+import { Eye, Wallet, Stethoscope, Activity, ShoppingBag } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { StatTile } from "@/components/ui/stat-tile";
 import { getBranches, getRevenueOverview } from "@/lib/api";
 import { ClientHistoryModal } from "@/components/branch/ClientHistoryModal";
 import { OutstandingAmountBoard } from "@/components/branch/OutstandingAmountBoard";
@@ -44,14 +45,17 @@ const subTabClasses = (tab, active) => {
   return active ? "bg-sky-50 text-sky-700" : "text-slate-600 hover:bg-slate-50";
 };
 
+// The card, the table it filters to, and the label above that table are one thing, so they
+// are one list rather than three that have to be kept in step.
 const REVENUE_VIEWS = [
-  { key: "collected", label: "Total Collected", color: "#059669" },
-  { key: "consultation", label: "Consultation Revenue", color: "#0284c7" },
-  { key: "session", label: "Session Revenue", color: "#7c3aed" },
-  { key: "store", label: "Store Revenue", color: "#d97706" },
+  { key: "collected", label: "Total Collected", color: "#059669", icon: Wallet },
+  { key: "consultation", label: "Consultation Revenue", color: "#0284c7", icon: Stethoscope },
+  { key: "session", label: "Session Revenue", color: "#7c3aed", icon: Activity },
+  { key: "store", label: "Store Revenue", color: "#d97706", icon: ShoppingBag },
 ];
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+const countLabel = (n, noun) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 
 const PAYMENT_MODE_STYLES = {
   cash: "bg-emerald-50 text-emerald-700 border-emerald-200",
@@ -107,9 +111,20 @@ export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
 
   const k = data?.kpis || {};
   const b = data?.breakdown || {};
-  const transactions = data?.transactions || [];
-  const outstanding = data?.outstanding_clients || [];
+  // `data?.x || []` builds a fresh array on every render, so every memo keyed on one was
+  // re-running each time and memoising nothing. Held steady here instead, which is what
+  // the exhaustive-deps warnings on this file were pointing at.
+  const transactions = useMemo(() => data?.transactions || [], [data]);
+  const outstanding = useMemo(() => data?.outstanding_clients || [], [data]);
   const schedule = data?.payment_schedule || [];
+
+  // How many transactions sit behind each figure — the line under it, and the count of
+  // rows clicking it will leave in the table below.
+  const txnCounts = useMemo(() => {
+    const acc = { collected: transactions.length, consultation: 0, session: 0, store: 0 };
+    transactions.forEach((t) => { if (acc[t.source] !== undefined) acc[t.source] += 1; });
+    return acc;
+  }, [transactions]);
 
   // Payment Paid — clients with nothing left owing, rolled up from their own
   // transactions. Anyone still carrying a balance belongs to Outstanding Amount, so they
@@ -189,23 +204,20 @@ export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
         <div className="space-y-4" data-testid="accountant-manage-total-revenue">
           {/* Four across from lg. Store Revenue joined the row, and three-up would have
               left it wrapped onto a line of its own looking like a footnote. */}
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <KpiCard
-              label="Total Collected" value={fmt(k.total_collected)} color="#059669"
-              active={revenueView === "collected"} onClick={() => setRevenueView("collected")}
-            />
-            <KpiCard
-              label="Consultation Revenue" value={fmt(b.consultation_revenue)} color="#0284c7"
-              active={revenueView === "consultation"} onClick={() => setRevenueView("consultation")}
-            />
-            <KpiCard
-              label="Session Revenue" value={fmt(b.session_revenue)} color="#7c3aed"
-              active={revenueView === "session"} onClick={() => setRevenueView("session")}
-            />
-            <KpiCard
-              label="Store Revenue" value={fmt(b.store_revenue)} color="#d97706"
-              active={revenueView === "store"} onClick={() => setRevenueView("store")}
-            />
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            {REVENUE_VIEWS.map((v) => (
+              <StatTile
+                key={v.key}
+                label={v.label}
+                value={fmt(v.key === "collected" ? k.total_collected : b[`${v.key}_revenue`])}
+                sub={countLabel(txnCounts[v.key], v.key === "store" ? "sale" : "payment")}
+                icon={v.icon}
+                color={v.color}
+                active={revenueView === v.key}
+                onClick={() => setRevenueView(v.key)}
+                testid={`revenue-kpi-${v.label.toLowerCase().replace(/\s+/g, "-")}`}
+              />
+            ))}
           </div>
 
           <RevenueDetailTable
@@ -234,22 +246,6 @@ export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
     </div>
   );
 };
-
-// The card's colour lives in the figure alone. It used to also run down the left edge as
-// a 4px bar, which read as a second, permanent selection marker sitting beside the real
-// one — three cards all looked picked.
-const KpiCard = ({ label, value, color, active, onClick }) => (
-  <button
-    type="button"
-    onClick={onClick}
-    className={`rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm transition ${active ? "ring-2 ring-offset-1" : "hover:shadow-md"}`}
-    style={active ? { boxShadow: `0 0 0 2px ${color}33` } : undefined}
-    data-testid={`revenue-kpi-${label.toLowerCase().replace(/\s+/g, "-")}`}
-  >
-    <p className="text-xs text-slate-500">{label}</p>
-    <p className="mt-1 text-2xl font-bold" style={{ color }}>{value}</p>
-  </button>
-);
 
 const RevenueDetailTable = ({ title, rows, onView }) => (
   <Card data-testid="accountant-manage-revenue-detail">

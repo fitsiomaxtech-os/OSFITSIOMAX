@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Eye, Printer, ChevronDown } from "lucide-react";
+import { Eye, Printer, ChevronDown, CalendarRange, CheckCircle2, Clock, AlertTriangle } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { StatTile } from "@/components/ui/stat-tile";
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 const todayIso = () => new Date().toISOString().slice(0, 10);
@@ -33,11 +34,8 @@ const ProgressBar = ({ paid, total }) => {
   );
 };
 
-const SummaryCard = ({ label, value, color }) => (
-  <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-    <p className="text-xs text-slate-500">{label}</p>
-    <p className="mt-1 text-2xl font-bold" style={{ color }}>{value}</p>
-  </div>
+const SummaryCard = ({ label, ...rest }) => (
+  <StatTile label={label} testid={`schedules-summary-${label.toLowerCase().replace(/\s+/g, "-")}`} {...rest} />
 );
 
 const DUE_PRESETS = [
@@ -131,20 +129,28 @@ export const PaymentSchedulesBoard = ({ rows, onView }) => {
     return true;
   }), [rows, search, branch, status, dueFilter, today, weekAhead]);
 
-  const totals = useMemo(() => ({
-    total: rows.length,
-    paid: rows.filter((r) => r.status === "paid").length,
-    pending: rows.filter((r) => r.status === "upcoming" || r.status === "due_today").length,
-    overdue: rows.filter((r) => r.status === "overdue").length,
-  }), [rows]);
+  // The figure is a count of installments; the line under it is what they come to in
+  // money, which is the part an accountant is actually chasing.
+  const totals = useMemo(() => {
+    const bucket = (pred) => {
+      const hits = rows.filter(pred);
+      return { count: hits.length, amount: hits.reduce((s, r) => s + (r.amount || 0), 0) };
+    };
+    return {
+      all: bucket(() => true),
+      paid: bucket((r) => r.status === "paid"),
+      pending: bucket((r) => r.status === "upcoming" || r.status === "due_today"),
+      overdue: bucket((r) => r.status === "overdue"),
+    };
+  }, [rows]);
 
   return (
     <div className="space-y-4" data-testid="payment-schedules-board">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <SummaryCard label="Total Scheduled" value={totals.total} color="#7c3aed" />
-        <SummaryCard label="Paid Installments" value={totals.paid} color="#059669" />
-        <SummaryCard label="Pending Installments" value={totals.pending} color="#0284c7" />
-        <SummaryCard label="Overdue Installments" value={totals.overdue} color="#e11d48" />
+        <SummaryCard label="Total Scheduled" value={totals.all.count} sub={fmt(totals.all.amount)} icon={CalendarRange} color="#7c3aed" />
+        <SummaryCard label="Paid Installments" value={totals.paid.count} sub={fmt(totals.paid.amount)} icon={CheckCircle2} color="#059669" />
+        <SummaryCard label="Pending Installments" value={totals.pending.count} sub={fmt(totals.pending.amount)} icon={Clock} color="#0284c7" />
+        <SummaryCard label="Overdue Installments" value={totals.overdue.count} sub={fmt(totals.overdue.amount)} icon={AlertTriangle} color="#e11d48" />
       </div>
 
       <Card>

@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Eye, ChevronDown, Printer, FileSpreadsheet, XCircle } from "lucide-react";
+import { Eye, ChevronDown, Printer, FileSpreadsheet, XCircle, AlarmClock, CalendarClock, Users } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { StatTile } from "@/components/ui/stat-tile";
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+const plural = (n, noun) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
 // The overview's status codes, re-labelled for this board. "partial" upstream just
@@ -68,11 +70,8 @@ const ColorFilterDropdown = ({ value, options, onChange, testId }) => {
   );
 };
 
-const SummaryCard = ({ label, value, color }) => (
-  <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-    <p className="text-xs text-slate-500">{label}</p>
-    <p className="mt-1 text-2xl font-bold" style={{ color }}>{value}</p>
-  </div>
+const SummaryCard = ({ label, ...rest }) => (
+  <StatTile label={label} testid={`payment-unpaid-summary-${label.toLowerCase().replace(/\s+/g, "-")}`} {...rest} />
 );
 
 const toCsv = (rows) => {
@@ -124,12 +123,19 @@ export const PaymentUnpaidBoard = ({ rows, onView }) => {
     return true;
   }), [rows, search, status, minAmount, maxAmount]);
 
-  const totals = useMemo(() => ({
-    unpaid: filtered.reduce((s, r) => s + (r.balance || 0), 0),
-    overdue: filtered.filter((r) => r.status === "overdue").reduce((s, r) => s + (r.balance || 0), 0),
-    dueToday: filtered.filter((r) => r.due_date === today).reduce((s, r) => s + (r.balance || 0), 0),
-    clients: filtered.length,
-  }), [filtered, today]);
+  // Counts as well as sums, so each card's second line says how many clients it covers.
+  const totals = useMemo(() => {
+    const overdueRows = filtered.filter((r) => r.status === "overdue");
+    const dueTodayRows = filtered.filter((r) => r.due_date === today);
+    return {
+      unpaid: filtered.reduce((s, r) => s + (r.balance || 0), 0),
+      overdue: overdueRows.reduce((s, r) => s + (r.balance || 0), 0),
+      overdueClients: overdueRows.length,
+      dueToday: dueTodayRows.reduce((s, r) => s + (r.balance || 0), 0),
+      dueTodayClients: dueTodayRows.length,
+      clients: filtered.length,
+    };
+  }, [filtered, today]);
 
   const footer = useMemo(() => filtered.reduce((acc, r) => ({
     total_bill: acc.total_bill + (r.total_bill || 0),
@@ -139,10 +145,10 @@ export const PaymentUnpaidBoard = ({ rows, onView }) => {
   return (
     <div className="space-y-4" data-testid="payment-unpaid-board">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <SummaryCard label="Total Unpaid" value={fmt(totals.unpaid)} color="#e11d48" />
-        <SummaryCard label="Overdue Amount" value={fmt(totals.overdue)} color="#be123c" />
-        <SummaryCard label="Due Today" value={fmt(totals.dueToday)} color="#d97706" />
-        <SummaryCard label="Unpaid Clients" value={totals.clients} color="#7c3aed" />
+        <SummaryCard label="Total Unpaid" value={fmt(totals.unpaid)} sub={plural(totals.clients, "client")} icon={XCircle} color="#e11d48" />
+        <SummaryCard label="Overdue Amount" value={fmt(totals.overdue)} sub={plural(totals.overdueClients, "client")} icon={AlarmClock} color="#be123c" />
+        <SummaryCard label="Due Today" value={fmt(totals.dueToday)} sub={plural(totals.dueTodayClients, "client")} icon={CalendarClock} color="#d97706" />
+        <SummaryCard label="Unpaid Clients" value={totals.clients} sub="billed, nothing paid" icon={Users} color="#7c3aed" />
       </div>
 
       <Card>

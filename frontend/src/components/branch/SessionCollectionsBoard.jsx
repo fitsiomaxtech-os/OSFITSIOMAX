@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Eye, Banknote, CreditCard, Smartphone, Landmark, Layers, ChevronDown } from "lucide-react";
+import { Eye, Banknote, CreditCard, Smartphone, Landmark, Layers, ChevronDown, CalendarDays, CalendarRange, AlertCircle } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { MilkDateInput } from "@/components/ui/milk-calendar";
+import { StatTile } from "@/components/ui/stat-tile";
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 const todayIso = () => new Date().toISOString().slice(0, 10);
+const plural = (n, noun) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 
 const MODE_META = {
   cash: { label: "Cash", icon: Banknote, classes: "bg-emerald-50 text-emerald-700 border-emerald-200" },
@@ -99,17 +101,8 @@ const ColorFilterDropdown = ({ value, options, onChange, testId }) => {
   );
 };
 
-const SummaryCard = ({ label, value, color, active, onClick }) => (
-  <button
-    type="button"
-    onClick={onClick}
-    className={`rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm transition ${active ? "ring-2 ring-offset-1" : "hover:shadow-md"}`}
-    style={active ? { boxShadow: `0 0 0 2px ${color}33` } : undefined}
-    data-testid={`session-summary-${label.toLowerCase().replace(/\s+/g, "-")}`}
-  >
-    <p className="text-xs text-slate-500">{label}</p>
-    <p className="mt-1 text-2xl font-bold" style={{ color }}>{value}</p>
-  </button>
+const SummaryCard = ({ label, ...rest }) => (
+  <StatTile label={label} testid={`session-summary-${label.toLowerCase().replace(/\s+/g, "-")}`} {...rest} />
 );
 
 export const SessionCollectionsBoard = ({ rows, onView }) => {
@@ -154,29 +147,39 @@ export const SessionCollectionsBoard = ({ rows, onView }) => {
     return true;
   }), [rows, search, branch, mode, status, fromDate, toDate, activeCard, today, monthPrefix]);
 
+  // Each card carries its own count as well as its sum, so the line under the figure says
+  // how many rows clicking it will leave in the table.
   const totals = useMemo(() => {
-    const todayTotal = rows.filter((r) => (r.date || "").slice(0, 10) === today).reduce((s, r) => s + r.gross, 0);
-    const monthTotal = rows.filter((r) => (r.date || "").slice(0, 7) === monthPrefix).reduce((s, r) => s + r.gross, 0);
-    const cash = rows.filter((r) => r.payment_mode === "cash").reduce((s, r) => s + r.gross, 0);
-    const card = rows.filter((r) => r.payment_mode === "card").reduce((s, r) => s + r.gross, 0);
-    const upi = rows.filter((r) => r.payment_mode === "upi").reduce((s, r) => s + r.gross, 0);
-    const partial = rows.filter((r) => r.session_status === "partial").reduce((s, r) => s + (r.session_due || 0), 0);
+    const bucket = (pred, amount = (r) => r.gross) => {
+      const hits = rows.filter(pred);
+      return { total: hits.reduce((s, r) => s + (amount(r) || 0), 0), count: hits.length };
+    };
     const uniqueDue = new Map();
     rows.forEach((r) => uniqueDue.set(r.lead_id, r.session_due || 0));
-    const outstanding = [...uniqueDue.values()].reduce((s, v) => s + v, 0);
-    return { todayTotal, monthTotal, cash, card, upi, partial, outstanding };
+    const owing = [...uniqueDue.values()].filter((v) => v > 0);
+    return {
+      today: bucket((r) => (r.date || "").slice(0, 10) === today),
+      month: bucket((r) => (r.date || "").slice(0, 7) === monthPrefix),
+      cash: bucket((r) => r.payment_mode === "cash"),
+      card: bucket((r) => r.payment_mode === "card"),
+      upi: bucket((r) => r.payment_mode === "upi"),
+      partial: bucket((r) => r.session_status === "partial", (r) => r.session_due),
+      // Summed per client rather than per row: one client's due appears on every row of
+      // theirs, and adding those up would count the same money several times over.
+      outstanding: { total: owing.reduce((s, v) => s + v, 0), count: owing.length },
+    };
   }, [rows, today, monthPrefix]);
 
   return (
     <div className="space-y-4" data-testid="session-collections-board">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-7">
-        <SummaryCard label="Today's Collection" value={fmt(totals.todayTotal)} color="#059669" active={activeCard === "today"} onClick={() => toggleCard("today")} />
-        <SummaryCard label="Monthly Collection" value={fmt(totals.monthTotal)} color="#0284c7" active={activeCard === "month"} onClick={() => toggleCard("month")} />
-        <SummaryCard label="Cash" value={fmt(totals.cash)} color="#16a34a" active={activeCard === "cash"} onClick={() => toggleCard("cash", { modeValue: "cash" })} />
-        <SummaryCard label="Card" value={fmt(totals.card)} color="#7c3aed" active={activeCard === "card"} onClick={() => toggleCard("card", { modeValue: "card" })} />
-        <SummaryCard label="UPI" value={fmt(totals.upi)} color="#0ea5e9" active={activeCard === "upi"} onClick={() => toggleCard("upi", { modeValue: "upi" })} />
-        <SummaryCard label="Partial Payments" value={fmt(totals.partial)} color="#ea580c" active={activeCard === "partial"} onClick={() => toggleCard("partial", { statusValue: "partial" })} />
-        <SummaryCard label="Outstanding Amount" value={fmt(totals.outstanding)} color="#d97706" active={activeCard === "outstanding"} onClick={() => toggleCard("outstanding")} />
+        <SummaryCard label="Today's Collection" value={fmt(totals.today.total)} sub={plural(totals.today.count, "payment")} icon={CalendarDays} color="#059669" active={activeCard === "today"} onClick={() => toggleCard("today")} />
+        <SummaryCard label="Monthly Collection" value={fmt(totals.month.total)} sub={plural(totals.month.count, "payment")} icon={CalendarRange} color="#0284c7" active={activeCard === "month"} onClick={() => toggleCard("month")} />
+        <SummaryCard label="Cash" value={fmt(totals.cash.total)} sub={plural(totals.cash.count, "payment")} icon={Banknote} color="#16a34a" active={activeCard === "cash"} onClick={() => toggleCard("cash", { modeValue: "cash" })} />
+        <SummaryCard label="Card" value={fmt(totals.card.total)} sub={plural(totals.card.count, "payment")} icon={CreditCard} color="#7c3aed" active={activeCard === "card"} onClick={() => toggleCard("card", { modeValue: "card" })} />
+        <SummaryCard label="UPI" value={fmt(totals.upi.total)} sub={plural(totals.upi.count, "payment")} icon={Smartphone} color="#0ea5e9" active={activeCard === "upi"} onClick={() => toggleCard("upi", { modeValue: "upi" })} />
+        <SummaryCard label="Partial Payments" value={fmt(totals.partial.total)} sub={plural(totals.partial.count, "part-payer")} icon={Layers} color="#ea580c" active={activeCard === "partial"} onClick={() => toggleCard("partial", { statusValue: "partial" })} />
+        <SummaryCard label="Outstanding Amount" value={fmt(totals.outstanding.total)} sub={plural(totals.outstanding.count, "client")} icon={AlertCircle} color="#d97706" active={activeCard === "outstanding"} onClick={() => toggleCard("outstanding")} />
       </div>
 
       <Card>
