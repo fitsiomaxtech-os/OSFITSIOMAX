@@ -9,10 +9,17 @@ import { ConsultationCollectionsBoard } from "@/components/branch/ConsultationCo
 import { SessionCollectionsBoard } from "@/components/branch/SessionCollectionsBoard";
 import { PaymentPaidBoard } from "@/components/branch/PaymentPaidBoard";
 import { PaymentUnpaidBoard } from "@/components/branch/PaymentUnpaidBoard";
+import { StorePaymentBoard } from "@/components/branch/StorePaymentBoard";
 
 // `tone` is carried only by the two settled/unsettled tabs — green for money fully in,
 // rose for none of it in, the same colours the OS uses for those states everywhere else,
 // so the pair reads as a pair. Every other tab keeps the shared sky styling.
+// `tone` is carried only by the settled/unsettled pair and by Store Payment — green for
+// money fully in, rose for none of it in, violet for the Fitsiomax Store, the same colours
+// the OS uses for those things elsewhere. Every other tab keeps the shared sky styling.
+//
+// Store Payment sits last rather than between Payment Paid and Payment Unpaid: those two
+// are a pair and read as one, and an unrelated tab dropped between them breaks that.
 const SUB_TABS = [
   { key: "total_revenue", label: "Total Revenue" },
   { key: "consultation", label: "Consultation Collections" },
@@ -21,6 +28,7 @@ const SUB_TABS = [
   { key: "schedules", label: "Payment Schedules" },
   { key: "paid", label: "Payment Paid", tone: "paid" },
   { key: "unpaid", label: "Payment Unpaid", tone: "unpaid" },
+  { key: "store", label: "Store Payment", tone: "store" },
 ];
 
 const subTabClasses = (tab, active) => {
@@ -30,6 +38,9 @@ const subTabClasses = (tab, active) => {
   if (tab.tone === "unpaid") {
     return active ? "bg-rose-600 text-white shadow-sm" : "text-rose-700 hover:bg-rose-50";
   }
+  if (tab.tone === "store") {
+    return active ? "bg-violet-600 text-white shadow-sm" : "text-violet-700 hover:bg-violet-50";
+  }
   return active ? "bg-sky-50 text-sky-700" : "text-slate-600 hover:bg-slate-50";
 };
 
@@ -37,6 +48,7 @@ const REVENUE_VIEWS = [
   { key: "collected", label: "Total Collected", color: "#059669" },
   { key: "consultation", label: "Consultation Revenue", color: "#0284c7" },
   { key: "session", label: "Session Revenue", color: "#7c3aed" },
+  { key: "store", label: "Store Revenue", color: "#d97706" },
 ];
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
@@ -107,6 +119,10 @@ export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
     const owing = new Set(outstanding.map((o) => o.lead_id));
     const map = {};
     transactions.forEach((t) => {
+      // Store sales are excluded outright, not merely by carrying no lead: this rolls a
+      // transaction into consultation_paid or session_paid with nothing in between, so a
+      // counter sale that ever gained a lead would silently land in session_paid.
+      if (t.source === "store") return;
       if (!t.lead_id || owing.has(t.lead_id)) return;
       const r = map[t.lead_id] || (map[t.lead_id] = {
         lead_id: t.lead_id,
@@ -171,7 +187,9 @@ export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
         <p className="py-10 text-center text-sm text-slate-400">Loading...</p>
       ) : subTab === "total_revenue" ? (
         <div className="space-y-4" data-testid="accountant-manage-total-revenue">
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          {/* Four across from lg. Store Revenue joined the row, and three-up would have
+              left it wrapped onto a line of its own looking like a footnote. */}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <KpiCard
               label="Total Collected" value={fmt(k.total_collected)} color="#059669"
               active={revenueView === "collected"} onClick={() => setRevenueView("collected")}
@@ -183,6 +201,10 @@ export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
             <KpiCard
               label="Session Revenue" value={fmt(b.session_revenue)} color="#7c3aed"
               active={revenueView === "session"} onClick={() => setRevenueView("session")}
+            />
+            <KpiCard
+              label="Store Revenue" value={fmt(b.store_revenue)} color="#d97706"
+              active={revenueView === "store"} onClick={() => setRevenueView("store")}
             />
           </div>
 
@@ -202,6 +224,8 @@ export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
         <PaymentPaidBoard rows={paidClients} onView={setViewingLeadId} />
       ) : subTab === "unpaid" ? (
         <PaymentUnpaidBoard rows={unpaidClients} onView={setViewingLeadId} />
+      ) : subTab === "store" ? (
+        <StorePaymentBoard rows={transactions.filter((t) => t.source === "store")} />
       ) : (
         <PaymentSchedulesBoard rows={schedule} onView={setViewingLeadId} onChanged={load} />
       )}

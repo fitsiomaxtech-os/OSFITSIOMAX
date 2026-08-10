@@ -436,13 +436,74 @@ async def revenue_overview(
             "session_status": session.get("status"),
         })
 
-    total_collected = consultation_total + session_total
+    # Fitsiomax Store counter sales — tablets, supplements and equipment handed over the
+    # desk. They come from their own ledger rather than the lead activity trail because a
+    # walk-in buying a strip of painkillers is not a lead, and inventing a lead to make the
+    # money countable would put a patient record behind every sale. Same money either way,
+    # so it belongs in the same total.
+    store_query = {"kind": "sale"}
+    if branch_id:
+        store_query["branch_id"] = branch_id
+    if date_query:
+        store_query["created_at"] = date_query
+    store_sales = await v3_col("inventory_movements").find(store_query, {"_id": 0}).sort("created_at", -1).to_list(5000)
+
+    store_total = 0.0
+    for sale in store_sales:
+        amount = float(sale.get("amount") or 0)
+        store_total += amount
+        bid = sale.get("branch_id")
+        bname = branch_name_map.get(bid, "Unknown")
+        day = (sale.get("created_at") or "")[:10]
+        mode = sale.get("payment_mode") or "unknown"
+
+        d = by_day.setdefault(day, {"date": day, "consultation": 0.0, "session": 0.0})
+        d["store"] = d.get("store", 0.0) + amount
+
+        b = by_branch_acc.setdefault(bid or "unknown", {
+            "branch_id": bid, "branch_name": bname, "consultation_total": 0.0, "session_total": 0.0,
+        })
+        b["store_total"] = b.get("store_total", 0.0) + amount
+
+        payment_modes[mode] = payment_modes.get(mode, 0.0) + amount
+
+        transactions.append({
+            "id": sale.get("id", ""),
+            "transaction_id": sale.get("transaction_id") or "",
+            "date": sale.get("created_at", ""),
+            "branch_name": bname,
+            "source": "store",
+            # Which Store shelf it came off, and what was actually handed over. Nothing
+            # else in this payload carries an item, so the Store Payment tab reads these
+            # and every other tab ignores them.
+            "store_category": sale.get("category", ""),
+            "item_name": sale.get("item_name", ""),
+            "qty": sale.get("qty", 0),
+            "gross": amount,
+            "discount": 0.0,
+            "tax": 0.0,
+            "net": amount,
+            "collected_by": sale.get("by_user_name", ""),
+            # No lead: a counter sale is to whoever was standing there. Left empty rather
+            # than faked, so the client-history eye and the Payment Paid roll-up — both
+            # keyed on a lead — skip these instead of opening on nothing.
+            "lead_id": "",
+            "client_name": (sale.get("customer_name") or "").strip() or "Counter sale",
+            "phone": "",
+            "payment_mode": mode,
+            "client_balance": 0.0,
+        })
+
+    total_collected = consultation_total + session_total + store_total
     trend = sorted(by_day.values(), key=lambda r: r["date"])
     for r in trend:
-        r["total"] = r["consultation"] + r["session"]
-    by_branch = sorted(by_branch_acc.values(), key=lambda r: -(r["consultation_total"] + r["session_total"]))
-    for r in by_branch:
-        r["total_revenue"] = r["consultation_total"] + r["session_total"]
+        # Days with only activity rows never got a store key, and vice versa.
+        r["store"] = r.get("store", 0.0)
+        r["total"] = r["consultation"] + r["session"] + r["store"]
+    for r in by_branch_acc.values():
+        r["store_total"] = r.get("store_total", 0.0)
+        r["total_revenue"] = r["consultation_total"] + r["session_total"] + r["store_total"]
+    by_branch = sorted(by_branch_acc.values(), key=lambda r: -r["total_revenue"])
 
     first_branch_stage = await get_first_stage_name("sales", "New Appointment")
     pending_leads_raw = [
@@ -515,8 +576,10 @@ async def revenue_overview(
         "breakdown": {
             "consultation_revenue": consultation_total,
             "session_revenue": session_total,
+            "store_revenue": store_total,
             "consultation_pct": round(consultation_total / total_collected * 100, 1) if total_collected else 0,
             "session_pct": round(session_total / total_collected * 100, 1) if total_collected else 0,
+            "store_pct": round(store_total / total_collected * 100, 1) if total_collected else 0,
         },
         "trend": trend,
         "by_branch": by_branch,

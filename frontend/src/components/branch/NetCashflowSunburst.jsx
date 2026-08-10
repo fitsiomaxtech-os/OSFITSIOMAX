@@ -21,6 +21,9 @@ const LIGHT = {
   schedule: "#eda100",
   scheduleLight: "#fbe3ad",
   scheduleDark: "#c9860a",
+  // Fitsiomax Store counter sales. Teal rather than a sixth hue: it is inflow and belongs
+  // with the two collections colours, not competing with the outflow half.
+  store: "#0f9b9b",
   unpaid: "#4a3aa7",
   delayed: "#e87ba4",
 };
@@ -98,6 +101,9 @@ export const NetCashflowSunburst = ({ data, onDrilldown }) => {
 
   const consultationTotal = Number(b.consultation_revenue) || 0;
   const sessionTotal = Number(b.session_revenue) || 0;
+  // Counted here as well as in the KPI card above: leaving it out would put two different
+  // "total revenue" figures on one board and make the centre's Net Cashflow wrong.
+  const storeTotal = Number(b.store_revenue) || 0;
   const scheduleUnpaid = schedule.filter((s) => s.status !== "paid");
   const scheduleTotal = scheduleUnpaid.reduce((s, r) => s + (r.amount || 0), 0);
 
@@ -106,7 +112,7 @@ export const NetCashflowSunburst = ({ data, onDrilldown }) => {
   const unpaidTotal = unpaidClients.reduce((s, c) => s + (c.balance || 0), 0);
   const delayedTotal = delayedClients.reduce((s, c) => s + (c.balance || 0), 0);
 
-  const totalRevenue = consultationTotal + sessionTotal;
+  const totalRevenue = consultationTotal + sessionTotal + storeTotal;
   const outstandingTotal = unpaidTotal + delayedTotal;
   const netCashflow = totalRevenue - outstandingTotal;
   const pendingCount = k.pending_count || 0;
@@ -115,10 +121,11 @@ export const NetCashflowSunburst = ({ data, onDrilldown }) => {
     [
       { key: "consultation", label: "Consultation Collections", value: consultationTotal, color: LIGHT.consultation, groupLabel: "Inflow" },
       { key: "session", label: "Session Collections", value: sessionTotal, color: LIGHT.session, groupLabel: "Inflow" },
+      { key: "store", label: "Store Payments", value: storeTotal, color: LIGHT.store, groupLabel: "Inflow" },
       { key: "schedule", label: "Payment Schedules", value: scheduleTotal, color: LIGHT.schedule, groupLabel: "Inflow" },
     ],
     -90, 90, 3,
-  ), [consultationTotal, sessionTotal, scheduleTotal]);
+  ), [consultationTotal, sessionTotal, storeTotal, scheduleTotal]);
 
   const outflow = useMemo(() => layoutSegments(
     [

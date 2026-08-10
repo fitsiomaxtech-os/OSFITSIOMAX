@@ -171,8 +171,10 @@ const TotalRevenueTab = ({ data, loading, fmt }) => {
 
   return (
     <div className="space-y-4" data-testid="ac-total-revenue-tab">
-      {/* Revenue split */}
-      <div className="grid grid-cols-2 gap-3">
+      {/* Revenue split — three ways since the Fitsiomax Store's counter sales began
+          counting. Two cards would have left their percentages short of 100 with nothing
+          on screen saying where the rest went. */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <div className="rounded-xl border border-sky-200 bg-sky-50 p-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-sky-700">Consultation Revenue</p>
           <p className="mt-1 text-xl font-bold text-sky-800">{fmt(b.consultation_revenue)}</p>
@@ -182,6 +184,11 @@ const TotalRevenueTab = ({ data, loading, fmt }) => {
           <p className="text-xs font-semibold uppercase tracking-wide text-violet-700">Session Revenue</p>
           <p className="mt-1 text-xl font-bold text-violet-800">{fmt(b.session_revenue)}</p>
           <p className="text-[11px] text-slate-500">{b.session_pct || 0}% of total</p>
+        </div>
+        <div className="rounded-xl border border-teal-200 bg-teal-50 p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-teal-700">Store Revenue</p>
+          <p className="mt-1 text-xl font-bold text-teal-800">{fmt(b.store_revenue)}</p>
+          <p className="text-[11px] text-slate-500">{b.store_pct || 0}% of total</p>
         </div>
       </div>
 
