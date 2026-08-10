@@ -365,6 +365,20 @@ export const getPaymentHistory = async (limit) => (await api.get("/store/payment
 export const getFollowUpHistory = async (limit) => (await api.get("/store/follow-up-history", { params: limit ? { limit } : {} })).data;
 export const getLoginHistory = async (limit) => (await api.get("/store/login-history", { params: limit ? { limit } : {} })).data;
 
+// FITSIOMAX STORE > Tablet — branch stock. `category` is here so Supplementary and
+// Equipment can call the same endpoints once their panels exist; the backend already
+// takes them. A Branch Admin's own branch is resolved server-side from their login, so
+// branch_id is only ever sent by a Super Admin looking at someone else's shelf.
+export const listInventoryItems = async (params = {}) => (await api.get("/inventory/items", { params: { category: "tablet", ...params } })).data;
+export const inventorySummary = async (params = {}) => (await api.get("/inventory/summary", { params: { category: "tablet", ...params } })).data;
+export const inventoryMovements = async (params = {}) => (await api.get("/inventory/movements", { params: { category: "tablet", ...params } })).data;
+export const createInventoryItem = async (payload) => (await api.post("/inventory/items", payload)).data;
+export const updateInventoryItem = async (id, payload) => (await api.put(`/inventory/items/${id}`, payload)).data;
+export const deleteInventoryItem = async (id) => (await api.delete(`/inventory/items/${id}`)).data;
+export const addInventoryStock = async (id, payload) => (await api.post(`/inventory/items/${id}/add-stock`, payload)).data;
+export const sellInventoryItem = async (id, payload) => (await api.post(`/inventory/items/${id}/sell`, payload)).data;
+export const transferInventoryItem = async (id, payload) => (await api.post(`/inventory/items/${id}/transfer`, payload)).data;
+
 export const saveLeadDiagnosis = async (leadId, diagnosis) => (await api.post(`/leads/${leadId}/diagnosis`, { diagnosis })).data;
 export const sellStoreItem = async (leadId, payload) => (await api.post(`/leads/${leadId}/sell-store-item`, payload)).data;
 export const collectPackagePayment = async (leadId, payload) => (await api.post(`/leads/${leadId}/collect-package-payment`, payload)).data;

@@ -4,6 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
 import { listStoreItems } from "@/lib/api";
+import { TabletInventoryPanel } from "@/components/branch/TabletInventoryPanel";
 import {
   TABS,
   CONSULTATIONS_SUBTABS,
@@ -165,6 +166,10 @@ export const BranchSessionsPanel = () => {
 
 const BRANCH_STORE_TABS = TABS.filter((t) => t.key !== "history");
 
+// Which tabs have a panel of their own. The rest fall through to the placeholder, and a
+// tab graduates by being added here rather than by another branch in the JSX below.
+const PANELS_BUILT = new Set(["consultations", "sessions", "tablet"]);
+
 export const FitsiomaxStorePanel = () => {
   const [tab, setTab] = useState("consultations");
 
@@ -189,7 +194,8 @@ export const FitsiomaxStorePanel = () => {
 
       {tab === "consultations" && <BranchConsultationsPanel />}
       {tab === "sessions" && <BranchSessionsPanel />}
-      {tab !== "consultations" && tab !== "sessions" && BRANCH_STORE_TABS.map((t) => tab === t.key && (
+      {tab === "tablet" && <TabletInventoryPanel />}
+      {!PANELS_BUILT.has(tab) && BRANCH_STORE_TABS.map((t) => tab === t.key && (
         <PlaceholderPanel key={t.key} label={t.label} testid={`branch-store-panel-${t.key}`} />
       ))}
     </div>
