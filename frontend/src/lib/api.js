@@ -271,7 +271,7 @@ export const resetAllLeads = async () => (await api.post("/admin/reset-all-leads
 // HR
 export const hrDashboard = async () => (await api.get("/hr/dashboard")).data;
 export const hrMeta = async () => (await api.get("/hr/meta")).data;
-export const hrAddCustomRole = async (label) => (await api.post("/hr/roles", { label })).data;
+export const hrAddCustomRole = async (label, color) => (await api.post("/hr/roles", { label, color })).data;
 export const hrEmployees = async (params = {}) => {
   const q = new URLSearchParams();
   Object.entries(params).forEach(([k, v]) => { if (v) q.set(k, v); });

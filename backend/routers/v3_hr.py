@@ -43,8 +43,18 @@ async def _all_role_names() -> list:
     return DEFAULT_ROLES + [r["name"] for r in await _custom_roles()]
 
 
+# The hues the built-in roles already wear. A custom role picks from the same set rather
+# than a free hex, so one added today can't arrive in a colour nothing else in the OS uses
+# — and so the value can be checked here instead of trusting whatever the client sends.
+ROLE_COLORS = [
+    "purple", "indigo", "sky", "emerald", "amber",
+    "cyan", "pink", "orange", "rose", "teal", "slate",
+]
+
+
 class CustomRoleCreate(BaseModel):
     label: str
+    color: Optional[str] = None
 
 
 class EmployeeCreate(BaseModel):
@@ -517,7 +527,18 @@ async def add_custom_role(payload: CustomRoleCreate, _: V3UserOut = Depends(v3_r
         raise HTTPException(status_code=400, detail="Role name must contain letters or numbers")
     if slug in await _all_role_names():
         raise HTTPException(status_code=409, detail="This role already exists")
-    role = {"id": str(uuid.uuid4()), "name": slug, "label": label.upper(), "created_at": now_iso()}
+    color = (payload.color or "").strip().lower()
+    if color and color not in ROLE_COLORS:
+        raise HTTPException(status_code=400, detail=f"Colour must be one of: {', '.join(ROLE_COLORS)}")
+    # Falls to slate rather than to nothing: a role with no colour rendered as the same
+    # grey as "unrecognised role", so a deliberate choice and a missing one looked alike.
+    role = {
+        "id": str(uuid.uuid4()),
+        "name": slug,
+        "label": label.upper(),
+        "color": color or "slate",
+        "created_at": now_iso(),
+    }
     await v3_col("custom_roles").insert_one(role.copy())
     return role
 
