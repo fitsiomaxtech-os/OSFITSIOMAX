@@ -123,7 +123,12 @@ export const DashboardBoard = () => {
           This Month in there sets the same key a button owns, so the button lights up
           and Custom goes back to reading "Custom" rather than the two of them naming the
           same range side by side. */}
-      <div className="flex flex-wrap items-center gap-2" data-testid="dashboard-date-filter">
+      {/* One row on a phone, scrolled sideways rather than wrapped. Six ranges cannot
+          fit a phone's width at a readable size, so the choice is wrap or scroll — and
+          wrapping pushed the tabs and the first card down a whole row to show a control
+          most visits never touch. The negative margin lets the row bleed to the screen
+          edge, which is what makes it read as scrollable instead of cut off. */}
+      <div className="-mx-1 flex items-center gap-2 overflow-x-auto px-1 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0" data-testid="dashboard-date-filter">
         {DASH_PRESETS.map((p) => {
           const active = dateFilter.key === p.key;
           return (
@@ -131,25 +136,30 @@ export const DashboardBoard = () => {
               key={p.key}
               type="button"
               onClick={() => setDateFilter(presetFilter(p))}
-              className={`h-10 rounded-md px-3 text-sm font-medium transition ${active ? "bg-sky-600 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}
+              className={`h-10 shrink-0 whitespace-nowrap rounded-md px-3 text-sm font-medium transition ${active ? "bg-sky-600 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}
               data-testid={`dashboard-preset-${p.key}`}
             >
               {p.label}
             </button>
           );
         })}
-        <DateFilterPopover
-          value={DASH_PRESETS.some((p) => p.key === dateFilter.key) ? null : dateFilter}
-          onChange={(next) => setDateFilter(next || defaultFilter())}
-          testid="dashboard-date-filter-popover"
-          placeholder="Custom"
-          centered
-        />
+        <span className="shrink-0">
+          <DateFilterPopover
+            value={DASH_PRESETS.some((p) => p.key === dateFilter.key) ? null : dateFilter}
+            onChange={(next) => setDateFilter(next || defaultFilter())}
+            testid="dashboard-date-filter-popover"
+            placeholder="Custom"
+            centered
+          />
+        </span>
       </div>
 
-      {/* Single row always — no min-width per tab (that's what forced a 2-row wrap on
-          a phone), each tab just shrinks to share the row instead. */}
-      <div className="flex gap-1 rounded-xl border border-slate-200 bg-white/95 p-1" data-testid="dashboard-tabs">
+      {/* Two rows of three on a phone, one row of six from sm up. Six tabs sharing a
+          phone's width truncated every label past the third — "Pre…", "BR…", "App…" —
+          which is a tab bar that can't be read. Three per row fits the full label, and
+          the grid falls out of DASH_TABS' own order: Leads / Pre-Sales Team / BRANCHS,
+          then Appointments / Treatments / Revenue. */}
+      <div className="grid grid-cols-3 gap-1 rounded-xl border border-slate-200 bg-white/95 p-1 sm:flex" data-testid="dashboard-tabs">
         {DASH_TABS.map((t) => {
           const Icon = t.icon;
           const active = activeTab === t.key;
@@ -158,7 +168,7 @@ export const DashboardBoard = () => {
               key={t.key}
               type="button"
               onClick={() => setActiveTab(t.key)}
-              className={`flex flex-1 min-w-0 items-center justify-center gap-1 rounded-lg px-1.5 py-2 text-[11px] font-semibold transition sm:gap-1.5 sm:px-3 sm:text-sm ${active ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100"}`}
+              className={`flex min-w-0 items-center justify-center gap-1 rounded-lg px-1.5 py-2 text-[11px] font-semibold transition sm:flex-1 sm:gap-1.5 sm:px-3 sm:text-sm ${active ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100"}`}
               data-testid={`dashboard-tab-${t.key}`}
             >
               <Icon className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />
@@ -224,8 +234,14 @@ export const DashboardBoard = () => {
           {/* One row, always — branches read as a comparison, and 2x2 made the two on
               the bottom row look like a second, lesser group. Columns counted off the
               data rather than hardcoded, so opening a fifth branch re-divides the row
-              instead of dropping one underneath. On a phone the row scrolls sideways
-              rather than wrapping, which is the same thing by another name. */}
+              instead of dropping one underneath.
+
+              A phone gets a plain stacked list instead. Sideways scrolling hid every
+              branch past the second behind a swipe, and a branch you have to go looking
+              for is a branch nobody compares — a list shows the whole set at once, which
+              is the only reason these sit side by side in the first place. Each row puts
+              the name and the figure on one line rather than stacking them, so four
+              branches still fit above the fold. */}
           <div>
             <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Physiotherapy Branches</p>
             {activeData.physio_branches.length === 0 ? (
@@ -234,7 +250,7 @@ export const DashboardBoard = () => {
               </p>
             ) : (
               <div
-                className="-mx-1 flex gap-3 overflow-x-auto px-1 pb-1 sm:mx-0 sm:grid sm:overflow-visible sm:px-0 sm:pb-0"
+                className="flex flex-col gap-2 sm:grid sm:gap-3"
                 style={{ gridTemplateColumns: `repeat(${activeData.physio_branches.length}, minmax(0, 1fr))` }}
               >
                 {activeData.physio_branches.map((b) => {
@@ -249,14 +265,16 @@ export const DashboardBoard = () => {
                       // there's no separate control to hunt for.
                       onClick={() => setDrillBranch(open ? null : b)}
                       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDrillBranch(open ? null : b); } }}
-                      className={`min-w-[9rem] shrink-0 cursor-pointer transition sm:min-w-0 ${
+                      // min-w-0 because a grid item defaults to min-width:auto, which lets
+                      // a long branch name push its own column wider than its 1fr track.
+                      className={`min-w-0 cursor-pointer transition ${
                         open ? "border-sky-500 bg-sky-50/60 shadow-sm" : "hover:border-sky-300 hover:shadow-md"
                       }`}
                       data-testid={`dashboard-physio-${b.branch_id}`}
                     >
-                      <CardContent className="p-4">
-                        <p className="truncate text-sm font-semibold text-slate-700">{b.branch_name}</p>
-                        <p className="mt-1 truncate text-2xl font-bold text-sky-600">{fmtValue(activeTab, b.value)}</p>
+                      <CardContent className="flex items-center justify-between gap-3 p-3 sm:block sm:p-4">
+                        <p className="min-w-0 truncate text-sm font-semibold text-slate-700">{b.branch_name}</p>
+                        <p className="shrink-0 truncate text-xl font-bold text-sky-600 sm:mt-1 sm:text-2xl">{fmtValue(activeTab, b.value)}</p>
                       </CardContent>
                     </Card>
                   );
