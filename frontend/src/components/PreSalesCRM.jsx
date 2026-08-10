@@ -1318,6 +1318,8 @@ const LeadDetailDialog = ({ lead, stages, currentUser, onClose, onSaved, onMoveS
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600">Date *</label>
                 <MilkDateInput
+                  centered
+                  title="Follow-Up Date"
                   value={followUpDraft.date}
                   min={new Date().toISOString().slice(0, 10)}
                   onChange={(e) => setFollowUpDraft({ ...followUpDraft, date: e.target.value })}
@@ -1327,6 +1329,8 @@ const LeadDetailDialog = ({ lead, stages, currentUser, onClose, onSaved, onMoveS
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600">Time *</label>
                 <MilkTimeInput
+                  centered
+                  title="Follow-Up Time"
                   value={followUpDraft.time}
                   onChange={(e) => setFollowUpDraft({ ...followUpDraft, time: e.target.value })}
                   data-testid="presales-followup-time"
@@ -1386,6 +1390,8 @@ const LeadDetailDialog = ({ lead, stages, currentUser, onClose, onSaved, onMoveS
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600">New Date *</label>
                 <MilkDateInput
+                  centered
+                  title="New Follow-Up Date"
                   value={rescheduleDraft.date}
                   min={new Date().toISOString().slice(0, 10)}
                   onChange={(e) => setRescheduleDraft({ ...rescheduleDraft, date: e.target.value })}
@@ -1395,6 +1401,8 @@ const LeadDetailDialog = ({ lead, stages, currentUser, onClose, onSaved, onMoveS
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600">New Time *</label>
                 <MilkTimeInput
+                  centered
+                  title="New Follow-Up Time"
                   value={rescheduleDraft.time}
                   onChange={(e) => setRescheduleDraft({ ...rescheduleDraft, time: e.target.value })}
                   data-testid="presales-reschedule-time"
@@ -1518,6 +1526,9 @@ const LeadDetailDialog = ({ lead, stages, currentUser, onClose, onSaved, onMoveS
                   <div>
                     <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-600">Date *</label>
                     <MilkDateInput
+                      centered
+                      title="Appointment Date"
+                      accent="teal"
                       value={appointmentDraft.appointment_date}
                       min={new Date().toISOString().slice(0, 10)}
                       onChange={(e) => setAppointmentDraft({ ...appointmentDraft, appointment_date: e.target.value })}
@@ -1527,6 +1538,9 @@ const LeadDetailDialog = ({ lead, stages, currentUser, onClose, onSaved, onMoveS
                   <div>
                     <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-600">Time *</label>
                     <MilkTimeInput
+                      centered
+                      title="Appointment Time"
+                      accent="teal"
                       value={appointmentDraft.appointment_time}
                       onChange={(e) => setAppointmentDraft({ ...appointmentDraft, appointment_time: e.target.value })}
                       data-testid="presales-appointment-time"

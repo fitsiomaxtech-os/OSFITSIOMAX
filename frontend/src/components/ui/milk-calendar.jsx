@@ -122,6 +122,35 @@ export default MilkCalendar;
 
 
 /**
+ * The shell both fields use in `centered` mode: an ordinary dialog over the popup that
+ * opened it. A panel anchored to the field is clipped by the `overflow-hidden` on a modal
+ * card, which swallows the last week of the month and the Today link.
+ */
+const CenteredPicker = ({ title, onClose, testid, children }) => (
+  <div
+    className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/50 p-3 backdrop-blur-sm sm:p-4"
+    onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    data-testid={testid}
+  >
+    <div className="max-h-[90vh] w-full max-w-xs overflow-y-auto rounded-2xl border border-[#EFEAE0] bg-[#FDFCF8] p-3 shadow-2xl sm:max-w-sm">
+      <div className="mb-2 flex items-center justify-between px-1">
+        <p className="text-sm font-bold text-slate-800">{title}</p>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-full p-1.5 text-slate-400 hover:bg-[#F3EFE6] hover:text-slate-600"
+          aria-label="Close"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      {children}
+    </div>
+  </div>
+);
+
+
+/**
  * A date field that opens the calendar above in a popover, instead of whatever picker the
  * browser would show. Chrome's desktop dialog and the Android/iOS wheel are both
  * unstyleable and neither looks like the rest of the OS — on a phone especially, tapping a
@@ -166,30 +195,14 @@ export const MilkDateInput = ({
       </button>
 
       {/* `centered` opens the calendar as a normal dialog in the middle of the screen
-          instead of a panel hanging off the field. Anchored is right for a form, where the
-          calendar sits under the input it fills; it is wrong in a toolbar above a table,
-          where the panel opens over the rows and gets clipped by whatever scrolls. */}
+          instead of a panel hanging off the field. Anchored is right for a plain page form,
+          where the calendar sits under the input it fills; it is wrong in a toolbar above a
+          table, where the panel opens over the rows and gets clipped by whatever scrolls,
+          and wrong inside a popup, where the card's own clipping cuts the grid off. */}
       {open && (centered ? (
-        <div
-          className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/50 p-3 backdrop-blur-sm sm:p-4"
-          onClick={(e) => { if (e.target === e.currentTarget) setOpen(false); }}
-          data-testid={`${rest["data-testid"] || "milk-date"}-modal`}
-        >
-          <div className="max-h-[90vh] w-full max-w-xs overflow-y-auto rounded-2xl border border-[#EFEAE0] bg-[#FDFCF8] p-3 shadow-2xl sm:max-w-sm">
-            <div className="mb-2 flex items-center justify-between px-1">
-              <p className="text-sm font-bold text-slate-800">{title}</p>
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                className="rounded-full p-1.5 text-slate-400 hover:bg-[#F3EFE6] hover:text-slate-600"
-                aria-label="Close"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <MilkCalendar value={value} min={min} max={max} accent={accent} onChange={pick} />
-          </div>
-        </div>
+        <CenteredPicker title={title} onClose={() => setOpen(false)} testid={`${rest["data-testid"] || "milk-date"}-modal`}>
+          <MilkCalendar value={value} min={min} max={max} accent={accent} onChange={pick} />
+        </CenteredPicker>
       ) : (
         // Right-aligned and above/below by container flow; w-max keeps the grid from being
         // squeezed by a narrow field.
@@ -289,28 +302,32 @@ export const MilkTimeSlots = ({
 export const MilkTimeInput = ({
   value, onChange, disabled, className = "", accent = "amber",
   from = SLOT_DAY_START, to = SLOT_DAY_END, step = 30,
-  placeholder = "Select time", ...rest
+  placeholder = "Select time", centered = false, title = "Select Time", ...rest
 }) => {
   const [open, setOpen] = useState(false);
   const [drop, setDrop] = useState("down");
   const ref = useRef(null);
 
   useEffect(() => {
-    if (!open) return undefined;
+    // As on the date field: a centred dialog closes on its own backdrop, so a document
+    // listener here would also catch clicks on the slots inside it.
+    if (!open || centered) return undefined;
     const onDocClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
     document.addEventListener("mousedown", onDocClick);
     return () => document.removeEventListener("mousedown", onDocClick);
-  }, [open]);
+  }, [open, centered]);
 
   // These sit low in tall popups (Follow Up puts Time under a full month grid), where a
   // downward panel would open past the bottom of the screen.
   const toggle = () => {
-    if (!open && ref.current) {
+    if (!open && !centered && ref.current) {
       const box = ref.current.getBoundingClientRect();
       setDrop(window.innerHeight - box.bottom < 340 && box.top > 340 ? "up" : "down");
     }
     setOpen((o) => !o);
   };
+
+  const pick = (t) => { onChange?.({ target: { value: t } }); setOpen(false); };
 
   return (
     <div className="relative" ref={ref}>
@@ -324,18 +341,15 @@ export const MilkTimeInput = ({
         <span className="truncate">{value ? formatSlotLabel(value) : placeholder}</span>
         <Clock className="h-4 w-4 shrink-0 text-slate-400" />
       </button>
-      {open && (
+      {open && (centered ? (
+        <CenteredPicker title={title} onClose={() => setOpen(false)} testid={`${rest["data-testid"] || "milk-time"}-modal`}>
+          <MilkTimeSlots value={value} from={from} to={to} step={step} accent={accent} onChange={pick} />
+        </CenteredPicker>
+      ) : (
         <div className={`absolute left-0 z-50 w-max min-w-full ${drop === "up" ? "bottom-full mb-1" : "mt-1"}`}>
-          <MilkTimeSlots
-            value={value}
-            from={from}
-            to={to}
-            step={step}
-            accent={accent}
-            onChange={(t) => { onChange?.({ target: { value: t } }); setOpen(false); }}
-          />
+          <MilkTimeSlots value={value} from={from} to={to} step={step} accent={accent} onChange={pick} />
         </div>
-      )}
+      ))}
     </div>
   );
 };
