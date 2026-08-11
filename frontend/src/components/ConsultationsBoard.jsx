@@ -458,10 +458,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
 
   // Assign to Diet Head (Branch Admin only) — the diet vertical's counterpart to Physio
   // Assign, and the only route a patient has onto a Nutrition Coach's check-in calendar.
-  // One popup rather than the physio flow's two: a diet plan has no fixed number of days
-  // to place (there is no session count on a Diet Package), so there is nothing to count
-  // down and no reason to send the Branch Admin through a full-screen month grid. The
-  // coach's published days are listed and as many as the plan needs get ticked.
+  // Deliberately the same two steps as Physio Assign: pick the coach, then fix each
+  // check-in day on a month grid of what that coach has actually published. A flat list
+  // of every published time was the first attempt and it did not survive contact — a
+  // coach opens thirty slots on a day, so the list was a wall of times with no sense of
+  // which week they fell in, and the whole month scrolled past inside a phone-sized box.
   const [showDietModal, setShowDietModal] = useState(false);
   const [coachOptions, setCoachOptions] = useState([]);
   const [coachPick, setCoachPick] = useState("");
@@ -469,6 +470,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   const [loadingCoachCalendar, setLoadingCoachCalendar] = useState(false);
   const [pickedCheckinSlots, setPickedCheckinSlots] = useState([]); // ["YYYY-MM-DDTHH:MM", ...]
   const [assigningDiet, setAssigningDiet] = useState(false);
+  // Step 2 — the "pick the check-in dates and times" popup.
+  const [showDietSlotPicker, setShowDietSlotPicker] = useState(false);
+  const [dietPickerMonth, setDietPickerMonth] = useState(new Date().getMonth());
+  const [dietPickerYear, setDietPickerYear] = useState(new Date().getFullYear());
+  const [dietPickerDate, setDietPickerDate] = useState(null); // "YYYY-MM-DD"
+  const [dietMinutes, setDietMinutes] = useState(FALLBACK_SESSION_MINUTES);
 
   // Treatment (Head Physio only) — "Save & Move": every patient goes on to treatment
   // sessions once Diagnosis Report + Treatment Summary are written; only the Treatment
@@ -1460,9 +1467,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // ---- Assign to Diet Head (Branch Admin) ----
   const openDietModal = async () => {
     setShowDietModal(true);
+    setShowDietSlotPicker(false);
     setCoachPick(selectedLead.diet_coach_id || "");
     setCoachCalendar(null);
     setPickedCheckinSlots([]);
+    setDietPickerDate(null);
+    setDietPickerMonth(new Date().getMonth());
+    setDietPickerYear(new Date().getFullYear());
     try {
       const res = await listNutritionCoaches();
       setCoachOptions(res?.coaches || []);
@@ -1470,6 +1481,21 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       setCoachOptions([]);
     }
   };
+
+  // How long one check-in runs. Read from the Diet Package in FITSIO STORE, not from the
+  // session package — a check-in is not a treatment session and the two are priced and
+  // timed separately.
+  useEffect(() => {
+    if (!showDietModal) return;
+    let cancelled = false;
+    listStoreItems(undefined, "diet")
+      .then((items) => {
+        const configured = (items || []).map((i) => i.duration_minutes).find((d) => Number(d) > 0);
+        if (!cancelled && configured) setDietMinutes(Number(configured));
+      })
+      .catch(() => { /* keep the fallback */ });
+    return () => { cancelled = true; };
+  }, [showDietModal]);
 
   // The picked coach's own calendar — the same DIET CALENDAR the Branch Admin publishes
   // under MANAGEMENT. Only days that coach has actually put up can be booked.
@@ -1533,6 +1559,40 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
 
   const sortedCheckinSlots = useMemo(() => [...pickedCheckinSlots].sort(), [pickedCheckinSlots]);
 
+  // Counted off the same days the picker will actually offer, so the header's "N slots
+  // open" can't promise times that are in the past and unreachable.
+  const openCheckinSlotCount = useMemo(
+    () => Object.entries(coachSlotsByDate)
+      .reduce((n, [d, times]) => n + times.filter((t) => !checkinSlotFull(`${d}T${t}`)).length, 0),
+    [coachSlotsByDate, checkinSlotFull],
+  );
+
+  // The plan itself: Day 1, Day 2 … in date order, stamped with the week each falls in,
+  // the same week rule the treatment plan uses. A diet plan has no session count to
+  // measure against — a Diet Package is sold by duration — so the number of days is
+  // whatever the Branch Admin fixes rather than something to count down to.
+  const dietPlan = useMemo(() => {
+    if (sortedCheckinSlots.length === 0) return [];
+    const firstDay = sortedCheckinSlots[0].split("T")[0];
+    return sortedCheckinSlots.map((slot, i) => {
+      const [date, time] = slot.split("T");
+      return { slot, date, time, day: i + 1, week: weekOf(date, firstDay) };
+    });
+  }, [sortedCheckinSlots]);
+
+  const dietPlanByDate = useMemo(() => {
+    const map = {};
+    dietPlan.forEach((p) => { map[p.date] = p; });
+    return map;
+  }, [dietPlan]);
+
+  /** The next date after `after` that still has an open slot and no check-in on it yet. */
+  const nextOpenCheckinDateAfter = (after, alreadyFixed) => Object.keys(coachSlotsByDate)
+    .filter((d) => d > after
+      && !alreadyFixed.has(d)
+      && coachSlotsByDate[d].some((t) => !checkinSlotFull(`${d}T${t}`)))
+    .sort()[0];
+
   const toggleCheckinSlot = (slot) => {
     if (checkinSlotFull(slot)) return;
     const day = slot.split("T")[0];
@@ -1540,8 +1600,33 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     if (prev.includes(slot)) { setPickedCheckinSlots(prev.filter((s) => s !== slot)); return; }
     // One check-in a day, the same rule the treatment picker enforces — picking another
     // time on a day already taken moves that day rather than stacking a second onto it.
+    // Moving a day deliberately doesn't advance: that's a correction, and the result
+    // should stay in view.
     const sameDay = prev.find((s) => s.startsWith(`${day}T`));
-    setPickedCheckinSlots(sameDay ? [...prev.filter((s) => s !== sameDay), slot] : [...prev, slot]);
+    if (sameDay) { setPickedCheckinSlots([...prev.filter((s) => s !== sameDay), slot]); return; }
+
+    const next = [...prev, slot];
+    setPickedCheckinSlots(next);
+
+    // Fixing a day's time settles that day, so jump to the next date that still has room —
+    // the plan gets laid out in one run of clicks instead of a trip back to the calendar
+    // between every check-in.
+    const nextDate = nextOpenCheckinDateAfter(day, new Set(next.map((s) => s.split("T")[0])));
+    if (nextDate) {
+      const [y, m] = nextDate.split("-").map(Number);
+      setDietPickerYear(y);
+      setDietPickerMonth(m - 1);
+      setDietPickerDate(nextDate);
+    }
+  };
+
+  // Opening the picker for the coach this patient is already with keeps the check-ins they
+  // already hold, so an adjustment starts from what's booked instead of a blank slate.
+  const openDietSlotPickerFor = (coachId) => {
+    setCoachPick(coachId);
+    if (coachId !== selectedLead?.diet_coach_id) setPickedCheckinSlots([]);
+    setDietPickerDate(null);
+    setShowDietSlotPicker(true);
   };
 
   const submitDietAssign = async () => {
@@ -1551,6 +1636,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     try {
       const res = await assignDiet({ lead_id: selectedLead.id, coach_id: coachPick, slot_times: sortedCheckinSlots });
       toast.success(`${res.coach_name} assigned — ${res.days_booked} check-in ${res.days_booked === 1 ? "day" : "days"} booked`);
+      setShowDietSlotPicker(false);
       setShowDietModal(false);
       // assign-diet answers with the booking, not the lead, so the row is patched with the
       // fields it sets. The patient card stays open on purpose: unlike Physio Assign this
@@ -3241,76 +3327,39 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           <button
                             key={c.id}
                             type="button"
-                            onClick={() => { setCoachPick(c.id); if (c.id !== selectedLead.diet_coach_id) setPickedCheckinSlots([]); }}
+                            onClick={() => openDietSlotPickerFor(c.id)}
                             className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-xs font-semibold transition ${
                               coachPick === c.id ? "border-orange-500 bg-orange-50 text-orange-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"
                             }`}
                             data-testid={`cons-diet-coach-option-${c.id}`}
                           >
                             <span className="truncate">{c.full_name}{c.specialization ? ` · ${c.specialization}` : ""}</span>
-                            {coachPick === c.id && <CheckCircle2 className="ml-1.5 h-3.5 w-3.5 shrink-0" />}
+                            <span className="ml-1.5 flex shrink-0 items-center gap-1.5">
+                              {coachPick === c.id && <CheckCircle2 className="h-3.5 w-3.5" />}
+                              <ChevronRight className="h-3.5 w-3.5 text-slate-400" />
+                            </span>
                           </button>
                         ))}
                       </div>
                     )}
 
-                    {coachPick && (
-                      loadingCoachCalendar ? (
-                        <p className="py-4 text-center text-xs text-slate-400">Loading their calendar...</p>
-                      ) : Object.keys(coachSlotsByDate).length === 0 ? (
-                        <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-center text-xs text-amber-700" data-testid="cons-diet-no-slots">
-                          This coach has no upcoming days published. Add them under MANAGEMENT &gt; DIET CALENDAR first.
-                        </p>
-                      ) : (
-                        <div data-testid="cons-diet-slot-picker">
-                          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-orange-700">
-                            Check-in days · one a day · {sortedCheckinSlots.length} picked
-                          </p>
-                          <div className="max-h-56 space-y-2 overflow-y-auto rounded-lg border border-slate-200 p-2">
-                            {Object.keys(coachSlotsByDate).sort().map((date) => (
-                              <div key={date}>
-                                <p className="mb-1 text-[11px] font-semibold text-slate-500">{shortDayLabel(date)}</p>
-                                <div className="flex flex-wrap gap-1.5">
-                                  {coachSlotsByDate[date].map((time) => {
-                                    const slot = `${date}T${time}`;
-                                    const full = checkinSlotFull(slot);
-                                    const picked = pickedCheckinSlots.includes(slot);
-                                    return (
-                                      <button
-                                        key={slot}
-                                        type="button"
-                                        disabled={full}
-                                        onClick={() => toggleCheckinSlot(slot)}
-                                        title={full ? `Taken by ${checkinSlotHeldBy(slot) || "another patient"}` : undefined}
-                                        className={`rounded-md border px-2 py-1 text-[11px] font-semibold transition ${
-                                          full
-                                            ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400 line-through"
-                                            : picked
-                                            ? "border-orange-500 bg-orange-500 text-white"
-                                            : "border-slate-200 text-slate-600 hover:border-orange-300 hover:bg-orange-50"
-                                        }`}
-                                        data-testid={`cons-diet-slot-${slot}`}
-                                      >
-                                        {to12h(time)}
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )
-                    )}
-
-                    {sortedCheckinSlots.length > 0 && (
+                    {coachPick && sortedCheckinSlots.length > 0 && (
                       <div className="rounded-lg border border-orange-200 bg-orange-50 p-3" data-testid="cons-diet-plan-preview">
-                        <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-orange-700">Check-in days fixed</p>
-                        <div className="max-h-28 space-y-1 overflow-y-auto text-xs text-slate-700">
-                          {sortedCheckinSlots.map((slot, i) => {
-                            const [d, t] = slot.split("T");
-                            return <p key={slot}><b>Day {i + 1}</b> · {dayLabel(d)} · {to12h(t)}</p>;
-                          })}
+                        <div className="mb-1.5 flex items-center justify-between">
+                          <p className="text-[11px] font-semibold uppercase tracking-wider text-orange-700">Check-in days fixed</p>
+                          <button
+                            type="button"
+                            onClick={() => setShowDietSlotPicker(true)}
+                            className="text-[11px] font-semibold text-orange-600 underline underline-offset-2 hover:text-orange-800"
+                            data-testid="cons-diet-change-slots"
+                          >
+                            Change
+                          </button>
+                        </div>
+                        <div className="max-h-28 space-y-1 overflow-y-auto text-xs text-slate-700" data-testid="cons-diet-plan-list">
+                          {dietPlan.map((p) => (
+                            <p key={p.slot}><b>Day {p.day}</b> · {dayLabel(p.date)} · {to12h(p.time)} – {endTime12h(p.time, dietMinutes)}</p>
+                          ))}
                         </div>
                       </div>
                     )}
@@ -3319,16 +3368,298 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                   <div className="border-t border-slate-100 px-4 py-3">
                     <Button
                       className="w-full bg-orange-500 text-xs hover:bg-orange-600"
-                      onClick={submitDietAssign}
-                      disabled={assigningDiet || !coachPick || sortedCheckinSlots.length === 0}
+                      onClick={() => (sortedCheckinSlots.length > 0 ? submitDietAssign() : setShowDietSlotPicker(true))}
+                      disabled={assigningDiet || !coachPick}
                       data-testid="cons-diet-submit"
                     >
                       {assigningDiet
                         ? "Assigning..."
                         : sortedCheckinSlots.length === 0
-                        ? "Pick the check-in days"
+                        ? "Choose Check-in Dates & Times"
                         : `Assign & Book ${sortedCheckinSlots.length} Check-in ${sortedCheckinSlots.length === 1 ? "Day" : "Days"}`}
                     </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Step 2 — Check-in date & time picker, the same shape as the treatment
+                picker below and driven the same way: entirely by the picked coach's own
+                DIET CALENDAR. Every check-in gets a date and a time fixed by hand, and
+                only days that coach has actually published can be picked. */}
+            {showDietModal && showDietSlotPicker && coachPick && (
+              <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-2" data-testid="cons-diet-slot-picker-modal">
+                <div className="flex h-[calc(100vh-1rem)] max-h-[calc(100vh-1rem)] w-full max-w-7xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+                  <div className="flex flex-wrap items-center justify-between gap-2.5 bg-gradient-to-r from-orange-500 to-amber-500 px-4 py-3 text-white sm:flex-nowrap sm:gap-3 sm:px-6 sm:py-4">
+                    <div className="flex min-w-0 flex-1 items-center gap-2.5 sm:gap-3">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/20 text-base font-bold text-white sm:h-12 sm:w-12 sm:text-lg">
+                        {(coachCalendar?.doctor_name || coachOptions.find((c) => c.id === coachPick)?.full_name || "D").charAt(0).toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold sm:text-lg" data-testid="cons-diet-picker-coach">
+                          {selectedLead.name} <span className="font-normal text-white/70">with</span>{" "}
+                          {coachCalendar?.doctor_name || coachOptions.find((c) => c.id === coachPick)?.full_name || "Diet Head"}
+                        </p>
+                        <p className="text-[11px] leading-snug text-white/75 sm:text-[13px]">
+                          Diet plan · one check-in a day · {dietMinutes} min each · {openCheckinSlotCount} slots open
+                        </p>
+                      </div>
+                    </div>
+                    <button onClick={() => setShowDietSlotPicker(false)} className="shrink-0 rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="cons-diet-picker-close">
+                      <X className="h-5 w-5" />
+                    </button>
+                  </div>
+
+                  {/* Where the plan stands. The treatment picker's twin carries the paid and
+                      unpaid split alongside; a diet plan has no per-day money on the lead to
+                      report, so this says how many days are fixed and what they span. */}
+                  <div className="border-b-2 border-slate-200 bg-slate-100 px-3 py-2 sm:px-6 sm:py-3.5" data-testid="cons-diet-picker-status">
+                    <div className="flex flex-wrap items-stretch gap-2">
+                      <span className="w-full rounded-md border border-orange-800 bg-orange-600 px-3 py-1 text-center text-[11px] font-bold text-white shadow-sm sm:w-auto sm:rounded-lg sm:border-2 sm:px-4 sm:py-2 sm:text-sm" data-testid="cons-diet-picker-count">
+                        {sortedCheckinSlots.length} check-in {sortedCheckinSlots.length === 1 ? "day" : "days"} fixed
+                      </span>
+                      {dietPlan.length > 0 && (
+                        <span className="hidden w-full rounded-lg border-2 border-orange-300 bg-orange-50 px-3 py-1.5 text-center text-xs font-bold text-orange-700 shadow-sm sm:block sm:w-auto sm:px-4 sm:py-2 sm:text-left sm:text-sm">
+                          {dayLabel(dietPlan[0].date)} to {dayLabel(dietPlan[dietPlan.length - 1].date)}
+                          <span className="ml-2 font-medium text-orange-500">
+                            {[...new Set(dietPlan.map((p) => p.week))].length} week{[...new Set(dietPlan.map((p) => p.week))].length === 1 ? "" : "s"}
+                          </span>
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {loadingCoachCalendar ? (
+                    <p className="px-5 py-14 text-center text-sm text-slate-400">Loading this coach's calendar...</p>
+                  ) : (
+                    <div className="flex flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
+                      {/* Month grid — a dot marks a day this coach has published slots on */}
+                      <div className="w-full flex-shrink-0 border-b border-slate-100 p-5 lg:w-[25rem] lg:border-b-0 lg:border-r lg:overflow-y-auto">
+                        <div className="mb-3 flex items-center justify-between">
+                          <button
+                            type="button"
+                            onClick={() => (dietPickerMonth === 0 ? (setDietPickerMonth(11), setDietPickerYear(dietPickerYear - 1)) : setDietPickerMonth(dietPickerMonth - 1))}
+                            className="rounded p-1 hover:bg-slate-100"
+                            data-testid="cons-diet-prev-month"
+                          >
+                            <ChevronLeft className="h-5 w-5 text-slate-500" />
+                          </button>
+                          <h4 className="text-base font-bold text-slate-700">{MONTH_NAMES[dietPickerMonth]} {dietPickerYear}</h4>
+                          <button
+                            type="button"
+                            onClick={() => (dietPickerMonth === 11 ? (setDietPickerMonth(0), setDietPickerYear(dietPickerYear + 1)) : setDietPickerMonth(dietPickerMonth + 1))}
+                            className="rounded p-1 hover:bg-slate-100"
+                            data-testid="cons-diet-next-month"
+                          >
+                            <ChevronRight className="h-5 w-5 text-slate-500" />
+                          </button>
+                        </div>
+
+                        <div className="mb-1 grid grid-cols-7 gap-1">
+                          {WEEKDAY_LABELS.map((d) => (
+                            <div key={d} className="py-1 text-center text-[13px] font-semibold text-slate-400">{d}</div>
+                          ))}
+                        </div>
+
+                        <div className="grid grid-cols-7 gap-1">
+                          {Array.from({ length: new Date(dietPickerYear, dietPickerMonth, 1).getDay() }, (_, i) => (
+                            <div key={`pad-${i}`} className="h-12" />
+                          ))}
+                          {Array.from({ length: new Date(dietPickerYear, dietPickerMonth + 1, 0).getDate() }, (_, i) => {
+                            const day = i + 1;
+                            const d = isoDate(dietPickerYear, dietPickerMonth, day);
+                            const dayOpen = (coachSlotsByDate[d] || []).filter((t) => !checkinSlotFull(`${d}T${t}`)).length;
+                            const planned = dietPlanByDate[d];
+                            const isFocused = dietPickerDate === d;
+                            return (
+                              <button
+                                key={day}
+                                type="button"
+                                onClick={() => setDietPickerDate(d)}
+                                disabled={dayOpen === 0 && !planned}
+                                className={`relative h-12 rounded-lg text-base font-semibold transition-all ${
+                                  isFocused
+                                    ? "bg-orange-500 text-white shadow-md ring-2 ring-orange-200 ring-offset-1"
+                                    : planned
+                                    ? "border border-orange-300 bg-orange-50 text-orange-700"
+                                    : dayOpen > 0
+                                    ? "text-slate-600 hover:bg-slate-100"
+                                    : "cursor-not-allowed text-slate-300"
+                                }`}
+                                title={planned
+                                  ? `Day ${planned.day} · ${to12h(planned.time)}`
+                                  : dayOpen > 0 ? `${dayOpen} slot${dayOpen > 1 ? "s" : ""} open` : "No slots published"}
+                                data-testid={`cons-diet-day-${day}`}
+                              >
+                                {day}
+                                {planned ? (
+                                  <span className="absolute -right-1 -top-1 flex h-[1.3rem] min-w-[1.3rem] items-center justify-center rounded-full bg-orange-500 px-1 text-[11px] font-bold text-white shadow-sm">
+                                    {planned.day}
+                                  </span>
+                                ) : dayOpen > 0 && !isFocused ? (
+                                  <span className="absolute bottom-0.5 left-1/2 h-1 w-1 -translate-x-1/2 rounded-full bg-orange-400" />
+                                ) : null}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        <div className="mt-4 hidden space-y-2 border-t border-slate-100 pt-3 sm:block">
+                          <div className="flex flex-wrap items-center gap-3 text-xs font-semibold text-slate-500">
+                            <span className="flex items-center gap-1"><span className="inline-block h-3 w-3 rounded-full bg-orange-500" /> Check-in day</span>
+                            <span className="flex items-center gap-1"><span className="inline-block h-1.5 w-1.5 rounded-full bg-orange-400" /> Slots open</span>
+                          </div>
+                          <p className="text-[13px] text-slate-400">
+                            One check-in a day — a plan of six check-ins is six separate days. Only days this
+                            coach has opened in <b>MANAGEMENT → DIET CALENDAR</b> can be picked. Pick a time and it{" "}
+                            <b>jumps to the next open date</b> on its own, so the plan is laid out in one run.
+                            Picking another time on a day already fixed <b>moves</b> that day and stays put.
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Times published on the focused date */}
+                      <div className="w-full flex-shrink-0 p-4 lg:flex-1 lg:overflow-y-auto">
+                        {!dietPickerDate ? (
+                          <div className="flex h-full items-center justify-center">
+                            <div className="text-center">
+                              <Calendar className="mx-auto mb-2 h-10 w-10 text-slate-200" />
+                              <p className="text-sm text-slate-400">Pick a check-in date to see this coach's open times</p>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                              <h4 className="text-lg font-bold text-slate-800" data-testid="cons-diet-picker-date">{longDate(dietPickerDate)}</h4>
+                              <div className="flex flex-wrap items-center gap-3 text-xs font-semibold text-slate-400">
+                                <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-emerald-400" /> Open</span>
+                                <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-orange-500" /> Check-in day</span>
+                                <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-amber-400" /> Booked</span>
+                              </div>
+                            </div>
+
+                            {dietPlanByDate[dietPickerDate] && (
+                              <p className="mb-3 rounded-lg border-2 border-orange-400 bg-orange-50 px-4 py-2.5 text-sm font-semibold text-orange-800 shadow-sm" data-testid="cons-diet-day-fixed">
+                                <b>Day {dietPlanByDate[dietPickerDate].day}</b> is fixed for {to12h(dietPlanByDate[dietPickerDate].time)} – {endTime12h(dietPlanByDate[dietPickerDate].time, dietMinutes)}.
+                                <span className="ml-1 font-normal">Pick another time to move it, or click it again to free the day.</span>
+                              </p>
+                            )}
+
+                            {(coachSlotsByDate[dietPickerDate] || []).length === 0 ? (
+                              <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-8 text-center text-sm text-slate-400">
+                                Nothing published on this day — open it in MANAGEMENT → DIET CALENDAR first.
+                              </p>
+                            ) : (
+                              <div className="grid grid-cols-3 gap-1.5 sm:gap-2" data-testid="cons-diet-picker-grid">
+                                {(coachSlotsByDate[dietPickerDate] || []).map((time) => {
+                                  const slot = `${dietPickerDate}T${time}`;
+                                  const taken = checkinSlotFull(slot);
+                                  const picked = dietPlanByDate[dietPickerDate]?.slot === slot;
+                                  return (
+                                    <button
+                                      key={time}
+                                      type="button"
+                                      onClick={() => toggleCheckinSlot(slot)}
+                                      disabled={taken}
+                                      className={`overflow-hidden rounded-lg border-2 p-2 text-left transition-all sm:p-3 ${
+                                        taken
+                                          ? "cursor-not-allowed border-amber-300 bg-amber-50 opacity-70"
+                                          : picked
+                                          ? "border-orange-500 bg-orange-100 shadow-md ring-2 ring-orange-200"
+                                          : "border-emerald-200 bg-emerald-50 hover:border-emerald-400 hover:shadow-sm"
+                                      }`}
+                                      title={taken
+                                        ? `Booked · ${checkinSlotHeldBy(slot) || "another patient"}`
+                                        : `${to12h(time)} – ${endTime12h(time, dietMinutes)}${picked ? ` · Day ${dietPlanByDate[dietPickerDate].day}` : ""}`}
+                                      data-testid={`cons-diet-pick-${time}`}
+                                    >
+                                      <p className={`truncate text-[13px] font-bold sm:text-base ${taken ? "text-amber-800" : picked ? "text-orange-900" : "text-emerald-800"}`}>
+                                        {to12h(time)}
+                                      </p>
+                                      <p className={`mt-0.5 truncate text-[10px] font-medium sm:text-xs ${taken ? "text-amber-600" : picked ? "text-orange-700" : "text-emerald-600"}`}>
+                                        {taken
+                                          ? "Booked"
+                                          : picked
+                                          ? `Day ${dietPlanByDate[dietPickerDate].day}`
+                                          : `ends ${endTime12h(time, dietMinutes)}`}
+                                      </p>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
+
+                            {dietPlan.length > 0 && (
+                              <div className="mt-4 rounded-xl border-2 border-orange-200 bg-orange-50/70 p-4" data-testid="cons-diet-plan">
+                                <div className="mb-2 flex items-center justify-between">
+                                  <p className="text-sm font-bold uppercase tracking-wider text-orange-700">Diet plan</p>
+                                  <button
+                                    type="button"
+                                    onClick={() => setPickedCheckinSlots([])}
+                                    className="text-[13px] font-bold text-rose-600 hover:text-rose-800"
+                                    data-testid="cons-diet-picker-clear"
+                                  >
+                                    Clear all
+                                  </button>
+                                </div>
+                                <div className="max-h-48 space-y-2.5 overflow-y-auto">
+                                  {[...new Set(dietPlan.map((p) => p.week))].map((week) => (
+                                    <div key={week}>
+                                      <p className="mb-1 text-xs font-bold uppercase tracking-wider text-orange-500">Week {week}</p>
+                                      <div className="grid grid-cols-3 gap-1.5 lg:grid-cols-4">
+                                        {dietPlan.filter((p) => p.week === week).map((p) => (
+                                          <button
+                                            key={p.slot}
+                                            type="button"
+                                            onClick={() => toggleCheckinSlot(p.slot)}
+                                            className="relative flex flex-col items-center gap-0.5 rounded-lg border-2 border-orange-300 bg-white px-1 py-1.5 text-[10px] font-bold leading-tight text-orange-700 transition hover:border-orange-500"
+                                            title={`${dayLabel(p.date)} · ${to12h(p.time)} – ${endTime12h(p.time, dietMinutes)} — tap to remove`}
+                                            data-testid={`cons-diet-picked-${p.slot}`}
+                                          >
+                                            <X className="absolute right-0.5 top-0.5 h-3 w-3 text-slate-300" />
+                                            <span className="rounded-full bg-orange-600 px-1.5 py-0.5 text-[9px] text-white">Day {p.day}</span>
+                                            <span className="text-slate-600">{shortDayLabel(p.date)}</span>
+                                            <span className="text-slate-500">{to12h(p.time)}</span>
+                                          </button>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex flex-col gap-2.5 border-t-2 border-slate-200 bg-slate-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-6 sm:py-4">
+                    <div className="text-[12px] leading-snug text-slate-500 sm:text-[13px]">
+                      <p className="font-bold text-slate-700">
+                        {dietPlan.length === 0
+                          ? "Pick a date, then a time, for each check-in day."
+                          : `${dietPlan.length} check-in ${dietPlan.length === 1 ? "day" : "days"} · ${dayLabel(dietPlan[0].date)} to ${dayLabel(dietPlan[dietPlan.length - 1].date)}.`}
+                      </p>
+                      {selectedLead.assigned_physio_name && (
+                        <p className="mt-1 text-slate-400">
+                          Also on treatment with {selectedLead.assigned_physio_name} — check-ins are booked separately from their sessions.
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <Button variant="outline" className="flex-1 text-sm sm:flex-none" onClick={() => setShowDietSlotPicker(false)} data-testid="cons-diet-picker-back">
+                        Back
+                      </Button>
+                      <Button
+                        className="flex-[2] bg-orange-500 text-sm hover:bg-orange-600 sm:flex-none"
+                        onClick={submitDietAssign}
+                        disabled={assigningDiet || dietPlan.length === 0}
+                        data-testid="cons-diet-picker-submit"
+                      >
+                        {assigningDiet ? "Assigning..." : `Assign & Book ${dietPlan.length} Check-in ${dietPlan.length === 1 ? "Day" : "Days"}`}
+                      </Button>
+                    </div>
                   </div>
                 </div>
               </div>
