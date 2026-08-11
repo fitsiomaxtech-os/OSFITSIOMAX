@@ -104,10 +104,23 @@ const rateTone = (value, team) => {
 const nameOf = (m, tier) => (tier.subline && m[tier.subline]) || m.full_name;
 const subOf = (m, tier) => (tier.subline && m[tier.subline] ? m.full_name : m.email);
 
-export const TeamCard = ({ title, subtitle, members = [], kind }) => {
+/**
+ * `benchmarkFrom` is who the team average is computed over, and it is NOT always the rows
+ * on screen.
+ *
+ * Filtering Pre-Sales to one branch should re-benchmark: those agents are peers doing the
+ * same job in the same place, and how they compare with each other is the question.
+ *
+ * Filtering Branch Performance to one branch must NOT: a branch's peers are the other
+ * branches, and measuring it against itself gives every branch a delta of zero forever.
+ *
+ * So the caller says which. Defaulting to the rows shown keeps every existing caller
+ * behaving exactly as it did.
+ */
+export const TeamCard = ({ title, subtitle, members = [], kind, benchmarkFrom }) => {
   const tier = TEAM_TIERS[kind] || TEAM_TIERS.pre_sales;
   const Icon = tier.icon;
-  const avg = teamRate(members, tier.rate);
+  const avg = teamRate(benchmarkFrom || members, tier.rate);
 
   // Best rate first, so the person who needs help is findable rather than buried at
   // whatever position the roster happened to return them in.
