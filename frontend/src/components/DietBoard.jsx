@@ -3,10 +3,8 @@ import { createPortal } from "react-dom";
 import {
   Calendar,
   Check,
-  CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  Clock,
   Salad,
   Search,
   Stethoscope,
@@ -55,27 +53,41 @@ const VIEW_TABS = [
   { key: "patients", label: "Patients", icon: Users },
 ];
 
-// The same summary tile the Physio board uses — count, and the filter that narrows to it,
-// as one control.
-const StatTile = ({ label, value, sub, icon: Icon, onClick, active, testid }) => {
+// The Human Resource Master View's stage card: white and bordered, a coloured label over a
+// big coloured number, and selecting one brings its own colour to the border and a wash of
+// it to the card. Each tile keeps a distinct colour so the queue reads at a glance rather
+// than as three identical boxes.
+//
+// No icon and no sub-line, matching HR. The icon repeated what the label already said in
+// the space the number wanted, and the sub-line ("Not yet on a plan") was a caption on a
+// word that needs none.
+const StatTile = ({ label, value, color = "#64748b", onClick, active, testid }) => {
   const Tag = onClick ? "button" : "div";
   const tagProps = onClick ? { type: "button", onClick, "data-testid": testid } : { "data-testid": testid };
   return (
     <Tag
       {...tagProps}
-      className={`w-full rounded-xl border-2 px-3 py-2.5 text-left transition sm:px-4 sm:py-4 ${
-        active ? "border-teal-600 bg-teal-50 shadow-sm" : `border-slate-200 bg-white ${onClick ? "hover:border-teal-300 hover:shadow-sm" : ""}`
+      className={`w-full min-w-0 rounded-lg border-2 px-2 py-2 text-center transition sm:rounded-xl sm:px-4 sm:py-4 sm:text-left ${
+        active ? "shadow-sm" : `border-slate-200 bg-white ${onClick ? "hover:shadow-sm" : ""}`
       }`}
+      style={active ? { borderColor: color, backgroundColor: `${color}14` } : undefined}
     >
-      <span className={`flex items-center gap-1.5 ${active ? "text-teal-700" : "text-slate-500"}`}>
-        {Icon && <Icon className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />}
-        <span className="truncate text-[10px] font-bold uppercase tracking-wider sm:text-xs">{label}</span>
+      <span
+        className="block break-words text-[9px] font-bold uppercase leading-[1.15] sm:truncate sm:text-xs sm:tracking-wider"
+        style={{ color }}
+        title={label}
+      >
+        {label}
       </span>
-      <span className={`mt-0.5 block text-2xl font-extrabold sm:mt-1 sm:text-3xl ${active ? "text-teal-700" : "text-slate-800"}`}>{value}</span>
-      {sub && <span className={`mt-0.5 block truncate text-[10px] ${active ? "text-teal-600" : "text-slate-400"}`}>{sub}</span>}
+      <span className="mt-0.5 block text-lg font-extrabold leading-tight sm:mt-1 sm:text-3xl" style={{ color }}>
+        {value}
+      </span>
     </Tag>
   );
 };
+
+// One colour per tile, so a glance at the row says which number is which.
+const TILE_COLORS = { referred: "#0ea5e9", waiting: "#f59e0b", booked: "#10b981", neutral: "#64748b" };
 
 export const DietBoard = ({ coachId } = {}) => {
   const [activeTab, setActiveTab] = useState("consultations");
@@ -89,8 +101,12 @@ export const DietBoard = ({ coachId } = {}) => {
 
   return (
     <div className="space-y-3 pb-20 md:pb-0" data-testid="diet-board-root">
-      <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between md:gap-4 md:border-b md:border-slate-200" data-testid="diet-view-bar">
-        <div className="hidden items-center gap-1 overflow-x-auto md:flex" data-testid="diet-view-tabs">
+      {/* Filled-pill tabs on a rule, the same control the Human Resource Master View uses.
+          This is top-level navigation between three different jobs, and a filled pill says
+          "you are here" more plainly than an underline does. Kept in emerald rather than
+          HR's indigo so the vertical is still identifiable at a glance. */}
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between md:gap-4 md:border-b md:border-slate-200 md:pb-2" data-testid="diet-view-bar">
+        <div className="hidden flex-wrap items-center gap-2 md:flex" data-testid="diet-view-tabs">
           {VIEW_TABS.map((tab) => {
             const Icon = tab.icon;
             const active = activeTab === tab.key;
@@ -101,14 +117,14 @@ export const DietBoard = ({ coachId } = {}) => {
                 type="button"
                 onClick={() => setActiveTab(tab.key)}
                 aria-current={active ? "page" : undefined}
-                className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
-                  active ? "border-emerald-500 text-emerald-700" : "border-transparent text-slate-400 hover:text-slate-600"
+                className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition ${
+                  active ? "bg-emerald-600 text-white" : "text-slate-600 hover:bg-slate-100"
                 }`}
                 data-testid={`diet-view-tab-${tab.key}`}
               >
                 <Icon className="h-4 w-4" /> {tab.label}
                 {count > 0 && (
-                  <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ${active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                  <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ${active ? "bg-white/25 text-white" : "bg-slate-100 text-slate-500"}`}>
                     {count > 99 ? "99+" : count}
                   </span>
                 )}
@@ -116,7 +132,7 @@ export const DietBoard = ({ coachId } = {}) => {
             );
           })}
         </div>
-        <div ref={setToolbarSlot} className="flex flex-wrap items-center gap-2 md:pb-1.5" data-testid="diet-view-toolbar" />
+        <div ref={setToolbarSlot} className="flex flex-wrap items-center gap-2" data-testid="diet-view-toolbar" />
       </div>
 
       <div style={{ display: activeTab === "consultations" ? "block" : "none" }}>
@@ -219,9 +235,9 @@ function ConsultationsTab({ coachId, onCountChange, toolbarSlot }) {
       {toolbarSlot ? createPortal(toolbar, toolbarSlot) : toolbar}
 
       <div className="mb-4 grid grid-cols-3 gap-2 sm:gap-3">
-        <StatTile icon={Stethoscope} label="Referred" value={rows.length} onClick={() => setFilter("all")} active={filter === "all"} testid="diet-consult-stat-all" />
-        <StatTile icon={Clock} label="Waiting" value={waiting.length} sub="No consultation booked" onClick={() => setFilter("waiting")} active={filter === "waiting"} testid="diet-consult-stat-waiting" />
-        <StatTile icon={CheckCircle2} label="Booked" value={seen.length} sub="Diet Consultation set" onClick={() => setFilter("seen")} active={filter === "seen"} testid="diet-consult-stat-seen" />
+        <StatTile label="Referred" value={rows.length} color={TILE_COLORS.referred} onClick={() => setFilter("all")} active={filter === "all"} testid="diet-consult-stat-all" />
+        <StatTile label="Waiting" value={waiting.length} color={TILE_COLORS.waiting} onClick={() => setFilter("waiting")} active={filter === "waiting"} testid="diet-consult-stat-waiting" />
+        <StatTile label="Booked" value={seen.length} color={TILE_COLORS.booked} onClick={() => setFilter("seen")} active={filter === "seen"} testid="diet-consult-stat-seen" />
       </div>
 
 
@@ -237,43 +253,113 @@ function ConsultationsTab({ coachId, onCountChange, toolbarSlot }) {
           </p>
         </div>
       ) : (
-        <div className="space-y-2">
-          {visible.map((p) => (
-            <div key={p.lead_id} className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border p-3 ${p.booked ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-white"}`} data-testid={`diet-consult-${p.lead_id}`}>
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="truncate text-sm font-bold text-slate-800">{p.lead_name}</p>
-                  {p.patient_number && <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-slate-500">{p.patient_number}</span>}
-                  {/* Says whether this patient is also on a physio course — it changes how
-                      a diet plan should be pitched, and the coach cannot see it anywhere
-                      else on this board. */}
-                  {p.consultation_decision === "consultation_treatment" && (
-                    <span className="rounded-md bg-violet-100 px-2 py-0.5 text-[10px] font-bold text-violet-700">+ TREATMENT</span>
-                  )}
-                </div>
-                <p className="mt-0.5 text-[11px] text-slate-500">
-                  {p.phone || "—"}
-                  {/* This is the DIET consultation's own date and time, not the Head
-                      Physio's — the coach needs to know when they see this patient. */}
-                  {p.appointment_date ? ` · ${fmtDate(p.appointment_date)}${p.appointment_time ? ` at ${to12h(p.appointment_time)}` : ""}` : ""}
-                  {p.total_days > 0 ? ` · ${p.completed_days}/${p.total_days} check-ins` : ""}
-                </p>
-              </div>
-              <span className={`shrink-0 rounded-md px-2.5 py-1 text-[11px] font-bold ${p.booked ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
-                {p.booked ? "BOOKED" : (
-                  <>
-                    <span className="sm:hidden">WAITING</span>
-                    <span className="hidden sm:inline">AWAITING BOOKING</span>
-                  </>
-                )}
-              </span>
-            </div>
-          ))}
-        </div>
+        <ConsultationList rows={visible} />
       )}
     </div>
   );
 }
+
+/** A status pill in the Human Resource Master View's shape — a bordered chip tinted with
+    its own colour, rather than a solid block. */
+const StatusPill = ({ label, color, testid }) => (
+  <span
+    className="inline-flex shrink-0 whitespace-nowrap rounded-[5px] border px-2 py-0.5 text-[10px] font-bold"
+    style={{ color, borderColor: `${color}55`, backgroundColor: `${color}14` }}
+    data-testid={testid}
+  >
+    {label}
+  </span>
+);
+
+/**
+ * The consultation queue as a table from tablet up, and the same rows as cards on a phone
+ * — the Human Resource Master View's list, which is the pattern the OS uses wherever a
+ * queue has more than two facts per row.
+ *
+ * As stacked cards, the phone number, the appointment and the check-in count were run into
+ * one grey line separated by dots, so nothing lined up between rows and a coach scanning
+ * for "who am I seeing on the 17th" had to read every row in full. In columns the same
+ * facts sit under a heading that names them.
+ */
+const ConsultationList = ({ rows }) => (
+  <>
+    <div className="space-y-2 sm:hidden" data-testid="diet-consult-list-mobile">
+      {rows.map((p) => (
+        <div key={p.lead_id} className="rounded-xl border border-slate-200 bg-white p-3" data-testid={`diet-consult-${p.lead_id}`}>
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-bold text-slate-800">{p.lead_name}</p>
+              <p className="truncate text-xs text-slate-500">{p.phone || "—"}</p>
+            </div>
+            {p.booked
+              ? <StatusPill label="BOOKED" color={TILE_COLORS.booked} />
+              : <StatusPill label="WAITING" color={TILE_COLORS.waiting} />}
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
+            {p.consultation_decision === "consultation_treatment" && (
+              <span className="rounded-md bg-violet-100 px-2 py-0.5 text-[10px] font-bold text-violet-700">+ TREATMENT</span>
+            )}
+            {p.appointment_date && (
+              <span className="font-semibold text-emerald-600">
+                {fmtDate(p.appointment_date)}{p.appointment_time ? ` ${to12h(p.appointment_time)}` : ""}
+              </span>
+            )}
+            {p.total_days > 0 && <span>· {p.completed_days}/{p.total_days} check-ins</span>}
+          </div>
+        </div>
+      ))}
+    </div>
+
+    <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white sm:block" data-testid="diet-consult-list-desktop">
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[720px] text-sm">
+          <thead className="bg-slate-50 text-left text-[10px] uppercase tracking-wider text-slate-400">
+            <tr>
+              <th className="px-4 py-2.5 font-semibold">Patient</th>
+              <th className="px-4 py-2.5 font-semibold">Contact</th>
+              <th className="px-4 py-2.5 font-semibold">Plan</th>
+              <th className="px-4 py-2.5 font-semibold">Diet Consultation</th>
+              <th className="px-4 py-2.5 font-semibold">Check-ins</th>
+              <th className="px-4 py-2.5 font-semibold">Status</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {rows.map((p) => (
+              <tr key={p.lead_id} className="hover:bg-slate-50" data-testid={`diet-consult-${p.lead_id}`}>
+                <td className="px-4 py-3">
+                  <p className="font-medium text-slate-800">{p.lead_name}</p>
+                  {p.patient_number && <p className="font-mono text-[11px] text-slate-400">{p.patient_number}</p>}
+                </td>
+                <td className="px-4 py-3 text-slate-600">{p.phone || "—"}</td>
+                {/* Whether this patient is also on a physio course — it changes how a diet
+                    plan should be pitched, and the coach sees it nowhere else. */}
+                <td className="px-4 py-3">
+                  {p.consultation_decision === "consultation_treatment"
+                    ? <span className="rounded-md bg-violet-100 px-2 py-0.5 text-[10px] font-bold text-violet-700">+ TREATMENT</span>
+                    : <span className="text-[11px] text-slate-400">Diet only</span>}
+                </td>
+                {/* The DIET consultation's own date and time, not the Head Physio's. */}
+                <td className="px-4 py-3 text-slate-600">
+                  {p.appointment_date
+                    ? <span className="whitespace-nowrap">{fmtDate(p.appointment_date)}{p.appointment_time ? ` at ${to12h(p.appointment_time)}` : ""}</span>
+                    : "—"}
+                </td>
+                <td className="px-4 py-3 text-slate-600">
+                  {p.total_days > 0 ? `${p.completed_days}/${p.total_days}` : "—"}
+                </td>
+                <td className="px-4 py-3">
+                  {p.booked
+                    ? <StatusPill label="BOOKED" color={TILE_COLORS.booked} testid={`diet-consult-status-${p.lead_id}`} />
+                    : <StatusPill label="AWAITING BOOKING" color={TILE_COLORS.waiting} testid={`diet-consult-status-${p.lead_id}`} />}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </>
+);
 
 function CheckinsTab({ coachId, onCountChange, toolbarSlot }) {
   const todayIso = isoOf(new Date());
@@ -377,13 +463,9 @@ function CheckinsTab({ coachId, onCountChange, toolbarSlot }) {
       <div className="mb-4" data-testid="diet-summary">
         <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">{filterValue ? filterValue.label : "Overall"}</p>
         <div className="grid grid-cols-3 gap-2 sm:gap-3">
-          <StatTile icon={Calendar} label="Check-ins" value={stats.total} onClick={() => setRowFilter("all")} active={rowFilter === "all"} testid="diet-stat-total" />
-          <StatTile
-            icon={CheckCircle2} label="Completed" value={stats.completed}
-            sub={stats.total ? `${Math.round((stats.completed / stats.total) * 100)}% done` : null}
-            onClick={() => setRowFilter(rowFilter === "completed" ? "all" : "completed")} active={rowFilter === "completed"} testid="diet-stat-completed"
-          />
-          <StatTile icon={Clock} label="Pending" value={stats.pending} sub="Days left" onClick={() => setRowFilter(rowFilter === "pending" ? "all" : "pending")} active={rowFilter === "pending"} testid="diet-stat-pending" />
+          <StatTile label="Check-ins" value={stats.total} color={TILE_COLORS.referred} onClick={() => setRowFilter("all")} active={rowFilter === "all"} testid="diet-stat-total" />
+          <StatTile label="Completed" value={stats.completed} color={TILE_COLORS.booked} onClick={() => setRowFilter(rowFilter === "completed" ? "all" : "completed")} active={rowFilter === "completed"} testid="diet-stat-completed" />
+          <StatTile label="Pending" value={stats.pending} color={TILE_COLORS.waiting} onClick={() => setRowFilter(rowFilter === "pending" ? "all" : "pending")} active={rowFilter === "pending"} testid="diet-stat-pending" />
         </div>
       </div>
 
@@ -561,37 +643,93 @@ function PatientsTab({ coachId, onCountChange }) {
           <p className="text-sm text-slate-400">{historyTab === "completed" ? "No completed diet plans yet" : "No patients assigned yet"}</p>
         </div>
       ) : (
-        <div className="space-y-3">
-          {visible.map((p) => (
-            <button
-              key={p.lead_id}
-              type="button"
-              onClick={() => setOpenLead(p)}
-              className="w-full rounded-xl border border-slate-200 bg-white p-4 text-left transition hover:border-emerald-300 hover:shadow-sm"
-              data-testid={`diet-patient-${p.lead_id}`}
-            >
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-bold text-slate-800">{p.lead_name}</p>
-                  <p className="text-[11px] text-slate-500">{p.phone || "—"}</p>
-                </div>
-                <div className="shrink-0 text-right">
-                  <p className="text-base font-bold text-emerald-600">{p.completed_days}/{p.total_days}</p>
-                  <p className="text-[10px] text-slate-400">check-ins</p>
-                </div>
-              </div>
-              <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
-                <div className="h-full rounded-full bg-emerald-500" style={{ width: `${p.total_days > 0 ? (p.completed_days / p.total_days) * 100 : 0}%` }} />
-              </div>
-            </button>
-          ))}
-        </div>
+        <PatientList rows={visible} onOpen={setOpenLead} />
       )}
 
       {openLead && <PatientDaysModal patient={openLead} onClose={() => setOpenLead(null)} />}
     </div>
   );
 }
+
+/** The caseload in the same list the queue uses: table from tablet up, cards on a phone.
+    The progress bar survives into the table as a column of its own — it is the one thing
+    on this board that answers "how far through is this patient" without arithmetic. */
+const PatientList = ({ rows, onOpen }) => {
+  const pct = (p) => (p.total_days > 0 ? (p.completed_days / p.total_days) * 100 : 0);
+  return (
+    <>
+      <div className="space-y-2 sm:hidden" data-testid="diet-patient-list-mobile">
+        {rows.map((p) => (
+          <button
+            key={p.lead_id}
+            type="button"
+            onClick={() => onOpen(p)}
+            className="w-full rounded-xl border border-slate-200 bg-white p-3 text-left"
+            data-testid={`diet-patient-${p.lead_id}`}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-bold text-slate-800">{p.lead_name}</p>
+                <p className="truncate text-xs text-slate-500">{p.phone || "—"}</p>
+              </div>
+              <span className="shrink-0 text-sm font-bold text-emerald-600">{p.completed_days}/{p.total_days}</span>
+            </div>
+            <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+              <div className="h-full rounded-full bg-emerald-500" style={{ width: `${pct(p)}%` }} />
+            </div>
+          </button>
+        ))}
+      </div>
+
+      <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white sm:block" data-testid="diet-patient-list-desktop">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[680px] text-sm">
+            <thead className="bg-slate-50 text-left text-[10px] uppercase tracking-wider text-slate-400">
+              <tr>
+                <th className="px-4 py-2.5 font-semibold">Patient</th>
+                <th className="px-4 py-2.5 font-semibold">Contact</th>
+                <th className="px-4 py-2.5 font-semibold">Next Check-in</th>
+                <th className="px-4 py-2.5 font-semibold">Progress</th>
+                <th className="px-4 py-2.5 font-semibold">Done</th>
+                <th className="px-4 py-2.5" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {rows.map((p) => (
+                <tr
+                  key={p.lead_id}
+                  onClick={() => onOpen(p)}
+                  className="cursor-pointer hover:bg-slate-50"
+                  data-testid={`diet-patient-${p.lead_id}`}
+                >
+                  <td className="px-4 py-3">
+                    <p className="font-medium text-slate-800">{p.lead_name}</p>
+                    {p.diet_stage && <p className="text-[11px] text-slate-400">{p.diet_stage}</p>}
+                  </td>
+                  <td className="px-4 py-3 text-slate-600">{p.phone || "—"}</td>
+                  <td className="px-4 py-3 text-slate-600">
+                    {p.next_day?.slot_time
+                      ? <span className="whitespace-nowrap">{fmtDate((p.next_day.slot_time || "").slice(0, 10))} at {to12h((p.next_day.slot_time || "").slice(11, 16))}</span>
+                      : "—"}
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="h-1.5 w-32 overflow-hidden rounded-full bg-slate-100">
+                      <div className="h-full rounded-full bg-emerald-500" style={{ width: `${pct(p)}%` }} />
+                    </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className="font-bold text-emerald-600">{p.completed_days}/{p.total_days}</span>
+                  </td>
+                  <td className="px-4 py-3 text-right"><ChevronRight className="ml-auto h-4 w-4 text-slate-300" /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </>
+  );
+};
 
 const PatientDaysModal = ({ patient, onClose }) => {
   const [days, setDays] = useState([]);
