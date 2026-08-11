@@ -234,7 +234,10 @@ class V3LeadOut(BaseModel):
     diet_coach_id: Optional[str] = None
     diet_coach_name: Optional[str] = None
     diet_assigned_at: Optional[str] = None
-    diet_stage: Optional[str] = None  # "Diet Plan Assigned" | "Diet Completed"
+    # The booked Diet Consultation slot, "YYYY-MM-DDTHH:MM". Distinct from
+    # appointment_date/_time above, which are the Head Physio's consultation.
+    diet_appointment_at: Optional[str] = None
+    diet_stage: Optional[str] = None  # "Diet Consultation Booked" | "Diet Plan Assigned" | "Diet Completed"
     diagnosis: Optional[str] = None  # Pre-Sales' basic diagnosis — read-only reference for the Head Physio
     physio_diagnosis_report: Optional[str] = None  # Head Physio's own diagnosis report
     physio_diagnosis_locked: Optional[bool] = False

@@ -189,8 +189,12 @@ function ConsultationsTab({ coachId, onCountChange, toolbarSlot }) {
     return () => { cancelled = true; };
   }, [coachId]);
 
-  const waiting = rows.filter((r) => !r.assigned);
-  const seen = rows.filter((r) => r.assigned);
+  // Keyed on whether a Diet Consultation is actually BOOKED, not on whether a coach is
+  // named against the patient. Diet is a consultation vertical: until the branch has put
+  // the patient in a slot there is nothing for the coach to turn up to, and a queue that
+  // counted a bare coach assignment as "seen" would empty itself before anyone was seen.
+  const waiting = rows.filter((r) => !r.booked);
+  const seen = rows.filter((r) => r.booked);
 
   // The badge counts who is still waiting, so it falls to zero as the coach works
   // through them rather than holding at the referral total.
@@ -216,8 +220,8 @@ function ConsultationsTab({ coachId, onCountChange, toolbarSlot }) {
 
       <div className="mb-4 grid grid-cols-3 gap-2 sm:gap-3">
         <StatTile icon={Stethoscope} label="Referred" value={rows.length} onClick={() => setFilter("all")} active={filter === "all"} testid="diet-consult-stat-all" />
-        <StatTile icon={Clock} label="Waiting" value={waiting.length} sub="Not yet on a plan" onClick={() => setFilter("waiting")} active={filter === "waiting"} testid="diet-consult-stat-waiting" />
-        <StatTile icon={CheckCircle2} label="On a plan" value={seen.length} onClick={() => setFilter("seen")} active={filter === "seen"} testid="diet-consult-stat-seen" />
+        <StatTile icon={Clock} label="Waiting" value={waiting.length} sub="No consultation booked" onClick={() => setFilter("waiting")} active={filter === "waiting"} testid="diet-consult-stat-waiting" />
+        <StatTile icon={CheckCircle2} label="Booked" value={seen.length} sub="Diet Consultation set" onClick={() => setFilter("seen")} active={filter === "seen"} testid="diet-consult-stat-seen" />
       </div>
 
 
@@ -228,14 +232,14 @@ function ConsultationsTab({ coachId, onCountChange, toolbarSlot }) {
           <Stethoscope className="mx-auto mb-3 h-10 w-10 text-slate-200" />
           <p className="text-sm text-slate-400">
             {filter === "seen"
-              ? "Nobody is on a diet plan yet."
-              : "No diet referrals yet. A Head Physio sends patients here by choosing a plan with Diet on it."}
+              ? "No Diet Consultations booked yet."
+              : "Nobody is waiting. The branch books a Diet Consultation from the patient's card in Consultations."}
           </p>
         </div>
       ) : (
         <div className="space-y-2">
           {visible.map((p) => (
-            <div key={p.lead_id} className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border p-3 ${p.assigned ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-white"}`} data-testid={`diet-consult-${p.lead_id}`}>
+            <div key={p.lead_id} className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border p-3 ${p.booked ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-white"}`} data-testid={`diet-consult-${p.lead_id}`}>
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <p className="truncate text-sm font-bold text-slate-800">{p.lead_name}</p>
@@ -249,15 +253,17 @@ function ConsultationsTab({ coachId, onCountChange, toolbarSlot }) {
                 </div>
                 <p className="mt-0.5 text-[11px] text-slate-500">
                   {p.phone || "—"}
-                  {p.appointment_date ? ` · seen ${fmtDate(p.appointment_date)}` : ""}
-                  {p.assigned ? ` · ${p.completed_days}/${p.total_days} check-ins` : ""}
+                  {/* This is the DIET consultation's own date and time, not the Head
+                      Physio's — the coach needs to know when they see this patient. */}
+                  {p.appointment_date ? ` · ${fmtDate(p.appointment_date)}${p.appointment_time ? ` at ${to12h(p.appointment_time)}` : ""}` : ""}
+                  {p.total_days > 0 ? ` · ${p.completed_days}/${p.total_days} check-ins` : ""}
                 </p>
               </div>
-              <span className={`shrink-0 rounded-md px-2.5 py-1 text-[11px] font-bold ${p.assigned ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
-                {p.assigned ? (p.diet_stage || "ON A PLAN") : (
+              <span className={`shrink-0 rounded-md px-2.5 py-1 text-[11px] font-bold ${p.booked ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+                {p.booked ? "BOOKED" : (
                   <>
                     <span className="sm:hidden">WAITING</span>
-                    <span className="hidden sm:inline">AWAITING CONSULTATION</span>
+                    <span className="hidden sm:inline">AWAITING BOOKING</span>
                   </>
                 )}
               </span>

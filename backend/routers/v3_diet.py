@@ -249,6 +249,117 @@ async def assign_diet(
     return {"days_booked": len(docs), "coach_name": coach["full_name"]}
 
 
+class DietAppointmentInput(BaseModel):
+    lead_id: str
+    coach_id: str
+    slot_time: str  # "YYYY-MM-DDTHH:MM"
+
+
+@router.post("/branch/diet-appointment")
+async def book_diet_appointment(
+    payload: DietAppointmentInput,
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+):
+    """Book the Diet Consultation — one appointment on the coach's calendar.
+
+    Diet is a consultation vertical, the same shape as a Head Physio consultation and not
+    the same shape as a course of treatment: the Nutrition Coach sees the patient once to
+    read them and set a plan. So this books ONE slot, and it lands in the shared
+    `appointments` collection with appt_kind="diet", exactly the way
+    v3_consult_appointments books a Head Physio's. That is what makes it show up on the
+    coach's own calendar without a second mechanism to keep in step.
+
+    Two rules this deliberately does not enforce, because the branch decides them:
+
+    Diet normally follows treatment, but a patient can come for a diet consultation and
+    nothing else — so this never requires a physio assignment or a treatment package.
+
+    And it is never compulsory: nothing here reads or requires `diet_recommended`. The flag
+    is set as a RESULT of booking, so the coach's queue agrees with the booking whether the
+    Head Physio recommended diet on the day or the patient asked for it a week later.
+
+    What it must never do is touch `stage`, `branch_stage` or `consultation_stage`. The
+    generic book-appointment endpoint resets a lead to the first sales stage, which for a
+    patient already at Fee Collected would throw away their whole consultation. That is
+    why this is its own endpoint rather than a reuse of that one.
+    """
+    lead = await v3_col("leads").find_one({"id": payload.lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    coach = await v3_col("doctors").find_one({"id": payload.coach_id, "profile_type": COACH}, {"_id": 0})
+    if not coach:
+        raise HTTPException(status_code=404, detail="Nutrition Coach not found")
+
+    slot = normalize_slot_time(payload.slot_time)
+    if slot not in (coach.get("slots") or []):
+        raise HTTPException(
+            status_code=400,
+            detail="That time isn't published on this coach's calendar. Open it in MANAGEMENT > DIET CALENDAR first.",
+        )
+
+    # This lead's own earlier booking is cancelled before the clash check, or re-booking
+    # them into the same slot would read as a clash against themselves.
+    await v3_col("appointments").update_many(
+        {"lead_id": payload.lead_id, "appt_kind": "diet", "status": "new_appointment"},
+        {"$set": {"status": "cancelled", "updated_at": now_iso()}},
+    )
+
+    clash = await v3_col("appointments").find_one(
+        {"doctor_id": payload.coach_id, "slot_time": slot, "status": "new_appointment"},
+        {"_id": 0, "lead_name": 1},
+    )
+    if clash:
+        raise HTTPException(
+            status_code=409,
+            detail=f"This coach is already booked at that time ({clash.get('lead_name') or 'another patient'})",
+        )
+
+    date_part, _, time_part = slot.partition("T")
+    now = now_iso()
+    appt = {
+        "id": str(uuid.uuid4()),
+        "lead_id": payload.lead_id,
+        "lead_name": lead.get("name", "Unknown"),
+        "patient_name": lead.get("name", "Unknown"),
+        "branch_id": lead.get("branch_id") or coach.get("branch_id") or user.branch_id,
+        "doctor_id": coach["id"],
+        "doctor_name": coach["full_name"],
+        "appointment_date": date_part,
+        "appointment_time": time_part,
+        "slot_time": slot,
+        "status": "new_appointment",
+        "appt_kind": "diet",
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": now,
+        "updated_at": now,
+    }
+    await v3_col("appointments").insert_one(appt.copy())
+
+    await v3_col("leads").update_one(
+        {"id": payload.lead_id},
+        {"$set": {
+            "diet_coach_id": coach["id"],
+            "diet_coach_name": coach["full_name"],
+            "diet_appointment_at": slot,
+            "diet_stage": "Diet Consultation Booked",
+            "diet_recommended": True,
+            "updated_at": now,
+        }},
+    )
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": payload.lead_id,
+        "action": "diet_appointment_booked",
+        "details": f"Diet Consultation with {coach['full_name']} on {date_part} at {time_part}",
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": now,
+    })
+    return {"appointment": appt, "coach_name": coach["full_name"], "slot_time": slot}
+
+
 @router.get("/branch/diet-patients")
 async def branch_diet_patients(user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
     """Everyone at this branch already on a diet plan, for the Branch Admin's own view."""
@@ -306,16 +417,29 @@ async def diet_consultations(coach_id: Optional[str] = None, user: V3UserOut = D
         if d.get("status") == "completed":
             row["done"] += 1
 
+    # The DIET consultation's own appointment. The lead's appointment_date/_time are the
+    # Head Physio's consultation — reading those here had the coach's queue showing every
+    # patient at the time they saw the physio, which is not when the coach sees them.
+    diet_appts = await v3_col("appointments").find(
+        {"lead_id": {"$in": lead_ids}, "appt_kind": "diet", "status": {"$ne": "cancelled"}},
+        {"_id": 0, "lead_id": 1, "slot_time": 1, "status": 1, "doctor_name": 1},
+    ).sort("slot_time", 1).to_list(2000)
+    appt_by_lead = {a["lead_id"]: a for a in diet_appts}
+
     out = []
     for l in leads:
         days = days_by_lead.get(l["id"], {"total": 0, "done": 0})
+        appt = appt_by_lead.get(l["id"])
+        appt_date, _, appt_time = (appt or {}).get("slot_time", "").partition("T")
         out.append({
             "lead_id": l["id"],
             "lead_name": l.get("name", "Unknown"),
             "phone": l.get("phone", ""),
             "patient_number": l.get("patient_number", ""),
-            "appointment_date": l.get("appointment_date"),
-            "appointment_time": l.get("appointment_time"),
+            "appointment_date": appt_date or None,
+            "appointment_time": appt_time or None,
+            "appointment_status": (appt or {}).get("status"),
+            "booked": bool(appt),
             # What the Head Physio sent them here with, so the coach can see at a glance
             # whether this patient is also on a physio course.
             "consultation_decision": l.get("consultation_decision"),

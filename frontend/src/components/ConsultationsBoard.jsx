@@ -13,7 +13,7 @@ import {
   collectPackagePayment, collectTreatmentFee, markInstallmentPaid, savePhysioDiagnosis, unlockPhysioDiagnosis,
   saveTreatmentSummary, unlockTreatmentSummary, stagesList, getDoctors,
   assignPhysioWithSessions, getDoctorCalendar,
-  listNutritionCoaches, assignDiet,
+  listNutritionCoaches, bookDietAppointment,
   scheduleConsultationFollowUp, rescheduleConsultationFollowUp,
   getLeadRemarks, getLeadActivity,
   saveConsultationDecision, markConsultationCompleted, getBranches,
@@ -456,21 +456,28 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   const [pickerDate, setPickerDate] = useState(null); // "YYYY-MM-DD"
   const [sessionMinutes, setSessionMinutes] = useState(FALLBACK_SESSION_MINUTES);
 
-  // Assign to Diet Head (Branch Admin only) — the diet vertical's counterpart to Physio
-  // Assign, and the only route a patient has onto a Nutrition Coach's check-in calendar.
-  // Deliberately the same two steps as Physio Assign: pick the coach, then fix each
-  // check-in day on a month grid of what that coach has actually published. A flat list
-  // of every published time was the first attempt and it did not survive contact — a
-  // coach opens thirty slots on a day, so the list was a wall of times with no sense of
-  // which week they fell in, and the whole month scrolled past inside a phone-sized box.
+  // Diet Appointment (Branch Admin only) — books the Diet Consultation.
+  //
+  // Diet is a consultation vertical, the same shape as the Head Physio's: the Nutrition
+  // Coach sees the patient once to read them and set a plan. So this books ONE slot on
+  // the coach's calendar, not a course of days — the counterpart to booking a Head Physio
+  // consultation, not to Assign Physio.
+  //
+  // Two steps all the same, because the coach's calendar is a month of published days and
+  // a flat list of every time in it is unreadable: pick the coach, then pick the day and
+  // the time on a month grid of what that coach has actually opened.
+  //
+  // Offered on both paths on purpose. Diet normally follows treatment, but a patient can
+  // come for a diet consultation and nothing else, so nothing here requires a physio or a
+  // treatment package — only that the Consultation Fee is in.
   const [showDietModal, setShowDietModal] = useState(false);
   const [coachOptions, setCoachOptions] = useState([]);
   const [coachPick, setCoachPick] = useState("");
   const [coachCalendar, setCoachCalendar] = useState(null);
   const [loadingCoachCalendar, setLoadingCoachCalendar] = useState(false);
-  const [pickedCheckinSlots, setPickedCheckinSlots] = useState([]); // ["YYYY-MM-DDTHH:MM", ...]
+  const [dietSlot, setDietSlot] = useState(""); // "YYYY-MM-DDTHH:MM"
   const [assigningDiet, setAssigningDiet] = useState(false);
-  // Step 2 — the "pick the check-in dates and times" popup.
+  // Step 2 — the "pick the consultation date and time" popup.
   const [showDietSlotPicker, setShowDietSlotPicker] = useState(false);
   const [dietPickerMonth, setDietPickerMonth] = useState(new Date().getMonth());
   const [dietPickerYear, setDietPickerYear] = useState(new Date().getFullYear());
@@ -1470,7 +1477,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     setShowDietSlotPicker(false);
     setCoachPick(selectedLead.diet_coach_id || "");
     setCoachCalendar(null);
-    setPickedCheckinSlots([]);
+    setDietSlot(selectedLead.diet_appointment_at || "");
     setDietPickerDate(null);
     setDietPickerMonth(new Date().getMonth());
     setDietPickerYear(new Date().getFullYear());
@@ -1545,20 +1552,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     return map;
   }, [coachCalendar]);
 
-  // Re-opening for the coach this patient is already with starts from the check-ins they
-  // already hold, so an adjustment only means moving the few days that actually change.
-  useEffect(() => {
-    if (!coachCalendar || !selectedLead || coachPick !== selectedLead.diet_coach_id) return;
-    const mine = Object.entries(coachCalendar.booked || {})
-      .filter(([, b]) => b.lead_id === selectedLead.id)
-      .map(([slot]) => slot)
-      .sort();
-    if (mine.length === 0) return;
-    setPickedCheckinSlots((prev) => (prev.length === 0 ? mine : prev));
-  }, [coachCalendar, coachPick, selectedLead]);
-
-  const sortedCheckinSlots = useMemo(() => [...pickedCheckinSlots].sort(), [pickedCheckinSlots]);
-
   // Counted off the same days the picker will actually offer, so the header's "N slots
   // open" can't promise times that are in the past and unreachable.
   const openCheckinSlotCount = useMemo(
@@ -1567,90 +1560,59 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     [coachSlotsByDate, checkinSlotFull],
   );
 
-  // The plan itself: Day 1, Day 2 … in date order, stamped with the week each falls in,
-  // the same week rule the treatment plan uses. A diet plan has no session count to
-  // measure against — a Diet Package is sold by duration — so the number of days is
-  // whatever the Branch Admin fixes rather than something to count down to.
-  const dietPlan = useMemo(() => {
-    if (sortedCheckinSlots.length === 0) return [];
-    const firstDay = sortedCheckinSlots[0].split("T")[0];
-    return sortedCheckinSlots.map((slot, i) => {
-      const [date, time] = slot.split("T");
-      return { slot, date, time, day: i + 1, week: weekOf(date, firstDay) };
-    });
-  }, [sortedCheckinSlots]);
+  const dietSlotDate = dietSlot ? dietSlot.split("T")[0] : "";
+  const dietSlotTime = dietSlot ? dietSlot.split("T")[1] : "";
 
-  const dietPlanByDate = useMemo(() => {
-    const map = {};
-    dietPlan.forEach((p) => { map[p.date] = p; });
-    return map;
-  }, [dietPlan]);
-
-  /** The next date after `after` that still has an open slot and no check-in on it yet. */
-  const nextOpenCheckinDateAfter = (after, alreadyFixed) => Object.keys(coachSlotsByDate)
-    .filter((d) => d > after
-      && !alreadyFixed.has(d)
-      && coachSlotsByDate[d].some((t) => !checkinSlotFull(`${d}T${t}`)))
-    .sort()[0];
-
-  const toggleCheckinSlot = (slot) => {
+  // One consultation, so picking a time replaces whatever was picked before rather than
+  // adding to a list — clicking the chosen time again clears it.
+  const pickDietSlot = (slot) => {
     if (checkinSlotFull(slot)) return;
-    const day = slot.split("T")[0];
-    const prev = pickedCheckinSlots;
-    if (prev.includes(slot)) { setPickedCheckinSlots(prev.filter((s) => s !== slot)); return; }
-    // One check-in a day, the same rule the treatment picker enforces — picking another
-    // time on a day already taken moves that day rather than stacking a second onto it.
-    // Moving a day deliberately doesn't advance: that's a correction, and the result
-    // should stay in view.
-    const sameDay = prev.find((s) => s.startsWith(`${day}T`));
-    if (sameDay) { setPickedCheckinSlots([...prev.filter((s) => s !== sameDay), slot]); return; }
-
-    const next = [...prev, slot];
-    setPickedCheckinSlots(next);
-
-    // Fixing a day's time settles that day, so jump to the next date that still has room —
-    // the plan gets laid out in one run of clicks instead of a trip back to the calendar
-    // between every check-in.
-    const nextDate = nextOpenCheckinDateAfter(day, new Set(next.map((s) => s.split("T")[0])));
-    if (nextDate) {
-      const [y, m] = nextDate.split("-").map(Number);
-      setDietPickerYear(y);
-      setDietPickerMonth(m - 1);
-      setDietPickerDate(nextDate);
-    }
+    setDietSlot((prev) => (prev === slot ? "" : slot));
   };
 
-  // Opening the picker for the coach this patient is already with keeps the check-ins they
-  // already hold, so an adjustment starts from what's booked instead of a blank slate.
+  // Opening the picker for the coach this patient is already booked with keeps their
+  // existing time, so re-opening is a reschedule rather than a blank slate.
   const openDietSlotPickerFor = (coachId) => {
     setCoachPick(coachId);
-    if (coachId !== selectedLead?.diet_coach_id) setPickedCheckinSlots([]);
-    setDietPickerDate(null);
+    setDietSlot(coachId === selectedLead?.diet_coach_id ? (selectedLead?.diet_appointment_at || "") : "");
+    // Land on the month the existing booking is in, so a reschedule opens where the
+    // patient already is instead of on today.
+    const existing = coachId === selectedLead?.diet_coach_id ? selectedLead?.diet_appointment_at : null;
+    if (existing) {
+      const [y, m] = existing.split("T")[0].split("-").map(Number);
+      setDietPickerYear(y);
+      setDietPickerMonth(m - 1);
+      setDietPickerDate(existing.split("T")[0]);
+    } else {
+      setDietPickerDate(null);
+    }
     setShowDietSlotPicker(true);
   };
 
   const submitDietAssign = async () => {
     if (!coachPick) { toast.error("Choose a Nutrition Coach"); return; }
-    if (sortedCheckinSlots.length === 0) { toast.error("Pick at least one check-in day"); return; }
+    if (!dietSlot) { toast.error("Pick the consultation date and time"); return; }
     setAssigningDiet(true);
     try {
-      const res = await assignDiet({ lead_id: selectedLead.id, coach_id: coachPick, slot_times: sortedCheckinSlots });
-      toast.success(`${res.coach_name} assigned — ${res.days_booked} check-in ${res.days_booked === 1 ? "day" : "days"} booked`);
+      const res = await bookDietAppointment({ lead_id: selectedLead.id, coach_id: coachPick, slot_time: dietSlot });
+      toast.success(`Diet Consultation booked with ${res.coach_name} — ${dayLabel(dietSlotDate)} at ${to12h(dietSlotTime)}`);
       setShowDietSlotPicker(false);
       setShowDietModal(false);
-      // assign-diet answers with the booking, not the lead, so the row is patched with the
-      // fields it sets. The patient card stays open on purpose: unlike Physio Assign this
-      // isn't the end of their consultation — the physio side may still be mid-flow.
+      // The endpoint answers with the appointment, not the lead, so the row is patched
+      // with the fields it sets. The patient card stays open on purpose: unlike Physio
+      // Assign this isn't the end of their consultation — the physio side may still be
+      // mid-flow, and diet normally comes after it.
       const patch = {
         diet_coach_id: coachPick,
         diet_coach_name: res.coach_name,
-        diet_stage: "Diet Plan Assigned",
+        diet_appointment_at: res.slot_time,
+        diet_stage: "Diet Consultation Booked",
         diet_recommended: true,
       };
       setSelectedLead((l) => (l ? { ...l, ...patch } : l));
       setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => (l.id === selectedLead.id ? { ...l, ...patch } : l)) }));
     } catch (err) {
-      toast.error(err?.response?.data?.detail || "Failed to assign the Nutrition Coach");
+      toast.error(err?.response?.data?.detail || "Failed to book the Diet Consultation");
     }
     setAssigningDiet(false);
   };
@@ -2173,27 +2135,30 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 </Button>
               ) : null;
 
-              // "Assign to Diet Head" sits beside Assign Physio because it is the same kind
-              // of act: handing a paid-up patient to the clinician who will actually see
-              // them. Offered from the moment the Consultation Fee is in, which is when the
-              // consultation that recommends a diet plan has happened.
+              // "Diet Appointment" sits beside Assign Physio, but it is the other kind of
+              // act: it books a consultation, the way a Head Physio consultation is booked,
+              // rather than handing the patient to someone who will deliver a course.
               //
-              // Deliberately NOT gated on diet_recommended. That flag records what the Head
-              // Physio advised at the time; a patient who asks for a plan a week later would
-              // otherwise have no way in at all, and the flag is set by the assignment
-              // itself so the coach's queue agrees with the booking either way.
-              const dietAssigned = !!selectedLead.diet_coach_id;
+              // Offered from the moment the Consultation Fee is in, and on every path.
+              // Diet normally follows treatment, but a patient can come for a diet
+              // consultation and nothing else, so it never waits on a physio or a package.
+              //
+              // Deliberately NOT gated on diet_recommended. Diet is never compulsory; that
+              // flag records what the Head Physio advised on the day, and a patient who
+              // asks for a plan a week later would otherwise have no way in. Booking sets
+              // the flag itself, so the coach's queue agrees with the booking either way.
+              const dietBooked = !!selectedLead.diet_appointment_at;
               const DietButton = selectedLead.package_paid != null ? (
                 <Button
                   size="sm"
-                  variant={dietAssigned ? "outline" : undefined}
-                  className={dietAssigned
+                  variant={dietBooked ? "outline" : undefined}
+                  className={dietBooked
                     ? "border-orange-200 text-xs text-orange-700 hover:bg-orange-50"
                     : "bg-orange-500 text-xs text-white hover:bg-orange-600"}
                   onClick={openDietModal}
                   data-testid="cons-open-diet-assign"
                 >
-                  <Salad className="mr-1 h-3.5 w-3.5" /> {dietAssigned ? "Reassign Diet Head" : "Assign to Diet Head"}
+                  <Salad className="mr-1 h-3.5 w-3.5" /> {dietBooked ? "Reschedule Diet" : "Diet Appointment"}
                 </Button>
               ) : null;
 
@@ -2434,7 +2399,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       <p className="text-sm font-semibold text-emerald-800">Treatment sessions in progress</p>
                       <p className="mt-1 text-xs text-slate-600">Assigned Physio: <span className="font-semibold text-slate-800">{selectedLead.assigned_physio_name}</span></p>
                       {selectedLead.diet_coach_name && (
-                        <p className="mt-0.5 text-xs text-slate-600">Diet Head: <span className="font-semibold text-slate-800">{selectedLead.diet_coach_name}</span></p>
+                        <p className="mt-0.5 text-xs text-slate-600">Diet Consultation: <span className="font-semibold text-slate-800">{selectedLead.diet_coach_name}</span>
+                          {selectedLead.diet_appointment_at && ` · ${dayLabel(selectedLead.diet_appointment_at.split("T")[0])} at ${to12h(selectedLead.diet_appointment_at.split("T")[1])}`}</p>
                       )}
                       <div className="mt-3 flex flex-wrap items-center gap-1.5">
                         <Button size="sm" variant="outline" className="text-xs" onClick={openPhysioModal} data-testid="cons-reassign-physio">
@@ -2452,7 +2418,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       <p className="text-sm font-semibold text-slate-700">Consultation completed</p>
                       <p className="mt-1 text-xs text-slate-500">Consultation Only — no treatment sessions were required.</p>
                       {selectedLead.diet_coach_name && (
-                        <p className="mt-1 text-xs text-slate-600">Diet Head: <span className="font-semibold text-slate-800">{selectedLead.diet_coach_name}</span></p>
+                        <p className="mt-1 text-xs text-slate-600">Diet Consultation: <span className="font-semibold text-slate-800">{selectedLead.diet_coach_name}</span>
+                          {selectedLead.diet_appointment_at && ` · ${dayLabel(selectedLead.diet_appointment_at.split("T")[0])} at ${to12h(selectedLead.diet_appointment_at.split("T")[1])}`}</p>
                       )}
                       {/* A closed consultation can still start a diet plan. "Consultation +
                           Diet" patients land here the moment the consultation is marked
@@ -3287,15 +3254,15 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               );
             })()}
 
-            {/* Assign to Diet Head popup (Branch Admin) — picks the Nutrition Coach and
-                books the check-in days, in one step. The days come from that coach's own
-                DIET CALENDAR, so nothing can be booked into a day they haven't published. */}
+            {/* Diet Appointment popup (Branch Admin) — step 1, picks the Nutrition Coach.
+                Their days come from that coach's own DIET CALENDAR, so nothing can be
+                booked into a time they haven't published. */}
             {showDietModal && (
               <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-3 sm:p-4" data-testid="cons-diet-modal">
                 <div className="flex max-h-[92vh] w-full max-w-md flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
                   <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
                     <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-800">
-                      <Salad className="h-4 w-4 text-orange-500" /> Assign to Diet Head
+                      <Salad className="h-4 w-4 text-orange-500" /> Diet Appointment
                     </p>
                     <button onClick={() => setShowDietModal(false)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-diet-close">
                       <X className="h-4 w-4" />
@@ -3308,14 +3275,17 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       <p className="mt-0.5">
                         {selectedLead.diet_recommended
                           ? <span className="font-semibold text-orange-600">Diet recommended by the Head Physio</span>
-                          : "No diet was recommended at the consultation — assigning one now puts this patient on the Nutrition Coach's list."}
+                          : "No diet was recommended at the consultation — a Diet Consultation can still be booked if the patient wants one."}
                       </p>
-                      {selectedLead.diet_coach_name && (
-                        <p className="mt-0.5">Currently with <span className="font-semibold text-slate-700">{selectedLead.diet_coach_name}</span></p>
+                      {selectedLead.diet_appointment_at && (
+                        <p className="mt-0.5">
+                          Booked with <span className="font-semibold text-slate-700">{selectedLead.diet_coach_name}</span>
+                          {" "}· {dayLabel(selectedLead.diet_appointment_at.split("T")[0])} at {to12h(selectedLead.diet_appointment_at.split("T")[1])}
+                        </p>
                       )}
                     </div>
 
-                    <p className="text-[11px] text-slate-500">Nutrition Coaches in this branch — pick one to choose their check-in days</p>
+                    <p className="text-[11px] text-slate-500">Nutrition Coaches in this branch — pick one to choose their consultation time</p>
 
                     {coachOptions.length === 0 ? (
                       <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-4 text-center text-xs text-slate-400" data-testid="cons-diet-no-coaches">
@@ -3343,10 +3313,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       </div>
                     )}
 
-                    {coachPick && sortedCheckinSlots.length > 0 && (
+                    {coachPick && dietSlot && (
                       <div className="rounded-lg border border-orange-200 bg-orange-50 p-3" data-testid="cons-diet-plan-preview">
                         <div className="mb-1.5 flex items-center justify-between">
-                          <p className="text-[11px] font-semibold uppercase tracking-wider text-orange-700">Check-in days fixed</p>
+                          <p className="text-[11px] font-semibold uppercase tracking-wider text-orange-700">Consultation time</p>
                           <button
                             type="button"
                             onClick={() => setShowDietSlotPicker(true)}
@@ -3356,11 +3326,9 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             Change
                           </button>
                         </div>
-                        <div className="max-h-28 space-y-1 overflow-y-auto text-xs text-slate-700" data-testid="cons-diet-plan-list">
-                          {dietPlan.map((p) => (
-                            <p key={p.slot}><b>Day {p.day}</b> · {dayLabel(p.date)} · {to12h(p.time)} – {endTime12h(p.time, dietMinutes)}</p>
-                          ))}
-                        </div>
+                        <p className="text-xs text-slate-700" data-testid="cons-diet-plan-list">
+                          <b>{dayLabel(dietSlotDate)}</b> · {to12h(dietSlotTime)} – {endTime12h(dietSlotTime, dietMinutes)}
+                        </p>
                       </div>
                     )}
                   </div>
@@ -3368,25 +3336,24 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                   <div className="border-t border-slate-100 px-4 py-3">
                     <Button
                       className="w-full bg-orange-500 text-xs hover:bg-orange-600"
-                      onClick={() => (sortedCheckinSlots.length > 0 ? submitDietAssign() : setShowDietSlotPicker(true))}
+                      onClick={() => (dietSlot ? submitDietAssign() : setShowDietSlotPicker(true))}
                       disabled={assigningDiet || !coachPick}
                       data-testid="cons-diet-submit"
                     >
                       {assigningDiet
-                        ? "Assigning..."
-                        : sortedCheckinSlots.length === 0
-                        ? "Choose Check-in Dates & Times"
-                        : `Assign & Book ${sortedCheckinSlots.length} Check-in ${sortedCheckinSlots.length === 1 ? "Day" : "Days"}`}
+                        ? "Booking..."
+                        : dietSlot
+                        ? "Book Diet Consultation"
+                        : "Choose Consultation Date & Time"}
                     </Button>
                   </div>
                 </div>
               </div>
             )}
 
-            {/* Step 2 — Check-in date & time picker, the same shape as the treatment
-                picker below and driven the same way: entirely by the picked coach's own
-                DIET CALENDAR. Every check-in gets a date and a time fixed by hand, and
-                only days that coach has actually published can be picked. */}
+            {/* Step 2 — Diet Consultation date & time, driven entirely by the picked
+                coach's own DIET CALENDAR. One appointment, so one time gets chosen; only
+                days that coach has actually published can be picked. */}
             {showDietModal && showDietSlotPicker && coachPick && (
               <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-2" data-testid="cons-diet-slot-picker-modal">
                 <div className="flex h-[calc(100vh-1rem)] max-h-[calc(100vh-1rem)] w-full max-w-7xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
@@ -3401,7 +3368,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           {coachCalendar?.doctor_name || coachOptions.find((c) => c.id === coachPick)?.full_name || "Diet Head"}
                         </p>
                         <p className="text-[11px] leading-snug text-white/75 sm:text-[13px]">
-                          Diet plan · one check-in a day · {dietMinutes} min each · {openCheckinSlotCount} slots open
+                          Diet Consultation · {dietMinutes} min · {openCheckinSlotCount} slots open
                         </p>
                       </div>
                     </div>
@@ -3410,20 +3377,18 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     </button>
                   </div>
 
-                  {/* Where the plan stands. The treatment picker's twin carries the paid and
-                      unpaid split alongside; a diet plan has no per-day money on the lead to
-                      report, so this says how many days are fixed and what they span. */}
+                  {/* Where the booking stands. The treatment picker's twin counts days
+                      against a package; this is one appointment, so it says which one. */}
                   <div className="border-b-2 border-slate-200 bg-slate-100 px-3 py-2 sm:px-6 sm:py-3.5" data-testid="cons-diet-picker-status">
                     <div className="flex flex-wrap items-stretch gap-2">
                       <span className="w-full rounded-md border border-orange-800 bg-orange-600 px-3 py-1 text-center text-[11px] font-bold text-white shadow-sm sm:w-auto sm:rounded-lg sm:border-2 sm:px-4 sm:py-2 sm:text-sm" data-testid="cons-diet-picker-count">
-                        {sortedCheckinSlots.length} check-in {sortedCheckinSlots.length === 1 ? "day" : "days"} fixed
+                        {dietSlot
+                          ? `${dayLabel(dietSlotDate)} · ${to12h(dietSlotTime)}`
+                          : "No time chosen yet"}
                       </span>
-                      {dietPlan.length > 0 && (
-                        <span className="hidden w-full rounded-lg border-2 border-orange-300 bg-orange-50 px-3 py-1.5 text-center text-xs font-bold text-orange-700 shadow-sm sm:block sm:w-auto sm:px-4 sm:py-2 sm:text-left sm:text-sm">
-                          {dayLabel(dietPlan[0].date)} to {dayLabel(dietPlan[dietPlan.length - 1].date)}
-                          <span className="ml-2 font-medium text-orange-500">
-                            {[...new Set(dietPlan.map((p) => p.week))].length} week{[...new Set(dietPlan.map((p) => p.week))].length === 1 ? "" : "s"}
-                          </span>
+                      {selectedLead.diet_appointment_at && selectedLead.diet_appointment_at !== dietSlot && (
+                        <span className="hidden w-full rounded-lg border-2 border-slate-300 bg-white px-3 py-1.5 text-center text-xs font-bold text-slate-500 shadow-sm sm:block sm:w-auto sm:px-4 sm:py-2 sm:text-left sm:text-sm">
+                          Moving from {dayLabel(selectedLead.diet_appointment_at.split("T")[0])} · {to12h(selectedLead.diet_appointment_at.split("T")[1])}
                         </span>
                       )}
                     </div>
@@ -3469,7 +3434,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             const day = i + 1;
                             const d = isoDate(dietPickerYear, dietPickerMonth, day);
                             const dayOpen = (coachSlotsByDate[d] || []).filter((t) => !checkinSlotFull(`${d}T${t}`)).length;
-                            const planned = dietPlanByDate[d];
+                            const planned = dietSlotDate === d;
                             const isFocused = dietPickerDate === d;
                             return (
                               <button
@@ -3487,14 +3452,14 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                                     : "cursor-not-allowed text-slate-300"
                                 }`}
                                 title={planned
-                                  ? `Day ${planned.day} · ${to12h(planned.time)}`
+                                  ? `Diet Consultation · ${to12h(dietSlotTime)}`
                                   : dayOpen > 0 ? `${dayOpen} slot${dayOpen > 1 ? "s" : ""} open` : "No slots published"}
                                 data-testid={`cons-diet-day-${day}`}
                               >
                                 {day}
                                 {planned ? (
-                                  <span className="absolute -right-1 -top-1 flex h-[1.3rem] min-w-[1.3rem] items-center justify-center rounded-full bg-orange-500 px-1 text-[11px] font-bold text-white shadow-sm">
-                                    {planned.day}
+                                  <span className="absolute -right-1 -top-1 flex h-[1.3rem] w-[1.3rem] items-center justify-center rounded-full bg-orange-500 text-[11px] font-bold text-white shadow-sm">
+                                    <Salad className="h-3 w-3" />
                                   </span>
                                 ) : dayOpen > 0 && !isFocused ? (
                                   <span className="absolute bottom-0.5 left-1/2 h-1 w-1 -translate-x-1/2 rounded-full bg-orange-400" />
@@ -3506,14 +3471,14 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
 
                         <div className="mt-4 hidden space-y-2 border-t border-slate-100 pt-3 sm:block">
                           <div className="flex flex-wrap items-center gap-3 text-xs font-semibold text-slate-500">
-                            <span className="flex items-center gap-1"><span className="inline-block h-3 w-3 rounded-full bg-orange-500" /> Check-in day</span>
+                            <span className="flex items-center gap-1"><span className="inline-block h-3 w-3 rounded-full bg-orange-500" /> Consultation</span>
                             <span className="flex items-center gap-1"><span className="inline-block h-1.5 w-1.5 rounded-full bg-orange-400" /> Slots open</span>
                           </div>
                           <p className="text-[13px] text-slate-400">
-                            One check-in a day — a plan of six check-ins is six separate days. Only days this
-                            coach has opened in <b>MANAGEMENT → DIET CALENDAR</b> can be picked. Pick a time and it{" "}
-                            <b>jumps to the next open date</b> on its own, so the plan is laid out in one run.
-                            Picking another time on a day already fixed <b>moves</b> that day and stays put.
+                            One Diet Consultation — the coach reads the patient and sets their plan. Only days
+                            this coach has opened in <b>MANAGEMENT → DIET CALENDAR</b> can be picked. Picking
+                            another time <b>moves</b> the appointment; clicking the chosen one again clears it.
+                            Diet usually follows treatment, but a patient can come for this alone.
                           </p>
                         </div>
                       </div>
@@ -3524,7 +3489,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           <div className="flex h-full items-center justify-center">
                             <div className="text-center">
                               <Calendar className="mx-auto mb-2 h-10 w-10 text-slate-200" />
-                              <p className="text-sm text-slate-400">Pick a check-in date to see this coach's open times</p>
+                              <p className="text-sm text-slate-400">Pick a date to see this coach's open times</p>
                             </div>
                           </div>
                         ) : (
@@ -3533,15 +3498,15 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                               <h4 className="text-lg font-bold text-slate-800" data-testid="cons-diet-picker-date">{longDate(dietPickerDate)}</h4>
                               <div className="flex flex-wrap items-center gap-3 text-xs font-semibold text-slate-400">
                                 <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-emerald-400" /> Open</span>
-                                <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-orange-500" /> Check-in day</span>
+                                <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-orange-500" /> Consultation</span>
                                 <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-amber-400" /> Booked</span>
                               </div>
                             </div>
 
-                            {dietPlanByDate[dietPickerDate] && (
+                            {dietSlotDate === dietPickerDate && (
                               <p className="mb-3 rounded-lg border-2 border-orange-400 bg-orange-50 px-4 py-2.5 text-sm font-semibold text-orange-800 shadow-sm" data-testid="cons-diet-day-fixed">
-                                <b>Day {dietPlanByDate[dietPickerDate].day}</b> is fixed for {to12h(dietPlanByDate[dietPickerDate].time)} – {endTime12h(dietPlanByDate[dietPickerDate].time, dietMinutes)}.
-                                <span className="ml-1 font-normal">Pick another time to move it, or click it again to free the day.</span>
+                                <b>Diet Consultation</b> at {to12h(dietSlotTime)} – {endTime12h(dietSlotTime, dietMinutes)}.
+                                <span className="ml-1 font-normal">Pick another time to move it, or click it again to clear it.</span>
                               </p>
                             )}
 
@@ -3554,12 +3519,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                                 {(coachSlotsByDate[dietPickerDate] || []).map((time) => {
                                   const slot = `${dietPickerDate}T${time}`;
                                   const taken = checkinSlotFull(slot);
-                                  const picked = dietPlanByDate[dietPickerDate]?.slot === slot;
+                                  const picked = dietSlot === slot;
                                   return (
                                     <button
                                       key={time}
                                       type="button"
-                                      onClick={() => toggleCheckinSlot(slot)}
+                                      onClick={() => pickDietSlot(slot)}
                                       disabled={taken}
                                       className={`overflow-hidden rounded-lg border-2 p-2 text-left transition-all sm:p-3 ${
                                         taken
@@ -3570,7 +3535,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                                       }`}
                                       title={taken
                                         ? `Booked · ${checkinSlotHeldBy(slot) || "another patient"}`
-                                        : `${to12h(time)} – ${endTime12h(time, dietMinutes)}${picked ? ` · Day ${dietPlanByDate[dietPickerDate].day}` : ""}`}
+                                        : `${to12h(time)} – ${endTime12h(time, dietMinutes)}${picked ? " · Diet Consultation" : ""}`}
                                       data-testid={`cons-diet-pick-${time}`}
                                     >
                                       <p className={`truncate text-[13px] font-bold sm:text-base ${taken ? "text-amber-800" : picked ? "text-orange-900" : "text-emerald-800"}`}>
@@ -3580,7 +3545,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                                         {taken
                                           ? "Booked"
                                           : picked
-                                          ? `Day ${dietPlanByDate[dietPickerDate].day}`
+                                          ? "Consultation"
                                           : `ends ${endTime12h(time, dietMinutes)}`}
                                       </p>
                                     </button>
@@ -3589,42 +3554,41 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                               </div>
                             )}
 
-                            {dietPlan.length > 0 && (
+                            {/* The chosen appointment, shown here as well as in the status
+                                strip so a time picked in another month is still in front of
+                                you when you come back to check it. */}
+                            {dietSlot && dietSlotDate !== dietPickerDate && (
                               <div className="mt-4 rounded-xl border-2 border-orange-200 bg-orange-50/70 p-4" data-testid="cons-diet-plan">
-                                <div className="mb-2 flex items-center justify-between">
-                                  <p className="text-sm font-bold uppercase tracking-wider text-orange-700">Diet plan</p>
-                                  <button
-                                    type="button"
-                                    onClick={() => setPickedCheckinSlots([])}
-                                    className="text-[13px] font-bold text-rose-600 hover:text-rose-800"
-                                    data-testid="cons-diet-picker-clear"
-                                  >
-                                    Clear all
-                                  </button>
-                                </div>
-                                <div className="max-h-48 space-y-2.5 overflow-y-auto">
-                                  {[...new Set(dietPlan.map((p) => p.week))].map((week) => (
-                                    <div key={week}>
-                                      <p className="mb-1 text-xs font-bold uppercase tracking-wider text-orange-500">Week {week}</p>
-                                      <div className="grid grid-cols-3 gap-1.5 lg:grid-cols-4">
-                                        {dietPlan.filter((p) => p.week === week).map((p) => (
-                                          <button
-                                            key={p.slot}
-                                            type="button"
-                                            onClick={() => toggleCheckinSlot(p.slot)}
-                                            className="relative flex flex-col items-center gap-0.5 rounded-lg border-2 border-orange-300 bg-white px-1 py-1.5 text-[10px] font-bold leading-tight text-orange-700 transition hover:border-orange-500"
-                                            title={`${dayLabel(p.date)} · ${to12h(p.time)} – ${endTime12h(p.time, dietMinutes)} — tap to remove`}
-                                            data-testid={`cons-diet-picked-${p.slot}`}
-                                          >
-                                            <X className="absolute right-0.5 top-0.5 h-3 w-3 text-slate-300" />
-                                            <span className="rounded-full bg-orange-600 px-1.5 py-0.5 text-[9px] text-white">Day {p.day}</span>
-                                            <span className="text-slate-600">{shortDayLabel(p.date)}</span>
-                                            <span className="text-slate-500">{to12h(p.time)}</span>
-                                          </button>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  ))}
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <div>
+                                    <p className="text-sm font-bold uppercase tracking-wider text-orange-700">Diet Consultation</p>
+                                    <p className="mt-0.5 text-sm text-slate-600">
+                                      {dayLabel(dietSlotDate)} · {to12h(dietSlotTime)} – {endTime12h(dietSlotTime, dietMinutes)}
+                                    </p>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const [y, m] = dietSlotDate.split("-").map(Number);
+                                        setDietPickerYear(y);
+                                        setDietPickerMonth(m - 1);
+                                        setDietPickerDate(dietSlotDate);
+                                      }}
+                                      className="text-[13px] font-bold text-orange-600 hover:text-orange-800"
+                                      data-testid="cons-diet-picker-goto"
+                                    >
+                                      Go to it
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setDietSlot("")}
+                                      className="text-[13px] font-bold text-rose-600 hover:text-rose-800"
+                                      data-testid="cons-diet-picker-clear"
+                                    >
+                                      Clear
+                                    </button>
+                                  </div>
                                 </div>
                               </div>
                             )}
@@ -3637,13 +3601,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                   <div className="flex flex-col gap-2.5 border-t-2 border-slate-200 bg-slate-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-6 sm:py-4">
                     <div className="text-[12px] leading-snug text-slate-500 sm:text-[13px]">
                       <p className="font-bold text-slate-700">
-                        {dietPlan.length === 0
-                          ? "Pick a date, then a time, for each check-in day."
-                          : `${dietPlan.length} check-in ${dietPlan.length === 1 ? "day" : "days"} · ${dayLabel(dietPlan[0].date)} to ${dayLabel(dietPlan[dietPlan.length - 1].date)}.`}
+                        {dietSlot
+                          ? `Diet Consultation · ${dayLabel(dietSlotDate)} at ${to12h(dietSlotTime)}.`
+                          : "Pick a date, then a time, for the Diet Consultation."}
                       </p>
                       {selectedLead.assigned_physio_name && (
                         <p className="mt-1 text-slate-400">
-                          Also on treatment with {selectedLead.assigned_physio_name} — check-ins are booked separately from their sessions.
+                          Also on treatment with {selectedLead.assigned_physio_name} — the diet consultation is booked separately from their sessions.
                         </p>
                       )}
                     </div>
@@ -3654,10 +3618,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       <Button
                         className="flex-[2] bg-orange-500 text-sm hover:bg-orange-600 sm:flex-none"
                         onClick={submitDietAssign}
-                        disabled={assigningDiet || dietPlan.length === 0}
+                        disabled={assigningDiet || !dietSlot}
                         data-testid="cons-diet-picker-submit"
                       >
-                        {assigningDiet ? "Assigning..." : `Assign & Book ${dietPlan.length} Check-in ${dietPlan.length === 1 ? "Day" : "Days"}`}
+                        {assigningDiet ? "Booking..." : "Book Diet Consultation"}
                       </Button>
                     </div>
                   </div>

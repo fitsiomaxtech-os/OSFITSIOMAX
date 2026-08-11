@@ -194,6 +194,7 @@ export const dietCompleteDay = async (sessionId, payload) => (await api.post(`/d
 export const listNutritionCoaches = async () => (await api.get("/branch/nutrition-coaches")).data;
 export const createNutritionCoach = async (payload) => (await api.post("/branch/nutrition-coaches", payload)).data;
 export const assignDiet = async (payload) => (await api.post("/branch/assign-diet", payload)).data;
+export const bookDietAppointment = async (payload) => (await api.post("/branch/diet-appointment", payload)).data;
 export const branchDietPatients = async () => (await api.get("/branch/diet-patients")).data;
 
 // ---- Client documents ----
