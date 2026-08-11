@@ -775,10 +775,6 @@ async def v3_dashboard_branch_breakdown(
 #                same number twice and hide every no-show.
 #   Converted    they bought something beyond the consultation: a treatment package, or a
 #                diet plan. That is the moment a lead becomes a customer of a service.
-#   Not Converted the journey ENDED without that: cancelled. Deliberately not "everything
-#                that isn't converted" — a lead still in Follow Up has not failed, and
-#                lumping it in would make the branch look worse the more work it has in
-#                hand. Those sit in `in_progress`, so the three always sum to Enquiries.
 
 
 def _is_converted(lead: dict) -> bool:
@@ -787,10 +783,6 @@ def _is_converted(lead: dict) -> bool:
         or bool(lead.get("session_package_id"))
         or lead.get("diet_fee_paid") is not None
     )
-
-
-def _is_lost(lead: dict) -> bool:
-    return lead.get("consultation_stage") == "Cancel" or lead.get("branch_stage") == "Cancelled"
 
 
 @router.get("/dashboard/lead-metrics")
@@ -817,9 +809,8 @@ async def dashboard_lead_metrics(
 
     metrics = {
         k: blank() for k in (
-            "enquiries", "slot_fixed", "consultations", "converted", "not_converted",
-            "in_progress", "assigned_follow_up", "day_follow_up_calls",
-            "day_rnr_attempts", "day_follow_up_payment",
+            "enquiries", "slot_fixed", "consultations", "converted",
+            "assigned_follow_up", "day_follow_up_calls", "day_follow_up_payment",
         )
     }
     payment_due_amount = {bid: 0.0 for bid in branch_ids}
@@ -841,10 +832,6 @@ async def dashboard_lead_metrics(
             metrics["assigned_follow_up"][bid] += 1
         if _is_converted(l):
             metrics["converted"][bid] += 1
-        elif _is_lost(l):
-            metrics["not_converted"][bid] += 1
-        else:
-            metrics["in_progress"][bid] += 1
 
     # The two daily ones, over every lead regardless of when it came in: a follow-up due
     # today on a lead from March is still due today.
@@ -860,12 +847,6 @@ async def dashboard_lead_metrics(
             or str(l.get("next_consultation_follow_up_at") or "").startswith(today)
         if due_today:
             metrics["day_follow_up_calls"][bid] += 1
-
-        # A call that WAS made and went unanswered. The only call the OS actually records
-        # — there is no "call completed" event anywhere, so this is the honest half of the
-        # picture and is reported as its own figure rather than folded into the one above.
-        if str(l.get("rnr_last_attempt_at") or "").startswith(today):
-            metrics["day_rnr_attempts"][bid] += 1
 
         for inst in ((l.get("treatment_fee_payment_details") or {}).get("installments") or []):
             if not inst.get("paid") and str(inst.get("due_date") or "") == today:
@@ -896,14 +877,9 @@ async def dashboard_lead_metrics(
             row("enquiries", "Number Of Enquiries", "range", "Every lead that came in"),
             row("consultations", "Number Of Consultation", "range", "Consultation Fee collected"),
             row("converted", "Number Of Converted", "range", "Took treatment or a diet plan"),
-            row("not_converted", "Number Of Not Converted", "range", "Cancelled — in-progress excluded"),
             row("assigned_follow_up", "Assign To Follow Up Person", "range", "Leads with an owner"),
             row("slot_fixed", "Slot Fixed", "range", "Appointment date fixed"),
         ],
-        # Alongside rather than as a ninth row: it is what makes Converted, Not Converted
-        # and In Progress add up to Enquiries, which is the check a reader will do first.
-        "in_progress": row("in_progress", "Still In Progress", "range", "Neither converted nor lost yet"),
-        "day_rnr_attempts": row("day_rnr_attempts", "Unanswered Calls Today", "today", "Recorded RNR attempts"),
         "day_payment_amount": {
             "total": round(sum(payment_due_amount.values()), 2),
             "branches": [

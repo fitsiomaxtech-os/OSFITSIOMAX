@@ -399,10 +399,10 @@ const LeadMetrics = ({ dateFilter }) => {
     </td>
   );
 
-  const MetricRow = ({ r, tone }) => (
+  const MetricRow = ({ r }) => (
     <tr className="hover:bg-slate-50" data-testid={`lead-metric-${r.key}`}>
       <td className="px-4 py-3">
-        <p className={`text-sm font-semibold ${tone || "text-slate-800"}`}>{r.label}</p>
+        <p className="text-sm font-semibold text-slate-800">{r.label}</p>
         <p className="text-[11px] text-slate-400">
           {r.period === "today" ? "Today" : "Selected period"}
           {r.sub ? ` · ${r.sub}` : ""}
@@ -434,11 +434,6 @@ const LeadMetrics = ({ dateFilter }) => {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {rows.map((r) => <MetricRow key={r.key} r={r} />)}
-              {/* Below the rule, because it is not one of the eight. It is here because it
-                  is what makes Converted + Not Converted + this add up to Enquiries —
-                  the first check anyone reads this table will do. */}
-              {data.in_progress && <MetricRow r={data.in_progress} tone="text-slate-500" />}
-              {data.day_rnr_attempts && <MetricRow r={data.day_rnr_attempts} tone="text-slate-500" />}
             </tbody>
           </table>
         </div>
@@ -461,9 +456,8 @@ const LeadMetrics = ({ dateFilter }) => {
       )}
 
       <p className="text-[11px] leading-relaxed text-slate-400">
-        Day Follow Up Calls counts people due a call today — the OS records follow-ups being
-        scheduled and calls that went unanswered, but has no record of a call being placed,
-        so "calls made" is not a figure it can honestly report yet.
+        Day Follow Up Calls counts people due a call today. The OS records follow-ups being
+        scheduled, not calls being placed, so "calls made" is not a figure it can report yet.
       </p>
     </div>
   );
