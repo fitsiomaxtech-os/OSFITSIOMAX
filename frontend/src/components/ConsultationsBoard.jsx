@@ -2280,6 +2280,42 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     );
                   }
                   const treatmentPaid = selectedLead.treatment_fee_paid != null;
+
+                  // Where a Partial Payment plan currently stands. Computed once here so the
+                  // balance card and the Collect button can be rendered in two different
+                  // places — the card with the Treatment Fee it describes, the button down
+                  // in the action row — without working the numbers out twice.
+                  const partial = hasPendingInstallments ? (() => {
+                    const unpaid = savedInstallments.filter((i) => !i.paid);
+                    const nextIdx = savedInstallments.findIndex((i) => !i.paid);
+                    const next = savedInstallments[nextIdx] || {};
+                    return {
+                      nextIdx,
+                      next,
+                      balance: unpaid.reduce((s, i) => s + (i.amount || 0), 0),
+                      overdue: !!next.due_date && next.due_date < new Date().toISOString().slice(0, 10),
+                    };
+                  })() : null;
+
+                  // The next thing to do about money, whatever state the Treatment Fee is
+                  // in: collect the next installment, collect the lot, or nothing at all.
+                  // Reopening a partially-paid patient is exactly when the rest gets taken,
+                  // so Collect stays one click away rather than behind the schedule.
+                  const FeeActions = partial ? (
+                    <>
+                      <Button size="sm" className="bg-emerald-600 text-xs hover:bg-emerald-700" onClick={() => openPartialCollectPopup(partial.nextIdx)} data-testid="cons-collect-next-installment">
+                        Collect Rs.{partial.next.amount ?? partial.balance}
+                      </Button>
+                      <Button size="sm" variant="outline" className="text-xs" onClick={openPartialScheduleDraft} data-testid="cons-open-partial-schedule-sidebar">
+                        View Payment Schedule
+                      </Button>
+                    </>
+                  ) : !treatmentPaid ? (
+                    <Button size="sm" className="bg-indigo-600 text-xs hover:bg-indigo-700" onClick={openTreatmentFeeDraft} data-testid="cons-open-treatment-fee">
+                      Collect Payment
+                    </Button>
+                  ) : null;
+
                   return (
                     <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3" data-testid="cons-stage-panel-fee-collected">
                       <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-indigo-700">
@@ -2306,64 +2342,52 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             </span>
                           </div>
                         </div>
-                        {hasPendingInstallments ? (
-                          // What's still owed and when it's due, with Collect right here —
-                          // reopening a partially-paid patient is exactly when the rest
-                          // gets taken, so it shouldn't need a trip through the schedule.
-                          (() => {
-                            const unpaid = savedInstallments.filter((i) => !i.paid);
-                            const nextIdx = savedInstallments.findIndex((i) => !i.paid);
-                            const next = savedInstallments[nextIdx] || {};
-                            const balance = unpaid.reduce((s, i) => s + (i.amount || 0), 0);
-                            const nextOverdue = !!next.due_date && next.due_date < new Date().toISOString().slice(0, 10);
-                            return (
-                              <>
-                                <p className="mt-1 text-[11px] text-slate-500">
-                                  {savedInstallments.filter((i) => i.paid).length} of {savedInstallments.length} installments collected.
-                                </p>
-                                <div className={`mt-2 rounded-md border px-2.5 py-2 ${nextOverdue ? "border-rose-200 bg-rose-50" : "border-amber-200 bg-amber-50"}`} data-testid="cons-partial-balance-summary">
-                                  <div className="flex items-center justify-between">
-                                    <span className={`text-[11px] font-semibold ${nextOverdue ? "text-rose-700" : "text-amber-700"}`}>Balance Amount</span>
-                                    <span className={`text-sm font-bold ${nextOverdue ? "text-rose-700" : "text-amber-700"}`}>Rs.{balance}</span>
-                                  </div>
-                                  <p className={`mt-0.5 text-[10px] ${nextOverdue ? "text-rose-600" : "text-amber-600"}`}>
-                                    Next · {partialInstallmentLabel(nextIdx)}
-                                    {next.sessions ? ` · ${next.sessions} sessions` : ""}
-                                    {next.amount != null ? ` · Rs.${next.amount}` : ""}
-                                    {next.due_date ? ` · due ${next.due_date}` : ""}
-                                    {nextOverdue ? " · OVERDUE" : ""}
-                                  </p>
-                                </div>
-                                <div className="mt-2 flex flex-wrap gap-1.5">
-                                  <Button size="sm" className="bg-emerald-600 text-xs hover:bg-emerald-700" onClick={() => openPartialCollectPopup(nextIdx)} data-testid="cons-collect-next-installment">
-                                    Collect Rs.{next.amount ?? balance}
-                                  </Button>
-                                  <Button size="sm" variant="outline" className="text-xs" onClick={openPartialScheduleDraft} data-testid="cons-open-partial-schedule-sidebar">
-                                    View Payment Schedule
-                                  </Button>
-                                </div>
-                              </>
-                            );
-                          })()
-                        ) : treatmentPaid ? (
+                        {/* What's still owed and when it's due. The buttons that act on it
+                            are NOT here — they sit in the one action row at the bottom with
+                            everything else this patient can be sent to next. */}
+                        {partial && (
+                          <>
+                            <p className="mt-1 text-[11px] text-slate-500">
+                              {savedInstallments.filter((i) => i.paid).length} of {savedInstallments.length} installments collected.
+                            </p>
+                            <div className={`mt-2 rounded-md border px-2.5 py-2 ${partial.overdue ? "border-rose-200 bg-rose-50" : "border-amber-200 bg-amber-50"}`} data-testid="cons-partial-balance-summary">
+                              <div className="flex items-center justify-between">
+                                <span className={`text-[11px] font-semibold ${partial.overdue ? "text-rose-700" : "text-amber-700"}`}>Balance Amount</span>
+                                <span className={`text-sm font-bold ${partial.overdue ? "text-rose-700" : "text-amber-700"}`}>Rs.{partial.balance}</span>
+                              </div>
+                              <p className={`mt-0.5 text-[10px] ${partial.overdue ? "text-rose-600" : "text-amber-600"}`}>
+                                Next · {partialInstallmentLabel(partial.nextIdx)}
+                                {partial.next.sessions ? ` · ${partial.next.sessions} sessions` : ""}
+                                {partial.next.amount != null ? ` · Rs.${partial.next.amount}` : ""}
+                                {partial.next.due_date ? ` · due ${partial.next.due_date}` : ""}
+                                {partial.overdue ? " · OVERDUE" : ""}
+                              </p>
+                            </div>
+                          </>
+                        )}
+                        {!partial && treatmentPaid && (
                           <p className="mt-1 flex items-center gap-1 text-[11px] font-medium text-emerald-600" data-testid="cons-treatment-fee-already-collected">
                             <CheckCircle2 className="h-3 w-3" /> Already Collected
                           </p>
-                        ) : (
-                          <Button size="sm" className="mt-3 bg-indigo-600 text-xs hover:bg-indigo-700" onClick={openTreatmentFeeDraft} data-testid="cons-open-treatment-fee">
-                            Collect Payment
-                          </Button>
                         )}
                       </div>
                       {treatmentPaid && (
                         <p className="mt-3 border-t border-indigo-100 pt-3 text-xs text-slate-600">
-                          Both fees collected. Choose the physiotherapist who will deliver the sessions.
+                          {/* A Partial Payment plan reaches here with money in but a balance
+                              still owed, and this line read "Both fees collected" over the
+                              top of a Balance Amount card saying otherwise. */}
+                          {partial
+                            ? "Consultation Fee collected, Treatment Fee part-paid. The physiotherapist can be assigned now."
+                            : "Both fees collected. Choose the physiotherapist who will deliver the sessions."}
                         </p>
                       )}
-                      {/* Every action this patient can be sent to next, on one line — the
-                          two assignments and the way out. They were stacked, which read as
-                          three unrelated steps instead of one choice. Wraps on a phone. */}
+                      {/* One action row: the money first, then where this patient goes next,
+                          then the way out. Collect Payment used to sit inside the Treatment
+                          Fee block above, so it took a line of its own and the row beneath
+                          it started with Diet Appointment — three buttons on two lines,
+                          reading as unrelated steps. Wraps on a phone. */}
                       <div className={`${treatmentPaid ? "mt-2" : "mt-3"} flex flex-wrap items-center gap-1.5`}>
+                        {FeeActions}
                         {treatmentPaid && (
                           <Button size="sm" className="bg-violet-600 text-xs hover:bg-violet-700" onClick={openPhysioModal} data-testid="cons-open-physio-assign-from-fee-collected">
                             Assign Physio
