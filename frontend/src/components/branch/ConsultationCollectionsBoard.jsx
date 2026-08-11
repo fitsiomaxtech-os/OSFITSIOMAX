@@ -94,7 +94,23 @@ const SummaryCard = ({ label, ...rest }) => (
   <StatTile label={label} testid={`consultation-summary-${label.toLowerCase().replace(/\s+/g, "-")}`} {...rest} />
 );
 
-export const ConsultationCollectionsBoard = ({ rows, onView }) => {
+/**
+ * A collections board: summary cards, filters, and the payment table beneath them.
+ *
+ * `title` and `testid` are props because Diet Collections is this same board over a
+ * different slice of the same transaction list — every card, filter and column means the
+ * same thing for a Diet Consultation Fee as for a Consultation Fee. Copying it would have
+ * been 250 lines that drift the moment one of them is edited.
+ *
+ * Inner test ids stay as they are: the two boards are mutually exclusive sub-tabs, so only
+ * one is ever mounted and they cannot collide.
+ */
+export const ConsultationCollectionsBoard = ({
+  rows,
+  onView,
+  title = "Consultation Collections",
+  testid = "consultation-collections-board",
+}) => {
   const [search, setSearch] = useState("");
   const [branch, setBranch] = useState("all");
   const [mode, setMode] = useState("all");
@@ -157,7 +173,7 @@ export const ConsultationCollectionsBoard = ({ rows, onView }) => {
   }, [rows, today, monthPrefix]);
 
   return (
-    <div className="space-y-4" data-testid="consultation-collections-board">
+    <div className="space-y-4" data-testid={testid}>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
         <SummaryCard label="Today's Collection" value={fmt(totals.today.total)} sub={plural(totals.today.count, "payment")} icon={CalendarDays} color="#059669" active={activeCard === "today"} onClick={() => toggleCard("today")} />
         <SummaryCard label="This Month" value={fmt(totals.month.total)} sub={plural(totals.month.count, "payment")} icon={CalendarRange} color="#0284c7" active={activeCard === "month"} onClick={() => toggleCard("month")} />
@@ -224,7 +240,7 @@ export const ConsultationCollectionsBoard = ({ rows, onView }) => {
 
       <Card data-testid="accountant-manage-consultation">
         <CardContent className="p-4">
-          <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Consultation Collections</p>
+          <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</p>
           <div className="overflow-x-auto">
             <table className="w-full table-fixed border-separate border-spacing-x-0 border-spacing-y-2 text-sm">
               <thead>

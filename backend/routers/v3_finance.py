@@ -174,9 +174,19 @@ CONSULTATION_FEE_ACTIONS = {"consultation_paid", "package_sold", "package_paymen
 
 
 def _revenue_category(action: str) -> str:
-    # A Diet Consultation is a consultation, so its fee reports as consultation revenue
-    # rather than needing a fourth headline nobody asked for.
-    return "session" if action == "treatment_fee_collected" else "consultation"
+    """Which revenue line a payment belongs to: consultation, session, or diet.
+
+    Diet has its own line rather than sitting inside consultation. It is a separate
+    service sold at its own price by its own clinician, and a branch reporting on it
+    cannot answer "how much did diet bring in" if it is folded into the consultation
+    figure. Anything not named here is consultation, which keeps every older action
+    reporting exactly where it always did.
+    """
+    if action == "treatment_fee_collected":
+        return "session"
+    if action == "diet_fee_collected":
+        return "diet"
+    return "consultation"
 
 
 def _parse_rs_amount(details: str) -> float:
@@ -334,6 +344,19 @@ def _lead_session_summary(lead: dict) -> dict:
     }
 
 
+def _empty_day(day: str) -> dict:
+    """One day's revenue row, with every line seeded. Both loops that build these use it,
+    so a row can never be missing the key the other loop is about to add to."""
+    return {"date": day, "consultation": 0.0, "session": 0.0, "diet": 0.0, "store": 0.0}
+
+
+def _empty_branch(bid, bname: str) -> dict:
+    return {
+        "branch_id": bid, "branch_name": bname,
+        "consultation_total": 0.0, "session_total": 0.0, "diet_total": 0.0, "store_total": 0.0,
+    }
+
+
 @router.get("/finance/revenue-overview")
 async def revenue_overview(
     start_date: Optional[str] = None,
@@ -380,6 +403,7 @@ async def revenue_overview(
 
     consultation_total = 0.0
     session_total = 0.0
+    diet_total = 0.0
     by_day = {}
     by_branch_acc = {}
     payment_modes = {}
@@ -404,15 +428,19 @@ async def revenue_overview(
 
         if category == "session":
             session_total += amount
+        elif category == "diet":
+            diet_total += amount
         else:
             consultation_total += amount
 
-        d = by_day.setdefault(day, {"date": day, "consultation": 0.0, "session": 0.0})
+        # Every category is seeded on both of the setdefaults below, here and in the store
+        # loop — `d[category] += amount` needs the key to exist whichever loop created the
+        # day, and a day with only store sales in it would otherwise KeyError the moment an
+        # activity row landed on it.
+        d = by_day.setdefault(day, _empty_day(day))
         d[category] += amount
 
-        b = by_branch_acc.setdefault(bid or "unknown", {
-            "branch_id": bid, "branch_name": bname, "consultation_total": 0.0, "session_total": 0.0,
-        })
+        b = by_branch_acc.setdefault(bid or "unknown", _empty_branch(bid, bname))
         b[f"{category}_total"] += amount
 
         payment_modes[mode] = payment_modes.get(mode, 0.0) + amount
@@ -466,12 +494,10 @@ async def revenue_overview(
         day = (sale.get("created_at") or "")[:10]
         mode = sale.get("payment_mode") or "unknown"
 
-        d = by_day.setdefault(day, {"date": day, "consultation": 0.0, "session": 0.0})
+        d = by_day.setdefault(day, _empty_day(day))
         d["store"] = d.get("store", 0.0) + amount
 
-        b = by_branch_acc.setdefault(bid or "unknown", {
-            "branch_id": bid, "branch_name": bname, "consultation_total": 0.0, "session_total": 0.0,
-        })
+        b = by_branch_acc.setdefault(bid or "unknown", _empty_branch(bid, bname))
         b["store_total"] = b.get("store_total", 0.0) + amount
 
         payment_modes[mode] = payment_modes.get(mode, 0.0) + amount
@@ -503,15 +529,12 @@ async def revenue_overview(
             "client_balance": 0.0,
         })
 
-    total_collected = consultation_total + session_total + store_total
+    total_collected = consultation_total + session_total + diet_total + store_total
     trend = sorted(by_day.values(), key=lambda r: r["date"])
     for r in trend:
-        # Days with only activity rows never got a store key, and vice versa.
-        r["store"] = r.get("store", 0.0)
-        r["total"] = r["consultation"] + r["session"] + r["store"]
+        r["total"] = r["consultation"] + r["session"] + r["diet"] + r["store"]
     for r in by_branch_acc.values():
-        r["store_total"] = r.get("store_total", 0.0)
-        r["total_revenue"] = r["consultation_total"] + r["session_total"] + r["store_total"]
+        r["total_revenue"] = r["consultation_total"] + r["session_total"] + r["diet_total"] + r["store_total"]
     by_branch = sorted(by_branch_acc.values(), key=lambda r: -r["total_revenue"])
 
     first_branch_stage = await get_first_stage_name("sales", "New Appointment")
@@ -585,9 +608,11 @@ async def revenue_overview(
         "breakdown": {
             "consultation_revenue": consultation_total,
             "session_revenue": session_total,
+            "diet_revenue": diet_total,
             "store_revenue": store_total,
             "consultation_pct": round(consultation_total / total_collected * 100, 1) if total_collected else 0,
             "session_pct": round(session_total / total_collected * 100, 1) if total_collected else 0,
+            "diet_pct": round(diet_total / total_collected * 100, 1) if total_collected else 0,
             "store_pct": round(store_total / total_collected * 100, 1) if total_collected else 0,
         },
         "trend": trend,

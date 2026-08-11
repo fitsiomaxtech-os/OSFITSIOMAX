@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Eye, Wallet, Stethoscope, Activity, ShoppingBag } from "lucide-react";
+import { Eye, Wallet, Stethoscope, Activity, ShoppingBag, Salad } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { StatTile } from "@/components/ui/stat-tile";
 import { getBranches, getRevenueOverview } from "@/lib/api";
@@ -25,6 +25,7 @@ const SUB_TABS = [
   { key: "total_revenue", label: "Total Revenue" },
   { key: "consultation", label: "Consultation Collections" },
   { key: "session", label: "Session Collections" },
+  { key: "diet", label: "Diet Collections" },
   { key: "outstanding", label: "Outstanding Amount" },
   { key: "schedules", label: "Payment Schedules" },
   { key: "paid", label: "Payment Paid", tone: "paid" },
@@ -52,6 +53,7 @@ const REVENUE_VIEWS = [
   { key: "consultation", label: "Consultation Revenue", color: "#0284c7", icon: Stethoscope },
   { key: "session", label: "Session Revenue", color: "#7c3aed", icon: Activity },
   { key: "store", label: "Store Revenue", color: "#d97706", icon: ShoppingBag },
+  { key: "diet", label: "Diet Revenue", color: "#ea580c", icon: Salad },
 ];
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
@@ -121,7 +123,7 @@ export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
   // How many transactions sit behind each figure — the line under it, and the count of
   // rows clicking it will leave in the table below.
   const txnCounts = useMemo(() => {
-    const acc = { collected: transactions.length, consultation: 0, session: 0, store: 0 };
+    const acc = { collected: transactions.length, consultation: 0, session: 0, diet: 0, store: 0 };
     transactions.forEach((t) => { if (acc[t.source] !== undefined) acc[t.source] += 1; });
     return acc;
   }, [transactions]);
@@ -149,8 +151,13 @@ export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
       });
       const amount = Number(t.gross) || 0;
       r.total_paid += amount;
-      if (t.source === "consultation") r.consultation_paid += amount;
-      else r.session_paid += amount;
+      // Written as an explicit three-way, not "consultation else session". This board has
+      // two columns and a total that must equal them; an else-branch put every Diet
+      // Consultation Fee under Session, which is the one place it certainly does not
+      // belong. Diet joins Consultation here — it is a consultation of another kind — so
+      // the two columns still add up to Total Paid.
+      if (t.source === "session") r.session_paid += amount;
+      else r.consultation_paid += amount;
       const day = (t.date || "").slice(0, 10);
       if (day > r.last_date) r.last_date = day;
       if (t.payment_mode && !r.modes.includes(t.payment_mode)) r.modes.push(t.payment_mode);
@@ -202,9 +209,9 @@ export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
         <p className="py-10 text-center text-sm text-slate-400">Loading...</p>
       ) : subTab === "total_revenue" ? (
         <div className="space-y-4" data-testid="accountant-manage-total-revenue">
-          {/* Four across from lg. Store Revenue joined the row, and three-up would have
-              left it wrapped onto a line of its own looking like a footnote. */}
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {/* Five across from lg, so the whole split reads on one line. Two-up on a phone
+              leaves the odd one centred rather than stranded in a column of its own. */}
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
             {REVENUE_VIEWS.map((v) => (
               <StatTile
                 key={v.key}
@@ -230,6 +237,15 @@ export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
         <ConsultationCollectionsBoard rows={transactions.filter((t) => t.source === "consultation")} onView={setViewingLeadId} />
       ) : subTab === "session" ? (
         <SessionCollectionsBoard rows={transactions.filter((t) => t.source === "session")} onView={setViewingLeadId} />
+      ) : subTab === "diet" ? (
+        // The consultation board over the diet slice: every card, filter and column means
+        // the same thing for a Diet Consultation Fee as for a Consultation Fee.
+        <ConsultationCollectionsBoard
+          rows={transactions.filter((t) => t.source === "diet")}
+          onView={setViewingLeadId}
+          title="Diet Collections"
+          testid="diet-collections-board"
+        />
       ) : subTab === "outstanding" ? (
         <OutstandingAmountBoard rows={outstanding} onView={setViewingLeadId} onChanged={load} />
       ) : subTab === "paid" ? (

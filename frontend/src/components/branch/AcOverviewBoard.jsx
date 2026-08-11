@@ -171,10 +171,10 @@ const TotalRevenueTab = ({ data, loading, fmt }) => {
 
   return (
     <div className="space-y-4" data-testid="ac-total-revenue-tab">
-      {/* Revenue split — three ways since the Fitsiomax Store's counter sales began
-          counting. Two cards would have left their percentages short of 100 with nothing
-          on screen saying where the rest went. */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+      {/* Revenue split — four ways now the Diet Consultation Fee is collected separately.
+          Every line that carries money has a card here, because a card missing is a
+          percentage short of 100 with nothing on screen saying where the rest went. */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <div className="rounded-xl border border-sky-200 bg-sky-50 p-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-sky-700">Consultation Revenue</p>
           <p className="mt-1 text-xl font-bold text-sky-800">{fmt(b.consultation_revenue)}</p>
@@ -184,6 +184,11 @@ const TotalRevenueTab = ({ data, loading, fmt }) => {
           <p className="text-xs font-semibold uppercase tracking-wide text-violet-700">Session Revenue</p>
           <p className="mt-1 text-xl font-bold text-violet-800">{fmt(b.session_revenue)}</p>
           <p className="text-[11px] text-slate-500">{b.session_pct || 0}% of total</p>
+        </div>
+        <div className="rounded-xl border border-orange-200 bg-orange-50 p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-orange-700">Diet Revenue</p>
+          <p className="mt-1 text-xl font-bold text-orange-800">{fmt(b.diet_revenue)}</p>
+          <p className="text-[11px] text-slate-500">{b.diet_pct || 0}% of total</p>
         </div>
         <div className="rounded-xl border border-teal-200 bg-teal-50 p-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-teal-700">Store Revenue</p>
@@ -261,7 +266,11 @@ const TotalRevenueTab = ({ data, loading, fmt }) => {
                     <td className="px-4 py-2.5 text-xs text-slate-500">{(tx.date || "").slice(0, 16).replace("T", " ")}</td>
                     <td className="px-4 py-2.5 text-slate-700">{tx.branch_name || "—"}</td>
                     <td className="px-4 py-2.5">
-                      <span className={`rounded-[5px] px-2 py-0.5 text-[10px] font-semibold capitalize ${tx.source === "session" ? "bg-violet-100 text-violet-700" : "bg-sky-100 text-sky-700"}`}>
+                      <span className={`rounded-[5px] px-2 py-0.5 text-[10px] font-semibold capitalize ${
+                        tx.source === "session" ? "bg-violet-100 text-violet-700"
+                        : tx.source === "diet" ? "bg-orange-100 text-orange-700"
+                        : "bg-sky-100 text-sky-700"
+                      }`}>
                         {tx.source}
                       </span>
                     </td>

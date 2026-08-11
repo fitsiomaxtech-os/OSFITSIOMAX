@@ -24,6 +24,8 @@ const LIGHT = {
   // Fitsiomax Store counter sales. Teal rather than a sixth hue: it is inflow and belongs
   // with the two collections colours, not competing with the outflow half.
   store: "#0f9b9b",
+  // Diet Consultation Fees. Orange, the colour diet carries everywhere else in the OS.
+  diet: "#eb6834",
   unpaid: "#4a3aa7",
   delayed: "#e87ba4",
 };
@@ -104,6 +106,9 @@ export const NetCashflowSunburst = ({ data, onDrilldown }) => {
   // Counted here as well as in the KPI card above: leaving it out would put two different
   // "total revenue" figures on one board and make the centre's Net Cashflow wrong.
   const storeTotal = Number(b.store_revenue) || 0;
+  // Counted for the same reason as store: it is money in, and leaving it out would put a
+  // total here that disagrees with the Total Collected card above.
+  const dietTotal = Number(b.diet_revenue) || 0;
   const scheduleUnpaid = schedule.filter((s) => s.status !== "paid");
   const scheduleTotal = scheduleUnpaid.reduce((s, r) => s + (r.amount || 0), 0);
 
@@ -112,7 +117,7 @@ export const NetCashflowSunburst = ({ data, onDrilldown }) => {
   const unpaidTotal = unpaidClients.reduce((s, c) => s + (c.balance || 0), 0);
   const delayedTotal = delayedClients.reduce((s, c) => s + (c.balance || 0), 0);
 
-  const totalRevenue = consultationTotal + sessionTotal + storeTotal;
+  const totalRevenue = consultationTotal + sessionTotal + dietTotal + storeTotal;
   const outstandingTotal = unpaidTotal + delayedTotal;
   const netCashflow = totalRevenue - outstandingTotal;
   const pendingCount = k.pending_count || 0;
@@ -121,11 +126,12 @@ export const NetCashflowSunburst = ({ data, onDrilldown }) => {
     [
       { key: "consultation", label: "Consultation Collections", value: consultationTotal, color: LIGHT.consultation, groupLabel: "Inflow" },
       { key: "session", label: "Session Collections", value: sessionTotal, color: LIGHT.session, groupLabel: "Inflow" },
+      { key: "diet", label: "Diet Collections", value: dietTotal, color: LIGHT.diet, groupLabel: "Inflow" },
       { key: "store", label: "Store Payments", value: storeTotal, color: LIGHT.store, groupLabel: "Inflow" },
       { key: "schedule", label: "Payment Schedules", value: scheduleTotal, color: LIGHT.schedule, groupLabel: "Inflow" },
     ],
     -90, 90, 3,
-  ), [consultationTotal, sessionTotal, storeTotal, scheduleTotal]);
+  ), [consultationTotal, sessionTotal, dietTotal, storeTotal, scheduleTotal]);
 
   const outflow = useMemo(() => layoutSegments(
     [
@@ -163,6 +169,7 @@ export const NetCashflowSunburst = ({ data, onDrilldown }) => {
     if (!selected) return null;
     if (selected === "consultation") return { title: "Consultation Collections", rows: transactions.filter((t) => t.source === "consultation").slice(0, 8), kind: "tx" };
     if (selected === "session") return { title: "Session Collections", rows: transactions.filter((t) => t.source === "session").slice(0, 8), kind: "tx" };
+    if (selected === "diet") return { title: "Diet Collections", rows: transactions.filter((t) => t.source === "diet").slice(0, 8), kind: "tx" };
     if (selected === "schedule" || selected.startsWith("sched_")) return { title: "Payment Schedules", rows: scheduleUnpaid.slice(0, 8), kind: "schedule" };
     if (selected === "unpaid") return { title: "Outstanding — Unpaid", rows: unpaidClients.slice(0, 8), kind: "client" };
     if (selected === "delayed") return { title: "Outstanding — Delayed", rows: delayedClients.slice(0, 8), kind: "client" };

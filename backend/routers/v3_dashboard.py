@@ -509,7 +509,9 @@ async def v3_dashboard_overview(
     # headline figures and the Collections boards can't disagree about what a payment was
     # for. `action` and `created_at` have to be projected for this — the branch buckets
     # below never needed either.
-    revenue_split = {"consultation": 0.0, "session": 0.0, "spot_joining": 0.0}
+    # "diet" is seeded because _revenue_category can return it — without the key the
+    # increment below raises the moment a Diet Consultation Fee lands in range.
+    revenue_split = {"consultation": 0.0, "session": 0.0, "diet": 0.0, "spot_joining": 0.0}
     activity_query = {"action": {"$in": REVENUE_ACTIONS}}
     activity_query.update(_date_range_query("created_at", start_date, end_date))
     activities = await v3_col("lead_activity").find(
@@ -553,11 +555,12 @@ async def v3_dashboard_overview(
         "appointments": format_bucket(appt_bucket),
         "treatments": format_bucket(treat_bucket),
         # spot_joining is a slice of session, not money on top of it — total stays
-        # consultation + session.
+        # consultation + session + diet.
         "revenue": {
             **format_bucket(revenue_bucket, currency=True),
             "consultation": round(revenue_split["consultation"], 2),
             "session": round(revenue_split["session"], 2),
+            "diet": round(revenue_split["diet"], 2),
             "spot_joining": round(revenue_split["spot_joining"], 2),
         },
     }
