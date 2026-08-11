@@ -48,6 +48,31 @@ async def _lead_or_404(lead_id: str) -> dict:
     return lead
 
 
+def has_treatment(lead: dict) -> bool:
+    """Whether this patient is on a course of treatment, and so gets the Client Portal.
+
+    The portal exists for a course of sessions: progress to follow, a plan to read
+    between visits, a balance to watch. That is what makes it worth logging in to, and
+    what a one-off consultation does not have.
+
+    Three signals, any one of which means treatment exists. Written as presence rather
+    than as an amount, because HOW MUCH has been paid must never decide this — a patient
+    on a 10,000 package who has paid 2,000 is mid-treatment and needs the portal most of
+    all. `treatment_fee_paid` is set the moment any treatment money or Partial Payment
+    schedule is recorded, whatever the figure, including zero.
+
+    What this deliberately excludes: "Consultation Only", and a patient who came for a
+    Diet Consultation alone. Both are paying patients, and neither is a treatment patient.
+    A patient on treatment who ALSO takes a diet plan matches on the treatment side and
+    keeps the portal.
+    """
+    return (
+        lead.get("treatment_fee_paid") is not None          # fee collected, in full or part
+        or bool(lead.get("session_package_id"))             # treatment package chosen
+        or lead.get("consultation_decision") == "consultation_treatment"
+    )
+
+
 # ------------------------------------------------------------- Branch Admin: manage access
 
 @router.get("/leads/{lead_id}/portal-account")
@@ -74,17 +99,10 @@ async def create_or_reset_portal_account(
     lead = await _lead_or_404(lead_id)
     if user.role == "branch_admin" and lead.get("branch_id") != user.branch_id:
         raise HTTPException(status_code=404, detail="Patient not found")
-    # Any fee collected is enough. This used to insist on the Treatment Fee, which locked
-    # out the two kinds of patient who never pay one: "Consultation Only", and anyone who
-    # came for a Diet Consultation and nothing else. Both are paying patients with a record
-    # worth reading, and neither could ever be given a login.
-    #
-    # The gate exists to separate a paying patient from a bare lead, and the Consultation
-    # Fee is the first money in — so that is the honest floor.
-    if all(lead.get(f) is None for f in ("package_paid", "treatment_fee_paid", "diet_fee_paid")):
+    if not has_treatment(lead):
         raise HTTPException(
             status_code=400,
-            detail="Collect a fee from this patient before creating portal access",
+            detail="Only treatment patients get the Client Portal — this patient has no treatment sessions.",
         )
 
     email = (payload.email or lead.get("email") or "").strip().lower()

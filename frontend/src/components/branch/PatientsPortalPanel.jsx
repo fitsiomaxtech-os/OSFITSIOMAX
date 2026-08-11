@@ -14,16 +14,47 @@ import { waNumber } from "@/lib/phone";
 
 const portalUrl = () => `${window.location.origin}/portal`;
 
-/** Everything this patient has actually paid, across all three fees. One figure rather
-    than a Treatment Fee column, which was blank for anyone who never had one. */
+/**
+ * Whether this patient is on a course of treatment, and so belongs on this list.
+ *
+ * Mirrors has_treatment() in backend/routers/v3_patient_portal.py — the server enforces
+ * it on the account itself, and this keeps the list from offering someone the server will
+ * then refuse. Change one and change the other.
+ *
+ * Presence, never an amount: a patient on a 10,000 package who has paid 2,000 is
+ * mid-treatment and belongs here. Excluded are "Consultation Only" and anyone who came
+ * for a Diet Consultation alone — paying patients both, treatment patients neither.
+ */
+const hasTreatment = (l) => (
+  l.treatment_fee_paid != null
+  || !!l.session_package_id
+  || l.consultation_decision === "consultation_treatment"
+);
+
+/** Everything this patient has actually paid. Everyone listed here is on treatment, but
+    many also have a Consultation Fee and some a Diet one, so the column reports the total
+    rather than a single fee that only ever tells part of it. */
 const feesPaid = (l) => (l.package_paid || 0) + (l.treatment_fee_paid || 0) + (l.diet_fee_paid || 0);
 
-/** Which fees make up that figure, for the line under the name. */
+/** Green once any money is in, amber while none is. Deliberately not a judgement about
+    whether the whole package is settled — a partial payer is a normal treatment patient,
+    and Accountant Manage is where a balance is chased. */
+const PaidBadge = ({ lead }) => (
+  feesPaid(lead) > 0 ? (
+    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">Paid</span>
+  ) : (
+    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700">Awaiting</span>
+  )
+);
+
+/** Which fees make up that figure. A patient whose treatment package is chosen but whose
+    money has not come in yet belongs on this list and has none, so that case is named
+    rather than rendering an empty pair of brackets. */
 const feeParts = (l) => [
   l.package_paid != null ? "Consultation" : null,
   l.treatment_fee_paid != null ? "Treatment" : null,
   l.diet_fee_paid != null ? "Diet" : null,
-].filter(Boolean).join(" + ");
+].filter(Boolean).join(" + ") || "nothing collected yet";
 
 export const PatientsPortalPanel = ({ branchId }) => {
   const [leads, setLeads] = useState([]);
@@ -36,12 +67,7 @@ export const PatientsPortalPanel = ({ branchId }) => {
     setLoading(true);
     try {
       const data = await getBranchBoard(branchId);
-      // A lead becomes a patient the moment any fee is recorded — the same rule the
-      // portal-account endpoint enforces. It used to be the Treatment Fee alone, which
-      // hid the two kinds of patient who never pay one: "Consultation Only", and anyone
-      // who came for a Diet Consultation and nothing else. They could not appear here, so
-      // they could never be given a login however the server was gated.
-      setLeads((data.leads || []).filter((l) => feesPaid(l) > 0));
+      setLeads((data.leads || []).filter(hasTreatment));
     } catch { /* silent */ }
     setLoading(false);
   }, [branchId]);
@@ -71,7 +97,7 @@ export const PatientsPortalPanel = ({ branchId }) => {
       {visible.length === 0 && !loading ? (
         <div className="py-16 text-center">
           <User className="mx-auto mb-3 h-10 w-10 text-slate-200" />
-          <p className="text-sm text-slate-400">No patients yet — a lead shows up here once any fee is collected from them</p>
+          <p className="text-sm text-slate-400">No patients yet — a lead shows up here once they are on a course of treatment</p>
         </div>
       ) : (
         <>
@@ -99,7 +125,7 @@ export const PatientsPortalPanel = ({ branchId }) => {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-start justify-between gap-2">
                       <span className="truncate font-semibold text-slate-800">{l.name}</span>
-                      <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">Paid</span>
+                      <span className="shrink-0"><PaidBadge lead={l} /></span>
                     </div>
                     <p className="truncate text-xs text-slate-600">{l.phone || "—"}</p>
                     <p className="mt-0.5 text-[11px] text-slate-500">
@@ -163,9 +189,9 @@ export const PatientsPortalPanel = ({ branchId }) => {
                   </td>
                   <td className="px-4 py-3 text-slate-600">{l.phone || "—"}</td>
                   <td className="px-4 py-3 text-slate-600">Rs.{feesPaid(l)} <span className="text-slate-400">({feeParts(l)})</span></td>
-                  <td className="px-4 py-3">
-                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">Paid</span>
-                  </td>
+                  {/* Not a blanket "Paid": a patient can be on treatment with a balance
+                      still owed, or with nothing collected yet, and both belong here. */}
+                  <td className="px-4 py-3"><PaidBadge lead={l} /></td>
                 </tr>
               ))}
             </tbody>
@@ -301,6 +327,7 @@ function PatientPortalDetailModal({ lead, onClose, onSaved }) {
               <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">Rs.{feesPaid(lead)}</span>
             </div>
             <div className="space-y-1 text-xs text-slate-600">
+              {feesPaid(lead) === 0 && <p className="text-slate-400">Nothing collected yet.</p>}
               {lead.package_paid != null && (
                 <p>Consultation Rs.{lead.package_paid} <span className="capitalize text-slate-400">via {lead.package_payment_mode}</span></p>
               )}
