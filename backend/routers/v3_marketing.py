@@ -672,3 +672,141 @@ async def performance(_: V3UserOut = Depends(v3_require_roles("super_admin"))):
         "leads_per_pre_sales": [{"name": r["_id"].get("name") or "Unassigned", "count": r["count"]} for r in pre_rows],
         "deals_per_sales": [{"name": r["_id"].get("name") or "Unassigned", "count": r["count"]} for r in sales_rows],
     }
+
+
+# ------------------------------------------------------- one team member's own leads
+
+def _lead_source_name(lead: Dict[str, Any]) -> str:
+    return lead.get("source_tab") or lead.get("source_type") or "unknown"
+
+
+def _lead_stage_name(lead: Dict[str, Any]) -> str:
+    """The stage a lead is at, from whichever pipeline currently owns it.
+
+    branch_stage first: once a lead is handed to a branch that is the live position, and
+    `stage` is left holding wherever Pre-Sales last had it. Reading `stage` alone would
+    report every converted patient as still sitting in Appointment.
+    """
+    return lead.get("branch_stage") or lead.get("stage") or "—"
+
+
+@router.get("/team-members/{member_id}/leads")
+async def team_member_leads(
+    member_id: str,
+    from_date: Optional[str] = Query(None),
+    to_date: Optional[str] = Query(None),
+    source: Optional[str] = Query(None),
+    stage: Optional[str] = Query(None),
+    limit: int = 500,
+    _: V3UserOut = Depends(v3_require_roles("super_admin")),
+):
+    """The leads behind one team member's card.
+
+    Which leads are "theirs" depends on the tier, and both readings are taken straight
+    from get_team_members so the popup can never contradict the card that opened it:
+
+      Pre-Sales   leads assigned to them (assigned_user_id). They own by assignment.
+      Branch      leads belonging to their branch. Nothing sets assigned_user_id to a
+                  Branch Admin, so ownership by assignment would report zero for every
+                  one of them.
+
+    The header figures are computed over the member's WHOLE book, never over the filtered
+    list — `filtered` reports that separately. A Conversion Rate that moved when you
+    picked a date range would be a different statistic wearing the same label.
+    """
+    user = await v3_col("users").find_one({"id": member_id}, {"_id": 0, "password": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="Team member not found")
+
+    role = user.get("role")
+    if role == "pre_sales":
+        owned = {"assigned_user_id": member_id}
+    elif user.get("branch_id"):
+        owned = {"branch_id": user["branch_id"]}
+    else:
+        owned = None
+
+    leads = await v3_col("leads").find(owned, {"_id": 0}).sort("created_at", -1).to_list(20000) if owned else []
+
+    # Headline figures, over the WHOLE book. Each line mirrors get_team_members, because
+    # the popup opens off a card and the two showing different numbers for the same person
+    # is the fault this drill-down exists to make impossible.
+    total_leads = len(leads)
+
+    if role == "pre_sales":
+        # Owns by assignment; converted means the lead reached a physio, and the rate is
+        # measured against everything handed to them.
+        secondary = None
+        converted = len([l for l in leads if l.get("assigned_physio_id")])
+        denominator = total_leads
+    else:
+        # Owns by branch. Appointments and conversions are measured over the same
+        # population — the patients booked in — or a patient who reached a physio without
+        # a consultation on record would push the rate past 100%.
+        appt_lead_ids = {
+            i for i in (await v3_col("appointments").distinct(
+                "lead_id", {"branch_id": user["branch_id"], "appt_kind": "consultation"}
+            )) if i
+        } if user.get("branch_id") else set()
+        by_id = {l["id"]: l for l in leads}
+        secondary = len(appt_lead_ids)
+        converted = len([
+            by_id[i] for i in appt_lead_ids
+            if i in by_id and by_id[i].get("assigned_physio_id")
+        ])
+        denominator = secondary
+
+    conversion_rate = round((converted / denominator * 100.0), 1) if denominator else 0.0
+
+    # Built before the filters below, so a stage you filter to is still listed after you
+    # pick it, and a source you filter away can still be chosen again.
+    by_stage: Dict[str, int] = {}
+    by_source: Dict[str, int] = {}
+    for l in leads:
+        by_stage[_lead_stage_name(l)] = by_stage.get(_lead_stage_name(l), 0) + 1
+        by_source[_lead_source_name(l)] = by_source.get(_lead_source_name(l), 0) + 1
+
+    rows = leads
+    if from_date:
+        rows = [l for l in rows if str(l.get("created_at") or "")[:10] >= from_date]
+    if to_date:
+        rows = [l for l in rows if str(l.get("created_at") or "")[:10] <= to_date]
+    if source:
+        rows = [l for l in rows if _lead_source_name(l) == source]
+    if stage:
+        rows = [l for l in rows if _lead_stage_name(l) == stage]
+
+    branch_docs = await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1}).to_list(500)
+    branch_names = {b["id"]: b.get("branch_name", "") for b in branch_docs}
+
+    return {
+        "member": {
+            "id": user["id"],
+            "full_name": user.get("full_name", ""),
+            "email": user.get("email", ""),
+            "role": role,
+            "branch_name": branch_names.get(user.get("branch_id"), ""),
+        },
+        "total_leads": total_leads,
+        # Appointments, and only for a branch — a Pre-Sales agent has no such figure, so
+        # it comes back null rather than as a zero the popup would then have to print.
+        "appointments": secondary,
+        "converted": converted,
+        "conversion_rate": conversion_rate,
+        "filtered": len(rows),
+        "stages": sorted(({"name": k, "value": v} for k, v in by_stage.items()), key=lambda r: -r["value"]),
+        "sources": sorted(({"name": k, "value": v} for k, v in by_source.items()), key=lambda r: -r["value"]),
+        "leads": [
+            {
+                "id": l.get("id"),
+                "name": l.get("name", "Unknown"),
+                "phone": l.get("phone", ""),
+                "email": l.get("email", ""),
+                "branch_name": branch_names.get(l.get("branch_id"), ""),
+                "source": _lead_source_name(l),
+                "stage": _lead_stage_name(l),
+                "created_at": l.get("created_at"),
+            }
+            for l in rows[:limit]
+        ],
+    }
