@@ -16,7 +16,7 @@ import {
   ViewItemModal,
 } from "@/components/PackagesBoard";
 
-const BranchItemsPanel = ({ category, itemType, emptyLabel, testidPrefix }) => {
+const BranchItemsPanel = ({ category, itemType, emptyLabel, testidPrefix, durationLabel = "Consultation Duration" }) => {
   const [items, setItems] = useState([]);
   const [viewingItem, setViewingItem] = useState(null);
   const isSession = itemType === "session";
@@ -61,7 +61,7 @@ const BranchItemsPanel = ({ category, itemType, emptyLabel, testidPrefix }) => {
                     {it.duration_minutes && (
                       <div className="mt-1.5 flex items-center justify-between rounded-lg bg-sky-50 px-2.5 py-1.5">
                         <span className="inline-flex items-center gap-1.5 text-xs font-bold text-sky-800">
-                          <Clock className="h-3.5 w-3.5" />Consultation Duration
+                          <Clock className="h-3.5 w-3.5" />{durationLabel}
                         </span>
                         <span className="text-sm font-extrabold text-sky-900">
                           {DURATION_OPTIONS.find((d) => d.minutes === it.duration_minutes)?.label || `${it.duration_minutes} mins`}
@@ -164,6 +164,28 @@ export const BranchSessionsPanel = () => {
   );
 };
 
+/**
+ * Diet Package — the branch's read-only view of what Super Admin has priced.
+ *
+ * No Physiotherapy/Fitness sub-tabs, matching Super Admin's own Diet Package tab: a diet
+ * package is not split by department the way a consultation is, so a sub-tab bar with one
+ * live entry would be a control that never does anything.
+ *
+ * Otherwise it is the consultation panel exactly — a Diet Consultation is priced and timed
+ * the same way, which is why the backend validates it against the same rules.
+ */
+export const BranchDietPanel = () => (
+  <div className="space-y-4" data-testid="branch-store-panel-diet">
+    <BranchItemsPanel
+      category="physiotherapy"
+      itemType="diet"
+      durationLabel="Diet Consultation Duration"
+      emptyLabel="No diet packages available yet. Super Admin adds them in FITSIO STORE > Diet Package."
+      testidPrefix="branch-diet"
+    />
+  </div>
+);
+
 const BRANCH_STORE_TABS = TABS.filter((t) => t.key !== "history");
 
 // The three shelves that are stock: a catalogue, a count per branch, and the same add,
@@ -172,7 +194,7 @@ const INVENTORY_TABS = new Set(["tablet", "supplementary", "equipment"]);
 
 // Which tabs have a panel of their own. The rest fall through to the placeholder, and a
 // tab graduates by being added here rather than by another branch in the JSX below.
-const PANELS_BUILT = new Set(["consultations", "sessions", ...INVENTORY_TABS]);
+const PANELS_BUILT = new Set(["consultations", "sessions", "diet", ...INVENTORY_TABS]);
 
 export const FitsiomaxStorePanel = () => {
   const [tab, setTab] = useState("consultations");
@@ -198,6 +220,7 @@ export const FitsiomaxStorePanel = () => {
 
       {tab === "consultations" && <BranchConsultationsPanel />}
       {tab === "sessions" && <BranchSessionsPanel />}
+      {tab === "diet" && <BranchDietPanel />}
       {/* Keyed by category: without it React keeps the same instance across a tab switch
           and the previous shelf's rows sit there until the new ones land. */}
       {INVENTORY_TABS.has(tab) && <StoreInventoryPanel key={tab} category={tab} />}
