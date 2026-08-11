@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Stethoscope, CalendarRange, Pill, Dumbbell, ShoppingCart, Activity, Plus, X, FlaskConical, Pencil, Trash2, ImagePlus, Wifi, MapPin, Clock, Eye, History, Salad } from "lucide-react";
+import { Stethoscope, CalendarRange, Pill, Dumbbell, ShoppingCart, Activity, Plus, X, FlaskConical, Pencil, Trash2, ImagePlus, Wifi, MapPin, Clock, Eye, History, Salad, ChevronDown } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -941,6 +941,61 @@ const BUILT_TABS = new Set(["consultations", "sessions", "diet", "history", ...I
  * could add to that shared catalogue, so two branches spelling the same tablet differently
  * ended up with two rows that could never be transferred between them.
  */
+/**
+ * The branch picker, in the shape the finance boards' filter dropdowns use: a bordered
+ * trigger that opens a panel of pill rows rather than a native select's system menu.
+ *
+ * Colourless on purpose. Those boards give each branch its own tint because colour is
+ * carrying meaning there — it ties a row in the table to the branch that owns it. Here
+ * there is one selection and nothing to tie it to, so a palette would be decoration that
+ * reads as information. The selected row is marked by weight and a filled ground instead.
+ */
+const BranchSelect = ({ value, options, onChange, testId }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const onDocClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, []);
+
+  const current = options.find((o) => o.value === value);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex h-9 min-w-[190px] items-center justify-between gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+        data-testid={testId}
+      >
+        <span className="truncate">{current?.label || "-- choose a branch --"}</span>
+        <ChevronDown className={`h-3.5 w-3.5 shrink-0 opacity-60 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div className="absolute left-0 z-20 mt-1 max-h-64 min-w-[190px] space-y-1 overflow-y-auto rounded-md border border-slate-200 bg-white p-1.5 shadow-lg" data-testid={`${testId}-list`}>
+          {options.map((o) => (
+            <button
+              key={o.value}
+              type="button"
+              onClick={() => { onChange(o.value); setOpen(false); }}
+              className={`block w-full whitespace-nowrap rounded-md border px-3 py-1.5 text-left text-xs font-semibold ${
+                o.value === value
+                  ? "border-slate-300 bg-slate-100 text-slate-900"
+                  : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+              }`}
+              data-testid={`${testId}-option-${o.value}`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const SuperAdminInventoryPanel = ({ category }) => {
   const [branches, setBranches] = useState([]);
   const [branchId, setBranchId] = useState("");
@@ -959,15 +1014,15 @@ const SuperAdminInventoryPanel = ({ category }) => {
     <div className="space-y-3" data-testid={`packages-inventory-${category}`}>
       <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-3">
         <label className="text-xs font-medium text-slate-600">Branch:</label>
-        <select
+        <BranchSelect
           value={branchId}
-          onChange={(e) => setBranchId(e.target.value)}
-          className="h-9 rounded-md border border-slate-200 px-2 text-sm"
-          data-testid={`packages-inventory-branch-${category}`}
-        >
-          <option value="">-- choose a branch --</option>
-          {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name || b.name}</option>)}
-        </select>
+          onChange={setBranchId}
+          options={[
+            { value: "", label: "-- choose a branch --" },
+            ...branches.map((b) => ({ value: b.id, label: b.branch_name || b.name || "Unnamed branch" })),
+          ]}
+          testId={`packages-inventory-branch-${category}`}
+        />
         <span className="text-[11px] text-slate-400">
           Stock is held per branch. The catalogue itself is shared across all of them.
         </span>
@@ -993,11 +1048,8 @@ export const PackagesBoard = () => {
 
   return (
     <div className="space-y-4" data-testid="packages-board">
-      <div>
-        <h2 className="text-2xl font-bold text-slate-900">FITSIO STORE</h2>
-        <p className="text-sm text-slate-500">Manage Consultations, Sessions, Diet Packages, Tablet, Supplementary, Equipment, and Vending Machine.</p>
-      </div>
-
+      {/* No heading. The nav tab above already reads FITSIO STORE, and the line under it
+          only listed the tabs that follow it. */}
       <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="packages-subtabs">
         {TABS.map((t) => {
           const Icon = t.icon;
