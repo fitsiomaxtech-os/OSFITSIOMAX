@@ -20,14 +20,11 @@ const DASH_TABS = [
   // which is the question a Super Admin opens this board with. The four tabs after it
   // answer "how are we doing at X", which is the follow-up.
   { key: "overview", label: "Executive Overview", short: "Overview", icon: LayoutDashboard },
-  { key: "leads", label: "Leads", icon: Users },
-  // BRANCHS carries both halves of the sales chain: the branches, and the Pre-Sales
-  // agents who fed them. Pre-Sales had its own tab and it didn't earn one — the two
-  // are read against each other, and a tab apiece meant switching back and forth to
-  // compare what was handed over with what was closed.
+  // Named for the team whose work it reports, not for the records it counts. Every figure
+  // on it — enquiries in, calls due, slots fixed, who owns the follow-up — is Pre-Sales
+  // work, and the per-agent panel that used to sit under BRANCHS belongs with them.
+  { key: "leads", label: "Pre Sales", short: "Pre Sales", icon: Users },
   { key: "branch", label: "BRANCHS", short: "Branch", icon: Building2, team: "sales", panel: "branch" },
-  { key: "appointments", label: "Appointments", short: "Appts", icon: CalendarCheck },
-  { key: "treatments", label: "Treatments", short: "Treat", icon: Activity },
   { key: "revenue", label: "Revenue", icon: IndianRupee },
 ];
 
@@ -119,13 +116,15 @@ export const DashboardBoard = () => {
   // dates. Refetching on every range change would burn a request to return the same
   // numbers, and would imply the figures answer to the filter when they don't.
   useEffect(() => {
-    if (!activeTeam || team || teamLoading) return;
+    // Pre Sales needs the roster too, and carries no `team` key of its own — its rows
+    // come back under `pre_sales`, which every tab that needs people already reads.
+    if (!(activeTeam || activeTab === "leads") || team || teamLoading) return;
     setTeamLoading(true);
     mkGetTeam()
       .then(setTeam)
       .catch(() => { toast.error("Failed to load the team"); setTeam({ pre_sales: [], sales: [] }); })
       .finally(() => setTeamLoading(false));
-  }, [activeTeam, team, teamLoading]);
+  }, [activeTeam, activeTab, team, teamLoading]);
 
   const activeData = data?.[activeTab];
 
@@ -191,28 +190,32 @@ export const DashboardBoard = () => {
       {activeTab === "overview" ? (
         <ExecutiveOverview data={data} loading={loading} dateFilter={dateFilter} />
       ) : activeTab === "leads" ? (
-        <LeadMetrics dateFilter={dateFilter} />
+        <div className="space-y-4">
+          <LeadMetrics dateFilter={dateFilter} />
+          {/* The agents behind those figures. Moved here from BRANCHS with the tab's
+              rename: the numbers above are what Pre-Sales produced, and this is who
+              produced them — reading one without the other is half the picture. */}
+          {teamLoading || !team ? (
+            <p className="py-10 text-center text-sm text-slate-400">{teamLoading ? "Loading..." : ""}</p>
+          ) : (
+            <TeamCard
+              title={TEAM_PANELS.pre_sales.title}
+              subtitle={TEAM_PANELS.pre_sales.subtitle}
+              members={team.pre_sales || []}
+              kind="pre_sales"
+            />
+          )}
+        </div>
       ) : activeTeam ? (
         teamLoading || !team ? (
           <p className="py-16 text-center text-sm text-slate-400">{teamLoading ? "Loading..." : "No data."}</p>
         ) : (
-          // Branches first, then the Pre-Sales agents who fed them — the order the work
-          // happens in reversed, because the branch figures are what this tab is named
-          // for and Pre-Sales is the context behind them. Both come out of the one
-          // /marketing/team-members response already fetched, so showing them together
-          // costs no extra request.
           <div className="space-y-4">
             <TeamCard
               title={TEAM_PANELS[activePanel].title}
               subtitle={TEAM_PANELS[activePanel].subtitle}
               members={team[activeTeam] || []}
               kind={activePanel}
-            />
-            <TeamCard
-              title={TEAM_PANELS.pre_sales.title}
-              subtitle={TEAM_PANELS.pre_sales.subtitle}
-              members={team.pre_sales || []}
-              kind="pre_sales"
             />
           </div>
         )
