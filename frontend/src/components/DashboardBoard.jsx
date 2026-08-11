@@ -186,21 +186,7 @@ export const DashboardBoard = () => {
       {activeTab === "overview" ? (
         <ExecutiveOverview data={data} loading={loading} dateFilter={dateFilter} />
       ) : activeTab === "leads" ? (
-        <div className="space-y-4">
-          {/* The metric cards that stood here are gone at the branch's request. The
-              /dashboard/lead-metrics and /lead-metric-detail endpoints behind them are
-              untouched and still tested, so whatever replaces them has its data ready. */}
-          {teamLoading || !team ? (
-            <p className="py-10 text-center text-sm text-slate-400">{teamLoading ? "Loading..." : ""}</p>
-          ) : (
-            <TeamCard
-              title={TEAM_PANELS.pre_sales.title}
-              subtitle={TEAM_PANELS.pre_sales.subtitle}
-              members={team.pre_sales || []}
-              kind="pre_sales"
-            />
-          )}
-        </div>
+        <PreSalesTab team={team} loading={teamLoading} branches={data?.leads?.physio_branches || []} />
       ) : activeTeam ? (
         teamLoading || !team ? (
           <p className="py-16 text-center text-sm text-slate-400">{teamLoading ? "Loading..." : "No data."}</p>
@@ -360,6 +346,108 @@ export const DashboardBoard = () => {
  *
  * `All` has no preceding window, so it shows no deltas rather than inventing a baseline.
  */
+/**
+ * Dashboard > Pre Sales — the branches, and the agents behind whichever is picked.
+ *
+ * Each branch runs its own Pre-Sales team, so the roster is only readable a branch at a
+ * time; all of them at once is a list of people from different places being compared
+ * against a team average that spans all of them.
+ *
+ * The branch list comes from the dashboard payload rather than from the agents, so a
+ * branch with nobody on it still appears. "This branch has no Pre-Sales cover" is a
+ * finding, and a card that quietly fails to exist cannot report it.
+ */
+const PreSalesTab = ({ team, loading, branches }) => {
+  const [branchId, setBranchId] = useState("");
+
+  const members = team?.pre_sales || [];
+
+  // An agent with no branch on their login would vanish the moment any branch is picked,
+  // so they get a bucket of their own — and it only appears when somebody is in it.
+  const unassigned = members.filter((m) => !m.branch_id);
+
+  const leadsIn = (bid) => members
+    .filter((m) => (bid === "none" ? !m.branch_id : m.branch_id === bid))
+    .reduce((s, m) => s + (Number(m.total_assigned) || 0), 0);
+  const agentsIn = (bid) => members.filter((m) => (bid === "none" ? !m.branch_id : m.branch_id === bid)).length;
+
+  const shown = branchId
+    ? members.filter((m) => (branchId === "none" ? !m.branch_id : m.branch_id === branchId))
+    : members;
+
+  const BranchCard = ({ id, name, leads, agents }) => {
+    const active = branchId === id;
+    return (
+      <button
+        type="button"
+        onClick={() => setBranchId(active ? "" : id)}
+        className={`rounded-xl border p-4 text-left transition ${
+          active ? "border-sky-400 bg-sky-50 shadow-sm" : "border-slate-200 bg-white hover:border-sky-300 hover:shadow-sm"
+        }`}
+        data-testid={`pre-sales-branch-${id}`}
+      >
+        <p className="truncate text-xs font-semibold uppercase tracking-wider text-slate-500">{name}</p>
+        <p className={`mt-1 text-2xl font-bold ${active ? "text-sky-700" : "text-slate-800"}`}>{leads}</p>
+        <p className="mt-0.5 text-[11px] text-slate-400">
+          {agents} {agents === 1 ? "agent" : "agents"} · leads held
+        </p>
+      </button>
+    );
+  };
+
+  if (loading || !team) {
+    return <p className="py-16 text-center text-sm text-slate-400">{loading ? "Loading..." : "No data."}</p>;
+  }
+
+  return (
+    <div className="space-y-4" data-testid="dashboard-pre-sales-tab">
+      <div>
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Physiotherapy Branches</p>
+          {branchId && (
+            <button
+              type="button"
+              onClick={() => setBranchId("")}
+              className="text-[11px] font-semibold text-sky-600 hover:text-sky-800"
+              data-testid="pre-sales-branch-clear"
+            >
+              Show all branches
+            </button>
+          )}
+        </div>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          {branches.map((b) => (
+            <BranchCard
+              key={b.branch_id}
+              id={b.branch_id}
+              name={b.branch_name}
+              leads={leadsIn(b.branch_id)}
+              agents={agentsIn(b.branch_id)}
+            />
+          ))}
+          {unassigned.length > 0 && (
+            <BranchCard id="none" name="No branch" leads={leadsIn("none")} agents={agentsIn("none")} />
+          )}
+        </div>
+      </div>
+
+      {/* The team average inside the card is computed from whoever is shown, so filtering
+          to one branch benchmarks its agents against that branch rather than against the
+          whole organisation — which is the comparison a branch is actually judged on. */}
+      <TeamCard
+        title={TEAM_PANELS.pre_sales.title}
+        subtitle={
+          branchId
+            ? `${branches.find((b) => b.branch_id === branchId)?.branch_name || "No branch"} · ${TEAM_PANELS.pre_sales.subtitle}`
+            : TEAM_PANELS.pre_sales.subtitle
+        }
+        members={shown}
+        kind="pre_sales"
+      />
+    </div>
+  );
+};
+
 const ExecutiveOverview = ({ data, loading, dateFilter }) => {
   const [prev, setPrev] = useState(null);
   const [prevLoading, setPrevLoading] = useState(false);
