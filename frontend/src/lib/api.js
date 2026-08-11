@@ -376,12 +376,15 @@ export const getLoginHistory = async (limit) => (await api.get("/store/login-his
 export const listInventoryItems = async (params = {}) => (await api.get("/inventory/items", { params: { category: "tablet", ...params } })).data;
 export const inventorySummary = async (params = {}) => (await api.get("/inventory/summary", { params: { category: "tablet", ...params } })).data;
 export const inventoryMovements = async (params = {}) => (await api.get("/inventory/movements", { params: { category: "tablet", ...params } })).data;
+// The catalogue is org-wide, so create and delete carry no branch. Everything that moves
+// stock does: the backend pins a Branch Admin to their own branch whatever they send, and
+// requires a Super Admin — who has none — to name one.
 export const createInventoryItem = async (payload) => (await api.post("/inventory/items", payload)).data;
-export const updateInventoryItem = async (id, payload) => (await api.put(`/inventory/items/${id}`, payload)).data;
+export const updateInventoryItem = async (id, payload, params = {}) => (await api.put(`/inventory/items/${id}`, payload, { params })).data;
 export const deleteInventoryItem = async (id) => (await api.delete(`/inventory/items/${id}`)).data;
-export const addInventoryStock = async (id, payload) => (await api.post(`/inventory/items/${id}/add-stock`, payload)).data;
-export const sellInventoryItem = async (id, payload) => (await api.post(`/inventory/items/${id}/sell`, payload)).data;
-export const transferInventoryItem = async (id, payload) => (await api.post(`/inventory/items/${id}/transfer`, payload)).data;
+export const addInventoryStock = async (id, payload, params = {}) => (await api.post(`/inventory/items/${id}/add-stock`, payload, { params })).data;
+export const sellInventoryItem = async (id, payload, params = {}) => (await api.post(`/inventory/items/${id}/sell`, payload, { params })).data;
+export const transferInventoryItem = async (id, payload, params = {}) => (await api.post(`/inventory/items/${id}/transfer`, payload, { params })).data;
 
 export const saveLeadDiagnosis = async (leadId, diagnosis) => (await api.post(`/leads/${leadId}/diagnosis`, { diagnosis })).data;
 export const sellStoreItem = async (leadId, payload) => (await api.post(`/leads/${leadId}/sell-store-item`, payload)).data;

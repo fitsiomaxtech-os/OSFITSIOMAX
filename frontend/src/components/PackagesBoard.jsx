@@ -4,7 +4,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
-import { uploadStoreImage, createStoreItem, updateStoreItem, deleteStoreItem, listStoreItems, getPaymentHistory, getFollowUpHistory, getLoginHistory } from "@/lib/api";
+import { uploadStoreImage, createStoreItem, updateStoreItem, deleteStoreItem, listStoreItems, getPaymentHistory, getFollowUpHistory, getLoginHistory, getBranches } from "@/lib/api";
+import { StoreInventoryPanel } from "@/components/branch/StoreInventoryPanel";
 
 export const TABS = [
   { key: "consultations", label: "Consultations", icon: Stethoscope },
@@ -919,6 +920,74 @@ const HistoryPanel = () => {
   );
 };
 
+// The three stock shelves. One panel serves all of them, told which by its category —
+// the same panel Branch Admin uses, so the two stores cannot drift apart.
+const INVENTORY_TABS = new Set(["tablet", "supplementary", "equipment"]);
+
+// Which tabs have a panel. Everything else falls through to the placeholder; Vending
+// Machine is the only one left, and it has no backend at all yet.
+const BUILT_TABS = new Set(["consultations", "sessions", "diet", "history", ...INVENTORY_TABS]);
+
+/**
+ * The stock shelves as Super Admin sees them.
+ *
+ * Stock is held per branch and Super Admin has no branch of their own, so a branch has to
+ * be named before there is anything to show — every stock call refuses without one. The
+ * picker is that choice, and nothing loads until it is made rather than the panel opening
+ * on an error.
+ *
+ * The catalogue behind it is org-wide: a tablet added here is the same row every branch
+ * sees, which is exactly why Super Admin needs this screen. Until now only Branch Admins
+ * could add to that shared catalogue, so two branches spelling the same tablet differently
+ * ended up with two rows that could never be transferred between them.
+ */
+const SuperAdminInventoryPanel = ({ category }) => {
+  const [branches, setBranches] = useState([]);
+  const [branchId, setBranchId] = useState("");
+
+  useEffect(() => {
+    getBranches()
+      .then((rows) => {
+        setBranches(rows || []);
+        // One branch is not a choice, so it is made here rather than asked for.
+        if ((rows || []).length === 1) setBranchId(rows[0].id);
+      })
+      .catch(() => setBranches([]));
+  }, []);
+
+  return (
+    <div className="space-y-3" data-testid={`packages-inventory-${category}`}>
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-3">
+        <label className="text-xs font-medium text-slate-600">Branch:</label>
+        <select
+          value={branchId}
+          onChange={(e) => setBranchId(e.target.value)}
+          className="h-9 rounded-md border border-slate-200 px-2 text-sm"
+          data-testid={`packages-inventory-branch-${category}`}
+        >
+          <option value="">-- choose a branch --</option>
+          {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name || b.name}</option>)}
+        </select>
+        <span className="text-[11px] text-slate-400">
+          Stock is held per branch. The catalogue itself is shared across all of them.
+        </span>
+      </div>
+
+      {branchId ? (
+        // Keyed on both: without it React keeps the same instance across a change and the
+        // previous branch's or shelf's rows sit there until the new ones land.
+        <StoreInventoryPanel key={`${category}-${branchId}`} category={category} branchId={branchId} />
+      ) : (
+        <Card>
+          <CardContent className="p-8 text-center text-sm text-slate-400">
+            {branches.length === 0 ? "No branches yet." : "Choose a branch to see its stock."}
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+};
+
 export const PackagesBoard = () => {
   const [tab, setTab] = useState("consultations");
 
@@ -950,7 +1019,10 @@ export const PackagesBoard = () => {
       {tab === "sessions" && <SessionsPanel />}
       {tab === "diet" && <PhysiotherapyPanel kind="diet" />}
       {tab === "history" && <HistoryPanel />}
-      {tab !== "consultations" && tab !== "sessions" && tab !== "diet" && tab !== "history" && TABS.map((t) => tab === t.key && (
+      {INVENTORY_TABS.has(tab) && <SuperAdminInventoryPanel key={tab} category={tab} />}
+      {/* Whatever has no panel yet. A tab graduates by being handled above rather than by
+          another branch being added here. */}
+      {!BUILT_TABS.has(tab) && TABS.map((t) => tab === t.key && (
         <PlaceholderPanel key={t.key} label={t.label} testid={`packages-panel-${t.key}`} />
       ))}
     </div>

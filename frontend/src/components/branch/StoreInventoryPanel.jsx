@@ -130,8 +130,25 @@ const StockBadge = ({ qty, low }) => {
  * Mounted with a `key` of the category so switching tabs remounts rather than showing the
  * previous shelf's rows while the new ones load.
  */
-export const StoreInventoryPanel = ({ category = "tablet" }) => {
+/**
+ * One shelf of the Fitsiomax Store: the catalogue, this branch's count against each row,
+ * and the add / sell / move that change it.
+ *
+ * `branchId` is which branch's stock is being looked at, and it is optional. A Branch
+ * Admin omits it — the backend pins them to their own branch whatever they send, so
+ * sending nothing is both correct and the safer default. A Super Admin has no branch of
+ * their own, so they name one, and every call that touches stock has to carry it: the
+ * server refuses with "branch_id is required" rather than guessing.
+ *
+ * The catalogue itself is org-wide, so creating and deleting an entry carry no branch.
+ * That asymmetry is the point of the split — one spelling of a tablet across the whole
+ * organisation is what lets two branches transfer it to each other.
+ */
+export const StoreInventoryPanel = ({ category = "tablet", branchId }) => {
   const CAT = CATEGORIES[category] || CATEGORIES.tablet;
+  // Spread into every stock-scoped call. Empty for a Branch Admin, so their requests go
+  // out exactly as they did before this prop existed.
+  const scope = branchId ? { branch_id: branchId } : {};
   // Test ids carry the category, so the three shelves stay distinguishable in a run and
   // the Tablet ones keep the names they already had.
   const tid = (s) => `${category}-${s}`;
@@ -153,10 +170,11 @@ export const StoreInventoryPanel = ({ category = "tablet" }) => {
   const load = useCallback(async () => {
     setLoading(true);
     try {
+      const s = branchId ? { branch_id: branchId } : {};
       const [rows, totals, ledger] = await Promise.all([
-        listInventoryItems({ category }),
-        inventorySummary({ category }),
-        inventoryMovements({ category, limit: 50 }),
+        listInventoryItems({ category, ...s }),
+        inventorySummary({ category, ...s }),
+        inventoryMovements({ category, limit: 50, ...s }),
       ]);
       setItems(rows);
       setSummary(totals);
@@ -165,7 +183,7 @@ export const StoreInventoryPanel = ({ category = "tablet" }) => {
       toast.error(errText(e, `Couldn't load the ${CAT.noun.toLowerCase()} stock`));
     }
     setLoading(false);
-  }, [category, CAT.noun]);
+  }, [category, CAT.noun, branchId]);
 
   useEffect(() => { load(); }, [load]);
   // Only needed by the move form, but fetched once here rather than on each open.
@@ -179,9 +197,15 @@ export const StoreInventoryPanel = ({ category = "tablet" }) => {
     return items.filter((i) => `${i.name} ${i.brand || ""}`.toLowerCase().includes(q));
   }, [items, search]);
 
+  // Where stock can be moved TO. The branch being viewed is dropped: the server refuses a
+  // move to the branch the stock is already at, and offering it is offering an error. A
+  // Branch Admin passes no branchId, and their own branch is filtered server-side, so this
+  // only bites for a Super Admin looking at a named shelf.
   const branchOptions = useMemo(
-    () => branches.map((b) => ({ id: b.id, name: b.branch_name || b.name || "Unnamed branch" })),
-    [branches],
+    () => branches
+      .filter((b) => b.id !== branchId)
+      .map((b) => ({ id: b.id, name: b.branch_name || b.name || "Unnamed branch" })),
+    [branches, branchId],
   );
 
   const run = async (fn, successMsg) => {
@@ -213,7 +237,7 @@ export const StoreInventoryPanel = ({ category = "tablet" }) => {
       notes: d.notes.trim(),
     };
     const ok = await run(
-      () => (d.id ? updateInventoryItem(d.id, payload) : createInventoryItem(payload)),
+      () => (d.id ? updateInventoryItem(d.id, payload, scope) : createInventoryItem(payload)),
       d.id ? `${CAT.noun} updated` : `${CAT.noun} added to the catalogue`,
     );
     if (ok) setItemDraft(null);
@@ -234,7 +258,7 @@ export const StoreInventoryPanel = ({ category = "tablet" }) => {
       cost_price: addDraft.cost_price === "" ? null : Number(addDraft.cost_price),
       supplier: addDraft.supplier.trim(),
       note: addDraft.note.trim(),
-    }), "Stock added");
+    }, scope), "Stock added");
     if (ok) setAddDraft(null);
   };
 
@@ -248,7 +272,7 @@ export const StoreInventoryPanel = ({ category = "tablet" }) => {
       customer_name: sellDraft.customer_name.trim(),
       payment_mode: sellDraft.payment_mode,
       note: sellDraft.note.trim(),
-    }), "Sale recorded");
+    }, scope), "Sale recorded");
     if (ok) setSellDraft(null);
   };
 
@@ -261,7 +285,7 @@ export const StoreInventoryPanel = ({ category = "tablet" }) => {
       qty,
       to_branch_id: moveDraft.to_branch_id,
       note: moveDraft.note.trim(),
-    }), "Stock moved");
+    }, scope), "Stock moved");
     if (ok) setMoveDraft(null);
   };
 
