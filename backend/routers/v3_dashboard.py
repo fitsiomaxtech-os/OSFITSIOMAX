@@ -760,3 +760,155 @@ async def v3_dashboard_branch_breakdown(
             },
         ],
     }
+
+
+# ---------------------------------------------------------------- Dashboard > Leads tab
+
+# What "converted" means here, and why each line is drawn where it is. Every one of these
+# is a judgement about the branch's funnel, not a fact the data states, so they are named
+# once and read from here rather than being re-decided inside the loop.
+#
+#   Enquiries    every lead. The top of the funnel and the denominator for the rest.
+#   Slot Fixed   an appointment date exists. A slot was actually fixed for them.
+#   Consultation the Consultation Fee was collected — the consultation HAPPENED. Booked is
+#                already counted by Slot Fixed, so counting booked here would print the
+#                same number twice and hide every no-show.
+#   Converted    they bought something beyond the consultation: a treatment package, or a
+#                diet plan. That is the moment a lead becomes a customer of a service.
+#   Not Converted the journey ENDED without that: cancelled. Deliberately not "everything
+#                that isn't converted" — a lead still in Follow Up has not failed, and
+#                lumping it in would make the branch look worse the more work it has in
+#                hand. Those sit in `in_progress`, so the three always sum to Enquiries.
+
+
+def _is_converted(lead: dict) -> bool:
+    return (
+        lead.get("treatment_fee_paid") is not None
+        or bool(lead.get("session_package_id"))
+        or lead.get("diet_fee_paid") is not None
+    )
+
+
+def _is_lost(lead: dict) -> bool:
+    return lead.get("consultation_stage") == "Cancel" or lead.get("branch_stage") == "Cancelled"
+
+
+@router.get("/dashboard/lead-metrics")
+async def dashboard_lead_metrics(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    _: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin")),
+):
+    """The Leads tab: eight figures, each broken down by branch.
+
+    Two of them are daily by name and stay daily whatever the date filter says — "Day
+    Follow Up Calls" for a three-month range is not a thing anyone asked for. The other
+    six follow the filter. Each card states its own period so the difference is on screen
+    rather than in someone's head.
+    """
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    branches = await v3_col("branches").find({}, {"_id": 0}).to_list(200)
+    physio_branches = [b for b in branches if b.get("vertical") == "offline_physiotherapy"]
+    branch_ids = [b["id"] for b in physio_branches]
+
+    def blank():
+        return {bid: 0 for bid in branch_ids}
+
+    metrics = {
+        k: blank() for k in (
+            "enquiries", "slot_fixed", "consultations", "converted", "not_converted",
+            "in_progress", "assigned_follow_up", "day_follow_up_calls",
+            "day_rnr_attempts", "day_follow_up_payment",
+        )
+    }
+    payment_due_amount = {bid: 0.0 for bid in branch_ids}
+
+    # The six range metrics, off the leads created in the window.
+    ranged = await v3_col("leads").find(
+        _date_range_query("created_at", start_date, end_date), {"_id": 0}
+    ).to_list(50000)
+    for l in ranged:
+        bid = l.get("branch_id")
+        if bid not in metrics["enquiries"]:
+            continue
+        metrics["enquiries"][bid] += 1
+        if l.get("appointment_date"):
+            metrics["slot_fixed"][bid] += 1
+        if l.get("package_paid") is not None:
+            metrics["consultations"][bid] += 1
+        if l.get("assigned_user_id"):
+            metrics["assigned_follow_up"][bid] += 1
+        if _is_converted(l):
+            metrics["converted"][bid] += 1
+        elif _is_lost(l):
+            metrics["not_converted"][bid] += 1
+        else:
+            metrics["in_progress"][bid] += 1
+
+    # The two daily ones, over every lead regardless of when it came in: a follow-up due
+    # today on a lead from March is still due today.
+    everyone = await v3_col("leads").find({}, {"_id": 0}).to_list(50000)
+    for l in everyone:
+        bid = l.get("branch_id")
+        if bid not in metrics["enquiries"]:
+            continue
+
+        # Due today, counted once per lead however many of its follow-ups land today —
+        # this is "how many people to ring", not how many rows exist.
+        due_today = str(l.get("next_follow_up_at") or "").startswith(today) \
+            or str(l.get("next_consultation_follow_up_at") or "").startswith(today)
+        if due_today:
+            metrics["day_follow_up_calls"][bid] += 1
+
+        # A call that WAS made and went unanswered. The only call the OS actually records
+        # — there is no "call completed" event anywhere, so this is the honest half of the
+        # picture and is reported as its own figure rather than folded into the one above.
+        if str(l.get("rnr_last_attempt_at") or "").startswith(today):
+            metrics["day_rnr_attempts"][bid] += 1
+
+        for inst in ((l.get("treatment_fee_payment_details") or {}).get("installments") or []):
+            if not inst.get("paid") and str(inst.get("due_date") or "") == today:
+                metrics["day_follow_up_payment"][bid] += 1
+                payment_due_amount[bid] += float(inst.get("amount") or 0)
+
+    def row(key, label, period, sub=None):
+        by_branch = metrics[key]
+        return {
+            "key": key,
+            "label": label,
+            "period": period,
+            "sub": sub,
+            "total": sum(by_branch.values()),
+            "branches": [
+                {"branch_id": b["id"], "branch_name": b.get("branch_name", ""), "value": by_branch[b["id"]]}
+                for b in physio_branches
+            ],
+        }
+
+    return {
+        "applied_filters": {"start_date": start_date, "end_date": end_date},
+        "today": today,
+        "branches": [{"branch_id": b["id"], "branch_name": b.get("branch_name", "")} for b in physio_branches],
+        "rows": [
+            row("day_follow_up_calls", "Day Follow Up Calls", "today", "People due a follow-up call today"),
+            row("day_follow_up_payment", "Day Follow Up Payment", "today", "Installments falling due today"),
+            row("enquiries", "Number Of Enquiries", "range", "Every lead that came in"),
+            row("consultations", "Number Of Consultation", "range", "Consultation Fee collected"),
+            row("converted", "Number Of Converted", "range", "Took treatment or a diet plan"),
+            row("not_converted", "Number Of Not Converted", "range", "Cancelled — in-progress excluded"),
+            row("assigned_follow_up", "Assign To Follow Up Person", "range", "Leads with an owner"),
+            row("slot_fixed", "Slot Fixed", "range", "Appointment date fixed"),
+        ],
+        # Alongside rather than as a ninth row: it is what makes Converted, Not Converted
+        # and In Progress add up to Enquiries, which is the check a reader will do first.
+        "in_progress": row("in_progress", "Still In Progress", "range", "Neither converted nor lost yet"),
+        "day_rnr_attempts": row("day_rnr_attempts", "Unanswered Calls Today", "today", "Recorded RNR attempts"),
+        "day_payment_amount": {
+            "total": round(sum(payment_due_amount.values()), 2),
+            "branches": [
+                {"branch_id": b["id"], "branch_name": b.get("branch_name", ""), "value": round(payment_due_amount[b["id"]], 2)}
+                for b in physio_branches
+            ],
+        },
+    }

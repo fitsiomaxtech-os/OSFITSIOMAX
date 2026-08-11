@@ -4,7 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { SegmentedTabs } from "@/components/ui/segmented-tabs";
 import { toast } from "@/components/ui/sonner";
-import { getDashboardOverview, getDashboardBranchBreakdown, getDashboardLeadsTrend, mkGetTeam } from "@/lib/api";
+import { getDashboardOverview, getDashboardBranchBreakdown, getDashboardLeadsTrend, getDashboardLeadMetrics, mkGetTeam } from "@/lib/api";
 import { TeamCard } from "@/components/marketing/TeamCard";
 
 // The four count tabs read the same branch/vertical payload; the two people tabs are a
@@ -39,6 +39,10 @@ const TEAM_PANELS = {
 const startOfDay = (d) => { const n = new Date(d); n.setHours(0, 0, 0, 0); return n; };
 const endOfDay = (d) => { const n = new Date(d); n.setHours(23, 59, 59, 999); return n; };
 const toIso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+/** The date filter as query params. Empty on "All" — the endpoints read no dates as
+    unfiltered, which is not the same as a range covering everything. */
+const dateParams = (f) => (f?.from && f?.to ? { start_date: toIso(f.from), end_date: toIso(f.to) } : {});
 
 // A real Monday→Sunday calendar week, not a rolling last-7-days window.
 const mondayOf = (d) => {
@@ -186,6 +190,8 @@ export const DashboardBoard = () => {
 
       {activeTab === "overview" ? (
         <ExecutiveOverview data={data} loading={loading} dateFilter={dateFilter} />
+      ) : activeTab === "leads" ? (
+        <LeadMetrics dateFilter={dateFilter} />
       ) : activeTeam ? (
         teamLoading || !team ? (
           <p className="py-16 text-center text-sm text-slate-400">{teamLoading ? "Loading..." : "No data."}</p>
@@ -339,7 +345,6 @@ export const DashboardBoard = () => {
               Executive Overview, beside a table that says more than the donut's legend
               did; the branch cards above are the same numbers again. What's left is the
               one thing this tab had that nothing else showed: the trend. */}
-          {activeTab === "leads" && <LeadsTrend />}
         </div>
       )}
     </div>
@@ -357,6 +362,113 @@ export const DashboardBoard = () => {
  *
  * `All` has no preceding window, so it shows no deltas rather than inventing a baseline.
  */
+/**
+ * Dashboard > Leads — eight figures, each across every branch.
+ *
+ * A table rather than eight cards: the question this tab answers is "how does one branch
+ * compare with another on this line", and cards put the branches inside the metric where
+ * they can only be read one at a time. Rows are metrics, columns are branches, Total last.
+ *
+ * Two rows are daily by name and stay daily whatever the date filter says — a "Day Follow
+ * Up Calls" figure for a three-month range is not a thing anyone asked for. Each row
+ * carries its own period so the difference is on screen rather than in the reader's head.
+ */
+const LeadMetrics = ({ dateFilter }) => {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    getDashboardLeadMetrics(dateParams(dateFilter))
+      .then((d) => { if (!cancelled) setData(d); })
+      .catch(() => { if (!cancelled) setData(null); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [dateFilter]);
+
+  if (loading) return <p className="py-16 text-center text-sm text-slate-400">Loading...</p>;
+  if (!data) return <p className="py-16 text-center text-sm text-slate-400">No data.</p>;
+
+  const branches = data.branches || [];
+  const rows = data.rows || [];
+
+  const Cell = ({ value }) => (
+    <td className="px-3 py-3 text-center">
+      <span className={value > 0 ? "font-semibold text-slate-800" : "text-slate-300"}>{value}</span>
+    </td>
+  );
+
+  const MetricRow = ({ r, tone }) => (
+    <tr className="hover:bg-slate-50" data-testid={`lead-metric-${r.key}`}>
+      <td className="px-4 py-3">
+        <p className={`text-sm font-semibold ${tone || "text-slate-800"}`}>{r.label}</p>
+        <p className="text-[11px] text-slate-400">
+          {r.period === "today" ? "Today" : "Selected period"}
+          {r.sub ? ` · ${r.sub}` : ""}
+        </p>
+      </td>
+      {branches.map((b) => {
+        const hit = (r.branches || []).find((x) => x.branch_id === b.branch_id);
+        return <Cell key={b.branch_id} value={hit ? hit.value : 0} />;
+      })}
+      <td className="px-4 py-3 text-center">
+        <span className="text-base font-bold text-sky-700">{r.total}</span>
+      </td>
+    </tr>
+  );
+
+  return (
+    <div className="space-y-3" data-testid="dashboard-lead-metrics">
+      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] text-sm">
+            <thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-400">
+              <tr>
+                <th className="px-4 py-2.5 text-left font-semibold">Metric</th>
+                {branches.map((b) => (
+                  <th key={b.branch_id} className="px-3 py-2.5 text-center font-semibold">{b.branch_name}</th>
+                ))}
+                <th className="px-4 py-2.5 text-center font-semibold text-sky-600">All Branch</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {rows.map((r) => <MetricRow key={r.key} r={r} />)}
+              {/* Below the rule, because it is not one of the eight. It is here because it
+                  is what makes Converted + Not Converted + this add up to Enquiries —
+                  the first check anyone reads this table will do. */}
+              {data.in_progress && <MetricRow r={data.in_progress} tone="text-slate-500" />}
+              {data.day_rnr_attempts && <MetricRow r={data.day_rnr_attempts} tone="text-slate-500" />}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* The money behind Day Follow Up Payment. A count of installments says how many
+          calls to make; the amount says how much is riding on them. */}
+      {data.day_payment_amount && (
+        <Card data-testid="lead-metric-payment-amount">
+          <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-amber-700">Due Today</p>
+              <p className="text-[11px] text-slate-400">Total value of the installments falling due</p>
+            </div>
+            <p className="text-2xl font-bold text-amber-700">
+              Rs.{(data.day_payment_amount.total || 0).toLocaleString("en-IN")}
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      <p className="text-[11px] leading-relaxed text-slate-400">
+        Day Follow Up Calls counts people due a call today — the OS records follow-ups being
+        scheduled and calls that went unanswered, but has no record of a call being placed,
+        so "calls made" is not a figure it can honestly report yet.
+      </p>
+    </div>
+  );
+};
+
 const ExecutiveOverview = ({ data, loading, dateFilter }) => {
   const [prev, setPrev] = useState(null);
   const [prevLoading, setPrevLoading] = useState(false);
@@ -475,6 +587,11 @@ const ExecutiveOverview = ({ data, loading, dateFilter }) => {
           )}
         </CardContent>
       </Card>
+
+      {/* Moved here from the Leads tab, which is now eight operational figures and has no
+          room for a six-month trend. This is the tab that already answers "how are we
+          doing", so the shape of the last six months belongs with it. */}
+      <LeadsTrend />
     </div>
   );
 };
