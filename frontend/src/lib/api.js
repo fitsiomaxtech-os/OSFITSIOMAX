@@ -122,6 +122,7 @@ export const getDashboardOverview = async (params = {}) => (await api.get("/dash
 export const getDashboardBranchBreakdown = async (params = {}) => (await api.get("/dashboard/branch-breakdown", { params })).data;
 export const getDashboardLeadsTrend = async (months = 6) => (await api.get("/dashboard/leads-trend", { params: { months } })).data;
 export const getDashboardLeadMetrics = async (params = {}) => (await api.get("/dashboard/lead-metrics", { params })).data;
+export const getDashboardLeadMetricDetail = async (params = {}) => (await api.get("/dashboard/lead-metric-detail", { params })).data;
 export const getBranchBoardOld = async (branchId) => (await api.get(`/boards/branch/${branchId}`)).data;
 
 export const getTeamMembers = async (params) => (await api.get("/team-members", { params })).data;

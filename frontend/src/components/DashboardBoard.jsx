@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
-import { Users, CalendarCheck, Activity, IndianRupee, X, Building2, LayoutDashboard, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { Users, CalendarCheck, Activity, IndianRupee, X, Building2, LayoutDashboard, TrendingUp, TrendingDown, Minus, ChevronRight, Filter } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { SegmentedTabs } from "@/components/ui/segmented-tabs";
 import { toast } from "@/components/ui/sonner";
-import { getDashboardOverview, getDashboardBranchBreakdown, getDashboardLeadsTrend, getDashboardLeadMetrics, mkGetTeam } from "@/lib/api";
+import { getDashboardOverview, getDashboardBranchBreakdown, getDashboardLeadsTrend, getDashboardLeadMetrics, getDashboardLeadMetricDetail, mkGetTeam } from "@/lib/api";
 import { TeamCard } from "@/components/marketing/TeamCard";
 
 // The four count tabs read the same branch/vertical payload; the two people tabs are a
@@ -366,19 +366,20 @@ export const DashboardBoard = () => {
  * `All` has no preceding window, so it shows no deltas rather than inventing a baseline.
  */
 /**
- * Dashboard > Leads — eight figures, each across every branch.
+ * Dashboard > Pre Sales — one card per metric, each opening the people behind it.
  *
- * A table rather than eight cards: the question this tab answers is "how does one branch
- * compare with another on this line", and cards put the branches inside the metric where
- * they can only be read one at a time. Rows are metrics, columns are branches, Total last.
+ * Cards rather than a table. A table answers "compare the branches on this line", which
+ * is a real question but not the one asked here — the branch split lives inside each card
+ * for that. What a card buys is somewhere to click: the figure stops being a number to
+ * read and becomes a list you can act on.
  *
- * Two rows are daily by name and stay daily whatever the date filter says — a "Day Follow
- * Up Calls" figure for a three-month range is not a thing anyone asked for. Each row
- * carries its own period so the difference is on screen rather than in the reader's head.
+ * Two cards are daily by name and stay daily whatever the date filter says, and say so on
+ * their own face.
  */
 const LeadMetrics = ({ dateFilter }) => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [openMetric, setOpenMetric] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -393,75 +394,264 @@ const LeadMetrics = ({ dateFilter }) => {
   if (loading) return <p className="py-16 text-center text-sm text-slate-400">Loading...</p>;
   if (!data) return <p className="py-16 text-center text-sm text-slate-400">No data.</p>;
 
-  const branches = data.branches || [];
-  const rows = data.rows || [];
-
-  const Cell = ({ value }) => (
-    <td className="px-3 py-3 text-center">
-      <span className={value > 0 ? "font-semibold text-slate-800" : "text-slate-300"}>{value}</span>
-    </td>
-  );
-
-  const MetricRow = ({ r }) => (
-    <tr className="hover:bg-slate-50" data-testid={`lead-metric-${r.key}`}>
-      <td className="px-4 py-3">
-        <p className="text-sm font-semibold text-slate-800">{r.label}</p>
-        <p className="text-[11px] text-slate-400">
-          {r.period === "today" ? "Today" : "Selected period"}
-          {r.sub ? ` · ${r.sub}` : ""}
-        </p>
-      </td>
-      {branches.map((b) => {
-        const hit = (r.branches || []).find((x) => x.branch_id === b.branch_id);
-        return <Cell key={b.branch_id} value={hit ? hit.value : 0} />;
-      })}
-      <td className="px-4 py-3 text-center">
-        <span className="text-base font-bold text-sky-700">{r.total}</span>
-      </td>
-    </tr>
-  );
-
   return (
     <div className="space-y-3" data-testid="dashboard-lead-metrics">
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-sm">
-            <thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-400">
-              <tr>
-                <th className="px-4 py-2.5 text-left font-semibold">Metric</th>
-                {branches.map((b) => (
-                  <th key={b.branch_id} className="px-3 py-2.5 text-center font-semibold">{b.branch_name}</th>
-                ))}
-                <th className="px-4 py-2.5 text-center font-semibold text-sky-600">All Branch</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {rows.map((r) => <MetricRow key={r.key} r={r} />)}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* The money behind Day Follow Up Payment. A count of installments says how many
-          calls to make; the amount says how much is riding on them. */}
-      {data.day_payment_amount && (
-        <Card data-testid="lead-metric-payment-amount">
-          <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-amber-700">Due Today</p>
-              <p className="text-[11px] text-slate-400">Total value of the installments falling due</p>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {(data.cards || []).map((c) => (
+          <button
+            key={c.key}
+            type="button"
+            onClick={() => setOpenMetric(c)}
+            className="rounded-xl border border-slate-200 bg-white p-4 text-left transition hover:border-sky-300 hover:shadow-sm"
+            data-testid={`lead-metric-${c.key}`}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-slate-800">{c.label}</p>
+                <p className="truncate text-[11px] text-slate-400">
+                  {c.period === "today" ? "Today" : "Selected period"} · {c.sub}
+                </p>
+              </div>
+              <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-slate-300" />
             </div>
-            <p className="text-2xl font-bold text-amber-700">
-              Rs.{(data.day_payment_amount.total || 0).toLocaleString("en-IN")}
-            </p>
-          </CardContent>
-        </Card>
-      )}
+
+            <div className="mt-2 flex flex-wrap items-baseline gap-x-2">
+              <p className="text-3xl font-bold text-sky-700">{c.total}</p>
+              {c.amount != null && (
+                <p className="text-sm font-semibold text-amber-700">
+                  Rs.{(c.amount || 0).toLocaleString("en-IN")} due
+                </p>
+              )}
+            </div>
+
+            {/* The branch split, inside the card it belongs to. A branch on zero is greyed
+                rather than dropped — "ECR did none of this" is itself the finding. */}
+            <div className="mt-3 space-y-1 border-t border-slate-100 pt-2">
+              {(c.branches || []).map((b) => (
+                <div key={b.branch_id} className="flex items-center justify-between gap-2 text-[11px]">
+                  <span className="truncate text-slate-500">{b.branch_name}</span>
+                  <span className={b.value > 0 ? "font-semibold text-slate-700" : "text-slate-300"}>{b.value}</span>
+                </div>
+              ))}
+            </div>
+          </button>
+        ))}
+      </div>
 
       <p className="text-[11px] leading-relaxed text-slate-400">
         Day Follow Up Calls counts people due a call today. The OS records follow-ups being
         scheduled, not calls being placed, so "calls made" is not a figure it can report yet.
       </p>
+
+      {openMetric && (
+        <MetricDrilldown
+          metric={openMetric}
+          dateFilter={dateFilter}
+          onClose={() => setOpenMetric(null)}
+        />
+      )}
+    </div>
+  );
+};
+
+/**
+ * The people behind one card: the figure, how it splits, and the list itself.
+ *
+ * Its filters narrow the list only — `total` stays what the card said and `filtered` says
+ * what is left. Showing one number for both is how a filtered list quietly starts reading
+ * as the whole truth about the metric.
+ *
+ * The dropdowns are built from the metric BEFORE its own filters, so every option stays
+ * selectable. A dropdown that only lists what survives the current filter is one you can
+ * narrow with but never widen.
+ */
+const MetricDrilldown = ({ metric, dateFilter, onClose }) => {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [branch, setBranch] = useState("");
+  const [source, setSource] = useState("");
+  const [stage, setStage] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    getDashboardLeadMetricDetail({
+      metric: metric.key,
+      ...dateParams(dateFilter),
+      ...(branch ? { branch_id: branch } : {}),
+      ...(source ? { source } : {}),
+      ...(stage ? { stage } : {}),
+    })
+      .then((d) => { if (!cancelled) setData(d); })
+      .catch(() => { if (!cancelled) setData(null); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [metric.key, dateFilter, branch, source, stage]);
+
+  const narrowed = !!(branch || source || stage);
+  const clear = () => { setBranch(""); setSource(""); setStage(""); };
+
+  const Tile = ({ label, value, tone }) => (
+    <div className={`rounded-xl border px-4 py-3 text-center ${tone}`}>
+      <p className="text-2xl font-bold">{value}</p>
+      <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wider opacity-70">{label}</p>
+    </div>
+  );
+
+  const Select = ({ value, onChange, children, testid }) => (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-700"
+      data-testid={testid}
+    >
+      {children}
+    </select>
+  );
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-3" data-testid="lead-metric-drilldown">
+      <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4">
+          <div className="min-w-0">
+            <p className="truncate text-lg font-bold text-slate-800">{metric.label}</p>
+            <p className="truncate text-xs text-slate-400">
+              {metric.period === "today" ? "Today" : "Selected period"} · {metric.sub}
+            </p>
+          </div>
+          <button onClick={onClose} className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="lead-metric-drilldown-close">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="space-y-4 overflow-y-auto px-5 py-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <Tile label={metric.label} value={data?.total ?? "—"} tone="border-sky-200 bg-sky-50 text-sky-700" />
+            <Tile label="Branches" value={(data?.branches || []).filter((b) => b.value > 0).length} tone="border-violet-200 bg-violet-50 text-violet-700" />
+            <Tile label="Sources" value={(data?.sources || []).length} tone="border-emerald-200 bg-emerald-50 text-emerald-700" />
+            <Tile
+              label={narrowed ? "Filtered Results" : "Showing All"}
+              value={data?.filtered ?? "—"}
+              tone={narrowed ? "border-amber-200 bg-amber-50 text-amber-700" : "border-slate-200 bg-slate-50 text-slate-600"}
+            />
+          </div>
+
+          {/* Where the figure sits, before any of the filters below touch it. */}
+          <div>
+            <p className="mb-1.5 text-xs font-semibold text-slate-600">Branch Breakdown</p>
+            <div className="flex flex-wrap gap-1.5">
+              {(data?.branches || []).map((b) => (
+                <button
+                  key={b.branch_id}
+                  type="button"
+                  onClick={() => setBranch(branch === b.branch_id ? "" : b.branch_id)}
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition ${
+                    branch === b.branch_id
+                      ? "border-sky-400 bg-sky-50 text-sky-700"
+                      : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                  }`}
+                  data-testid={`lead-metric-branch-chip-${b.branch_id}`}
+                >
+                  <span className={`h-1.5 w-1.5 rounded-full ${b.value > 0 ? "bg-sky-500" : "bg-slate-300"}`} />
+                  {b.branch_name}: {b.value}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+                <Filter className="h-3.5 w-3.5" /> Filters
+              </p>
+              {narrowed && (
+                <button type="button" onClick={clear} className="text-[11px] font-semibold text-rose-600 hover:text-rose-800" data-testid="lead-metric-clear-filters">
+                  Clear
+                </button>
+              )}
+            </div>
+            <div className="grid gap-2 sm:grid-cols-3">
+              <div>
+                <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-slate-400">Branch</label>
+                <Select value={branch} onChange={setBranch} testid="lead-metric-filter-branch">
+                  <option value="">All Branches</option>
+                  {(data?.branches || []).map((b) => (
+                    <option key={b.branch_id} value={b.branch_id}>{b.branch_name} ({b.value})</option>
+                  ))}
+                </Select>
+              </div>
+              <div>
+                <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-slate-400">Source</label>
+                <Select value={source} onChange={setSource} testid="lead-metric-filter-source">
+                  <option value="">All Sources</option>
+                  {(data?.sources || []).map((s) => (
+                    <option key={s.name} value={s.name}>{s.name} ({s.value})</option>
+                  ))}
+                </Select>
+              </div>
+              <div>
+                <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-slate-400">Stage</label>
+                <Select value={stage} onChange={setStage} testid="lead-metric-filter-stage">
+                  <option value="">All Stages</option>
+                  {(data?.stages || []).map((s) => (
+                    <option key={s.name} value={s.name}>{s.name} ({s.value})</option>
+                  ))}
+                </Select>
+              </div>
+            </div>
+          </div>
+
+          <div className="overflow-hidden rounded-xl border border-slate-200">
+            <div className="border-b border-slate-100 bg-slate-50/60 px-4 py-2.5">
+              <p className="text-xs font-semibold text-slate-600">
+                Leads ({loading ? "…" : data?.filtered ?? 0})
+                {!loading && (data?.filtered ?? 0) > (data?.leads || []).length && (
+                  <span className="ml-1 font-normal text-slate-400">· showing the first {(data?.leads || []).length}</span>
+                )}
+              </p>
+            </div>
+            {loading ? (
+              <p className="py-10 text-center text-sm text-slate-400">Loading...</p>
+            ) : (data?.leads || []).length === 0 ? (
+              <p className="py-10 text-center text-sm text-slate-400">Nothing matches these filters.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[640px] text-sm">
+                  <thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-400">
+                    <tr>
+                      <th className="px-4 py-2.5 text-left font-semibold">Lead</th>
+                      <th className="px-3 py-2.5 text-left font-semibold">Contact</th>
+                      <th className="px-3 py-2.5 text-left font-semibold">Branch</th>
+                      <th className="px-3 py-2.5 text-left font-semibold">Source</th>
+                      <th className="px-3 py-2.5 text-left font-semibold">Stage</th>
+                      <th className="px-3 py-2.5 text-left font-semibold">Date</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {(data?.leads || []).map((l) => (
+                      <tr key={l.id} className="hover:bg-slate-50" data-testid={`lead-metric-lead-${l.id}`}>
+                        <td className="px-4 py-2.5">
+                          <p className="truncate font-medium text-slate-800">{l.name}</p>
+                          {l.assigned_user_name && <p className="truncate text-[11px] text-slate-400">{l.assigned_user_name}</p>}
+                        </td>
+                        <td className="px-3 py-2.5 text-slate-600">{l.phone || "—"}</td>
+                        <td className="px-3 py-2.5 text-slate-600">{l.branch_name || "—"}</td>
+                        <td className="px-3 py-2.5">
+                          <span className="rounded-[5px] border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-600">{l.source}</span>
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <span className="rounded-[5px] border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] font-semibold text-sky-700">{l.stage}</span>
+                        </td>
+                        <td className="px-3 py-2.5 whitespace-nowrap text-slate-500">{String(l.created_at || "").slice(0, 10)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 };

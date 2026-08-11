@@ -785,106 +785,222 @@ def _is_converted(lead: dict) -> bool:
     )
 
 
+def _due_today(lead: dict, today: str) -> bool:
+    return (
+        str(lead.get("next_follow_up_at") or "").startswith(today)
+        or str(lead.get("next_consultation_follow_up_at") or "").startswith(today)
+    )
+
+
+def _payment_due_today(lead: dict, today: str) -> bool:
+    return any(
+        not i.get("paid") and str(i.get("due_date") or "") == today
+        for i in ((lead.get("treatment_fee_payment_details") or {}).get("installments") or [])
+    )
+
+
+# One predicate per metric, and the ONLY definition of each. The card's figure and the list
+# of people behind it are both built from this, so a card can never show a number the drill
+# -down then fails to account for — the commonest way a dashboard loses trust.
+#
+# `ranged` says whether the metric answers to the date filter. The two daily ones do not:
+# a follow-up due today on a lead from March is still due today, so they read every lead
+# and filter on the day instead.
+METRIC_DEFS = {
+    "day_follow_up_calls": {
+        "label": "Day Follow Up Calls", "sub": "People due a follow-up call today",
+        "ranged": False, "match": lambda l, today: _due_today(l, today),
+    },
+    "day_follow_up_payment": {
+        "label": "Day Follow Up Payment", "sub": "Installments falling due today",
+        "ranged": False, "match": lambda l, today: _payment_due_today(l, today),
+        # A count says how many calls to make; the amount says how much is riding on them.
+        # Carried on the card itself rather than as a separate tile, so the two figures
+        # can never be read as describing different sets of people.
+        "amount": lambda l, today: sum(
+            float(i.get("amount") or 0)
+            for i in ((l.get("treatment_fee_payment_details") or {}).get("installments") or [])
+            if not i.get("paid") and str(i.get("due_date") or "") == today
+        ),
+    },
+    "enquiries": {
+        "label": "Number Of Enquiries", "sub": "Every lead that came in",
+        "ranged": True, "match": lambda l, today: True,
+    },
+    "consultations": {
+        "label": "Number Of Consultation", "sub": "Consultation Fee collected",
+        "ranged": True, "match": lambda l, today: l.get("package_paid") is not None,
+    },
+    "converted": {
+        "label": "Number Of Converted", "sub": "Took treatment or a diet plan",
+        "ranged": True, "match": lambda l, today: _is_converted(l),
+    },
+    "assigned_follow_up": {
+        "label": "Assign To Follow Up Person", "sub": "Leads with an owner",
+        "ranged": True, "match": lambda l, today: bool(l.get("assigned_user_id")),
+    },
+    "slot_fixed": {
+        "label": "Slot Fixed", "sub": "Appointment date fixed",
+        "ranged": True, "match": lambda l, today: bool(l.get("appointment_date")),
+    },
+}
+METRIC_ORDER = list(METRIC_DEFS.keys())
+
+
+
+
+async def _physio_branches() -> list:
+    rows = await v3_col("branches").find({}, {"_id": 0}).to_list(200)
+    return [b for b in rows if b.get("vertical") == "offline_physiotherapy"]
+
+
+def _lead_source(lead: dict) -> str:
+    return lead.get("source_tab") or lead.get("source_type") or "unknown"
+
+
 @router.get("/dashboard/lead-metrics")
 async def dashboard_lead_metrics(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     _: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin")),
 ):
-    """The Leads tab: eight figures, each broken down by branch.
+    """The Pre Sales tab: one card per metric, each carrying its branch split.
 
-    Two of them are daily by name and stay daily whatever the date filter says — "Day
-    Follow Up Calls" for a three-month range is not a thing anyone asked for. The other
-    six follow the filter. Each card states its own period so the difference is on screen
-    rather than in someone's head.
+    Two of the seven are daily by name and stay daily whatever the date filter says — a
+    "Day Follow Up Calls" figure for a three-month range is not a thing anyone asked for.
+    Each card states its own period so the difference is on screen, not in someone's head.
     """
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    branches = await _physio_branches()
+    branch_ids = {b["id"] for b in branches}
 
-    branches = await v3_col("branches").find({}, {"_id": 0}).to_list(200)
-    physio_branches = [b for b in branches if b.get("vertical") == "offline_physiotherapy"]
-    branch_ids = [b["id"] for b in physio_branches]
-
-    def blank():
-        return {bid: 0 for bid in branch_ids}
-
-    metrics = {
-        k: blank() for k in (
-            "enquiries", "slot_fixed", "consultations", "converted",
-            "assigned_follow_up", "day_follow_up_calls", "day_follow_up_payment",
-        )
-    }
-    payment_due_amount = {bid: 0.0 for bid in branch_ids}
-
-    # The six range metrics, off the leads created in the window.
     ranged = await v3_col("leads").find(
         _date_range_query("created_at", start_date, end_date), {"_id": 0}
     ).to_list(50000)
-    for l in ranged:
-        bid = l.get("branch_id")
-        if bid not in metrics["enquiries"]:
-            continue
-        metrics["enquiries"][bid] += 1
-        if l.get("appointment_date"):
-            metrics["slot_fixed"][bid] += 1
-        if l.get("package_paid") is not None:
-            metrics["consultations"][bid] += 1
-        if l.get("assigned_user_id"):
-            metrics["assigned_follow_up"][bid] += 1
-        if _is_converted(l):
-            metrics["converted"][bid] += 1
-
-    # The two daily ones, over every lead regardless of when it came in: a follow-up due
-    # today on a lead from March is still due today.
     everyone = await v3_col("leads").find({}, {"_id": 0}).to_list(50000)
-    for l in everyone:
-        bid = l.get("branch_id")
-        if bid not in metrics["enquiries"]:
-            continue
 
-        # Due today, counted once per lead however many of its follow-ups land today —
-        # this is "how many people to ring", not how many rows exist.
-        due_today = str(l.get("next_follow_up_at") or "").startswith(today) \
-            or str(l.get("next_consultation_follow_up_at") or "").startswith(today)
-        if due_today:
-            metrics["day_follow_up_calls"][bid] += 1
-
-        for inst in ((l.get("treatment_fee_payment_details") or {}).get("installments") or []):
-            if not inst.get("paid") and str(inst.get("due_date") or "") == today:
-                metrics["day_follow_up_payment"][bid] += 1
-                payment_due_amount[bid] += float(inst.get("amount") or 0)
-
-    def row(key, label, period, sub=None):
-        by_branch = metrics[key]
-        return {
+    cards = []
+    for key in METRIC_ORDER:
+        d = METRIC_DEFS[key]
+        pool = ranged if d["ranged"] else everyone
+        counts = {bid: 0 for bid in branch_ids}
+        amount = 0.0
+        for l in pool:
+            bid = l.get("branch_id")
+            if bid in counts and d["match"](l, today):
+                counts[bid] += 1
+                if d.get("amount"):
+                    amount += d["amount"](l, today)
+        cards.append({
             "key": key,
-            "label": label,
-            "period": period,
-            "sub": sub,
-            "total": sum(by_branch.values()),
+            "label": d["label"],
+            "sub": d["sub"],
+            "period": "range" if d["ranged"] else "today",
+            "total": sum(counts.values()),
+            # Only the metrics that carry money have one, so a card with nothing to say
+            # about rupees says nothing rather than printing Rs.0.
+            "amount": round(amount, 2) if d.get("amount") else None,
             "branches": [
-                {"branch_id": b["id"], "branch_name": b.get("branch_name", ""), "value": by_branch[b["id"]]}
-                for b in physio_branches
+                {"branch_id": b["id"], "branch_name": b.get("branch_name", ""), "value": counts[b["id"]]}
+                for b in branches
             ],
-        }
+        })
 
     return {
         "applied_filters": {"start_date": start_date, "end_date": end_date},
         "today": today,
-        "branches": [{"branch_id": b["id"], "branch_name": b.get("branch_name", "")} for b in physio_branches],
-        "rows": [
-            row("day_follow_up_calls", "Day Follow Up Calls", "today", "People due a follow-up call today"),
-            row("day_follow_up_payment", "Day Follow Up Payment", "today", "Installments falling due today"),
-            row("enquiries", "Number Of Enquiries", "range", "Every lead that came in"),
-            row("consultations", "Number Of Consultation", "range", "Consultation Fee collected"),
-            row("converted", "Number Of Converted", "range", "Took treatment or a diet plan"),
-            row("assigned_follow_up", "Assign To Follow Up Person", "range", "Leads with an owner"),
-            row("slot_fixed", "Slot Fixed", "range", "Appointment date fixed"),
+        "branches": [{"branch_id": b["id"], "branch_name": b.get("branch_name", "")} for b in branches],
+        "cards": cards,
+    }
+
+
+@router.get("/dashboard/lead-metric-detail")
+async def dashboard_lead_metric_detail(
+    metric: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    branch_id: Optional[str] = None,
+    source: Optional[str] = None,
+    stage: Optional[str] = None,
+    limit: int = 500,
+    _: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin")),
+):
+    """The people behind one card.
+
+    Built from the same METRIC_DEFS predicate the card counted with, so the drill-down can
+    never fail to account for the figure that opened it.
+
+    Its own filters narrow further and are reported separately: `total` is what the card
+    said, `filtered` is what is left after the popup's own branch/source/stage narrowing.
+    Collapsing the two into one number is how a filtered list starts looking like the whole
+    truth about the metric.
+    """
+    d = METRIC_DEFS.get(metric)
+    if not d:
+        raise HTTPException(status_code=404, detail=f"Unknown metric '{metric}'")
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    branches = await _physio_branches()
+    branch_ids = {b["id"] for b in branches}
+    branch_names = {b["id"]: b.get("branch_name", "") for b in branches}
+
+    query = _date_range_query("created_at", start_date, end_date) if d["ranged"] else {}
+    pool = await v3_col("leads").find(query, {"_id": 0}).to_list(50000)
+
+    matched = [l for l in pool if l.get("branch_id") in branch_ids and d["match"](l, today)]
+
+    # Every branch, source and stage present in the metric BEFORE the popup's own filters —
+    # a dropdown that only lists what survives the current filter is one you can never use
+    # to widen the selection again.
+    by_branch: dict = {}
+    by_source: dict = {}
+    by_stage: dict = {}
+    for l in matched:
+        by_branch[l["branch_id"]] = by_branch.get(l["branch_id"], 0) + 1
+        by_source[_lead_source(l)] = by_source.get(_lead_source(l), 0) + 1
+        st = l.get("branch_stage") or l.get("stage") or "—"
+        by_stage[st] = by_stage.get(st, 0) + 1
+
+    rows = matched
+    if branch_id:
+        rows = [l for l in rows if l.get("branch_id") == branch_id]
+    if source:
+        rows = [l for l in rows if _lead_source(l) == source]
+    if stage:
+        rows = [l for l in rows if (l.get("branch_stage") or l.get("stage") or "—") == stage]
+
+    rows.sort(key=lambda l: str(l.get("created_at") or ""), reverse=True)
+
+    return {
+        "metric": metric,
+        "label": d["label"],
+        "sub": d["sub"],
+        "period": "range" if d["ranged"] else "today",
+        "total": len(matched),
+        "filtered": len(rows),
+        "branches": [
+            {"branch_id": b["id"], "branch_name": branch_names[b["id"]], "value": by_branch.get(b["id"], 0)}
+            for b in branches
         ],
-        "day_payment_amount": {
-            "total": round(sum(payment_due_amount.values()), 2),
-            "branches": [
-                {"branch_id": b["id"], "branch_name": b.get("branch_name", ""), "value": round(payment_due_amount[b["id"]], 2)}
-                for b in physio_branches
-            ],
-        },
+        "sources": sorted(
+            ({"name": k, "value": v} for k, v in by_source.items()),
+            key=lambda r: -r["value"],
+        ),
+        "stages": sorted(
+            ({"name": k, "value": v} for k, v in by_stage.items()),
+            key=lambda r: -r["value"],
+        ),
+        "leads": [
+            {
+                "id": l.get("id"),
+                "name": l.get("name", "Unknown"),
+                "phone": l.get("phone", ""),
+                "branch_name": branch_names.get(l.get("branch_id"), ""),
+                "source": _lead_source(l),
+                "stage": l.get("branch_stage") or l.get("stage") or "—",
+                "created_at": l.get("created_at"),
+                "assigned_user_name": l.get("assigned_user_name"),
+            }
+            for l in rows[:limit]
+        ],
     }
