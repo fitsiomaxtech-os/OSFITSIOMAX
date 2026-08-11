@@ -13,7 +13,7 @@ import {
   collectPackagePayment, collectTreatmentFee, markInstallmentPaid, savePhysioDiagnosis, unlockPhysioDiagnosis,
   saveTreatmentSummary, unlockTreatmentSummary, stagesList, getDoctors,
   assignPhysioWithSessions, getDoctorCalendar,
-  listNutritionCoaches, bookDietAppointment,
+  listNutritionCoaches, bookDietAppointment, collectDietFee,
   scheduleConsultationFollowUp, rescheduleConsultationFollowUp,
   getLeadRemarks, getLeadActivity,
   saveConsultationDecision, markConsultationCompleted, getBranches,
@@ -436,6 +436,18 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // installment is a real payment in its own right (amount, mode, UTR/cheque number),
   // same as every other Treatment Fee mode, not just a bare "mark paid" flip.
   const [partialCollectDraft, setPartialCollectDraft] = useState(null); // { idx, amount, payment_mode, ... } | null
+
+  // Diet Consultation Fee (Branch Admin only). Collected in one go like the Consultation
+  // Fee rather than in installments like the Treatment Fee — a diet consultation is a
+  // single visit at a single price, so there is no schedule to spread.
+  //
+  // The Diet Package is chosen here, not upstream: the Head Physio picks a treatment
+  // package during their decision but never a diet one, because diet is optional and
+  // often decided after treatment is under way.
+  const [dietFeeDraft, setDietFeeDraft] = useState(null); // { item_id, mode, payment_mode, amount } | null
+  const [dietFeeConfirmDraft, setDietFeeConfirmDraft] = useState(null);
+  const [collectingDietFee, setCollectingDietFee] = useState(false);
+  const [dietItems, setDietItems] = useState([]);
 
   // Physio Assign (Branch Admin only) — two steps. Step 1 picks an available Jr. Physio;
   // clicking one opens step 2, the slot picker, where every session of the paid package is
@@ -1471,7 +1483,95 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     setAssigningPhysio(false);
   };
 
-  // ---- Assign to Diet Head (Branch Admin) ----
+  // ---- Diet Consultation Fee (Branch Admin) ----
+  const dietItemById = (id) => dietItems.find((i) => i.id === id);
+  const dietListPrice = (draft) => {
+    const item = dietItemById(draft?.item_id);
+    if (!item) return null;
+    const price = draft.mode === "online" ? item.price_online : item.price_offline;
+    return price != null ? Number(price) : null;
+  };
+
+  const openDietFeeDraft = async () => {
+    let items = dietItems;
+    if (!items.length) {
+      try {
+        items = (await listStoreItems(undefined, "diet")) || [];
+        setDietItems(items);
+      } catch {
+        items = [];
+      }
+    }
+    if (!items.length) {
+      toast.error("No Diet Package priced yet — add one in FITSIO STORE > Diet Package.");
+      return;
+    }
+    setDietFeeDraft({
+      // Re-collecting keeps whatever was chosen last time, so a correction doesn't
+      // silently move the patient onto a different package.
+      item_id: selectedLead.diet_package_id || items[0].id,
+      mode: selectedLead.diet_package_mode || "offline",
+      payment_mode: "cash",
+      amount: "",
+    });
+  };
+
+  const startCollectDietFee = () => {
+    const price = dietListPrice(dietFeeDraft);
+    if (!dietFeeDraft.item_id) { toast.error("Choose a Diet Package"); return; }
+    if (!(price > 0)) { toast.error(`This Diet Package has no ${dietFeeDraft.mode} price set`); return; }
+    setDietFeeDraft((d) => ({ ...d, amount: String(price) }));
+    setDietFeeConfirmDraft({
+      upi_transaction_id: "", upi_utr: "",
+      account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "", transfer_reference: "",
+    });
+  };
+
+  const confirmCollectDietFee = async () => {
+    const amount = parseFloat(dietFeeDraft.amount);
+    const mode = dietFeeDraft.payment_mode;
+    if (!(amount > 0)) { toast.error("Enter the amount collected"); return; }
+    const payload = { item_id: dietFeeDraft.item_id, mode: dietFeeDraft.mode, payment_mode: mode, amount, confirmed: true };
+    if (mode === "upi") {
+      if (!dietFeeConfirmDraft.upi_transaction_id.trim() || !dietFeeConfirmDraft.upi_utr.trim()) {
+        toast.error("UPI Transaction ID and UTR are required");
+        return;
+      }
+      payload.upi_transaction_id = dietFeeConfirmDraft.upi_transaction_id.trim();
+      payload.upi_utr = dietFeeConfirmDraft.upi_utr.trim();
+    } else if (BANK_DETAIL_MODES.includes(mode)) {
+      if (!attachBankDetails(payload, dietFeeConfirmDraft, mode)) return;
+    }
+
+    setCollectingDietFee(true);
+    // Only the call is guarded: a fault while building the receipt below must never be
+    // reported as a failure to collect, because the money is already recorded.
+    let res;
+    try {
+      res = await collectDietFee(selectedLead.id, payload);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to collect the Diet Consultation Fee");
+      setCollectingDietFee(false);
+      return;
+    }
+    toast.success(`Diet Consultation Fee collected — Rs.${amount}`);
+    setDietFeeConfirmDraft(null);
+    setDietFeeDraft(null);
+    setSelectedLead(res.lead);
+    setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => (l.id === res.lead.id ? res.lead : l)) }));
+    showReceipt(() => makeReceipt({
+      lead: res.lead,
+      payload,
+      prefix: "DIET",
+      paidFor: "Diet Consultation Fee",
+      packageName: res.lead.diet_package_name || "",
+      assignedPrice: res.lead.diet_package_price,
+      transactionId: res.transaction_id,
+    }));
+    setCollectingDietFee(false);
+  };
+
+  // ---- Diet Appointment (Branch Admin) ----
   const openDietModal = async () => {
     setShowDietModal(true);
     setShowDietSlotPicker(false);
@@ -2261,6 +2361,60 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     </div>
                   );
 
+                  // The third fee, below the Treatment Fee it normally follows. Rendered on
+                  // both paths — a "Consultation Only" patient can still want a diet plan,
+                  // and diet is optional for everyone, so this never waits on a treatment.
+                  const dietFeePaid = selectedLead.diet_fee_paid != null;
+                  const DietFeeSection = (
+                    <div className="mt-3 border-t border-indigo-100 pt-3" data-testid="cons-diet-fee-section">
+                      <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-orange-600">
+                        <Salad className="h-3.5 w-3.5" /> Diet Consultation Fee
+                      </p>
+                      {dietFeePaid ? (
+                        <>
+                          <div className="space-y-1.5 text-sm">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs text-slate-500">Diet Package</span>
+                              <span className="font-semibold text-slate-800">
+                                {selectedLead.diet_package_name || "—"}
+                                {selectedLead.diet_package_mode ? ` · ${selectedLead.diet_package_mode}` : ""}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs text-slate-500">Diet Fee</span>
+                              <span className="font-semibold text-slate-800">
+                                Rs.{selectedLead.diet_fee_paid}
+                                <span className="ml-1 capitalize text-emerald-600">({selectedLead.diet_fee_payment_mode})</span>
+                              </span>
+                            </div>
+                          </div>
+                          <p className="mt-1 flex items-center gap-1 text-[11px] font-medium text-emerald-600" data-testid="cons-diet-fee-already-collected">
+                            <CheckCircle2 className="h-3 w-3" /> Already Collected
+                          </p>
+                        </>
+                      ) : (
+                        <p className="text-[11px] text-slate-500" data-testid="cons-diet-fee-not-collected">
+                          Not collected. Optional — only if this patient is taking a diet plan.
+                        </p>
+                      )}
+                    </div>
+                  );
+
+                  // Sits with the money it collects, in the panel's one action row.
+                  const DietFeeButton = (
+                    <Button
+                      size="sm"
+                      variant={dietFeePaid ? "outline" : undefined}
+                      className={dietFeePaid
+                        ? "border-orange-200 text-xs text-orange-700 hover:bg-orange-50"
+                        : "bg-orange-600 text-xs text-white hover:bg-orange-700"}
+                      onClick={openDietFeeDraft}
+                      data-testid="cons-open-diet-fee"
+                    >
+                      {dietFeePaid ? "Update Diet Fee" : "Collect Diet Fee"}
+                    </Button>
+                  );
+
                   if (decision === "consultation_only") {
                     return (
                       <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3" data-testid="cons-stage-panel-fee-collected">
@@ -2268,11 +2422,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           <ClipboardCheck className="h-3.5 w-3.5" /> Fee Collected
                         </p>
                         {ConsultationFeeSummary}
+                        {DietFeeSection}
                         <p className="mb-2 mt-3 text-xs text-slate-600">Consultation Only — no treatment sessions. Mark this consultation as completed to close it out.</p>
                         <div className="flex flex-wrap items-center gap-1.5">
                           <Button size="sm" className="bg-emerald-600 text-xs hover:bg-emerald-700" onClick={submitMarkCompleted} disabled={completingConsultation} data-testid="cons-mark-completed">
                             {completingConsultation ? "Saving..." : "Mark Consultation Completed"}
                           </Button>
+                          {DietFeeButton}
                           {DietButton}
                           {CancelButton}
                         </div>
@@ -2371,6 +2527,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           </p>
                         )}
                       </div>
+                      {DietFeeSection}
                       {treatmentPaid && (
                         <p className="mt-3 border-t border-indigo-100 pt-3 text-xs text-slate-600">
                           {/* A Partial Payment plan reaches here with money in but a balance
@@ -2393,6 +2550,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             Assign Physio
                           </Button>
                         )}
+                        {DietFeeButton}
                         {DietButton}
                         {CancelButton}
                       </div>
@@ -3273,6 +3431,167 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     >
                       {collectingTreatmentFee ? "Saving..." : `Collect ${modeLabel} Payment`}
                     </Button>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Collect Diet Consultation Fee — step 1: which package, at which price, paid
+                how. Its own popup rather than a section inside the Consultation Fee one,
+                because it is taken at a different moment: diet is decided after the
+                consultation, often after treatment has started. */}
+            {dietFeeDraft && (
+              <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" data-testid="cons-diet-fee-modal">
+                <div className="max-h-[85vh] w-full max-w-md space-y-3 overflow-y-auto rounded-xl bg-white p-4 shadow-2xl">
+                  <div className="flex items-center justify-between">
+                    <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-800">
+                      <Salad className="h-4 w-4 text-orange-500" />
+                      {selectedLead.diet_fee_paid != null ? "Update Diet Consultation Fee" : "Collect Diet Consultation Fee"}
+                    </p>
+                    <button onClick={() => setDietFeeDraft(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-diet-fee-close"><X className="h-4 w-4" /></button>
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-[11px] font-medium text-slate-500">Diet Package</label>
+                    <select
+                      value={dietFeeDraft.item_id}
+                      onChange={(e) => setDietFeeDraft({ ...dietFeeDraft, item_id: e.target.value })}
+                      className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-sm"
+                      data-testid="cons-diet-fee-package"
+                    >
+                      {dietItems.map((it) => (
+                        <option key={it.id} value={it.id}>{it.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-[11px] font-medium text-slate-500">Price</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {["offline", "online"].map((m) => {
+                        const item = dietItemById(dietFeeDraft.item_id);
+                        const price = item ? (m === "online" ? item.price_online : item.price_offline) : null;
+                        const active = dietFeeDraft.mode === m;
+                        return (
+                          <button
+                            key={m}
+                            type="button"
+                            onClick={() => setDietFeeDraft({ ...dietFeeDraft, mode: m })}
+                            className={`rounded-lg border-2 px-3 py-2 text-left transition ${
+                              active ? "border-orange-500 bg-orange-50" : "border-slate-200 hover:border-orange-300"
+                            }`}
+                            data-testid={`cons-diet-fee-mode-${m}`}
+                          >
+                            <span className={`block text-[10px] font-bold uppercase tracking-wider ${active ? "text-orange-700" : "text-slate-400"}`}>{m}</span>
+                            <span className={`block text-base font-extrabold ${active ? "text-orange-700" : "text-slate-700"}`}>
+                              {price != null ? `Rs.${price}` : "—"}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-[11px] font-medium text-slate-500">Payment Mode</label>
+                    <PaymentModeSelect
+                      value={dietFeeDraft.payment_mode}
+                      options={CONSULTATION_FEE_PAYMENT_MODES}
+                      onChange={(v) => setDietFeeDraft({ ...dietFeeDraft, payment_mode: v })}
+                      testId="cons-diet-fee-mode-select"
+                    />
+                  </div>
+
+                  <Button
+                    className="w-full bg-orange-600 text-xs hover:bg-orange-700"
+                    onClick={startCollectDietFee}
+                    disabled={collectingDietFee || !dietFeeDraft.item_id || !(dietListPrice(dietFeeDraft) > 0)}
+                    data-testid="cons-diet-fee-submit"
+                  >
+                    Collect Diet Consultation Fee
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Step 2 — the same confirm the other two fees require before money is
+                accepted: the amount is editable here (a discount negotiated on the spot),
+                and UPI/Card/Transfer ask for what a dispute would be traced by. */}
+            {dietFeeConfirmDraft && dietFeeDraft && (() => {
+              const mode = dietFeeDraft.payment_mode;
+              return (
+                <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" data-testid="cons-diet-fee-confirm-modal">
+                  <div className="max-h-[90vh] w-full max-w-sm space-y-3 overflow-y-auto rounded-xl bg-white p-4 shadow-2xl">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-semibold text-slate-800">Confirm Diet Consultation Fee</p>
+                      <button onClick={() => setDietFeeConfirmDraft(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-diet-fee-confirm-close"><X className="h-4 w-4" /></button>
+                    </div>
+
+                    <p className="text-[11px] text-slate-500">
+                      {dietItemById(dietFeeDraft.item_id)?.name || "Diet Package"} · <span className="capitalize">{dietFeeDraft.mode}</span>
+                    </p>
+
+                    <DiscountCalculator
+                      assignedPrice={dietListPrice(dietFeeDraft)}
+                      amount={dietFeeDraft.amount}
+                      onAmountChange={(v) => setDietFeeDraft({ ...dietFeeDraft, amount: v })}
+                      label="Diet Consultation Fee (₹)"
+                      testPrefix="cons-diet-fee-confirm"
+                    />
+
+                    {mode === "upi" && (
+                      <>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium text-slate-500">UPI Transaction ID</label>
+                          <Input value={dietFeeConfirmDraft.upi_transaction_id} onChange={(e) => setDietFeeConfirmDraft({ ...dietFeeConfirmDraft, upi_transaction_id: e.target.value })} className="h-9" data-testid="cons-diet-fee-upi-txn" />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium text-slate-500">UTR</label>
+                          <Input value={dietFeeConfirmDraft.upi_utr} onChange={(e) => setDietFeeConfirmDraft({ ...dietFeeConfirmDraft, upi_utr: e.target.value })} className="h-9" data-testid="cons-diet-fee-upi-utr" />
+                        </div>
+                      </>
+                    )}
+
+                    {BANK_DETAIL_MODES.includes(mode) && (
+                      <>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium text-slate-500">Account Number</label>
+                          <Input value={dietFeeConfirmDraft.account_number} onChange={(e) => setDietFeeConfirmDraft({ ...dietFeeConfirmDraft, account_number: e.target.value })} className="h-9" data-testid="cons-diet-fee-account-number" />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium text-slate-500">Account Holder Name</label>
+                          <Input value={dietFeeConfirmDraft.account_holder_name} onChange={(e) => setDietFeeConfirmDraft({ ...dietFeeConfirmDraft, account_holder_name: e.target.value })} className="h-9" data-testid="cons-diet-fee-account-holder" />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium text-slate-500">Bank Name</label>
+                          <Input value={dietFeeConfirmDraft.bank_name} onChange={(e) => setDietFeeConfirmDraft({ ...dietFeeConfirmDraft, bank_name: e.target.value })} className="h-9" data-testid="cons-diet-fee-bank-name" />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium text-slate-500">IFSC Code</label>
+                          <Input value={dietFeeConfirmDraft.ifsc_code} onChange={(e) => setDietFeeConfirmDraft({ ...dietFeeConfirmDraft, ifsc_code: e.target.value.toUpperCase() })} className="h-9" data-testid="cons-diet-fee-ifsc" />
+                        </div>
+                        {mode === "account_transfer" && (
+                          <div>
+                            <label className="mb-1 block text-[11px] font-medium text-slate-500">Reference / UTR No.</label>
+                            <Input value={dietFeeConfirmDraft.transfer_reference} onChange={(e) => setDietFeeConfirmDraft({ ...dietFeeConfirmDraft, transfer_reference: e.target.value })} className="h-9" data-testid="cons-diet-fee-transfer-reference" />
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    <div className="flex gap-2">
+                      <Button variant="outline" className="flex-1 text-xs" onClick={() => setDietFeeConfirmDraft(null)} data-testid="cons-diet-fee-confirm-back">
+                        Back
+                      </Button>
+                      <Button
+                        className="flex-[2] bg-orange-600 text-xs hover:bg-orange-700"
+                        onClick={confirmCollectDietFee}
+                        disabled={collectingDietFee || !(parseFloat(dietFeeDraft.amount) > 0)}
+                        data-testid="cons-diet-fee-confirm-submit"
+                      >
+                        {collectingDietFee ? "Saving..." : `Confirm Rs.${dietFeeDraft.amount || 0}`}
+                      </Button>
+                    </div>
                   </div>
                 </div>
               );

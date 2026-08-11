@@ -7,7 +7,7 @@ from stage_utils import get_closing_stage_name
 from deps import v3_current_user, v3_require_roles
 from constants import V3_STAGES, V3_BRANCH_STAGES
 from schemas.v3 import V3UserOut, V3LeadOut
-from routers.v3_finance import REVENUE_ACTIONS, _parse_rs_amount, _revenue_category
+from routers.v3_finance import REVENUE_ACTIONS, CONSULTATION_FEE_ACTIONS, _parse_rs_amount, _revenue_category
 
 router = APIRouter(prefix="/api/v3")
 
@@ -529,9 +529,12 @@ async def v3_dashboard_overview(
     # either way, so a same-day pair is either both inside the range or both outside it.
     # A treatment fee whose consultation fell in some earlier range isn't spot joining
     # anyway.
+    # Keyed on the Consultation Fee actions themselves, not on the "consultation" reporting
+    # bucket — that bucket also holds the Diet Consultation Fee, and a diet fee taken on the
+    # same day as a treatment fee would otherwise mark that treatment fee as spot joining.
     consult_days: dict[str, set] = {}
     for a in activities:
-        if _revenue_category(a.get("action", "")) == "consultation":
+        if a.get("action", "") in CONSULTATION_FEE_ACTIONS:
             consult_days.setdefault(a.get("lead_id"), set()).add(str(a.get("created_at", ""))[:10])
 
     for a in activities:

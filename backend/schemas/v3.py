@@ -238,6 +238,16 @@ class V3LeadOut(BaseModel):
     # appointment_date/_time above, which are the Head Physio's consultation.
     diet_appointment_at: Optional[str] = None
     diet_stage: Optional[str] = None  # "Diet Consultation Booked" | "Diet Plan Assigned" | "Diet Completed"
+    # The Diet Consultation Fee and the FITSIO STORE Diet Package it was collected for.
+    # Kept apart from package_* (the Consultation Fee) and session_package_* (the
+    # Treatment Fee) so all three read back independently on the Fee Collected panel.
+    diet_package_id: Optional[str] = None
+    diet_package_name: Optional[str] = None
+    diet_package_price: Optional[float] = None
+    diet_package_mode: Optional[str] = None  # "online" | "offline"
+    diet_fee_paid: Optional[float] = None
+    diet_fee_payment_mode: Optional[str] = None
+    diet_fee_payment_details: Optional[dict] = None
     diagnosis: Optional[str] = None  # Pre-Sales' basic diagnosis — read-only reference for the Head Physio
     physio_diagnosis_report: Optional[str] = None  # Head Physio's own diagnosis report
     physio_diagnosis_locked: Optional[bool] = False
@@ -322,6 +332,19 @@ class V3CollectPackagePaymentInput(BaseModel):
     # Account Transfer — reuses the four bank fields above (same last-4 rule) and adds
     # the bank's own reference for the transfer, which is what a dispute is traced by.
     transfer_reference: Optional[str] = None
+
+
+class V3CollectDietFeeInput(V3CollectPackagePaymentInput):
+    """The Diet Consultation Fee.
+
+    Inherits every payment field from the Consultation Fee — it is collected the same way,
+    in one go, by the same four modes — and adds only what is particular to diet: which
+    Diet Package from FITSIO STORE, and whether it was sold at the online or offline price.
+    The Head Physio never picks a diet package the way they pick a treatment one, so it is
+    chosen here at the point of collection.
+    """
+    item_id: str
+    mode: Literal["online", "offline"] = "offline"
 
 
 class V3PartialInstallment(BaseModel):

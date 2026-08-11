@@ -163,10 +163,19 @@ async def get_branch_finance(
 
 # "session" = Treatment Fee (the multi-visit Session Package collected after Consultation
 # Fee); everything else collected at/around the consultation itself is "consultation".
-REVENUE_ACTIONS = ["consultation_paid", "package_sold", "package_payment_collected", "treatment_fee_collected", "fee_collected"]
+REVENUE_ACTIONS = ["consultation_paid", "package_sold", "package_payment_collected", "treatment_fee_collected", "diet_fee_collected", "fee_collected"]
+
+# The Consultation Fee itself: the actions that mean "this patient paid to be seen today".
+# Deliberately narrower than _revenue_category(...) == "consultation", which is a reporting
+# bucket that also holds the Diet Consultation Fee. Spot joining keys off THIS set — a diet
+# fee taken on the same day as a treatment fee is not evidence the patient signed up on the
+# spot, and folding it in would inflate spot joining with unrelated same-day payments.
+CONSULTATION_FEE_ACTIONS = {"consultation_paid", "package_sold", "package_payment_collected", "fee_collected"}
 
 
 def _revenue_category(action: str) -> str:
+    # A Diet Consultation is a consultation, so its fee reports as consultation revenue
+    # rather than needing a fourth headline nobody asked for.
     return "session" if action == "treatment_fee_collected" else "consultation"
 
 

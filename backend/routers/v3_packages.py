@@ -10,7 +10,7 @@ from database import v3_col
 from deps import v3_require_roles
 from schemas.v3 import (
     V3UserOut, V3LeadOut, V3DiagnosisInput, V3SellStoreItemInput,
-    V3CollectPackagePaymentInput, V3CollectTreatmentFeeInput,
+    V3CollectPackagePaymentInput, V3CollectTreatmentFeeInput, V3CollectDietFeeInput,
     V3PhysioDiagnosisInput, V3TreatmentSummaryInput,
 )
 from utils import generate_transaction_id
@@ -179,6 +179,139 @@ SETTLED_NOW_MODES = ("cash", "upi", "card", "account_transfer")
 # The above plus Cheque — every mode that can cover only part of a session package now
 # and leave the rest as a scheduled balance. Partial Payment can't: it *is* the schedule.
 PART_SESSION_MODES = ("cash", "upi", "card", "cheque", "account_transfer")
+
+
+def build_payment_details(payload) -> tuple:
+    """(details, human suffix) for whichever mode this payment used.
+
+    The same validation the Consultation Fee and Treatment Fee already do inline. Written
+    once here for the Diet Consultation Fee rather than copied a third time; the two older
+    endpoints still carry their own copies and can adopt this when they are next touched —
+    changing a working money path is not something to do as a side effect.
+
+    Cash needs nothing, so it falls through to an empty dict. Card and Account Transfer
+    persist only the last four digits of the account number; the full number is never
+    stored, and that rule lives here so no future caller can forget it.
+    """
+    mode = payload.payment_mode
+    if mode == "upi":
+        if not (payload.upi_transaction_id or "").strip() or not (payload.upi_utr or "").strip():
+            raise HTTPException(status_code=400, detail="UPI Transaction ID and UTR are required")
+        txn, utr = payload.upi_transaction_id.strip(), payload.upi_utr.strip()
+        return {"upi_transaction_id": txn, "upi_utr": utr}, f" · UPI txn {txn}, UTR {utr}"
+
+    if mode in ("card", "account_transfer"):
+        required = [payload.account_number, payload.account_holder_name, payload.bank_name, payload.ifsc_code]
+        if not all((f or "").strip() for f in required):
+            raise HTTPException(status_code=400, detail="Account Number, Account Holder Name, Bank Name and IFSC Code are required")
+        if mode == "account_transfer" and not (payload.transfer_reference or "").strip():
+            raise HTTPException(status_code=400, detail="Reference/UTR No. is required for an Account Transfer")
+        last4 = "".join(ch for ch in payload.account_number if ch.isdigit())[-4:]
+        holder = payload.account_holder_name.strip()
+        bank = payload.bank_name.strip()
+        ifsc = payload.ifsc_code.strip().upper()
+        details = {"account_last4": last4, "account_holder_name": holder, "bank_name": bank, "ifsc_code": ifsc}
+        suffix = f" · A/C ****{last4}, {holder}, {bank} ({ifsc})"
+        if mode == "account_transfer":
+            details["transfer_reference"] = payload.transfer_reference.strip()
+            suffix += f" · Ref {details['transfer_reference']}"
+        return details, suffix
+
+    return {}, ""
+
+
+DIET_FEE_PAYMENT_MODES = {"cash", "upi", "card", "account_transfer"}
+
+
+@router.post("/leads/{lead_id}/collect-diet-fee", response_model=dict)
+async def collect_diet_fee(lead_id: str, payload: V3CollectDietFeeInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
+    """Branch admin collects the Diet Consultation Fee.
+
+    Collected in one go like the Consultation Fee, not in installments like the Treatment
+    Fee: a diet consultation is a single visit at a single price, so there is no schedule
+    to spread and no per-session rate to divide by.
+
+    The Diet Package is chosen HERE rather than upstream. The Head Physio picks a treatment
+    package during their decision, but they never pick a diet one — diet is optional and
+    often decided after the treatment is under way — so the item is named at the point the
+    money is taken.
+
+    Deliberately does not touch consultation_stage. Diet is a parallel vertical: taking
+    this fee is not progress through the physio pipeline, and moving that stage as a side
+    effect of a diet payment would misreport where the patient actually is.
+    """
+    if payload.payment_mode not in DIET_FEE_PAYMENT_MODES:
+        raise HTTPException(status_code=400, detail=f"Diet Consultation Fee only accepts: {sorted(DIET_FEE_PAYMENT_MODES)}")
+    if not payload.confirmed:
+        raise HTTPException(status_code=400, detail="Please confirm the payment before submitting")
+
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    # The Consultation Fee is the only prerequisite. Not the Treatment Fee: a patient can
+    # come for a diet consultation and nothing else, and gating on treatment would shut
+    # that door.
+    if lead.get("package_paid") is None:
+        raise HTTPException(status_code=400, detail="Collect the Consultation Fee first")
+
+    item = await v3_col("store_items").find_one({"id": payload.item_id, "item_type": "diet"}, {"_id": 0})
+    if not item:
+        raise HTTPException(status_code=404, detail="Diet Package not found. Add one in FITSIO STORE > Diet Package.")
+
+    original_price = item.get("price_online") if payload.mode == "online" else item.get("price_offline")
+    if original_price is None:
+        raise HTTPException(status_code=400, detail=f"This Diet Package has no {payload.mode} price set")
+    amount = payload.amount if payload.amount is not None else original_price
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be greater than zero")
+
+    # Same discount handling as the Consultation Fee: the gap between the listed price and
+    # what was actually taken is recorded with a reason, so Transaction History shows why
+    # rather than only the final number.
+    discount_amount = round(original_price - amount, 2)
+    discount_reason = None
+    discount_suffix = ""
+    if discount_amount > 0:
+        discount_reason = "Discount"
+        discount_suffix = f" · Actual Price Rs.{original_price}, Discount Rs.{discount_amount}"
+    elif discount_amount < 0:
+        discount_reason = "Additional amount collected"
+        discount_suffix = f" · Actual Price Rs.{original_price}, Rs.{abs(discount_amount)} above listed fee"
+
+    payment_details, detail_suffix = build_payment_details(payload)
+    is_update = lead.get("diet_fee_paid") is not None
+    transaction_id = await generate_transaction_id(lead.get("branch_id"))
+    payment_details["transaction_id"] = transaction_id
+
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": {
+        "diet_package_id": item["id"],
+        "diet_package_name": item["name"],
+        "diet_package_price": original_price,
+        "diet_package_mode": payload.mode,
+        "diet_fee_paid": amount,
+        "diet_fee_payment_mode": payload.payment_mode,
+        "diet_fee_payment_details": payment_details,
+        # The fee IS the referral when nobody recommended one — same reasoning as
+        # book_diet_appointment, so a paying patient reaches the coach's queue either way.
+        "diet_recommended": True,
+        "updated_at": _now(),
+    }})
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "transaction_id": transaction_id,
+        "lead_id": lead_id,
+        "action": "diet_fee_collected",
+        "details": f"{'Updated' if is_update else 'Collected'} Diet Consultation Fee Rs.{amount} for '{item['name']}' ({payload.mode}) via {payload.payment_mode}{detail_suffix}{discount_suffix} · Txn {transaction_id}",
+        "original_amount": original_price,
+        "collected_amount": amount,
+        "discount_amount": discount_amount if discount_amount != 0 else None,
+        "discount_reason": discount_reason,
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": _now(),
+    })
+    updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    return {"message": "Payment collected", "transaction_id": transaction_id, "lead": V3LeadOut(**updated).model_dump()}
 
 
 @router.post("/leads/{lead_id}/collect-package-payment", response_model=dict)

@@ -160,6 +160,7 @@ STORE_HISTORY_ACTIONS = [
     "package_assigned",
     "package_payment_collected",
     "treatment_fee_collected",
+    "diet_fee_collected",
     "fee_collected",
 ]
 
@@ -170,6 +171,7 @@ PAYMENT_HISTORY_ACTIONS = [
     "package_sold",
     "package_payment_collected",
     "treatment_fee_collected",
+    "diet_fee_collected",
     "fee_collected",
 ]
 
