@@ -248,6 +248,11 @@ class V3LeadOut(BaseModel):
     diet_fee_paid: Optional[float] = None
     diet_fee_payment_mode: Optional[str] = None
     diet_fee_payment_details: Optional[dict] = None
+    # What the Nutrition Coach concluded at the Diet Consultation — the diet counterpart
+    # of physio_diagnosis_report. One current plan, replaced rather than appended to.
+    diet_consultation_report: Optional[str] = None
+    diet_consultation_report_at: Optional[str] = None
+    diet_consultation_report_by: Optional[str] = None
     diagnosis: Optional[str] = None  # Pre-Sales' basic diagnosis — read-only reference for the Head Physio
     physio_diagnosis_report: Optional[str] = None  # Head Physio's own diagnosis report
     physio_diagnosis_locked: Optional[bool] = False

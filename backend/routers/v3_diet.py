@@ -360,6 +360,55 @@ async def book_diet_appointment(
     return {"appointment": appt, "coach_name": coach["full_name"], "slot_time": slot}
 
 
+class DietReportInput(BaseModel):
+    report: str
+
+
+@router.post("/diet/consultation-report/{lead_id}")
+async def save_diet_consultation_report(
+    lead_id: str,
+    payload: DietReportInput,
+    user: V3UserOut = Depends(v3_require_diet),
+):
+    """What the Nutrition Coach concluded at the Diet Consultation.
+
+    The diet vertical's counterpart to the Head Physio's diagnosis report: one piece of
+    written advice per patient, replaced rather than appended to, because it is the current
+    plan and not a log. The per-visit notes are `coach_remarks` on each check-in day.
+
+    Written by the coach alone. Branch Admin books and collects; what the plan says is a
+    clinical judgement and nobody else's to author.
+    """
+    text = (payload.report or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="The report cannot be empty")
+
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0, "id": 1, "name": 1})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Patient not found")
+
+    now = now_iso()
+    await v3_col("leads").update_one(
+        {"id": lead_id},
+        {"$set": {
+            "diet_consultation_report": text,
+            "diet_consultation_report_at": now,
+            "diet_consultation_report_by": user.full_name,
+            "updated_at": now,
+        }},
+    )
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": lead_id,
+        "action": "diet_consultation_report_saved",
+        "details": "Diet Consultation report written",
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": now,
+    })
+    return {"report": text, "saved_at": now, "saved_by": user.full_name}
+
+
 @router.get("/branch/diet-patients")
 async def branch_diet_patients(user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
     """Everyone at this branch already on a diet plan, for the Branch Admin's own view."""
@@ -445,6 +494,8 @@ async def diet_consultations(coach_id: Optional[str] = None, user: V3UserOut = D
             "consultation_decision": l.get("consultation_decision"),
             "diet_stage": l.get("diet_stage"),
             "diet_coach_name": l.get("diet_coach_name"),
+            # So the coach's queue shows who has been written up and who has not.
+            "diet_consultation_report": l.get("diet_consultation_report"),
             "assigned": bool(l.get("diet_coach_id")),
             "total_days": days["total"],
             "completed_days": days["done"],

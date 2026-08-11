@@ -17,10 +17,13 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token as google_id_token
 
+from fastapi.responses import FileResponse
+
 from database import v3_col
 from utils import now_iso
 from security import hash_password, verify_password
 from deps import v3_require_roles
+from routers.v3_lead_documents import DOC_DIR, is_shared_with_patient
 from schemas.v3 import V3UserOut, V3PortalAccountInput, V3PatientPortalLogin, V3PatientPortalGoogleLogin
 
 router = APIRouter(prefix="/api/v3")
@@ -71,8 +74,18 @@ async def create_or_reset_portal_account(
     lead = await _lead_or_404(lead_id)
     if user.role == "branch_admin" and lead.get("branch_id") != user.branch_id:
         raise HTTPException(status_code=404, detail="Patient not found")
-    if lead.get("treatment_fee_paid") is None:
-        raise HTTPException(status_code=400, detail="Treatment Fee must be collected before portal access can be created")
+    # Any fee collected is enough. This used to insist on the Treatment Fee, which locked
+    # out the two kinds of patient who never pay one: "Consultation Only", and anyone who
+    # came for a Diet Consultation and nothing else. Both are paying patients with a record
+    # worth reading, and neither could ever be given a login.
+    #
+    # The gate exists to separate a paying patient from a bare lead, and the Consultation
+    # Fee is the first money in — so that is the honest floor.
+    if all(lead.get(f) is None for f in ("package_paid", "treatment_fee_paid", "diet_fee_paid")):
+        raise HTTPException(
+            status_code=400,
+            detail="Collect a fee from this patient before creating portal access",
+        )
 
     email = (payload.email or lead.get("email") or "").strip().lower()
     if not email:
@@ -193,9 +206,12 @@ async def patient_portal_me(lead_id: str = Depends(_current_patient_lead_id)):
     if not lead:
         raise HTTPException(status_code=404, detail="Patient not found")
 
+    # `sessions` is physio treatment days only — diet check-ins live in their own
+    # collection, so nothing here can miscount one as the other.
     sessions = await v3_col("sessions").find({"lead_id": lead_id}, {"_id": 0}).sort("slot_time", 1).to_list(500)
     assessments = await v3_col("weekly_assessments").find({"lead_id": lead_id}, {"_id": 0}).sort("week_number", 1).to_list(100)
     reviews = await v3_col("reviews").find({"lead_id": lead_id}, {"_id": 0}).sort("raised_at", 1).to_list(50)
+    diet_days = await v3_col("diet_sessions").find({"lead_id": lead_id}, {"_id": 0}).sort("slot_time", 1).to_list(200)
     total = len(sessions)
     completed = len([s for s in sessions if s.get("status") == "completed"])
 
@@ -274,6 +290,33 @@ async def patient_portal_me(lead_id: str = Depends(_current_patient_lead_id)):
             for r in reviews
         ],
 
+        # The diet side of the patient's care. Absent entirely until now, so a patient on a
+        # diet plan had no sign of it here and — worse — no sign of the fee they paid for
+        # it. Returned as its own block rather than folded into the physio numbers: they
+        # are separate courses of care with separate clinicians.
+        "diet": {
+            "coach_name": lead.get("diet_coach_name"),
+            "appointment_at": lead.get("diet_appointment_at"),
+            "stage": lead.get("diet_stage"),
+            # The coach's written plan — the diet counterpart of the physio's Diagnosis
+            # Report, and the thing the patient is actually meant to follow.
+            "consultation_report": lead.get("diet_consultation_report"),
+            "consultation_report_at": lead.get("diet_consultation_report_at"),
+            "consultation_report_by": lead.get("diet_consultation_report_by"),
+            "total_checkins": len(diet_days),
+            "completed_checkins": len([d for d in diet_days if d.get("status") == "completed"]),
+            "checkins": [
+                {
+                    "day_number": d.get("day_number"),
+                    "slot_time": d.get("slot_time"),
+                    "status": d.get("status"),
+                    "coach_remarks": d.get("coach_remarks"),
+                    "weight_kg": d.get("weight_kg"),
+                }
+                for d in diet_days
+            ],
+        },
+
         "payment": {
             "consultation_fee_total": lead.get("package_price"),
             "consultation_fee_paid": lead.get("package_paid"),
@@ -286,5 +329,62 @@ async def patient_portal_me(lead_id: str = Depends(_current_patient_lead_id)):
             "installments_paid": len([i for i in installments if i.get("paid")]),
             "next_due_amount": next_due.get("amount") if next_due else None,
             "next_due_date": next_due.get("due_date") if next_due else None,
+            # The third fee. Left out, the portal's own Total was short by whatever the
+            # patient paid for their diet consultation — a wrong number on the one screen
+            # where the patient checks what they have been charged.
+            "diet_package_name": lead.get("diet_package_name"),
+            "diet_fee_total": lead.get("diet_package_price"),
+            "diet_fee_paid": lead.get("diet_fee_paid"),
+            "diet_payment_mode": lead.get("diet_fee_payment_mode"),
         },
     }
+
+
+# ------------------------------------------------------------------ Patient: own documents
+
+@router.get("/patient-portal/documents")
+async def patient_portal_documents(lead_id: str = Depends(_current_patient_lead_id)):
+    """The patient's own documents, and only the ones the branch has shared.
+
+    `lead_id` comes from the session token and is never accepted from the caller — the
+    staff route takes it in the path, which is right there because staff legitimately read
+    across patients, and would be a way to read anyone's file here.
+    """
+    docs = await v3_col("lead_documents").find(
+        {"lead_id": lead_id}, {"_id": 0, "stored_name": 0}
+    ).sort("created_at", -1).to_list(500)
+    return {
+        "documents": [
+            {
+                "id": d.get("id"),
+                "label": d.get("label"),
+                "original_name": d.get("original_name"),
+                "kind": d.get("kind"),
+                "content_type": d.get("content_type"),
+                "size_bytes": d.get("size_bytes"),
+                "created_at": d.get("created_at"),
+            }
+            for d in docs if is_shared_with_patient(d)
+        ]
+    }
+
+
+@router.get("/patient-portal/documents/{doc_id}/download")
+async def patient_portal_download_document(
+    doc_id: str, lead_id: str = Depends(_current_patient_lead_id)
+):
+    """The bytes, for one of this patient's own shared documents.
+
+    Three things have to hold, and each is checked rather than assumed: the document
+    belongs to the lead this session is for, the branch has shared it, and the resolved
+    path is still inside the documents folder. A document id on its own is not a key.
+    """
+    doc = await v3_col("lead_documents").find_one({"id": doc_id, "lead_id": lead_id}, {"_id": 0})
+    if not doc or not is_shared_with_patient(doc):
+        # The same 404 either way: "exists but is not shared with you" is itself something
+        # a patient does not need told.
+        raise HTTPException(status_code=404, detail="Document not found")
+    path = os.path.join(DOC_DIR, doc["stored_name"])
+    if os.path.dirname(os.path.abspath(path)) != os.path.abspath(DOC_DIR) or not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="File is missing from storage")
+    return FileResponse(path, media_type=doc.get("content_type"), filename=doc.get("original_name"))

@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
-import { dietCalendar, dietConsultations, dietPatients, dietSessions, dietCompleteDay } from "@/lib/api";
+import { dietCalendar, dietConsultations, dietPatients, dietSessions, dietCompleteDay, saveDietConsultationReport } from "@/lib/api";
 import { to12h } from "@/lib/time";
 
 /**
@@ -194,6 +194,7 @@ function ConsultationsTab({ coachId, onCountChange, toolbarSlot }) {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("waiting");
+  const [reportFor, setReportFor] = useState(null); // the patient whose report is open
 
   useEffect(() => {
     let cancelled = false;
@@ -253,8 +254,92 @@ function ConsultationsTab({ coachId, onCountChange, toolbarSlot }) {
           </p>
         </div>
       ) : (
-        <ConsultationList rows={visible} />
+        <ConsultationList rows={visible} onOpen={setReportFor} />
       )}
+
+      {reportFor && (
+        <DietReportModal
+          patient={reportFor}
+          onClose={() => setReportFor(null)}
+          onSaved={(text) => {
+            setRows((prev) => prev.map((r) => (r.lead_id === reportFor.lead_id
+              ? { ...r, diet_consultation_report: text } : r)));
+            setReportFor(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * The Diet Consultation report — what the coach concluded, and the thing the patient then
+ * reads in their own Client Portal.
+ *
+ * One report per patient, replaced rather than appended to: it is the current plan, not a
+ * log. The per-visit notes belong on each check-in day.
+ */
+function DietReportModal({ patient, onClose, onSaved }) {
+  const [text, setText] = useState(patient.diet_consultation_report || "");
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    if (!text.trim()) { toast.error("Write the report before saving"); return; }
+    setSaving(true);
+    try {
+      await saveDietConsultationReport(patient.lead_id, text.trim());
+      toast.success("Diet Consultation report saved");
+      onSaved(text.trim());
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Couldn't save the report");
+    }
+    setSaving(false);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-3" data-testid="diet-report-modal">
+      <div className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+          <div className="min-w-0">
+            <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-800">
+              <Salad className="h-4 w-4 text-orange-500" /> Diet Consultation Report
+            </p>
+            <p className="truncate text-[11px] text-slate-400">{patient.lead_name}</p>
+          </div>
+          <button onClick={onClose} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="diet-report-close">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="space-y-2 overflow-y-auto px-4 py-3">
+          <p className="text-[11px] text-slate-500">
+            The patient reads this in their Client Portal, so write it to them: what the
+            plan is, and what to follow.
+          </p>
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            rows={10}
+            placeholder="Assessment, the diet plan, what to avoid, what to follow between check-ins..."
+            className="w-full rounded-lg border border-slate-200 p-3 text-sm outline-none focus:border-orange-400"
+            data-testid="diet-report-text"
+          />
+        </div>
+
+        <div className="flex items-center gap-2 border-t border-slate-100 px-4 py-3">
+          <Button variant="outline" className="flex-1 text-xs" onClick={onClose} data-testid="diet-report-cancel">
+            Cancel
+          </Button>
+          <Button
+            className="flex-[2] bg-orange-500 text-xs hover:bg-orange-600"
+            onClick={save}
+            disabled={saving || !text.trim()}
+            data-testid="diet-report-save"
+          >
+            {saving ? "Saving..." : patient.diet_consultation_report ? "Update Report" : "Save Report"}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -281,11 +366,17 @@ const StatusPill = ({ label, color, testid }) => (
  * for "who am I seeing on the 17th" had to read every row in full. In columns the same
  * facts sit under a heading that names them.
  */
-const ConsultationList = ({ rows }) => (
+const ConsultationList = ({ rows, onOpen }) => (
   <>
     <div className="space-y-2 sm:hidden" data-testid="diet-consult-list-mobile">
       {rows.map((p) => (
-        <div key={p.lead_id} className="rounded-xl border border-slate-200 bg-white p-3" data-testid={`diet-consult-${p.lead_id}`}>
+        <button
+          key={p.lead_id}
+          type="button"
+          onClick={() => onOpen(p)}
+          className="w-full rounded-xl border border-slate-200 bg-white p-3 text-left"
+          data-testid={`diet-consult-${p.lead_id}`}
+        >
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <p className="truncate text-sm font-bold text-slate-800">{p.lead_name}</p>
@@ -305,8 +396,11 @@ const ConsultationList = ({ rows }) => (
               </span>
             )}
             {p.total_days > 0 && <span>· {p.completed_days}/{p.total_days} check-ins</span>}
+            {p.diet_consultation_report
+              ? <span className="font-semibold text-emerald-600">· report written</span>
+              : <span className="text-slate-400">· no report yet</span>}
           </div>
-        </div>
+        </button>
       ))}
     </div>
 
@@ -320,12 +414,13 @@ const ConsultationList = ({ rows }) => (
               <th className="px-4 py-2.5 font-semibold">Plan</th>
               <th className="px-4 py-2.5 font-semibold">Diet Consultation</th>
               <th className="px-4 py-2.5 font-semibold">Check-ins</th>
+              <th className="px-4 py-2.5 font-semibold">Report</th>
               <th className="px-4 py-2.5 font-semibold">Status</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {rows.map((p) => (
-              <tr key={p.lead_id} className="hover:bg-slate-50" data-testid={`diet-consult-${p.lead_id}`}>
+              <tr key={p.lead_id} onClick={() => onOpen(p)} className="cursor-pointer hover:bg-slate-50" data-testid={`diet-consult-${p.lead_id}`}>
                 <td className="px-4 py-3">
                   <p className="font-medium text-slate-800">{p.lead_name}</p>
                   {p.patient_number && <p className="font-mono text-[11px] text-slate-400">{p.patient_number}</p>}
@@ -346,6 +441,13 @@ const ConsultationList = ({ rows }) => (
                 </td>
                 <td className="px-4 py-3 text-slate-600">
                   {p.total_days > 0 ? `${p.completed_days}/${p.total_days}` : "—"}
+                </td>
+                {/* Who has been written up. The report is what the patient reads in their
+                    own portal, so an unwritten one is work still outstanding. */}
+                <td className="px-4 py-3">
+                  {p.diet_consultation_report
+                    ? <StatusPill label="WRITTEN" color={TILE_COLORS.booked} />
+                    : <span className="text-[11px] text-slate-400">—</span>}
                 </td>
                 <td className="px-4 py-3">
                   {p.booked

@@ -14,6 +14,17 @@ import { waNumber } from "@/lib/phone";
 
 const portalUrl = () => `${window.location.origin}/portal`;
 
+/** Everything this patient has actually paid, across all three fees. One figure rather
+    than a Treatment Fee column, which was blank for anyone who never had one. */
+const feesPaid = (l) => (l.package_paid || 0) + (l.treatment_fee_paid || 0) + (l.diet_fee_paid || 0);
+
+/** Which fees make up that figure, for the line under the name. */
+const feeParts = (l) => [
+  l.package_paid != null ? "Consultation" : null,
+  l.treatment_fee_paid != null ? "Treatment" : null,
+  l.diet_fee_paid != null ? "Diet" : null,
+].filter(Boolean).join(" + ");
+
 export const PatientsPortalPanel = ({ branchId }) => {
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -25,9 +36,12 @@ export const PatientsPortalPanel = ({ branchId }) => {
     setLoading(true);
     try {
       const data = await getBranchBoard(branchId);
-      // A lead becomes a patient the moment any Treatment Fee amount is recorded —
-      // same convention ConsultationsBoard's "Treatments" filter already uses.
-      setLeads((data.leads || []).filter((l) => l.treatment_fee_paid != null));
+      // A lead becomes a patient the moment any fee is recorded — the same rule the
+      // portal-account endpoint enforces. It used to be the Treatment Fee alone, which
+      // hid the two kinds of patient who never pay one: "Consultation Only", and anyone
+      // who came for a Diet Consultation and nothing else. They could not appear here, so
+      // they could never be given a login however the server was gated.
+      setLeads((data.leads || []).filter((l) => feesPaid(l) > 0));
     } catch { /* silent */ }
     setLoading(false);
   }, [branchId]);
@@ -57,7 +71,7 @@ export const PatientsPortalPanel = ({ branchId }) => {
       {visible.length === 0 && !loading ? (
         <div className="py-16 text-center">
           <User className="mx-auto mb-3 h-10 w-10 text-slate-200" />
-          <p className="text-sm text-slate-400">No patients yet — a lead shows up here once their Treatment Fee is collected</p>
+          <p className="text-sm text-slate-400">No patients yet — a lead shows up here once any fee is collected from them</p>
         </div>
       ) : (
         <>
@@ -89,8 +103,8 @@ export const PatientsPortalPanel = ({ branchId }) => {
                     </div>
                     <p className="truncate text-xs text-slate-600">{l.phone || "—"}</p>
                     <p className="mt-0.5 text-[11px] text-slate-500">
-                      Treatment Fee Rs.{l.treatment_fee_paid}
-                      {l.treatment_fee_payment_mode && <span className="capitalize text-slate-400"> · {l.treatment_fee_payment_mode}</span>}
+                      Rs.{feesPaid(l)} paid
+                      <span className="text-slate-400"> · {feeParts(l)}</span>
                     </p>
                   </div>
                 </div>
@@ -127,7 +141,7 @@ export const PatientsPortalPanel = ({ branchId }) => {
               <tr>
                 <th className="px-4 py-2.5">Patient</th>
                 <th className="px-4 py-2.5">Phone</th>
-                <th className="px-4 py-2.5">Treatment Fee</th>
+                <th className="px-4 py-2.5">Fees Paid</th>
                 <th className="px-4 py-2.5">Status</th>
               </tr>
             </thead>
@@ -148,7 +162,7 @@ export const PatientsPortalPanel = ({ branchId }) => {
                     </div>
                   </td>
                   <td className="px-4 py-3 text-slate-600">{l.phone || "—"}</td>
-                  <td className="px-4 py-3 text-slate-600">Rs.{l.treatment_fee_paid} <span className="capitalize text-slate-400">({l.treatment_fee_payment_mode})</span></td>
+                  <td className="px-4 py-3 text-slate-600">Rs.{feesPaid(l)} <span className="text-slate-400">({feeParts(l)})</span></td>
                   <td className="px-4 py-3">
                     <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">Paid</span>
                   </td>
@@ -279,12 +293,24 @@ function PatientPortalDetailModal({ lead, onClose, onSaved }) {
             </Button>
           </div>
 
+          {/* Each fee that was actually collected, rather than a Treatment Fee row that
+              read "Rs.undefined" for a patient who never had one. */}
           <div className="rounded-lg border border-slate-200 p-3">
             <div className="mb-2 flex items-center justify-between">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Treatment Fee</p>
-              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">Paid</span>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Fees Paid</p>
+              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">Rs.{feesPaid(lead)}</span>
             </div>
-            <p className="text-xs text-slate-600">Rs.{lead.treatment_fee_paid} <span className="capitalize text-slate-400">via {lead.treatment_fee_payment_mode}</span></p>
+            <div className="space-y-1 text-xs text-slate-600">
+              {lead.package_paid != null && (
+                <p>Consultation Rs.{lead.package_paid} <span className="capitalize text-slate-400">via {lead.package_payment_mode}</span></p>
+              )}
+              {lead.treatment_fee_paid != null && (
+                <p>Treatment Rs.{lead.treatment_fee_paid} <span className="capitalize text-slate-400">via {lead.treatment_fee_payment_mode}</span></p>
+              )}
+              {lead.diet_fee_paid != null && (
+                <p>Diet Rs.{lead.diet_fee_paid} <span className="capitalize text-slate-400">via {lead.diet_fee_payment_mode}</span></p>
+              )}
+            </div>
           </div>
 
           <div className="space-y-3 rounded-lg border border-violet-200 bg-violet-50/40 p-3">

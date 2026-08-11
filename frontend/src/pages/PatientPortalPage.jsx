@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Calendar, Check, ClipboardCheck, ClipboardList, Clock, Eye, EyeOff, IndianRupee, LogOut, PhoneCall, UserRound } from "lucide-react";
+import { Calendar, Check, ClipboardCheck, ClipboardList, Clock, Eye, EyeOff, IndianRupee, LogOut, PhoneCall, Salad, UserRound } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { slotTo12h } from "@/lib/time";
 import {
   loadPortalSession, savePortalSession, clearPortalSession,
   patientPortalLogin, patientPortalLogout, patientPortalMe, patientPortalGoogleLogin,
+  patientPortalDocuments, patientPortalDocumentUrl,
 } from "@/lib/patientPortalApi";
 
 const LOGO_URL =
@@ -328,6 +329,65 @@ function SessionsTab({ data }) {
   );
 }
 
+/** When the patient sees their Nutrition Coach, and how far through the check-ins they
+    are. Renders nothing at all unless a Diet Consultation has been booked. */
+function DietCard({ diet }) {
+  if (!diet || (!diet.appointment_at && !diet.total_checkins)) return null;
+  const date = (diet.appointment_at || "").split("T")[0];
+  const done = diet.completed_checkins || 0;
+  const total = diet.total_checkins || 0;
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-orange-200 bg-white" data-testid="patient-portal-diet-card">
+      <div className="border-b border-orange-100 bg-orange-50/60 px-4 py-3">
+        <h2 className="flex items-center gap-1.5 text-sm font-semibold text-orange-700">
+          <Salad className="h-4 w-4 text-orange-500" /> Diet Plan
+        </h2>
+      </div>
+      <div className="space-y-2 px-4 py-3">
+        {diet.coach_name && (
+          <p className="text-xs text-slate-600">
+            Nutrition Coach <span className="font-semibold text-slate-800">{diet.coach_name}</span>
+          </p>
+        )}
+        {date && (
+          <div className="rounded-md border border-orange-200 bg-orange-50 px-2.5 py-2 text-xs text-orange-800">
+            Diet Consultation on <span className="font-semibold">{date}</span>
+            {" at "}<span className="font-semibold">{slotTo12h(diet.appointment_at)}</span>
+          </div>
+        )}
+        {total > 0 && (
+          <div>
+            <div className="mb-1 flex items-center justify-between text-[11px] text-slate-500">
+              <span>Check-ins</span>
+              <span className="font-semibold text-slate-700">{done} of {total}</span>
+            </div>
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+              <div className="h-full rounded-full bg-orange-500" style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
+            </div>
+          </div>
+        )}
+
+        {/* The plan the patient is meant to follow — the reason they came. */}
+        {diet.consultation_report && (
+          <div className="rounded-lg border border-orange-200 bg-orange-50/60 p-3" data-testid="patient-portal-diet-report">
+            <p className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-orange-500">
+              Diet Consultation Report
+            </p>
+            <p className="whitespace-pre-wrap text-xs text-orange-900">{diet.consultation_report}</p>
+            {diet.consultation_report_by && (
+              <p className="mt-1.5 text-[10px] text-orange-400">
+                {diet.consultation_report_by}
+                {diet.consultation_report_at ? ` · ${String(diet.consultation_report_at).slice(0, 10)}` : ""}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function TreatmentTab({ data }) {
   return (
     <div className="space-y-4" data-testid="patient-portal-treatment-tab">
@@ -363,6 +423,11 @@ function TreatmentTab({ data }) {
         </p>
       )}
 
+      {/* The diet side of their care. Shown only once a Diet Consultation is actually
+          booked — diet is optional, and an empty card on every other patient's screen
+          would suggest a plan they were never put on. */}
+      <DietCard diet={data.diet} />
+
       {data.reviews && data.reviews.length > 0 && (
         <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
           <div className="border-b border-slate-100 bg-slate-50/60 px-4 py-3">
@@ -394,8 +459,10 @@ function TreatmentTab({ data }) {
 
 function PaymentTab({ data }) {
   const p = data.payment || {};
-  const totalAll = (p.consultation_fee_total || 0) + (p.treatment_fee_total || 0);
-  const collectedAll = (p.consultation_fee_paid || 0) + (p.treatment_fee_paid || 0);
+  // All three fees. The diet one was missing, so a patient who paid for a diet
+  // consultation was shown a Total that did not include their own money.
+  const totalAll = (p.consultation_fee_total || 0) + (p.treatment_fee_total || 0) + (p.diet_fee_total || 0);
+  const collectedAll = (p.consultation_fee_paid || 0) + (p.treatment_fee_paid || 0) + (p.diet_fee_paid || 0);
   const pendingAll = Math.max(totalAll - collectedAll, 0);
 
   return (
@@ -459,6 +526,99 @@ function PaymentTab({ data }) {
           <p className="text-xs text-slate-400">No treatment fee collected yet</p>
         )}
       </div>
+
+      {/* Only for patients who actually took a diet plan. Diet is optional, so an empty
+          card on every other patient's screen would be a bill they never had. */}
+      {p.diet_fee_paid != null && (
+        <div className="rounded-lg border border-slate-200 bg-white p-3" data-testid="patient-portal-diet-fee">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Diet Consultation Fee</p>
+            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">Paid</span>
+          </div>
+          <p className="text-xs text-slate-600">
+            ₹{p.diet_fee_paid} <span className="capitalize text-slate-400">via {p.diet_payment_mode}</span>
+          </p>
+          {p.diet_package_name && <p className="mt-0.5 text-[11px] text-slate-400">{p.diet_package_name}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const prettyBytes = (n) => {
+  const b = Number(n) || 0;
+  if (b < 1024) return `${b} B`;
+  if (b < 1024 * 1024) return `${Math.round(b / 1024)} KB`;
+  return `${(b / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+/**
+ * The patient's own documents.
+ *
+ * Only what the branch has shared comes back — the server decides that, not this
+ * component, so nothing here can widen it. Renders nothing at all when the list is empty,
+ * because an empty "Documents" card reads as something having gone missing.
+ *
+ * Opened through a blob URL rather than a direct link: the download route needs the
+ * session token in a header, which an <a href> cannot send.
+ */
+function PatientDocuments() {
+  const [docs, setDocs] = useState([]);
+  const [opening, setOpening] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    patientPortalDocuments()
+      .then((r) => { if (!cancelled) setDocs(r.documents || []); })
+      .catch(() => { if (!cancelled) setDocs([]); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const open = async (doc) => {
+    setOpening(doc.id);
+    try {
+      const url = await patientPortalDocumentUrl(doc.id);
+      window.open(url, "_blank", "noopener");
+      // Revoked on a delay rather than immediately: the new tab has to have started
+      // loading from it first, and revoking straight away leaves a blank tab.
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch {
+      toast.error("That document couldn't be opened. Please ask your branch.");
+    }
+    setOpening(null);
+  };
+
+  if (docs.length === 0) return null;
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-3" data-testid="patient-portal-documents">
+      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Your Documents</p>
+      <div className="space-y-2">
+        {docs.map((d) => (
+          <button
+            key={d.id}
+            type="button"
+            onClick={() => open(d)}
+            disabled={opening === d.id}
+            className="flex w-full items-center justify-between gap-3 rounded-lg border border-slate-200 p-2.5 text-left transition hover:border-sky-300 hover:bg-sky-50/50 disabled:opacity-50"
+            data-testid={`patient-portal-document-${d.id}`}
+          >
+            <div className="min-w-0">
+              <p className="truncate text-xs font-semibold text-slate-800">
+                {d.label || d.original_name}
+              </p>
+              <p className="text-[10px] text-slate-400">
+                {d.kind === "consultation_form" ? "Consultation Form" : "Report"}
+                {d.size_bytes ? ` · ${prettyBytes(d.size_bytes)}` : ""}
+                {d.created_at ? ` · ${String(d.created_at).slice(0, 10)}` : ""}
+              </p>
+            </div>
+            <span className="shrink-0 text-[11px] font-semibold text-sky-600">
+              {opening === d.id ? "Opening..." : "View"}
+            </span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -500,6 +660,8 @@ function ProfileTab({ data }) {
           </div>
         </div>
       )}
+
+      <PatientDocuments />
 
       {(data.branch_name || data.branch_phone) && (
         <div className="rounded-lg border border-sky-200 bg-sky-50 p-3">

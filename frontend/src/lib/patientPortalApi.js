@@ -51,3 +51,19 @@ export const patientPortalMe = async () => {
   const { data } = await portalApi.get("/patient-portal/me", { headers: authHeaders() });
   return data;
 };
+
+export const patientPortalDocuments = async () => {
+  const { data } = await portalApi.get("/patient-portal/documents", { headers: authHeaders() });
+  return data;
+};
+
+/** The bytes, as an object URL. Fetched as a blob rather than linked to directly: the
+    route needs the session token in a header, which a plain <a href> cannot send. The
+    caller owns the URL and must revokeObjectURL it when done. */
+export const patientPortalDocumentUrl = async (docId) => {
+  const { data } = await portalApi.get(`/patient-portal/documents/${docId}/download`, {
+    headers: authHeaders(),
+    responseType: "blob",
+  });
+  return URL.createObjectURL(data);
+};

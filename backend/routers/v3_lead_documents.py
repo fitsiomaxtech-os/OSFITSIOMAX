@@ -42,6 +42,29 @@ CHUNK = 1024 * 1024
 CONSULTATION_FORM = "consultation_form"
 GENERAL = "general"
 
+
+def default_shared_with_patient(kind: str) -> bool:
+    """Whether a newly uploaded document is visible in the patient's own Client Portal.
+
+    A consultation form is the patient's own intake form, filled by and about them — that
+    is the whole reason the kind exists — so it is shared on upload.
+
+    Everything else is not. A report, scan or letter can be filed for the clinic's use, and
+    a patient reading a finding before a clinician has explained it is a decision for the
+    branch to make deliberately, one document at a time, through the share control. Silent
+    exposure by default is the one outcome that cannot be undone.
+    """
+    return kind == CONSULTATION_FORM
+
+
+def is_shared_with_patient(doc: dict) -> bool:
+    """Reads the flag, falling back to the same rule for rows saved before it existed —
+    so an old consultation form still reaches the patient and an old report still doesn't."""
+    value = doc.get("shared_with_patient")
+    if value is None:
+        return default_shared_with_patient(doc.get("kind") or GENERAL)
+    return bool(value)
+
 # Everyone who treats the patient can read their documents; the front desk and the
 # clinicians who order them can add. A Physio can read a report without being able to
 # delete one.
@@ -64,7 +87,42 @@ async def list_lead_documents(
     docs = await v3_col("lead_documents").find(
         query, {"_id": 0, "stored_name": 0}
     ).sort("created_at", 1 if kind == CONSULTATION_FORM else -1).to_list(500)
+    # Resolved rather than returned raw, so the staff screen's toggle shows the same state
+    # the patient's portal is actually applying, including for rows saved before the flag.
+    for d in docs:
+        d["shared_with_patient"] = is_shared_with_patient(d)
     return {"documents": docs}
+
+
+@router.patch("/leads/{lead_id}/documents/{doc_id}/share")
+async def set_document_shared(
+    lead_id: str,
+    doc_id: str,
+    shared: bool,
+    user: V3UserOut = Depends(v3_require_roles(*WRITE_ROLES)),
+):
+    """Show this document in the patient's own Client Portal, or stop showing it.
+
+    Restricted to WRITE_ROLES rather than everyone who can read: deciding what a patient
+    sees is the branch's call, not something a treating clinician does in passing.
+    """
+    doc = await v3_col("lead_documents").find_one({"id": doc_id, "lead_id": lead_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    await v3_col("lead_documents").update_one(
+        {"id": doc_id}, {"$set": {"shared_with_patient": bool(shared)}}
+    )
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": lead_id,
+        "action": "document_share_changed",
+        "details": f"{doc.get('label') or doc.get('original_name')} "
+                   f"{'shared with' if shared else 'hidden from'} the patient's portal",
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": now_iso(),
+    })
+    return {"id": doc_id, "shared_with_patient": bool(shared)}
 
 
 @router.post("/leads/{lead_id}/documents")
@@ -121,6 +179,7 @@ async def upload_lead_document(
         "original_name": os.path.basename(file.filename or "document")[:200],
         "label": (label or "").strip()[:120],
         "kind": CONSULTATION_FORM if kind == CONSULTATION_FORM else GENERAL,
+        "shared_with_patient": default_shared_with_patient(CONSULTATION_FORM if kind == CONSULTATION_FORM else GENERAL),
         "content_type": file.content_type or "application/octet-stream",
         "size_bytes": size,
         "uploaded_by": user.full_name,

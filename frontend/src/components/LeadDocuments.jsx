@@ -3,7 +3,7 @@ import { FileText, Image as ImageIcon, Trash2, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
-import { leadDocuments, uploadLeadDocument, deleteLeadDocument, openLeadDocument } from "@/lib/api";
+import { leadDocuments, uploadLeadDocument, deleteLeadDocument, openLeadDocument, setDocumentShared } from "@/lib/api";
 
 /**
  * Documents held against one client — scans, reports, prescriptions, scheme letters.
@@ -97,6 +97,7 @@ const fmtWhen = (iso) => (iso ? `${String(iso).slice(8, 10)}/${String(iso).slice
 
 export const LeadDocuments = ({ leadId, canEdit = true, kind = "general", fixedLabel = "", hint }) => {
   const [docs, setDocs] = useState([]);
+  const [sharing, setSharing] = useState(null); // the doc whose share flag is in flight
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [label, setLabel] = useState("");
@@ -157,6 +158,20 @@ export const LeadDocuments = ({ leadId, canEdit = true, kind = "general", fixedL
     } catch {
       toast.error("Could not open that document");
     }
+  };
+
+  const toggleShare = async (doc) => {
+    const next = !doc.shared_with_patient;
+    setSharing(doc.id);
+    try {
+      await setDocumentShared(leadId, doc.id, next);
+      // Patched in place rather than reloading: the list is the same, only this flag moved.
+      setDocs((prev) => prev.map((d) => (d.id === doc.id ? { ...d, shared_with_patient: next } : d)));
+      toast.success(next ? "Shared with the patient's portal" : "Hidden from the patient's portal");
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Couldn't change sharing");
+    }
+    setSharing(null);
   };
 
   const remove = async (doc) => {
@@ -237,6 +252,29 @@ export const LeadDocuments = ({ leadId, canEdit = true, kind = "general", fixedL
                     {fmtSize(d.size_bytes || 0)} · {fmtWhen(d.created_at)} · {d.uploaded_by || "—"}
                   </p>
                 </button>
+                {/* Whether the patient can see this in their own Client Portal.
+                    Consultation forms are shared on upload — it is the patient's own
+                    form. Reports and scans are not, because a patient reading a finding
+                    before a clinician has explained it is the branch's call to make
+                    deliberately, one document at a time. */}
+                {canEdit && (
+                  <button
+                    type="button"
+                    onClick={() => toggleShare(d)}
+                    disabled={sharing === d.id}
+                    className={`shrink-0 rounded-md border px-2 py-1 text-[10px] font-bold transition disabled:opacity-50 ${
+                      d.shared_with_patient
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                        : "border-slate-200 text-slate-400 hover:bg-slate-50"
+                    }`}
+                    title={d.shared_with_patient
+                      ? "Visible to the patient in their portal — click to hide"
+                      : "Hidden from the patient — click to share"}
+                    data-testid={`lead-doc-share-${d.id}`}
+                  >
+                    {d.shared_with_patient ? "SHARED" : "PRIVATE"}
+                  </button>
+                )}
                 {canEdit && (
                   <button
                     type="button"
