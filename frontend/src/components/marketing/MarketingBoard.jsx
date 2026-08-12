@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   FileSpreadsheet, Layers, Users, ChevronDown,
-  Plus, RefreshCw, Trash2, Link as LinkIcon, ArrowRightLeft, X, Pencil, Lock,
+  Plus, RefreshCw, Trash2, Link as LinkIcon, ArrowRightLeft, X, Pencil,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,7 @@ import {
   mkUnassignedCount, mkDistributeUnassigned,
   mkGetTeam, mkCreateTeamMember, mkAllLeads, mkAssignLead, mkDeleteLead, mkBulkDelete,
   mkGetSources, mkCreateSource, mkUpdateSource, mkDeleteSource, mkSyncSource,
-  gsStatus, gsAuthUrl, gsDisconnect, gsRequestOtp, gsVerifyOtp, gsPull,
+  gsStatus, gsAuthUrl, gsDisconnect, gsPull,
 } from "@/lib/api";
 import { MaskedContact } from "@/components/MaskedContact";
 import { SourcePill } from "@/components/marketing/SourcePill";
@@ -48,11 +48,9 @@ const SourcesTab = ({ branches = [] }) => {
   const [syncResult, setSyncResult] = useState(null);
   const [pullResult, setPullResult] = useState(null);
   const [pullingId, setPullingId] = useState(null);
-  // "View" opens a locked popup — entering the code unlocks Connect/Disconnect
-  // controls for that connection, rather than either action being one click away.
+  // "View" shows the connection and its controls. It used to open locked behind a
+  // code; that came off with the rest of the lock system.
   const [showManage, setShowManage] = useState(false);
-  const [manageCode, setManageCode] = useState("");
-  const [manageUnlocked, setManageUnlocked] = useState(false);
   const [manageBusy, setManageBusy] = useState(false);
 
   const load = useCallback(() => mkGetSources().then(setSources).catch((e) => console.warn("[load failed]", e?.message || e)), []);
@@ -79,50 +77,17 @@ const SourcesTab = ({ branches = [] }) => {
     } catch (e) { toast.error(e?.response?.data?.detail || "Failed to start OAuth"); }
   };
 
-  // The whole lead pipeline runs through this connection, so disconnecting sits behind
-  // the same one-time code the source gate uses — "View" opens locked, the code from
-  // your inbox unlocks the controls. The grant it issues is what /disconnect actually
-  // checks, so the server is enforcing this and not just the dialog.
-  const [manageRequest, setManageRequest] = useState(null);
-  const [manageGrant, setManageGrant] = useState(null);
 
-  const closeManage = () => {
-    setShowManage(false);
-    setManageCode("");
-    setManageUnlocked(false);
-    setManageRequest(null);
-    setManageGrant(null);
-  };
+  const closeManage = () => setShowManage(false);
 
-  const sendManageOtp = async () => {
-    setManageBusy(true);
-    try {
-      const res = await gsRequestOtp("disconnect");
-      setManageRequest(res);
-      toast.success(`Code sent to ${res.sent_to}`);
-    } catch (e) {
-      toast.error(e?.response?.data?.detail || "Couldn't send the code");
-    }
-    setManageBusy(false);
-  };
-
-  const unlockManage = async () => {
-    if (!manageCode.trim()) { toast.error("Enter the code from your email"); return; }
-    setManageBusy(true);
-    try {
-      const res = await gsVerifyOtp(manageRequest.request_id, manageCode.trim());
-      setManageGrant(res.grant_id);
-      setManageUnlocked(true);
-    } catch (e) {
-      toast.error(e?.response?.data?.detail || "Incorrect code");
-    }
-    setManageBusy(false);
-  };
-
+  // Disconnect still confirms. It is the one action on this screen that stops every
+  // branch's sheet sync at once and cannot be undone from the app — a misclick guard,
+  // not a lock.
   const disconnectFromManage = async () => {
+    if (!window.confirm("Disconnect Google Sheets? Every branch's lead sync stops until it is reconnected.")) return;
     setManageBusy(true);
     try {
-      await gsDisconnect(manageGrant);
+      await gsDisconnect();
       toast.success("Disconnected");
       closeManage();
       loadGs();
@@ -201,53 +166,16 @@ const SourcesTab = ({ branches = [] }) => {
     load();
   };
 
-  // Editing or deleting a live source is one accidental tap away from breaking a
-  // branch's lead sync, so both sit behind a second factor on top of the Super Admin
-  // role. That used to be a static code held on the server; it is a one-time code
-  // emailed to the Super Admin now, so there is nothing to remember and nothing that
-  // can be forgotten past recovery.
-  const [codeGate, setCodeGate] = useState(null); // { type: "edit" | "delete", source } | null
-  const [otpValue, setOtpValue] = useState("");
-  const [otpRequest, setOtpRequest] = useState(null); // { request_id, sent_to } once sent
-  const [gateBusy, setGateBusy] = useState(false);
-  const [cooldown, setCooldown] = useState(0);
-
-  // Counts the resend window down on screen. The server enforces it too — this only
-  // saves someone tapping into a 429 they could have seen coming.
-  useEffect(() => {
-    if (cooldown <= 0) return undefined;
-    const t = setTimeout(() => setCooldown((c) => c - 1), 1000);
-    return () => clearTimeout(t);
-  }, [cooldown]);
-
-  const closeCodeGate = () => { setCodeGate(null); setOtpValue(""); setOtpRequest(null); };
-
-  const sendGateOtp = async () => {
-    setGateBusy(true);
-    try {
-      const res = await gsRequestOtp(codeGate.type, codeGate.source?.name);
-      setOtpRequest(res);
-      setCooldown(60);
-      toast.success(`Code sent to ${res.sent_to}`);
-    } catch (e) {
-      toast.error(e?.response?.data?.detail || "Couldn't send the code");
-    }
-    setGateBusy(false);
-  };
-
-  const submitCodeGate = async () => {
-    if (!otpValue.trim()) { toast.error("Enter the code from your email"); return; }
-    setGateBusy(true);
-    try {
-      await gsVerifyOtp(otpRequest.request_id, otpValue.trim());
-      const { type, source } = codeGate;
-      closeCodeGate();
-      if (type === "edit") setShowEdit(source);
-      else await remove(source.id);
-    } catch (e) {
-      toast.error(e?.response?.data?.detail || "Incorrect code");
-    }
-    setGateBusy(false);
+  // No gate on editing. Reaching this screen already means a Super Admin session,
+  // and that is the check now — the one-time code that used to sit here was removed
+  // at the branch's request.
+  //
+  // Delete keeps a confirm, because it is the one action here that destroys a
+  // configured source and cannot be undone from the app. That is a misclick guard,
+  // not a lock: it asks nothing you have to go and find.
+  const confirmRemove = async (source) => {
+    if (!window.confirm(`Delete the source "${source.name}"? Leads already imported stay; the feed stops.`)) return;
+    await remove(source.id);
   };
 
   return (
@@ -308,8 +236,8 @@ const SourcesTab = ({ branches = [] }) => {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <button onClick={() => setCodeGate({ type: "edit", source: s })} className="text-slate-400 hover:text-sky-600" data-testid={`mk-source-edit-${s.id}`} title="Edit source"><Pencil className="h-4 w-4" /></button>
-                <button onClick={() => setCodeGate({ type: "delete", source: s })} className="text-slate-400 hover:text-red-500" data-testid={`mk-source-delete-${s.id}`} title="Delete source"><Trash2 className="h-4 w-4" /></button>
+                <button onClick={() => setShowEdit(s)} className="text-slate-400 hover:text-sky-600" data-testid={`mk-source-edit-${s.id}`} title="Edit source"><Pencil className="h-4 w-4" /></button>
+                <button onClick={() => confirmRemove(s)} className="text-slate-400 hover:text-red-500" data-testid={`mk-source-delete-${s.id}`} title="Delete source"><Trash2 className="h-4 w-4" /></button>
               </div>
             </CardHeader>
             <CardContent className="space-y-2 text-xs text-slate-600">
@@ -415,45 +343,6 @@ const SourcesTab = ({ branches = [] }) => {
 
       {showManage && (
         <DialogShell title="Google Sheets Connection" onClose={closeManage} testid="gs-manage-dialog">
-          {!manageUnlocked ? (
-            <>
-              <p className="flex items-start gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-                <Lock className="mt-0.5 h-4 w-4 shrink-0" />
-                Every branch's lead sync runs through this connection, so the controls need a
-                one-time code.
-              </p>
-              {!manageRequest ? (
-                <Button onClick={sendManageOtp} disabled={manageBusy} className="w-full" data-testid="gs-manage-otp-send">
-                  {manageBusy ? "Sending..." : "Email me a code"}
-                </Button>
-              ) : (
-                <>
-                  <p className="text-xs text-slate-500">
-                    Code sent to <span className="font-semibold text-slate-700">{manageRequest.sent_to}</span>.
-                  </p>
-                  <Input
-                    autoFocus
-                    inputMode="numeric"
-                    maxLength={6}
-                    placeholder="6-digit code"
-                    value={manageCode}
-                    onChange={(e) => setManageCode(e.target.value.replace(/\D/g, ""))}
-                    onKeyDown={(e) => { if (e.key === "Enter") unlockManage(); }}
-                    data-testid="gs-manage-code"
-                  />
-                  <Button
-                    onClick={unlockManage}
-                    disabled={manageBusy || manageCode.trim().length < 6}
-                    className="w-full"
-                    data-testid="gs-manage-unlock"
-                  >
-                    {manageBusy ? "Checking..." : "Unlock"}
-                  </Button>
-                </>
-              )}
-            </>
-          ) : (
-            <>
               <p className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-700">
                 {gs.connected ? "Currently connected." : "Not connected."}
               </p>
@@ -470,71 +359,6 @@ const SourcesTab = ({ branches = [] }) => {
                   {manageBusy ? "Disconnecting..." : "Disconnect"}
                 </Button>
               )}
-            </>
-          )}
-        </DialogShell>
-      )}
-
-      {codeGate && (
-        <DialogShell
-          title={codeGate.type === "edit" ? "Edit Source" : "Delete Source"}
-          onClose={closeCodeGate}
-          testid="mk-source-code-gate-dialog"
-        >
-          <p className="flex items-start gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-            <Lock className="mt-0.5 h-4 w-4 shrink-0" />
-            {codeGate.type === "edit" ? "Editing" : "Deleting"} "{codeGate.source.name}" needs a one-time code.
-          </p>
-
-          {!otpRequest ? (
-            <>
-              <p className="text-xs text-slate-500">
-                We'll email a 6-digit code to the address on your Super Admin account. It
-                works once and expires in 10 minutes.
-              </p>
-              <Button
-                onClick={sendGateOtp}
-                disabled={gateBusy}
-                className="w-full"
-                data-testid="mk-source-otp-send"
-              >
-                {gateBusy ? "Sending..." : "Email me a code"}
-              </Button>
-            </>
-          ) : (
-            <>
-              <p className="text-xs text-slate-500">
-                Code sent to <span className="font-semibold text-slate-700">{otpRequest.sent_to}</span>.
-              </p>
-              <Input
-                autoFocus
-                inputMode="numeric"
-                maxLength={6}
-                placeholder="6-digit code"
-                value={otpValue}
-                onChange={(e) => setOtpValue(e.target.value.replace(/\D/g, ""))}
-                onKeyDown={(e) => { if (e.key === "Enter") submitCodeGate(); }}
-                data-testid="mk-source-code-gate-input"
-              />
-              <Button
-                onClick={submitCodeGate}
-                disabled={gateBusy || otpValue.trim().length < 6}
-                className={`w-full ${codeGate.type === "delete" ? "bg-red-600 text-white hover:bg-red-700" : ""}`}
-                data-testid="mk-source-code-gate-confirm"
-              >
-                {gateBusy ? "Checking..." : codeGate.type === "edit" ? "Continue to Edit" : "Continue to Delete"}
-              </Button>
-              <button
-                type="button"
-                onClick={sendGateOtp}
-                disabled={gateBusy || cooldown > 0}
-                className="w-full text-center text-[11px] font-semibold text-sky-600 hover:text-sky-800 disabled:text-slate-300"
-                data-testid="mk-source-otp-resend"
-              >
-                {cooldown > 0 ? `Resend in ${cooldown}s` : "Didn't get it? Send another"}
-              </button>
-            </>
-          )}
         </DialogShell>
       )}
     </div>
