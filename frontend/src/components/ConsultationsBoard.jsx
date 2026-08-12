@@ -310,6 +310,24 @@ const DiscountCalculator = ({ assignedPrice, amount, onAmountChange, label, test
   );
 };
 
+/**
+ * Button label that shortens on a phone.
+ *
+ * The Fee Collected panel can show four actions at once — Assign Physio, Collect Diet Fee,
+ * Diet Appointment, Cancel — and their full labels need roughly 280px of text, more than a
+ * phone has once the panel's padding is off. They have to sit on one row, so the row cannot
+ * wrap and must not scroll; the labels are what gives way instead.
+ */
+const Lbl = ({ full, short }) => (
+  <>
+    <span className="sm:hidden">{short}</span>
+    <span className="hidden sm:inline">{full}</span>
+  </>
+);
+
+// Applied to every button in a stage action row: tighter below sm so four fit, normal above.
+const ACT_BTN = "px-2 text-[11px] sm:px-3 sm:text-xs";
+
 export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened, externalDate, hideDateFilter = false, onCountChange, onRowsChange, externalSearch, mobileCards = false }) => {
   const isConsultant = viewerRole === "head_physio";
   // Head Physio tracks progress on their own independent pipeline (head_consultation_stage),
@@ -2237,7 +2255,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 <Button
                   size="sm"
                   variant="outline"
-                  className="border-rose-200 text-xs text-rose-600 hover:bg-rose-50"
+                  className={`border-rose-200 text-rose-600 hover:bg-rose-50 ${ACT_BTN}`}
                   onClick={() => { if (window.confirm("Cancel this consultation?")) moveStage(selectedLead, "Cancel"); }}
                   data-testid="cons-cancel-btn"
                 >
@@ -2262,13 +2280,16 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 <Button
                   size="sm"
                   variant={dietBooked ? "outline" : undefined}
-                  className={dietBooked
-                    ? "border-orange-200 text-xs text-orange-700 hover:bg-orange-50"
-                    : "bg-orange-500 text-xs text-white hover:bg-orange-600"}
+                  className={`${dietBooked
+                    ? "border-orange-200 text-orange-700 hover:bg-orange-50"
+                    : "bg-orange-500 text-white hover:bg-orange-600"} ${ACT_BTN}`}
                   onClick={openDietModal}
                   data-testid="cons-open-diet-assign"
                 >
-                  <Salad className="mr-1 h-3.5 w-3.5" /> {dietBooked ? "Reschedule Diet" : "Diet Appointment"}
+                  <Salad className="mr-1 h-3.5 w-3.5" />{" "}
+                  {dietBooked
+                    ? <Lbl full="Reschedule Diet" short="Diet" />
+                    : <Lbl full="Diet Appointment" short="Diet Appt" />}
                 </Button>
               ) : null;
 
@@ -2280,7 +2301,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         <Calendar className="h-3.5 w-3.5" /> Move to Stage
                       </p>
                       <p className="mb-2 text-xs text-slate-600">Schedule the Consultation Date & Time to send this patient to the Head Physio.</p>
-                      <div className="flex items-center gap-1.5 overflow-x-auto [justify-content:safe_center] [&>*]:shrink-0">
+                      <div className="flex items-center gap-1.5 [justify-content:safe_center] [&>*]:shrink-0">
                         <Button
                           size="sm"
                           className="bg-amber-500 text-xs text-white hover:bg-amber-600"
@@ -2304,7 +2325,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       <p className="mb-2 text-xs text-slate-600">
                         {activeFollowUp ? `Scheduled for ${activeFollowUp.date} at ${activeFollowUp.time} — waiting on the Head Physio.` : "Waiting on the Head Physio."}
                       </p>
-                      <div className="flex items-center gap-1.5 overflow-x-auto [justify-content:safe_center] [&>*]:shrink-0">
+                      <div className="flex items-center gap-1.5 [justify-content:safe_center] [&>*]:shrink-0">
                         <Button
                           size="sm"
                           className="bg-amber-500 text-xs text-white hover:bg-amber-600"
@@ -2350,7 +2371,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       <Button size="sm" className="mt-3 bg-sky-600 text-xs hover:bg-sky-700" onClick={openCollectFeeDraft} data-testid="cons-open-collect-fee">
                         {alreadyPaid ? "Update Payment" : "Collect Payment"}
                       </Button>
-                      <div className="mt-2 flex items-center gap-1.5 overflow-x-auto [justify-content:safe_center] [&>*]:shrink-0">{CancelButton}</div>
+                      <div className="mt-2 flex items-center gap-1.5 [justify-content:safe_center] [&>*]:shrink-0">{CancelButton}</div>
                     </div>
                   );
                 }
@@ -2415,13 +2436,15 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     <Button
                       size="sm"
                       variant={dietFeePaid ? "outline" : undefined}
-                      className={dietFeePaid
-                        ? "border-orange-200 text-xs text-orange-700 hover:bg-orange-50"
-                        : "bg-orange-600 text-xs text-white hover:bg-orange-700"}
+                      className={`${dietFeePaid
+                        ? "border-orange-200 text-orange-700 hover:bg-orange-50"
+                        : "bg-orange-600 text-white hover:bg-orange-700"} ${ACT_BTN}`}
                       onClick={openDietFeeDraft}
                       data-testid="cons-open-diet-fee"
                     >
-                      {dietFeePaid ? "Update Diet Fee" : "Collect Diet Fee"}
+                      {dietFeePaid
+                        ? <Lbl full="Update Diet Fee" short="Diet Fee" />
+                        : <Lbl full="Collect Diet Fee" short="Diet Fee" />}
                     </Button>
                   );
 
@@ -2434,7 +2457,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         {ConsultationFeeSummary}
                         {DietFeeSection}
                         <p className="mb-2 mt-3 text-xs text-slate-600">Consultation Only — no treatment sessions. Mark this consultation as completed to close it out.</p>
-                        <div className="flex items-center gap-1.5 overflow-x-auto [justify-content:safe_center] [&>*]:shrink-0">
+                        <div className="flex items-center gap-1.5 [justify-content:safe_center] [&>*]:shrink-0">
                           <Button size="sm" className="bg-emerald-600 text-xs hover:bg-emerald-700" onClick={submitMarkCompleted} disabled={completingConsultation} data-testid="cons-mark-completed">
                             {completingConsultation ? "Saving..." : "Mark Consultation Completed"}
                           </Button>
@@ -2553,11 +2576,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           Fee block above, so it took a line of its own and the row beneath
                           it started with Diet Appointment — three buttons on two lines,
                           reading as unrelated steps. Wraps on a phone. */}
-                      <div className={`${treatmentPaid ? "mt-2" : "mt-3"} flex items-center gap-1.5 overflow-x-auto [justify-content:safe_center] [&>*]:shrink-0`}>
+                      <div className={`${treatmentPaid ? "mt-2" : "mt-3"} flex items-center gap-1.5 [justify-content:safe_center] [&>*]:shrink-0`}>
                         {FeeActions}
                         {treatmentPaid && (
-                          <Button size="sm" className="bg-violet-600 text-xs hover:bg-violet-700" onClick={openPhysioModal} data-testid="cons-open-physio-assign-from-fee-collected">
-                            Assign Physio
+                          <Button size="sm" className={`bg-violet-600 hover:bg-violet-700 ${ACT_BTN}`} onClick={openPhysioModal} data-testid="cons-open-physio-assign-from-fee-collected">
+                            <Lbl full="Assign Physio" short="Physio" />
                           </Button>
                         )}
                         {DietFeeButton}
@@ -2576,7 +2599,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           <Users className="h-3.5 w-3.5" /> Physio Assign
                         </p>
                         <p className="text-xs text-slate-600">Treatment Fee collected. Choose the physiotherapist who will deliver the sessions.</p>
-                        <div className="mt-3 flex items-center gap-1.5 overflow-x-auto [justify-content:safe_center] [&>*]:shrink-0">
+                        <div className="mt-3 flex items-center gap-1.5 [justify-content:safe_center] [&>*]:shrink-0">
                           <Button size="sm" className="bg-violet-600 text-xs hover:bg-violet-700" onClick={openPhysioModal} data-testid="cons-open-physio-assign">
                             Assign Physio
                           </Button>
@@ -2594,7 +2617,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         <p className="mt-0.5 text-xs text-slate-600">Diet Consultation: <span className="font-semibold text-slate-800">{selectedLead.diet_coach_name}</span>
                           {selectedLead.diet_appointment_at && ` · ${dayLabel(selectedLead.diet_appointment_at.split("T")[0])} at ${to12h(selectedLead.diet_appointment_at.split("T")[1])}`}</p>
                       )}
-                      <div className="mt-3 flex items-center gap-1.5 overflow-x-auto [justify-content:safe_center] [&>*]:shrink-0">
+                      <div className="mt-3 flex items-center gap-1.5 [justify-content:safe_center] [&>*]:shrink-0">
                         <Button size="sm" variant="outline" className="text-xs" onClick={openPhysioModal} data-testid="cons-reassign-physio">
                           Reassign Physio
                         </Button>
@@ -2616,7 +2639,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       {/* A closed consultation can still start a diet plan. "Consultation +
                           Diet" patients land here the moment the consultation is marked
                           completed, and that is exactly when their plan gets booked. */}
-                      {DietButton && <div className="mt-3 flex items-center gap-1.5 overflow-x-auto [justify-content:safe_center] [&>*]:shrink-0">{DietButton}</div>}
+                      {DietButton && <div className="mt-3 flex items-center gap-1.5 [justify-content:safe_center] [&>*]:shrink-0">{DietButton}</div>}
                     </div>
                   );
                 }
