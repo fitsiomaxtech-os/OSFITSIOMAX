@@ -523,7 +523,13 @@ export const BranchAdminBoard = ({ branchId, embedded = false }) => {
             {/* Icons only. The labels live on title/aria-label rather than being dropped,
                 so hovering still says what each one does and a screen reader still
                 announces it — an unlabelled glyph that announces nothing is a button only
-                the person who built it can use. */}
+                the person who built it can use.
+
+                Their own row on a phone, centred. The search box takes the full width
+                above them, so as direct children of the toolbar they sat hard left under
+                it with the rest of the line empty. From sm up they go back to trailing the
+                search on one line. */}
+            <div className="flex w-full items-center justify-center gap-2 sm:w-auto sm:justify-start sm:gap-3">
             <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="branch-date-filter" centered iconOnly />
             <Button
               onClick={() => { loadBoard(); setRefreshTick((n) => n + 1); }}
@@ -550,6 +556,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false }) => {
               noSourcesHint="No Google Sheet is linked to this branch yet — ask your Super Admin to tag one to this branch in Marketing Board → Lead Sources."
               iconOnly
             />
+            </div>
           </div>
 
           {isConsultationStage ? (
