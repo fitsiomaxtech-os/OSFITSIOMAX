@@ -11,6 +11,8 @@ Endpoints (all under /api/v3/marketing/google-sheets):
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, Optional
 import asyncio
+import hashlib
+import secrets
 import os
 import re
 import uuid
@@ -28,6 +30,7 @@ from utils import now_iso, generate_patient_number
 from deps import v3_require_roles
 from schemas.v3 import V3UserOut
 from stage_utils import get_first_stage_name
+from email_utils import send_email
 from routers.v3_marketing import (
     auto_map_columns, normalize_phone, STANDARD_FIELDS, round_robin_assign,
 )
@@ -166,7 +169,62 @@ async def auth_callback(code: str, state: Optional[str] = None):
 
 
 class DisconnectInput(BaseModel):
-    secret: str
+    # Either proof is accepted. `grant_id` is what the OTP flow issues and what the UI
+    # now sends; `secret` is the old shared code, still honoured so an install that has
+    # SHEETS_DISCONNECT_SECRET set and scripts pointed at it keeps working.
+    grant_id: Optional[str] = None
+    secret: Optional[str] = None
+
+
+# ---------- the gate on editing, deleting and disconnecting a source ----------
+#
+# These actions run the whole lead pipeline: a stray tap breaks every branch's sheet
+# sync. Super Admin alone was not judged enough, so there is a second factor on top of
+# the role check.
+#
+# That second factor used to be SHEETS_DISCONNECT_SECRET — a static code held in the
+# server environment. It had one fault that mattered more than anything it prevented:
+# nothing could recover it. Forget it and the only way back in was SSH to the VPS, and a
+# code nobody can reset is a code that eventually locks out the person it was protecting.
+#
+# It is a one-time code sent to the Super Admin's own inbox now. Same shape as the
+# Super Admin creation flow, and the same properties: nothing to remember, nothing to
+# share, and it expires. Losing access now needs losing the mailbox.
+
+OTP_TTL_MINUTES = 10
+GRANT_TTL_MINUTES = 10
+MAX_OTP_ATTEMPTS = 5
+RESEND_COOLDOWN_SECONDS = 60
+FALLBACK_OTP_EMAIL = "fitsiomaxtech@gmail.com"
+
+GATE_ACTIONS = {
+    "edit": "edit a lead source",
+    "delete": "delete a lead source",
+    "disconnect": "disconnect Google Sheets",
+}
+
+
+class GateOtpRequest(BaseModel):
+    action: str
+    source_name: Optional[str] = None
+
+
+class GateOtpVerify(BaseModel):
+    request_id: str
+    otp: str
+
+
+def _hash_otp(otp: str) -> str:
+    return hashlib.sha256(otp.encode()).hexdigest()
+
+
+def _mask_email(email: str) -> str:
+    """Enough to recognise your own inbox, not enough to hand someone the address."""
+    name, _, domain = (email or "").partition("@")
+    if not domain:
+        return "your email"
+    shown = name[:2] if len(name) > 2 else name[:1]
+    return f"{shown}{'*' * max(len(name) - len(shown), 1)}@{domain}"
 
 
 def _check_secret(secret: str) -> None:
@@ -177,20 +235,135 @@ def _check_secret(secret: str) -> None:
         raise HTTPException(status_code=403, detail="Incorrect code")
 
 
+async def _consume_grant(grant_id: str, action: str) -> None:
+    """A grant is single-use, expires, and is bound to the action it was issued for —
+    an OTP taken for an edit cannot be replayed to disconnect the whole connection."""
+    grant = await v3_col("sheets_gate_grants").find_one({"id": grant_id}, {"_id": 0})
+    if not grant or grant.get("consumed"):
+        raise HTTPException(status_code=403, detail="That approval has already been used — request a new code")
+    if datetime.fromisoformat(grant["expires_at"]) < datetime.now(timezone.utc):
+        raise HTTPException(status_code=403, detail="That approval expired — request a new code")
+    if grant.get("action") != action:
+        raise HTTPException(status_code=403, detail="That approval was issued for a different action")
+    await v3_col("sheets_gate_grants").update_one({"id": grant_id}, {"$set": {"consumed": True}})
+
+
+@router.post("/request-otp")
+async def request_gate_otp(payload: GateOtpRequest, user: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    """Send a one-time code to the Super Admin's own inbox."""
+    if payload.action not in GATE_ACTIONS:
+        raise HTTPException(status_code=400, detail="Unknown action")
+
+    # Their own address, so the person doing the work is the person who receives it and
+    # there is no shared mailbox to chase. Falls back to the control address only when
+    # the account carries no email at all.
+    to_address = (user.email or "").strip() or FALLBACK_OTP_EMAIL
+
+    recent = await v3_col("sheets_gate_otps").find_one(
+        {"user_id": user.id, "consumed": False}, {"_id": 0, "created_at": 1}, sort=[("created_at", -1)]
+    )
+    if recent:
+        elapsed = (datetime.now(timezone.utc) - datetime.fromisoformat(recent["created_at"])).total_seconds()
+        if elapsed < RESEND_COOLDOWN_SECONDS:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Please wait {int(RESEND_COOLDOWN_SECONDS - elapsed)}s before asking for another code",
+            )
+
+    otp = f"{secrets.randbelow(1000000):06d}"
+    doc = {
+        "id": str(uuid.uuid4()),
+        "user_id": user.id,
+        "action": payload.action,
+        "source_name": payload.source_name,
+        "otp_hash": _hash_otp(otp),
+        "attempts": 0,
+        "consumed": False,
+        "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=OTP_TTL_MINUTES)).isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await v3_col("sheets_gate_otps").insert_one(doc.copy())
+
+    what = GATE_ACTIONS[payload.action]
+    target = f' "{payload.source_name}"' if payload.source_name else ""
+    try:
+        send_email(
+            to_address,
+            "FitsiomaxOS — approval code for a lead source change",
+            (
+                f"{user.full_name} asked to {what}{target}.\n\n"
+                f"Code: {otp}\n"
+                f"It expires in {OTP_TTL_MINUTES} minutes and works once.\n\n"
+                f"If this wasn't you, ignore this email — nothing changes without the code."
+            ),
+        )
+    except Exception as e:
+        # The row is already written; without this the caller sees a 500 and has no idea
+        # whether a code went out. Named plainly instead: this is a mail configuration
+        # problem, not a wrong code.
+        raise HTTPException(
+            status_code=503,
+            detail=f"Couldn't send the code — check the mail settings on the server ({type(e).__name__})",
+        )
+
+    return {
+        "request_id": doc["id"],
+        "sent_to": _mask_email(to_address),
+        "expires_in_minutes": OTP_TTL_MINUTES,
+    }
+
+
+@router.post("/verify-otp")
+async def verify_gate_otp(payload: GateOtpVerify, user: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    """Check the code and issue a short-lived, single-use grant for that one action."""
+    req = await v3_col("sheets_gate_otps").find_one({"id": payload.request_id}, {"_id": 0})
+    if not req:
+        raise HTTPException(status_code=404, detail="Request not found — ask for a new code")
+    # Bound to the account that asked for it: another Super Admin cannot spend a code
+    # sent to somebody else's inbox.
+    if req.get("user_id") != user.id:
+        raise HTTPException(status_code=403, detail="That code was issued to a different account")
+    if req.get("consumed"):
+        raise HTTPException(status_code=400, detail="That code has already been used")
+    if datetime.fromisoformat(req["expires_at"]) < datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="That code expired — ask for a new one")
+    if req.get("attempts", 0) >= MAX_OTP_ATTEMPTS:
+        raise HTTPException(status_code=429, detail="Too many wrong attempts — ask for a new code")
+
+    if _hash_otp(payload.otp) != req["otp_hash"]:
+        await v3_col("sheets_gate_otps").update_one({"id": req["id"]}, {"$inc": {"attempts": 1}})
+        raise HTTPException(status_code=401, detail="Incorrect code")
+
+    await v3_col("sheets_gate_otps").update_one({"id": req["id"]}, {"$set": {"consumed": True}})
+    grant = {
+        "id": str(uuid.uuid4()),
+        "user_id": user.id,
+        "action": req["action"],
+        "consumed": False,
+        "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=GRANT_TTL_MINUTES)).isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await v3_col("sheets_gate_grants").insert_one(grant.copy())
+    return {"ok": True, "grant_id": grant["id"], "action": req["action"]}
+
+
 @router.post("/verify-secret")
 async def verify_secret(payload: DisconnectInput, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
-    """Non-destructive check used to unlock the Connect/Disconnect controls in the
-    'View' popup — the real enforcement still happens again at /disconnect itself."""
-    _check_secret(payload.secret)
+    """The old static-code check. Kept for any install still configured that way; the UI
+    uses the OTP flow above."""
+    _check_secret(payload.secret or "")
     return {"ok": True}
 
 
 @router.post("/disconnect")
 async def disconnect(payload: DisconnectInput, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
-    # The whole lead pipeline runs through this connection — a stray click here breaks
-    # every branch's sheet sync, so disconnecting requires a shared secret on top of the
-    # super_admin role check, not just a browser confirm() a super admin can click past.
-    _check_secret(payload.secret)
+    # Enforced here as well as in the UI: this is the one action in the set that is
+    # irreversible from the app, so it re-checks rather than trusting that a dialog was
+    # shown. A grant is spent here, so the same code cannot disconnect twice.
+    if payload.grant_id:
+        await _consume_grant(payload.grant_id, "disconnect")
+    else:
+        _check_secret(payload.secret or "")
     await v3_col("google_sheets_tokens").delete_one({"id": TOKEN_DOC_ID})
     return {"disconnected": True}
 
