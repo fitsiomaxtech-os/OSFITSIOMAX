@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Calendar,
   CheckCircle2,
+  RefreshCw,
   ClipboardCheck,
   ChevronLeft,
   ChevronRight,
@@ -520,9 +521,29 @@ export const BranchAdminBoard = ({ branchId, embedded = false }) => {
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
               <Input className="pl-9" placeholder="Search patients..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} data-testid="branch-search" />
             </div>
-            <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="branch-date-filter" centered />
-            <Button onClick={() => setShowCreateLead(true)} className="flex-1 bg-sky-600 hover:bg-sky-700 sm:flex-none" data-testid="branch-create-lead-btn">
-              <UserPlus className="h-4 w-4 mr-1.5" />Create Lead
+            {/* Icons only. The labels live on title/aria-label rather than being dropped,
+                so hovering still says what each one does and a screen reader still
+                announces it — an unlabelled glyph that announces nothing is a button only
+                the person who built it can use. */}
+            <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="branch-date-filter" centered iconOnly />
+            <Button
+              onClick={loadBoard}
+              disabled={loading}
+              title="Refresh"
+              aria-label="Refresh"
+              className="h-10 w-10 shrink-0 bg-orange-500 p-0 text-white hover:bg-orange-600"
+              data-testid="branch-refresh-btn"
+            >
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            </Button>
+            <Button
+              onClick={() => setShowCreateLead(true)}
+              title="Create Lead"
+              aria-label="Create Lead"
+              className="h-10 w-10 shrink-0 bg-sky-600 p-0 hover:bg-sky-700"
+              data-testid="branch-create-lead-btn"
+            >
+              <UserPlus className="h-4 w-4" />
             </Button>
             <PullFromSheetButton
               onPulled={loadBoard}

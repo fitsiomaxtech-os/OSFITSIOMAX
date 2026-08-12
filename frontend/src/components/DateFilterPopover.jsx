@@ -84,7 +84,18 @@ const manualToIso = (text) => {
   return real ? iso : "";
 };
 
-export const DateFilterPopover = ({ value, onChange, testid = "date-filter", centered = false, placeholder = "Date Filter" }) => {
+/**
+ * `iconOnly` drops the label and squares the trigger down to the calendar glyph.
+ *
+ * The label is still carried on `title` and `aria-label`, so what the control does is
+ * available to a hover and to a screen reader — an unlabelled icon that announces nothing
+ * is a button only the person who built it can use.
+ *
+ * When a filter is active the label comes back regardless. "Date Filter" is decoration
+ * once you know where the button is; "Last 90 Days" is the state of the screen you are
+ * reading, and hiding that would leave numbers filtered with nothing saying so.
+ */
+export const DateFilterPopover = ({ value, onChange, testid = "date-filter", centered = false, placeholder = "Date Filter", iconOnly = false }) => {
   const [open, setOpen] = useState(false);
   const [showRange, setShowRange] = useState(false);
   const [rangeFrom, setRangeFrom] = useState("");
@@ -168,11 +179,13 @@ export const DateFilterPopover = ({ value, onChange, testid = "date-filter", cen
         <Button
           variant="outline"
           onClick={() => setOpen(true)}
-          className={`h-10 ${isActive ? "rounded-r-none border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100" : ""}`}
+          title={activeLabel}
+          aria-label={activeLabel}
+          className={`h-10 ${iconOnly && !isActive ? "w-10 px-0" : ""} ${isActive ? "rounded-r-none border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100" : ""}`}
           data-testid={`${testid}-btn`}
         >
-          <CalendarIcon className="mr-2 h-4 w-4" />
-          {activeLabel}
+          <CalendarIcon className={`h-4 w-4 ${iconOnly && !isActive ? "" : "mr-2"}`} />
+          {(!iconOnly || isActive) && activeLabel}
         </Button>
         {isActive && (
           <button
