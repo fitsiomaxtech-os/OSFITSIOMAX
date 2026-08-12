@@ -675,7 +675,13 @@ export const CRMPage = ({ auth, onLogout }) => {
                     already knows, so these two boards show who is signed in instead. The
                     desktop header is untouched. */}
                 <h1 className="truncate text-base font-bold text-slate-900 sm:text-2xl" data-testid="role-board-title">
-                  {showHeadPhysioBoard || showHumanResourceBoard ? (
+                  {/* On a phone the board title is the least useful thing that could sit
+                      here: whoever is holding it already knows which board they opened,
+                      and what they cannot see is which account they are signed in as —
+                      the desktop shows that in the corner, and a phone has no corner to
+                      spare. Pre-Sales joins Head Physio and HR in trading one for the
+                      other below sm. */}
+                  {showHeadPhysioBoard || showHumanResourceBoard || showPreSalesBoard ? (
                     <>
                       <span className="sm:hidden">{auth.user.full_name}</span>
                       <span className="hidden sm:inline">{boardTitle}</span>

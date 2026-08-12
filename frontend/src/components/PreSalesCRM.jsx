@@ -599,8 +599,20 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
               className="h-8 border-0 p-0 focus-visible:ring-0"
               data-testid="presales-mobile-search"
             />
-            <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="presales-mobile-date-filter" centered />
+            {/* Icons only. On a phone this row also holds the search box, and three
+                labelled controls beside it leave the search field about a word wide. */}
+            <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="presales-mobile-date-filter" centered iconOnly />
             <PullFromSheetButton onPulled={() => { load(); setStageFilter("New Leads"); }} iconOnly />
+            <Button
+              onClick={load}
+              disabled={loading}
+              title="Refresh"
+              aria-label="Refresh"
+              className="h-8 w-8 shrink-0 bg-orange-500 p-0 text-white hover:bg-orange-600"
+              data-testid="presales-mobile-refresh-btn"
+            >
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            </Button>
           </div>
 
           <StageTabBar
@@ -816,7 +828,7 @@ const ConsultationsTab = ({ leads, branches, loading, onOpen }) => {
     <div className="space-y-3 md:hidden" data-testid="presales-consultations-tab">
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-sm font-semibold text-slate-700">Consultations ({filtered.length})</h2>
-        <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="presales-consult-date-filter" centered />
+        <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="presales-consult-date-filter" centered iconOnly />
       </div>
 
       <div className="grid grid-cols-3 gap-2" data-testid="presales-consult-milestones">
