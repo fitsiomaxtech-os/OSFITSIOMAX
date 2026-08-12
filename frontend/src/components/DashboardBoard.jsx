@@ -4,7 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { SegmentedTabs } from "@/components/ui/segmented-tabs";
 import { toast } from "@/components/ui/sonner";
-import { getDashboardOverview, getDashboardBranchBreakdown, getDashboardLeadsTrend, mkGetTeam } from "@/lib/api";
+import { getDashboardOverview, getDashboardLeadsTrend, getRevenueOverview, mkGetTeam } from "@/lib/api";
 import { TeamCard } from "@/components/marketing/TeamCard";
 
 // The four count tabs read the same branch/vertical payload; the two people tabs are a
@@ -303,7 +303,7 @@ export const DashboardBoard = () => {
                 in a modal. A branch's breakdown is something to read against the other
                 branches' numbers, and a dialog hides exactly what you'd compare it to. */}
             {drillBranch && (
-              <BranchBreakdown
+              <BranchRevenueCards
                 branch={drillBranch}
                 dateFilter={dateFilter}
                 onClose={() => setDrillBranch(null)}
@@ -880,79 +880,123 @@ const BranchShareDonut = ({ branches }) => {
 };
 
 
+const money = (n) => `₹${(Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+const amt = (v) => Number(v) || 0;
+
+/** Still owed on a Partial Payment plan. A row already collected is history; counting it
+    would make this a total of the plan rather than of what is still to come. */
+export const unpaidSchedule = (schedule = []) => schedule.filter((s) => s.status !== "paid");
+
 /**
- * Who did the work behind one branch's number, over the range the board is showing.
+ * Clients with nothing left owing, rolled up from their own transactions — the same cut
+ * Accountant Manage's Payment Paid makes.
  *
- * Counts only — no lead lists. Super Admin is reading performance here; the screens for
- * actually working a lead already exist under Pre-Sales CRM and Branch Wise, and putting
- * a second editing surface on a reporting board would mean Super Admin edits bypassing
- * the branch's own flow.
- *
- * Each column scrolls on its own past a dozen or so people. A branch with thirty physios
- * would otherwise push the rest of the page out of reach to show one list.
+ * Store sales are excluded outright rather than merely carrying no lead: a counter sale
+ * that ever gained one would otherwise be credited to whoever it landed beside.
  */
-const BranchBreakdown = ({ branch, dateFilter, onClose }) => {
+export const paidByLead = (transactions = [], outstanding = []) => {
+  const owing = new Set(outstanding.map((o) => o.lead_id));
+  const out = {};
+  transactions.forEach((t) => {
+    if (t.source === "store" || !t.lead_id || owing.has(t.lead_id)) return;
+    out[t.lead_id] = (out[t.lead_id] || 0) + amt(t.gross);
+  });
+  return out;
+};
+
+/** Billed, and nothing collected at all — what separates this from Outstanding Amount's
+    part-payers, who have paid something and still owe the rest. */
+export const fullyUnpaid = (outstanding = []) =>
+  outstanding.filter((o) => amt(o.paid_amount) <= 0 && amt(o.balance) > 0);
+
+/**
+ * One branch's money, opened from its card on the Revenue tab.
+ *
+ * Every figure comes from /finance/revenue-overview scoped to this branch — the same
+ * payload Accountant Manage reads — so a branch's numbers here and on that board cannot
+ * disagree. Derived the same way too: Payment Paid and Payment Unpaid are the roll-ups
+ * that board performs, not second definitions written for this screen.
+ *
+ * What used to open here was the lead breakdown: who booked, which physio saw them. That
+ * is the Pre Sales and BRANCHS question, and on a tab named Revenue it answered one
+ * nobody had asked.
+ */
+const BranchRevenueCards = ({ branch, dateFilter, onClose }) => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     const params = { branch_id: branch.branch_id };
-    if (dateFilter.from && dateFilter.to) {
+    if (dateFilter?.from && dateFilter?.to) {
       params.start_date = toIso(dateFilter.from);
       params.end_date = toIso(dateFilter.to);
     }
-    getDashboardBranchBreakdown(params)
-      .then(setData)
-      .catch(() => { toast.error("Failed to load the branch breakdown"); setData(null); })
-      .finally(() => setLoading(false));
+    getRevenueOverview(params)
+      .then((d) => { if (!cancelled) setData(d); })
+      .catch(() => { if (!cancelled) setData(null); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [branch.branch_id, dateFilter]);
 
+  const b = data?.breakdown || {};
+  const transactions = data?.transactions || [];
+  const outstanding = data?.outstanding_clients || [];
+  const schedule = data?.payment_schedule || [];
+
+  const outstandingTotal = outstanding.reduce((s, c) => s + amt(c.balance), 0);
+
+  const scheduleUnpaid = unpaidSchedule(schedule);
+  const scheduleTotal = scheduleUnpaid.reduce((s, r) => s + amt(r.amount), 0);
+
+  const paid = paidByLead(transactions, outstanding);
+  const paidTotal = Object.values(paid).reduce((s, v) => s + v, 0);
+
+  const unpaidClients = fullyUnpaid(outstanding);
+  const unpaidTotal = unpaidClients.reduce((s, c) => s + amt(c.balance), 0);
+
+  const cards = [
+    { key: "total", label: "Total Revenue", value: money(data?.kpis?.total_collected), sub: `${transactions.length} transactions`, tone: "border-emerald-200 bg-emerald-50/60 text-emerald-700" },
+    { key: "consultation", label: "Consultations Revenue", value: money(b.consultation_revenue), sub: `${b.consultation_pct || 0}% of total`, tone: "border-sky-200 bg-sky-50/60 text-sky-700" },
+    { key: "session", label: "Sessions Revenue", value: money(b.session_revenue), sub: `${b.session_pct || 0}% of total`, tone: "border-violet-200 bg-violet-50/60 text-violet-700" },
+    { key: "diet", label: "Diet Collections", value: money(b.diet_revenue), sub: `${b.diet_pct || 0}% of total`, tone: "border-orange-200 bg-orange-50/60 text-orange-700" },
+    { key: "store", label: "Store Payment", value: money(b.store_revenue), sub: `${transactions.filter((t) => t.source === "store").length} sales`, tone: "border-teal-200 bg-teal-50/60 text-teal-700" },
+    { key: "outstanding", label: "Outstanding Amount", value: money(outstandingTotal), sub: `${outstanding.length} ${outstanding.length === 1 ? "client" : "clients"}`, tone: "border-amber-200 bg-amber-50/60 text-amber-700" },
+    { key: "schedules", label: "Payment Schedules", value: money(scheduleTotal), sub: `${scheduleUnpaid.length} still due`, tone: "border-indigo-200 bg-indigo-50/60 text-indigo-700" },
+    { key: "paid", label: "Payment Paid", value: money(paidTotal), sub: `${Object.keys(paid).length} settled`, tone: "border-emerald-200 bg-emerald-50/60 text-emerald-700" },
+    { key: "unpaid", label: "Payment Unpaid", value: money(unpaidTotal), sub: `${unpaidClients.length} ${unpaidClients.length === 1 ? "client" : "clients"}`, tone: "border-rose-200 bg-rose-50/60 text-rose-700" },
+  ];
+
   return (
-    <div className="mt-3 rounded-xl border border-sky-200 bg-sky-50/40 p-3" data-testid="dashboard-branch-breakdown">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <p className="min-w-0 truncate text-xs font-bold uppercase tracking-wider text-sky-700">
-          {branch.branch_name}
-          <span className="ml-2 font-medium normal-case tracking-normal text-slate-500">{dateFilter.label}</span>
+    <div className="mt-3 rounded-xl border border-sky-200 bg-sky-50/40 p-4" data-testid="branch-revenue-cards">
+      <div className="mb-3 flex items-center justify-between">
+        <p className="text-sm font-bold text-sky-700">
+          {branch.branch_name} <span className="font-normal text-slate-400">{dateFilter?.label || "All"}</span>
         </p>
-        <button
-          type="button"
-          onClick={onClose}
-          className="shrink-0 rounded-full p-1.5 text-slate-400 hover:bg-white hover:text-slate-600"
-          title="Close"
-          aria-label="Close breakdown"
-          data-testid="dashboard-branch-breakdown-close"
-        >
+        <button onClick={onClose} className="rounded p-1 text-slate-400 hover:bg-white" data-testid="branch-revenue-close">
           <X className="h-4 w-4" />
         </button>
       </div>
 
       {loading ? (
-        <p className="py-10 text-center text-sm text-slate-400">Loading...</p>
+        <p className="py-8 text-center text-sm text-slate-400">Loading...</p>
       ) : !data ? (
-        <p className="py-10 text-center text-sm text-slate-400">No breakdown available.</p>
+        <p className="py-8 text-center text-sm text-slate-400">Couldn't load this branch's transactions.</p>
       ) : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {data.groups.map((g) => (
-            <div key={g.key} className="overflow-hidden rounded-xl border border-slate-200 bg-white" data-testid={`dashboard-breakdown-${g.key}`}>
-              <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-3 py-2.5">
-                <p className="min-w-0 text-[11px] font-bold uppercase leading-tight tracking-wider text-slate-500">{g.label}</p>
-                <p className="shrink-0 text-lg font-bold text-sky-600">{g.total}</p>
-              </div>
-              {g.members.length === 0 ? (
-                <p className="px-3 py-6 text-center text-xs text-slate-400">No one assigned yet.</p>
-              ) : (
-                <ul className="max-h-72 divide-y divide-slate-100 overflow-y-auto">
-                  {g.members.map((m) => (
-                    <li key={m.key} className="flex items-center justify-between gap-2 px-3 py-2">
-                      <span className="min-w-0 truncate text-sm text-slate-700">{m.name}</span>
-                      <span className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-bold ${m.count ? "bg-sky-50 text-sky-700" : "bg-slate-100 text-slate-400"}`}>
-                        {m.count}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
+        // Horizontal, wrapping. A fixed grid would leave the last row's cards stretched
+        // across columns they don't fill; flowing them keeps every card the same size
+        // whatever the screen does with the row.
+        <div className="flex flex-wrap gap-3">
+          {cards.map((c) => (
+            <div
+              key={c.key}
+              className={`min-w-[150px] flex-1 rounded-xl border p-3 sm:min-w-[170px] sm:max-w-[220px] ${c.tone}`}
+              data-testid={`branch-revenue-${c.key}`}
+            >
+              <p className="truncate text-[10px] font-bold uppercase tracking-wider opacity-80">{c.label}</p>
+              <p className="mt-1 truncate text-xl font-bold">{c.value}</p>
+              <p className="mt-0.5 truncate text-[10px] opacity-60">{c.sub}</p>
             </div>
           ))}
         </div>
