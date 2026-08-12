@@ -11,6 +11,7 @@ import {
   LayoutList,
   MessageSquare,
   Package,
+  Search,
   Send,
   Stethoscope,
   User,
@@ -18,6 +19,7 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { StatTile } from "@/components/ui/stat-tile";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { ConsultationsBoard } from "@/components/ConsultationsBoard";
@@ -56,13 +58,18 @@ const STAGE_TONES = {
 };
 
 const WORK_TABS = [
-  { key: "consultations", label: "Consultations", icon: Calendar },
-  { key: "review", label: "Review", icon: ClipboardCheck },
-  { key: "rehab", label: "Rehab", icon: Activity },
-  { key: "all", label: "All", icon: LayoutList },
+  { key: "consultations", label: "Consultations", icon: Calendar, color: "#0284c7" },
+  { key: "review", label: "Review", icon: ClipboardCheck, color: "#7c3aed" },
+  { key: "rehab", label: "Rehab", icon: Activity, color: "#d97706" },
+  { key: "all", label: "All", icon: LayoutList, color: "#0d9488" },
 ];
 
-export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "" }) => {
+// A stage counts as finished when it says so. Read from the name rather than matched
+// against a list of them, because these are renamed in Pipeline Stage Management and a
+// hardcoded "Consultation Completed" would quietly stop matching the day someone edits it.
+const isDone = (...stages) => stages.some((s) => /complete/i.test(String(s || "")));
+
+export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSearchChange }) => {
   const [workTab, setWorkTab] = useState("consultations");
   // The day every list under Consultations answers to. Starts on today.
   const [workDate, setWorkDate] = useState(todayIso());
@@ -91,17 +98,26 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "" }) => {
   // of them, and reading three tables to find the day's work defeats the point. Every row
   // is flattened to the same shape and carries the stage it came from, so the mix stays
   // legible.
+  //
+  // The Stage pill names the queue a row came from and whether that work is finished —
+  // Consultation, Review, Rehab, each with "· Completed" once it is. It used to print the
+  // lead's raw pipeline stage, which in a mixed list said nothing about which of the three
+  // kinds of work a row was, and read as "All" for anyone whose stage happened to be named
+  // that. Which list a row belongs to is the thing this column exists to answer.
   const allRows = useMemo(() => [
-    ...consultRows.map((l) => ({
-      key: `c-${l.id}`,
-      name: l.name || "Unknown",
-      patientNo: l.patient_number || "",
-      phone: l.phone || "",
-      stage: l.head_consultation_stage || l.consultation_stage || "Consultation",
-      tone: "sky",
-      when: l.appointment_date ? `${l.appointment_date} ${to12h(l.appointment_time)}` : "",
-      who: l.assigned_physio_name || "",
-    })),
+    ...consultRows.map((l) => {
+      const done = isDone(l.head_consultation_stage, l.consultation_stage);
+      return {
+        key: `c-${l.id}`,
+        name: l.name || "Unknown",
+        patientNo: l.patient_number || "",
+        phone: l.phone || "",
+        stage: done ? "Consultation · Completed" : "Consultation",
+        tone: done ? "emerald" : "sky",
+        when: l.appointment_date ? `${l.appointment_date} ${to12h(l.appointment_time)}` : "",
+        who: l.assigned_physio_name || "",
+      };
+    }),
     ...reviewRows.filter((r) => matches(r.lead_name, r.phone, r.patient_number)).map((r) => ({
       key: `r-${r.id}`,
       name: r.lead_name || "Unknown",
@@ -117,7 +133,9 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "" }) => {
       name: p.lead_name || "Unknown",
       patientNo: "",
       phone: p.phone || "",
-      stage: p.has_recommendation ? "Rehab · Recommended" : "Rehab",
+      // A rehab patient is done once a package has been recommended — that is the whole
+      // job this board holds them for.
+      stage: p.has_recommendation ? "Rehab · Completed" : "Rehab",
       tone: p.has_recommendation ? "emerald" : "amber",
       when: "",
       who: p.branch_stage || "",
@@ -153,7 +171,20 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "" }) => {
           be filled later by whatever comes along. The day filter takes only the width it
           needs on the right, divided off from it. */}
       <div className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-2 lg:flex-row lg:items-center lg:gap-4">
-        <div className="hidden min-h-[2.25rem] flex-1 lg:block" data-testid="hp-header-reserved" />
+        {/* One search for the whole board, so it works on Review, Rehab and All and not
+            only on Consultations — that tab had its own box and the other three had
+            nothing. Hidden on a phone, where the header's magnifier does the same job
+            without costing a row of vertical space above the lists. */}
+        <div className="relative hidden min-h-[2.25rem] flex-1 sm:block" data-testid="hp-header-search">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <input
+            value={search}
+            onChange={(e) => onSearchChange && onSearchChange(e.target.value)}
+            placeholder="Search patient, phone or patient no..."
+            className="h-9 w-full rounded-md border border-slate-200 pl-9 pr-3 text-sm focus:border-teal-400 focus:outline-none focus:ring-1 focus:ring-teal-400"
+            data-testid="hp-search-input"
+          />
+        </div>
         <div className="shrink-0 lg:border-l lg:border-slate-100 lg:pl-4" data-testid="hp-header-day-filter">
           <WeekStrip value={workDate} onChange={setWorkDate} testid="hp-week-strip" bare />
         </div>
@@ -166,33 +197,30 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "" }) => {
               thumb reach. */}
           <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 sm:mx-0 sm:grid sm:grid-cols-4 sm:gap-3 sm:overflow-visible sm:px-0 sm:pb-0" data-testid="hp-work-tabs">
             {WORK_TABS.map((t) => {
-              const Icon = t.icon;
-              const active = workTab === t.key;
               const n = t.key === "consultations" ? (consultStages[firstStage] || 0)
                 : t.key === "review" ? reviewCount
                 : t.key === "rehab" ? newRehab.length
                 // All is the three of them together, every stage, nothing narrowed.
                 : consultCount + reviewCount + patients.length;
+              const sub = t.key === "consultations" ? (firstStage ? `in ${firstStage}` : "on this day")
+                : t.key === "review" ? "on this day"
+                : t.key === "rehab" ? "awaiting a plan"
+                : "everything on this day";
+              // The wrapper keeps the phone's side-scrolling row of fixed-width cards; the
+              // tile itself fills whatever it is given.
               return (
-                <button
-                  key={t.key}
-                  type="button"
-                  onClick={() => setWorkTab(t.key)}
-                  className={`w-[7.5rem] shrink-0 rounded-xl border-2 px-3 py-2.5 text-left transition sm:w-auto sm:px-4 sm:py-4 ${
-                    active
-                      ? "border-teal-600 bg-teal-50 shadow-sm"
-                      : "border-slate-200 bg-white hover:border-teal-300 hover:shadow-sm"
-                  }`}
-                  data-testid={`hp-work-tab-${t.key}`}
-                >
-                  <span className={`flex items-center gap-1.5 ${active ? "text-teal-700" : "text-slate-500"}`}>
-                    <Icon className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />
-                    <span className="truncate text-[10px] font-bold uppercase tracking-wider sm:text-xs">{t.label}</span>
-                  </span>
-                  <span className={`mt-0.5 block text-2xl font-extrabold sm:mt-1 sm:text-3xl ${active ? "text-teal-700" : "text-slate-800"}`}>
-                    {n}
-                  </span>
-                </button>
+                <div key={t.key} className="w-[10.5rem] shrink-0 sm:w-auto">
+                  <StatTile
+                    label={t.label}
+                    value={n}
+                    sub={sub}
+                    icon={t.icon}
+                    color={t.color}
+                    active={workTab === t.key}
+                    onClick={() => setWorkTab(t.key)}
+                    testid={`hp-work-tab-${t.key}`}
+                  />
+                </div>
               );
             })}
           </div>
@@ -238,11 +266,13 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "" }) => {
               <div className="space-y-2 sm:hidden">
                 {allRows.length === 0 ? (
                   <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">Nothing on this day.</p>
-                ) : allRows.map((r) => (
+                ) : allRows.map((r, i) => (
                   <div key={r.key} className="rounded-xl border border-slate-200 bg-white p-3" data-testid={`hp-all-card-${r.key}`}>
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-bold text-slate-800">{r.name}</p>
+                        <p className="truncate text-sm font-bold text-slate-800">
+                          <span className="mr-1.5 font-semibold text-slate-300">{i + 1}.</span>{r.name}
+                        </p>
                         <p className="truncate text-xs text-slate-500">{r.phone || "—"}</p>
                       </div>
                       <span className={`shrink-0 whitespace-nowrap rounded-[5px] border px-2 py-0.5 text-[10px] font-bold ${STAGE_TONES[r.tone]}`}>
@@ -266,6 +296,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "" }) => {
                       {/* Patient stays left — it's the column the eye scans down to find
                           a row, and a ragged left edge is exactly what makes a name list
                           hard to scan. Everything after it is centred. */}
+                      <th className="w-12 px-4 py-2.5 text-left font-semibold">S.No</th>
                       <th className="px-4 py-2.5 text-left font-semibold">Patient</th>
                       <th className="px-4 py-2.5 text-center font-semibold">Patient No.</th>
                       <th className="px-4 py-2.5 text-center font-semibold">Phone</th>
@@ -276,9 +307,12 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "" }) => {
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {allRows.length === 0 ? (
-                      <tr><td colSpan={6} className="px-4 py-10 text-center text-sm text-slate-400">Nothing on this day.</td></tr>
-                    ) : allRows.map((r) => (
+                      <tr><td colSpan={7} className="px-4 py-10 text-center text-sm text-slate-400">Nothing on this day.</td></tr>
+                    ) : allRows.map((r, i) => (
                       <tr key={r.key} className="hover:bg-slate-50" data-testid={`hp-all-row-${r.key}`}>
+                        {/* Numbers what is on screen — the merged list reorders as the
+                            three queues change, so this is a position, never an id. */}
+                        <td className="px-4 py-3 text-left text-slate-400">{i + 1}</td>
                         <td className="px-4 py-3 text-left font-medium text-slate-800">{r.name}</td>
                         <td className="px-4 py-3 text-center font-mono text-[11px] text-slate-400">{r.patientNo || "—"}</td>
                         <td className="px-4 py-3 text-center text-slate-600">{r.phone || "—"}</td>

@@ -1733,8 +1733,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
         />
       )}
 
-      {/* Search — hidden when a parent already provides one. */}
-      <div className={`items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 ${externalSearch !== undefined ? "hidden sm:flex" : "flex"}`}>
+      {/* Search — hidden outright when a parent provides one. It used to reappear at sm:+
+          on the assumption the parent's box was phone-only; Head Physio now carries one
+          above all four of its tabs, and two search boxes on the same screen looking for
+          the same thing is worse than either. */}
+      <div className={`items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 ${externalSearch !== undefined ? "hidden" : "flex"}`}>
         <Search className="h-4 w-4 text-slate-400" />
         <Input
           value={search}

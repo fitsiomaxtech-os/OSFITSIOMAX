@@ -911,7 +911,7 @@ export const CRMPage = ({ auth, onLogout }) => {
         )}
 
         {showHeadPhysioBoard && (
-          <HeadPhysioBoard branchId={auth?.user?.branch_id} branchIds={auth?.user?.branch_ids} user={auth?.user} search={hpSearch} />
+          <HeadPhysioBoard branchId={auth?.user?.branch_id} branchIds={auth?.user?.branch_ids} user={auth?.user} search={hpSearch} onSearchChange={setHpSearch} />
         )}
 
         {showPhysioBoard && (
@@ -935,6 +935,7 @@ export const CRMPage = ({ auth, onLogout }) => {
             <FinanceBoard />
           </div>
         )}
+
 
         </div>
       </div>
