@@ -279,8 +279,21 @@ async def list_users(search: Optional[str] = None, role: Optional[str] = None, _
     if emp_ids:
         async for emp in v3_col("employees").find({"id": {"$in": emp_ids}}, {"_id": 0}):
             emps[emp["id"]] = {"employee_code": emp.get("employee_code"), "designation": emp.get("designation"), "full_name": emp.get("full_name")}
+    # Which branch each account belongs to. Three different answers are possible and the
+    # column has to tell them apart, so the shape is a list plus a flag rather than one
+    # string that would have to mean all of them:
+    #
+    #   org-wide      a Head Physio covers every branch and holds no branch of their own.
+    #                 An empty branch list on them means "all", not "none".
+    #   multi-branch  a Physio or Nutrition Coach can serve several, held in branch_ids.
+    #   single        everyone else, on branch_id.
+    branch_docs = await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1}).to_list(500)
+    bmap = {b["id"]: b.get("branch_name", "") for b in branch_docs}
     for r in rows:
         r["linked_employee"] = emps.get(r.get("employee_id"))
+        ids = r.get("branch_ids") or ([r["branch_id"]] if r.get("branch_id") else [])
+        r["branches"] = [{"id": i, "name": bmap.get(i) or "Unknown branch"} for i in ids if i]
+        r["org_wide"] = r.get("role") in ORG_WIDE_ROLES
     return rows
 
 

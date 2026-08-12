@@ -662,6 +662,40 @@ const roleLabel = (role) => ROLE_META[role]?.label || role.replace(/_/g, " ").to
 const roleClasses = (role) =>
   ROLE_META[role]?.classes || CUSTOM_ROLE_CLASSES.get(role) || "border-slate-200 bg-white text-slate-600";
 
+/**
+ * Which branch an account belongs to.
+ *
+ * Three answers are possible and they are not interchangeable, so none of them is
+ * flattened into the same text:
+ *
+ *   All branches   a Head Physio covers every one and holds no branch of their own. Their
+ *                  empty branch list means "all", and printing "—" for it would read as
+ *                  the opposite of the truth.
+ *   several        a Physio or Nutrition Coach can serve more than one. The first is
+ *                  named and the rest counted, with all of them in the tooltip — a column
+ *                  this narrow cannot list four branch names without pushing Actions off.
+ *   one, or none   the name, or a dash for an account genuinely not attached to a branch.
+ */
+const UserBranch = ({ user }) => {
+  const branches = user.branches || [];
+
+  if (user.org_wide) {
+    return <span className="rounded bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-700">All branches</span>;
+  }
+  if (branches.length === 0) return <span className="text-xs text-slate-400">—</span>;
+
+  return (
+    <span className="text-xs text-slate-700" title={branches.map((b) => b.name).join(", ")}>
+      {branches[0].name}
+      {branches.length > 1 && (
+        <span className="ml-1 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">
+          +{branches.length - 1}
+        </span>
+      )}
+    </span>
+  );
+};
+
 // Native <select> can't reliably color individual dropdown-list items across
 // browsers — only the closed box. This renders each role as its own colored,
 // rounded row in a custom open list instead.
@@ -948,7 +982,7 @@ const RolesTab = ({ meta, reloadMeta }) => {
         <CardContent className="p-0">
           <div className="overflow-auto">
             <table className="min-w-full text-sm">
-              <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th className="px-3 py-2">S.No</th><th className="px-3 py-2">User</th><th className="px-3 py-2">Email</th><th className="px-3 py-2">Role</th><th className="px-3 py-2">Linked Employee</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Actions</th></tr></thead>
+              <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th className="px-3 py-2">S.No</th><th className="px-3 py-2">User</th><th className="px-3 py-2">Email</th><th className="px-3 py-2">Role</th><th className="px-3 py-2">Linked Employee</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Branch</th><th className="px-3 py-2">Actions</th></tr></thead>
               <tbody>
                 {sortedUsers.map((u, i) => (
                   <tr key={u.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`hr-user-row-${u.id}`}>
@@ -967,6 +1001,7 @@ const RolesTab = ({ meta, reloadMeta }) => {
                     </td>
                     <td className="px-3 py-2 text-xs text-emerald-600">{u.linked_employee ? `${u.linked_employee.employee_code} - ${u.linked_employee.designation || u.linked_employee.full_name}` : "—"}</td>
                     <td className="px-3 py-2"><span className={`rounded px-2 py-0.5 text-xs ${u.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}`}>{u.is_active ? "Active" : "Inactive"}</span></td>
+                    <td className="px-3 py-2"><UserBranch user={u} /></td>
                     <td className="px-3 py-2">
                       <button
                         onClick={() => setActionTarget(u)}
@@ -979,7 +1014,7 @@ const RolesTab = ({ meta, reloadMeta }) => {
                     </td>
                   </tr>
                 ))}
-                {sortedUsers.length === 0 && <tr><td colSpan="7" className="px-3 py-6 text-center text-slate-400">No users.</td></tr>}
+                {sortedUsers.length === 0 && <tr><td colSpan="8" className="px-3 py-6 text-center text-slate-400">No users.</td></tr>}
               </tbody>
             </table>
           </div>
