@@ -1034,12 +1034,20 @@ const LeadDetailDialog = ({ lead, stages, currentUser, onClose, onSaved, onMoveS
     getBranches().then(setBranches).catch(() => {});
   }, []);
 
+  // Both History and RNR History read the same activity trail — RNR History is that trail
+  // filtered to the call attempts, not a second source. One fetch serves both, so the two
+  // tabs can never show a different number of calls for the same lead.
   useEffect(() => {
-    if (tab === "history" && currentLead?.id) {
+    if ((tab === "history" || tab === "rnr") && currentLead?.id) {
       setActivityLoading(true);
       leadActivity(currentLead.id).then(setActivity).catch(() => setActivity([])).finally(() => setActivityLoading(false));
     }
   }, [tab, currentLead?.id]);
+
+  // "rnr_attempt" is the action v3_leads writes on every +1 No Answer. Nothing else in
+  // the trail records a call, so this is the whole of what the OS knows about ringing
+  // this person.
+  const rnrRows = activity.filter((a) => a.action === "rnr_attempt");
 
   useEffect(() => { setCurrentLead(lead); }, [lead]);
 
@@ -1049,18 +1057,20 @@ const LeadDetailDialog = ({ lead, stages, currentUser, onClose, onSaved, onMoveS
     <div className="fixed inset-0 z-30 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" data-testid="presales-detail-dialog">
       {!showEdit && (
       <div className="w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-slate-200">
-        {/* Colored gradient header */}
-        <div className="relative bg-gradient-to-r from-sky-500 via-indigo-500 to-violet-500 px-6 py-5 text-white">
+        {/* Plain header. The gradient was the loudest thing on the dialog and it carried
+            no meaning — the two chips beneath it are what actually say where this lead
+            came from and what stage it is at, and they read better against white. */}
+        <div className="relative border-b border-slate-200 bg-white px-6 py-5">
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-3">
-              <span className={`inline-flex h-12 w-12 items-center justify-center rounded-full text-base font-bold shadow-md ${avatarColor(currentLead.name).bg} ${avatarColor(currentLead.name).fg}`}>{initials(currentLead.name)}</span>
+              <span className={`inline-flex h-12 w-12 items-center justify-center rounded-full text-base font-bold ${avatarColor(currentLead.name).bg} ${avatarColor(currentLead.name).fg}`}>{initials(currentLead.name)}</span>
               <div>
-                <p className="text-lg font-semibold leading-tight" data-testid="presales-detail-name">{currentLead.name}</p>
+                <p className="text-lg font-semibold leading-tight text-slate-900" data-testid="presales-detail-name">{currentLead.name}</p>
                 <div className="mt-1 flex items-center gap-2">
-                  <span className="rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white backdrop-blur-sm">
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-600">
                     {currentLead.source_tab || currentLead.source_type || "—"}
                   </span>
-                  <span className="rounded-full bg-white/95 px-2.5 py-0.5 text-[11px] font-semibold text-slate-700">
+                  <span className="rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-[11px] font-semibold text-slate-700">
                     {currentLead.stage}
                   </span>
                 </div>
@@ -1068,11 +1078,11 @@ const LeadDetailDialog = ({ lead, stages, currentUser, onClose, onSaved, onMoveS
             </div>
             <div className="flex items-center gap-2">
               {currentLead.source_type === "manual" && (
-                <Button size="sm" onClick={() => setShowEdit(true)} className="h-8 bg-white text-indigo-600 hover:bg-white/90" data-testid="presales-detail-edit-btn">
+                <Button size="sm" variant="outline" onClick={() => setShowEdit(true)} className="h-8" data-testid="presales-detail-edit-btn">
                   <Pencil className="mr-1 h-3.5 w-3.5" /> Edit
                 </Button>
               )}
-              <button onClick={onClose} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="presales-detail-close">
+              <button onClick={onClose} className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100" data-testid="presales-detail-close">
                 <X className="h-4 w-4" />
               </button>
             </div>
@@ -1083,6 +1093,7 @@ const LeadDetailDialog = ({ lead, stages, currentUser, onClose, onSaved, onMoveS
         <div className="flex flex-wrap gap-1.5 border-b border-slate-100 bg-slate-50/60 px-5 py-2.5">
           {[
             { key: "overview", label: "Overview", color: "bg-sky-500" },
+            { key: "rnr", label: "RNR History", color: "bg-rose-500" },
             { key: "history", label: "History", color: "bg-violet-500" },
             { key: "follow-up", label: "Follow-up", color: "bg-emerald-500" },
           ].map((t) => (
@@ -1144,6 +1155,67 @@ const LeadDetailDialog = ({ lead, stages, currentUser, onClose, onSaved, onMoveS
               )}
             </div>
           )}
+          {tab === "rnr" && (
+            <div className="space-y-3" data-testid="presales-detail-rnr">
+              {/* The standing count first — it is what decides whether this lead is still
+                  worth ringing, and it comes off the lead itself rather than the length of
+                  the list below, so a trail that predates the counter still reports right. */}
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 p-4">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-rose-700">Client Not Answered</p>
+                  <p className="mt-1 text-2xl font-bold text-rose-700" data-testid="presales-rnr-count">
+                    {currentLead.rnr_attempts || 0}
+                    <span className="ml-1.5 text-sm font-medium text-rose-500">
+                      {(currentLead.rnr_attempts || 0) === 1 ? "attempt" : "attempts"}
+                    </span>
+                  </p>
+                </div>
+                {currentLead.rnr_last_attempt_at && (
+                  <div className="text-right">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-rose-400">Last call</p>
+                    <p className="text-sm font-semibold text-rose-700">
+                      {new Date(currentLead.rnr_last_attempt_at).toLocaleString()}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {activityLoading && <p className="text-sm text-slate-400">Loading call history...</p>}
+
+              {!activityLoading && rnrRows.length === 0 && (
+                <div className="rounded-lg border border-dashed border-slate-200 bg-white p-6 text-center text-sm text-slate-400" data-testid="presales-rnr-empty">
+                  {(currentLead.rnr_attempts || 0) > 0
+                    // The counter can be ahead of the trail for leads that were rung before
+                    // the activity log recorded it. Saying so beats showing an empty list
+                    // under a figure that insists calls were made.
+                    ? "No individual calls are logged for this lead — only the running total above."
+                    : "No calls attempted yet. Use +1 No Answer on the Overview tab when a client doesn't pick up."}
+                </div>
+              )}
+
+              {!activityLoading && rnrRows.map((a, i) => (
+                <div key={a.id} className="flex items-start gap-3 rounded-lg border border-rose-100 bg-white p-3 shadow-sm" data-testid={`presales-rnr-row-${a.id}`}>
+                  <span className="mt-0.5 inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-rose-100 text-rose-600">
+                    <PhoneOff className="h-3.5 w-3.5" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {/* Newest first, so attempt numbering counts down the page. */}
+                      <span className="rounded-md bg-rose-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-rose-700">
+                        Attempt {rnrRows.length - i}
+                      </span>
+                      <span className="text-[11px] text-slate-400">{new Date(a.created_at).toLocaleString()}</span>
+                    </div>
+                    {a.details && <p className="mt-1 text-sm text-slate-700">{a.details}</p>}
+                    <p className="mt-1 text-[11px] text-slate-400">
+                      by {a.created_by || "system"}{a.created_by_role ? ` · ${a.created_by_role}` : ""}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
           {tab !== "overview" && tab === "history" && (
             <div className="space-y-2" data-testid="presales-detail-history">
               {activityLoading && <p className="text-sm text-slate-400">Loading history...</p>}
