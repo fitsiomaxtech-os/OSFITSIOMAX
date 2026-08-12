@@ -4695,7 +4695,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
 function AllStagesStepper({ stages, currentStage }) {
   const currentIdx = stages.findIndex((s) => s.name === currentStage);
   return (
-    <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-slate-100 bg-slate-50/60 p-2.5" data-testid="cons-all-stages-stepper">
+    <div className="flex flex-wrap items-center justify-center gap-1.5 rounded-lg border border-slate-100 bg-slate-50/60 p-2.5" data-testid="cons-all-stages-stepper">
       {stages.map((s, idx) => {
         const hex = s.color || "#64748b";
         const isCurrent = idx === currentIdx;
