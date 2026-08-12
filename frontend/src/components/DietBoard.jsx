@@ -5,6 +5,7 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  RefreshCw,
   Salad,
   Search,
   Stethoscope,
@@ -46,6 +47,22 @@ const weekDatesFor = (iso) => {
 };
 const DAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"];
 const fmtDate = (iso) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}` : "—");
+
+// One Refresh per tab, wired to that tab's own loader. Orange and icon-only, the same
+// button every other Master View carries — it is the one control that acts rather than
+// filters, so it should not read as another filter chip.
+const RefreshBtn = ({ onClick, busy, testid }) => (
+  <Button
+    onClick={onClick}
+    disabled={busy}
+    title="Refresh"
+    aria-label="Refresh"
+    className="h-10 w-10 shrink-0 bg-orange-500 p-0 text-white hover:bg-orange-600"
+    data-testid={testid}
+  >
+    <RefreshCw className={`h-4 w-4 ${busy ? "animate-spin" : ""}`} />
+  </Button>
+);
 
 const VIEW_TABS = [
   { key: "consultations", label: "Consultations", icon: Stethoscope },
@@ -142,7 +159,7 @@ export const DietBoard = ({ coachId } = {}) => {
         <CheckinsTab coachId={coachId} onCountChange={setCheckinCount} toolbarSlot={slotFor("checkins")} />
       </div>
       <div style={{ display: activeTab === "patients" ? "block" : "none" }}>
-        <PatientsTab coachId={coachId} onCountChange={setPatientsCount} />
+        <PatientsTab coachId={coachId} onCountChange={setPatientsCount} toolbarSlot={slotFor("patients")} />
       </div>
 
       {/* Phones only — the tab strip above is desk-only. */}
@@ -196,15 +213,16 @@ function ConsultationsTab({ coachId, onCountChange, toolbarSlot }) {
   const [filter, setFilter] = useState("waiting");
   const [reportFor, setReportFor] = useState(null); // the patient whose report is open
 
-  useEffect(() => {
-    let cancelled = false;
+  // A callback rather than an inline effect, so the toolbar's Refresh has something to
+  // call. The other two tabs were already shaped this way.
+  const load = useCallback(async () => {
     setLoading(true);
-    dietConsultations(coachId)
-      .then((r) => { if (!cancelled) setRows(r.patients || []); })
-      .catch(() => { if (!cancelled) setRows([]); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
+    try { setRows((await dietConsultations(coachId)).patients || []); }
+    catch { setRows([]); }
+    setLoading(false);
   }, [coachId]);
+
+  useEffect(() => { load(); }, [load]);
 
   // Keyed on whether a Diet Consultation is actually BOOKED, not on whether a coach is
   // named against the patient. Diet is a consultation vertical: until the branch has put
@@ -225,9 +243,12 @@ function ConsultationsTab({ coachId, onCountChange, toolbarSlot }) {
     });
 
   const toolbar = (
-    <div className="relative w-full sm:w-[260px]" data-testid="diet-consult-toolbar">
-      <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-      <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search patient..." className="h-10 pl-9" data-testid="diet-consult-search" />
+    <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto" data-testid="diet-consult-toolbar">
+      <div className="relative w-full sm:w-[260px]">
+        <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
+        <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search patient..." className="h-10 pl-9" data-testid="diet-consult-search" />
+      </div>
+      <RefreshBtn onClick={load} busy={loading} testid="diet-consult-refresh" />
     </div>
   );
 
@@ -555,6 +576,7 @@ function CheckinsTab({ coachId, onCountChange, toolbarSlot }) {
         testid="diet-date-filter"
         centered
       />
+      <RefreshBtn onClick={load} busy={loading} testid="diet-checkins-refresh" />
     </div>
   );
 
@@ -701,7 +723,7 @@ const CompleteDayModal = ({ day, onClose, onDone }) => {
   );
 };
 
-function PatientsTab({ coachId, onCountChange }) {
+function PatientsTab({ coachId, onCountChange, toolbarSlot }) {
   const [patients, setPatients] = useState([]);
   const [loading, setLoading] = useState(false);
   const [historyTab, setHistoryTab] = useState("ongoing");
@@ -723,8 +745,19 @@ function PatientsTab({ coachId, onCountChange }) {
 
   useEffect(() => { onCountChange?.(ongoing.length); }, [ongoing.length, onCountChange]);
 
+  // This tab has no search or filter of its own, so its toolbar is the Refresh alone —
+  // still portaled into the shared slot, so the button sits in the same place on all
+  // three tabs rather than moving when you switch.
+  const toolbar = (
+    <div className="flex flex-wrap items-center gap-2" data-testid="diet-patients-toolbar">
+      <RefreshBtn onClick={load} busy={loading} testid="diet-patients-refresh" />
+    </div>
+  );
+
   return (
     <div data-testid="diet-patients-tab">
+      {toolbarSlot ? createPortal(toolbar, toolbarSlot) : toolbar}
+
       <div className="mb-4 flex w-fit gap-1 rounded-lg border border-slate-200 bg-white p-1">
         {[{ key: "ongoing", label: "Ongoing", count: ongoing.length }, { key: "completed", label: "Completed", count: completed.length }].map((t) => (
           <button
