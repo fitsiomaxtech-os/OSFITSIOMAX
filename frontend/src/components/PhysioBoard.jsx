@@ -10,6 +10,8 @@ import {
   ClipboardCheck,
   ClipboardList,
   Clock,
+  Eye,
+  FileText,
   PhoneCall,
   Search,
   Send,
@@ -32,6 +34,8 @@ import {
   physioWeeklyAssessment,
   physioReviews,
   physioRaiseReview,
+  leadDocuments,
+  openLeadDocument,
 } from "@/lib/api";
 import { to12h, slotTo12h } from "@/lib/time";
 
@@ -74,12 +78,13 @@ export const PhysioBoard = ({ physioId } = {}) => {
           but the toolbar slot is not, so on a phone this row is just the toolbar,
           which is why the border and the tab baseline are both md-only.
 
-          Same underlined tabs Branch Admin uses, so moving between boards doesn't
+          The filled-pill tabs Human Resource uses, so moving between boards doesn't
           mean learning a second way to switch view. The counts come along rather
           than being dropped on desktop: an outstanding count is the reason to look
-          at a tab you aren't already on. */}
-      <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between md:gap-4 md:border-b md:border-slate-200" data-testid="physio-view-bar">
-      <div className="hidden items-center gap-1 overflow-x-auto md:flex" data-testid="physio-view-tabs">
+          at a tab you aren't already on — on the selected pill it goes white-on-indigo,
+          since a slate badge on a filled tab reads as disabled. */}
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between md:gap-4 md:border-b md:border-slate-200 md:pb-2" data-testid="physio-view-bar">
+      <div className="hidden flex-wrap items-center gap-2 overflow-x-auto md:flex" data-testid="physio-view-tabs">
         {VIEW_TABS.map((tab) => {
           const Icon = tab.icon;
           const active = activeTab === tab.key;
@@ -90,15 +95,15 @@ export const PhysioBoard = ({ physioId } = {}) => {
               type="button"
               onClick={() => setActiveTab(tab.key)}
               aria-current={active ? "page" : undefined}
-              className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
-                active ? "border-sky-500 text-sky-700" : "border-transparent text-slate-400 hover:text-slate-600"
+              className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition ${
+                active ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-100"
               }`}
               data-testid={`physio-view-tab-${tab.key}`}
             >
               <Icon className="h-4 w-4" /> {tab.label}
               {count > 0 && (
                 <span
-                  className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ${active ? "bg-sky-100 text-sky-700" : "bg-slate-100 text-slate-500"}`}
+                  className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ${active ? "bg-white/25 text-white" : "bg-slate-100 text-slate-500"}`}
                   data-testid={`physio-view-tab-badge-${tab.key}`}
                 >
                   {count > 99 ? "99+" : count}
@@ -204,6 +209,104 @@ const TILE = {
   pending: "#d97706",
   review: "#7c3aed",
   request: "#db2777",
+};
+
+// Every 7th treatment day is a review milestone — reviewsSoFar counts how many the patient
+// has already passed, isReviewDay flags this one as the next. One definition because the
+// phone list and the desktop table both draw the violet from it, and two copies of the
+// arithmetic is two chances for a row to say "Review Today" in one layout and not the other.
+const reviewMarks = (r) => ({
+  reviewsSoFar: r.sessionNumber ? Math.floor(r.sessionNumber / 7) : 0,
+  isReviewDay: r.sessionNumber > 0 && r.sessionNumber % 7 === 0,
+});
+
+const docSize = (n) => {
+  const b = Number(n) || 0;
+  if (b < 1024) return `${b} B`;
+  if (b < 1024 * 1024) return `${Math.round(b / 1024)} KB`;
+  return `${(b / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+/**
+ * The patient's uploaded records, read-only.
+ *
+ * A physio is in READ_ROLES but not WRITE_ROLES on the documents router, so this lists and
+ * opens and offers nothing else — no upload, no delete, no share toggle. Putting buttons
+ * here that the API would reject is worse than not having them.
+ *
+ * Bytes come back as an authenticated blob rather than a static URL, so opening one means
+ * fetching it first. The object URL is revoked on a timer instead of immediately: revoking
+ * it in the same tick closes the tab that was just handed it.
+ */
+const DocumentsPanel = ({ leadId }) => {
+  const [docs, setDocs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [opening, setOpening] = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+    if (!leadId) return undefined;
+    setLoading(true);
+    leadDocuments(leadId)
+      .then((r) => { if (alive) setDocs(r.documents || []); })
+      .catch(() => { if (alive) setDocs([]); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [leadId]);
+
+  const view = async (doc) => {
+    setOpening(doc.id);
+    try {
+      const url = await openLeadDocument(leadId, doc.id);
+      window.open(url, "_blank", "noopener");
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch {
+      toast.error("Could not open that document");
+    } finally {
+      setOpening(null);
+    }
+  };
+
+  return (
+    <div data-testid="physio-documents-panel">
+      <p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">
+        Documents {docs.length > 0 && <span className="text-slate-400">({docs.length})</span>}
+      </p>
+      {loading ? (
+        <div className="rounded-lg border border-dashed border-slate-200 p-4 text-center text-xs text-slate-400">Loading documents…</div>
+      ) : docs.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-slate-200 p-4 text-center text-xs text-slate-400">No documents uploaded for this patient</div>
+      ) : (
+        <div className="space-y-2">
+          {docs.map((d) => (
+            <div
+              key={d.id}
+              className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-2.5"
+              data-testid={`physio-document-${d.id}`}
+            >
+              <FileText className="h-4 w-4 shrink-0 text-sky-500" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-xs font-medium text-slate-700">{d.label || d.original_name || "Document"}</p>
+                <p className="text-[10px] text-slate-400">
+                  {[d.kind, d.size_bytes ? docSize(d.size_bytes) : null, d.created_at ? String(d.created_at).slice(0, 10) : null]
+                    .filter(Boolean).join(" · ")}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => view(d)}
+                disabled={opening === d.id}
+                className="flex shrink-0 items-center gap-1 rounded-md border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-[11px] font-semibold text-sky-700 transition hover:bg-sky-100 disabled:opacity-50"
+                data-testid={`physio-document-view-${d.id}`}
+              >
+                <Eye className="h-3.5 w-3.5" /> {opening === d.id ? "Opening…" : "View"}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 };
 
 function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
@@ -436,16 +539,19 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
 
       {toolbarSlot ? createPortal(toolbar, toolbarSlot) : toolbar}
 
-      {/* Sun-Sat week strip — today is always the default selection. */}
-      <div className="mb-4 rounded-xl border border-slate-200 bg-white p-3" data-testid="physio-treatment-week-strip">
-        <div className="mb-2 flex items-center justify-between">
-          <button type="button" onClick={() => setWeekAnchor((a) => shiftIso(a, -7))} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="physio-week-prev">
+      {/* Sun-Sat week strip — today is always the default selection.
+          Kept deliberately short: this is a date picker sitting between the summary and
+          the day's list, and at its old height it pushed the first patient below the fold
+          on a laptop. The month line and the day cells both lost their spare padding. */}
+      <div className="mb-3 rounded-xl border border-slate-200 bg-white px-3 py-2" data-testid="physio-treatment-week-strip">
+        <div className="mb-1 flex items-center justify-between">
+          <button type="button" onClick={() => setWeekAnchor((a) => shiftIso(a, -7))} className="rounded p-0.5 text-slate-400 hover:bg-slate-100" data-testid="physio-week-prev">
             <ChevronLeft className="h-4 w-4" />
           </button>
-          <p className="text-xs font-semibold text-slate-600">
+          <p className="text-[11px] font-semibold text-slate-600">
             {new Date(`${weekAnchor}T00:00:00`).toLocaleDateString("en-US", { month: "long", year: "numeric" })}
           </p>
-          <button type="button" onClick={() => setWeekAnchor((a) => shiftIso(a, 7))} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="physio-week-next">
+          <button type="button" onClick={() => setWeekAnchor((a) => shiftIso(a, 7))} className="rounded p-0.5 text-slate-400 hover:bg-slate-100" data-testid="physio-week-next">
             <ChevronRight className="h-4 w-4" />
           </button>
         </div>
@@ -460,18 +566,18 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
                 key={date}
                 type="button"
                 onClick={() => setSelectedDate(date)}
-                className={`flex flex-col items-center gap-1 rounded-lg py-1.5 transition ${isSelected ? "bg-sky-600" : "hover:bg-slate-50"}`}
+                className={`flex flex-col items-center gap-0.5 rounded-lg py-1 transition ${isSelected ? "bg-sky-600" : "hover:bg-slate-50"}`}
                 data-testid={`physio-day-${date}`}
               >
-                <span className={`text-[10px] font-semibold ${isSelected ? "text-sky-100" : "text-slate-400"}`}>{DAY_LETTERS[i]}</span>
+                <span className={`text-[9px] font-semibold ${isSelected ? "text-sky-100" : "text-slate-400"}`}>{DAY_LETTERS[i]}</span>
                 <span
-                  className={`flex h-7 w-7 items-center justify-center rounded-full text-sm font-semibold ${
+                  className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold ${
                     isSelected ? "bg-white/20 text-white" : isToday ? "bg-sky-100 text-sky-700" : "text-slate-600"
                   }`}
                 >
                   {day}
                 </span>
-                {n > 0 && <span className={`text-[9px] font-medium ${isSelected ? "text-sky-100" : "text-slate-400"}`}>{n}</span>}
+                {n > 0 && <span className={`text-[9px] font-medium leading-none ${isSelected ? "text-sky-100" : "text-slate-400"}`}>{n}</span>}
               </button>
             );
           })}
@@ -488,55 +594,129 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
           </p>
         </div>
       ) : (
-        <div className="space-y-2">
-          {visibleRows.map((r) => {
-            const l = r.lead;
-            const clickable = l?.phone !== undefined;
-            // Every 7th treatment day is a review milestone — reviewsSoFar counts how
-            // many the patient has already passed; isReviewDay flags today as one of them.
-            const reviewsSoFar = r.sessionNumber ? Math.floor(r.sessionNumber / 7) : 0;
-            const isReviewDay = r.sessionNumber > 0 && r.sessionNumber % 7 === 0;
-            return (
-              <button
-                type="button"
-                key={r.key}
-                onClick={() => clickable && setSelectedLead(l)}
-                disabled={!clickable}
-                className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left transition disabled:cursor-default ${
-                  r.done ? "border-emerald-200 bg-emerald-50/50" : isReviewDay ? "border-violet-200 bg-violet-50/40" : "border-slate-200 bg-white hover:border-sky-200"
-                }`}
-                data-testid={`treatment-row-${r.key}`}
-              >
-                <div className={`flex h-11 w-16 shrink-0 items-center justify-center rounded-lg text-[11px] font-bold ${r.done ? "bg-emerald-200 text-emerald-800" : "bg-sky-100 text-sky-700"}`}>
-                  {r.time ? to12h(r.time) : "—"}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-slate-800">{l.name}</p>
-                  <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500">
-                    {r.sessionNumber ? (
-                      <>
-                        <span>{String(r.sessionNumber).padStart(2, "0")}/{r.totalSessions}</span>
-                        <span className={`rounded-full px-1.5 py-0.5 font-semibold ${reviewsSoFar > 0 ? "bg-violet-100 text-violet-700" : "bg-slate-100 text-slate-400"}`}>
-                          {reviewsSoFar} Review{reviewsSoFar === 1 ? "" : "s"}
-                        </span>
-                        {isReviewDay && <span className="rounded-full bg-violet-600 px-1.5 py-0.5 font-semibold text-white">Review Today</span>}
-                      </>
-                    ) : (
-                      <span>{r.label}</span>
-                    )}
+        <>
+          {/* Cards on a phone, table from sm up — the same two-mode list Human Resource
+              uses for its candidates. A table is the right shape for scanning a day of
+              appointments down a column, but eight columns on a 375px screen is a
+              horizontal scrollbar and nothing readable, so the phone keeps the row. */}
+          <div className="space-y-2 sm:hidden" data-testid="physio-treatment-list-mobile">
+            {visibleRows.map((r) => {
+              const l = r.lead;
+              const clickable = l?.phone !== undefined;
+              const { reviewsSoFar, isReviewDay } = reviewMarks(r);
+              return (
+                <button
+                  type="button"
+                  key={r.key}
+                  onClick={() => clickable && setSelectedLead(l)}
+                  disabled={!clickable}
+                  className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left transition disabled:cursor-default ${
+                    r.done ? "border-emerald-200 bg-emerald-50/50" : isReviewDay ? "border-violet-200 bg-violet-50/40" : "border-slate-200 bg-white hover:border-sky-200"
+                  }`}
+                  data-testid={`treatment-row-${r.key}`}
+                >
+                  <div className={`flex h-11 w-16 shrink-0 items-center justify-center rounded-lg text-[11px] font-bold ${r.done ? "bg-emerald-200 text-emerald-800" : "bg-sky-100 text-sky-700"}`}>
+                    {r.time ? to12h(r.time) : "—"}
                   </div>
-                </div>
-                {r.done ? (
-                  <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-semibold text-emerald-700">Done</span>
-                ) : (
-                  <span className="flex shrink-0 items-center gap-0.5 text-[11px] font-semibold text-sky-600">
-                    View <ChevronRight className="h-3.5 w-3.5" />
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-slate-800">{l.name}</p>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500">
+                      {r.sessionNumber ? (
+                        <>
+                          <span>{String(r.sessionNumber).padStart(2, "0")}/{r.totalSessions}</span>
+                          <span className={`rounded-full px-1.5 py-0.5 font-semibold ${reviewsSoFar > 0 ? "bg-violet-100 text-violet-700" : "bg-slate-100 text-slate-400"}`}>
+                            {reviewsSoFar} Review{reviewsSoFar === 1 ? "" : "s"}
+                          </span>
+                          {isReviewDay && <span className="rounded-full bg-violet-600 px-1.5 py-0.5 font-semibold text-white">Review Today</span>}
+                        </>
+                      ) : (
+                        <span>{r.label}</span>
+                      )}
+                    </div>
+                  </div>
+                  {r.done ? (
+                    <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-semibold text-emerald-700">Done</span>
+                  ) : (
+                    <span className="flex shrink-0 items-center gap-0.5 text-[11px] font-semibold text-sky-600">
+                      View <ChevronRight className="h-3.5 w-3.5" />
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white sm:block" data-testid="physio-treatment-list-desktop">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[720px] text-sm">
+                <thead className="bg-slate-50 text-left text-[10px] uppercase tracking-wider text-slate-400">
+                  <tr>
+                    <th className="px-4 py-2.5 font-semibold">Time</th>
+                    <th className="px-4 py-2.5 font-semibold">Patient</th>
+                    <th className="px-4 py-2.5 font-semibold">Day</th>
+                    <th className="px-4 py-2.5 font-semibold">Reviews</th>
+                    <th className="px-4 py-2.5 font-semibold">Status</th>
+                    <th className="px-4 py-2.5" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {visibleRows.map((r) => {
+                    const l = r.lead;
+                    const clickable = l?.phone !== undefined;
+                    const { reviewsSoFar, isReviewDay } = reviewMarks(r);
+                    return (
+                      <tr
+                        key={r.key}
+                        onClick={() => clickable && setSelectedLead(l)}
+                        // The done/review tint stays on the row. It is how a physio picks
+                        // out what is left to do without reading the Status column, and
+                        // dropping it was the one thing the table could not afford to lose.
+                        className={`${clickable ? "cursor-pointer" : "cursor-default"} ${
+                          r.done ? "bg-emerald-50/50 hover:bg-emerald-50" : isReviewDay ? "bg-violet-50/40 hover:bg-violet-50" : "hover:bg-slate-50"
+                        }`}
+                        data-testid={`treatment-row-${r.key}`}
+                      >
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex whitespace-nowrap rounded-lg px-2 py-1 text-[11px] font-bold ${r.done ? "bg-emerald-200 text-emerald-800" : "bg-sky-100 text-sky-700"}`}>
+                            {r.time ? to12h(r.time) : "—"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <p className="font-medium text-slate-800">{l.name}</p>
+                          {l.phone ? <p className="text-[11px] text-slate-400">{l.phone}</p> : null}
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">
+                          {r.sessionNumber
+                            ? <span className="whitespace-nowrap">{String(r.sessionNumber).padStart(2, "0")}/{r.totalSessions}</span>
+                            : <span className="text-slate-400">{r.label}</span>}
+                        </td>
+                        <td className="px-4 py-3">
+                          {r.sessionNumber ? (
+                            <span className={`inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold ${reviewsSoFar > 0 ? "bg-violet-100 text-violet-700" : "bg-slate-100 text-slate-400"}`}>
+                              {reviewsSoFar} Review{reviewsSoFar === 1 ? "" : "s"}
+                            </span>
+                          ) : <span className="text-slate-300">—</span>}
+                        </td>
+                        <td className="px-4 py-3">
+                          {r.done ? (
+                            <span className="inline-flex whitespace-nowrap rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">Done</span>
+                          ) : isReviewDay ? (
+                            <span className="inline-flex whitespace-nowrap rounded-full bg-violet-600 px-2 py-0.5 text-[10px] font-semibold text-white">Review Today</span>
+                          ) : (
+                            <span className="inline-flex whitespace-nowrap rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700">Pending</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <ChevronRight className="ml-auto h-4 w-4 text-slate-300" />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
       )}
 
       {selectedLead && (
@@ -1028,6 +1208,46 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
         </div>
 
         <div className="flex-1 overflow-y-auto p-5 space-y-5">
+          {/* Consultation Report first. This is what the Head Physio wrote about the
+              patient, and it is the thing a physio opens this popup to read before
+              treating them — it used to sit under the day list, so it was reached by
+              scrolling past the work it was meant to inform. */}
+          <div data-testid="physio-consultation-report">
+            <p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Consultation Report</p>
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+              <Row label="Alternative Phone" value={lead.alternative_phone} />
+              <Row label="Address" value={lead.address} />
+              <Row label="City / State" value={[lead.city, lead.state].filter(Boolean).join(", ")} />
+              <Row label="Age" value={lead.age} />
+              <Row label="Gender" value={lead.gender} />
+              <Row label="Occupation" value={lead.occupation} />
+              <Row label="Condition" value={lead.condition} />
+              <Row label="Months of Pain" value={lead.months_of_pain} />
+              <Row label="Appointment" value={lead.appointment_date ? `${lead.appointment_date}${lead.appointment_time ? ` · ${to12h(lead.appointment_time)}` : ""}` : null} />
+            </div>
+
+            {lead.diagnosis && (
+              <div className="mt-3 rounded-lg border border-slate-200 p-3">
+                <p className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-slate-400">Pre-Sales Diagnosis</p>
+                <p className="text-xs text-slate-700 whitespace-pre-wrap">{lead.diagnosis}</p>
+              </div>
+            )}
+            {lead.physio_diagnosis_report && (
+              <div className="mt-3 rounded-lg border border-sky-200 bg-sky-50 p-3">
+                <p className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-sky-500">Diagnosis Report</p>
+                <p className="text-xs text-sky-900 whitespace-pre-wrap">{lead.physio_diagnosis_report}</p>
+              </div>
+            )}
+            {lead.treatment_summary && (
+              <div className="mt-3 rounded-lg border border-violet-200 bg-violet-50 p-3">
+                <p className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-violet-500">Treatment Summary</p>
+                <p className="text-xs text-violet-900 whitespace-pre-wrap">{lead.treatment_summary}</p>
+              </div>
+            )}
+          </div>
+
+          <DocumentsPanel leadId={lead.id} />
+
           <div className="rounded-xl border-2 border-slate-200 bg-white p-4">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Stat label="Physio">
@@ -1169,36 +1389,6 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-            <Row label="Alternative Phone" value={lead.alternative_phone} />
-            <Row label="Address" value={lead.address} />
-            <Row label="City / State" value={[lead.city, lead.state].filter(Boolean).join(", ")} />
-            <Row label="Age" value={lead.age} />
-            <Row label="Gender" value={lead.gender} />
-            <Row label="Occupation" value={lead.occupation} />
-            <Row label="Condition" value={lead.condition} />
-            <Row label="Months of Pain" value={lead.months_of_pain} />
-            <Row label="Appointment" value={lead.appointment_date ? `${lead.appointment_date}${lead.appointment_time ? ` · ${to12h(lead.appointment_time)}` : ""}` : null} />
-          </div>
-
-          {lead.diagnosis && (
-            <div className="rounded-lg border border-slate-200 p-3">
-              <p className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-slate-400">Pre-Sales Diagnosis</p>
-              <p className="text-xs text-slate-700 whitespace-pre-wrap">{lead.diagnosis}</p>
-            </div>
-          )}
-          {lead.physio_diagnosis_report && (
-            <div className="rounded-lg border border-sky-200 bg-sky-50 p-3">
-              <p className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-sky-500">Diagnosis Report</p>
-              <p className="text-xs text-sky-900 whitespace-pre-wrap">{lead.physio_diagnosis_report}</p>
-            </div>
-          )}
-          {lead.treatment_summary && (
-            <div className="rounded-lg border border-violet-200 bg-violet-50 p-3">
-              <p className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-violet-500">Treatment Summary</p>
-              <p className="text-xs text-violet-900 whitespace-pre-wrap">{lead.treatment_summary}</p>
-            </div>
-          )}
         </div>
 
         <div className="flex items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-6 py-3.5">
