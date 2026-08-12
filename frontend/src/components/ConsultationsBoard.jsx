@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Calendar, CheckCircle2, ChevronLeft, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2, Ban, ClipboardCheck, IndianRupee, Printer, Share2, Download, Eye, FileText, Salad } from "lucide-react";
+import { Calendar, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2, Ban, ClipboardCheck, IndianRupee, Printer, Share2, Download, Eye, FileText, Salad } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,6 +17,7 @@ import {
   scheduleConsultationFollowUp, rescheduleConsultationFollowUp,
   getLeadRemarks, getLeadActivity,
   saveConsultationDecision, markConsultationCompleted, getBranches,
+  listTextPresets, addTextPreset, deleteTextPreset,
 } from "@/lib/api";
 import { waNumber } from "@/lib/phone";
 import { endTime12h, to12h } from "@/lib/time";
@@ -2082,6 +2083,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     onUnlock={unlockPhysioDiag}
                     rows={3}
                     placeholder="Write the full diagnosis report..."
+                    presetKind="diagnosis_report"
                     testPrefix="cons-physio-diagnosis"
                   />
                 )}
@@ -2103,6 +2105,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     onUnlock={unlockTreatment}
                     rows={3}
                     placeholder="What treatment should be given to the patient..."
+                    presetKind="treatment_summary"
                     testPrefix="cons-treatment-summary"
                   />
                 )}
@@ -4976,6 +4979,124 @@ function PartialInstallmentsEditor({ installments, setInstallments, totalSession
 }
 
 /**
+ * Saved wording for a report box, picked from a list the Head Physios build themselves.
+ *
+ * Choosing one fills the box and nothing more — the text stays editable, so what ends up
+ * on the patient's record is what was actually written for them, not a fixed value from a
+ * list. That is the whole reason this is a picker over a textarea rather than a select
+ * that replaces it: a lower back strain reads much the same each time, right up until the
+ * patient it doesn't.
+ *
+ * The list is org-wide, so deleting an option takes it away from every Head Physio. It is
+ * only wording though — no report already written is touched by removing the preset it
+ * started from.
+ */
+function PresetPicker({ kind, onPick, currentText, testPrefix }) {
+  const [open, setOpen] = useState(false);
+  const [presets, setPresets] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const boxRef = useRef(null);
+
+  const load = useCallback(() => {
+    listTextPresets(kind)
+      .then((r) => setPresets(r.presets || []))
+      .catch(() => setPresets([]));
+  }, [kind]);
+
+  useEffect(() => { load(); }, [load]);
+
+  // Click-away, because this is a plain absolutely-positioned panel rather than a
+  // Popover — without it the list stays open behind whatever gets clicked next.
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = (e) => { if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  const save = async () => {
+    const text = (currentText || "").trim();
+    if (!text) { toast.error("Write something first, then save it as an option"); return; }
+    setBusy(true);
+    try {
+      await addTextPreset(kind, text);
+      load();
+      toast.success("Saved as an option");
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Could not save that option");
+    }
+    setBusy(false);
+  };
+
+  const remove = async (id) => {
+    setBusy(true);
+    try { await deleteTextPreset(id); load(); }
+    catch { toast.error("Could not remove that option"); }
+    setBusy(false);
+  };
+
+  return (
+    <div className="relative mb-2" ref={boxRef}>
+      <div className="flex items-center gap-1.5">
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className="flex h-8 min-w-0 flex-1 items-center justify-between gap-2 rounded-md border border-slate-200 bg-white px-2.5 text-[11px] text-slate-600 hover:bg-slate-50"
+          data-testid={`${testPrefix}-preset-toggle`}
+        >
+          <span className="truncate">{presets.length ? "Choose a saved option" : "No saved options yet"}</span>
+          <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-slate-400 transition ${open ? "rotate-180" : ""}`} />
+        </button>
+        <button
+          type="button"
+          onClick={save}
+          disabled={busy}
+          title="Save what's written as a reusable option"
+          className="flex h-8 shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[11px] font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+          data-testid={`${testPrefix}-preset-save`}
+        >
+          <Plus className="h-3.5 w-3.5" /> Save
+        </button>
+      </div>
+
+      {open && (
+        <div
+          className="absolute left-0 right-0 top-9 z-20 max-h-56 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-lg"
+          data-testid={`${testPrefix}-preset-list`}
+        >
+          {presets.length === 0 ? (
+            <p className="px-2 py-3 text-center text-[11px] text-slate-400">
+              Write a report, then press Save to keep it here for next time.
+            </p>
+          ) : presets.map((p) => (
+            <div key={p.id} className="group flex items-start gap-1 rounded px-1 hover:bg-slate-50">
+              <button
+                type="button"
+                onClick={() => { onPick(p.text); setOpen(false); }}
+                className="min-w-0 flex-1 px-1 py-1.5 text-left text-[11px] text-slate-700"
+                data-testid={`${testPrefix}-preset-${p.id}`}
+              >
+                <span className="line-clamp-2">{p.text}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => remove(p.id)}
+                disabled={busy}
+                title="Remove this option for everyone"
+                className="mt-1 shrink-0 rounded p-1 text-slate-300 opacity-0 transition hover:bg-rose-50 hover:text-rose-500 group-hover:opacity-100"
+                data-testid={`${testPrefix}-preset-remove-${p.id}`}
+              >
+                <Trash2 className="h-3 w-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
  * A text box that auto-saves (debounced, silent) while typing — "Done" just exits
  * edit mode, it isn't a save action. Pre-existing records saved under the old
  * Save & Lock flow may still carry a locked flag; the Edit button calls the
@@ -4983,7 +5104,7 @@ function PartialInstallmentsEditor({ installments, setInstallments, totalSession
  */
 function LockableTextBox({
   icon: Icon, label, accent, value, onChange, editing, locked, savedText,
-  saving, canEdit, onDone, onEdit, onUnlock, rows, placeholder, testPrefix,
+  saving, canEdit, onDone, onEdit, onUnlock, rows, placeholder, testPrefix, presetKind,
 }) {
   const colors = {
     sky: { border: "border-sky-200", bg: "bg-sky-50", text: "text-sky-700", btn: "bg-sky-600 hover:bg-sky-700" },
@@ -5003,6 +5124,14 @@ function LockableTextBox({
 
       {showEditor ? (
         <>
+          {presetKind && (
+            <PresetPicker
+              kind={presetKind}
+              currentText={value}
+              onPick={onChange}
+              testPrefix={testPrefix}
+            />
+          )}
           <textarea
             value={value}
             onChange={(e) => onChange(e.target.value)}

@@ -202,6 +202,13 @@ export const saveDietConsultationReport = async (leadId, report) => (await api.p
 export const setDocumentShared = async (leadId, docId, shared) => (await api.patch(`/leads/${leadId}/documents/${docId}/share`, null, { params: { shared } })).data;
 export const branchDietPatients = async () => (await api.get("/branch/diet-patients")).data;
 
+// ---- Reusable report wording (Head Physio's Diagnosis Report / Treatment Summary) ----
+// Org-wide, so one list holds across branches. A preset only ever fills the box; what is
+// saved against a patient is whatever was actually written for them.
+export const listTextPresets = async (kind) => (await api.get("/text-presets", { params: kind ? { kind } : {} })).data;
+export const addTextPreset = async (kind, text) => (await api.post("/text-presets", { kind, text })).data;
+export const deleteTextPreset = async (presetId) => (await api.delete(`/text-presets/${presetId}`)).data;
+
 // ---- Client documents ----
 // Never served from the static /uploads mount — these are patient records, so the bytes
 // come back through an authenticated route as a blob.
