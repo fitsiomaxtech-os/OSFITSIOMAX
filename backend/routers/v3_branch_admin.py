@@ -598,6 +598,22 @@ async def v3_available_experts(
                 }
                 for s in sorted(free)
             ],
+            # The taken ones too, so the booking popup can show the expert's whole day
+            # rather than only the gaps. A grid of four free times says nothing about
+            # whether the day is quiet or nearly full, and Branch Admin is choosing a slot
+            # for a patient on the phone who wants to know what else is around.
+            #
+            # `taken` already excludes this lead's own booking, so reopening an existing
+            # appointment still shows that slot as free and selectable rather than as a
+            # clash with itself.
+            "booked_slots": [
+                {
+                    "slot_time": s,
+                    "time": s.split("T")[1],
+                    "duration": (detail_by_slot.get(s) or {}).get("duration") or 30,
+                }
+                for s in sorted(taken)
+            ],
         })
     return {
         "date": date,

@@ -939,11 +939,24 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
 
   // The picked expert's own open times on the picked date. They arrive with the expert
   // list, so choosing an expert reveals their slots without a second round trip.
+  // Free and booked in one time-ordered grid. Showing only the gaps said nothing about
+  // whether the day was quiet or nearly full, which is the question being asked when a
+  // patient on the phone wants to know what else is around their preferred time.
   const apptSlotsForExpert = useMemo(() => {
     if (!apptDraft?.physio_id) return [];
     const doc = (apptExperts.experts || []).find((d) => d.id === apptDraft.physio_id);
-    return doc?.free_slots || [];
+    if (!doc) return [];
+    const rows = [
+      ...(doc.free_slots || []).map((s) => ({ ...s, booked: false })),
+      ...(doc.booked_slots || []).map((s) => ({ ...s, booked: true })),
+    ];
+    return rows.sort((a, b) => (a.slot_time || "").localeCompare(b.slot_time || ""));
   }, [apptExperts.experts, apptDraft?.physio_id]);
+
+  const apptFreeCount = useMemo(
+    () => apptSlotsForExpert.filter((s) => !s.booked).length,
+    [apptSlotsForExpert],
+  );
 
   useEffect(() => {
     if (!apptDraft || !apptDraft.appointment_date || !branchId) return;
@@ -1470,7 +1483,9 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                   that scroll — two scrollbars, and the slots unreachable. */}
               <div className="w-full flex-shrink-0 p-4 sm:p-5 lg:flex-1 lg:overflow-y-auto" data-testid="branch-appt-slot-panel">
                 <p className="mb-1 text-xs font-bold uppercase tracking-wider text-slate-400">3 · Time Slot</p>
-                <p className="mb-3 text-xs text-slate-400">Published availability only.</p>
+                <p className="mb-3 text-xs text-slate-400">
+                  Published availability. Booked times are shown greyed out.
+                </p>
                 {!apptDraft.physio_id ? (
                   <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">Select a Head Physio to see their available times.</p>
                 ) : apptSlotsForExpert.length === 0 ? (
@@ -1481,23 +1496,46 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                     </p>
                   </div>
                 ) : (
+                  <>
+                  {/* Every slot greyed out would otherwise be a grid with no explanation
+                      of why nothing responds to a click. */}
+                  {apptFreeCount === 0 && (
+                    <div className="mb-2 rounded-lg border-2 border-amber-200 bg-amber-50 px-3 py-2" data-testid="branch-appt-fully-booked">
+                      <p className="text-xs font-semibold text-amber-800">Every published slot on this date is already booked.</p>
+                      <p className="mt-0.5 text-[11px] text-amber-700">Pick another date, or publish more availability in MANAGEMENT → HEAD PHYSIO CALENDAR.</p>
+                    </div>
+                  )}
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4" data-testid="branch-appt-slots">
                     {apptSlotsForExpert.map((s) => {
                       const active = apptDraft.appointment_time === s.time;
+                      // Disabled, not merely styled: a booked slot that still responds to a
+                      // click would put a second patient on one time and the clash would
+                      // only surface on Confirm.
                       return (
                         <button
                           key={s.slot_time}
                           type="button"
+                          disabled={s.booked}
                           onClick={() => setApptDraft({ ...apptDraft, appointment_time: s.time, duration: s.duration })}
-                          className={`rounded-lg border-2 px-2 py-2.5 text-center transition ${active ? "border-teal-500 bg-teal-50 text-teal-700 shadow-sm ring-2 ring-teal-100" : "border-slate-200 bg-white text-slate-600 hover:border-teal-300 hover:bg-slate-50"}`}
+                          className={`rounded-lg border-2 px-2 py-2.5 text-center transition ${
+                            s.booked
+                              ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
+                              : active
+                                ? "border-teal-500 bg-teal-50 text-teal-700 shadow-sm ring-2 ring-teal-100"
+                                : "border-slate-200 bg-white text-slate-600 hover:border-teal-300 hover:bg-slate-50"
+                          }`}
+                          title={s.booked ? "Already booked" : undefined}
                           data-testid={`branch-appt-slot-${s.time}`}
                         >
-                          <span className="block text-base font-bold">{to12h(s.time)}</span>
-                          <span className="block text-[11px] text-slate-400">{s.duration} min</span>
+                          <span className={`block text-base font-bold ${s.booked ? "line-through" : ""}`}>{to12h(s.time)}</span>
+                          <span className={`block text-[11px] ${s.booked ? "font-semibold text-slate-400" : "text-slate-400"}`}>
+                            {s.booked ? "Booked" : `${s.duration} min`}
+                          </span>
                         </button>
                       );
                     })}
                   </div>
+                  </>
                 )}
                 {/* Start time only. A consultation runs as long as it needs to, so printing
                     an end time and a duration here stated something the branch cannot
