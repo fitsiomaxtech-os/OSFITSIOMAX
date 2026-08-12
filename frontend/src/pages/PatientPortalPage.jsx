@@ -293,7 +293,9 @@ function SessionsTab({ data }) {
                     </div>
                   )}
                 </div>
-                <span className={`rounded-full px-2 py-0.5 text-[9px] font-semibold ${
+                {/* shrink-0: without it a long physio remark beside this squeezes the
+                    badge until "upcoming" wraps mid-word. */}
+                <span className={`shrink-0 rounded-full px-2 py-0.5 text-[9px] font-semibold ${
                   s.status === "completed" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"
                 }`}>
                   {s.status}
@@ -467,17 +469,20 @@ function PaymentTab({ data }) {
 
   return (
     <div className="space-y-4" data-testid="patient-portal-payment-tab">
+      {/* Grouped and truncated. These were raw numbers — ₹497896 — in a tile a third of
+          a phone wide: hard to read at a glance, and a longer figure would have run past
+          its own border rather than shortening. */}
       <div className="grid grid-cols-3 gap-2">
         <div className="rounded-xl border border-sky-200 bg-sky-50 p-3 text-center">
-          <p className="text-lg font-bold text-sky-700">₹{totalAll}</p>
+          <p className="truncate text-lg font-bold text-sky-700" title={`₹${money(totalAll)}`}>₹{money(totalAll)}</p>
           <p className="text-[10px] text-sky-500">Total</p>
         </div>
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-center">
-          <p className="text-lg font-bold text-emerald-700">₹{collectedAll}</p>
+          <p className="truncate text-lg font-bold text-emerald-700" title={`₹${money(collectedAll)}`}>₹{money(collectedAll)}</p>
           <p className="text-[10px] text-emerald-500">Collected</p>
         </div>
         <div className={`rounded-xl border p-3 text-center ${pendingAll > 0 ? "border-amber-200 bg-amber-50" : "border-slate-200 bg-white"}`}>
-          <p className={`text-lg font-bold ${pendingAll > 0 ? "text-amber-700" : "text-slate-700"}`}>₹{pendingAll}</p>
+          <p className={`truncate text-lg font-bold ${pendingAll > 0 ? "text-amber-700" : "text-slate-700"}`} title={`₹${money(pendingAll)}`}>₹{money(pendingAll)}</p>
           <p className={`text-[10px] ${pendingAll > 0 ? "text-amber-500" : "text-slate-400"}`}>Pending</p>
         </div>
       </div>
@@ -490,9 +495,9 @@ function PaymentTab({ data }) {
           </span>
         </div>
         {p.consultation_fee_paid ? (
-          <p className="text-xs text-slate-600">₹{p.consultation_fee_paid} <span className="capitalize text-slate-400">via {p.consultation_payment_mode}</span></p>
+          <p className="text-xs text-slate-600">₹{money(p.consultation_fee_paid)} <span className="capitalize text-slate-400">via {p.consultation_payment_mode}</span></p>
         ) : (
-          <p className="text-xs text-slate-400">Not yet collected{p.consultation_fee_total ? ` — ₹${p.consultation_fee_total} due` : ""}</p>
+          <p className="text-xs text-slate-400">Not yet collected{p.consultation_fee_total ? ` — ₹${money(p.consultation_fee_total)} due` : ""}</p>
         )}
       </div>
 
@@ -514,14 +519,14 @@ function PaymentTab({ data }) {
             <p className="text-[11px] text-slate-500">{p.installments_paid} of {p.installments_total} payments collected</p>
             {p.next_due_date ? (
               <div className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-800">
-                Next payment <span className="font-semibold">₹{p.next_due_amount}</span> due {p.next_due_date}
+                Next payment <span className="font-semibold">₹{money(p.next_due_amount)}</span> due {p.next_due_date}
               </div>
             ) : (
               <p className="rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-2 text-xs text-emerald-700">All installments collected</p>
             )}
           </div>
         ) : p.treatment_fee_paid ? (
-          <p className="text-xs text-slate-600">₹{p.treatment_fee_paid} <span className="capitalize text-slate-400">via {p.treatment_payment_mode}</span></p>
+          <p className="text-xs text-slate-600">₹{money(p.treatment_fee_paid)} <span className="capitalize text-slate-400">via {p.treatment_payment_mode}</span></p>
         ) : (
           <p className="text-xs text-slate-400">No treatment fee collected yet</p>
         )}
@@ -536,7 +541,7 @@ function PaymentTab({ data }) {
             <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">Paid</span>
           </div>
           <p className="text-xs text-slate-600">
-            ₹{p.diet_fee_paid} <span className="capitalize text-slate-400">via {p.diet_payment_mode}</span>
+            ₹{money(p.diet_fee_paid)} <span className="capitalize text-slate-400">via {p.diet_payment_mode}</span>
           </p>
           {p.diet_package_name && <p className="mt-0.5 text-[11px] text-slate-400">{p.diet_package_name}</p>}
         </div>
@@ -544,6 +549,10 @@ function PaymentTab({ data }) {
     </div>
   );
 }
+
+/** Indian digit grouping — 4,97,896 rather than 497896. The patient is reading what they
+    were charged, and an ungrouped six-figure number is read wrong before it is read. */
+const money = (n) => (Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 });
 
 const prettyBytes = (n) => {
   const b = Number(n) || 0;
@@ -684,15 +693,26 @@ function ProfileTab({ data }) {
   );
 }
 
+// Overview leads: it is the patient's own details, care team, documents and branch —
+// what they are looking at when they first open the app — and the three after it answer
+// "how is my treatment going", which is the follow-up.
+//
+// `short` is the phone label. Four full labels cannot share a phone's width once one of
+// them is "Payment History": at 360px each tab gets about 85px, and that label needs
+// well over a hundred. Truncating gives "Payment Hist…", wrapping makes that one tab
+// two lines tall and pushes the bar off the bottom of the screen. Shortening is the only
+// option that keeps all four readable in one row. `label` is what the desktop shows.
 const PORTAL_TABS = [
-  { key: "sessions", label: "Sessions", icon: Calendar },
-  { key: "treatment", label: "Treatment", icon: ClipboardList },
-  { key: "payment", label: "Payment History", icon: IndianRupee },
-  { key: "profile", label: "Profile", icon: UserRound },
+  { key: "profile", label: "Overview", short: "Overview", icon: UserRound },
+  { key: "sessions", label: "Sessions", short: "Sessions", icon: Calendar },
+  { key: "treatment", label: "Treatment", short: "Treatment", icon: ClipboardList },
+  { key: "payment", label: "Payment History", short: "Payments", icon: IndianRupee },
 ];
 
 function PortalDashboard({ onLogout }) {
-  const [activeTab, setActiveTab] = useState("sessions");
+  // Lands on Overview, the first tab. A patient opening the app is most often checking
+  // who they are with and when — not scrolling a session list they already know.
+  const [activeTab, setActiveTab] = useState("profile");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -754,10 +774,14 @@ function PortalDashboard({ onLogout }) {
                 key={t.key}
                 type="button"
                 onClick={() => setActiveTab(t.key)}
-                className={`flex flex-1 flex-col items-center gap-0.5 py-2.5 text-[10px] font-medium transition ${isActive ? "text-sky-600" : "text-slate-400"}`}
+                className={`flex min-w-0 flex-1 flex-col items-center gap-0.5 py-2.5 text-[10px] font-medium transition ${isActive ? "text-sky-600" : "text-slate-400"}`}
                 data-testid={`patient-portal-tab-${t.key}`}
               >
-                <Icon className="h-5 w-5" /> {t.label}
+                <Icon className="h-5 w-5 shrink-0" />
+                {/* min-w-0 above and truncate here so a long label shortens instead of
+                    forcing its tab wider and squeezing the other three. */}
+                <span className="w-full truncate px-0.5 text-center sm:hidden">{t.short}</span>
+                <span className="hidden w-full truncate px-0.5 text-center sm:inline">{t.label}</span>
               </button>
             );
           })}
