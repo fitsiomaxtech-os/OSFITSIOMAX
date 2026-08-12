@@ -328,6 +328,36 @@ const Lbl = ({ full, short }) => (
 // Applied to every button in a stage action row: tighter below sm so four fit, normal above.
 const ACT_BTN = "px-2 text-[11px] sm:px-3 sm:text-xs";
 
+/**
+ * How full a treatment slot is, as one dot per seat — filled for taken, hollow for free.
+ * Two of three booked reads at a glance, where "2/3" had to be read and divided.
+ *
+ * Colour comes from currentColor, so the dots take the tone of the line they sit on
+ * (amber when the slot is full, emerald while it is still open) with nothing to keep in
+ * step separately.
+ *
+ * slot_capacity is configurable per physio calendar, so it is not always three. Past
+ * DOT_MAX the row would outgrow a box a third of a phone wide and the dots stop being
+ * countable at a glance anyway, so it falls back to the number it replaced.
+ */
+const DOT_MAX = 8;
+const SeatDots = ({ taken, capacity }) => {
+  const cap = Number(capacity) || 0;
+  const used = Math.min(Number(taken) || 0, cap);
+  if (cap < 1) return null;
+  if (cap > DOT_MAX) return <span>{used}/{cap}</span>;
+  return (
+    <span className="inline-flex shrink-0 items-center gap-0.5" aria-label={`${used} of ${cap} booked`}>
+      {Array.from({ length: cap }, (_, i) => (
+        <span
+          key={i}
+          className={`h-1.5 w-1.5 rounded-full border border-current ${i < used ? "bg-current" : "bg-transparent opacity-45"}`}
+        />
+      ))}
+    </span>
+  );
+};
+
 export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened, externalDate, hideDateFilter = false, onCountChange, onRowsChange, externalSearch, externalDateFilter, reloadToken, mobileCards = false }) => {
   const isConsultant = viewerRole === "head_physio";
   // Head Physio tracks progress on their own independent pipeline (head_consultation_stage),
@@ -4366,18 +4396,26 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                                       {/* Once a slot is picked, which treatment day it became
                                           and whether it's paid matter more than its end time,
                                           which is fixed by the package and named in the header. */}
-                                      <p className={`mt-0.5 truncate text-[10px] font-medium sm:text-xs ${taken ? "text-amber-600" : picked ? (pickedPaid ? "text-emerald-700" : "text-rose-700") : "text-emerald-600"}`}>
-                                        {/* A part-filled slot says how full it is rather than
-                                            who is in it — the physio takes several at once, so
-                                            the seat count is what decides whether it's bookable.
-                                            Names stay in the tooltip. */}
-                                        {taken
-                                          ? `Full · ${seats}/${slotCapacity}`
-                                          : picked
-                                          ? `Day ${planByDate[pickerDate].day} · ${pickedPaid ? "PAID" : "UNPAID"}`
-                                          : seats > 0
-                                          ? `${seats}/${slotCapacity} · ends ${endTime12h(time, sessionMinutes)}`
-                                          : `ends ${endTime12h(time, sessionMinutes)}`}
+                                      <p className={`mt-0.5 flex items-center gap-1 truncate text-[10px] font-medium sm:text-xs ${taken ? "text-amber-600" : picked ? (pickedPaid ? "text-emerald-700" : "text-rose-700") : "text-emerald-600"}`}>
+                                        {/* A slot says how full it is rather than who is in
+                                            it — the physio takes several at once, so the seat
+                                            count is what decides whether it's bookable. Names
+                                            stay in the tooltip.
+
+                                            Dots on every unpicked slot, not only part-filled
+                                            ones: they are how many seats this slot has as much
+                                            as how many are gone, and an empty slot that showed
+                                            nothing made the row of dots look like a warning
+                                            rather than a gauge. A picked slot gives the space
+                                            to its day and paid state instead. */}
+                                        {picked ? (
+                                          `Day ${planByDate[pickerDate].day} · ${pickedPaid ? "PAID" : "UNPAID"}`
+                                        ) : (
+                                          <>
+                                            <SeatDots taken={seats} capacity={slotCapacity} />
+                                            {!taken && <span className="min-w-0 truncate">ends {endTime12h(time, sessionMinutes)}</span>}
+                                          </>
+                                        )}
                                       </p>
                                     </button>
                                   );
