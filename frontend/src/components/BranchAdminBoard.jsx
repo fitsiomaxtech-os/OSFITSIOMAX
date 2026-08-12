@@ -1484,7 +1484,7 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
               <div className="w-full flex-shrink-0 p-4 sm:p-5 lg:flex-1 lg:overflow-y-auto" data-testid="branch-appt-slot-panel">
                 <p className="mb-1 text-xs font-bold uppercase tracking-wider text-slate-400">3 · Time Slot</p>
                 <p className="mb-3 text-xs text-slate-400">
-                  Published availability. Booked times are shown greyed out.
+                  Published availability. Booked times are shown in amber.
                 </p>
                 {!apptDraft.physio_id ? (
                   <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">Select a Head Physio to see their available times.</p>
@@ -1512,6 +1512,10 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                       // click would put a second patient on one time and the clash would
                       // only surface on Confirm.
                       return (
+                        // Amber, matching the booked slot on HEAD PHYSIO CALENDAR — the same
+                        // fact in two places should look the same. Not struck through: the
+                        // time hasn't been withdrawn, it belongs to someone, and the name
+                        // below says who so a clash can be discussed on the call.
                         <button
                           key={s.slot_time}
                           type="button"
@@ -1519,18 +1523,23 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                           onClick={() => setApptDraft({ ...apptDraft, appointment_time: s.time, duration: s.duration })}
                           className={`rounded-lg border-2 px-2 py-2.5 text-center transition ${
                             s.booked
-                              ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
+                              ? "cursor-not-allowed border-amber-300 bg-amber-50"
                               : active
                                 ? "border-teal-500 bg-teal-50 text-teal-700 shadow-sm ring-2 ring-teal-100"
                                 : "border-slate-200 bg-white text-slate-600 hover:border-teal-300 hover:bg-slate-50"
                           }`}
-                          title={s.booked ? "Already booked" : undefined}
+                          title={s.booked ? (s.lead_name ? `Booked — ${s.lead_name}` : "Already booked") : undefined}
                           data-testid={`branch-appt-slot-${s.time}`}
                         >
-                          <span className={`block text-base font-bold ${s.booked ? "line-through" : ""}`}>{to12h(s.time)}</span>
-                          <span className={`block text-[11px] ${s.booked ? "font-semibold text-slate-400" : "text-slate-400"}`}>
-                            {s.booked ? "Booked" : `${s.duration} min`}
-                          </span>
+                          <span className={`block text-base font-bold ${s.booked ? "text-amber-800" : ""}`}>{to12h(s.time)}</span>
+                          {s.booked ? (
+                            <>
+                              <span className="mt-0.5 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-semibold text-amber-600">Booked</span>
+                              {s.lead_name && <span className="mt-0.5 block truncate text-[10px] text-amber-600">{s.lead_name}</span>}
+                            </>
+                          ) : (
+                            <span className="block text-[11px] text-slate-400">{s.duration} min</span>
+                          )}
                         </button>
                       );
                     })}

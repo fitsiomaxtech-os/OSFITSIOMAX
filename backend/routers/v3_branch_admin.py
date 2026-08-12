@@ -560,9 +560,13 @@ async def v3_available_experts(
     # the Consultant Calendar instead of silently offering no one.
     booked_rows = await v3_col("appointments").find(
         {"status": "new_appointment", "slot_time": {"$regex": f"^{date}T"}},
-        {"_id": 0, "doctor_id": 1, "slot_time": 1, "lead_id": 1},
+        {"_id": 0, "doctor_id": 1, "slot_time": 1, "lead_id": 1, "lead_name": 1},
     ).to_list(2000)
     booked_by_doc: Dict[str, set] = {}
+    # Who holds each taken slot, so the picker can name them rather than only saying the
+    # time is gone. Read off the appointment row, which already carries lead_name — no
+    # second lookup against leads.
+    booked_names: Dict[tuple, str] = {}
     for r in booked_rows:
         # A slot this same lead already holds isn't "taken" as far as they're concerned —
         # reopening their own booking has to keep offering the slot they're sitting in,
@@ -570,6 +574,8 @@ async def v3_available_experts(
         if lead_id and r.get("lead_id") == lead_id:
             continue
         booked_by_doc.setdefault(r.get("doctor_id"), set()).add(r.get("slot_time"))
+        if r.get("lead_name"):
+            booked_names[(r.get("doctor_id"), r.get("slot_time"))] = r.get("lead_name")
 
     available = []
     for d in branch_experts:
@@ -611,6 +617,7 @@ async def v3_available_experts(
                     "slot_time": s,
                     "time": s.split("T")[1],
                     "duration": (detail_by_slot.get(s) or {}).get("duration") or 30,
+                    "lead_name": booked_names.get((d.get("id"), s)),
                 }
                 for s in sorted(taken)
             ],
