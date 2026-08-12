@@ -1205,7 +1205,7 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
         {/* Plain white header, as the Pre-Sales detail popup uses. The day count keeps
             its emphasis by going sky on a tinted chip — on the old slate bar it was
             carried by white-on-colour, which there is no colour left to do. */}
-        <div className="flex items-start justify-between gap-3 bg-white px-6 py-4">
+        <div className="flex shrink-0 items-start justify-between gap-3 bg-white px-6 py-4">
           <div className="min-w-0">
             <h3 className="truncate text-lg font-bold text-slate-900">{lead.name}</h3>
             <p className="truncate text-xs text-slate-500">{lead.phone}{lead.email ? ` · ${lead.email}` : ""}</p>
@@ -1223,7 +1223,11 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
             long scroll where the Complete button — the reason the popup is open — sat far
             below the reading material. Tabs keep each within one screen.
             Overview leads because it answers "what am I doing with this patient today". */}
-        <div className="flex gap-1 overflow-x-auto border-b border-slate-200 px-5 pt-2" data-testid="physio-detail-tabs">
+        {/* shrink-0 is load-bearing. This is a flex column at max-h-[90vh], and a flex
+            child defaults to shrink:1 — with a long day list the tab row was squeezed
+            shorter than its own text, so the sky underline rode up through the labels and
+            "Treatment Days" came out struck through. */}
+        <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-slate-200 px-5 pt-2" data-testid="physio-detail-tabs">
           {MODAL_TABS.map((t) => (
             <button
               key={t.key}
@@ -1420,32 +1424,37 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
                 })}
               </div>
             )}
+
+            {/* Was the popup's footer bar. "Mark Treatment Complete" is not the per-day
+                Complete above — it calls physioCompleteConsultation and closes out the
+                whole course of treatment, and this popup is the only place a physio can
+                do it, so it moved here rather than going away with the footer. Treatment
+                Days is where it belongs anyway: it is the end of this list. */}
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-3">
+              <p className="text-[11px] text-slate-500">
+                {activeDate
+                  ? "Only the day you opened can be completed — pick another date in the strip to complete that one."
+                  : "Completing a day sends that week's session to Review for a weekly write-up."}
+              </p>
+              <button
+                type="button"
+                onClick={markComplete}
+                disabled={isComplete || submitting}
+                className={`flex items-center gap-1.5 rounded-lg border px-4 py-2 text-xs font-semibold transition ${
+                  isComplete
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                    : "border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100"
+                }`}
+                data-testid="physio-consultation-complete"
+              >
+                <Check className="h-3.5 w-3.5" /> {isComplete ? "Complete" : submitting ? "Marking..." : "Mark Treatment Complete"}
+              </button>
+            </div>
           </div>
           )}
 
           {tab === "documents" && <DocumentsPanel leadId={lead.id} />}
 
-        </div>
-
-        <div className="flex items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-6 py-3.5">
-          <p className="text-[11px] text-slate-500">
-            {activeDate
-              ? "Only the day you opened can be completed — pick another date in the strip to complete that one."
-              : "Completing a day sends that week's session to Review for a weekly write-up."}
-          </p>
-          <button
-            type="button"
-            onClick={markComplete}
-            disabled={isComplete || submitting}
-            className={`flex items-center gap-1.5 rounded-lg border px-4 py-2 text-xs font-semibold transition ${
-              isComplete
-                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                : "border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100"
-            }`}
-            data-testid="physio-consultation-complete"
-          >
-            <Check className="h-3.5 w-3.5" /> {isComplete ? "Complete" : submitting ? "Marking..." : "Mark Treatment Complete"}
-          </button>
         </div>
 
         {completeTarget && (
