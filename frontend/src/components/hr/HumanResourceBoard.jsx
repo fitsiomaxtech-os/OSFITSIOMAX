@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  ArrowUpDown,
+  ArrowDownNarrowWide,
+  ArrowUpNarrowWide,
   Briefcase,
   CalendarClock,
   ChevronRight,
@@ -16,6 +17,7 @@ import {
   Search,
   SlidersHorizontal,
   Trash2,
+  RefreshCw,
   UserPlus,
   Users,
   X,
@@ -259,25 +261,47 @@ export const HumanResourceBoard = ({ user }) => {
         <div className="flex flex-wrap items-center justify-center gap-2 lg:justify-start">
           {/* Filters by when the candidate was added, which is what "0d / 19d" in the Age
               column counts from — the two answer the same question. */}
-          <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="hr-date-filter" centered />
+          <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="hr-date-filter" centered iconOnly />
 
+          {/* Reloads the board. Distinct from the green Pull from Sheet at the end of
+              this row, which reaches out to Google Sheets and can create candidates —
+              they share an icon and mean different things, so this one is orange to
+              match the refresh on every other Master View. */}
+          <Button
+            onClick={load}
+            disabled={loading}
+            title="Refresh"
+            aria-label="Refresh"
+            className="h-10 w-10 shrink-0 bg-orange-500 p-0 text-white hover:bg-orange-600"
+            data-testid="hr-refresh-button"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+          </Button>
+
+          {/* Icon only, but the arrow direction still carries the state — an ArrowUpDown
+              would have said "sortable" without saying which way it is sorted, and that
+              is the one thing this control exists to tell you. */}
           <button
             type="button"
             onClick={() => setSortDir((d) => (d === "newest" ? "oldest" : "newest"))}
-            className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-600 hover:bg-slate-50"
-            title="Sort by when the candidate was added"
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+            title={sortDir === "newest" ? "Newest first" : "Oldest first"}
+            aria-label={sortDir === "newest" ? "Newest first" : "Oldest first"}
             data-testid="hr-sort-toggle"
           >
-            <ArrowUpDown className="h-4 w-4 shrink-0 text-slate-400" />
-            {sortDir === "newest" ? "Newest first" : "Oldest first"}
+            {sortDir === "newest"
+              ? <ArrowDownNarrowWide className="h-4 w-4 shrink-0 text-slate-500" />
+              : <ArrowUpNarrowWide className="h-4 w-4 shrink-0 text-slate-500" />}
           </button>
 
           <Button
             onClick={() => setShowAdd(true)}
-            className="hidden h-10 shrink-0 bg-orange-500 text-white hover:bg-orange-600 sm:inline-flex"
+            title="Add Candidate"
+            aria-label="Add Candidate"
+            className="hidden h-10 w-10 shrink-0 bg-sky-600 p-0 text-white hover:bg-sky-700 sm:inline-flex"
             data-testid="hr-add-candidate-button"
           >
-            <UserPlus className="mr-1.5 h-4 w-4" /> Add Candidate
+            <UserPlus className="h-4 w-4" />
           </Button>
 
           <CandidatePullButton onPulled={load} />
@@ -291,7 +315,7 @@ export const HumanResourceBoard = ({ user }) => {
       <button
         type="button"
         onClick={() => setShowAdd(true)}
-        className="fixed bottom-20 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-orange-500 text-white shadow-lg sm:hidden"
+        className="fixed bottom-20 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-sky-600 text-white shadow-lg sm:hidden"
         aria-label="Add candidate"
         data-testid="hr-add-candidate-fab"
       >
