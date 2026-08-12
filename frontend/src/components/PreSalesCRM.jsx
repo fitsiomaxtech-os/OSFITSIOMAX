@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Eye, Plus, Search, Settings as Cog, Calendar as CalendarIcon, Phone, FileText, StickyNote, ArrowRight, CheckCircle2, X, Pencil, PhoneOff, Clock, Bell, Building2, Trash2, Lock, Users, CalendarCheck, UserRound, LogOut, Mail, Youtube, ChevronDown, ChevronUp } from "lucide-react";
+import { Eye, Plus, Search, Settings as Cog, Calendar as CalendarIcon, Phone, FileText, StickyNote, ArrowRight, CheckCircle2, X, Pencil, PhoneOff, Clock, Bell, Building2, Trash2, Lock, Users, CalendarCheck, UserRound, LogOut, Mail, Youtube, ChevronDown, ChevronUp, RefreshCw } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -405,9 +405,14 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
           <Search className="pointer-events-none absolute left-2 top-2.5 h-4 w-4 text-slate-400" />
           <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search leads by name, email, phone..." className="h-10 pl-8" data-testid="presales-search" />
         </div>
-        <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="presales-date-filter" centered />
-        <PullFromSheetButton onPulled={load} />
-        <Button onClick={() => setShowCreate(true)} className="h-10 bg-sky-600 hover:bg-sky-700" data-testid="presales-create-lead-btn"><Plus className="h-4 w-4 mr-1" />Create Lead</Button>
+        {/* Icons only, matching Branch Leads. The labels move to title/aria-label rather
+            than being dropped, so a hover still says what each does and a screen reader
+            still announces it.
+
+            All Sources keeps its text: it is not a button but the current selection, and
+            an icon cannot say WHICH source is filtered. Same reason the date filter puts
+            its label back once a range is picked — a filtered screen has to admit it. */}
+        <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="presales-date-filter" centered iconOnly />
         <ColorSelect
           value={sourceFilter}
           options={sourceSelectOptions}
@@ -418,6 +423,26 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
           onChange={setSourceFilter}
           testid="presales-source-filter"
         />
+        <PullFromSheetButton onPulled={load} iconOnly />
+        <Button
+          onClick={() => setShowCreate(true)}
+          title="Create Lead"
+          aria-label="Create Lead"
+          className="h-10 w-10 shrink-0 bg-sky-600 p-0 hover:bg-sky-700"
+          data-testid="presales-create-lead-btn"
+        >
+          <Plus className="h-4 w-4" />
+        </Button>
+        <Button
+          onClick={load}
+          disabled={loading}
+          title="Refresh"
+          aria-label="Refresh"
+          className="h-10 w-10 shrink-0 bg-orange-500 p-0 text-white hover:bg-orange-600"
+          data-testid="presales-refresh-btn"
+        >
+          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+        </Button>
         {role === "super_admin" && (
           <Button variant="outline" className="h-10" onClick={onManageStages} data-testid="presales-manage-stages-btn"><Cog className="h-4 w-4 mr-1" />Manage Stages</Button>
         )}
