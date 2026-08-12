@@ -2280,7 +2280,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         <Calendar className="h-3.5 w-3.5" /> Move to Stage
                       </p>
                       <p className="mb-2 text-xs text-slate-600">Schedule the Consultation Date & Time to send this patient to the Head Physio.</p>
-                      <div className="flex flex-wrap justify-center gap-1.5 sm:justify-start">
+                      <div className="flex items-center gap-1.5 overflow-x-auto [justify-content:safe_center] [&>*]:shrink-0 sm:justify-start">
                         <Button
                           size="sm"
                           className="bg-amber-500 text-xs text-white hover:bg-amber-600"
@@ -2304,7 +2304,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       <p className="mb-2 text-xs text-slate-600">
                         {activeFollowUp ? `Scheduled for ${activeFollowUp.date} at ${activeFollowUp.time} — waiting on the Head Physio.` : "Waiting on the Head Physio."}
                       </p>
-                      <div className="flex flex-wrap justify-center gap-1.5 sm:justify-start">
+                      <div className="flex items-center gap-1.5 overflow-x-auto [justify-content:safe_center] [&>*]:shrink-0 sm:justify-start">
                         <Button
                           size="sm"
                           className="bg-amber-500 text-xs text-white hover:bg-amber-600"
@@ -2350,7 +2350,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       <Button size="sm" className="mt-3 bg-sky-600 text-xs hover:bg-sky-700" onClick={openCollectFeeDraft} data-testid="cons-open-collect-fee">
                         {alreadyPaid ? "Update Payment" : "Collect Payment"}
                       </Button>
-                      <div className="mt-2 flex flex-wrap justify-center gap-1.5 sm:justify-start">{CancelButton}</div>
+                      <div className="mt-2 flex items-center gap-1.5 overflow-x-auto [justify-content:safe_center] [&>*]:shrink-0 sm:justify-start">{CancelButton}</div>
                     </div>
                   );
                 }
@@ -2434,7 +2434,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         {ConsultationFeeSummary}
                         {DietFeeSection}
                         <p className="mb-2 mt-3 text-xs text-slate-600">Consultation Only — no treatment sessions. Mark this consultation as completed to close it out.</p>
-                        <div className="flex flex-wrap items-center justify-center gap-1.5 sm:justify-start">
+                        <div className="flex items-center gap-1.5 overflow-x-auto [justify-content:safe_center] [&>*]:shrink-0 sm:justify-start">
                           <Button size="sm" className="bg-emerald-600 text-xs hover:bg-emerald-700" onClick={submitMarkCompleted} disabled={completingConsultation} data-testid="cons-mark-completed">
                             {completingConsultation ? "Saving..." : "Mark Consultation Completed"}
                           </Button>
@@ -2553,7 +2553,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           Fee block above, so it took a line of its own and the row beneath
                           it started with Diet Appointment — three buttons on two lines,
                           reading as unrelated steps. Wraps on a phone. */}
-                      <div className={`${treatmentPaid ? "mt-2" : "mt-3"} flex flex-wrap items-center justify-center gap-1.5 sm:justify-start`}>
+                      <div className={`${treatmentPaid ? "mt-2" : "mt-3"} flex items-center gap-1.5 overflow-x-auto [justify-content:safe_center] [&>*]:shrink-0 sm:justify-start`}>
                         {FeeActions}
                         {treatmentPaid && (
                           <Button size="sm" className="bg-violet-600 text-xs hover:bg-violet-700" onClick={openPhysioModal} data-testid="cons-open-physio-assign-from-fee-collected">
@@ -2576,7 +2576,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           <Users className="h-3.5 w-3.5" /> Physio Assign
                         </p>
                         <p className="text-xs text-slate-600">Treatment Fee collected. Choose the physiotherapist who will deliver the sessions.</p>
-                        <div className="mt-3 flex flex-wrap items-center justify-center gap-1.5 sm:justify-start">
+                        <div className="mt-3 flex items-center gap-1.5 overflow-x-auto [justify-content:safe_center] [&>*]:shrink-0 sm:justify-start">
                           <Button size="sm" className="bg-violet-600 text-xs hover:bg-violet-700" onClick={openPhysioModal} data-testid="cons-open-physio-assign">
                             Assign Physio
                           </Button>
@@ -2594,7 +2594,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         <p className="mt-0.5 text-xs text-slate-600">Diet Consultation: <span className="font-semibold text-slate-800">{selectedLead.diet_coach_name}</span>
                           {selectedLead.diet_appointment_at && ` · ${dayLabel(selectedLead.diet_appointment_at.split("T")[0])} at ${to12h(selectedLead.diet_appointment_at.split("T")[1])}`}</p>
                       )}
-                      <div className="mt-3 flex flex-wrap items-center justify-center gap-1.5 sm:justify-start">
+                      <div className="mt-3 flex items-center gap-1.5 overflow-x-auto [justify-content:safe_center] [&>*]:shrink-0 sm:justify-start">
                         <Button size="sm" variant="outline" className="text-xs" onClick={openPhysioModal} data-testid="cons-reassign-physio">
                           Reassign Physio
                         </Button>
@@ -2616,7 +2616,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       {/* A closed consultation can still start a diet plan. "Consultation +
                           Diet" patients land here the moment the consultation is marked
                           completed, and that is exactly when their plan gets booked. */}
-                      {DietButton && <div className="mt-3 flex flex-wrap items-center justify-center gap-1.5 sm:justify-start">{DietButton}</div>}
+                      {DietButton && <div className="mt-3 flex items-center gap-1.5 overflow-x-auto [justify-content:safe_center] [&>*]:shrink-0 sm:justify-start">{DietButton}</div>}
                     </div>
                   );
                 }
