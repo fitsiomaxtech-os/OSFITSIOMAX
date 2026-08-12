@@ -1018,6 +1018,24 @@ const ChipTab = ({ label, active, onClick, color, testid }) => (
 
 // ============ Lead Detail Dialog (Overview + Move-to-Stage + Edit) ============
 
+/**
+ * The activity line without its "Call attempt #4 — " prefix.
+ *
+ * The backend writes that prefix so the entry reads on its own in the History tab and in
+ * Transaction History, where nothing else says which call it was. In RNR History the badge
+ * beside it already says ATTEMPT 4, so the prefix printed the number twice on one row.
+ *
+ * Stripped here rather than dropped at the source, because those other screens still need
+ * it. Anything that doesn't match the pattern is passed through untouched — an activity
+ * line written some other way should still be readable, not silently blanked.
+ */
+const rnrDetail = (details) => {
+  const text = (details || "").trim();
+  const stripped = text.replace(/^call attempt\s*#?\d+\s*[—–-]\s*/i, "");
+  if (!stripped) return text;
+  return stripped.charAt(0).toUpperCase() + stripped.slice(1);
+};
+
 const LeadDetailDialog = ({ lead, stages, currentUser, onClose, onSaved, onMoveStage }) => {
   const [tab, setTab] = useState("overview");
   const [showEdit, setShowEdit] = useState(false);
@@ -1212,7 +1230,7 @@ const LeadDetailDialog = ({ lead, stages, currentUser, onClose, onSaved, onMoveS
                       <span className="text-[11px] font-medium text-slate-600">{callTimeStamp(a.created_at)}</span>
                       <span className="text-[11px] text-slate-400">· {callDateStamp(a.created_at)}</span>
                     </div>
-                    {a.details && <p className="mt-1 text-sm text-slate-700">{a.details}</p>}
+                    {a.details && <p className="mt-1 text-sm text-slate-700">{rnrDetail(a.details)}</p>}
                     <p className="mt-1 text-[11px] text-slate-400">
                       by {a.created_by || "system"}{a.created_by_role ? ` · ${a.created_by_role}` : ""}
                     </p>
