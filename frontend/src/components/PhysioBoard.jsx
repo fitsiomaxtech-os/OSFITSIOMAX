@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
+import { StatTile } from "@/components/ui/stat-tile";
 import {
   physioConsultations,
   physioCompleteConsultation,
@@ -193,35 +194,16 @@ const WhatsAppIcon = ({ className }) => (
   </svg>
 );
 
-// Summary tile — the same card the Head Physio board uses for its work tabs, so both
-// Master Views read as one system rather than two products. Each tile is also the
-// list's filter: the count and the control that narrows to it are one thing.
-//
-// The filled tile this replaced (a solid violet Pending) singled one figure out by
-// weight, which only worked while it was the figure being acted on. Selection is the
-// state worth showing, and the teal carries that on whichever tile is picked.
-const StatTile = ({ label, value, sub, icon: Icon, onClick, active, testid }) => {
-  const Tag = onClick ? "button" : "div";
-  const tagProps = onClick ? { type: "button", onClick, "data-testid": testid } : { "data-testid": testid };
-  return (
-    <Tag
-      {...tagProps}
-      className={`w-full rounded-xl border-2 px-3 py-2.5 text-left transition sm:px-4 sm:py-4 ${
-        active
-          ? "border-teal-600 bg-teal-50 shadow-sm"
-          : `border-slate-200 bg-white ${onClick ? "hover:border-teal-300 hover:shadow-sm" : ""}`
-      }`}
-    >
-      <span className={`flex items-center gap-1.5 ${active ? "text-teal-700" : "text-slate-500"}`}>
-        {Icon && <Icon className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />}
-        <span className="truncate text-[10px] font-bold uppercase tracking-wider sm:text-xs">{label}</span>
-      </span>
-      <span className={`mt-0.5 block text-2xl font-extrabold sm:mt-1 sm:text-3xl ${active ? "text-teal-700" : "text-slate-800"}`}>
-        {value}
-      </span>
-      {sub && <span className={`mt-0.5 block text-[10px] ${active ? "text-teal-600" : "text-slate-400"}`}>{sub}</span>}
-    </Tag>
-  );
+// Tile colours. The money boards give every card its own hex and read it back for the
+// figure, the corner disc and the selected ring, so the colour is the card's identity
+// rather than decoration. Naming them here keeps one meaning per colour across the three
+// places this board shows tiles — pending is amber wherever it appears.
+const TILE = {
+  total: "#0284c7",
+  done: "#059669",
+  pending: "#d97706",
+  review: "#7c3aed",
+  request: "#db2777",
 };
 
 function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
@@ -424,7 +406,7 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
           <Search className="h-4 w-4" />
         </button>
       )}
-      <DateFilterPopover value={filterValue} onChange={handleFilterChange} testid="physio-treatment-date-filter" centered />
+      <DateFilterPopover value={filterValue} onChange={handleFilterChange} testid="physio-treatment-date-filter" centered iconOnly />
     </div>
   );
 
@@ -437,16 +419,16 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
         <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">{filterValue ? filterValue.label : "Overall Treatment"}</p>
         <div className="grid grid-cols-3 gap-2 sm:gap-3">
           <StatTile
-            icon={Calendar} label="Total Days" value={filterStats.total}
+            icon={Calendar} label="Total Days" value={filterStats.total} color={TILE.total}
             onClick={() => setRowFilter("all")} active={rowFilter === "all"} testid="physio-stat-total"
           />
           <StatTile
-            icon={CheckCircle2} label="Completed" value={filterStats.completed}
+            icon={CheckCircle2} label="Completed" value={filterStats.completed} color={TILE.done}
             sub={filterStats.total ? `${Math.round((filterStats.completed / filterStats.total) * 100)}% done` : null}
             onClick={() => setRowFilter(rowFilter === "completed" ? "all" : "completed")} active={rowFilter === "completed"} testid="physio-stat-completed"
           />
           <StatTile
-            icon={Clock} label="Pending" value={filterStats.pending} sub="Days left"
+            icon={Clock} label="Pending" value={filterStats.pending} sub="Days left" color={TILE.pending}
             onClick={() => setRowFilter(rowFilter === "pending" ? "all" : "pending")} active={rowFilter === "pending"} testid="physio-stat-pending"
           />
         </div>
@@ -576,11 +558,11 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
 // them through — so Total counted five patients while the tabs between them showed one,
 // which read as the review flow being broken when it was working correctly.
 const REVIEW_TABS = [
-  { key: "not_due", label: "Not Due", icon: Clock },
-  { key: "new_review", label: "New Review", icon: ClipboardCheck },
-  { key: "requests", label: "Requests", icon: Send },
-  { key: "assigned", label: "Assigned", icon: Users },
-  { key: "completed", label: "Completed", icon: CheckCircle2 },
+  { key: "not_due", label: "Not Due", icon: Clock, color: TILE.pending },
+  { key: "new_review", label: "New Review", icon: ClipboardCheck, color: TILE.review },
+  { key: "requests", label: "Requests", icon: Send, color: TILE.request },
+  { key: "assigned", label: "Assigned", icon: Users, color: TILE.total },
+  { key: "completed", label: "Completed", icon: CheckCircle2, color: TILE.done },
 ];
 
 const ordinal = (n) => {
@@ -745,7 +727,7 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
           <Search className="h-4 w-4" />
         </button>
       )}
-      <DateFilterPopover value={filterValue} onChange={setFilterValue} testid="physio-review-date-filter" centered />
+      <DateFilterPopover value={filterValue} onChange={setFilterValue} testid="physio-review-date-filter" centered iconOnly />
       <div className="flex h-10 shrink-0 items-center gap-1.5 rounded-md border border-sky-200 bg-sky-50 px-3" data-testid="physio-review-total">
         <span className="text-[10px] font-semibold uppercase tracking-wide text-sky-600">Total</span>
         <span className="text-sm font-bold text-sky-700">{dateFiltered.length}</span>
@@ -769,6 +751,7 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
             icon={t.icon}
             label={t.label}
             value={counts[t.key]}
+            color={t.color}
             active={bucket === t.key}
             onClick={() => setBucket(t.key)}
             testid={`physio-review-bucket-${t.key}`}
@@ -1615,15 +1598,15 @@ export function PatientDetailPage({ patient, physioId, onClose, onRefresh }) {
           <div className="space-y-3" data-testid="physio-patient-sessions-tab">
             <div className="grid grid-cols-3 gap-2">
               <StatTile
-                icon={Clock} label="Pending" value={pendingSessions}
+                icon={Clock} label="Pending" value={pendingSessions} color={TILE.pending}
                 onClick={() => setSessionFilter("pending")} active={sessionFilter === "pending"} testid="physio-patient-stat-pending"
               />
               <StatTile
-                icon={CheckCircle2} label="Completed" value={completedSessions}
+                icon={CheckCircle2} label="Completed" value={completedSessions} color={TILE.done}
                 onClick={() => setSessionFilter("completed")} active={sessionFilter === "completed"} testid="physio-patient-stat-completed"
               />
               <StatTile
-                icon={Calendar} label="Total" value={sessions.length}
+                icon={Calendar} label="Total" value={sessions.length} color={TILE.total}
                 onClick={() => setSessionFilter("all")} active={sessionFilter === "all"} testid="physio-patient-stat-total"
               />
             </div>

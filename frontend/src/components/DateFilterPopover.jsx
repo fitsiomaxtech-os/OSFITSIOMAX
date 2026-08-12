@@ -318,13 +318,19 @@ export const DateFilterPopover = ({ value, onChange, testid = "date-filter", cen
     <div className="inline-flex items-center">
       <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
+        {/* The centered variant honours iconOnly on the same terms as the variant above:
+            squared down to the glyph while idle, label back the moment a range is set. It
+            was the only trigger that ignored the prop, which is why the Master Views using
+            `centered` still carried a full-width "Date Filter" button. */}
         <Button
           variant="outline"
-          className={`h-10 ${isActive ? "rounded-r-none border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100" : ""}`}
+          title={iconOnly ? activeLabel : undefined}
+          aria-label={iconOnly ? activeLabel : undefined}
+          className={`h-10 ${iconOnly && !isActive ? "w-10 px-0" : ""} ${isActive ? "rounded-r-none border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100" : ""}`}
           data-testid={`${testid}-btn`}
         >
-          <CalendarIcon className="mr-2 h-4 w-4" />
-          {activeLabel}
+          <CalendarIcon className={`h-4 w-4 ${iconOnly && !isActive ? "" : "mr-2"}`} />
+          {(!iconOnly || isActive) && activeLabel}
         </Button>
       </PopoverTrigger>
       <PopoverContent className="relative w-auto max-w-[calc(100vw-2rem)] p-0" align="start" data-testid={`${testid}-panel`}>
