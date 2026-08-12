@@ -1174,8 +1174,9 @@ const LeadDetailDialog = ({ lead, stages, currentUser, onClose, onSaved, onMoveS
                   <div className="text-right">
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-rose-400">Last call</p>
                     <p className="text-sm font-semibold text-rose-700">
-                      {new Date(currentLead.rnr_last_attempt_at).toLocaleString()}
+                      {callTimeStamp(currentLead.rnr_last_attempt_at)}
                     </p>
+                    <p className="text-[11px] text-rose-400">{callDateStamp(currentLead.rnr_last_attempt_at)}</p>
                   </div>
                 )}
               </div>
@@ -1204,7 +1205,12 @@ const LeadDetailDialog = ({ lead, stages, currentUser, onClose, onSaved, onMoveS
                       <span className="rounded-md bg-rose-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-rose-700">
                         Attempt {rnrRows.length - i}
                       </span>
-                      <span className="text-[11px] text-slate-400">{new Date(a.created_at).toLocaleString()}</span>
+                      {/* callTimeStamp, not toLocaleString: it reads the clock in IST and
+                          names the band — "01:02 pm Afternoon" — the same way the panel on
+                          Overview already reports the last call. Two formatters would
+                          eventually disagree about where Afternoon ends. */}
+                      <span className="text-[11px] font-medium text-slate-600">{callTimeStamp(a.created_at)}</span>
+                      <span className="text-[11px] text-slate-400">· {callDateStamp(a.created_at)}</span>
                     </div>
                     {a.details && <p className="mt-1 text-sm text-slate-700">{a.details}</p>}
                     <p className="mt-1 text-[11px] text-slate-400">
