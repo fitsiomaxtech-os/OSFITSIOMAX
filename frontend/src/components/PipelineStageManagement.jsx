@@ -119,15 +119,9 @@ export const PipelineStageManagement = ({ onBack }) => {
         <Button onClick={() => { setEditing(null); setForm({ name: "", color: PALETTE[Math.floor(Math.random() * PALETTE.length)], is_final: false }); setShowAdd(true); }} className="bg-orange-500 hover:bg-orange-600" data-testid="stages-add-btn"><Plus className="h-4 w-4 mr-1" />Add Stage</Button>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        {TYPES.map((t) => (
-          <div key={t.key} className={`rounded-xl border-l-4 bg-white p-4 shadow-sm ${TONE_CLASSES[t.tone].border}`} data-testid={`stages-kpi-${t.key}`}>
-            <p className="text-xs text-slate-500">{t.kpi}</p>
-            <p className={`text-3xl font-bold ${TONE_CLASSES[t.tone].text}`}>{counts[t.key]}</p>
-          </div>
-        ))}
-      </div>
-
+      {/* The five summary cards are gone. They printed the same five counts the tab row
+          directly beneath already carries in its labels — Pre-Sales (4), Branch Lead (3)
+          — so the page opened with every figure stated twice. */}
       <div className="grid grid-cols-2 gap-2 rounded-lg bg-slate-100 p-1 sm:grid-cols-5">
         {TYPES.map((t) => (
           <button

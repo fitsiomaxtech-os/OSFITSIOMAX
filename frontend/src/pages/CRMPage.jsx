@@ -120,7 +120,7 @@ const isHumanResourceRole = (role) => {
 const SUPER_ADMIN_TABS = [
   { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { key: "marketing", label: "Marketing Source", icon: Megaphone },
-  { key: "stages", label: "Rehabilitation Phase", icon: Activity },
+  { key: "stages", label: "CI/CD ROOTS", icon: Activity },
   { key: "hr", label: "HR Admin", icon: Users },
   { key: "presales", label: "Pre-Sales CRM", icon: Headphones },
   { key: "branches", label: "Branch Management", icon: Building2 },
