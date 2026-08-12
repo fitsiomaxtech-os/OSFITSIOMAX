@@ -291,6 +291,9 @@ export const BranchAdminBoard = ({ branchId, embedded = false }) => {
   const [consultationsSubTab, setConsultationsSubTab] = useState("head_physio");
   const [stageFilter, setStageFilter] = useState(null); // null = show all stages
   const [dateFilter, setDateFilter] = useState(null); // { from, to, label, key } | null
+  // Bumped by Refresh. loadBoard only reloads the branch leads; on a consultation stage
+  // the rows on screen come from ConsultationsBoard, which needs telling separately.
+  const [refreshTick, setRefreshTick] = useState(0);
   const [showCreateLead, setShowCreateLead] = useState(false);
   // Set when a lead's own detail popup hands off to a Consultation-only stage — tells the
   // embedded ConsultationsBoard which lead to auto-open once it loads, so the handoff lands
@@ -500,26 +503,22 @@ export const BranchAdminBoard = ({ branchId, embedded = false }) => {
             testid="branch-metric"
           />
 
-          {isConsultationStage ? (
-            <ConsultationsBoard
-              branchId={branchId}
-              viewerRole="branch_admin"
-              externalStageFilter={stageFilter}
-              showOwnStageBar={false}
-              autoOpenLeadId={autoOpenLeadId}
-              onAutoOpened={() => setAutoOpenLeadId(null)}
-              // Eight columns can't be read on a phone — without this the consultation
-              // stages fall back to the desk table and every field arrives truncated.
-              mobileCards
-            />
-          ) : (
-          <>
-          {/* Toolbar — search takes the whole first row on a phone, the actions sit
-              together underneath rather than all four squeezing onto one line. */}
+          {/* One toolbar for every stage. It used to sit inside the non-consultation
+              branch, so selecting a consultation stage swapped in ConsultationsBoard's
+              own toolbar and Branch Leads lost Refresh, Create Lead and Pull from Sheet —
+              the same screen offering four actions or two depending on which stage pill
+              was lit. The consultations board is told to hide its toolbar (passing
+              externalSearch does that) and is driven from here instead. */}
           <div className="flex flex-wrap items-center gap-2 sm:gap-3" data-testid="branch-toolbar">
             <div className="relative w-full sm:flex-1">
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-              <Input className="pl-9" placeholder="Search patients..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} data-testid="branch-search" />
+              <Input
+                className="pl-9"
+                placeholder={isConsultationStage ? "Search patients in Consultations..." : "Search patients..."}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                data-testid="branch-search"
+              />
             </div>
             {/* Icons only. The labels live on title/aria-label rather than being dropped,
                 so hovering still says what each one does and a screen reader still
@@ -527,7 +526,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false }) => {
                 the person who built it can use. */}
             <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="branch-date-filter" centered iconOnly />
             <Button
-              onClick={loadBoard}
+              onClick={() => { loadBoard(); setRefreshTick((n) => n + 1); }}
               disabled={loading}
               title="Refresh"
               aria-label="Refresh"
@@ -546,12 +545,32 @@ export const BranchAdminBoard = ({ branchId, embedded = false }) => {
               <UserPlus className="h-4 w-4" />
             </Button>
             <PullFromSheetButton
-              onPulled={loadBoard}
+              onPulled={() => { loadBoard(); setRefreshTick((n) => n + 1); }}
               notConnectedHint="Google Sheets isn't connected yet — ask your Super Admin to connect it."
               noSourcesHint="No Google Sheet is linked to this branch yet — ask your Super Admin to tag one to this branch in Marketing Board → Lead Sources."
               iconOnly
             />
           </div>
+
+          {isConsultationStage ? (
+            <ConsultationsBoard
+              branchId={branchId}
+              viewerRole="branch_admin"
+              externalStageFilter={stageFilter}
+              showOwnStageBar={false}
+              autoOpenLeadId={autoOpenLeadId}
+              onAutoOpened={() => setAutoOpenLeadId(null)}
+              // Driven by the toolbar above: passing externalSearch hides this board's own
+              // search row, which is also where its date filter and green refresh lived.
+              externalSearch={searchQuery}
+              externalDateFilter={dateFilter}
+              reloadToken={refreshTick}
+              // Eight columns can't be read on a phone — without this the consultation
+              // stages fall back to the desk table and every field arrives truncated.
+              mobileCards
+            />
+          ) : (
+          <>
 
           {/* Phone list — six columns can't be read at 430px whichever way they're sized,
               so below md the same rows are stacked as cards instead of being pushed off

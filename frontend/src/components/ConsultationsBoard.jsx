@@ -328,7 +328,7 @@ const Lbl = ({ full, short }) => (
 // Applied to every button in a stage action row: tighter below sm so four fit, normal above.
 const ACT_BTN = "px-2 text-[11px] sm:px-3 sm:text-xs";
 
-export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened, externalDate, hideDateFilter = false, onCountChange, onRowsChange, externalSearch, mobileCards = false }) => {
+export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened, externalDate, hideDateFilter = false, onCountChange, onRowsChange, externalSearch, externalDateFilter, reloadToken, mobileCards = false }) => {
   const isConsultant = viewerRole === "head_physio";
   // Head Physio tracks progress on their own independent pipeline (head_consultation_stage),
   // fully separate from Branch's own consultation_stage pipeline.
@@ -643,6 +643,24 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   useEffect(() => {
     if (externalSearch !== undefined) setSearch(externalSearch);
   }, [externalSearch]);
+
+  // A parent that owns the whole toolbar (Branch Leads) drives the date filter with the
+  // popover's own value, rather than the single ISO day externalDate takes. Same shape as
+  // this board's state, so it passes straight through.
+  useEffect(() => {
+    if (externalDateFilter === undefined) return;
+    setDateFilter(externalDateFilter);
+  }, [externalDateFilter]);
+
+  // A parent's Refresh button reaching this board's data. Bumping the token reloads;
+  // the first value is skipped because the mount effect above has already fetched, and
+  // firing here too would double every open of the board.
+  const reloadSeen = useRef(reloadToken);
+  useEffect(() => {
+    if (reloadToken === undefined || reloadToken === reloadSeen.current) return;
+    reloadSeen.current = reloadToken;
+    load();
+  }, [reloadToken, load]);
 
   // A parent day-picker (the Head Physio board's week strip) drives the date filter, so
   // the board shows one day at a time without its own popover fighting the selection.
