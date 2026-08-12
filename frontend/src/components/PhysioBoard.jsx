@@ -1227,23 +1227,31 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
             child defaults to shrink:1 — with a long day list the tab row was squeezed
             shorter than its own text, so the sky underline rode up through the labels and
             "Treatment Days" came out struck through. */}
-        <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-slate-200 px-5 pt-2" data-testid="physio-detail-tabs">
-          {MODAL_TABS.map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => setTab(t.key)}
-              className={`shrink-0 whitespace-nowrap rounded-t-md px-3 py-2 text-xs font-medium transition ${
-                tab === t.key ? "border-b-2 border-sky-500 text-sky-700" : "border-b-2 border-transparent text-slate-400 hover:text-slate-600"
-              }`}
-              data-testid={`physio-detail-tab-${t.key}`}
-            >
-              {t.label}
-              {t.key === "days" && sessions.length > 0 && (
-                <span className="ml-1.5 text-[10px] text-slate-400">{completedSessions.length}/{sessions.length}</span>
-              )}
-            </button>
-          ))}
+        <div className="shrink-0 overflow-x-auto border-b border-slate-200 px-5 py-2" data-testid="physio-detail-tabs">
+          {/* w-max + mx-auto rather than justify-center: centred while the four fit, but
+              once they overflow on a phone the row starts at its left edge and scrolls
+              properly. A centred flex row in a scroll container puts its first item off
+              the left with no way to scroll back to it. */}
+          <div className="mx-auto flex w-max gap-1">
+            {MODAL_TABS.map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                onClick={() => setTab(t.key)}
+                className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-2 text-xs font-medium transition ${
+                  tab === t.key ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-100"
+                }`}
+                data-testid={`physio-detail-tab-${t.key}`}
+              >
+                {t.label}
+                {t.key === "days" && sessions.length > 0 && (
+                  <span className={`text-[10px] font-semibold ${tab === t.key ? "text-white/70" : "text-slate-400"}`}>
+                    {completedSessions.length}/{sessions.length}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto p-5 space-y-5">
           {tab === "overview" && (
