@@ -1767,7 +1767,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                   by stage, where "on this day" would be describing a filter it isn't using. */}
               {loading ? "Loading…" : externalDate ? "No patients on this day." : "No patients in this stage yet."}
             </p>
-          ) : filtered.map((l) => {
+          ) : filtered.map((l, i) => {
             const hex = stageColor(l[stageField]);
             const wa = waNumber(l.phone);
             return (
@@ -1787,7 +1787,9 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-bold text-slate-800">{l.name || "—"}</p>
+                    <p className="truncate text-sm font-bold text-slate-800">
+                      <span className="mr-1.5 font-semibold text-slate-300">{i + 1}.</span>{l.name || "—"}
+                    </p>
                     <p className="truncate text-xs text-slate-500">{l.phone || "—"}</p>
                   </div>
                   <span
@@ -1844,14 +1846,18 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               and the trailing date columns ended up too narrow to hold a date,
               breaking "2026-08-02" across two lines. The min-width is what lets the
               wrapper scroll on a narrow screen instead of crushing them again. */}
-          <table className="w-full min-w-[1000px] table-fixed text-sm">
+          {/* S.No took its 4% out of the four widest columns rather than being appended:
+              these percentages have to total 100 under table-fixed, and the min-width grew
+              by the same 40px so no column lost real estate to make room for it. */}
+          <table className="w-full min-w-[1040px] table-fixed text-sm">
             <thead className="bg-slate-50 text-xs uppercase text-slate-500">
               <tr>
-                <th className="w-[14%] px-4 py-2 text-left align-middle">Patient</th>
-                <th className="w-[11%] px-4 py-2 text-left align-middle">Patient No.</th>
+                <th className="w-[4%] px-3 py-2 text-left align-middle">S.No</th>
+                <th className="w-[13%] px-4 py-2 text-left align-middle">Patient</th>
+                <th className="w-[10%] px-4 py-2 text-left align-middle">Patient No.</th>
                 <th className="w-[12%] px-4 py-2 text-left align-middle">Phone</th>
-                <th className="w-[14%] px-4 py-2 text-left align-middle">Email</th>
-                <th className="w-[14%] px-4 py-2 text-left align-middle">{isConsultant ? "Live Stage" : "Consultation Stage"}</th>
+                <th className="w-[13%] px-4 py-2 text-left align-middle">Email</th>
+                <th className="w-[13%] px-4 py-2 text-left align-middle">{isConsultant ? "Live Stage" : "Consultation Stage"}</th>
                 <th className="w-[11%] px-4 py-2 text-left align-middle">Assigned Expert</th>
                 <th className="w-[9%] px-3 py-2 text-left align-middle">Appointment</th>
                 <th className="w-[9%] px-3 py-2 text-left align-middle">Updated</th>
@@ -1859,10 +1865,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               </tr>
             </thead>
             <tbody>
-              {filtered.map((l) => {
+              {filtered.map((l, i) => {
                 const hex = stageColor(l[stageField]);
                 return (
                   <tr key={l.id} onClick={() => { setSelectedLead(l); setDetailTab("overview"); }} className="cursor-pointer border-t border-slate-100 hover:bg-slate-50" data-testid={`cons-row-${l.id}`}>
+                    <td className="px-3 py-3 align-middle text-slate-400">{i + 1}</td>
                     <td className="truncate px-4 py-3 align-middle font-medium text-slate-800" title={l.name}>{l.name || "—"}</td>
                     <td className="truncate px-4 py-3 align-middle font-mono text-xs text-slate-500" title={l.patient_number}>{l.patient_number || "—"}</td>
                     <td className="truncate px-4 py-3 align-middle text-slate-600" title={l.phone}>{l.phone || "—"}</td>
@@ -1909,7 +1916,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 );
               })}
               {filtered.length === 0 && (
-                <tr><td colSpan="9" className="px-4 py-8 text-center text-sm text-slate-400">
+                <tr><td colSpan="10" className="px-4 py-8 text-center text-sm text-slate-400">
                   {loading ? "Loading…" : "No leads in consultations yet. Book an appointment with a Head Physio to populate this list."}
                 </td></tr>
               )}

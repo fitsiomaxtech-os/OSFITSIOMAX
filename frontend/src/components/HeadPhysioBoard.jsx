@@ -430,6 +430,31 @@ export const HeadPhysioCalendarModal = ({ branchId, onClose }) => (
   </div>
 );
 
+// What can be sitting in a Head Physio's slot. Consultation and Review are the two things
+// actually booked into one — the colours are the same ones their cards wear on the board
+// above, so a violet dot here and the violet Review card are recognisably one thing.
+//
+// Rehab is deliberately absent. It is a queue of patients waiting for a package to be
+// recommended, with no time attached to any of them, so it has nothing to occupy an hour
+// with. A third colour in this legend would be one that never appears.
+const SLOT_KINDS = {
+  consultation: {
+    label: "Consultation",
+    dot: "bg-sky-500",
+    box: "border-sky-200 bg-sky-50 text-sky-700",
+  },
+  review: {
+    label: "Review",
+    dot: "bg-violet-500",
+    box: "border-violet-200 bg-violet-50 text-violet-700",
+  },
+  free: {
+    label: "Available",
+    dot: "bg-slate-300",
+    box: "border-slate-200 text-slate-500",
+  },
+};
+
 function MyCalendarTab({ branchId }) {
   const [data, setData] = useState({ slots: [], booked: {} });
   const [loading, setLoading] = useState(false);
@@ -458,8 +483,26 @@ function MyCalendarTab({ branchId }) {
     );
   }
 
+  // Counted off the slots on screen rather than stated, so the legend is also the day's
+  // tally and cannot disagree with the grid under it.
+  const tally = (data.slots || []).reduce((acc, s) => {
+    const kind = data.booked?.[s]?.kind || "free";
+    acc[kind] = (acc[kind] || 0) + 1;
+    return acc;
+  }, {});
+
   return (
     <div className="space-y-4" data-testid="hp-calendar-tab">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2" data-testid="hp-calendar-legend">
+        {["consultation", "review", "free"].map((kind) => (
+          <span key={kind} className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
+            <span className={`h-2 w-2 rounded-full ${SLOT_KINDS[kind].dot}`} aria-hidden />
+            {SLOT_KINDS[kind].label}
+            <span className="font-bold text-slate-700">{tally[kind] || 0}</span>
+          </span>
+        ))}
+      </div>
+
       {dates.map((date) => (
         <div key={date} className="rounded-xl border border-slate-200 bg-white p-4" data-testid={`hp-calendar-day-${date}`}>
           <h4 className="text-sm font-semibold text-slate-700 mb-2">
@@ -469,14 +512,23 @@ function MyCalendarTab({ branchId }) {
             {grouped[date].map((slot) => {
               const booking = data.booked?.[slot];
               const time = to12h(slot.split("T")[1]);
+              const meta = SLOT_KINDS[booking?.kind] || SLOT_KINDS.free;
               return (
                 <div
                   key={slot}
-                  className={`rounded-lg border px-3 py-2 text-xs ${booking ? "border-teal-200 bg-teal-50 text-teal-700" : "border-slate-200 text-slate-500"}`}
+                  className={`rounded-lg border px-3 py-2 text-xs ${meta.box}`}
                   data-testid={`hp-calendar-slot-${slot}`}
+                  title={booking ? `${meta.label} · ${booking.lead_name}` : "Available"}
                 >
-                  <p className="font-semibold">{time}</p>
+                  {/* The dot is what makes a day readable at a glance: the times are all
+                      the same length and the names carry no colour, so the kind of work
+                      has to be something other than more text to be seen at speed. */}
+                  <p className="flex items-center gap-1.5 font-semibold">
+                    <span className={`h-2 w-2 shrink-0 rounded-full ${meta.dot}`} aria-hidden />
+                    {time}
+                  </p>
                   <p className="text-[10px]">{booking ? booking.lead_name : "Available"}</p>
+                  {booking && <p className="text-[9px] font-bold uppercase tracking-wider opacity-70">{meta.label}</p>}
                 </div>
               );
             })}
@@ -504,7 +556,7 @@ function PatientsTab({ patients, onRecommend, onSelect, loading }) {
     <div data-testid="hp-patients-list">
       {/* Cards on a phone, the table from sm — same rows either way. */}
       <div className="space-y-2 sm:hidden">
-        {patients.map((p) => (
+        {patients.map((p, i) => (
           <div key={p.lead_id} className="rounded-xl border border-slate-200 bg-white p-3" data-testid={`hp-patient-card-${p.lead_id}`}>
             <div className="flex items-start justify-between gap-2">
               <div className="flex min-w-0 items-center gap-2.5">
@@ -512,7 +564,9 @@ function PatientsTab({ patients, onRecommend, onSelect, loading }) {
                   {p.lead_name?.charAt(0)?.toUpperCase() || "?"}
                 </span>
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-bold text-slate-800">{p.lead_name}</p>
+                  <p className="truncate text-sm font-bold text-slate-800">
+                    <span className="mr-1.5 font-semibold text-slate-300">{i + 1}.</span>{p.lead_name}
+                  </p>
                   <p className="truncate text-xs text-slate-500">{p.phone || "—"}</p>
                 </div>
               </div>
@@ -548,6 +602,7 @@ function PatientsTab({ patients, onRecommend, onSelect, loading }) {
         <table className="w-full min-w-[760px] text-sm">
           <thead className="bg-slate-50 text-left text-[10px] uppercase tracking-wider text-slate-400">
             <tr>
+              <th className="w-12 px-4 py-2.5 font-semibold">S.No</th>
               <th className="px-4 py-2.5 font-semibold">Patient</th>
               <th className="px-4 py-2.5 font-semibold">Phone</th>
               <th className="px-4 py-2.5 font-semibold">Stage</th>
@@ -556,8 +611,9 @@ function PatientsTab({ patients, onRecommend, onSelect, loading }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {patients.map((p) => (
+            {patients.map((p, i) => (
               <tr key={p.lead_id} className="hover:bg-slate-50" data-testid={`hp-patient-${p.lead_id}`}>
+                <td className="px-4 py-3 text-slate-400">{i + 1}</td>
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-2.5">
                     <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-teal-50 text-xs font-bold text-teal-700">

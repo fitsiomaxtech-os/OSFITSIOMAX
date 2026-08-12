@@ -68,14 +68,45 @@ async def hp_my_calendar(branch_id: Optional[str] = None, user: V3UserOut = Depe
     if not doctor:
         return {"slots": [], "slot_details": [], "booked": {}}
 
-    booked_rows = await v3_col("appointments").find(
+    # Two different things take a Head Physio's slot, and the calendar has to say which.
+    # A review is dispatched into one of these published slots exactly as a consultation is
+    # booked into it — it was simply never read here, so a slot held by a review showed as
+    # "Available" and could be booked over.
+    review_rows = await v3_col("reviews").find(
+        {"head_physio_id": doctor["id"], "review_date": {"$nin": ["", None]}},
+        {"_id": 0, "id": 1, "lead_name": 1, "review_date": 1, "review_time": 1, "status": 1, "physio_name": 1},
+    ).to_list(1000)
+
+    booked_map = {}
+    for r in review_rows:
+        # No time means it was never placed on the grid — it is on the Review list waiting
+        # for one, and inventing a slot for it here would put it in an hour nobody chose.
+        if not r.get("review_time"):
+            continue
+        slot = f"{r['review_date']}T{r['review_time']}"
+        booked_map[slot] = {
+            "id": r.get("id"),
+            "slot_time": slot,
+            "lead_name": r.get("lead_name", "Unknown"),
+            "kind": "review",
+            "kind_label": "Review",
+            "status": r.get("status", ""),
+            "with_name": r.get("physio_name", ""),
+        }
+
+    appt_rows = await v3_col("appointments").find(
         {"doctor_id": doctor["id"], "status": "new_appointment"},
         {"_id": 0, "slot_time": 1, "lead_name": 1, "id": 1},
     ).to_list(1000)
-    booked_map = {row["slot_time"]: row for row in booked_rows}
+    for row in appt_rows:
+        # Written second on purpose. If a slot somehow holds both, the consultation is the
+        # one shown — it is the appointment the patient was given a time for. Two things in
+        # one slot is a booking fault of its own, and hiding the harder one would be worse
+        # than hiding the review.
+        booked_map[row["slot_time"]] = {**row, "kind": "consultation", "kind_label": "Consultation"}
 
-    # Surface booked consultation slots even when the branch admin never pre-created
-    # an availability slot for them — union booked times into the displayed slots.
+    # Surface booked slots even when the branch admin never pre-created an availability slot
+    # for them — union booked times into the displayed slots.
     slots = sorted(set(doctor.get("slots", [])) | set(booked_map.keys()))
 
     return {

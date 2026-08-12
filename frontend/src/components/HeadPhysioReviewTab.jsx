@@ -13,6 +13,33 @@ const dmy = (d) => {
 };
 
 /**
+ * Where a review stands, worked out once and used by both the table and the phone cards so
+ * the two cannot disagree about what is overdue.
+ *
+ * Order matters: written is written, whatever its date. A completed review dated last week
+ * is not overdue — it is done, and colouring it red would send someone chasing it.
+ */
+const stageOf = (r, todayDate) => {
+  if (r.status === "completed") {
+    return { key: "completed", label: "Completed", done: true, badge: "border-emerald-200 bg-emerald-50 text-emerald-700", card: "border-slate-200" };
+  }
+  if (r.review_date && todayDate && r.review_date < todayDate) {
+    return { key: "overdue", label: "Overdue", done: false, badge: "border-rose-200 bg-rose-50 text-rose-700", card: "border-rose-300", warn: true };
+  }
+  if (r.review_date === todayDate) {
+    return { key: "today", label: "Today", done: false, badge: "border-sky-200 bg-sky-50 text-sky-700", card: "border-sky-300" };
+  }
+  return { key: "upcoming", label: "Upcoming", done: false, badge: "border-slate-200 bg-slate-50 text-slate-600", card: "border-slate-200" };
+};
+
+const StageBadge = ({ stage }) => (
+  <span className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-[5px] border px-2 py-0.5 text-[10px] font-bold ${stage.badge}`}>
+    {stage.warn && <AlertTriangle className="h-3 w-3" />}
+    {stage.label}
+  </span>
+);
+
+/**
  * Head Physio > Review — the far end of the post-treatment review chain. Only reviews a
  * Branch Admin has actually dispatched to this Head Physio appear here.
  *
@@ -110,41 +137,97 @@ export const HeadPhysioReviewTab = ({ selectedDate, compact = false, onCountChan
             : "No reviews assigned to you. A Branch Admin sends them here once a Physio raises one."}
         </p>
       ) : (
-        <div className="space-y-2">
-          {rows.map((r) => {
-            const done = r.status === "completed";
-            const overdue = !done && r.review_date && r.review_date < (data.today_date || "");
-            const isToday = r.review_date === data.today_date;
-            return (
-              <div key={r.id} className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border-2 bg-white p-4 ${overdue ? "border-rose-300" : isToday ? "border-sky-300" : "border-slate-200"}`} data-testid={`hp-review-row-${r.id}`}>
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-sm font-bold text-slate-800">{r.lead_name}</p>
-                    {r.patient_number && <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-slate-500">{r.patient_number}</span>}
-                    <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">{r.treatment_days} treatment days</span>
-                    {overdue && <span className="flex items-center gap-1 rounded-md bg-rose-100 px-2 py-0.5 text-[11px] font-bold text-rose-700"><AlertTriangle className="h-3 w-3" /> OVERDUE</span>}
-                    {isToday && <span className="rounded-md bg-sky-100 px-2 py-0.5 text-[11px] font-bold text-sky-700">TODAY</span>}
+        <>
+          {/* Cards on a phone, the table from sm. Six columns cannot reflow, and a review
+              is only useful read whole — who, what stage, what was recommended. */}
+          <div className="space-y-2 sm:hidden" data-testid="hp-review-mobile">
+            {rows.map((r, i) => {
+              const st = stageOf(r, data.today_date);
+              return (
+                <div key={r.id} className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border-2 bg-white p-4 ${st.card}`} data-testid={`hp-review-card-${r.id}`}>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-bold text-slate-800">
+                        <span className="mr-1.5 font-semibold text-slate-300">{i + 1}.</span>{r.lead_name}
+                      </p>
+                      {r.patient_number && <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-slate-500">{r.patient_number}</span>}
+                      <StageBadge stage={st} />
+                    </div>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {r.phone || "—"} · Review {dmy(r.review_date)} · raised by {r.physio_name || "—"}
+                    </p>
+                    {r.physio_notes && <p className="mt-1 line-clamp-2 text-xs text-slate-600">“{r.physio_notes}”</p>}
+                    {r.head_physio_suggestions && (
+                      <p className="mt-1 line-clamp-2 text-xs font-medium text-emerald-700">{r.head_physio_suggestions}</p>
+                    )}
                   </div>
-                  <p className="mt-1 text-xs text-slate-500">
-                    Review {dmy(r.review_date)} · raised by {r.physio_name || "—"}
-                    {r.session_package_name ? ` · ${r.session_package_name}` : ""}
-                  </p>
-                  {r.physio_notes && <p className="mt-1 line-clamp-2 text-xs text-slate-600">“{r.physio_notes}”</p>}
-                  {done && r.head_physio_notes && (
-                    <p className="mt-1 line-clamp-2 text-xs font-medium text-emerald-700">{r.head_physio_notes}</p>
+                  {!st.done ? (
+                    <Button size="sm" className="shrink-0 bg-sky-600 text-xs text-white hover:bg-sky-700" onClick={() => setDraft({ review: r, head_physio_notes: "", head_physio_suggestions: "" })} data-testid={`hp-review-write-${r.id}`}>
+                      Write Review
+                    </Button>
+                  ) : (
+                    <span className="shrink-0 rounded-md bg-emerald-100 px-2.5 py-1 text-[11px] font-bold text-emerald-700">COMPLETED</span>
                   )}
                 </div>
-                {!done ? (
-                  <Button size="sm" className="shrink-0 bg-sky-600 text-xs text-white hover:bg-sky-700" onClick={() => setDraft({ review: r, head_physio_notes: "", head_physio_suggestions: "" })} data-testid={`hp-review-write-${r.id}`}>
-                    Write Review
-                  </Button>
-                ) : (
-                  <span className="shrink-0 rounded-md bg-emerald-100 px-2.5 py-1 text-[11px] font-bold text-emerald-700">COMPLETED</span>
-                )}
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+
+          <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white sm:block" data-testid="hp-review-desktop">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[860px] text-sm">
+                <thead className="bg-slate-50 text-left text-[10px] uppercase tracking-wider text-slate-400">
+                  <tr>
+                    <th className="w-12 px-4 py-2.5 font-semibold">S.No</th>
+                    <th className="px-4 py-2.5 font-semibold">Patient</th>
+                    <th className="px-4 py-2.5 font-semibold">Phone</th>
+                    <th className="px-4 py-2.5 font-semibold">Stage</th>
+                    <th className="px-4 py-2.5 font-semibold">Recommendation</th>
+                    <th className="px-4 py-2.5 text-right font-semibold">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {rows.map((r, i) => {
+                    const st = stageOf(r, data.today_date);
+                    return (
+                      <tr key={r.id} className="hover:bg-slate-50" data-testid={`hp-review-row-${r.id}`}>
+                        <td className="px-4 py-3 text-slate-400">{i + 1}</td>
+                        <td className="px-4 py-3">
+                          <p className="font-medium text-slate-800">{r.lead_name}</p>
+                          <p className="text-[11px] text-slate-400">
+                            {r.patient_number || "—"} · {r.treatment_days} treatment days
+                          </p>
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">{r.phone || "—"}</td>
+                        <td className="px-4 py-3">
+                          <StageBadge stage={st} />
+                          <span className="mt-0.5 block text-[11px] text-slate-400">{dmy(r.review_date)}</span>
+                        </td>
+                        {/* What the Head Physio told the treating physio to change. Empty
+                            until the review is written, which is most of this column most
+                            of the time — that emptiness is the queue. */}
+                        <td className="px-4 py-3 text-slate-600">
+                          {r.head_physio_suggestions
+                            ? <span className="line-clamp-2">{r.head_physio_suggestions}</span>
+                            : <span className="text-slate-300">—</span>}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          {!st.done ? (
+                            <Button size="sm" className="bg-sky-600 text-xs text-white hover:bg-sky-700" onClick={() => setDraft({ review: r, head_physio_notes: "", head_physio_suggestions: "" })} data-testid={`hp-review-write-${r.id}`}>
+                              Write Review
+                            </Button>
+                          ) : (
+                            <span className="rounded-md bg-emerald-100 px-2.5 py-1 text-[11px] font-bold text-emerald-700">COMPLETED</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
       )}
 
       {draft && (
