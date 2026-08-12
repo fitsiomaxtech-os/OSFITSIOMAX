@@ -13,6 +13,7 @@ import {
   Eye,
   FileText,
   PhoneCall,
+  RefreshCw,
   Search,
   Send,
   Users,
@@ -220,11 +221,14 @@ const reviewMarks = (r) => ({
   isReviewDay: r.sessionNumber > 0 && r.sessionNumber % 7 === 0,
 });
 
+// `short` is the phone label. The four full names run to about 480px and the modal gets
+// roughly 340px on a phone, so without these the row scrolls sideways and two of the four
+// tabs sit off-screen behind a gesture nobody knows is there.
 const MODAL_TABS = [
-  { key: "overview", label: "Overview" },
-  { key: "report", label: "Consultation Report" },
-  { key: "days", label: "Treatment Days" },
-  { key: "documents", label: "Documents" },
+  { key: "overview", label: "Overview", short: "Overview" },
+  { key: "report", label: "Consultation Report", short: "Report" },
+  { key: "days", label: "Treatment Days", short: "Days" },
+  { key: "documents", label: "Documents", short: "Docs" },
 ];
 
 const docSize = (n) => {
@@ -516,6 +520,18 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
           <Search className="h-4 w-4" />
         </button>
       )}
+      {/* Orange, and the only orange on the board — it is the one control that acts
+          rather than filters, so it should not read as another filter chip. */}
+      <Button
+        onClick={load}
+        disabled={loading}
+        title="Refresh"
+        aria-label="Refresh"
+        className="h-10 w-10 shrink-0 bg-orange-500 p-0 text-white hover:bg-orange-600"
+        data-testid="physio-treatment-refresh"
+      >
+        <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+      </Button>
       <DateFilterPopover value={filterValue} onChange={handleFilterChange} testid="physio-treatment-date-filter" centered iconOnly />
     </div>
   );
@@ -914,6 +930,18 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
           <Search className="h-4 w-4" />
         </button>
       )}
+      {/* Orange, and the only orange on the board — it is the one control that acts
+          rather than filters, so it should not read as another filter chip. */}
+      <Button
+        onClick={load}
+        disabled={loading}
+        title="Refresh"
+        aria-label="Refresh"
+        className="h-10 w-10 shrink-0 bg-orange-500 p-0 text-white hover:bg-orange-600"
+        data-testid="physio-review-refresh"
+      >
+        <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+      </Button>
       <DateFilterPopover value={filterValue} onChange={setFilterValue} testid="physio-review-date-filter" centered iconOnly />
       <div className="flex h-10 shrink-0 items-center gap-1.5 rounded-md border border-sky-200 bg-sky-50 px-3" data-testid="physio-review-total">
         <span className="text-[10px] font-semibold uppercase tracking-wide text-sky-600">Total</span>
@@ -1200,12 +1228,12 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="w-full max-w-3xl overflow-hidden rounded-xl bg-white shadow-2xl max-h-[90vh] flex flex-col" data-testid="physio-consultation-detail-modal">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-2 sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl" data-testid="physio-consultation-detail-modal">
         {/* Plain white header, as the Pre-Sales detail popup uses. The day count keeps
             its emphasis by going sky on a tinted chip — on the old slate bar it was
             carried by white-on-colour, which there is no colour left to do. */}
-        <div className="flex shrink-0 items-start justify-between gap-3 bg-white px-6 py-4">
+        <div className="flex shrink-0 items-start justify-between gap-3 bg-white px-4 py-4 sm:px-6">
           <div className="min-w-0">
             <h3 className="truncate text-lg font-bold text-slate-900">{lead.name}</h3>
             <p className="truncate text-xs text-slate-500">{lead.phone}{lead.email ? ` · ${lead.email}` : ""}</p>
@@ -1227,23 +1255,25 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
             child defaults to shrink:1 — with a long day list the tab row was squeezed
             shorter than its own text, so the sky underline rode up through the labels and
             "Treatment Days" came out struck through. */}
-        <div className="shrink-0 overflow-x-auto border-b border-slate-200 px-5 py-2" data-testid="physio-detail-tabs">
+        <div className="shrink-0 overflow-x-auto border-b border-slate-200 px-3 py-2 sm:px-5" data-testid="physio-detail-tabs">
           {/* w-max + mx-auto rather than justify-center: centred while the four fit, but
-              once they overflow on a phone the row starts at its left edge and scrolls
-              properly. A centred flex row in a scroll container puts its first item off
-              the left with no way to scroll back to it. */}
+              if they ever overflow the row starts at its left edge and scrolls properly.
+              A centred flex row in a scroll container puts its first item off the left
+              with no way to scroll back to it. With the short labels below they fit on a
+              phone, so this is a backstop rather than the normal case. */}
           <div className="mx-auto flex w-max gap-1">
             {MODAL_TABS.map((t) => (
               <button
                 key={t.key}
                 type="button"
                 onClick={() => setTab(t.key)}
-                className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-2 text-xs font-medium transition ${
+                className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1.5 text-[11px] font-medium transition sm:px-3 sm:py-2 sm:text-xs ${
                   tab === t.key ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-100"
                 }`}
                 data-testid={`physio-detail-tab-${t.key}`}
               >
-                {t.label}
+                <span className="sm:hidden">{t.short}</span>
+                <span className="hidden sm:inline">{t.label}</span>
                 {t.key === "days" && sessions.length > 0 && (
                   <span className={`text-[10px] font-semibold ${tab === t.key ? "text-white/70" : "text-slate-400"}`}>
                     {completedSessions.length}/{sessions.length}
@@ -1253,7 +1283,7 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
             ))}
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto p-5 space-y-5">
+        <div className="flex-1 space-y-5 overflow-y-auto p-4 sm:p-5">
           {tab === "overview" && (
           <div className="rounded-xl border-2 border-slate-200 bg-white p-4">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
