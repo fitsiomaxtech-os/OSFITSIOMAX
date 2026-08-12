@@ -220,6 +220,13 @@ const reviewMarks = (r) => ({
   isReviewDay: r.sessionNumber > 0 && r.sessionNumber % 7 === 0,
 });
 
+const MODAL_TABS = [
+  { key: "overview", label: "Overview" },
+  { key: "report", label: "Consultation Report" },
+  { key: "days", label: "Treatment Days" },
+  { key: "documents", label: "Documents" },
+];
+
 const docSize = (n) => {
   const b = Number(n) || 0;
   if (b < 1024) return `${b} B`;
@@ -1112,6 +1119,7 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
   const [sessions, setSessions] = useState([]);
   const [assessments, setAssessments] = useState([]);
   const [completeTarget, setCompleteTarget] = useState(null);
+  const [tab, setTab] = useState("overview");
   const isComplete = lead.physio_stage === "Complete";
 
   const loadSessions = useCallback(async () => {
@@ -1194,60 +1202,47 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="w-full max-w-3xl overflow-hidden rounded-xl bg-white shadow-2xl max-h-[90vh] flex flex-col" data-testid="physio-consultation-detail-modal">
-        <div className="flex items-start justify-between gap-3 bg-slate-500 px-6 py-4 text-white">
+        {/* Plain white header, as the Pre-Sales detail popup uses. The day count keeps
+            its emphasis by going sky on a tinted chip — on the old slate bar it was
+            carried by white-on-colour, which there is no colour left to do. */}
+        <div className="flex items-start justify-between gap-3 bg-white px-6 py-4">
           <div className="min-w-0">
-            <h3 className="text-lg font-bold">{lead.name}</h3>
-            <p className="text-xs text-white/80">{lead.phone}{lead.email ? ` · ${lead.email}` : ""}</p>
+            <h3 className="truncate text-lg font-bold text-slate-900">{lead.name}</h3>
+            <p className="truncate text-xs text-slate-500">{lead.phone}{lead.email ? ` · ${lead.email}` : ""}</p>
           </div>
           <div className="flex shrink-0 items-center gap-3">
-            <span className="whitespace-nowrap rounded-lg border-2 border-white/40 bg-white/15 px-3 py-1.5 text-sm font-bold">
+            <span className="whitespace-nowrap rounded-lg border border-sky-200 bg-sky-50 px-3 py-1.5 text-sm font-bold text-sky-700">
               {completedSessions.length}/{sessions.length} days
             </span>
-            <button type="button" onClick={onClose} className="rounded-full p-1.5 text-white/80 hover:bg-white/20"><X className="h-5 w-5" /></button>
+            <button type="button" onClick={onClose} className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100"><X className="h-5 w-5" /></button>
           </div>
         </div>
 
+        {/* One popup, four things in it: what is happening now, what the Head Physio
+            wrote, the day list to tick off, and the patient's files. Stacked, that was a
+            long scroll where the Complete button — the reason the popup is open — sat far
+            below the reading material. Tabs keep each within one screen.
+            Overview leads because it answers "what am I doing with this patient today". */}
+        <div className="flex gap-1 overflow-x-auto border-b border-slate-200 px-5 pt-2" data-testid="physio-detail-tabs">
+          {MODAL_TABS.map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setTab(t.key)}
+              className={`shrink-0 whitespace-nowrap rounded-t-md px-3 py-2 text-xs font-medium transition ${
+                tab === t.key ? "border-b-2 border-sky-500 text-sky-700" : "border-b-2 border-transparent text-slate-400 hover:text-slate-600"
+              }`}
+              data-testid={`physio-detail-tab-${t.key}`}
+            >
+              {t.label}
+              {t.key === "days" && sessions.length > 0 && (
+                <span className="ml-1.5 text-[10px] text-slate-400">{completedSessions.length}/{sessions.length}</span>
+              )}
+            </button>
+          ))}
+        </div>
         <div className="flex-1 overflow-y-auto p-5 space-y-5">
-          {/* Consultation Report first. This is what the Head Physio wrote about the
-              patient, and it is the thing a physio opens this popup to read before
-              treating them — it used to sit under the day list, so it was reached by
-              scrolling past the work it was meant to inform. */}
-          <div data-testid="physio-consultation-report">
-            <p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Consultation Report</p>
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-              <Row label="Alternative Phone" value={lead.alternative_phone} />
-              <Row label="Address" value={lead.address} />
-              <Row label="City / State" value={[lead.city, lead.state].filter(Boolean).join(", ")} />
-              <Row label="Age" value={lead.age} />
-              <Row label="Gender" value={lead.gender} />
-              <Row label="Occupation" value={lead.occupation} />
-              <Row label="Condition" value={lead.condition} />
-              <Row label="Months of Pain" value={lead.months_of_pain} />
-              <Row label="Appointment" value={lead.appointment_date ? `${lead.appointment_date}${lead.appointment_time ? ` · ${to12h(lead.appointment_time)}` : ""}` : null} />
-            </div>
-
-            {lead.diagnosis && (
-              <div className="mt-3 rounded-lg border border-slate-200 p-3">
-                <p className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-slate-400">Pre-Sales Diagnosis</p>
-                <p className="text-xs text-slate-700 whitespace-pre-wrap">{lead.diagnosis}</p>
-              </div>
-            )}
-            {lead.physio_diagnosis_report && (
-              <div className="mt-3 rounded-lg border border-sky-200 bg-sky-50 p-3">
-                <p className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-sky-500">Diagnosis Report</p>
-                <p className="text-xs text-sky-900 whitespace-pre-wrap">{lead.physio_diagnosis_report}</p>
-              </div>
-            )}
-            {lead.treatment_summary && (
-              <div className="mt-3 rounded-lg border border-violet-200 bg-violet-50 p-3">
-                <p className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-violet-500">Treatment Summary</p>
-                <p className="text-xs text-violet-900 whitespace-pre-wrap">{lead.treatment_summary}</p>
-              </div>
-            )}
-          </div>
-
-          <DocumentsPanel leadId={lead.id} />
-
+          {tab === "overview" && (
           <div className="rounded-xl border-2 border-slate-200 bg-white p-4">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Stat label="Physio">
@@ -1298,8 +1293,46 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
               </Stat>
             </div>
           </div>
+          )}
+
+          {tab === "report" && (
+          <div data-testid="physio-consultation-report">
+            <p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Consultation Report</p>
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+              <Row label="Alternative Phone" value={lead.alternative_phone} />
+              <Row label="Address" value={lead.address} />
+              <Row label="City / State" value={[lead.city, lead.state].filter(Boolean).join(", ")} />
+              <Row label="Age" value={lead.age} />
+              <Row label="Gender" value={lead.gender} />
+              <Row label="Occupation" value={lead.occupation} />
+              <Row label="Condition" value={lead.condition} />
+              <Row label="Months of Pain" value={lead.months_of_pain} />
+              <Row label="Appointment" value={lead.appointment_date ? `${lead.appointment_date}${lead.appointment_time ? ` · ${to12h(lead.appointment_time)}` : ""}` : null} />
+            </div>
+
+            {lead.diagnosis && (
+              <div className="mt-3 rounded-lg border border-slate-200 p-3">
+                <p className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-slate-400">Pre-Sales Diagnosis</p>
+                <p className="text-xs text-slate-700 whitespace-pre-wrap">{lead.diagnosis}</p>
+              </div>
+            )}
+            {lead.physio_diagnosis_report && (
+              <div className="mt-3 rounded-lg border border-sky-200 bg-sky-50 p-3">
+                <p className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-sky-500">Diagnosis Report</p>
+                <p className="text-xs text-sky-900 whitespace-pre-wrap">{lead.physio_diagnosis_report}</p>
+              </div>
+            )}
+            {lead.treatment_summary && (
+              <div className="mt-3 rounded-lg border border-violet-200 bg-violet-50 p-3">
+                <p className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-violet-500">Treatment Summary</p>
+                <p className="text-xs text-violet-900 whitespace-pre-wrap">{lead.treatment_summary}</p>
+              </div>
+            )}
+          </div>
+          )}
 
           {/* Treatment days — one row per booked session, completed in order */}
+          {tab === "days" && (
           <div>
             <p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">
               Treatment Days {sessions.length > 0 && <span className="text-slate-400">({completedSessions.length} of {sessions.length} complete)</span>}
@@ -1388,6 +1421,9 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
               </div>
             )}
           </div>
+          )}
+
+          {tab === "documents" && <DocumentsPanel leadId={lead.id} />}
 
         </div>
 
