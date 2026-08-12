@@ -112,14 +112,10 @@ export const PipelineStageManagement = ({ onBack }) => {
 
   return (
     <div className="space-y-5" data-testid="pipeline-stages-page">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex flex-wrap items-center gap-3">
-          <Button variant="ghost" size="sm" onClick={onBack} data-testid="stages-back-btn"><ArrowLeft className="h-4 w-4 mr-1" />Settings</Button>
-          <div>
-            <h2 className="text-2xl font-bold text-slate-900">Pipeline Stage Management</h2>
-            <p className="text-sm text-slate-500">Add, edit, reorder, and delete stages for the Pre-Sales, Branch Lead, Branch Consultation, Head Consultation, and Recruitment pipelines.</p>
-          </div>
-        </div>
+      {/* Heading removed with the others. The back link and Add Stage keep the row, so
+          it still reads left-to-right as "where you came from" then "what you can do". */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <Button variant="ghost" size="sm" onClick={onBack} data-testid="stages-back-btn"><ArrowLeft className="h-4 w-4 mr-1" />Settings</Button>
         <Button onClick={() => { setEditing(null); setForm({ name: "", color: PALETTE[Math.floor(Math.random() * PALETTE.length)], is_final: false }); setShowAdd(true); }} className="bg-orange-500 hover:bg-orange-600" data-testid="stages-add-btn"><Plus className="h-4 w-4 mr-1" />Add Stage</Button>
       </div>
 

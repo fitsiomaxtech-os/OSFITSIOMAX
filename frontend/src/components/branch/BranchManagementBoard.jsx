@@ -34,10 +34,7 @@ export const BranchManagementBoard = ({ actingUser } = {}) => {
 
   return (
     <div className="space-y-5" data-testid="branch-mgmt-board">
-      <div>
-        <h2 className="text-2xl font-bold text-slate-900">Branch Management</h2>
-        <p className="text-sm text-slate-500">Create branches, assign managers, and track performance.</p>
-      </div>
+      {/* No heading. The nav tab above already reads Branch Management. */}
       <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="bm-subtabs">
         {TABS.map((t) => {
           const Icon = t.icon;

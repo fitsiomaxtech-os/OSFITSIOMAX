@@ -45,10 +45,7 @@ export const HRBoard = () => {
   // the tab strip phantom top margin for content a phone never draws.
   return (
     <div className="flex flex-col gap-5" data-testid="hr-board">
-      <div className="hidden md:block">
-        <h2 className="text-2xl font-bold text-slate-900">HR Admin</h2>
-        <p className="text-sm text-slate-500">Manage employees, attendance, leave & payroll.</p>
-      </div>
+      {/* No heading. The nav tab above already reads HR Admin. */}
       <SegmentedTabs tabs={TABS} value={tab} onChange={setTab} testid="hr-subtab" />
       {tab === "dashboard" && <DashboardTab onNavigate={(t, f) => { setEmpFilter(f || null); setTab(t); }} />}
       {tab === "employees" && <EmployeesTab meta={meta} initialFilter={empFilter} />}

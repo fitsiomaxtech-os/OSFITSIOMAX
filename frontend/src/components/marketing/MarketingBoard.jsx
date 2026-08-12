@@ -902,10 +902,7 @@ export const MarketingBoard = ({ branches = [] }) => {
 
   return (
     <div className="space-y-4" data-testid="marketing-board">
-      <div>
-        <h2 className="text-2xl font-bold text-slate-900">Marketing Source</h2>
-        <p className="text-sm text-slate-500">Source leads, distribute them, and track team performance.</p>
-      </div>
+      {/* No heading. The nav tab above already reads Marketing Source. */}
       <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2" data-testid="mk-subtabs">
         {SUB_TABS.map((t) => (
           <TabBtn key={t.key} active={tab === t.key} label={t.label} Icon={t.icon} onClick={() => setTab(t.key)} testid={`mk-subtab-${t.key}`} />
