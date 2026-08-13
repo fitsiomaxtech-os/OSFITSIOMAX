@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Send, CheckCircle2, Clock, X, Search, RefreshCw, ChevronLeft, ChevronRight, Calendar as CalendarIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
+import { MilkDateInput } from "@/components/ui/milk-calendar";
+import { StatTile } from "@/components/ui/stat-tile";
 import { branchReviews, branchSendReview, getAvailableExperts, getAvailableDates } from "@/lib/api";
 import { to12h, endTime12h } from "@/lib/time";
 
@@ -9,10 +11,24 @@ import { to12h, endTime12h } from "@/lib/time";
 // Each row already names the Head Physio it went to, so the branch can see who has what
 // without a separate view for it.
 const SUB_TABS = [
-  { key: "send", label: "Send to Review", icon: Send },
-  { key: "pending", label: "Pending Review", icon: Clock },
-  { key: "complete", label: "Review Complete", icon: CheckCircle2 },
+  { key: "send", label: "Send to Review", icon: Send, color: "#d97706", sub: "waiting to be sent" },
+  { key: "pending", label: "Pending Review", icon: Clock, color: "#0284c7", sub: "sent, not yet written" },
+  { key: "complete", label: "Review Complete", icon: CheckCircle2, color: "#059669", sub: "written up" },
 ];
+
+/**
+ * The date a review means on each tab, and what to call it.
+ *
+ * One filter, three meanings — which is right, because the tabs are three stages of one
+ * review and a stage's date is the thing that happened at it. Filtering a review waiting to
+ * be sent by the date it is due with a Head Physio would filter on a date it does not have
+ * yet, and every row would vanish.
+ */
+const DATE_FIELD = {
+  send: { label: "Raised On", of: (r) => (r.raised_at || "").slice(0, 10) },
+  pending: { label: "Review Date", of: (r) => (r.review_date || "").slice(0, 10) },
+  complete: { label: "Completed On", of: (r) => (r.completed_at || r.review_date || "").slice(0, 10) },
+};
 
 const dmy = (d) => {
   if (!d) return "—";
@@ -35,6 +51,9 @@ export const BranchReviewPanel = ({ branchId }) => {
   const [data, setData] = useState({ reviews: [], counts: {}, head_physios: [], today: "" });
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
+  // Cleared when the tab changes: the date means a different thing on each one, so a date
+  // carried across would silently filter on a field the new tab never fills.
+  const [dateFilter, setDateFilter] = useState("");
   const [sendDraft, setSendDraft] = useState(null); // { review, head_physio_id, review_date, review_time, duration, notes }
   const [sending, setSending] = useState(false);
   const [viewing, setViewing] = useState(null);
@@ -63,17 +82,21 @@ export const BranchReviewPanel = ({ branchId }) => {
 
   const rows = useMemo(() => {
     const all = data.reviews || [];
-    const byTab = sub === "send" ? all.filter((r) => r.status === "send_to_review")
+    let list = sub === "send" ? all.filter((r) => r.status === "send_to_review")
       : sub === "pending" ? all.filter((r) => r.status === "sent")
       : all.filter((r) => r.status === "completed");
-    if (!search) return byTab;
+    if (dateFilter) {
+      const of = DATE_FIELD[sub].of;
+      list = list.filter((r) => of(r) === dateFilter);
+    }
+    if (!search) return list;
     const q = search.toLowerCase();
-    return byTab.filter((r) =>
+    return list.filter((r) =>
       (r.lead_name || "").toLowerCase().includes(q)
       || (r.patient_number || "").toLowerCase().includes(q)
       || (r.phone || "").includes(q)
       || (r.head_physio_name || "").toLowerCase().includes(q));
-  }, [data.reviews, sub, search]);
+  }, [data.reviews, sub, search, dateFilter]);
 
   const openSend = (review) => {
     const startDate = review.review_date || data.today || new Date().toISOString().slice(0, 10);
@@ -140,10 +163,11 @@ export const BranchReviewPanel = ({ branchId }) => {
     setSending(false);
   };
 
-  const ReviewRow = ({ r }) => {
+  const ReviewRow = ({ r, index }) => {
     const overdue = r.status === "sent" && r.review_date && r.review_date < (data.today || "");
     return (
       <tr className="transition-colors hover:bg-slate-50" data-testid={`branch-review-row-${r.id}`}>
+        <td className="px-4 py-3 align-middle text-slate-400">{index + 1}</td>
         <td className="px-4 py-3 align-middle">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-medium text-slate-800">{r.lead_name}</span>
@@ -190,13 +214,15 @@ export const BranchReviewPanel = ({ branchId }) => {
   // Same row as a card, for phones. Seven columns can't hold their width there — the
   // table scrolled sideways and left Physio, Weeks, the Send button and View all
   // off-screen, so the one thing this tab exists to do couldn't be reached.
-  const ReviewCard = ({ r }) => {
+  const ReviewCard = ({ r, index }) => {
     const overdue = r.status === "sent" && r.review_date && r.review_date < (data.today || "");
     return (
       <div className="rounded-xl border border-slate-200 bg-white p-3" data-testid={`branch-review-card-${r.id}`}>
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <p className="truncate font-semibold text-slate-800">{r.lead_name}</p>
+            <p className="truncate font-semibold text-slate-800">
+              <span className="mr-1.5 font-semibold text-slate-300">{index + 1}.</span>{r.lead_name}
+            </p>
             {r.patient_number && <p className="truncate font-mono text-[10px] text-slate-400">{r.patient_number}</p>}
           </div>
           {overdue && <span className="shrink-0 rounded-md bg-rose-100 px-2 py-0.5 text-[10px] font-bold text-rose-700">OVERDUE</span>}
@@ -259,31 +285,19 @@ export const BranchReviewPanel = ({ branchId }) => {
           Selection is what the colour marks now. Still three across on a phone — they
           fit, and the third was otherwise behind a sideways swipe. */}
       <div className="grid grid-cols-3 gap-2 sm:gap-3" data-testid="branch-review-subtabs">
-        {SUB_TABS.map((t) => {
-          const Icon = t.icon;
-          const active = sub === t.key;
-          return (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => setSub(t.key)}
-              className={`w-full rounded-xl border-2 px-3 py-2.5 text-left transition sm:px-4 sm:py-4 ${
-                active
-                  ? "border-teal-600 bg-teal-50 shadow-sm"
-                  : "border-slate-200 bg-white hover:border-teal-300 hover:shadow-sm"
-              }`}
-              data-testid={`branch-review-subtab-${t.key}`}
-            >
-              <span className={`flex items-center gap-1.5 ${active ? "text-teal-700" : "text-slate-500"}`}>
-                <Icon className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />
-                <span className="truncate text-[10px] font-bold uppercase tracking-wider sm:text-xs">{t.label}</span>
-              </span>
-              <span className={`mt-0.5 block text-2xl font-extrabold sm:mt-1 sm:text-3xl ${active ? "text-teal-700" : "text-slate-800"}`}>
-                {countFor(t.key)}
-              </span>
-            </button>
-          );
-        })}
+        {SUB_TABS.map((t) => (
+          <StatTile
+            key={t.key}
+            label={t.label}
+            value={countFor(t.key)}
+            sub={t.sub}
+            icon={t.icon}
+            color={t.color}
+            active={sub === t.key}
+            onClick={() => { setSub(t.key); setDateFilter(""); }}
+            testid={`branch-review-subtab-${t.key}`}
+          />
+        ))}
       </div>
 
       {/* No Card around this row any more. A bordered input sitting inside a bordered
@@ -312,6 +326,31 @@ export const BranchReviewPanel = ({ branchId }) => {
             </button>
           )}
         </div>
+        {/* Centred rather than anchored: this sits directly above the table, where a panel
+            hanging off the field opens over the rows and is clipped by the scroll. */}
+        <div className="relative shrink-0" data-testid="branch-review-date-wrap">
+          <MilkDateInput
+            centered
+            accent="sky"
+            title={DATE_FIELD[sub].label}
+            placeholder={DATE_FIELD[sub].label}
+            value={dateFilter}
+            onChange={(e) => setDateFilter(e.target.value)}
+            className="h-11 w-[9.5rem] rounded-xl border-slate-200 bg-white shadow-sm sm:w-[11rem]"
+            data-testid="branch-review-date-filter"
+          />
+          {dateFilter && (
+            <button
+              type="button"
+              onClick={() => setDateFilter("")}
+              aria-label="Clear date filter"
+              className="absolute -right-1 -top-1 rounded-full border border-slate-200 bg-white p-0.5 text-slate-400 shadow-sm hover:text-slate-600"
+              data-testid="branch-review-date-clear"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          )}
+        </div>
         {/* Icon-only on a phone: the word cost a whole second row under the search box. */}
         <button
           type="button"
@@ -337,13 +376,14 @@ export const BranchReviewPanel = ({ branchId }) => {
       ) : (
         <>
         <div className="space-y-2 md:hidden" data-testid="branch-review-mobile">
-          {rows.map((r) => <ReviewCard key={r.id} r={r} />)}
+          {rows.map((r, i) => <ReviewCard key={r.id} r={r} index={i} />)}
         </div>
 
         <div className="hidden overflow-auto rounded-xl border border-slate-200 bg-white md:block">
           <table className="min-w-full text-sm">
             <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
               <tr>
+                <th className="w-12 px-4 py-2.5">S.No</th>
                 <th className="px-4 py-2.5">Patient</th>
                 <th className="whitespace-nowrap px-4 py-2.5">Phone</th>
                 <th className="whitespace-nowrap px-4 py-2.5">Physio</th>
@@ -354,7 +394,7 @@ export const BranchReviewPanel = ({ branchId }) => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {rows.map((r) => <ReviewRow key={r.id} r={r} />)}
+              {rows.map((r, i) => <ReviewRow key={r.id} r={r} index={i} />)}
             </tbody>
           </table>
         </div>
