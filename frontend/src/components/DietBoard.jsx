@@ -18,17 +18,16 @@ import { to12h } from "@/lib/time";
 /**
  * Diet Master View — the Nutrition Coach's own board.
  *
- * Deliberately the same shape as the Physio Master View, because it is the same job on a
- * different vertical: a day's list of booked visits to work through, and a caseload behind
- * it. A coach moving between the two boards should not have to learn a second layout.
+ * Two tabs: the consultations to work through, and the caseload behind them. It keeps the
+ * Physio Master View's shape where it still applies, so a coach moving between the two
+ * boards does not have to learn a second layout.
  *
  * Two things are intentionally absent, and their absence is the design rather than an
  * omission:
  *
  *   No Review tab. On the physio side reviews exist so a junior's work gets seen by a
- *   senior. One Nutrition Coach runs both the diet consultation and the check-ins, so
- *   there is nobody above them for a review to route to. A Review tab here would be a
- *   queue that never fills.
+ *   senior. One Nutrition Coach runs the whole vertical, so there is nobody above them for
+ *   a review to route to. A Review tab here would be a queue that never fills.
  *
  *   No treatment-day terminology. These are check-in days against a diet plan, counted
  *   out of diet_sessions — a separate collection from `sessions`, so nothing here can be
@@ -231,9 +230,13 @@ function ConsultationsTab({ coachId, onCountChange, toolbarSlot }) {
       return (r.lead_name || "").toLowerCase().includes(q) || (r.phone || "").includes(q);
     });
 
+  // One row on every width. The search used to be w-full, which on a phone left the Refresh
+  // no room and wrapped it onto a line of its own; it now takes the space left over beside
+  // the button instead. min-w-0 so it can actually shrink — a flex item defaults to its
+  // content's width and would push the button off the edge.
   const toolbar = (
-    <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto" data-testid="diet-consult-toolbar">
-      <div className="relative w-full sm:w-[260px]">
+    <div className="flex w-full items-center gap-2 sm:w-auto" data-testid="diet-consult-toolbar">
+      <div className="relative min-w-0 flex-1 sm:w-[260px] sm:flex-none">
         <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
         <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search patient..." className="h-10 pl-9" data-testid="diet-consult-search" />
       </div>
@@ -496,8 +499,8 @@ function PatientsTab({ coachId, onCountChange, toolbarSlot }) {
   useEffect(() => { onCountChange?.(ongoing.length); }, [ongoing.length, onCountChange]);
 
   // This tab has no search or filter of its own, so its toolbar is the Refresh alone —
-  // still portaled into the shared slot, so the button sits in the same place on all
-  // three tabs rather than moving when you switch.
+  // still portaled into the shared slot, so the button sits in the same place on both
+  // tabs rather than moving when you switch.
   const toolbar = (
     <div className="flex flex-wrap items-center gap-2" data-testid="diet-patients-toolbar">
       <RefreshBtn onClick={load} busy={loading} testid="diet-patients-refresh" />
