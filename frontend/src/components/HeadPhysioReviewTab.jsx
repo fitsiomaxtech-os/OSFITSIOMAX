@@ -302,7 +302,6 @@ export const HeadPhysioReviewTab = ({ selectedDate, compact = false, onCountChan
                 <textarea
                   rows={3}
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400"
-                  placeholder="Changes to the treatment plan, if any..."
                   value={draft.head_physio_suggestions}
                   onChange={(e) => setDraft({ ...draft, head_physio_suggestions: e.target.value })}
                   data-testid="hp-review-suggestions"
