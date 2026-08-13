@@ -593,15 +593,20 @@ function CheckinsTab({ coachId, onCountChange, toolbarSlot }) {
         </div>
       </div>
 
-      <div className="mb-4 rounded-xl border border-slate-200 bg-white p-3" data-testid="diet-week-strip">
-        <div className="mb-2 flex items-center justify-between">
-          <button type="button" onClick={() => setWeekAnchor((a) => shiftIso(a, -7))} className="rounded p-1 text-slate-400 hover:bg-slate-100"><ChevronLeft className="h-4 w-4" /></button>
-          <p className="text-xs font-semibold text-slate-600">
+      {/* Arrows beside the strip, centred against its full height — they move the row of
+          days, so sitting in the month line put them above the thing they act on. Same
+          shape as the Physio treatment strip, which is the same picker over a different
+          day's work. */}
+      <div className="mb-4 flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-2" data-testid="diet-week-strip">
+        <button type="button" onClick={() => setWeekAnchor((a) => shiftIso(a, -7))} className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-100" aria-label="Previous week" data-testid="diet-week-prev">
+          <ChevronLeft className="h-4 w-4" />
+        </button>
+
+        <div className="min-w-0 flex-1">
+          <p className="mb-2 text-center text-xs font-semibold text-slate-600">
             {new Date(`${weekAnchor}T00:00:00`).toLocaleDateString("en-US", { month: "long", year: "numeric" })}
           </p>
-          <button type="button" onClick={() => setWeekAnchor((a) => shiftIso(a, 7))} className="rounded p-1 text-slate-400 hover:bg-slate-100"><ChevronRight className="h-4 w-4" /></button>
-        </div>
-        <div className="grid grid-cols-7 gap-1">
+          <div className="grid grid-cols-7 gap-1">
           {stripDates.map((date, i) => {
             const isSelected = date === selectedDate;
             const n = countFor(date);
@@ -619,7 +624,12 @@ function CheckinsTab({ coachId, onCountChange, toolbarSlot }) {
               </button>
             );
           })}
+          </div>
         </div>
+
+        <button type="button" onClick={() => setWeekAnchor((a) => shiftIso(a, 7))} className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-100" aria-label="Next week" data-testid="diet-week-next">
+          <ChevronRight className="h-4 w-4" />
+        </button>
       </div>
 
       {visible.length === 0 && !loading ? (

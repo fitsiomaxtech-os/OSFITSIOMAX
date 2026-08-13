@@ -564,20 +564,21 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
       {/* Sun-Sat week strip — today is always the default selection.
           Kept deliberately short: this is a date picker sitting between the summary and
           the day's list, and at its old height it pushed the first patient below the fold
-          on a laptop. The month line and the day cells both lost their spare padding. */}
-      <div className="mb-3 rounded-xl border border-slate-200 bg-white px-3 py-2" data-testid="physio-treatment-week-strip">
-        <div className="mb-1 flex items-center justify-between">
-          <button type="button" onClick={() => setWeekAnchor((a) => shiftIso(a, -7))} className="rounded p-0.5 text-slate-400 hover:bg-slate-100" data-testid="physio-week-prev">
-            <ChevronLeft className="h-4 w-4" />
-          </button>
-          <p className="text-[11px] font-semibold text-slate-600">
+          on a laptop. The month line and the day cells both lost their spare padding.
+
+          The arrows sit beside the strip and centre against its full height rather than
+          riding in the month line. They step the week — the row of days — so pinned to the
+          label they floated above the thing they move. */}
+      <div className="mb-3 flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-2 py-2" data-testid="physio-treatment-week-strip">
+        <button type="button" onClick={() => setWeekAnchor((a) => shiftIso(a, -7))} className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-100" aria-label="Previous week" data-testid="physio-week-prev">
+          <ChevronLeft className="h-4 w-4" />
+        </button>
+
+        <div className="min-w-0 flex-1">
+          <p className="mb-1 text-center text-[11px] font-semibold text-slate-600">
             {new Date(`${weekAnchor}T00:00:00`).toLocaleDateString("en-US", { month: "long", year: "numeric" })}
           </p>
-          <button type="button" onClick={() => setWeekAnchor((a) => shiftIso(a, 7))} className="rounded p-0.5 text-slate-400 hover:bg-slate-100" data-testid="physio-week-next">
-            <ChevronRight className="h-4 w-4" />
-          </button>
-        </div>
-        <div className="grid grid-cols-7 gap-1">
+          <div className="grid grid-cols-7 gap-1">
           {stripDates.map((date, i) => {
             const day = parseInt(date.split("-")[2], 10);
             const isSelected = date === selectedDate;
@@ -603,7 +604,12 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
               </button>
             );
           })}
+          </div>
         </div>
+
+        <button type="button" onClick={() => setWeekAnchor((a) => shiftIso(a, 7))} className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-100" aria-label="Next week" data-testid="physio-week-next">
+          <ChevronRight className="h-4 w-4" />
+        </button>
       </div>
 
       {visibleRows.length === 0 && !loading ? (
