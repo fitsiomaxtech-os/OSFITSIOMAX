@@ -180,7 +180,9 @@ export const DashboardBoard = () => {
       {/* Two rows of three on a phone. Six tabs in one row leaves each about a sixth of
           the width, which even the short labels can't survive — and one of them is
           "Executive Overview". Desktop keeps the single row. */}
-      <SegmentedTabs tabs={DASH_TABS} value={activeTab} onChange={setActiveTab} testid="dashboard-tab" mobileCols={3} />
+      {/* Four columns, not three: at three the fourth tab dropped to a second row on its
+          own, which read as a separate control rather than the last of a set. */}
+      <SegmentedTabs tabs={DASH_TABS} value={activeTab} onChange={setActiveTab} testid="dashboard-tab" mobileCols={4} />
 
       {activeTab === "overview" ? (
         <ExecutiveOverview data={data} loading={loading} dateFilter={dateFilter} />

@@ -18,9 +18,9 @@
  * so anything that won't survive a sixth of a phone's width gets a shorter name rather
  * than an ellipsis. The full label returns from sm up.
  *
- * `mobileCols` wraps the bar into that many columns on a phone. Past four tabs a single
- * row leaves each one too narrow to read even abbreviated; two rows of three costs less
- * than a bar nobody can use. Desktop is always one row.
+ * `mobileCols` fixes the bar to that many columns on a phone. Four is the ceiling: past
+ * that a single row leaves each tab too narrow to read even abbreviated, and two rows of
+ * three costs less than a bar nobody can use. Desktop is always one row.
  */
 // Written out rather than built from mobileCols: Tailwind reads the source for class
 // names, so `grid-cols-${n}` compiles to nothing and the bar silently falls back to one
@@ -32,7 +32,15 @@ const MOBILE_LAYOUTS = {
 };
 
 export const SegmentedTabs = ({ tabs, value, onChange, testid = "segmented-tabs", size = "md", mobileCols = 0 }) => {
-  const pad = size === "sm" ? "px-2 py-1.5 text-[11px] sm:text-xs" : "px-2 py-2 text-[11px] sm:px-3 sm:text-sm";
+  // Four across a phone is about 80px a tab, and the usual px-2 plus the icon leaves ~46px
+  // of text — under what "Pre Sales" needs, so it would arrive as "Pre Sal…". The padding
+  // and the icon gap tighten only in that case; two and three columns have room already,
+  // and desktop is untouched.
+  const tight = mobileCols === 4;
+  const pad = size === "sm"
+    ? "px-2 py-1.5 text-[11px] sm:text-xs"
+    : `${tight ? "px-1" : "px-2"} py-2 text-[11px] sm:px-3 sm:text-sm`;
+  const iconGap = tight ? "gap-0.5" : "gap-1";
   const layout = MOBILE_LAYOUTS[mobileCols] || "flex";
   return (
     <div className={`${layout} gap-1 rounded-xl bg-slate-100 p-1 ${size === "sm" ? "" : "sm:gap-1.5"}`} data-testid={testid}>
@@ -45,7 +53,7 @@ export const SegmentedTabs = ({ tabs, value, onChange, testid = "segmented-tabs"
             type="button"
             onClick={() => onChange(t.key)}
             aria-current={active ? "page" : undefined}
-            className={`flex min-w-0 items-center justify-center gap-1 rounded-lg font-semibold transition sm:flex-1 sm:gap-1.5 ${mobileCols ? "" : "flex-1"} ${pad} ${
+            className={`flex min-w-0 items-center justify-center ${iconGap} rounded-lg font-semibold transition sm:flex-1 sm:gap-1.5 ${mobileCols ? "" : "flex-1"} ${pad} ${
               active
                 ? "bg-white text-slate-900 shadow-sm"
                 : "text-slate-500 hover:text-slate-800"
