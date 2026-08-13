@@ -383,6 +383,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   const [physioDiagEditing, setPhysioDiagEditing] = useState(false);
   const [savingPhysioDiag, setSavingPhysioDiag] = useState(false);
   const physioDiagDebounceRef = useRef(null);
+  // What has been typed but is not yet known to be on the server. "Done" used to flush the
+  // debounce before it closed the box; with the button gone, closing the popup inside the
+  // 800ms window would otherwise drop the last keystrokes silently. Holds the lead id too,
+  // because the flush runs after selectedLead has already been cleared.
+  const pendingWriteRef = useRef({ leadId: null, diag: null, treat: null });
 
   // Head Physio's treatment plan summary
   const [treatmentDraft, setTreatmentDraft] = useState("");
@@ -815,6 +820,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     try {
       const updated = await savePhysioDiagnosis(selectedLead.id, text.trim(), false);
       applyUpdatedLead(updated);
+      if (pendingWriteRef.current.diag === text) pendingWriteRef.current.diag = null;
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed to save diagnosis report");
     }
@@ -823,14 +829,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
 
   const handlePhysioDiagChange = (text) => {
     setPhysioDiagDraft(text);
+    pendingWriteRef.current.leadId = selectedLead?.id || null;
+    pendingWriteRef.current.diag = text;
     if (physioDiagDebounceRef.current) clearTimeout(physioDiagDebounceRef.current);
     physioDiagDebounceRef.current = setTimeout(() => autoSavePhysioDiag(text), 800);
-  };
-
-  const finishPhysioDiagEdit = () => {
-    if (physioDiagDebounceRef.current) { clearTimeout(physioDiagDebounceRef.current); physioDiagDebounceRef.current = null; }
-    if (physioDiagDraft.trim()) autoSavePhysioDiag(physioDiagDraft);
-    setPhysioDiagEditing(false);
   };
 
   const unlockPhysioDiag = async () => {
@@ -850,6 +852,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     try {
       const updated = await saveTreatmentSummary(selectedLead.id, text.trim(), false);
       applyUpdatedLead(updated);
+      if (pendingWriteRef.current.treat === text) pendingWriteRef.current.treat = null;
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed to save treatment summary");
     }
@@ -858,15 +861,28 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
 
   const handleTreatmentChange = (text) => {
     setTreatmentDraft(text);
+    pendingWriteRef.current.leadId = selectedLead?.id || null;
+    pendingWriteRef.current.treat = text;
     if (treatmentDebounceRef.current) clearTimeout(treatmentDebounceRef.current);
     treatmentDebounceRef.current = setTimeout(() => autoSaveTreatment(text), 800);
   };
 
-  const finishTreatmentEdit = () => {
-    if (treatmentDebounceRef.current) { clearTimeout(treatmentDebounceRef.current); treatmentDebounceRef.current = null; }
-    if (treatmentDraft.trim()) autoSaveTreatment(treatmentDraft);
-    setTreatmentEditing(false);
-  };
+  // Writes out anything still in flight when the popup closes or moves to another lead.
+  // This is what "Done" used to do, minus the button: it cancels the pending debounce and
+  // saves that text immediately, against the lead it was actually typed for.
+  const openLeadId = selectedLead?.id;
+  useEffect(() => {
+    if (!openLeadId) return undefined;
+    return () => {
+      if (physioDiagDebounceRef.current) { clearTimeout(physioDiagDebounceRef.current); physioDiagDebounceRef.current = null; }
+      if (treatmentDebounceRef.current) { clearTimeout(treatmentDebounceRef.current); treatmentDebounceRef.current = null; }
+      const p = pendingWriteRef.current;
+      if (p.leadId !== openLeadId) return;
+      if (p.diag && p.diag.trim()) savePhysioDiagnosis(openLeadId, p.diag.trim(), false).catch(() => {});
+      if (p.treat && p.treat.trim()) saveTreatmentSummary(openLeadId, p.treat.trim(), false).catch(() => {});
+      pendingWriteRef.current = { leadId: null, diag: null, treat: null };
+    };
+  }, [openLeadId]);
 
   const unlockTreatment = async () => {
     try {
@@ -2078,7 +2094,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     savedText={selectedLead.physio_diagnosis_report}
                     saving={savingPhysioDiag}
                     canEdit={isConsultant}
-                    onDone={finishPhysioDiagEdit}
                     onEdit={() => setPhysioDiagEditing(true)}
                     onUnlock={unlockPhysioDiag}
                     rows={3}
@@ -2100,7 +2115,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     savedText={selectedLead.treatment_summary}
                     saving={savingTreatment}
                     canEdit={isConsultant}
-                    onDone={finishTreatmentEdit}
                     onEdit={() => setTreatmentEditing(true)}
                     onUnlock={unlockTreatment}
                     rows={3}
@@ -5104,7 +5118,7 @@ function PresetPicker({ kind, onPick, currentText, testPrefix }) {
  */
 function LockableTextBox({
   icon: Icon, label, accent, value, onChange, editing, locked, savedText,
-  saving, canEdit, onDone, onEdit, onUnlock, rows, placeholder, testPrefix, presetKind,
+  saving, canEdit, onEdit, onUnlock, rows, placeholder, testPrefix, presetKind,
 }) {
   const colors = {
     sky: { border: "border-sky-200", bg: "bg-sky-50", text: "text-sky-700", btn: "bg-sky-600 hover:bg-sky-700" },
@@ -5140,16 +5154,19 @@ function LockableTextBox({
             className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-xs"
             data-testid={`${testPrefix}-input`}
           />
-          <div className="mt-2 flex items-center justify-between">
-            <span className="flex items-center gap-1 text-[11px] text-slate-400" data-testid={`${testPrefix}-autosave-status`}>
-              {saving ? "Saving..." : value.trim() ? (
-                <><CheckCircle2 className="h-3 w-3 text-emerald-500" /> Auto-saved</>
-              ) : null}
-            </span>
-            <Button size="sm" variant="outline" className="text-xs" onClick={onDone} data-testid={`${testPrefix}-done`}>
-              Done
-            </Button>
-          </div>
+          {/* No Done button: the box saves as you type and flushes whatever is left when
+              the popup closes, so there was nothing for it to do that wasn't already
+              happening. The status line renders only when it has something to say —
+              otherwise an empty strip would hold the space the button used to. */}
+          {(saving || value.trim()) && (
+            <div className="mt-1.5 flex items-center" data-testid={`${testPrefix}-autosave-status`}>
+              <span className="flex items-center gap-1 text-[11px] text-slate-400">
+                {saving ? "Saving..." : (
+                  <><CheckCircle2 className="h-3 w-3 text-emerald-500" /> Auto-saved</>
+                )}
+              </span>
+            </div>
+          )}
         </>
       ) : savedText ? (
         <>
