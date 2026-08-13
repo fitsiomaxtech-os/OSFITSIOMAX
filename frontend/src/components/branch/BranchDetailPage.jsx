@@ -46,13 +46,17 @@ export const BranchDetailPage = ({ branchId, onBack, readOnly = false }) => {
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2" data-testid="branch-detail-tabs">
+      {/* Four across on a phone rather than wrapping Experts onto a line of its own.
+          The icon goes above the label and the text shrinks, which is what the Manage
+          sub-tabs one bar up already do — the two sit on the same screen and should not
+          each solve this differently. Unchanged from sm up. */}
+      <div className="grid grid-cols-4 gap-1 border-b border-slate-200 pb-2 sm:flex sm:flex-wrap sm:gap-2" data-testid="branch-detail-tabs">
         {TABS.map((t) => {
           const Icon = t.icon;
           const active = tab === t.key;
           return (
-            <button key={t.key} onClick={() => setTab(t.key)} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${active ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"}`} data-testid={`branch-detail-tab-${t.key}`}>
-              <Icon className="h-4 w-4" />{t.label}
+            <button key={t.key} onClick={() => setTab(t.key)} className={`flex min-w-0 flex-col items-center justify-center gap-1 rounded-md px-1 py-2 text-center text-[10px] font-semibold leading-tight transition sm:inline-flex sm:flex-row sm:gap-2 sm:px-3 sm:text-sm sm:font-medium ${active ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"}`} data-testid={`branch-detail-tab-${t.key}`}>
+              <Icon className="h-4 w-4 shrink-0" />{t.label}
             </button>
           );
         })}
