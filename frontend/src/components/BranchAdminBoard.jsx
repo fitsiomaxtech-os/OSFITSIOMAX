@@ -73,6 +73,15 @@ const dmyLabel = (d) => {
 const weekdayLabel = (d) => (d
   ? new Date(`${d}T00:00:00`).toLocaleDateString("en-US", { weekday: "long", day: "numeric", month: "long" })
   : "—");
+/** "2026-08-19" -> "Wednesday 19-08-2026". The popup hero only; the printed sheet and the
+ *  card keep the spelled-out month, which reads better on paper and cannot be mistaken for
+ *  month-first by a patient reading it. */
+const weekdayDmy = (d) => {
+  const [y, m, day] = String(d || "").split("-");
+  if (!y || !m || !day) return d || "—";
+  const weekday = new Date(`${d}T00:00:00`).toLocaleDateString("en-US", { weekday: "long" });
+  return `${weekday} ${day}-${m}-${y}`;
+};
 
 /** The slot on a lead, for the Branch Leads list — "06 Aug" + "10:30 AM".
  *  Pre-Sales writes appointment_date/time when it schedules, and assigning the Fitsiomax
@@ -174,8 +183,8 @@ const isHandheld = () => (typeof window !== "undefined"
  * pasting into the chat attaches the card and WhatsApp moves the typed text down into
  * its caption, which is the picture-above/words-below shape the branch is after.
  *
- * Resolves true when the card made it to the clipboard, so the caller can leave the
- * paste instruction on screen instead of in a toast that the handoff wipes out.
+ * Resolves true when the card made it to the clipboard. Both outcomes are reported here,
+ * so callers need not.
  */
 const sendApptOnWhatsApp = async (a) => {
   const num = waNumber(a.phone);
@@ -190,8 +199,12 @@ const sendApptOnWhatsApp = async (a) => {
   if (tab) tab.opener = null;
 
   const copied = await copyCardToClipboard(a);
-  // Only the failure is worth a toast — success is said by the panel that stays up.
-  if (!copied) toast.message("This browser can't copy the card — use Send Card + Message for the image");
+  // Both outcomes are worth saying, since the popup itself no longer explains the paste.
+  // On desktop WhatsApp takes its own tab, so this is still on screen when the branch
+  // looks back at the board; on a phone the page navigates away and neither would have
+  // survived anyway.
+  if (copied) toast.success("Card copied — paste it into the chat to send the picture");
+  else toast.message("This browser can't copy the card — use Send Card + Message for the image");
   const url = `https://wa.me/${num}?text=${encodeURIComponent(apptMessage(a))}`;
 
   if (tab && !tab.closed) {
@@ -888,10 +901,6 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
   // Shown once a booking is actually made. Kept outside the Appointment popup because
   // confirming closes that popup and the lead card with it.
   const [apptConfirm, setApptConfirm] = useState(null);
-  // Whether the card is sitting on the clipboard waiting to be pasted. A toast can't
-  // carry this — sending navigates to WhatsApp and takes the toast with it, and the
-  // instruction is needed after that trip, not during it.
-  const [cardCopied, setCardCopied] = useState(false);
   // The branch's own address and map link, for the confirmation the patient is sent —
   // they need to know where to come, which the lead record doesn't carry.
   const [branchInfo, setBranchInfo] = useState(null);
@@ -1687,11 +1696,14 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
             <div className="flex-1 overflow-y-auto p-6">
               <div className="rounded-xl border-2 border-teal-200 bg-teal-50 px-4 py-5 text-center">
                 <p className="text-xs font-bold uppercase tracking-widest text-teal-600">Your Appointment</p>
-                <p className="mt-1 text-2xl font-extrabold text-teal-700">{weekdayLabel(apptConfirm.date)}</p>
-                {/* Start only. A consultation runs as long as it needs to, so printing an
-                    end time promised something the branch cannot hold to — the same reason
-                    the treatment slot summary shows one time. */}
-                <p className="text-lg font-bold text-teal-700">{to12h(apptConfirm.time)}</p>
+                {/* Day and time on one line — they are read as one fact. Start only: a
+                    consultation runs as long as it needs to, so printing an end time
+                    promised something the branch cannot hold to. Wrapping is left on so a
+                    narrow phone drops the time to its own line rather than shrinking it. */}
+                <p className="mt-1 flex flex-wrap items-baseline justify-center gap-x-3 gap-y-0.5 text-xl font-extrabold text-teal-700 sm:text-2xl">
+                  <span>{weekdayDmy(apptConfirm.date)}</span>
+                  <span className="text-lg sm:text-xl">{to12h(apptConfirm.time)}</span>
+                </p>
                 <p className="mt-1 text-sm font-semibold text-teal-600">with {apptConfirm.headPhysio}</p>
               </div>
 
@@ -1718,24 +1730,7 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
               )}
             </div>
 
-            <div className="shrink-0 space-y-2 border-t border-slate-200 bg-slate-50 px-4 py-3">
-              {/* The paste is the only manual step in the flow and nothing on screen would
-                  otherwise suggest it, so it is spelled out beforehand and left up
-                  afterwards — the trip to WhatsApp is exactly when it is needed, and a
-                  toast would already be gone by then. It stays above the icons: with the
-                  labels gone it is the only thing explaining what the green one does. */}
-              {cardCopied ? (
-                <p className="flex items-center justify-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-2 text-center text-[11px] font-semibold leading-snug text-emerald-800" data-testid="branch-appt-confirm-hint">
-                  <CheckCircle2 className="h-3.5 w-3.5 flex-none" />
-                  Card copied — paste it into {apptConfirm.patient}'s chat to attach it
-                </p>
-              ) : (
-                <p className="px-1 text-center text-[11px] leading-snug text-slate-500" data-testid="branch-appt-confirm-hint">
-                  Opens {apptConfirm.patient}'s chat with the message ready. The card image is
-                  copied too — paste it in to send the picture with it.
-                </p>
-              )}
-
+            <div className="shrink-0 border-t border-slate-200 bg-slate-50 px-4 py-3">
               {/* Icons on one row, as the receipt popup does. Every label moves to title
                   and aria-label rather than being dropped. Done goes with them: the header
                   X runs the same close-and-move, so it was a second button for one action. */}
@@ -1755,7 +1750,7 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                     number with the confirmation typed, card image on the clipboard. */}
                 <Button
                   className="h-10 w-10 shrink-0 bg-[#25D366] p-0 text-white hover:bg-[#1da851]"
-                  onClick={async () => setCardCopied(await sendApptOnWhatsApp(apptConfirm))}
+                  onClick={() => sendApptOnWhatsApp(apptConfirm)}
                   title="Send on WhatsApp"
                   aria-label="Send on WhatsApp"
                   data-testid="branch-appt-confirm-whatsapp"
