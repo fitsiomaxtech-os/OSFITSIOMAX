@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { X, RefreshCw, AlertTriangle, Search } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -47,7 +47,7 @@ const StageBadge = ({ stage }) => (
  * an overdue review that fell out of Today would sit in a list nobody opens, which is
  * exactly how a patient's week-one review gets missed.
  */
-export const HeadPhysioReviewTab = ({ selectedDate, compact = false, onCountChange, onRowsChange, autoOpenReviewId, onAutoOpened }) => {
+export const HeadPhysioReviewTab = ({ selectedDate, compact = false, onCountChange, onRowsChange, autoOpenReviewId, onAutoOpened, reloadToken }) => {
   const [data, setData] = useState({ today: [], upcoming: [], overdue: [], completed: [], today_date: "" });
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
@@ -62,6 +62,15 @@ export const HeadPhysioReviewTab = ({ selectedDate, compact = false, onCountChan
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // The board's Refresh reaching this tab's data. The first value is skipped — the mount
+  // effect above has already fetched, and firing here too would double every open.
+  const reloadSeen = useRef(reloadToken);
+  useEffect(() => {
+    if (reloadToken === undefined || reloadToken === reloadSeen.current) return;
+    reloadSeen.current = reloadToken;
+    load();
+  }, [reloadToken, load]);
 
   // With a day picked upstream, "due" means that day's reviews rather than everything
   // outstanding — the week strip is the filter, so the list has to answer to it.

@@ -11,6 +11,7 @@ import {
   LayoutList,
   MessageSquare,
   Package,
+  RefreshCw,
   Search,
   Send,
   Stethoscope,
@@ -167,6 +168,9 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
   // Set by View on the All list, consumed by whichever board owns that row's popup.
   const [autoOpenLead, setAutoOpenLead] = useState(null);
   const [autoOpenReview, setAutoOpenReview] = useState(null);
+  // One Refresh for a board with three data sources behind it. loadPatients covers Rehab;
+  // Consultations and Review each own their own fetch, so they are told by token.
+  const [refreshTick, setRefreshTick] = useState(0);
   const [showRecommendModal, setShowRecommendModal] = useState(null);
   const [showReviewModal, setShowReviewModal] = useState(null);
 
@@ -212,6 +216,17 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
         <div className="shrink-0 lg:border-l lg:border-slate-100 lg:pl-4" data-testid="hp-header-day-filter">
           <WeekStrip value={workDate} onChange={setWorkDate} testid="hp-week-strip" bare />
         </div>
+        <button
+          type="button"
+          onClick={() => { loadPatients(); setRefreshTick((n) => n + 1); }}
+          disabled={loading}
+          title="Refresh"
+          aria-label="Refresh"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-orange-500 text-white transition hover:bg-orange-600 disabled:opacity-50"
+          data-testid="hp-refresh-btn"
+        >
+          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+        </button>
       </div>
 
       <div className="space-y-4" data-testid="hp-work-view">
@@ -268,6 +283,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
               onRowsChange={setConsultRows}
               autoOpenLeadId={autoOpenLead}
               onAutoOpened={() => setAutoOpenLead(null)}
+              reloadToken={refreshTick}
             />
           </div>
 
@@ -279,6 +295,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
               onRowsChange={setReviewRows}
               autoOpenReviewId={autoOpenReview}
               onAutoOpened={() => setAutoOpenReview(null)}
+              reloadToken={refreshTick}
             />
           </div>
 
