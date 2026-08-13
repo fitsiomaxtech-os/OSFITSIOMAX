@@ -15,8 +15,15 @@ export const escapeHtml = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => (
 ));
 
 export const PRINTABLE_STYLES = `
+  /* Its own font link. This is a standalone document opened in its own window, so the
+     app's index.css never reaches it — without this the sheet falls back to Segoe UI and
+     paper stops matching screen. Weights go to 800 because .brand, .amt and .tag all use
+     it; requesting only the app's 500-700 would leave the browser synthesising the bold. */
+  @import url('https://fonts.googleapis.com/css2?family=Lexend:wght@400;500;600;700;800&display=swap');
   *{box-sizing:border-box}
-  body{margin:0;padding:28px;font-family:'Segoe UI',Arial,sans-serif;color:#0f172a;background:#f1f5f9}
+  /* 88%, on the document rather than .wrap, so the page padding scales with the sheet.
+     Segoe UI stays in the stack: a printer with no network still produces a receipt. */
+  body{margin:0;padding:28px;zoom:.88;font-family:'Lexend','Segoe UI',Arial,sans-serif;color:#0f172a;background:#f1f5f9}
   .wrap{max-width:560px;margin:0 auto;border:1px solid #cbd5e1;border-radius:12px;padding:26px;background:#fff}
   .head{display:flex;align-items:center;gap:14px}
   .logo{width:52px;height:52px;object-fit:contain;border-radius:10px;flex:none}
