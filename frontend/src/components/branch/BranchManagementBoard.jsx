@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Plus, Pencil, Trash2, X, Users, MapPin, Phone, Mail, TrendingUp, BarChart3, RefreshCw, Layers, LayoutDashboard, ChevronDown, BadgeIndianRupee, Building2, Stethoscope } from "lucide-react";
+import { Plus, Pencil, Trash2, X, Users, MapPin, Phone, Mail, TrendingUp, RefreshCw, Layers, LayoutDashboard, ChevronDown, BadgeIndianRupee, Building2, Stethoscope } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import {
-  bmList, bmCreateWithExistingAdmin, bmReassignAdmin, bmPerformance, bmPerformanceSummary,
+  bmList, bmCreateWithExistingAdmin, bmReassignAdmin,
   updateBranch, deleteBranch, hrBranchAdminCandidates,
   getVerticals, createVertical, deleteVertical, getDoctors,
 } from "@/lib/api";
@@ -22,7 +22,6 @@ import { AccountantManagementBoard } from "@/components/branch/AccountantManagem
 // and it now opens from MANAGER, the only tab that ever needs it.
 const TABS = [
   { key: "creation", label: "MANAGER", icon: Users },
-  { key: "performance", label: "Performance", icon: TrendingUp },
   { key: "branch_control", label: "Branch Control", icon: LayoutDashboard },
   { key: "ac_overview", label: "Accountant Management", icon: BadgeIndianRupee },
 ];
@@ -58,7 +57,6 @@ export const BranchManagementBoard = ({ actingUser } = {}) => {
         <div ref={setActionSlot} className="ml-auto flex shrink-0 items-center gap-2 pr-1" data-testid="bm-subtab-actions" />
       </div>
       {tab === "creation" && <CreationTab onDrillIn={setDrilledBranchId} actionSlot={actionSlot} />}
-      {tab === "performance" && <PerformanceTab onDrillIn={setDrilledBranchId} />}
       {tab === "branch_control" && <BranchControlTab actingUser={actingUser} />}
       {tab === "ac_overview" && <AccountantManagementBoard />}
     </div>
@@ -448,13 +446,6 @@ const ReassignAdminDialog = ({ branch, candidates, onClose, onSaved }) => {
   );
 };
 
-const KpiCard = ({ label, value, color, testid }) => (
-  <div className="rounded-xl border bg-white p-4 shadow-sm" style={{ borderLeftColor: color, borderLeftWidth: 4 }} data-testid={testid}>
-    <p className="text-xs text-slate-500">{label}</p>
-    <p className="mt-1 text-3xl font-bold" style={{ color }}>{value}</p>
-  </div>
-);
-
 const Stat = ({ label, value, color }) => (
   <div className="rounded border border-slate-100 p-2">
     <p className="text-[10px] uppercase tracking-wide text-slate-400">{label}</p>
@@ -466,116 +457,6 @@ const Field = ({ label, children, className = "" }) => (
   <div className={`space-y-1 ${className}`}>
     <label className="text-xs font-medium text-slate-700">{label}</label>
     {children}
-  </div>
-);
-
-// ---------- Performance ----------
-
-const PerformanceTab = ({ onDrillIn }) => {
-  const [summary, setSummary] = useState([]);
-  const [selected, setSelected] = useState(null);
-  const [detail, setDetail] = useState(null);
-
-  const load = useCallback(() => bmPerformanceSummary().then(setSummary).catch((e) => console.warn("[load failed]", e?.message || e)), []);
-  useEffect(() => { load(); }, [load]);
-
-  const openDetail = async (b) => {
-    setSelected(b);
-    try { const d = await bmPerformance(b.branch_id); setDetail(d); }
-    catch (e) { toast.error("Failed to load detail"); }
-  };
-
-  const totals = summary.reduce((acc, s) => ({
-    leads: acc.leads + s.leads_total,
-    completed: acc.completed + s.leads_completed,
-    revenue: acc.revenue + (s.total_revenue || 0),
-  }), { leads: 0, completed: 0, revenue: 0 });
-  const overallConv = totals.leads ? (totals.completed / totals.leads * 100.0) : 0;
-
-  return (
-    <div className="space-y-4" data-testid="bm-performance-tab">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <KpiCard label="Branches" value={summary.length} color="#0ea5e9" testid="bm-perf-kpi-branches" />
-        <KpiCard label="Total Leads" value={totals.leads} color="#f59e0b" testid="bm-perf-kpi-leads" />
-        <KpiCard label="Avg Conversion %" value={`${overallConv.toFixed(1)}%`} color="#22c55e" testid="bm-perf-kpi-conv" />
-        <KpiCard label="Total Revenue (₹)" value={Number(totals.revenue || 0).toLocaleString("en-IN")} color="#a855f7" testid="bm-perf-kpi-revenue" />
-      </div>
-
-      <Card data-testid="bm-perf-table-card">
-        <CardHeader><CardTitle className="text-base">Branch Performance</CardTitle></CardHeader>
-        <CardContent className="p-0">
-          <div className="overflow-auto">
-            <table className="min-w-full text-sm">
-              <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-                <tr><th className="px-3 py-2">Branch</th><th className="px-3 py-2">Manager</th><th className="px-3 py-2">Leads</th><th className="px-3 py-2">Completed</th><th className="px-3 py-2">Conversion</th><th className="px-3 py-2">Revenue</th><th className="px-3 py-2"></th></tr>
-              </thead>
-              <tbody>
-                {summary.map((s) => (
-                  <tr key={s.branch_id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`bm-perf-row-${s.branch_id}`}>
-                    <td className="px-3 py-2 font-medium">{s.branch_name}</td>
-                    <td className="px-3 py-2 text-slate-600">{s.admin_name || "—"}</td>
-                    <td className="px-3 py-2">{s.leads_total}</td>
-                    <td className="px-3 py-2 text-emerald-600">{s.leads_completed}</td>
-                    <td className="px-3 py-2">
-                      <span className="inline-flex h-5 items-center rounded bg-sky-50 px-2 text-xs font-semibold text-sky-700">{s.conversion_rate}%</span>
-                    </td>
-                    <td className="px-3 py-2 font-semibold text-emerald-600">₹{Number(s.total_revenue || 0).toLocaleString("en-IN")}</td>
-                    <td className="px-3 py-2"><button onClick={() => onDrillIn(s.branch_id)} className="text-xs font-medium text-sky-600 hover:underline" data-testid={`bm-perf-view-${s.branch_id}`}>Open →</button></td>
-                  </tr>
-                ))}
-                {summary.length === 0 && <tr><td colSpan="7" className="px-3 py-6 text-center text-slate-400">No branches yet.</td></tr>}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
-
-      {selected && detail && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" data-testid="bm-perf-detail-dialog">
-          <div className="w-full max-w-2xl rounded-lg bg-white shadow-xl">
-            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
-              <div><h3 className="text-base font-semibold">{detail.branch.branch_name} — Detailed Performance</h3><p className="text-xs text-slate-500">{detail.branch.address}</p></div>
-              <button onClick={() => { setSelected(null); setDetail(null); }} className="text-slate-400 hover:text-slate-600" data-testid="bm-perf-detail-close"><X className="h-4 w-4" /></button>
-            </div>
-            <div className="space-y-4 p-5 max-h-[70vh] overflow-y-auto">
-              <div className="grid gap-2 sm:grid-cols-3">
-                <DetailStat label="Total Leads" value={detail.kpis.leads_total} color="#0ea5e9" />
-                <DetailStat label="Completed" value={detail.kpis.leads_completed} color="#22c55e" />
-                <DetailStat label="Conversion" value={`${detail.kpis.conversion_rate}%`} color="#a855f7" />
-                <DetailStat label="Appointments" value={`${detail.kpis.appointments_completed}/${detail.kpis.appointments_total}`} color="#f59e0b" />
-                <DetailStat label="Consultation Fees" value={`₹${Number(detail.kpis.consultation_fees || 0).toLocaleString("en-IN")}`} color="#0ea5e9" />
-                <DetailStat label="Package Revenue" value={`₹${Number(detail.kpis.package_revenue || 0).toLocaleString("en-IN")}`} color="#22c55e" />
-                <DetailStat label="Total Revenue" value={`₹${Number(detail.kpis.total_revenue || 0).toLocaleString("en-IN")}`} color="#a855f7" />
-                <DetailStat label="Doctors" value={detail.kpis.doctors} color="#64748b" />
-                <DetailStat label="Head Physios" value={detail.kpis.head_physios} color="#64748b" />
-                <DetailStat label="Physios" value={detail.kpis.physios} color="#64748b" />
-              </div>
-              <div className="rounded-lg border border-slate-200 p-3">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Stage Breakdown</p>
-                {detail.stage_breakdown.length === 0 ? <p className="text-xs text-slate-400">No leads.</p> : (
-                  <div className="space-y-1">
-                    {detail.stage_breakdown.map((s) => (
-                      <div key={s.stage} className="flex items-center gap-2 text-xs">
-                        <span className="w-44 text-slate-600">{s.stage}</span>
-                        <div className="h-2 flex-1 overflow-hidden rounded bg-slate-100"><div className="h-full bg-sky-500" style={{ width: `${(s.count / detail.kpis.leads_total * 100) || 0}%` }} /></div>
-                        <span className="w-8 text-right font-semibold">{s.count}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
-
-const DetailStat = ({ label, value, color }) => (
-  <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-    <p className="text-[10px] uppercase tracking-wide text-slate-500">{label}</p>
-    <p className="mt-1 text-lg font-bold" style={{ color }}>{value}</p>
   </div>
 );
 
