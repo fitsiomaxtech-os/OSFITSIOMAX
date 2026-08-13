@@ -4752,7 +4752,14 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
           that dialog, and the receipt has to outlive it. */}
       {receipt && (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-3" data-testid="cons-receipt-modal">
-          <div className="flex max-h-[94vh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+          {/* 88%, this dialog only. zoom rather than transform: scale — zoom shrinks the
+              layout box itself, so the flex centring above and the max-h below still work
+              on the size actually drawn. scale would leave the box at full size, centring
+              the card off its own bounds and reserving space nothing occupies. */}
+          <div
+            className="flex max-h-[94vh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+            style={{ zoom: 0.88 }}
+          >
             {/* items-center, not items-start: the title block is shorter than the logo, so
                 aligning to the top left a band of empty green under the transaction line.
                 Padding and logo come down with it. */}
