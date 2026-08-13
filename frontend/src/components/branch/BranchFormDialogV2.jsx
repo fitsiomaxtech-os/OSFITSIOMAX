@@ -3,8 +3,16 @@ import { X, MapPin, Clock, BarChart3, Stethoscope } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
-import { bmCreateWithExistingAdmin, updateBranch, hrBranchAdminCandidates, bmPerformance, bmHeadPhysioCandidates, bmAssignHeadPhysio } from "@/lib/api";
+import { bmCreateWithExistingAdmin, updateBranch, hrBranchAdminCandidates, bmPerformance, bmHeadPhysioCandidates, bmAssignHeadPhysio, getVerticals } from "@/lib/api";
 import { MilkDateInput, MilkTimeInput } from "@/components/ui/milk-calendar";
+
+// "offline_physiotherapy" -> "Offline Physiotherapy". The stored name stays snake_case,
+// because it is matched against elsewhere; only the label is prettied.
+const prettyVertical = (v) => String(v || "")
+  .split("_")
+  .filter(Boolean)
+  .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+  .join(" ");
 
 const TABS = [
   { key: "details", label: "Branch Details", icon: MapPin },
@@ -49,6 +57,14 @@ export const BranchFormDialogV2 = ({ branch, onClose, onSaved }) => {
   const [hpCandidates, setHpCandidates] = useState([]);
   const [hpPick, setHpPick] = useState("");
   const [hpSaving, setHpSaving] = useState(false);
+  /**
+   * Service types come from the list Service Type manages, not a literal.
+   *
+   * This select hardcoded three options, so a type added on the Service Type tab — or in
+   * the new dropdown on MANAGER — could never be given to a branch, which is the only
+   * reason to add one. The three remain as the fallback for a failed or empty fetch.
+   */
+  const [verticalOptions, setVerticalOptions] = useState([]);
 
   const loadHpCandidates = () => bmHeadPhysioCandidates().then(setHpCandidates).catch((e) => console.warn("[hp candidates]", e?.message || e));
 
@@ -57,6 +73,23 @@ export const BranchFormDialogV2 = ({ branch, onClose, onSaved }) => {
     if (isEdit && branch?.id) bmPerformance(branch.id).then(setFinance).catch((e) => console.warn("[perf]", e?.message || e));
     if (isEdit && branch?.id) loadHpCandidates();
   }, [isEdit, branch?.id]);
+
+  useEffect(() => {
+    let alive = true;
+    getVerticals()
+      .then((rows) => { if (alive) setVerticalOptions((rows || []).map((r) => r.name).filter(Boolean)); })
+      .catch(() => { if (alive) setVerticalOptions([]); });
+    return () => { alive = false; };
+  }, []);
+
+  // Whatever this branch already carries stays in the list even if it has since been
+  // removed, so opening an old branch cannot silently reassign its vertical on save.
+  const verticals = useMemo(() => {
+    const base = verticalOptions.length
+      ? verticalOptions
+      : ["offline_physiotherapy", "online_physiotherapy", "fitness"];
+    return !form.vertical || base.includes(form.vertical) ? base : [form.vertical, ...base];
+  }, [verticalOptions, form.vertical]);
 
   const available = useMemo(() => candidates.filter((c) => !c.assigned_branch || c.id === branch?.admin_user_id), [candidates, branch?.admin_user_id]);
   const assignedHeadPhysios = useMemo(() => hpCandidates.filter((c) => c.branch_id === branch?.id), [hpCandidates, branch?.id]);
@@ -146,9 +179,9 @@ export const BranchFormDialogV2 = ({ branch, onClose, onSaved }) => {
               </Field>
               <Field label="Vertical">
                 <select className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm" value={form.vertical} onChange={(e) => set("vertical", e.target.value)} data-testid="bf2-vertical">
-                  <option value="offline_physiotherapy">Offline Physiotherapy</option>
-                  <option value="online_physiotherapy">Online Physiotherapy</option>
-                  <option value="fitness">Fitness</option>
+                  {verticals.map((v) => (
+                    <option key={v} value={v}>{prettyVertical(v)}</option>
+                  ))}
                 </select>
               </Field>
               <Field label={isEdit ? "Branch Admin" : "Branch Admin *"}>

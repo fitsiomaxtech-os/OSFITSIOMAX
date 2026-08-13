@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Plus, Pencil, Trash2, X, Users, MapPin, Phone, Mail, TrendingUp, BarChart3, RefreshCw, Layers, LayoutDashboard, ChevronDown, BadgeIndianRupee } from "lucide-react";
+import { createPortal } from "react-dom";
+import { Plus, Pencil, Trash2, X, Users, MapPin, Phone, Mail, TrendingUp, BarChart3, RefreshCw, Layers, LayoutDashboard, ChevronDown, BadgeIndianRupee, Building2, Stethoscope } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,6 +10,7 @@ import {
   updateBranch, deleteBranch, hrBranchAdminCandidates,
   getVerticals, createVertical, getDoctors,
 } from "@/lib/api";
+import { StatTile } from "@/components/ui/stat-tile";
 import { BranchDetailPage } from "@/components/branch/BranchDetailPage";
 import { BranchFormDialogV2 } from "@/components/branch/BranchFormDialogV2";
 import { BranchAdminBoard } from "@/components/BranchAdminBoard";
@@ -17,7 +19,7 @@ import { PhysioBoard } from "@/components/PhysioBoard";
 import { AccountantManagementBoard } from "@/components/branch/AccountantManagementBoard";
 
 const TABS = [
-  { key: "creation", label: "Creation & Manager", icon: Users },
+  { key: "creation", label: "MANAGER", icon: Users },
   { key: "service_type", label: "Service Type", icon: Layers },
   { key: "performance", label: "Performance", icon: TrendingUp },
   { key: "branch_control", label: "Branch Control", icon: LayoutDashboard },
@@ -27,6 +29,9 @@ const TABS = [
 export const BranchManagementBoard = ({ actingUser } = {}) => {
   const [tab, setTab] = useState("creation");
   const [drilledBranchId, setDrilledBranchId] = useState(null);
+  // A callback ref, not useRef: the portal has to re-render once the node exists, and a
+  // ref object mutating in place never triggers that.
+  const [actionSlot, setActionSlot] = useState(null);
 
   if (drilledBranchId) {
     return <BranchDetailPage branchId={drilledBranchId} onBack={() => setDrilledBranchId(null)} />;
@@ -35,7 +40,11 @@ export const BranchManagementBoard = ({ actingUser } = {}) => {
   return (
     <div className="space-y-5" data-testid="branch-mgmt-board">
       {/* No heading. The nav tab above already reads Branch Management. */}
-      <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="bm-subtabs">
+      {/* The tab row carries the active tab's actions on its right. They used to sit on
+          the KPI row below, where a page action read as part of the figures. A portal
+          rather than lifted state: Refresh and Add Branch act on CreationTab's own data,
+          and hoisting that here to reach the bar would put a tab's state in the router. */}
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="bm-subtabs">
         {TABS.map((t) => {
           const Icon = t.icon;
           const active = tab === t.key;
@@ -45,8 +54,9 @@ export const BranchManagementBoard = ({ actingUser } = {}) => {
             </button>
           );
         })}
+        <div ref={setActionSlot} className="ml-auto flex shrink-0 items-center gap-2 pr-1" data-testid="bm-subtab-actions" />
       </div>
-      {tab === "creation" && <CreationTab onDrillIn={setDrilledBranchId} />}
+      {tab === "creation" && <CreationTab onDrillIn={setDrilledBranchId} actionSlot={actionSlot} />}
       {tab === "service_type" && <ServiceTypeTab />}
       {tab === "performance" && <PerformanceTab onDrillIn={setDrilledBranchId} />}
       {tab === "branch_control" && <BranchControlTab actingUser={actingUser} />}
@@ -208,12 +218,15 @@ const BranchControlTab = ({ actingUser }) => {
 
 // ---------- Creation & Manager ----------
 
-const CreationTab = ({ onDrillIn }) => {
+const CreationTab = ({ onDrillIn, actionSlot }) => {
   const [branches, setBranches] = useState([]);
   const [candidates, setCandidates] = useState([]);
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
   const [reassigning, setReassigning] = useState(null);
+  // Shut by default. A branch usually goes onto a service type that already exists, so
+  // this is the occasional case and should not cost a panel's height every visit.
+  const [showServiceTypes, setShowServiceTypes] = useState(false);
 
   const load = useCallback(async () => {
     const [bs, cs] = await Promise.all([bmList(), hrBranchAdminCandidates().catch(() => [])]);
@@ -229,17 +242,70 @@ const CreationTab = ({ onDrillIn }) => {
     catch (e) { toast.error(e?.response?.data?.detail || "Delete failed"); }
   };
 
+  // Rendered into the tab bar above. Both are icon-only there: a labelled button in a row
+  // of tabs reads as another tab, and the row has no width to spare for the word anyway.
+  const actions = (
+    <>
+      <Button
+        variant="outline"
+        className="h-9 w-9 shrink-0 p-0"
+        onClick={load}
+        title="Refresh"
+        aria-label="Refresh"
+        data-testid="bm-refresh"
+      >
+        <RefreshCw className="h-4 w-4" />
+      </Button>
+      <Button
+        className="h-9 w-9 shrink-0 bg-sky-600 p-0 hover:bg-sky-700"
+        onClick={() => { setEditing(null); setShowAdd(true); }}
+        title="Add Branch"
+        aria-label="Add Branch"
+        data-testid="bm-add-branch-btn"
+      >
+        <Plus className="h-4 w-4" />
+      </Button>
+    </>
+  );
+
   return (
     <div className="space-y-4" data-testid="bm-creation-tab">
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 flex-1">
-          <KpiCard label="Total Branches" value={branches.length} color="#0ea5e9" testid="bm-kpi-total" />
-          <KpiCard label="Available Managers" value={candidates.filter((c) => !c.assigned_branch).length} color="#22c55e" testid="bm-kpi-available" />
-          <KpiCard label="Active Leads" value={branches.reduce((a, b) => a + (b.leads_open || 0), 0)} color="#f59e0b" testid="bm-kpi-leads" />
-          <KpiCard label="Total Doctors" value={branches.reduce((a, b) => a + (b.doctors_count || 0), 0)} color="#a855f7" testid="bm-kpi-doctors" />
-        </div>
-        <Button variant="outline" onClick={load} data-testid="bm-refresh"><RefreshCw className="h-4 w-4" /></Button>
-        <Button onClick={() => { setEditing(null); setShowAdd(true); }} className="bg-sky-600 hover:bg-sky-700" data-testid="bm-add-branch-btn"><Plus className="h-4 w-4 mr-1" />Add Branch</Button>
+      {actionSlot ? createPortal(actions, actionSlot) : <div className="flex items-center justify-end gap-2">{actions}</div>}
+
+      {/* The shared money-board tile: corner icon over a colour disc, the figure in the
+          card's own colour. It was a bordered box with a coloured left edge, the last card
+          style on the OS still doing it that way. */}
+      {/* Service types, here as well as on their own tab. A branch is created on this tab
+          and has to be given a service type in the form below; if the one it needs does
+          not exist yet, leaving to make it means abandoning a half-filled form. Collapsed,
+          so it costs a row until it is wanted. */}
+      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white" data-testid="bm-service-type-panel">
+        <button
+          type="button"
+          onClick={() => setShowServiceTypes((v) => !v)}
+          className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-slate-50"
+          aria-expanded={showServiceTypes}
+          data-testid="bm-service-type-toggle"
+        >
+          <span className="flex min-w-0 items-center gap-2">
+            <Layers className="h-4 w-4 shrink-0 text-sky-600" />
+            <span className="truncate text-sm font-semibold text-slate-700">Service Type</span>
+            <span className="hidden text-xs text-slate-400 sm:inline">— add one without leaving this tab</span>
+          </span>
+          <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition ${showServiceTypes ? "rotate-180" : ""}`} />
+        </button>
+        {showServiceTypes && (
+          <div className="border-t border-slate-100 p-4">
+            <ServiceTypeManager onAdded={load} />
+          </div>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <StatTile label="Total Branches" value={branches.length} icon={Building2} color="#0ea5e9" testid="bm-kpi-total" />
+        <StatTile label="Available Managers" value={candidates.filter((c) => !c.assigned_branch).length} icon={Users} color="#22c55e" testid="bm-kpi-available" />
+        <StatTile label="Active Leads" value={branches.reduce((a, b) => a + (b.leads_open || 0), 0)} icon={TrendingUp} color="#f59e0b" testid="bm-kpi-leads" />
+        <StatTile label="Total Doctors" value={branches.reduce((a, b) => a + (b.doctors_count || 0), 0)} icon={Stethoscope} color="#a855f7" testid="bm-kpi-doctors" />
       </div>
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -505,7 +571,15 @@ const DetailStat = ({ label, value, color }) => (
 
 // ---------- Service Type (moved from Super Admin Master View "Business Verticals") ----------
 const SERVICE_TYPE_COLORS = ["#2563eb", "#059669", "#d97706", "#7c3aed", "#e11d48", "#0891b2"];
-const ServiceTypeTab = () => {
+/**
+ * Add a service type, and see the ones that exist. Its own component because it is now in
+ * two places — the Service Type tab, and a dropdown on MANAGER where a branch is created
+ * and the type it needs may not exist yet. One definition, so the two cannot drift.
+ *
+ * onAdded lets a host refresh whatever it renders off the same list; the tab has nothing
+ * to refresh and passes nothing.
+ */
+const ServiceTypeManager = ({ onAdded }) => {
   const [items, setItems] = useState([]);
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
@@ -533,6 +607,7 @@ const ServiceTypeTab = () => {
       await createVertical({ name: name.trim(), active: true });
       setName("");
       await fetchItems();
+      onAdded && onAdded();
       toast.success("Service type added");
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed to add service type");
@@ -542,49 +617,55 @@ const ServiceTypeTab = () => {
   };
 
   return (
-    <Card className="border-slate-200 bg-white" data-testid="service-type-card">
-      <CardHeader>
-        <CardTitle className="text-base">Service Type</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <form className="flex gap-2" onSubmit={addItem} data-testid="service-type-form">
-          <Input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="new_service_type"
-            className="h-10 flex-1"
-            data-testid="service-type-input"
-          />
-          <Button type="submit" disabled={loading} className="h-10 shrink-0 bg-sky-600 px-5 hover:bg-sky-700" data-testid="service-type-submit">
-            <Plus className="mr-1 h-4 w-4" />Add
-          </Button>
-        </form>
-        <div className="grid gap-2 sm:grid-cols-2">
-          {items.map((item, idx) => {
-            const color = SERVICE_TYPE_COLORS[idx % SERVICE_TYPE_COLORS.length];
-            return (
-              <div
-                key={item.id}
-                className="flex items-center gap-3 rounded-lg border px-3 py-2.5 text-sm transition hover:shadow-sm"
-                style={{ backgroundColor: `${color}0f`, borderColor: `${color}33` }}
-                data-testid={`service-type-row-${item.id}`}
-              >
-                <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md" style={{ backgroundColor: `${color}24` }}>
-                  <Layers className="h-3.5 w-3.5" style={{ color }} />
-                </span>
-                <span className="truncate font-medium text-slate-700">{item.name}</span>
-              </div>
-            );
-          })}
-          {items.length === 0 && (
-            <p className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-500 sm:col-span-2">
-              No service types yet. Add one above.
-            </p>
-          )}
-        </div>
-      </CardContent>
-    </Card>
+    <div className="space-y-4">
+      <form className="flex gap-2" onSubmit={addItem} data-testid="service-type-form">
+        <Input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="new_service_type"
+          className="h-10 flex-1"
+          data-testid="service-type-input"
+        />
+        <Button type="submit" disabled={loading} className="h-10 shrink-0 bg-sky-600 px-5 hover:bg-sky-700" data-testid="service-type-submit">
+          <Plus className="mr-1 h-4 w-4" />Add
+        </Button>
+      </form>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {items.map((item, idx) => {
+          const color = SERVICE_TYPE_COLORS[idx % SERVICE_TYPE_COLORS.length];
+          return (
+            <div
+              key={item.id}
+              className="flex items-center gap-3 rounded-lg border px-3 py-2.5 text-sm transition hover:shadow-sm"
+              style={{ backgroundColor: `${color}0f`, borderColor: `${color}33` }}
+              data-testid={`service-type-row-${item.id}`}
+            >
+              <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md" style={{ backgroundColor: `${color}24` }}>
+                <Layers className="h-3.5 w-3.5" style={{ color }} />
+              </span>
+              <span className="truncate font-medium text-slate-700">{item.name}</span>
+            </div>
+          );
+        })}
+        {items.length === 0 && (
+          <p className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-500 sm:col-span-2">
+            No service types yet. Add one above.
+          </p>
+        )}
+      </div>
+    </div>
   );
 };
+
+const ServiceTypeTab = () => (
+  <Card className="border-slate-200 bg-white" data-testid="service-type-card">
+    <CardHeader>
+      <CardTitle className="text-base">Service Type</CardTitle>
+    </CardHeader>
+    <CardContent>
+      <ServiceTypeManager />
+    </CardContent>
+  </Card>
+);
 
 export default BranchManagementBoard;
