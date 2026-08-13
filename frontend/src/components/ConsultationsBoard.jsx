@@ -101,6 +101,26 @@ const receiptRows = (r) => [
   [isSchedule(r) ? "Prepared By" : "Collected By", r.collectedBy],
 ].filter(Boolean);
 
+/**
+ * The shorter list the on-screen receipt shows. Deliberately not receiptRows.
+ *
+ * The printed bill and the shared text are records — they carry the branch, the package,
+ * the mode, the original price and who collected it, because that is what a receipt has to
+ * prove months later. The popup is an acknowledgement seen for a few seconds while the
+ * patient is still standing there, and thirteen rows to confirm one payment is a wall to
+ * read past rather than a confirmation.
+ *
+ * Everything dropped here is still on the bill, in the share text and in the download.
+ * Money is not among it: the three figures sit in the block above this, larger.
+ */
+const receiptPopupRows = (r) => [
+  [isSchedule(r) ? "Reference No." : "Transaction ID", r.receiptNo],
+  ["Date and Time", r.dateLabel],
+  ["Patient Name", r.patient],
+  ["Phone Number", r.phone],
+  [isSchedule(r) ? "Scheduled For" : "Paid For", r.paidFor],
+].filter(([, v]) => v);
+
 const receiptHtml = (r) => `<!doctype html><html><head><meta charset="utf-8">
 <title>Receipt ${escapeHtml(r.receiptNo)}</title><style>${PRINTABLE_STYLES}</style></head>
 <body><div class="wrap">
@@ -4738,7 +4758,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 Padding and logo come down with it. */}
             <div className={`flex items-center justify-between gap-3 px-4 py-3 text-white ${isSchedule(receipt) ? "bg-amber-600" : "bg-emerald-600"}`}>
               <div className="flex min-w-0 items-center gap-2.5">
-                <img src={LOGO_URL} alt="FITSIOMAX" className="h-9 w-9 shrink-0 rounded-lg bg-white/90 object-contain p-1" />
+                {/* A status mark rather than the logo: the logo already opens the body
+                    two lines below, and the header's job is to say what happened. */}
+                {isSchedule(receipt)
+                  ? <Calendar className="h-7 w-7 shrink-0" />
+                  : <CheckCircle2 className="h-7 w-7 shrink-0" />}
                 <div className="min-w-0">
                   <p className="text-base font-bold leading-tight">{isSchedule(receipt) ? "Payment Schedule Created" : "Payment Received"}</p>
                   <p className="truncate text-xs text-white/80">{isSchedule(receipt) ? "Reference" : "Txn"} {receipt.receiptNo}</p>
@@ -4791,16 +4815,18 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                   <div className="rounded-xl border-2 border-emerald-200 bg-emerald-50 px-4 py-4" data-testid="cons-receipt-amount-split">
                     <div className="grid grid-cols-3 gap-2 text-center">
                       <div>
-                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Billed</p>
+                        <p className="text-[11px] font-medium text-slate-500">Total Amount</p>
                         <p className="mt-1 text-xl font-extrabold text-slate-700">Rs.{billed}</p>
                       </div>
                       <div>
-                        <p className="text-[10px] font-bold uppercase tracking-widest text-amber-600">Discount</p>
+                        {/* The percentage sits in the heading rather than on a third line —
+                            "32% Discount" is one fact, and splitting it made the middle
+                            column a line taller than the two either side of it. */}
+                        <p className="text-[11px] font-medium text-amber-600">{pct}% Discount</p>
                         <p className="mt-1 text-xl font-extrabold text-amber-700" data-testid="cons-receipt-discount">−Rs.{off}</p>
-                        <p className="text-[10px] font-semibold text-amber-600">{pct}% off</p>
                       </div>
                       <div>
-                        <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-600">Collected</p>
+                        <p className="text-[11px] font-medium text-emerald-600">Paid Amount</p>
                         <p className="mt-1 text-xl font-extrabold text-emerald-700" data-testid="cons-receipt-amount">Rs.{receipt.amount}</p>
                         <p className="text-[10px] font-semibold text-emerald-600">{receipt.modeLabel}</p>
                       </div>
@@ -4810,7 +4836,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               })()}
 
               <dl className="mt-5 space-y-2 text-sm">
-                {receiptRows(receipt).map(([k, v]) => (
+                {receiptPopupRows(receipt).map(([k, v]) => (
                   <div key={k} className="flex items-start justify-between gap-3 border-b border-slate-100 pb-2">
                     <dt className="text-slate-500">{k}</dt>
                     <dd className={`text-right font-semibold ${
@@ -4848,6 +4874,9 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 and a screen reader still announces it.
                 Square and centred rather than four stretched quarters: an icon adrift in
                 the middle of a wide button reads as a mis-render. */}
+            {/* Three actions. Done went with the tick — the header X already closes this,
+                and a fourth button that only dismisses was the one control here that did
+                nothing to the receipt. */}
             <div className="flex items-center justify-center gap-2 border-t border-slate-200 bg-slate-50 px-4 py-3 sm:gap-3 sm:px-6">
               {/* Cash needs a bill in hand, so Print leads. Everything else already left a
                   trail with the bank, so sharing the receipt is the more useful default. */}
@@ -4880,18 +4909,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 data-testid="cons-receipt-download"
               >
                 <Download className="h-4 w-4" />
-              </Button>
-              {/* A tick, not another X — the header already has the one that abandons this
-                  view, and Done is an acknowledgement rather than a second way to close. */}
-              <Button
-                variant="ghost"
-                className="h-10 w-10 shrink-0 p-0 text-slate-500 hover:text-slate-700"
-                onClick={() => setReceipt(null)}
-                title="Done"
-                aria-label="Done"
-                data-testid="cons-receipt-done"
-              >
-                <CheckCircle2 className="h-4 w-4" />
               </Button>
             </div>
           </div>
