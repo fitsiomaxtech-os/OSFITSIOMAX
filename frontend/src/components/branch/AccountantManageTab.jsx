@@ -189,16 +189,6 @@ export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
     [transactions],
   );
 
-  const discountTotals = useMemo(() => {
-    const given = discountedTxns.reduce((s, t) => s + (Number(t.discount) || 0), 0);
-    // Against the listed price, not against what was collected: a Rs.200 discount on a
-    // Rs.1000 fee is 20% off, and dividing by the Rs.800 taken would call it 25%.
-    const listed = discountedTxns.reduce(
-      (s, t) => s + (Number(t.original_amount) || (Number(t.gross) || 0) + (Number(t.discount) || 0)),
-      0,
-    );
-    return { given, listed, pct: listed > 0 ? (given / listed) * 100 : 0 };
-  }, [discountedTxns]);
 
   return (
     <div className="space-y-4" data-testid="accountant-manage-tab">
@@ -287,7 +277,7 @@ export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
       ) : subTab === "store" ? (
         <StorePaymentBoard rows={transactions.filter((t) => t.source === "store")} />
       ) : subTab === "discount" ? (
-        <DiscountAppliedBoard rows={discountedTxns} totals={discountTotals} onView={setViewingLeadId} />
+        <DiscountAppliedBoard rows={discountedTxns} onView={setViewingLeadId} />
       ) : (
         <PaymentSchedulesBoard rows={schedule} onView={setViewingLeadId} onChanged={load} />
       )}
@@ -296,6 +286,21 @@ export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
     </div>
   );
 };
+
+// One card per fee type, mirroring Total Revenue's row. The first four figures this tab
+// carried — total, listed value, average % and count — could not filter anything between
+// them: all four described the same set of rows, so three of the cards would have been the
+// same filter as the first. Splitting by source is the cut that actually partitions the
+// list, and every one of those figures survives on the cards below.
+//
+// No Store card. A counter sale is rung at the shelf price and carries no discount, so it
+// could only ever read Rs.0.
+const DISCOUNT_VIEWS = [
+  { key: "all", label: "Total Discount", icon: Wallet, color: "#d97706" },
+  { key: "consultation", label: "Consultation", icon: Stethoscope, color: "#0284c7" },
+  { key: "session", label: "Session", icon: Activity, color: "#7c3aed" },
+  { key: "diet", label: "Diet", icon: Salad, color: "#059669" },
+];
 
 /**
  * Discount Applied — every collection settled below its listed price.
@@ -309,29 +314,64 @@ export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
  * decision taken at that moment — rolling a client's two visits together would average
  * away the one that was actually negotiated.
  */
-const DiscountAppliedBoard = ({ rows, totals, onView }) => {
+const DiscountAppliedBoard = ({ rows, onView }) => {
+  const [view, setView] = useState("all");
+
   // Falls back to listed = collected + discount when original_amount is missing, which is
   // every collection taken before v3_packages began recording the listed price.
   const listedOf = (tx) => Number(tx.original_amount) || (Number(tx.gross) || 0) + (Number(tx.discount) || 0);
   const pctOf = (tx) => { const l = listedOf(tx); return l > 0 ? (Number(tx.discount) / l) * 100 : 0; };
 
+  // Every card's figures, and the rows behind whichever is selected, from one pass.
+  const slices = useMemo(() => {
+    const acc = {};
+    DISCOUNT_VIEWS.forEach((v) => {
+      const list = v.key === "all" ? rows : rows.filter((t) => t.source === v.key);
+      const given = list.reduce((s, t) => s + (Number(t.discount) || 0), 0);
+      // Against the listed price, not against what was collected: Rs.200 off a Rs.1000 fee
+      // is 20% off, and dividing by the Rs.800 taken would call it 25%.
+      const listed = list.reduce((s, t) => s + (Number(t.original_amount) || (Number(t.gross) || 0) + (Number(t.discount) || 0)), 0);
+      acc[v.key] = { list, given, listed, pct: listed > 0 ? (given / listed) * 100 : 0 };
+    });
+    return acc;
+  }, [rows]);
+
+  const active = slices[view] || slices.all;
+  const visible = active.list;
+
   return (
     <div className="space-y-4" data-testid="accountant-manage-discount">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatTile label="Total Discount" value={fmt(totals.given)} icon={Wallet} color="#d97706" testid="discount-kpi-given" />
-        <StatTile label="Listed Value" value={fmt(totals.listed)} icon={Stethoscope} color="#0284c7" testid="discount-kpi-listed" />
-        <StatTile label="Average Discount" value={`${totals.pct.toFixed(1)}%`} icon={Activity} color="#7c3aed" testid="discount-kpi-pct" />
-        <StatTile label="Discounted Payments" value={rows.length} icon={ShoppingBag} color="#059669" testid="discount-kpi-count" />
+        {DISCOUNT_VIEWS.map((v) => {
+          const s = slices[v.key];
+          return (
+            <StatTile
+              key={v.key}
+              label={v.label}
+              value={fmt(s.given)}
+              // The three figures the single-total card used to spend a tile each on:
+              // how many payments, how deep the cut, and what it was cut from.
+              sub={`${countLabel(s.list.length, "payment")} · ${s.pct.toFixed(1)}% of ${fmt(s.listed)}`}
+              icon={v.icon}
+              color={v.color}
+              active={view === v.key}
+              onClick={() => setView(v.key)}
+              testid={`discount-kpi-${v.key}`}
+            />
+          );
+        })}
       </div>
 
       <Card>
         <CardContent className="p-4">
-          <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Discount Applied</p>
+          <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            {view === "all" ? "Discount Applied" : `${DISCOUNT_VIEWS.find((v) => v.key === view)?.label} Discounts`}
+          </p>
 
           <div className="space-y-2 md:hidden" data-testid="discount-detail-mobile">
-            {rows.length === 0 ? (
+            {visible.length === 0 ? (
               <p className="rounded-lg border border-dashed border-slate-200 px-3 py-8 text-center text-sm text-slate-400">No discounted collections yet.</p>
-            ) : rows.map((tx, i) => (
+            ) : visible.map((tx, i) => (
               <div
                 key={tx.id}
                 role={onView ? "button" : undefined}
@@ -383,9 +423,9 @@ const DiscountAppliedBoard = ({ rows, totals, onView }) => {
                 </tr>
               </thead>
               <tbody>
-                {rows.length === 0 ? (
+                {visible.length === 0 ? (
                   <tr><td colSpan={11} className="px-3 py-8 text-center text-sm text-slate-400">No discounted collections yet.</td></tr>
-                ) : rows.map((tx, i) => (
+                ) : visible.map((tx, i) => (
                   <tr key={tx.id} data-testid={`discount-detail-row-${tx.id}`}>
                     <td className="rounded-l-[5px] border-y border-l border-slate-200 bg-white px-3 py-2 text-center text-slate-400">{i + 1}</td>
                     <td className="border-y border-slate-200 bg-white px-3 py-2 font-medium text-slate-800">{tx.client_name || "Unknown"}</td>
