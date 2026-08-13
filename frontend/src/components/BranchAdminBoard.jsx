@@ -100,7 +100,9 @@ const apptRows = (a, { compact = false } = {}) => [
   ["Phone", a.phone],
   compact ? null : ["Date", dmyLabel(a.date)],
   compact ? null : ["Time", `${to12h(a.time)} – ${endTime12h(a.time, a.duration)}`],
-  ["Duration", `${a.duration} minutes`],
+  // Popup drops it: the sheet is the record and still carries it, but on screen the
+  // start time is what the patient is told and a length beside it invites the question.
+  compact ? null : ["Duration", `${a.duration} minutes`],
   compact ? null : ["Head Physio", a.headPhysio],
   a.branch ? ["Branch", a.branch] : null,
   ["Booked By", a.bookedBy],
@@ -1660,20 +1662,25 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
       {apptConfirm && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-3" data-testid="branch-appt-confirm-modal">
           <div className="flex max-h-[94vh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-            <div className="flex items-start justify-between gap-3 bg-teal-600 px-6 py-4 text-white">
-              <div className="flex min-w-0 items-center gap-3">
-                <img src={LOGO_URL} alt="FITSIOMAX" className="h-11 w-11 shrink-0 rounded-lg bg-white/90 object-contain p-1" />
+            {/* The receipt popup's header. items-center so the two-line title does not
+                leave a band of empty teal beneath it, a status mark rather than the logo
+                (which already opens the body), and a plain close — the orange-bordered X
+                read as a warning on a dialog that only confirms. */}
+            <div className="flex shrink-0 items-center justify-between gap-3 bg-teal-600 px-4 py-3 text-white">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <CheckCircle2 className="h-7 w-7 shrink-0" />
                 <div className="min-w-0">
-                  <p className="text-lg font-bold">Appointment Confirmed</p>
+                  <p className="text-base font-bold leading-tight">Appointment Confirmed</p>
                   <p className="truncate text-xs text-white/80">Ref {apptConfirm.refNo}</p>
                 </div>
               </div>
               <button
                 onClick={() => { const s = apptConfirm.finalStage; setApptConfirm(null); onMoved && onMoved(s); }}
-                className="shrink-0 rounded-lg border-2 border-orange-200 bg-orange-100 p-2 text-orange-600 hover:bg-orange-200"
+                className="shrink-0 rounded-full p-1.5 text-white/80 hover:bg-white/20"
+                aria-label="Close"
                 data-testid="branch-appt-confirm-close"
               >
-                <X className="h-4 w-4" />
+                <X className="h-5 w-5" />
               </button>
             </div>
 
@@ -1681,9 +1688,10 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
               <div className="rounded-xl border-2 border-teal-200 bg-teal-50 px-4 py-5 text-center">
                 <p className="text-xs font-bold uppercase tracking-widest text-teal-600">Your Appointment</p>
                 <p className="mt-1 text-2xl font-extrabold text-teal-700">{weekdayLabel(apptConfirm.date)}</p>
-                <p className="text-lg font-bold text-teal-700">
-                  {to12h(apptConfirm.time)} – {endTime12h(apptConfirm.time, apptConfirm.duration)}
-                </p>
+                {/* Start only. A consultation runs as long as it needs to, so printing an
+                    end time promised something the branch cannot hold to — the same reason
+                    the treatment slot summary shows one time. */}
+                <p className="text-lg font-bold text-teal-700">{to12h(apptConfirm.time)}</p>
                 <p className="mt-1 text-sm font-semibold text-teal-600">with {apptConfirm.headPhysio}</p>
               </div>
 
@@ -1710,25 +1718,12 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
               )}
             </div>
 
-            <div className="space-y-2 border-t border-slate-200 bg-slate-50 px-6 py-4">
-              {/* Open leads: the client wants to see the sheet before it's sent anywhere,
-                  and the browser's own Save-as-PDF lives behind that window's print. */}
-              <Button className="w-full bg-teal-600 text-white hover:bg-teal-700" onClick={() => openPrintable(apptHtml(apptConfirm), { print: true })} data-testid="branch-appt-confirm-pdf">
-                <FileText className="mr-1.5 h-4 w-4" /> Open PDF
-              </Button>
-              {/* The one the branch actually reaches for: straight to the patient's own
-                  number with the confirmation typed, card image waiting on the clipboard. */}
-              <Button
-                className="w-full bg-[#25D366] text-white hover:bg-[#1da851]"
-                onClick={async () => setCardCopied(await sendApptOnWhatsApp(apptConfirm))}
-                data-testid="branch-appt-confirm-whatsapp"
-              >
-                <WhatsAppIcon className="mr-1.5 h-4 w-4" /> Send on WhatsApp
-              </Button>
+            <div className="shrink-0 space-y-2 border-t border-slate-200 bg-slate-50 px-4 py-3">
               {/* The paste is the only manual step in the flow and nothing on screen would
-                  otherwise suggest it, so it is spelled out beforehand and then left up
-                  afterwards — the trip to WhatsApp is exactly when it's needed, and a
-                  toast would already be gone by then. */}
+                  otherwise suggest it, so it is spelled out beforehand and left up
+                  afterwards — the trip to WhatsApp is exactly when it is needed, and a
+                  toast would already be gone by then. It stays above the icons: with the
+                  labels gone it is the only thing explaining what the green one does. */}
               {cardCopied ? (
                 <p className="flex items-center justify-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-2 text-center text-[11px] font-semibold leading-snug text-emerald-800" data-testid="branch-appt-confirm-hint">
                   <CheckCircle2 className="h-3.5 w-3.5 flex-none" />
@@ -1740,22 +1735,56 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                   copied too — paste it in to send the picture with it.
                 </p>
               )}
-              {/* The attachment route proper: the share sheet is the only thing that can
-                  carry a file, at the cost of asking who it is going to. */}
-              <Button variant="outline" className="w-full" onClick={() => shareApptCard(apptConfirm)} data-testid="branch-appt-confirm-share-card">
-                <Share2 className="mr-1.5 h-4 w-4" /> Send Card + Message
-              </Button>
-              <Button variant="outline" className="w-full" onClick={() => downloadApptCard(apptConfirm)} data-testid="branch-appt-confirm-download">
-                <Download className="mr-1.5 h-4 w-4" /> Card
-              </Button>
-              <Button
-                variant="ghost"
-                className="w-full text-slate-500"
-                onClick={() => { const s = apptConfirm.finalStage; setApptConfirm(null); onMoved && onMoved(s); }}
-                data-testid="branch-appt-confirm-done"
-              >
-                Done
-              </Button>
+
+              {/* Icons on one row, as the receipt popup does. Every label moves to title
+                  and aria-label rather than being dropped. Done goes with them: the header
+                  X runs the same close-and-move, so it was a second button for one action. */}
+              <div className="flex items-center justify-center gap-2 pt-1 sm:gap-3">
+                {/* Open leads: the client wants to see the sheet before it is sent
+                    anywhere, and Save-as-PDF lives behind that window's print. */}
+                <Button
+                  className="h-10 w-10 shrink-0 bg-teal-600 p-0 text-white hover:bg-teal-700"
+                  onClick={() => openPrintable(apptHtml(apptConfirm), { print: true })}
+                  title="Open PDF"
+                  aria-label="Open PDF"
+                  data-testid="branch-appt-confirm-pdf"
+                >
+                  <FileText className="h-4 w-4" />
+                </Button>
+                {/* The one the branch actually reaches for: straight to the patient's own
+                    number with the confirmation typed, card image on the clipboard. */}
+                <Button
+                  className="h-10 w-10 shrink-0 bg-[#25D366] p-0 text-white hover:bg-[#1da851]"
+                  onClick={async () => setCardCopied(await sendApptOnWhatsApp(apptConfirm))}
+                  title="Send on WhatsApp"
+                  aria-label="Send on WhatsApp"
+                  data-testid="branch-appt-confirm-whatsapp"
+                >
+                  <WhatsAppIcon className="h-4 w-4" />
+                </Button>
+                {/* The attachment route proper: the share sheet is the only thing that can
+                    carry a file, at the cost of asking who it is going to. */}
+                <Button
+                  variant="outline"
+                  className="h-10 w-10 shrink-0 p-0"
+                  onClick={() => shareApptCard(apptConfirm)}
+                  title="Send Card + Message"
+                  aria-label="Send Card + Message"
+                  data-testid="branch-appt-confirm-share-card"
+                >
+                  <Share2 className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  className="h-10 w-10 shrink-0 p-0"
+                  onClick={() => downloadApptCard(apptConfirm)}
+                  title="Download Card"
+                  aria-label="Download Card"
+                  data-testid="branch-appt-confirm-download"
+                >
+                  <Download className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
           </div>
         </div>
