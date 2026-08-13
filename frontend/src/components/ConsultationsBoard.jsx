@@ -167,6 +167,12 @@ const CONSULTATION_PLANS = [
   { key: "treatment", label: "Consultation + Treatment", decision: "consultation_treatment", diet: false, tone: "#1baf7a" },
   { key: "treatment_diet", label: "Consultation + Treatment + Diet", decision: "consultation_treatment", diet: true, tone: "#7c3aed" },
   { key: "diet", label: "Consultation + Diet", decision: "consultation_only", diet: true, tone: "#eb6834" },
+  // Straight to the Head Physio's own Rehab queue: the consultation closes out, no
+  // Treatment Package is picked here, and the patient waits there for one to be
+  // recommended. decision stays consultation_only so the package stays optional — rehab
+  // is a third independent flag for the same reason diet is, not a fifth value of a field
+  // half the codebase already tests against.
+  { key: "rehab", label: "Consultation + Rehab", decision: "consultation_only", diet: false, rehab: true, tone: "#0891b2" },
 ];
 const planOf = (key) => CONSULTATION_PLANS.find((p) => p.key === key) || null;
 
@@ -665,6 +671,9 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
 
   useEffect(() => {
     listStoreItems().then(setStoreItems).catch(() => setStoreItems([]));
+    // Loaded up front, not just when the collect-fee popup opens: the Consultation Visit
+    // panel now quotes the Diet Fee before anyone has opened anything.
+    listStoreItems(undefined, "diet").then((d) => setDietItems(d || [])).catch(() => setDietItems([]));
     stagesList(isConsultant ? "head_consultation" : "consultation").then(setStages).catch(() => setStages([]));
   }, [isConsultant]);
 
@@ -770,7 +779,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
 
     // The package only exists for the two plans that include treatment. Demanding one for
     // "Only Consultation" would make that choice unpickable.
-    let payload = { decision: plan.decision, diet_recommended: plan.diet, mode: decisionDraft.mode };
+    let payload = { decision: plan.decision, diet_recommended: plan.diet, rehab_referred: !!plan.rehab, mode: decisionDraft.mode };
     if (plan.decision === "consultation_treatment") {
       if (!decisionDraft.item_id) { toast.error("Select a Treatment Package"); return; }
       const item = treatmentPackageItems.find((i) => i.id === decisionDraft.item_id);
@@ -783,7 +792,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     setSavingDecision(true);
     try {
       const res = await saveConsultationDecision(selectedLead.id, payload);
-      toast.success("Saved & moved to Branch Admin");
+      toast.success(plan.rehab ? "Saved — patient moved to Rehab" : "Saved & moved to Branch Admin");
       setSelectedLead(null);
       setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === res.lead.id ? res.lead : l) }));
     } catch (err) {
@@ -1568,6 +1577,23 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
 
   // ---- Diet Consultation Fee (Branch Admin) ----
   const dietItemById = (id) => dietItems.find((i) => i.id === id);
+
+  /**
+   * What to quote for the Diet Fee before it has been collected.
+   *
+   * The lead only carries diet_package_price once the fee is actually taken — the package
+   * is chosen at collection. So this falls back to the store, and only when there is
+   * exactly one Diet package priced: with several, any single number would be a guess at
+   * which one this patient is getting, and this panel is what Branch Admin reads to take
+   * money. Ambiguous means "—" and the real figure appears in the collect popup.
+   */
+  const dietFeeDue = useMemo(() => {
+    if (selectedLead?.diet_package_price != null) return Number(selectedLead.diet_package_price);
+    if (dietItems.length !== 1) return null;
+    const mode = selectedLead?.package_mode || selectedLead?.appointment_mode || "offline";
+    const price = mode === "online" ? dietItems[0].price_online : dietItems[0].price_offline;
+    return price != null ? Number(price) : null;
+  }, [selectedLead, dietItems]);
   const dietListPrice = (draft) => {
     const item = dietItemById(draft?.item_id);
     if (!item) return null;
@@ -2301,7 +2327,14 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     disabled={savingDecision || !canSave}
                     data-testid="cons-decision-save"
                   >
-                    {savingDecision ? "Saving..." : "Choose and Confirm & Select the Package"}
+                    {savingDecision
+                      ? "Saving..."
+                      // The label names what the button will actually do. Rehab picks no
+                      // package, so promising one was the wrong instruction on the only
+                      // control that finishes the consultation.
+                      : plan?.rehab ? "Confirm & Move to Rehab"
+                      : needsPackage ? "Choose and Confirm & Select the Package"
+                      : "Confirm & Save"}
                   </Button>
                 </div>
               );
@@ -2424,6 +2457,16 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           <div className="flex items-center justify-between">
                             <span className="text-xs text-slate-500">Treatment Fee</span>
                             <span className="font-semibold text-slate-800">{selectedLead.session_package_price != null ? `Rs.${selectedLead.session_package_price}` : "—"}</span>
+                          </div>
+                        )}
+                        {/* Only for a patient actually taking a diet plan — gated the same
+                            way Treatment Fee is. Diet is optional, and quoting it to
+                            everyone would overstate what this patient owes on the one
+                            panel Branch Admin reads before taking money. */}
+                        {selectedLead.diet_recommended && (
+                          <div className="flex items-center justify-between" data-testid="cons-collect-diet-fee-row">
+                            <span className="text-xs text-slate-500">Diet Fee</span>
+                            <span className="font-semibold text-slate-800">{dietFeeDue != null ? `Rs.${dietFeeDue}` : "—"}</span>
                           </div>
                         )}
                         {alreadyPaid && (
@@ -4706,16 +4749,56 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 </div>
               </div>
 
-              <div className={`rounded-xl border-2 px-4 py-5 text-center ${isSchedule(receipt) ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-50"}`}>
-                <p className={`text-xs font-bold uppercase tracking-widest ${isSchedule(receipt) ? "text-amber-600" : "text-emerald-600"}`}>
-                  {isSchedule(receipt) ? "Total Payable" : "Amount Paid"}
-                </p>
-                <p className={`mt-1 text-4xl font-extrabold ${isSchedule(receipt) ? "text-amber-700" : "text-emerald-700"}`} data-testid="cons-receipt-amount">Rs.{receipt.amount}</p>
-                <p className={`mt-1 text-sm font-semibold ${isSchedule(receipt) ? "text-amber-600" : "text-emerald-600"}`}>{receipt.modeLabel}</p>
-                {isSchedule(receipt) && (
-                  <p className="mt-2 text-xs font-medium text-amber-700">Nothing collected yet — each installment gets its own receipt.</p>
-                )}
-              </div>
+              {/* With a discount, the hero shows what it was worth as well as what came
+                  in — billed, off, collected. Rs.780 on its own is unarguable but says
+                  nothing about the Rs.1,200 it started from, and that is the number a
+                  patient queries. Both figures were already on the receipt, several rows
+                  further down, which is not where anyone looks first.
+                  No discount, or a schedule where nothing has been collected: the single
+                  figure stays: a "discount Rs.0" column is noise on most receipts. */}
+              {(() => {
+                const billed = receipt.originalAmount;
+                const off = Number(receipt.discount) || 0;
+                const showSplit = !isSchedule(receipt) && off > 0 && billed > 0;
+                if (!showSplit) {
+                  return (
+                    <div className={`rounded-xl border-2 px-4 py-5 text-center ${isSchedule(receipt) ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-50"}`}>
+                      <p className={`text-xs font-bold uppercase tracking-widest ${isSchedule(receipt) ? "text-amber-600" : "text-emerald-600"}`}>
+                        {isSchedule(receipt) ? "Total Payable" : "Amount Paid"}
+                      </p>
+                      <p className={`mt-1 text-4xl font-extrabold ${isSchedule(receipt) ? "text-amber-700" : "text-emerald-700"}`} data-testid="cons-receipt-amount">Rs.{receipt.amount}</p>
+                      <p className={`mt-1 text-sm font-semibold ${isSchedule(receipt) ? "text-amber-600" : "text-emerald-600"}`}>{receipt.modeLabel}</p>
+                      {isSchedule(receipt) && (
+                        <p className="mt-2 text-xs font-medium text-amber-700">Nothing collected yet — each installment gets its own receipt.</p>
+                      )}
+                    </div>
+                  );
+                }
+                // round2, the same helper the collect form's own discount readout uses, so
+                // the percentage on the receipt cannot disagree with the one shown while
+                // the amount was being entered. 35% off, not 35.00%; 12.5% stays 12.5%.
+                const pct = round2((off / billed) * 100);
+                return (
+                  <div className="rounded-xl border-2 border-emerald-200 bg-emerald-50 px-4 py-4" data-testid="cons-receipt-amount-split">
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Billed</p>
+                        <p className="mt-1 text-xl font-extrabold text-slate-700">Rs.{billed}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-amber-600">Discount</p>
+                        <p className="mt-1 text-xl font-extrabold text-amber-700" data-testid="cons-receipt-discount">−Rs.{off}</p>
+                        <p className="text-[10px] font-semibold text-amber-600">{pct}% off</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-600">Collected</p>
+                        <p className="mt-1 text-xl font-extrabold text-emerald-700" data-testid="cons-receipt-amount">Rs.{receipt.amount}</p>
+                        <p className="text-[10px] font-semibold text-emerald-600">{receipt.modeLabel}</p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
 
               <dl className="mt-5 space-y-2 text-sm">
                 {receiptRows(receipt).map(([k, v]) => (

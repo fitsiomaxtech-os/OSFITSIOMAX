@@ -228,6 +228,7 @@ class V3LeadOut(BaseModel):
     # Whether the Head Physio also referred this patient to a Nutrition Coach. Orthogonal
     # to consultation_decision — see V3ConsultationDecisionInput.
     diet_recommended: Optional[bool] = False
+    rehab_referred: Optional[bool] = False
     # Who is actually delivering that diet plan, set by branch/assign-diet. This model
     # ignores extras, so without these three the Consultations board could never tell an
     # already-assigned patient from a new one and its Reassign control would never appear.
@@ -447,6 +448,11 @@ class V3ConsultationDecisionInput(BaseModel):
     # treatment"` check in the codebase would silently stop matching half the cases it
     # used to.
     diet_recommended: bool = False
+    # Sends the patient straight to the Head Physio's Rehab queue instead of picking a
+    # Treatment Package here. Its own flag for the same reason diet is: it is a routing
+    # choice, not another value of `decision`, and folding it in would break every
+    # existing `== "consultation_only"` check.
+    rehab_referred: bool = False
     # Required only when decision == "consultation_treatment" — the Treatment/Session
     # package (FITSIO STORE > Sessions) the Head Physio is choosing on the patient's behalf.
     item_id: Optional[str] = None

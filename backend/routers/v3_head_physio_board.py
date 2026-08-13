@@ -340,6 +340,11 @@ async def hp_consultation_decision(
     updates = {
         "consultation_decision": payload.decision,
         "diet_recommended": bool(payload.diet_recommended),
+        # Recorded rather than inferred. The Rehab card is derived from "has an appointment
+        # with me and no package recommendation yet", which is true of a Consultation Only
+        # patient too — without this flag there is no way to tell a patient deliberately
+        # sent to rehab from one who simply has not been given a package.
+        "rehab_referred": bool(payload.rehab_referred),
         "head_consultation_stage": await _head_closing_stage(),
         "consultation_stage": await _branch_consultation_visit_stage(),
         "updated_at": now_iso(),
@@ -347,6 +352,8 @@ async def hp_consultation_decision(
     # Named the way the Head Physio picked it, so the activity log reads back as the
     # choice that was made rather than as two flags to recombine.
     chosen = "Consultation" if payload.decision == "consultation_only" else "Consultation + Treatment"
+    if payload.rehab_referred:
+        chosen += " + Rehab"
     if payload.diet_recommended:
         chosen += " + Diet"
     detail = f"Consultation decision: {chosen}"
