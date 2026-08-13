@@ -18,9 +18,10 @@ import { HeadPhysioBoard } from "@/components/HeadPhysioBoard";
 import { PhysioBoard } from "@/components/PhysioBoard";
 import { AccountantManagementBoard } from "@/components/branch/AccountantManagementBoard";
 
+// No Service Type tab. It is a setting, not a board — it was a tab holding one text field,
+// and it now opens from MANAGER, the only tab that ever needs it.
 const TABS = [
   { key: "creation", label: "MANAGER", icon: Users },
-  { key: "service_type", label: "Service Type", icon: Layers },
   { key: "performance", label: "Performance", icon: TrendingUp },
   { key: "branch_control", label: "Branch Control", icon: LayoutDashboard },
   { key: "ac_overview", label: "Accountant Management", icon: BadgeIndianRupee },
@@ -57,7 +58,6 @@ export const BranchManagementBoard = ({ actingUser } = {}) => {
         <div ref={setActionSlot} className="ml-auto flex shrink-0 items-center gap-2 pr-1" data-testid="bm-subtab-actions" />
       </div>
       {tab === "creation" && <CreationTab onDrillIn={setDrilledBranchId} actionSlot={actionSlot} />}
-      {tab === "service_type" && <ServiceTypeTab />}
       {tab === "performance" && <PerformanceTab onDrillIn={setDrilledBranchId} />}
       {tab === "branch_control" && <BranchControlTab actingUser={actingUser} />}
       {tab === "ac_overview" && <AccountantManagementBoard />}
@@ -224,14 +224,19 @@ const CreationTab = ({ onDrillIn, actionSlot }) => {
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
   const [reassigning, setReassigning] = useState(null);
-  // Shut by default. A branch usually goes onto a service type that already exists, so
-  // this is the occasional case and should not cost a panel's height every visit.
   const [showServiceTypes, setShowServiceTypes] = useState(false);
+  const [physioCount, setPhysioCount] = useState(0);
 
   const load = useCallback(async () => {
-    const [bs, cs] = await Promise.all([bmList(), hrBranchAdminCandidates().catch(() => [])]);
+    const [bs, cs, ds] = await Promise.all([
+      bmList(),
+      hrBranchAdminCandidates().catch(() => []),
+      // Unscoped, so as super_admin this is every doctor in the org.
+      getDoctors().catch(() => []),
+    ]);
     setBranches(bs);
     setCandidates(cs);
+    setPhysioCount((ds || []).filter((d) => d.profile_type === "physio").length);
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -242,8 +247,10 @@ const CreationTab = ({ onDrillIn, actionSlot }) => {
     catch (e) { toast.error(e?.response?.data?.detail || "Delete failed"); }
   };
 
-  // Rendered into the tab bar above. Both are icon-only there: a labelled button in a row
-  // of tabs reads as another tab, and the row has no width to spare for the word anyway.
+  // Rendered into the tab bar above. All three are icon-only there: a labelled button in a
+  // row of tabs reads as another tab, and the row has no width to spare for the word anyway.
+  // Weight runs left to right — outlined Refresh, grey Service Type, filled Add Branch — so
+  // the one destructive-ish action that creates a record stays the loudest of the three.
   const actions = (
     <>
       <Button
@@ -255,6 +262,15 @@ const CreationTab = ({ onDrillIn, actionSlot }) => {
         data-testid="bm-refresh"
       >
         <RefreshCw className="h-4 w-4" />
+      </Button>
+      <Button
+        className="h-9 w-9 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
+        onClick={() => setShowServiceTypes(true)}
+        title="Service Type"
+        aria-label="Service Type"
+        data-testid="bm-service-type-btn"
+      >
+        <Layers className="h-4 w-4" />
       </Button>
       <Button
         className="h-9 w-9 shrink-0 bg-sky-600 p-0 hover:bg-sky-700"
@@ -275,35 +291,9 @@ const CreationTab = ({ onDrillIn, actionSlot }) => {
       {/* The shared money-board tile: corner icon over a colour disc, the figure in the
           card's own colour. It was a bordered box with a coloured left edge, the last card
           style on the OS still doing it that way. */}
-      {/* Service types, here as well as on their own tab. A branch is created on this tab
-          and has to be given a service type in the form below; if the one it needs does
-          not exist yet, leaving to make it means abandoning a half-filled form. Collapsed,
-          so it costs a row until it is wanted. */}
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white" data-testid="bm-service-type-panel">
-        <button
-          type="button"
-          onClick={() => setShowServiceTypes((v) => !v)}
-          className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-slate-50"
-          aria-expanded={showServiceTypes}
-          data-testid="bm-service-type-toggle"
-        >
-          <span className="flex min-w-0 items-center gap-2">
-            <Layers className="h-4 w-4 shrink-0 text-sky-600" />
-            <span className="truncate text-sm font-semibold text-slate-700">Service Type</span>
-            <span className="hidden text-xs text-slate-400 sm:inline">— add one without leaving this tab</span>
-          </span>
-          <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition ${showServiceTypes ? "rotate-180" : ""}`} />
-        </button>
-        {showServiceTypes && (
-          <div className="border-t border-slate-100 p-4">
-            <ServiceTypeManager onAdded={load} />
-          </div>
-        )}
-      </div>
-
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <StatTile label="Total Branches" value={branches.length} icon={Building2} color="#0ea5e9" testid="bm-kpi-total" />
-        <StatTile label="Available Managers" value={candidates.filter((c) => !c.assigned_branch).length} icon={Users} color="#22c55e" testid="bm-kpi-available" />
+        <StatTile label="Total Physio" value={physioCount} icon={Users} color="#22c55e" testid="bm-kpi-available" />
         <StatTile label="Active Leads" value={branches.reduce((a, b) => a + (b.leads_open || 0), 0)} icon={TrendingUp} color="#f59e0b" testid="bm-kpi-leads" />
         <StatTile label="Total Doctors" value={branches.reduce((a, b) => a + (b.doctors_count || 0), 0)} icon={Stethoscope} color="#a855f7" testid="bm-kpi-doctors" />
       </div>
@@ -344,6 +334,24 @@ const CreationTab = ({ onDrillIn, actionSlot }) => {
           </Card>
         ))}
       </div>
+
+      {/* A branch is created on this tab and has to be given a service type in that form;
+          if the one it needs does not exist yet, leaving to make it meant abandoning a
+          half-filled form. A dialog rather than a panel: it is opened rarely, and it
+          returns you to exactly the tab you were on. */}
+      {showServiceTypes && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" data-testid="bm-service-type-dialog">
+          <div className="w-full max-w-lg rounded-lg bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
+              <h3 className="inline-flex items-center gap-2 text-base font-semibold"><Layers className="h-4 w-4 text-sky-600" />Service Type</h3>
+              <button onClick={() => setShowServiceTypes(false)} className="text-slate-400 hover:text-slate-600" data-testid="bm-service-type-close"><X className="h-4 w-4" /></button>
+            </div>
+            <div className="max-h-[70vh] overflow-y-auto p-5">
+              <ServiceTypeManager onAdded={load} />
+            </div>
+          </div>
+        </div>
+      )}
 
       {showAdd && <BranchFormDialogV2 branch={editing} onClose={() => { setShowAdd(false); setEditing(null); }} onSaved={() => { setShowAdd(false); setEditing(null); load(); }} />}
 
@@ -572,12 +580,10 @@ const DetailStat = ({ label, value, color }) => (
 // ---------- Service Type (moved from Super Admin Master View "Business Verticals") ----------
 const SERVICE_TYPE_COLORS = ["#2563eb", "#059669", "#d97706", "#7c3aed", "#e11d48", "#0891b2"];
 /**
- * Add a service type, and see the ones that exist. Its own component because it is now in
- * two places — the Service Type tab, and a dropdown on MANAGER where a branch is created
- * and the type it needs may not exist yet. One definition, so the two cannot drift.
+ * Add a service type, and see the ones that exist. Opened from MANAGER's toolbar, where a
+ * branch is created and the type it needs may not exist yet.
  *
- * onAdded lets a host refresh whatever it renders off the same list; the tab has nothing
- * to refresh and passes nothing.
+ * onAdded lets the host refresh whatever it renders off the same list.
  */
 const ServiceTypeManager = ({ onAdded }) => {
   const [items, setItems] = useState([]);
@@ -656,16 +662,5 @@ const ServiceTypeManager = ({ onAdded }) => {
     </div>
   );
 };
-
-const ServiceTypeTab = () => (
-  <Card className="border-slate-200 bg-white" data-testid="service-type-card">
-    <CardHeader>
-      <CardTitle className="text-base">Service Type</CardTitle>
-    </CardHeader>
-    <CardContent>
-      <ServiceTypeManager />
-    </CardContent>
-  </Card>
-);
 
 export default BranchManagementBoard;
