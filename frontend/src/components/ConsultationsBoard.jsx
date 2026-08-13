@@ -4733,11 +4733,14 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       {receipt && (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-3" data-testid="cons-receipt-modal">
           <div className="flex max-h-[94vh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-            <div className={`flex items-start justify-between gap-3 px-6 py-4 text-white ${isSchedule(receipt) ? "bg-amber-600" : "bg-emerald-600"}`}>
-              <div className="flex min-w-0 items-center gap-3">
-                <img src={LOGO_URL} alt="FITSIOMAX" className="h-11 w-11 shrink-0 rounded-lg bg-white/90 object-contain p-1" />
+            {/* items-center, not items-start: the title block is shorter than the logo, so
+                aligning to the top left a band of empty green under the transaction line.
+                Padding and logo come down with it. */}
+            <div className={`flex items-center justify-between gap-3 px-4 py-3 text-white ${isSchedule(receipt) ? "bg-amber-600" : "bg-emerald-600"}`}>
+              <div className="flex min-w-0 items-center gap-2.5">
+                <img src={LOGO_URL} alt="FITSIOMAX" className="h-9 w-9 shrink-0 rounded-lg bg-white/90 object-contain p-1" />
                 <div className="min-w-0">
-                  <p className="text-lg font-bold">{isSchedule(receipt) ? "Payment Schedule Created" : "Payment Received"}</p>
+                  <p className="text-base font-bold leading-tight">{isSchedule(receipt) ? "Payment Schedule Created" : "Payment Received"}</p>
                   <p className="truncate text-xs text-white/80">{isSchedule(receipt) ? "Reference" : "Txn"} {receipt.receiptNo}</p>
                 </div>
               </div>
@@ -4839,32 +4842,50 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               )}
             </div>
 
-            <div className="space-y-2 border-t border-slate-200 bg-slate-50 px-6 py-4">
+            {/* Four across, never wrapping. It was two rows plus two full-width buttons,
+                which made a footer taller than the figures it sat under.
+                Equal quarters, so nothing hangs. The labels drop the noun — the receipt
+                is the only thing on screen to print, share or download — and the icons
+                hide below sm to buy back the ~20px a quarter of a 320px phone does not
+                have. truncate is the floor rather than a wrap. */}
+            <div className="grid grid-cols-4 gap-1.5 border-t border-slate-200 bg-slate-50 px-4 py-3 sm:gap-2 sm:px-6">
               {/* Cash needs a bill in hand, so Print leads. Everything else already left a
                   trail with the bank, so sharing the receipt is the more useful default. */}
-              <div className="grid grid-cols-2 gap-2">
-                <Button
-                  className={receipt.isCash ? "bg-emerald-600 text-white hover:bg-emerald-700" : ""}
-                  variant={receipt.isCash ? undefined : "outline"}
-                  onClick={() => printReceipt(receipt)}
-                  data-testid="cons-receipt-print"
-                >
-                  <Printer className="mr-1.5 h-4 w-4" /> {isSchedule(receipt) ? "Print Schedule" : "Print Bill"}
-                </Button>
-                <Button
-                  className={receipt.isCash ? "" : "bg-emerald-600 text-white hover:bg-emerald-700"}
-                  variant={receipt.isCash ? "outline" : undefined}
-                  onClick={() => shareReceipt(receipt)}
-                  data-testid="cons-receipt-share"
-                >
-                  <Share2 className="mr-1.5 h-4 w-4" /> Share
-                </Button>
-              </div>
-              <Button variant="outline" className="w-full" onClick={() => downloadReceipt(receipt)} data-testid="cons-receipt-download">
-                <Download className="mr-1.5 h-4 w-4" /> {isSchedule(receipt) ? "Download Schedule" : "Download Receipt"}
+              <Button
+                size="sm"
+                className={`min-w-0 ${receipt.isCash ? "bg-emerald-600 text-white hover:bg-emerald-700" : ""}`}
+                variant={receipt.isCash ? undefined : "outline"}
+                onClick={() => printReceipt(receipt)}
+                title={isSchedule(receipt) ? "Print Schedule" : "Print Bill"}
+                data-testid="cons-receipt-print"
+              >
+                <Printer className="hidden h-4 w-4 shrink-0 sm:mr-1.5 sm:inline" />
+                <span className="truncate">Print</span>
               </Button>
-              <Button variant="ghost" className="w-full text-slate-500" onClick={() => setReceipt(null)} data-testid="cons-receipt-done">
-                Done
+              <Button
+                size="sm"
+                className={`min-w-0 ${receipt.isCash ? "" : "bg-emerald-600 text-white hover:bg-emerald-700"}`}
+                variant={receipt.isCash ? "outline" : undefined}
+                onClick={() => shareReceipt(receipt)}
+                title="Share"
+                data-testid="cons-receipt-share"
+              >
+                <Share2 className="hidden h-4 w-4 shrink-0 sm:mr-1.5 sm:inline" />
+                <span className="truncate">Share</span>
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="min-w-0"
+                onClick={() => downloadReceipt(receipt)}
+                title={isSchedule(receipt) ? "Download Schedule" : "Download Receipt"}
+                data-testid="cons-receipt-download"
+              >
+                <Download className="hidden h-4 w-4 shrink-0 sm:mr-1.5 sm:inline" />
+                <span className="truncate">Download</span>
+              </Button>
+              <Button size="sm" variant="ghost" className="min-w-0 text-slate-500" onClick={() => setReceipt(null)} data-testid="cons-receipt-done">
+                <span className="truncate">Done</span>
               </Button>
             </div>
           </div>
