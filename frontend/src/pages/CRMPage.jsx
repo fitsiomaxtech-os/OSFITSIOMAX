@@ -112,9 +112,9 @@ const isHumanResourceRole = (role) => {
   return r.split("_").some((t) => ["hr", "recruiter", "recruitment", "talent"].includes(t));
 };
 
-// Same 9 destinations as the desktop tab strip below. On a phone, the 5 most-used
-// get a direct bottom-nav slot each; the rest sit behind a "More" popover — both
-// derived from this one array so the two surfaces can't drift out of sync.
+// Same destinations as the desktop tab strip below. On a phone, three get a direct
+// bottom-nav slot each; the rest sit behind a "More" sheet — both derived from this one
+// array so the two surfaces can't drift out of sync.
 // Dashboard is the default landing view. Master View was retired from here — the
 // Dashboard now carries the same headline counts, per branch and per date range.
 const SUPER_ADMIN_TABS = [
@@ -128,9 +128,12 @@ const SUPER_ADMIN_TABS = [
   { key: "packages", label: "FITSIO STORE", icon: Store },
 ];
 
-const SUPER_ADMIN_BOTTOM_KEYS = ["dashboard", "marketing", "hr", "presales", "branch_wise"];
+const SUPER_ADMIN_BOTTOM_KEYS = ["dashboard", "hr", "branches"];
 const SUPER_ADMIN_BOTTOM_TABS = SUPER_ADMIN_TABS.filter((t) => SUPER_ADMIN_BOTTOM_KEYS.includes(t.key));
-const SUPER_ADMIN_MORE_TABS = SUPER_ADMIN_TABS.filter((t) => !SUPER_ADMIN_BOTTOM_KEYS.includes(t.key) && t.key !== "stages");
+// Everything not on the bar, with nothing held back. CI/CD ROOTS used to be excluded here
+// because Pre-Sales reaches it through its own Manage Stages button — but it is a peer tab
+// on the desktop strip, and leaving it out was the one destination a phone could not reach.
+const SUPER_ADMIN_MORE_TABS = SUPER_ADMIN_TABS.filter((t) => !SUPER_ADMIN_BOTTOM_KEYS.includes(t.key));
 
 
 const verticalDefaults = [
@@ -802,11 +805,17 @@ export const CRMPage = ({ auth, onLogout }) => {
           </div>
         )}
 
-        {/* Phone equivalent of the tab strip above: a real bottom nav with the 5
-            most-used destinations as direct icons, plus a "More" slot for the rest —
-            same pattern as the Physio/Branch Admin/Pre-Sales bottom navs. */}
+        {/* Phone equivalent of the tab strip above: three direct destinations plus a
+            "More" sheet for the rest — same pattern as the Physio/Branch Admin/Pre-Sales
+            bottom navs.
+
+            Icons only. Four slots across a phone leave room for a label, but the labels
+            that fit are not the real ones — "Branch Management" arrives as two wrapped
+            lines or an ellipsis, which names the destination no better than its icon does.
+            Each carries its full name on aria-label and title, so the bar is still
+            readable to a screen reader and on a long press. */}
         {showSuperAdminBoard && (
-          <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white md:hidden" data-testid="super-admin-bottom-nav">
+          <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white pb-[env(safe-area-inset-bottom)] md:hidden" data-testid="super-admin-bottom-nav">
             <div className="flex items-stretch justify-around">
               {SUPER_ADMIN_BOTTOM_TABS.map((t) => {
                 const Icon = t.icon;
@@ -816,24 +825,28 @@ export const CRMPage = ({ auth, onLogout }) => {
                     key={t.key}
                     type="button"
                     onClick={() => { setSuperAdminView(t.key); setShowSuperAdminMenu(false); }}
-                    className={`flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-medium leading-tight ${active ? "text-sky-600" : "text-slate-400"}`}
+                    aria-label={t.label}
+                    aria-current={active ? "page" : undefined}
+                    title={t.label}
+                    className={`flex flex-1 items-center justify-center py-3.5 ${active ? "text-sky-600" : "text-slate-400"}`}
                     data-testid={`super-admin-nav-${t.key === "branch_wise" ? "branch-wise" : t.key}`}
                   >
-                    <Icon className="h-5 w-5" />
-                    {t.label}
+                    <Icon className="h-6 w-6" />
                   </button>
                 );
               })}
               <button
                 type="button"
                 onClick={() => setShowSuperAdminMenu((v) => !v)}
-                className={`flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-medium leading-tight ${
+                aria-label="More"
+                aria-expanded={showSuperAdminMenu}
+                title="More"
+                className={`flex flex-1 items-center justify-center py-3.5 ${
                   SUPER_ADMIN_MORE_TABS.some((t) => t.key === superAdminView) || showSuperAdminMenu ? "text-sky-600" : "text-slate-400"
                 }`}
                 data-testid="super-admin-nav-more"
               >
-                <MoreHorizontal className="h-5 w-5" />
-                More
+                <MoreHorizontal className="h-6 w-6" />
               </button>
             </div>
           </div>
