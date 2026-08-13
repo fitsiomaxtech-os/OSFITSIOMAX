@@ -1670,7 +1670,14 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
           sharing it or saving it all render the exact same document. */}
       {apptConfirm && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-3" data-testid="branch-appt-confirm-modal">
-          <div className="flex max-h-[94vh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+          {/* 90%, this dialog only. zoom rather than transform: scale — zoom shrinks the
+              layout box itself, so the flex centring above and the max-h below still work
+              on the size actually drawn. scale would leave the box at full size, centring
+              the card off its own bounds and reserving space nothing occupies. */}
+          <div
+            className="flex max-h-[94vh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+            style={{ zoom: 0.9 }}
+          >
             {/* The receipt popup's header. items-center so the two-line title does not
                 leave a band of empty teal beneath it, a status mark rather than the logo
                 (which already opens the body), and a plain close — the orange-bordered X
