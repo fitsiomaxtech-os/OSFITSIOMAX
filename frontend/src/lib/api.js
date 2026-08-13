@@ -73,6 +73,7 @@ export const getRoleSelectionMock = async () => {
 
 export const getVerticals = async () => (await api.get("/verticals")).data;
 export const createVertical = async (payload) => (await api.post("/verticals", payload)).data;
+export const deleteVertical = async (id) => (await api.delete(`/verticals/${id}`)).data;
 
 export const getBranches = async () => (await api.get("/branches")).data;
 export const createBranch = async (payload) => (await api.post("/branches", payload)).data;

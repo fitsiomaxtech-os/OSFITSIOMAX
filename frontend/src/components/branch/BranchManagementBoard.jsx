@@ -8,7 +8,7 @@ import { toast } from "@/components/ui/sonner";
 import {
   bmList, bmCreateWithExistingAdmin, bmReassignAdmin, bmPerformance, bmPerformanceSummary,
   updateBranch, deleteBranch, hrBranchAdminCandidates,
-  getVerticals, createVertical, getDoctors,
+  getVerticals, createVertical, deleteVertical, getDoctors,
 } from "@/lib/api";
 import { StatTile } from "@/components/ui/stat-tile";
 import { BranchDetailPage } from "@/components/branch/BranchDetailPage";
@@ -341,13 +341,15 @@ const CreationTab = ({ onDrillIn, actionSlot }) => {
           returns you to exactly the tab you were on. */}
       {showServiceTypes && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" data-testid="bm-service-type-dialog">
-          <div className="w-full max-w-lg rounded-lg bg-white shadow-xl">
+          {/* Lexend, scoped to this dialog. It is already loaded for the printed sheets, so
+              this costs no extra font request. */}
+          <div className="w-full max-w-lg rounded-lg bg-white shadow-xl" style={{ fontFamily: "Lexend, sans-serif" }}>
             <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
               <h3 className="inline-flex items-center gap-2 text-base font-semibold"><Layers className="h-4 w-4 text-sky-600" />Service Type</h3>
               <button onClick={() => setShowServiceTypes(false)} className="text-slate-400 hover:text-slate-600" data-testid="bm-service-type-close"><X className="h-4 w-4" /></button>
             </div>
             <div className="max-h-[70vh] overflow-y-auto p-5">
-              <ServiceTypeManager onAdded={load} />
+              <ServiceTypeManager onChanged={load} />
             </div>
           </div>
         </div>
@@ -579,22 +581,33 @@ const DetailStat = ({ label, value, color }) => (
 
 // ---------- Service Type (moved from Super Admin Master View "Business Verticals") ----------
 const SERVICE_TYPE_COLORS = ["#2563eb", "#059669", "#d97706", "#7c3aed", "#e11d48", "#0891b2"];
+
+// "offline_physiotherapy" -> "offline physiotherapy". Only the underscores go: the casing
+// is left to CSS, so what gets read back for a match is still the stored name, and the
+// input above keeps writing whatever the user actually typed.
+const serviceTypeLabel = (name) => String(name || "").replace(/_/g, " ");
 /**
- * Add a service type, and see the ones that exist. Opened from MANAGER's toolbar, where a
- * branch is created and the type it needs may not exist yet.
+ * Add or remove a service type, and see the ones that exist. Opened from MANAGER's toolbar,
+ * where a branch is created and the type it needs may not exist yet.
  *
- * onAdded lets the host refresh whatever it renders off the same list.
+ * onChanged lets the host refresh whatever it renders off the same list.
  */
-const ServiceTypeManager = ({ onAdded }) => {
+const ServiceTypeManager = ({ onChanged }) => {
   const [items, setItems] = useState([]);
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
+  const [removingId, setRemovingId] = useState("");
 
   const fetchItems = useCallback(async () => {
     try {
       const rows = await getVerticals();
       const defaults = ["offline_physiotherapy", "online_physiotherapy", "online_fitness", "offline_fitness_gym"];
-      setItems(rows && rows.length ? rows : defaults.map((n) => ({ id: n, name: n })));
+      // `stored` separates real records from the placeholder list shown on an empty
+      // database. The placeholders have no row behind them, so they have nothing to
+      // delete — offering the bin there would only ever produce a 404.
+      setItems(rows && rows.length
+        ? rows.map((r) => ({ ...r, stored: true }))
+        : defaults.map((n) => ({ id: n, name: n, stored: false })));
     } catch (err) {
       toast.error("Failed to load service types");
     }
@@ -613,12 +626,29 @@ const ServiceTypeManager = ({ onAdded }) => {
       await createVertical({ name: name.trim(), active: true });
       setName("");
       await fetchItems();
-      onAdded && onAdded();
+      onChanged && onChanged();
       toast.success("Service type added");
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed to add service type");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const removeItem = async (item) => {
+    if (!window.confirm(`Delete service type "${serviceTypeLabel(item.name).toUpperCase()}"?`)) return;
+    try {
+      setRemovingId(item.id);
+      await deleteVertical(item.id);
+      await fetchItems();
+      onChanged && onChanged();
+      toast.success("Service type deleted");
+    } catch (err) {
+      // The 409 names the branches still on this type, so it is worth showing in full
+      // rather than collapsing to "Delete failed".
+      toast.error(err?.response?.data?.detail || "Failed to delete service type");
+    } finally {
+      setRemovingId("");
     }
   };
 
@@ -649,7 +679,24 @@ const ServiceTypeManager = ({ onAdded }) => {
               <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md" style={{ backgroundColor: `${color}24` }}>
                 <Layers className="h-3.5 w-3.5" style={{ color }} />
               </span>
-              <span className="truncate font-medium text-slate-700">{item.name}</span>
+              {/* The OS's small-caps label: uppercase, tracked, one step down in size. A
+                  service type is a tag on a branch, not prose, and it reads as one here. */}
+              <span className="min-w-0 flex-1 truncate text-xs font-semibold uppercase tracking-wide text-slate-600" title={item.name}>
+                {serviceTypeLabel(item.name)}
+              </span>
+              {item.stored && (
+                <button
+                  type="button"
+                  onClick={() => removeItem(item)}
+                  disabled={removingId === item.id}
+                  className="shrink-0 text-slate-400 transition hover:text-rose-600 disabled:opacity-40"
+                  title="Delete service type"
+                  aria-label={`Delete ${serviceTypeLabel(item.name)}`}
+                  data-testid={`service-type-delete-${item.id}`}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              )}
             </div>
           );
         })}

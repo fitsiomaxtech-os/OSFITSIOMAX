@@ -36,6 +36,31 @@ async def v3_add_vertical(payload: V3VerticalCreate, _: V3UserOut = Depends(v3_r
     return V3VerticalOut(**doc)
 
 
+@router.delete("/verticals/{vertical_id}")
+async def v3_delete_vertical(vertical_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    """Remove a service type.
+
+    Refused while a branch still carries it. A branch's `vertical` holds the type's *name*,
+    not its id, so deleting one in use would leave those branches pointing at a type that
+    no longer exists — the branch form would then fail to show their current selection and
+    silently offer to change it. Naming the branches lets the caller go and reassign them.
+    """
+    row = await v3_col("verticals").find_one({"id": vertical_id}, {"_id": 0})
+    if not row:
+        raise HTTPException(status_code=404, detail="Service type not found")
+    in_use = await v3_col("branches").find(
+        {"vertical": row.get("name")}, {"_id": 0, "branch_name": 1}
+    ).to_list(20)
+    if in_use:
+        names = ", ".join(b.get("branch_name", "?") for b in in_use)
+        raise HTTPException(
+            status_code=409,
+            detail=f"{len(in_use)} branch(es) still use this service type: {names}",
+        )
+    await v3_col("verticals").delete_one({"id": vertical_id})
+    return {"message": "Service type deleted"}
+
+
 @router.get("/branches", response_model=List[V3BranchOut])
 async def v3_get_branches(_: V3UserOut = Depends(v3_current_user)):
     rows = await v3_col("branches").find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
