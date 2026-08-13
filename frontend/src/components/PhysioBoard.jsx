@@ -980,8 +980,11 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
           <p className="text-sm text-slate-400">{EMPTY_TEXT[bucket] || "No patient matches these filters"}</p>
         </div>
       ) : (
-        <div className="space-y-2">
-          {visible.map((p) => {
+        <>
+        {/* Cards on a phone, the table from md. Seven columns cannot reflow, and the row
+            is read across — who, how far through, what is waiting on whom. */}
+        <div className="space-y-2 md:hidden" data-testid="physio-review-mobile">
+          {visible.map((p, i) => {
             const badge = STATUS_BADGE[p.review_status];
             return (
               <div key={p.lead_id} className="rounded-xl border border-slate-200 bg-white p-3" data-testid={`physio-review-patient-${p.lead_id}`}>
@@ -990,7 +993,9 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
                     {p.lead_name?.charAt(0)?.toUpperCase() || "?"}
                   </span>
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-slate-800">{p.lead_name}</p>
+                    <p className="truncate text-sm font-semibold text-slate-800">
+                      <span className="mr-1.5 font-semibold text-slate-300">{i + 1}.</span>{p.lead_name}
+                    </p>
                     <p className="truncate text-[10px] text-slate-400">
                       {p.phone || "—"}{p.patient_number ? ` · ${p.patient_number}` : ""}
                     </p>
@@ -1035,6 +1040,91 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
             );
           })}
         </div>
+
+        <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white md:block" data-testid="physio-review-desktop">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[860px] text-sm">
+              <thead className="bg-slate-50 text-left text-[10px] uppercase tracking-wider text-slate-400">
+                <tr>
+                  <th className="w-12 px-4 py-2.5 font-semibold">S.No</th>
+                  <th className="px-4 py-2.5 font-semibold">Patient</th>
+                  <th className="px-4 py-2.5 font-semibold">Phone</th>
+                  <th className="px-4 py-2.5 font-semibold">Sessions</th>
+                  <th className="px-4 py-2.5 font-semibold">Review</th>
+                  <th className="px-4 py-2.5 font-semibold">Status</th>
+                  <th className="px-4 py-2.5 text-right font-semibold">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {visible.map((p, i) => {
+                  const badge = STATUS_BADGE[p.review_status];
+                  return (
+                    // The row opens that patient's weeks, exactly as the card does. The
+                    // button in Actions stops the click travelling, or sending a review
+                    // would open the weeks picker behind the form.
+                    <tr
+                      key={p.lead_id}
+                      onClick={() => setWeeksTarget(p)}
+                      className="cursor-pointer hover:bg-slate-50"
+                      data-testid={`physio-review-row-${p.lead_id}`}
+                    >
+                      <td className="px-4 py-3 text-slate-400">{i + 1}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2.5">
+                          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sky-50 text-xs font-bold text-sky-700">
+                            {p.lead_name?.charAt(0)?.toUpperCase() || "?"}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="truncate font-medium text-slate-800">{p.lead_name}</p>
+                            <p className="truncate text-[11px] text-slate-400">{p.patient_number || "—"}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-slate-600">{p.phone || "—"}</td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-bold ${
+                          p.due_for_review ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-600"
+                        }`}>
+                          {p.treatment_days} done
+                        </span>
+                        {!p.due_for_review && !p.review_status && (
+                          <span className="mt-0.5 block text-[11px] text-slate-400">
+                            next at {(Math.floor(p.treatment_days / threshold) + 1) * threshold}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        {p.review_number > 0
+                          ? <span className="inline-flex items-center rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-semibold text-violet-700">{ordinal(p.review_number)}</span>
+                          : <span className="text-slate-300">—</span>}
+                      </td>
+                      <td className="px-4 py-3">
+                        {badge
+                          ? <span className={`inline-flex whitespace-nowrap items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${badge.cls}`}>{badge.label}</span>
+                          : <span className="text-slate-300">—</span>}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        {p.due_for_review ? (
+                          <Button
+                            size="sm"
+                            className="bg-amber-600 text-xs text-white hover:bg-amber-700"
+                            onClick={(e) => { e.stopPropagation(); setDraft({ patient: p, reason: "", physio_notes: "" }); }}
+                            data-testid={`physio-raise-review-row-${p.lead_id}`}
+                          >
+                            Send for Review
+                          </Button>
+                        ) : (
+                          <span className="text-[11px] text-slate-300">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        </>
       )}
 
       {/* Row click opens that patient's weeks — the write-up itself is the same
