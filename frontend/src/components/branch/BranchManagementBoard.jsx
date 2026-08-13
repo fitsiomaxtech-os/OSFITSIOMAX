@@ -224,17 +224,31 @@ const CreationTab = ({ onDrillIn, actionSlot }) => {
   const [reassigning, setReassigning] = useState(null);
   const [showServiceTypes, setShowServiceTypes] = useState(false);
   const [physioCount, setPhysioCount] = useState(0);
+  const [loading, setLoading] = useState(false);
 
-  const load = useCallback(async () => {
-    const [bs, cs, ds] = await Promise.all([
-      bmList(),
-      hrBranchAdminCandidates().catch(() => []),
-      // Unscoped, so as super_admin this is every doctor in the org.
-      getDoctors().catch(() => []),
-    ]);
-    setBranches(bs);
-    setCandidates(cs);
-    setPhysioCount((ds || []).filter((d) => d.profile_type === "physio").length);
+  /** `notify` is set only by the Refresh button. The same loader runs on mount and after
+   *  every save, and none of those should announce themselves. */
+  const load = useCallback(async ({ notify = false } = {}) => {
+    setLoading(true);
+    try {
+      const [bs, cs, ds] = await Promise.all([
+        bmList(),
+        hrBranchAdminCandidates().catch(() => []),
+        // Unscoped, so as super_admin this is every doctor in the org.
+        getDoctors().catch(() => []),
+      ]);
+      setBranches(bs);
+      setCandidates(cs);
+      setPhysioCount((ds || []).filter((d) => d.profile_type === "physio").length);
+      if (notify) toast.success("Refreshed");
+    } catch (e) {
+      // bmList had no catch of its own, so a failure rejected this whole function
+      // unhandled: nothing updated and nothing was said, which is exactly what a dead
+      // button looks like.
+      toast.error(e?.response?.data?.detail || "Couldn't load branches");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -247,19 +261,22 @@ const CreationTab = ({ onDrillIn, actionSlot }) => {
 
   // Rendered into the tab bar above. All three are icon-only there: a labelled button in a
   // row of tabs reads as another tab, and the row has no width to spare for the word anyway.
-  // Weight runs left to right — outlined Refresh, grey Service Type, filled Add Branch — so
-  // the one destructive-ish action that creates a record stays the loudest of the three.
+  // The two that only read or open sit in grey; Add Branch, the one that creates a record,
+  // keeps the filled blue to itself.
   const actions = (
     <>
+      {/* Spins and locks while in flight, as every other Refresh in the OS does, and says
+          so when it lands — a reload that changes nothing on screen is otherwise
+          indistinguishable from a button that does nothing. */}
       <Button
-        variant="outline"
-        className="h-9 w-9 shrink-0 p-0"
-        onClick={load}
+        className="h-9 w-9 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
+        onClick={() => load({ notify: true })}
+        disabled={loading}
         title="Refresh"
         aria-label="Refresh"
         data-testid="bm-refresh"
       >
-        <RefreshCw className="h-4 w-4" />
+        <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
       </Button>
       <Button
         className="h-9 w-9 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
