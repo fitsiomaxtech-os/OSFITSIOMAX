@@ -360,16 +360,6 @@ export const HeadPhysioReviewTab = ({ selectedDate, compact = false, onCountChan
                   data-testid="hp-review-notes"
                 />
               </div>
-              <div>
-                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">Suggestions</label>
-                <textarea
-                  rows={3}
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400"
-                  value={draft.head_physio_suggestions}
-                  onChange={(e) => setDraft({ ...draft, head_physio_suggestions: e.target.value })}
-                  data-testid="hp-review-suggestions"
-                />
-              </div>
             </div>
 
             <div className={`flex-1 overflow-y-auto p-5 ${draftTab === "days" ? "" : "hidden"}`} data-testid="hp-review-days">
