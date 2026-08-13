@@ -40,7 +40,10 @@ async def get_doctor_calendar(doctor_id: str, _: V3UserOut = Depends(v3_require_
         {"coach_id": doctor_id, "status": "upcoming"},
         {"_id": 0, "slot_time": 1, "lead_name": 1, "lead_id": 1, "id": 1},
     ).to_list(1000)
-    rows = [*appt_rows, *session_rows, *diet_rows]
+    # A treatment day waiting on a date from the Branch Admin carries no slot_time. Left in,
+    # it books the empty string — which then reads back as an occupied slot and can make the
+    # picker refuse the very day it is being asked to place.
+    rows = [r for r in (*appt_rows, *session_rows, *diet_rows) if (r.get("slot_time") or "").strip()]
 
     # `booked` keeps its old shape — one row per slot — because callers read it to answer
     # "is this slot mine or someone else's". It cannot answer "how full is this slot",

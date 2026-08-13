@@ -1574,10 +1574,17 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
                   // Where the list crosses from work to history, so the jump back to
                   // Day 1 reads as a divider rather than as the order being wrong.
                   const firstDone = done && i > 0 && orderedSessions[i - 1].status !== "completed";
+                  // The day an absence pushed off the end of the course. It holds no slot
+                  // until the Branch Admin puts it on one, so there is no date on which it
+                  // could be worked and nothing here to press.
+                  const awaiting = !done && (s.needs_assignment || !s.slot_time);
                   // Only the day being viewed can be ticked off — a day is completed on
                   // the date it actually falls on, so the others stay read-only until
                   // their own date is picked in the strip behind this popup.
-                  const isActiveDay = !activeDate || (s.slot_time || "").startsWith(activeDate);
+                  //
+                  // Never the dateless one: with no strip open every day counts as active,
+                  // which would offer Complete on a day that has not been booked yet.
+                  const isActiveDay = !awaiting && (!activeDate || (s.slot_time || "").startsWith(activeDate));
                   // The earliest day still open before this one. Ordered on the day number,
                   // not the date: an absence pushes a day past the one after it until that
                   // one shifts too, and comparing dates would call the order broken.
@@ -1598,12 +1605,17 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
                     <div
                       className={`flex items-center gap-3 rounded-lg border p-3 ${
                         done ? "border-emerald-200 bg-emerald-50/50"
+                        : awaiting ? "border-amber-200 bg-amber-50/60"
                         : isActiveDay ? "border-sky-200 bg-sky-50/40"
                         : "border-slate-200 bg-white"
                       }`}
                       data-testid={`physio-treatment-day-${s.id}`}
                     >
-                      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold ${done ? "bg-emerald-200 text-emerald-800" : "bg-slate-100 text-slate-500"}`}>
+                      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                        done ? "bg-emerald-200 text-emerald-800"
+                        : awaiting ? "bg-amber-200 text-amber-800"
+                        : "bg-slate-100 text-slate-500"
+                      }`}>
                         {s.session_number}
                       </div>
                       <div className="min-w-0 flex-1">
@@ -1617,13 +1629,28 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
                             </span>
                           )}
                         </p>
-                        <p className="text-[10px] text-slate-400">
-                          {s.slot_time ? `${fmtDate(s.slot_time)} at ${slotTo12h(s.slot_time)}` : "—"}
+                        <p className={`text-[10px] ${awaiting ? "font-semibold text-amber-700" : "text-slate-400"}`}>
+                          {s.slot_time
+                            ? `${fmtDate(s.slot_time)} at ${slotTo12h(s.slot_time)}`
+                            : awaiting
+                              ? "Missed class — Branch Admin to give this day a date"
+                              : "—"}
                         </p>
                         {s.jr_physio_remarks && <p className="mt-0.5 text-[10px] text-emerald-600">Remarks: {s.jr_physio_remarks}</p>}
                       </div>
                       {done ? (
                         <span className="shrink-0 rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-semibold text-emerald-700">Complete</span>
+                      ) : awaiting ? (
+                        // No button: the physio cannot place this day. Only the Branch Admin
+                        // books onto the published calendar, so this says who has it rather
+                        // than offering an action that would be refused.
+                        <span
+                          className="flex shrink-0 items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-semibold text-amber-700"
+                          title="An absence pushed this day past the end of the booked slots. Branch Admin assigns it a new date."
+                          data-testid={`physio-day-awaiting-${s.id}`}
+                        >
+                          <AlertCircle className="h-3 w-3" /> Needs a date
+                        </span>
                       ) : blockedBy ? (
                         // Treatment runs in order, so a later day cannot be ticked off
                         // while an earlier one is open. Said in the button's tooltip
@@ -1718,6 +1745,14 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
         {absentTarget && (
           <MarkAbsentModal
             session={absentTarget}
+            // The day that will come off the end — the highest-numbered day still holding a
+            // slot. Named in the warning so the physio knows which one goes back to the
+            // Branch Admin before agreeing to the move, not after.
+            lastDated={
+              sessions
+                .filter((x) => x.status !== "completed" && (x.slot_time || "").trim())
+                .reduce((hi, x) => Math.max(hi, x.session_number || 0), 0) || null
+            }
             onClose={() => setAbsentTarget(null)}
             // Stays open on purpose: the whole schedule just moved, and closing would hide
             // the one thing worth checking. The parent list reloads when the popup closes.
@@ -2255,14 +2290,16 @@ function CompleteSessionModal({ session, onClose, onDone }) {
 }
 
 /**
- * The patient did not turn up. The day is not written off — it moves to the next day, and
- * every day after it moves with it, so the package still delivers the number of treatment
- * days it was sold as.
+ * The patient did not turn up. The day is not written off — it takes the next day's slot,
+ * that day takes the one after, and so on, so the package still delivers the number of
+ * treatment days it was sold as.
  *
  * Says so before the press rather than after: this rewrites the dates of every remaining
- * day, which is not something to discover from a list that quietly looks different.
+ * day, which is not something to discover from a list that quietly looks different. And it
+ * names the day that comes off the end, because that one stops being the physio's to work
+ * until the Branch Admin has given it a date.
  */
-function MarkAbsentModal({ session, onClose, onDone }) {
+function MarkAbsentModal({ session, lastDated, onClose, onDone }) {
   const [remarks, setRemarks] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -2291,8 +2328,14 @@ function MarkAbsentModal({ session, onClose, onDone }) {
           <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-[11px] text-amber-800">
             <UserX className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>
-              Day {session.session_number} moves to the next day, and every day after it moves on by
-              one. The patient still gets all {session.total_sessions} days — nothing is lost.
+              Day {session.session_number} takes the next day's slot, and every day after it moves
+              down one. The patient still gets all {session.total_sessions} days — nothing is lost.
+              {lastDated && lastDated !== session.session_number && (
+                <>
+                  {" "}
+                  <b>Day {lastDated}</b> comes off the end and goes to the Branch Admin for a new date.
+                </>
+              )}
             </span>
           </div>
           <div>

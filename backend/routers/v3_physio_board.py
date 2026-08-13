@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends
 from typing import Optional
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timezone
 import uuid
 
 from database import v3_col
@@ -371,17 +371,6 @@ async def _first_incomplete_before(session: dict):
     return min(earlier) if earlier else None
 
 
-def _shift_slot_day(slot_time: str, days: int) -> str:
-    """Move a slot to another date, keeping its time of day. Returns it untouched if it is
-    not a slot this can read — a malformed value is not worth turning into a wrong date."""
-    try:
-        day_part, _, time_part = str(slot_time or "").partition("T")
-        moved = date.fromisoformat(day_part) + timedelta(days=days)
-        return f"{moved.isoformat()}T{time_part}" if time_part else moved.isoformat()
-    except Exception:
-        return slot_time
-
-
 @router.post("/physio/sessions/{session_id}/absent")
 async def physio_mark_absent(
     session_id: str,
@@ -390,9 +379,22 @@ async def physio_mark_absent(
 ):
     """The patient did not turn up, so the day moves rather than being lost.
 
-    This day and every uncompleted day after it shift forward together. Moving only the
-    missed one would land it on top of the next day already booked, and the package is a
-    count of days of treatment — skipping one would quietly shorten it.
+    This day and every uncompleted day after it shift down one place: this day takes the
+    next day's slot, that one takes the one after, and so on to the end of the course.
+    Moving only the missed one would land it on top of the next day already booked, and the
+    package is a count of days of treatment — skipping one would quietly shorten it.
+
+    The days move into each other's slots rather than each sliding one calendar day, which
+    is what this did before. Treatment dates are not a run of consecutive days: the Branch
+    Admin picks every one of them off the physio's published calendar, so a package can be
+    three days a week, and adding a day to each date walks the whole course onto days that
+    physio never opened. Stepping along the slots already chosen keeps every remaining day
+    on a time that exists.
+
+    That leaves the last day with nowhere to go, so it is left unscheduled and handed back
+    to the Branch Admin — the only role that can place a day on a published slot. This is
+    the missed class: the patient is still owed all of their days, and the last one now
+    needs a date choosing rather than one being invented for it.
 
     The absence itself is kept on the session and written to the lead's activity, because
     the branch needs to see that a day was missed and when; the schedule moving on its own
@@ -421,14 +423,28 @@ async def physio_mark_absent(
         {"lead_id": session["lead_id"], "status": {"$ne": "completed"}},
         {"_id": 0, "id": 1, "session_number": 1, "slot_time": 1},
     ).to_list(1000)
+    later = sorted(
+        (r for r in to_move if (r.get("session_number") or 0) >= number),
+        key=lambda r: r.get("session_number") or 0,
+    )
+
+    # Only the days that still hold a slot take part. A day already waiting on the Branch
+    # Admin from an earlier absence has no slot to give away, and stepping through it would
+    # hand its emptiness to the day in front — one absence would strand two days instead of
+    # one. Those wait where they are; each absence leaves exactly one day to be re-dated.
+    dated = [r for r in later if (r.get("slot_time") or "").strip()]
 
     moved = 0
-    for row in to_move:
-        if (row.get("session_number") or 0) < number:
-            continue
+    for i, row in enumerate(dated):
+        next_slot = dated[i + 1]["slot_time"] if i + 1 < len(dated) else ""
         await v3_col("sessions").update_one(
             {"id": row["id"]},
-            {"$set": {"slot_time": _shift_slot_day(row.get("slot_time"), 1), "updated_at": now_iso()}},
+            {"$set": {
+                "slot_time": next_slot,
+                # True on the last one only — the day the course has run out of slots for.
+                "needs_assignment": not next_slot,
+                "updated_at": now_iso(),
+            }},
         )
         moved += 1
 
@@ -448,7 +464,11 @@ async def physio_mark_absent(
         "action": "session_absent",
         "details": (
             f"Day {number} marked absent on {missed_on or 'an unknown date'} by {user.full_name}."
-            f" That day and {moved - 1} later day(s) moved on by one."
+            f" That day and {max(moved - 1, 0)} later day(s) moved down one slot."
+            + (
+                f" Day {dated[-1].get('session_number')} now needs a date from the Branch Admin."
+                if dated else ""
+            )
             + (f" Remarks: {payload.remarks.strip()}" if (payload.remarks or "").strip() else "")
         ),
         "created_by": user.full_name,
@@ -457,10 +477,19 @@ async def physio_mark_absent(
     })
 
     updated = await v3_col("sessions").find_one({"id": session_id}, {"_id": 0})
+    landed = ((updated or {}).get("slot_time") or "").split("T")[0]
+    unscheduled_day = dated[-1].get("session_number") if dated else None
     return {
         "session": updated,
         "moved": moved,
-        "message": f"Day {number} marked absent — moved to {(updated or {}).get('slot_time', '').split('T')[0] or 'the next day'}",
+        "unscheduled_session_number": unscheduled_day,
+        "message": (
+            f"Day {number} marked absent — moved to {landed}" if landed
+            else f"Day {number} marked absent"
+        ) + (
+            f". Day {unscheduled_day} now needs a date from the Branch Admin."
+            if unscheduled_day and unscheduled_day != number else ""
+        ),
     }
 
 

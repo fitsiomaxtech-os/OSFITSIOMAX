@@ -24,6 +24,7 @@ import {
   Salad,
   UserCog,
   User,
+  UserX,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -53,6 +54,7 @@ import { PullFromSheetButton } from "@/components/PullFromSheetButton";
 import { AccountantManageTab } from "@/components/branch/AccountantManageTab";
 import { BranchCalendarPanel } from "@/components/branch/BranchCalendarPanel";
 import { BranchDetailPage } from "@/components/branch/BranchDetailPage";
+import MissedClassPanel from "@/components/branch/MissedClassPanel";
 import { BranchReviewPanel } from "@/components/branch/BranchReviewPanel";
 import { PatientsPortalPanel } from "@/components/branch/PatientsPortalPanel";
 import { CreateLeadModal } from "@/components/CreateLeadModal";
@@ -427,6 +429,9 @@ export const BranchAdminBoard = ({ branchId, embedded = false }) => {
     // anywhere new — the Branch Admin publishes a Nutrition Coach's days exactly the way
     // they publish a Physio's.
     { key: "diet", label: "DIET CALENDAR", icon: Salad },
+    // Sits next to PHYSIO CALENDAR because that is where its slots come from: a day an
+    // absence left dateless is re-booked onto exactly the calendar published one tab over.
+    { key: "missed", label: "MISSED CLASSES", icon: UserX },
     { key: "manager", label: "MANAGER", icon: UserCog },
     { key: "calendar", label: "CALENDAR", icon: Calendar },
   ];
@@ -487,6 +492,8 @@ export const BranchAdminBoard = ({ branchId, embedded = false }) => {
             <HeadPhysioCalendar branchId={branchId} profileType="physio" />
           ) : consultationsSubTab === "diet" ? (
             <HeadPhysioCalendar branchId={branchId} profileType="nutrition_coach" />
+          ) : consultationsSubTab === "missed" ? (
+            <MissedClassPanel />
           ) : consultationsSubTab === "manager" ? (
             <BranchDetailPage branchId={branchId} readOnly />
           ) : consultationsSubTab === "calendar" ? (

@@ -261,13 +261,17 @@ export const physioPatients = async (physioId) => (await api.get("/physio/patien
 export const physioPatientDetail = async (leadId, physioId) => (await api.get(`/physio/patient/${leadId}`, { params: physioId ? { physio_id: physioId } : {} })).data;
 export const physioSessions = async (leadId) => (await api.get(`/physio/sessions/${leadId}`)).data;
 export const physioCompleteSession = async (sessionId, payload) => (await api.post(`/physio/sessions/${sessionId}/complete`, payload)).data;
-// The patient did not turn up: this day and every uncompleted day after it move on by one.
+// The patient did not turn up: this day takes the next day's slot, and every day after it
+// steps down one. The last day comes off the end and goes to the Branch Admin for a date.
 export const physioMarkAbsent = async (sessionId, payload) => (await api.post(`/physio/sessions/${sessionId}/absent`, payload)).data;
 export const physioWeeklyAssessment = async (leadId, week, payload, physioId) => (await api.post(`/physio/weekly-assessment/${leadId}/${week}`, payload, { params: physioId ? { physio_id: physioId } : {} })).data;
 
 export const getBranchRecommendations = async () => (await api.get("/branch/package-recommendations")).data;
 export const assignSessions = async (payload) => (await api.post("/branch/assign-sessions", payload)).data;
 export const createJrPhysio = async (payload) => (await api.post("/branch/jr-physios", payload)).data;
+// Treatment days an absence pushed off the end of the booked slots, and the booking that puts one back.
+export const unscheduledSessions = async () => (await api.get("/branch/sessions/unscheduled")).data;
+export const scheduleSession = async (sessionId, slotTime) => (await api.post(`/branch/sessions/${sessionId}/schedule`, { slot_time: slotTime })).data;
 
 export const patientView = async (token) => (await api.get(`/patient/view/${token}`)).data;
 
