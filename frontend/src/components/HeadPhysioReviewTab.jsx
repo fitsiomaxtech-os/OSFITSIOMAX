@@ -47,7 +47,7 @@ const StageBadge = ({ stage }) => (
  * an overdue review that fell out of Today would sit in a list nobody opens, which is
  * exactly how a patient's week-one review gets missed.
  */
-export const HeadPhysioReviewTab = ({ selectedDate, compact = false, onCountChange, onRowsChange }) => {
+export const HeadPhysioReviewTab = ({ selectedDate, compact = false, onCountChange, onRowsChange, autoOpenReviewId, onAutoOpened }) => {
   const [data, setData] = useState({ today: [], upcoming: [], overdue: [], completed: [], today_date: "" });
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
@@ -94,6 +94,17 @@ export const HeadPhysioReviewTab = ({ selectedDate, compact = false, onCountChan
   useEffect(() => {
     if (onRowsChange) onRowsChange(rows);
   }, [rows, onRowsChange]);
+
+  // View on the board's All list names a review; open its write-up here once the rows
+  // this tab owns have actually loaded. A completed review opens read-only-ish the same
+  // way the row's own button does — same drawer, so nothing new to keep in step.
+  useEffect(() => {
+    if (!autoOpenReviewId || !rows.length) return;
+    const match = rows.find((r) => r.id === autoOpenReviewId);
+    if (!match) return;
+    setDraft({ review: match, head_physio_notes: "", head_physio_suggestions: "" });
+    onAutoOpened && onAutoOpened();
+  }, [autoOpenReviewId, rows, onAutoOpened]);
 
   const submit = async () => {
     if (!draft.head_physio_notes.trim()) { toast.error("Write the review notes"); return; }

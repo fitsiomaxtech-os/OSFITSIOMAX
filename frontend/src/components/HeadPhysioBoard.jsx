@@ -109,6 +109,8 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
       const done = isDone(l.head_consultation_stage, l.consultation_stage);
       return {
         key: `c-${l.id}`,
+        kind: "consult",
+        leadId: l.id,
         name: l.name || "Unknown",
         patientNo: l.patient_number || "",
         phone: l.phone || "",
@@ -120,6 +122,8 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
     }),
     ...reviewRows.filter((r) => matches(r.lead_name, r.phone, r.patient_number)).map((r) => ({
       key: `r-${r.id}`,
+      kind: "review",
+      reviewId: r.id,
       name: r.lead_name || "Unknown",
       patientNo: r.patient_number || "",
       phone: r.phone || "",
@@ -130,6 +134,8 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
     })),
     ...visiblePatients.map((p) => ({
       key: `p-${p.lead_id}`,
+      kind: "rehab",
+      patient: p,
       name: p.lead_name || "Unknown",
       patientNo: "",
       phone: p.phone || "",
@@ -141,8 +147,26 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
       who: p.branch_stage || "",
     })),
   ], [consultRows, reviewRows, visiblePatients]);
+
+  /**
+   * View on an All row. The three queues merged into that list keep their own detail
+   * popups, so this routes to the right one rather than building a fourth that would
+   * show less than any of them.
+   *
+   * Consultations and Review switch tab first: both boards stay mounted but `hidden`
+   * when not selected, and a modal rendered inside display:none does not appear. Rehab
+   * needs no switch — PatientSessionsModal hangs off the board root, above the tabs.
+   */
+  const openRow = (r) => {
+    if (r.kind === "rehab") { setSelectedPatient(r.patient); return; }
+    if (r.kind === "consult") { setWorkTab("consultations"); setAutoOpenLead(r.leadId); return; }
+    setWorkTab("review"); setAutoOpenReview(r.reviewId);
+  };
   const [loading, setLoading] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState(null);
+  // Set by View on the All list, consumed by whichever board owns that row's popup.
+  const [autoOpenLead, setAutoOpenLead] = useState(null);
+  const [autoOpenReview, setAutoOpenReview] = useState(null);
   const [showRecommendModal, setShowRecommendModal] = useState(null);
   const [showReviewModal, setShowReviewModal] = useState(null);
 
@@ -242,6 +266,8 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
               externalStageFilter={workTab === "consultations" ? firstStage : null}
               onCountChange={(total, stages, names) => { setConsultCount(total); setConsultStages(stages || {}); setConsultStageNames(names || []); }}
               onRowsChange={setConsultRows}
+              autoOpenLeadId={autoOpenLead}
+              onAutoOpened={() => setAutoOpenLead(null)}
             />
           </div>
 
@@ -251,6 +277,8 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
               compact={workTab === "all"}
               onCountChange={setReviewCount}
               onRowsChange={setReviewRows}
+              autoOpenReviewId={autoOpenReview}
+              onAutoOpened={() => setAutoOpenReview(null)}
             />
           </div>
 
@@ -267,7 +295,15 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
                 {allRows.length === 0 ? (
                   <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">Nothing on this day.</p>
                 ) : allRows.map((r, i) => (
-                  <div key={r.key} className="rounded-xl border border-slate-200 bg-white p-3" data-testid={`hp-all-card-${r.key}`}>
+                  // The whole card opens it on a phone — a View link in a corner is a
+                  // small target next to a row that is already the thing being tapped.
+                  <button
+                    key={r.key}
+                    type="button"
+                    onClick={() => openRow(r)}
+                    className="w-full rounded-xl border border-slate-200 bg-white p-3 text-left transition hover:border-sky-200"
+                    data-testid={`hp-all-card-${r.key}`}
+                  >
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <p className="truncate text-sm font-bold text-slate-800">
@@ -284,7 +320,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
                       {r.who && <span>· {r.who}</span>}
                       {r.when && <span>· {r.when}</span>}
                     </div>
-                  </div>
+                  </button>
                 ))}
               </div>
 
@@ -303,11 +339,12 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
                       <th className="px-4 py-2.5 text-center font-semibold">Stage</th>
                       <th className="px-4 py-2.5 text-center font-semibold">Expert / Branch</th>
                       <th className="px-4 py-2.5 text-center font-semibold">When</th>
+                      <th className="px-4 py-2.5 text-center font-semibold">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {allRows.length === 0 ? (
-                      <tr><td colSpan={7} className="px-4 py-10 text-center text-sm text-slate-400">Nothing on this day.</td></tr>
+                      <tr><td colSpan={8} className="px-4 py-10 text-center text-sm text-slate-400">Nothing on this day.</td></tr>
                     ) : allRows.map((r, i) => (
                       <tr key={r.key} className="hover:bg-slate-50" data-testid={`hp-all-row-${r.key}`}>
                         {/* Numbers what is on screen — the merged list reorders as the
@@ -323,6 +360,16 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
                         </td>
                         <td className="px-4 py-3 text-center text-slate-600">{r.who || "—"}</td>
                         <td className="px-4 py-3 text-center text-slate-500">{r.when || "—"}</td>
+                        <td className="px-4 py-3 text-center">
+                          <button
+                            type="button"
+                            onClick={() => openRow(r)}
+                            className="inline-flex items-center gap-0.5 whitespace-nowrap text-[11px] font-semibold text-sky-600 hover:text-sky-800"
+                            data-testid={`hp-all-view-${r.key}`}
+                          >
+                            View <ChevronRight className="h-3.5 w-3.5" />
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
