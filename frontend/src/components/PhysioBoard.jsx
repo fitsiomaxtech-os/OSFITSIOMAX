@@ -32,7 +32,6 @@ import {
   physioPatientDetail,
   physioSessions,
   physioCompleteSession,
-  physioWeeklyAssessment,
   physioReviews,
   physioRaiseReview,
   leadDocuments,
@@ -756,20 +755,6 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
   );
 }
 
-/**
- * What a week in the write-up picker can be.
- *
- * A weekly assessment is written by the physio ("submitted") and then read by the Head
- * Physio ("reviewed"). Both are written up; only the second has been seen. A week with no
- * assessment at all is the only one that is actually outstanding, which is what the picker
- * exists to point at.
- */
-const WEEK_STATES = {
-  none: { label: "Not written", icon: null, cls: "border-slate-200 text-slate-600 hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700" },
-  submitted: { label: "Written", icon: Check, cls: "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100" },
-  reviewed: { label: "Reviewed", icon: CheckCircle2, cls: "border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100" },
-};
-
 // In pipeline order, earliest first. "Not Due" exists because bucketOf() has always
 // returned it for patients short of their next milestone, but there was no tab to reach
 // them through — so Total counted five patients while the tabs between them showed one,
@@ -809,35 +794,8 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
   const [search, setSearch] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [filterValue, setFilterValue] = useState(null);
-  const [weeksTarget, setWeeksTarget] = useState(null); // patient whose weeks are being picked
-  // Which of that patient's weeks are already written up, keyed by week number. Fetched
-  // when the picker opens rather than with the list: it is one patient's detail, and
-  // pulling it for every row would be a request per patient to fill a modal nobody may open.
-  const [weekStates, setWeekStates] = useState({ loading: false, byWeek: {} });
-  const [assessmentTarget, setAssessmentTarget] = useState(null); // { leadId, leadName, week } | null
   const [draft, setDraft] = useState(null); // { patient, reason, physio_notes } | null
   const [saving, setSaving] = useState(false);
-
-  // Refetched every time the picker opens, and again after a write-up is saved, so a week
-  // just written flips to Written without closing and reopening the patient.
-  const loadWeekStates = useCallback(async (leadId) => {
-    if (!leadId) return;
-    setWeekStates({ loading: true, byWeek: {} });
-    try {
-      const data = await physioSessions(leadId);
-      const byWeek = {};
-      (data.assessments || []).forEach((a) => {
-        if (a.week_number) byWeek[a.week_number] = a.status || "submitted";
-      });
-      setWeekStates({ loading: false, byWeek });
-    } catch {
-      // The picker still works without this — every week just reads as not written, which
-      // is what it said before any of this existed.
-      setWeekStates({ loading: false, byWeek: {} });
-    }
-  }, []);
-
-  useEffect(() => { loadWeekStates(weeksTarget?.lead_id); }, [weeksTarget, loadWeekStates]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1027,7 +985,9 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
             const badge = STATUS_BADGE[p.review_status];
             return (
               <div key={p.lead_id} className="rounded-xl border border-slate-200 bg-white p-3" data-testid={`physio-review-patient-${p.lead_id}`}>
-                <button type="button" onClick={() => setWeeksTarget(p)} className="flex w-full items-start gap-2.5 text-left">
+                {/* Not a control. Opening a week picker here offered work that is tracked
+                    elsewhere; Send for Review below is what this list actually does. */}
+                <div className="flex w-full items-start gap-2.5 text-left">
                   <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-sky-50 text-xs font-bold text-sky-700">
                     {p.lead_name?.charAt(0)?.toUpperCase() || "?"}
                   </span>
@@ -1064,7 +1024,7 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
                       )}
                     </div>
                   </div>
-                </button>
+                </div>
                 {p.due_for_review && (
                   <Button
                     size="sm"
@@ -1098,13 +1058,9 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
                 {visible.map((p, i) => {
                   const badge = STATUS_BADGE[p.review_status];
                   return (
-                    // The row opens that patient's weeks, exactly as the card does. The
-                    // button in Actions stops the click travelling, or sending a review
-                    // would open the weeks picker behind the form.
                     <tr
                       key={p.lead_id}
-                      onClick={() => setWeeksTarget(p)}
-                      className="cursor-pointer hover:bg-slate-50"
+                      className="hover:bg-slate-50"
                       data-testid={`physio-review-row-${p.lead_id}`}
                     >
                       <td className="px-4 py-3 text-slate-400">{i + 1}</td>
@@ -1166,63 +1122,6 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
         </>
       )}
 
-      {/* Row click opens that patient's weeks — the write-up itself is the same
-          WeeklyAssessmentModal the per-patient detail view uses. */}
-      {weeksTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) setWeeksTarget(null); }}>
-          <div className="w-full max-w-md overflow-hidden rounded-xl bg-white shadow-2xl" data-testid="physio-review-weeks-modal">
-            <div className="flex items-start justify-between gap-3 bg-slate-500 px-5 py-4 text-white">
-              <div className="min-w-0">
-                <h3 className="text-base font-bold">{weeksTarget.lead_name}</h3>
-                <p className="text-xs text-white/80">
-                  {weeksTarget.treatment_days} completed sessions
-                  {weeksTarget.total_sessions ? ` · ${weeksTarget.completed_sessions} of ${weeksTarget.total_sessions} booked days complete` : ""}
-                </p>
-              </div>
-              <button type="button" onClick={() => setWeeksTarget(null)} className="rounded-full p-1.5 text-white/80 hover:bg-white/20"><X className="h-5 w-5" /></button>
-            </div>
-            <div className="p-5">
-              {(weeksTarget.weeks || weeksTarget.package_weeks || 0) === 0 ? (
-                <p className="rounded-lg border border-dashed border-slate-200 px-3 py-6 text-center text-xs text-slate-400">
-                  No treatment weeks booked yet — nothing to write up.
-                </p>
-              ) : (
-                <>
-                  <p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">
-                    {weekStates.loading ? "Weeks" : "Pick a week"}
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {Array.from({ length: weeksTarget.weeks || weeksTarget.package_weeks || 0 }, (_, i) => {
-                      const state = WEEK_STATES[weekStates.byWeek[i + 1]] || WEEK_STATES.none;
-                      return (
-                        <button
-                          key={i}
-                          type="button"
-                          onClick={() => setAssessmentTarget({ leadId: weeksTarget.lead_id, leadName: weeksTarget.lead_name, week: i + 1 })}
-                          className={`rounded-lg border px-3 py-1.5 text-left text-[11px] font-medium transition-all ${state.cls}`}
-                          data-testid={`physio-review-week-${weeksTarget.lead_id}-${i + 1}`}
-                        >
-                          <span className="flex items-center gap-1.5">
-                            {state.icon && <state.icon className="h-3 w-3 shrink-0" />}
-                            Week {i + 1}
-                          </span>
-                          {/* A week already written up said nothing about it, so a
-                              completed patient's picker read as five weeks of work still
-                              to do. The state is the point of this list, not decoration. */}
-                          <span className="mt-0.5 block text-[9px] font-semibold uppercase tracking-wide opacity-70">
-                            {weekStates.loading ? "..." : state.label}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Raising the review — reason and notes travel with it to the Head Physio. */}
       {draft && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-3" onClick={(e) => { if (e.target === e.currentTarget) setDraft(null); }}>
@@ -1270,18 +1169,6 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
             </div>
           </div>
         </div>
-      )}
-
-      {assessmentTarget && (
-        <WeeklyAssessmentModal
-          leadId={assessmentTarget.leadId}
-          week={assessmentTarget.week}
-          physioId={physioId}
-          onClose={() => setAssessmentTarget(null)}
-          // Saved: the picker underneath is still open, so re-read it or the week just
-          // written would sit there reading "Not written".
-          onDone={() => { setAssessmentTarget(null); loadWeekStates(weeksTarget?.lead_id); }}
-        />
       )}
     </div>
   );
@@ -2171,44 +2058,6 @@ function CompleteSessionModal({ session, onClose, onDone }) {
               {submitting ? "Completing..." : "Mark Complete"}
             </Button>
           )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function WeeklyAssessmentModal({ leadId, week, physioId, onClose, onDone }) {
-  const [notes, setNotes] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-
-  const handleSubmit = async () => {
-    if (!notes.trim()) { toast.error("Please add notes"); return; }
-    setSubmitting(true);
-    try {
-      await physioWeeklyAssessment(leadId, week, { jr_physio_notes: notes }, physioId);
-      toast.success("Assessment submitted");
-      onDone();
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || "Failed");
-    }
-    setSubmitting(false);
-  };
-
-  return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="w-full max-w-md rounded-xl bg-white shadow-2xl" data-testid="weekly-assessment-modal">
-        <div className="border-b p-5">
-          <h3 className="text-base font-semibold text-slate-800">Week {week} Assessment</h3>
-        </div>
-        <div className="p-5">
-          <label className="text-xs font-medium text-slate-600 mb-1 block">Your Notes (visible to patient)</label>
-          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={4} placeholder="Progress, observations, patient feedback..." className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm" data-testid="assessment-notes" />
-        </div>
-        <div className="flex justify-end gap-2 border-t p-4">
-          <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
-          <Button size="sm" onClick={handleSubmit} disabled={submitting} className="bg-sky-600 hover:bg-sky-700 text-white" data-testid="assessment-submit">
-            {submitting ? "Submitting..." : "Submit Assessment"}
-          </Button>
         </div>
       </div>
     </div>
