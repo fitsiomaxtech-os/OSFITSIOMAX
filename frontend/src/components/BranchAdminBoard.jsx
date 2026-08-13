@@ -472,7 +472,13 @@ export const BranchAdminBoard = ({ branchId, embedded = false }) => {
 
       {activeView === "consultations" ? (
         <div className="space-y-4" data-testid="branch-consultations-headphysio">
-          <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="branch-consultations-subtabs">
+          {/* Three across on a phone, so the six land as two even rows in the order they
+              are declared. Left to wrap on their own they came out ragged — four rows,
+              one of them holding HEAD PHYSIO CALENDAR alone — because each label is a
+              different width. A grid ignores the widths and the icon moves above the
+              label so a third of the screen is enough to read it. From sm up nothing
+              changes: one flex row of full-size pills. */}
+          <div className="grid auto-rows-fr grid-cols-3 gap-1 rounded-lg border border-slate-200 bg-white p-1 sm:flex sm:flex-wrap sm:gap-2" data-testid="branch-consultations-subtabs">
             {MANAGEMENT_SUB_TABS.map((t) => {
               const Icon = t.icon;
               return (
@@ -480,10 +486,10 @@ export const BranchAdminBoard = ({ branchId, embedded = false }) => {
                   key={t.key}
                   type="button"
                   onClick={() => setConsultationsSubTab(t.key)}
-                  className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition ${consultationsSubTab === t.key ? "bg-sky-50 text-sky-600" : "text-slate-600 hover:bg-slate-50"}`}
+                  className={`flex min-w-0 flex-col items-center justify-center gap-1 rounded-md px-1 py-2 text-center text-[10px] font-semibold leading-tight transition sm:inline-flex sm:shrink-0 sm:flex-row sm:gap-2 sm:whitespace-nowrap sm:px-3 sm:text-sm sm:font-medium ${consultationsSubTab === t.key ? "bg-sky-50 text-sky-600" : "text-slate-600 hover:bg-slate-50"}`}
                   data-testid={`branch-consultations-subtab-${t.key}`}
                 >
-                  <Icon className="h-4 w-4" />{t.label}
+                  <Icon className="h-4 w-4 shrink-0" />{t.label}
                 </button>
               );
             })}
