@@ -2476,10 +2476,16 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           </div>
                         )}
                       </div>
-                      <Button size="sm" className="mt-3 bg-sky-600 text-xs hover:bg-sky-700" onClick={openCollectFeeDraft} data-testid="cons-open-collect-fee">
-                        {alreadyPaid ? "Update Payment" : "Collect Payment"}
-                      </Button>
-                      <div className="mt-2 flex items-center gap-1.5 [justify-content:safe_center] [&>*]:shrink-0">{CancelButton}</div>
+                      {/* One row, like every other stage panel. Collect Payment used to sit
+                          outside the action row, so it hung against the left edge while
+                          Cancel centred on its own line underneath — two buttons on two
+                          rows, neither lining up with the other. */}
+                      <div className="mt-3 flex items-center gap-1.5 [justify-content:safe_center] [&>*]:shrink-0">
+                        <Button size="sm" className={`bg-sky-600 hover:bg-sky-700 ${ACT_BTN}`} onClick={openCollectFeeDraft} data-testid="cons-open-collect-fee">
+                          {alreadyPaid ? "Update Payment" : "Collect Payment"}
+                        </Button>
+                        {CancelButton}
+                      </div>
                     </div>
                   );
                 }
