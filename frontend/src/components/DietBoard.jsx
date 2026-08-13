@@ -1,9 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  Calendar,
-  Check,
-  ChevronLeft,
   ChevronRight,
   RefreshCw,
   Salad,
@@ -15,8 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
-import { DateFilterPopover } from "@/components/DateFilterPopover";
-import { dietCalendar, dietConsultations, dietPatients, dietSessions, dietCompleteDay, saveDietConsultationReport } from "@/lib/api";
+import { dietConsultations, dietPatients, dietSessions, saveDietConsultationReport } from "@/lib/api";
 import { to12h } from "@/lib/time";
 
 /**
@@ -39,25 +35,18 @@ import { to12h } from "@/lib/time";
  *   miscounted as physio treatment (see the module docstring in backend/routers/v3_diet.py).
  */
 
-const isoOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-const shiftIso = (iso, days) => { const d = new Date(`${iso}T00:00:00`); d.setDate(d.getDate() + days); return isoOf(d); };
-const weekDatesFor = (iso) => {
-  const sunday = shiftIso(iso, -new Date(`${iso}T00:00:00`).getDay());
-  return Array.from({ length: 7 }, (_, i) => shiftIso(sunday, i));
-};
-const DAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"];
 const fmtDate = (iso) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}` : "—");
 
-// One Refresh per tab, wired to that tab's own loader. Orange and icon-only, the same
-// button every other Master View carries — it is the one control that acts rather than
-// filters, so it should not read as another filter chip.
+// One Refresh per tab, wired to that tab's own loader. Icon-only and grey — it is the one
+// control that acts rather than filters, so it should not read as another filter chip, but
+// it is not the loudest thing on the board either.
 const RefreshBtn = ({ onClick, busy, testid }) => (
   <Button
     onClick={onClick}
     disabled={busy}
     title="Refresh"
     aria-label="Refresh"
-    className="h-10 w-10 shrink-0 bg-orange-500 p-0 text-white hover:bg-orange-600"
+    className="h-10 w-10 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
     data-testid={testid}
   >
     <RefreshCw className={`h-4 w-4 ${busy ? "animate-spin" : ""}`} />
@@ -66,7 +55,6 @@ const RefreshBtn = ({ onClick, busy, testid }) => (
 
 const VIEW_TABS = [
   { key: "consultations", label: "Consultations", icon: Stethoscope },
-  { key: "checkins", label: "Check-ins", icon: Salad },
   { key: "patients", label: "Patients", icon: Users },
 ];
 
@@ -89,8 +77,11 @@ const StatTile = ({ label, value, color = "#64748b", onClick, active, testid }) 
       }`}
       style={active ? { borderColor: color, backgroundColor: `${color}14` } : undefined}
     >
+      {/* Two lines' worth of height on a phone whether the label needs it or not: "New
+          Consultation" wraps where "All" and "Completed" do not, and without this its
+          number would sit a line lower than its neighbours'. Desktop truncates instead. */}
       <span
-        className="block break-words text-[9px] font-bold uppercase leading-[1.15] sm:truncate sm:text-xs sm:tracking-wider"
+        className="block min-h-[2.3em] break-words text-[9px] font-bold uppercase leading-[1.15] sm:min-h-0 sm:truncate sm:text-xs sm:tracking-wider"
         style={{ color }}
         title={label}
       >
@@ -109,9 +100,8 @@ const TILE_COLORS = { referred: "#0ea5e9", waiting: "#f59e0b", booked: "#10b981"
 export const DietBoard = ({ coachId } = {}) => {
   const [activeTab, setActiveTab] = useState("consultations");
   const [consultCount, setConsultCount] = useState(0);
-  const [checkinCount, setCheckinCount] = useState(0);
   const [patientsCount, setPatientsCount] = useState(0);
-  const badgeFor = { consultations: consultCount, checkins: checkinCount, patients: patientsCount };
+  const badgeFor = { consultations: consultCount, patients: patientsCount };
 
   const [toolbarSlot, setToolbarSlot] = useState(null);
   const slotFor = (key) => (activeTab === key ? toolbarSlot : null);
@@ -154,9 +144,6 @@ export const DietBoard = ({ coachId } = {}) => {
 
       <div style={{ display: activeTab === "consultations" ? "block" : "none" }}>
         <ConsultationsTab coachId={coachId} onCountChange={setConsultCount} toolbarSlot={slotFor("consultations")} />
-      </div>
-      <div style={{ display: activeTab === "checkins" ? "block" : "none" }}>
-        <CheckinsTab coachId={coachId} onCountChange={setCheckinCount} toolbarSlot={slotFor("checkins")} />
       </div>
       <div style={{ display: activeTab === "patients" ? "block" : "none" }}>
         <PatientsTab coachId={coachId} onCountChange={setPatientsCount} toolbarSlot={slotFor("patients")} />
@@ -210,11 +197,11 @@ function ConsultationsTab({ coachId, onCountChange, toolbarSlot }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState("waiting");
+  const [filter, setFilter] = useState("pending");
   const [reportFor, setReportFor] = useState(null); // the patient whose report is open
 
   // A callback rather than an inline effect, so the toolbar's Refresh has something to
-  // call. The other two tabs were already shaped this way.
+  // call. The Patients tab was already shaped this way.
   const load = useCallback(async () => {
     setLoading(true);
     try { setRows((await dietConsultations(coachId)).patients || []); }
@@ -224,18 +211,20 @@ function ConsultationsTab({ coachId, onCountChange, toolbarSlot }) {
 
   useEffect(() => { load(); }, [load]);
 
-  // Keyed on whether a Diet Consultation is actually BOOKED, not on whether a coach is
-  // named against the patient. Diet is a consultation vertical: until the branch has put
-  // the patient in a slot there is nothing for the coach to turn up to, and a queue that
-  // counted a bare coach assignment as "seen" would empty itself before anyone was seen.
-  const waiting = rows.filter((r) => !r.booked);
-  const seen = rows.filter((r) => r.booked);
+  // Completed means the coach has written the consultation up, not that a slot was booked.
+  // A consultation booked for next week has not happened, and a card counting it as done
+  // would say so on the day it was booked. The written report is also what the patient
+  // reads in their own portal, so it is the point at which the coach's work exists.
+  //
+  // The two split the list between them, so New Consultation + Completed is always All.
+  const pending = rows.filter((r) => !r.diet_consultation_report);
+  const done = rows.filter((r) => r.diet_consultation_report);
 
-  // The badge counts who is still waiting, so it falls to zero as the coach works
-  // through them rather than holding at the referral total.
-  useEffect(() => { onCountChange?.(waiting.length); }, [waiting.length, onCountChange]);
+  // The badge counts outstanding work, so it falls to zero as the coach writes them up
+  // rather than holding at the referral total.
+  useEffect(() => { onCountChange?.(pending.length); }, [pending.length, onCountChange]);
 
-  const visible = (filter === "seen" ? seen : filter === "all" ? rows : waiting)
+  const visible = (filter === "done" ? done : filter === "all" ? rows : pending)
     .filter((r) => {
       if (!search) return true;
       const q = search.toLowerCase();
@@ -257,9 +246,9 @@ function ConsultationsTab({ coachId, onCountChange, toolbarSlot }) {
       {toolbarSlot ? createPortal(toolbar, toolbarSlot) : toolbar}
 
       <div className="mb-4 grid grid-cols-3 gap-2 sm:gap-3">
-        <StatTile label="Referred" value={rows.length} color={TILE_COLORS.referred} onClick={() => setFilter("all")} active={filter === "all"} testid="diet-consult-stat-all" />
-        <StatTile label="Waiting" value={waiting.length} color={TILE_COLORS.waiting} onClick={() => setFilter("waiting")} active={filter === "waiting"} testid="diet-consult-stat-waiting" />
-        <StatTile label="Booked" value={seen.length} color={TILE_COLORS.booked} onClick={() => setFilter("seen")} active={filter === "seen"} testid="diet-consult-stat-seen" />
+        <StatTile label="All" value={rows.length} color={TILE_COLORS.referred} onClick={() => setFilter("all")} active={filter === "all"} testid="diet-consult-stat-all" />
+        <StatTile label="New Consultation" value={pending.length} color={TILE_COLORS.waiting} onClick={() => setFilter("pending")} active={filter === "pending"} testid="diet-consult-stat-waiting" />
+        <StatTile label="Completed" value={done.length} color={TILE_COLORS.booked} onClick={() => setFilter("done")} active={filter === "done"} testid="diet-consult-stat-seen" />
       </div>
 
 
@@ -269,9 +258,9 @@ function ConsultationsTab({ coachId, onCountChange, toolbarSlot }) {
         <div className="py-16 text-center">
           <Stethoscope className="mx-auto mb-3 h-10 w-10 text-slate-200" />
           <p className="text-sm text-slate-400">
-            {filter === "seen"
-              ? "No Diet Consultations booked yet."
-              : "Nobody is waiting. The branch books a Diet Consultation from the patient's card in Consultations."}
+            {filter === "done"
+              ? "Nothing written up yet. A consultation counts as completed once its report is saved."
+              : "Nothing outstanding. The branch books a Diet Consultation from the patient's card in Consultations."}
           </p>
         </div>
       ) : (
@@ -483,255 +472,6 @@ const ConsultationList = ({ rows, onOpen }) => (
     </div>
   </>
 );
-
-function CheckinsTab({ coachId, onCountChange, toolbarSlot }) {
-  const todayIso = isoOf(new Date());
-  const [days, setDays] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [search, setSearch] = useState("");
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [selectedDate, setSelectedDate] = useState(todayIso);
-  const [weekAnchor, setWeekAnchor] = useState(todayIso);
-  const [rowFilter, setRowFilter] = useState("all");
-  const [completing, setCompleting] = useState(null); // the day being written up
-  const [filterValue, setFilterValue] = useState(() => {
-    const from = new Date(); from.setHours(0, 0, 0, 0);
-    const to = new Date(); to.setHours(23, 59, 59, 999);
-    return { key: "today", label: "Today", from, to };
-  });
-
-  const stripDates = useMemo(() => weekDatesFor(weekAnchor), [weekAnchor]);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      // One request per month the visible week touches — a Sun-Sat week can straddle two.
-      const months = [...new Set(stripDates.map((d) => d.slice(0, 7)))];
-      const results = await Promise.all(
-        months.map((m) => dietCalendar(Number(m.slice(5, 7)), Number(m.slice(0, 4)), coachId)),
-      );
-      setDays(results.flatMap((r) => r.days || []));
-    } catch { /* silent */ }
-    setLoading(false);
-  }, [coachId, stripDates.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => { load(); }, [load]);
-
-  const countFor = (date) => days.filter((d) => (d.slot_time || "").startsWith(date)).length;
-
-  const inRange = useCallback((iso) => {
-    if (!filterValue) return true;
-    return iso >= isoOf(filterValue.from) && iso <= isoOf(filterValue.to);
-  }, [filterValue]);
-
-  const stats = useMemo(() => {
-    const rows = days.filter((d) => inRange((d.slot_time || "").slice(0, 10)));
-    const completed = rows.filter((d) => d.status === "completed").length;
-    return { total: rows.length, completed, pending: rows.length - completed };
-  }, [days, inRange]);
-
-  // The badge counts what is still outstanding, so it falls to zero as the coach works
-  // through the day rather than holding at the day's total.
-  useEffect(() => { onCountChange?.(stats.pending); }, [stats.pending, onCountChange]);
-
-  const visible = useMemo(() => {
-    let rows = days.filter((d) => (d.slot_time || "").startsWith(selectedDate));
-    if (rowFilter === "completed") rows = rows.filter((d) => d.status === "completed");
-    else if (rowFilter === "pending") rows = rows.filter((d) => d.status !== "completed");
-    if (search) {
-      const q = search.toLowerCase();
-      rows = rows.filter((d) => (d.lead_name || "").toLowerCase().includes(q));
-    }
-    // Outstanding first, done last — the same ordering the treatment day list uses, so a
-    // finished visit never sits above one still to do.
-    const done = rows.filter((d) => d.status === "completed");
-    const todo = rows.filter((d) => d.status !== "completed");
-    const bySlot = (a, b) => (a.slot_time || "").localeCompare(b.slot_time || "");
-    return [...todo.sort(bySlot), ...done.sort(bySlot)];
-  }, [days, selectedDate, rowFilter, search]);
-
-  const toolbar = (
-    <div className="flex flex-wrap items-center gap-2" data-testid="diet-checkins-toolbar">
-      {searchOpen ? (
-        <div className="relative w-full sm:w-[240px]">
-          <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-          <Input autoFocus value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search patient..." className="h-10 pl-9 pr-9" data-testid="diet-search" />
-          <button type="button" onClick={() => { setSearchOpen(false); setSearch(""); }} className="absolute right-2 top-2 rounded p-1 text-slate-400 hover:bg-slate-100">
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-      ) : (
-        <button type="button" onClick={() => setSearchOpen(true)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 hover:bg-slate-50" data-testid="diet-search-open">
-          <Search className="h-4 w-4" />
-        </button>
-      )}
-      <DateFilterPopover
-        value={filterValue}
-        onChange={(next) => {
-          setFilterValue(next);
-          // A preset covering a single day moves the week strip there too — there is no
-          // ambiguity about which day was meant.
-          if (next && isoOf(next.from) === isoOf(next.to)) { setSelectedDate(isoOf(next.from)); setWeekAnchor(isoOf(next.from)); }
-        }}
-        testid="diet-date-filter"
-        centered
-      />
-      <RefreshBtn onClick={load} busy={loading} testid="diet-checkins-refresh" />
-    </div>
-  );
-
-  return (
-    <div data-testid="diet-checkins-tab">
-      {toolbarSlot ? createPortal(toolbar, toolbarSlot) : toolbar}
-
-      <div className="mb-4" data-testid="diet-summary">
-        <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">{filterValue ? filterValue.label : "Overall"}</p>
-        <div className="grid grid-cols-3 gap-2 sm:gap-3">
-          <StatTile label="Check-ins" value={stats.total} color={TILE_COLORS.referred} onClick={() => setRowFilter("all")} active={rowFilter === "all"} testid="diet-stat-total" />
-          <StatTile label="Completed" value={stats.completed} color={TILE_COLORS.booked} onClick={() => setRowFilter(rowFilter === "completed" ? "all" : "completed")} active={rowFilter === "completed"} testid="diet-stat-completed" />
-          <StatTile label="Pending" value={stats.pending} color={TILE_COLORS.waiting} onClick={() => setRowFilter(rowFilter === "pending" ? "all" : "pending")} active={rowFilter === "pending"} testid="diet-stat-pending" />
-        </div>
-      </div>
-
-      {/* Arrows beside the strip, centred against its full height — they move the row of
-          days, so sitting in the month line put them above the thing they act on. Same
-          shape as the Physio treatment strip, which is the same picker over a different
-          day's work. */}
-      <div className="mb-4 flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-2" data-testid="diet-week-strip">
-        <button type="button" onClick={() => setWeekAnchor((a) => shiftIso(a, -7))} className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-100" aria-label="Previous week" data-testid="diet-week-prev">
-          <ChevronLeft className="h-4 w-4" />
-        </button>
-
-        <div className="min-w-0 flex-1">
-          <p className="mb-2 text-center text-xs font-semibold text-slate-600">
-            {new Date(`${weekAnchor}T00:00:00`).toLocaleDateString("en-US", { month: "long", year: "numeric" })}
-          </p>
-          <div className="grid grid-cols-7 gap-1">
-          {stripDates.map((date, i) => {
-            const isSelected = date === selectedDate;
-            const n = countFor(date);
-            return (
-              <button
-                key={date}
-                type="button"
-                onClick={() => setSelectedDate(date)}
-                className={`rounded-lg py-2 text-center transition ${isSelected ? "bg-emerald-600 text-white" : "hover:bg-slate-50"}`}
-                data-testid={`diet-strip-${date}`}
-              >
-                <p className={`text-[10px] font-medium ${isSelected ? "text-white/80" : "text-slate-400"}`}>{DAY_LETTERS[i]}</p>
-                <p className="text-sm font-bold">{parseInt(date.split("-")[2], 10)}</p>
-                <p className={`text-[10px] ${isSelected ? "text-white/80" : "text-slate-400"}`}>{n || ""}</p>
-              </button>
-            );
-          })}
-          </div>
-        </div>
-
-        <button type="button" onClick={() => setWeekAnchor((a) => shiftIso(a, 7))} className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-100" aria-label="Next week" data-testid="diet-week-next">
-          <ChevronRight className="h-4 w-4" />
-        </button>
-      </div>
-
-      {visible.length === 0 && !loading ? (
-        <div className="py-16 text-center">
-          <Salad className="mx-auto mb-3 h-10 w-10 text-slate-200" />
-          <p className="text-sm text-slate-400">No check-ins on this day.</p>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {visible.map((d) => {
-            const done = d.status === "completed";
-            return (
-              <div key={d.id} className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border p-3 ${done ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-white"}`} data-testid={`diet-day-${d.id}`}>
-                <div className="flex min-w-0 items-center gap-3">
-                  <span className={`shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-bold ${done ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>
-                    {to12h((d.slot_time || "").slice(11, 16))}
-                  </span>
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-bold text-slate-800">{d.lead_name}</p>
-                    <p className="text-[11px] text-slate-500">Day {d.day_number} of {d.total_days}{d.weight_kg != null ? ` · ${d.weight_kg} kg` : ""}</p>
-                  </div>
-                </div>
-                {done ? (
-                  <span className="shrink-0 rounded-md bg-emerald-100 px-2.5 py-1 text-[11px] font-bold text-emerald-700">DONE</span>
-                ) : (
-                  <Button size="sm" className="shrink-0 bg-emerald-600 text-xs text-white hover:bg-emerald-700" onClick={() => setCompleting(d)} data-testid={`diet-complete-${d.id}`}>
-                    <Check className="mr-1 h-3.5 w-3.5" /> Complete
-                  </Button>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {completing && (
-        <CompleteDayModal day={completing} onClose={() => setCompleting(null)} onDone={() => { setCompleting(null); load(); }} />
-      )}
-    </div>
-  );
-}
-
-/** Writing up a check-in: how it went, and the weight, which is the one number a diet
- *  plan is actually steered by. Both optional — a coach who only ticks the visit off
- *  should not be blocked, and a forced field would just collect junk. */
-const CompleteDayModal = ({ day, onClose, onDone }) => {
-  const [remarks, setRemarks] = useState("");
-  const [weight, setWeight] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  const submit = async () => {
-    setSaving(true);
-    try {
-      await dietCompleteDay(day.id, {
-        coach_remarks: remarks,
-        weight_kg: weight === "" ? null : Number(weight),
-      });
-      toast.success("Check-in completed");
-      onDone();
-    } catch (e) {
-      toast.error(e?.response?.data?.detail || "Could not complete the check-in");
-    }
-    setSaving(false);
-  };
-
-  return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-3" data-testid="diet-complete-modal">
-      <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
-        <div className="flex items-center justify-between bg-emerald-600 px-5 py-4 text-white">
-          <div className="min-w-0">
-            <p className="truncate text-lg font-bold">{day.lead_name}</p>
-            <p className="text-xs text-white/80">Day {day.day_number} of {day.total_days}</p>
-          </div>
-          <button onClick={onClose} className="rounded-lg p-2 hover:bg-white/10"><X className="h-4 w-4" /></button>
-        </div>
-        <div className="space-y-4 p-5">
-          <div>
-            <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">Weight (kg)</label>
-            <Input type="number" inputMode="decimal" value={weight} onChange={(e) => setWeight(e.target.value)} placeholder="e.g. 74.5" data-testid="diet-weight" />
-          </div>
-          <div>
-            <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">Notes</label>
-            <textarea
-              rows={4}
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-400"
-              placeholder="How is the patient getting on with the plan?"
-              value={remarks}
-              onChange={(e) => setRemarks(e.target.value)}
-              data-testid="diet-remarks"
-            />
-          </div>
-        </div>
-        <div className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-3.5">
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button className="bg-emerald-600 text-white hover:bg-emerald-700" onClick={submit} disabled={saving} data-testid="diet-complete-submit">
-            {saving ? "Saving..." : "Complete Check-in"}
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-};
 
 function PatientsTab({ coachId, onCountChange, toolbarSlot }) {
   const [patients, setPatients] = useState([]);
