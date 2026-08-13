@@ -923,8 +923,72 @@ function WeeklyReviewModal({ patient, week, onClose, onDone }) {
   );
 }
 
+/**
+ * What the physio wrote on each treatment day, in day order.
+ *
+ * Every booked day is listed, not only the ones with a report, because the gap is the
+ * point: a completed day with nothing written is a day the Head Physio needs to chase,
+ * and a list of only the written ones hides exactly that.
+ *
+ * completed_by is blank on days finished before it started being recorded — shown as
+ * nothing rather than guessed at.
+ */
+function DayReports({ sessions }) {
+  if (!sessions.length) {
+    return <p className="py-8 text-center text-xs text-slate-400">No treatment days booked yet</p>;
+  }
+  return (
+    <div className="space-y-2" data-testid="hp-day-reports">
+      {sessions.map((s) => {
+        const done = s.status === "completed";
+        const remark = (s.jr_physio_remarks || "").trim();
+        return (
+          <div
+            key={s.id}
+            className={`rounded-lg border p-3 ${remark ? "border-emerald-200 bg-emerald-50/60" : done ? "border-amber-200 bg-amber-50/60" : "border-slate-200 bg-white"}`}
+            data-testid={`hp-day-report-${s.id}`}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-slate-700">
+                  Day {s.session_number}{s.total_sessions ? ` of ${s.total_sessions}` : ""}
+                  {s.week_number ? ` · Week ${s.week_number}` : ""}
+                </p>
+                <p className="text-[10px] text-slate-400">
+                  {s.slot_time ? `${s.slot_time.split("T")[0]} at ${slotTo12h(s.slot_time)}` : "—"}
+                </p>
+              </div>
+              <span className={`shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[9px] font-semibold ${
+                remark ? "bg-emerald-100 text-emerald-700" : done ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500"
+              }`}>
+                {remark ? "Reported" : done ? "No report" : "Upcoming"}
+              </span>
+            </div>
+            {remark ? (
+              <>
+                <p className="mt-2 whitespace-pre-wrap text-xs text-slate-700">{remark}</p>
+                {(s.completed_by || s.completed_at) && (
+                  <p className="mt-1 text-[10px] text-slate-400">
+                    {s.completed_by ? `— ${s.completed_by}` : ""}
+                    {s.completed_at ? `${s.completed_by ? " · " : ""}${String(s.completed_at).slice(0, 10)}` : ""}
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="mt-2 text-[11px] text-slate-400">
+                {done ? "Completed without a written report." : "Not treated yet."}
+              </p>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function PatientSessionsModal({ patient, onClose }) {
   const [sessions, setSessions] = useState([]);
+  const [tab, setTab] = useState("sessions");
 
   useEffect(() => {
     (async () => {
@@ -939,11 +1003,39 @@ function PatientSessionsModal({ patient, onClose }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="w-full max-w-2xl rounded-xl bg-white shadow-2xl max-h-[80vh] flex flex-col">
         <div className="flex items-center justify-between border-b p-5">
-          <h3 className="text-base font-semibold text-slate-800">{patient.lead_name} — Sessions</h3>
+          <h3 className="text-base font-semibold text-slate-800">{patient.lead_name}</h3>
           <button type="button" onClick={onClose} className="p-1 rounded hover:bg-slate-100"><X className="h-5 w-5 text-slate-400" /></button>
         </div>
+
+        {/* Sessions is the schedule — which days exist and which are done. Day Reports is
+            what the physio actually wrote on each of them, which is the thing a Head
+            Physio opens this for and which used to be a grey sub-line inside the schedule. */}
+        <div className="flex shrink-0 gap-1 border-b border-slate-200 px-5 pt-2" data-testid="hp-patient-tabs">
+          {[
+            { key: "sessions", label: "Sessions" },
+            { key: "reports", label: "Day Reports", count: sessions.filter((s) => (s.jr_physio_remarks || "").trim()).length },
+          ].map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setTab(t.key)}
+              className={`shrink-0 whitespace-nowrap rounded-t-md px-3 py-2 text-xs font-medium transition ${
+                tab === t.key ? "border-b-2 border-sky-500 text-sky-700" : "border-b-2 border-transparent text-slate-400 hover:text-slate-600"
+              }`}
+              data-testid={`hp-patient-tab-${t.key}`}
+            >
+              {t.label}
+              {t.key === "reports" && sessions.length > 0 && (
+                <span className="ml-1.5 text-[10px] text-slate-400">{t.count}/{sessions.length}</span>
+              )}
+            </button>
+          ))}
+        </div>
+
         <div className="flex-1 overflow-y-auto p-5">
-          {sessions.length === 0 ? (
+          {tab === "reports" ? (
+            <DayReports sessions={sessions} />
+          ) : sessions.length === 0 ? (
             <p className="text-xs text-slate-400 text-center py-8">No sessions assigned yet</p>
           ) : (
             <div className="space-y-2">

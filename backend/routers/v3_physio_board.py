@@ -337,6 +337,10 @@ async def physio_complete_session(
         {"$set": {
             "status": "completed",
             "jr_physio_remarks": payload.remarks,
+            # Who wrote the day's report. It was only ever in the activity log's prose,
+            # which is not something the Head Physio's day-report view can read a name out
+            # of. Rows completed before this stay blank rather than guessing.
+            "completed_by": user.full_name,
             "completed_at": now_iso(),
             "updated_at": now_iso(),
         }},
