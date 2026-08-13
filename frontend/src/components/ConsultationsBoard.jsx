@@ -116,12 +116,9 @@ const receiptRows = (r) => [
 const receiptPopupRows = (r) => [
   [isSchedule(r) ? "Reference No." : "Transaction ID", r.receiptNo],
   ["Date and Time", r.dateLabel],
-  // Paired rather than one line each: patient and patient number are one identity, and a
-  // phone without the mode it was paid by is half the answer to "which payment was this".
-  // Halves the rows without losing a field.
-  ["Patient Name With Patient No", r.patientNo && r.patientNo !== "—" ? `${r.patient} (${r.patientNo})` : r.patient],
-  ["Phone with Payment Mode", [r.phone, r.modeLabel].filter(Boolean).join("  |  ")],
-  ["Branch Name With Branch ID", r.branch ? (r.branchCode ? `${r.branch} (${r.branchCode})` : r.branch) : ""],
+  ["Patient Name", r.patient],
+  ["Phone Number", r.phone],
+  [isSchedule(r) ? "Scheduled For" : "Paid For", r.paidFor],
 ].filter(([, v]) => v);
 
 const receiptHtml = (r) => `<!doctype html><html><head><meta charset="utf-8">
@@ -449,7 +446,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     getBranches()
       .then((rows) => {
         if (!alive) return;
-        setBranchNames(Object.fromEntries((rows || []).map((b) => [b.id, { name: b.branch_name, code: b.code || "" }])));
+        setBranchNames(Object.fromEntries((rows || []).map((b) => [b.id, b.branch_name])));
       })
       .catch(() => {});
     return () => { alive = false; };
@@ -475,8 +472,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       patient: lead.name || "—",
       patientNo: lead.patient_number || "—",
       phone: lead.phone || "—",
-      branch: lead.branch_name || branchNames[lead.branch_id]?.name || "",
-      branchCode: branchNames[lead.branch_id]?.code || "",
+      branch: lead.branch_name || branchNames[lead.branch_id] || "",
       paidFor,
       packageName: packageName || "",
       sessionsCovered: sessionsCovered || "",
@@ -4816,44 +4812,39 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 // the amount was being entered. 35% off, not 35.00%; 12.5% stays 12.5%.
                 const pct = round2((off / billed) * 100);
                 return (
-                  <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 px-3 py-4 sm:px-4" data-testid="cons-receipt-amount-split">
-                    {/* items-start, so the three columns start on one line whichever of
-                        them wraps to two — centring them made the figures sit at three
-                        different heights. */}
-                    <div className="grid grid-cols-3 items-start gap-2 text-center sm:gap-3">
-                      <div className="flex flex-col">
-                        <p className="text-xs font-medium leading-snug text-slate-500">Total Amount</p>
-                        <p className="mt-1.5 text-lg font-extrabold text-slate-800 sm:text-xl">Rs.{billed}</p>
+                  <div className="rounded-xl border-2 border-emerald-200 bg-emerald-50 px-4 py-4" data-testid="cons-receipt-amount-split">
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                      <div>
+                        <p className="text-[11px] font-medium text-slate-500">Total Amount</p>
+                        <p className="mt-1 text-xl font-extrabold text-slate-700">Rs.{billed}</p>
                       </div>
-                      <div className="flex flex-col">
-                        {/* The percentage stays on its own line under the figure, not in
-                            the heading. A heading carrying a number has to be kept in step
-                            with the value beneath it by hand — the mock itself read "25%
-                            Discount" above "(32% off)". One place, derived. */}
-                        <p className="text-xs font-semibold leading-snug text-amber-600">Discount Amount</p>
-                        <p className="mt-1.5 text-lg font-extrabold text-amber-600 sm:text-xl" data-testid="cons-receipt-discount">−Rs.{off}</p>
-                        <p className="mt-0.5 text-[11px] font-medium text-amber-600">({pct}% off)</p>
+                      <div>
+                        {/* The percentage sits in the heading rather than on a third line —
+                            "32% Discount" is one fact, and splitting it made the middle
+                            column a line taller than the two either side of it. */}
+                        <p className="text-[11px] font-medium text-amber-600">{pct}% Discount</p>
+                        <p className="mt-1 text-xl font-extrabold text-amber-700" data-testid="cons-receipt-discount">−Rs.{off}</p>
                       </div>
-                      <div className="flex flex-col">
-                        <p className="text-xs font-semibold leading-snug text-emerald-700">Collected Amount</p>
-                        <p className="mt-1.5 text-lg font-extrabold text-emerald-700 sm:text-xl" data-testid="cons-receipt-amount">Rs.{receipt.amount}</p>
-                        <p className="mt-0.5 text-[11px] font-medium text-emerald-700">{receipt.modeLabel}</p>
+                      <div>
+                        <p className="text-[11px] font-medium text-emerald-600">Paid Amount</p>
+                        <p className="mt-1 text-xl font-extrabold text-emerald-700" data-testid="cons-receipt-amount">Rs.{receipt.amount}</p>
+                        <p className="text-[10px] font-semibold text-emerald-600">{receipt.modeLabel}</p>
                       </div>
                     </div>
                   </div>
                 );
               })()}
 
-              {/* Ruled between rows rather than under each: with five rows the trailing
-                  border drew a line under the last one with nothing beneath it.
-                  flex-wrap with the value on ml-auto, so a long pair like "Patient Name
-                  With Patient No" keeps its value right-aligned on the next line instead
-                  of squeezing both into a column each. */}
-              <dl className="mt-5 divide-y divide-slate-100 text-sm">
+              <dl className="mt-5 space-y-2 text-sm">
                 {receiptPopupRows(receipt).map(([k, v]) => (
-                  <div key={k} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-3.5">
+                  <div key={k} className="flex items-start justify-between gap-3 border-b border-slate-100 pb-2">
                     <dt className="text-slate-500">{k}</dt>
-                    <dd className="ml-auto text-right font-semibold text-slate-800">{v}</dd>
+                    <dd className={`text-right font-semibold ${
+                      k === "Amount Paid" ? "text-emerald-700"
+                      : k === "Total Payable" ? "text-amber-700"
+                      : k === "Discount" ? "text-rose-600"
+                      : k === "Balance Due" ? "text-rose-600"
+                      : "text-slate-700"}`}>{v}</dd>
                   </div>
                 ))}
               </dl>
