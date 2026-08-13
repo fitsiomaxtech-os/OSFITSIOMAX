@@ -12,9 +12,6 @@ import { PaymentPaidBoard } from "@/components/branch/PaymentPaidBoard";
 import { PaymentUnpaidBoard } from "@/components/branch/PaymentUnpaidBoard";
 import { StorePaymentBoard } from "@/components/branch/StorePaymentBoard";
 
-// `tone` is carried only by the two settled/unsettled tabs — green for money fully in,
-// rose for none of it in, the same colours the OS uses for those states everywhere else,
-// so the pair reads as a pair. Every other tab keeps the shared sky styling.
 // `tone` is carried only by the settled/unsettled pair and by Store Payment — green for
 // money fully in, rose for none of it in, violet for the Fitsiomax Store, the same colours
 // the OS uses for those things elsewhere. Every other tab keeps the shared sky styling.
@@ -83,9 +80,9 @@ const PaymentModeBadge = ({ mode }) => (
  * Accountant Manage — Super Admin's Branch Management > Accountant Management >
  * Accountant Manage, and the same view reused read-only-by-nature (it's all
  * reporting, nothing editable) as Branch Admin's own "Accountant Manage" tab.
- * Seven sub-tabs: Total Revenue, Consultation Collections, Session Collections,
- * Outstanding Amount, Payment Schedules, Payment Paid and Payment Unpaid — all
- * sourced from the same finance/revenue-overview payload.
+ * Nine sub-tabs: Total Revenue, Consultation Collections, Session Collections, Diet
+ * Collections, Outstanding Amount, Payment Schedules, Payment Paid, Payment Unpaid and
+ * Store Payment — all sourced from the same finance/revenue-overview payload.
  */
 export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
   const [branches, setBranches] = useState([]);
@@ -192,12 +189,19 @@ export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
         </div>
       )}
 
-      <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="accountant-manage-subtabs">
+      {/* Three across on a phone, which lands the nine as three even rows in declaration
+          order and keeps Payment Paid, Payment Unpaid and Store Payment together on the
+          last. Wrapping put them wherever the labels happened to run out of room, four
+          ragged rows deep. Labels wrap inside their cell rather than truncating — these
+          names differ at the end ("Consultation Collections" against "Session
+          Collections"), so an ellipsis would cut off the half that tells them apart.
+          Unchanged from sm up. */}
+      <div className="grid auto-rows-fr grid-cols-3 gap-1 rounded-lg border border-slate-200 bg-white p-1 sm:flex sm:flex-wrap sm:gap-2" data-testid="accountant-manage-subtabs">
         {SUB_TABS.map((t) => (
           <button
             key={t.key}
             onClick={() => setSubTab(t.key)}
-            className={`rounded-md px-3 py-2 text-sm font-medium transition ${subTabClasses(t, subTab === t.key)}`}
+            className={`min-w-0 rounded-md px-1 py-2 text-center text-[10px] font-semibold leading-tight transition sm:px-3 sm:text-sm sm:font-medium ${subTabClasses(t, subTab === t.key)}`}
             data-testid={`accountant-manage-subtab-${t.key}`}
           >
             {t.label}
