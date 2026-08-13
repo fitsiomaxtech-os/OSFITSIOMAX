@@ -28,6 +28,9 @@ const SUB_TABS = [
   { key: "paid", label: "Payment Paid", tone: "paid" },
   { key: "unpaid", label: "Payment Unpaid", tone: "unpaid" },
   { key: "store", label: "Store Payment", tone: "store" },
+  // Last, so the settled/unsettled/store trio above stays intact — and amber, because
+  // this is the one tab reporting money given away rather than money taken.
+  { key: "discount", label: "Discount Applied", tone: "discount" },
 ];
 
 const subTabClasses = (tab, active) => {
@@ -39,6 +42,9 @@ const subTabClasses = (tab, active) => {
   }
   if (tab.tone === "store") {
     return active ? "bg-violet-600 text-white shadow-sm" : "text-violet-700 hover:bg-violet-50";
+  }
+  if (tab.tone === "discount") {
+    return active ? "bg-amber-600 text-white shadow-sm" : "text-amber-700 hover:bg-amber-50";
   }
   return active ? "bg-sky-50 text-sky-700" : "text-slate-600 hover:bg-slate-50";
 };
@@ -80,9 +86,10 @@ const PaymentModeBadge = ({ mode }) => (
  * Accountant Manage — Super Admin's Branch Management > Accountant Management >
  * Accountant Manage, and the same view reused read-only-by-nature (it's all
  * reporting, nothing editable) as Branch Admin's own "Accountant Manage" tab.
- * Nine sub-tabs: Total Revenue, Consultation Collections, Session Collections, Diet
- * Collections, Outstanding Amount, Payment Schedules, Payment Paid, Payment Unpaid and
- * Store Payment — all sourced from the same finance/revenue-overview payload.
+ * Ten sub-tabs: Total Revenue, Consultation Collections, Session Collections, Diet
+ * Collections, Outstanding Amount, Payment Schedules, Payment Paid, Payment Unpaid,
+ * Store Payment and Discount Applied — all sourced from the same
+ * finance/revenue-overview payload.
  */
 export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
   const [branches, setBranches] = useState([]);
@@ -172,6 +179,27 @@ export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
     [outstanding],
   );
 
+  // Every collection taken below its listed price, biggest concession first. A negative
+  // discount means more than the listed fee was collected, which is the opposite of this
+  // tab, so only positives qualify.
+  const discountedTxns = useMemo(
+    () => transactions
+      .filter((t) => (Number(t.discount) || 0) > 0)
+      .sort((a, b) => (Number(b.discount) || 0) - (Number(a.discount) || 0)),
+    [transactions],
+  );
+
+  const discountTotals = useMemo(() => {
+    const given = discountedTxns.reduce((s, t) => s + (Number(t.discount) || 0), 0);
+    // Against the listed price, not against what was collected: a Rs.200 discount on a
+    // Rs.1000 fee is 20% off, and dividing by the Rs.800 taken would call it 25%.
+    const listed = discountedTxns.reduce(
+      (s, t) => s + (Number(t.original_amount) || (Number(t.gross) || 0) + (Number(t.discount) || 0)),
+      0,
+    );
+    return { given, listed, pct: listed > 0 ? (given / listed) * 100 : 0 };
+  }, [discountedTxns]);
+
   return (
     <div className="space-y-4" data-testid="accountant-manage-tab">
       {!fixedBranchId && (
@@ -258,11 +286,138 @@ export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
         <PaymentUnpaidBoard rows={unpaidClients} onView={setViewingLeadId} />
       ) : subTab === "store" ? (
         <StorePaymentBoard rows={transactions.filter((t) => t.source === "store")} />
+      ) : subTab === "discount" ? (
+        <DiscountAppliedBoard rows={discountedTxns} totals={discountTotals} onView={setViewingLeadId} />
       ) : (
         <PaymentSchedulesBoard rows={schedule} onView={setViewingLeadId} onChanged={load} />
       )}
 
       {viewingLeadId && <ClientHistoryModal leadId={viewingLeadId} onClose={() => setViewingLeadId(null)} onChanged={load} />}
+    </div>
+  );
+};
+
+/**
+ * Discount Applied — every collection settled below its listed price.
+ *
+ * The money here was never owed and never will be: the OS treats a negotiated fee as
+ * settled in full the moment it is confirmed, so none of it appears under Outstanding
+ * Amount. Which means this is the only place the concessions a branch has granted are
+ * countable at all.
+ *
+ * Each row is one confirmed collection, not one client, because the discount was a
+ * decision taken at that moment — rolling a client's two visits together would average
+ * away the one that was actually negotiated.
+ */
+const DiscountAppliedBoard = ({ rows, totals, onView }) => {
+  // Falls back to listed = collected + discount when original_amount is missing, which is
+  // every collection taken before v3_packages began recording the listed price.
+  const listedOf = (tx) => Number(tx.original_amount) || (Number(tx.gross) || 0) + (Number(tx.discount) || 0);
+  const pctOf = (tx) => { const l = listedOf(tx); return l > 0 ? (Number(tx.discount) / l) * 100 : 0; };
+
+  return (
+    <div className="space-y-4" data-testid="accountant-manage-discount">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatTile label="Total Discount" value={fmt(totals.given)} icon={Wallet} color="#d97706" testid="discount-kpi-given" />
+        <StatTile label="Listed Value" value={fmt(totals.listed)} icon={Stethoscope} color="#0284c7" testid="discount-kpi-listed" />
+        <StatTile label="Average Discount" value={`${totals.pct.toFixed(1)}%`} icon={Activity} color="#7c3aed" testid="discount-kpi-pct" />
+        <StatTile label="Discounted Payments" value={rows.length} icon={ShoppingBag} color="#059669" testid="discount-kpi-count" />
+      </div>
+
+      <Card>
+        <CardContent className="p-4">
+          <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Discount Applied</p>
+
+          <div className="space-y-2 md:hidden" data-testid="discount-detail-mobile">
+            {rows.length === 0 ? (
+              <p className="rounded-lg border border-dashed border-slate-200 px-3 py-8 text-center text-sm text-slate-400">No discounted collections yet.</p>
+            ) : rows.map((tx, i) => (
+              <div
+                key={tx.id}
+                role={onView ? "button" : undefined}
+                tabIndex={onView ? 0 : undefined}
+                onClick={() => onView && onView(tx.lead_id)}
+                onKeyDown={(e) => { if (onView && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onView(tx.lead_id); } }}
+                className={`rounded-xl border border-slate-200 bg-white p-3 ${onView ? "cursor-pointer active:bg-slate-50" : ""}`}
+                data-testid={`discount-detail-card-${tx.id}`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold text-slate-800">
+                      <span className="mr-1.5 font-normal text-slate-400">{i + 1}.</span>
+                      {tx.client_name || "Unknown"}
+                    </p>
+                    <p className="truncate text-xs text-slate-500">{tx.phone || "—"}</p>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <p className="text-sm font-bold text-amber-600">−{fmt(tx.discount)}</p>
+                    <p className="text-[11px] text-slate-400">{pctOf(tx).toFixed(1)}% off</p>
+                  </div>
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-slate-100 pt-2 text-[11px] text-slate-500">
+                  <span className="line-through">{fmt(listedOf(tx))}</span>
+                  <span className="font-semibold text-emerald-600">{fmt(tx.gross)}</span>
+                  <span className="capitalize">{tx.source}</span>
+                  <span>{(tx.date || "").slice(0, 10)}</span>
+                  {onView && <Eye className="ml-auto h-3.5 w-3.5 shrink-0 text-slate-300" />}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="hidden overflow-x-auto md:block">
+            <table className="w-full min-w-[56rem] table-fixed border-separate border-spacing-x-0 border-spacing-y-2 text-sm">
+              <thead>
+                <tr>
+                  <th className="w-[4%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">S.No</th>
+                  <th className="w-[16%] px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">Client</th>
+                  <th className="w-[11%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Phone</th>
+                  <th className="w-[10%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Paid For</th>
+                  <th className="w-[10%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Listed Price</th>
+                  <th className="w-[10%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Collected</th>
+                  <th className="w-[10%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Discount</th>
+                  <th className="w-[8%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">%</th>
+                  <th className="w-[9%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Date</th>
+                  <th className="w-[12%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">Branch</th>
+                  <th className="w-[7%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">View</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.length === 0 ? (
+                  <tr><td colSpan={11} className="px-3 py-8 text-center text-sm text-slate-400">No discounted collections yet.</td></tr>
+                ) : rows.map((tx, i) => (
+                  <tr key={tx.id} data-testid={`discount-detail-row-${tx.id}`}>
+                    <td className="rounded-l-[5px] border-y border-l border-slate-200 bg-white px-3 py-2 text-center text-slate-400">{i + 1}</td>
+                    <td className="border-y border-slate-200 bg-white px-3 py-2 font-medium text-slate-800">{tx.client_name || "Unknown"}</td>
+                    <td className="border-y border-slate-200 bg-white px-3 py-2 text-center text-slate-600">{tx.phone || "—"}</td>
+                    <td className="border-y border-slate-200 bg-white px-3 py-2 text-center capitalize text-slate-600">{tx.source}</td>
+                    <td className="border-y border-slate-200 bg-white px-3 py-2 text-center text-slate-500 line-through">{fmt(listedOf(tx))}</td>
+                    <td className="border-y border-slate-200 bg-white px-3 py-2 text-center font-semibold text-emerald-600">{fmt(tx.gross)}</td>
+                    <td className="border-y border-slate-200 bg-white px-3 py-2 text-center font-semibold text-amber-600">−{fmt(tx.discount)}</td>
+                    <td className="border-y border-slate-200 bg-white px-3 py-2 text-center">
+                      <span className="inline-flex items-center rounded-[5px] border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+                        {pctOf(tx).toFixed(1)}%
+                      </span>
+                    </td>
+                    <td className="border-y border-slate-200 bg-white px-3 py-2 text-center text-slate-600">{(tx.date || "").slice(0, 10)}</td>
+                    <td className="border-y border-slate-200 bg-white px-3 py-2 text-center text-slate-600">{tx.branch_name || "—"}</td>
+                    <td className="rounded-r-[5px] border-y border-r border-slate-200 bg-white px-3 py-2 text-center">
+                      <button
+                        type="button"
+                        onClick={() => onView && onView(tx.lead_id)}
+                        className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-sky-600"
+                        data-testid={`discount-detail-view-${tx.id}`}
+                      >
+                        <Eye className="h-4 w-4" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 };

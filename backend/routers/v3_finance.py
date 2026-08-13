@@ -447,6 +447,15 @@ async def revenue_overview(
 
         progress = lead_progress_map.get(act.get("lead_id"))
         session = lead_session_map.get(act.get("lead_id")) or {}
+        # The listed price and what was taken off it, both written onto the activity by
+        # v3_packages when the collection was confirmed. `discount` was hardcoded to zero
+        # here, so nothing downstream could see a negotiated price at all.
+        #
+        # gross stays what was actually collected — every total, day, branch and payment
+        # mode on this payload is summed from it — so the discount rides alongside rather
+        # than redefining it. discount_amount is negative when more than the listed fee was
+        # collected; it is passed through as-is and left to the caller to read.
+        discount_amount = act.get("discount_amount")
         transactions.append({
             "id": act.get("id", ""),
             "transaction_id": act.get("transaction_id") or "",
@@ -454,7 +463,9 @@ async def revenue_overview(
             "branch_name": bname,
             "source": category,
             "gross": amount,
-            "discount": 0.0,
+            "discount": float(discount_amount) if discount_amount is not None else 0.0,
+            "original_amount": act.get("original_amount"),
+            "discount_reason": act.get("discount_reason"),
             "tax": 0.0,
             "net": amount,
             "collected_by": act.get("created_by", ""),
@@ -515,7 +526,12 @@ async def revenue_overview(
             "item_name": sale.get("item_name", ""),
             "qty": sale.get("qty", 0),
             "gross": amount,
+            # Genuinely zero, not unset: a counter sale is rung up at the shelf price and
+            # has no negotiated-fee concept. Carried anyway so both halves of this list
+            # have one shape.
             "discount": 0.0,
+            "original_amount": None,
+            "discount_reason": None,
             "tax": 0.0,
             "net": amount,
             "collected_by": sale.get("by_user_name", ""),
