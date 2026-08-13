@@ -351,17 +351,24 @@ export const BranchReviewPanel = ({ branchId }) => {
             </button>
           )}
         </div>
-        {/* Icon-only on a phone: the word cost a whole second row under the search box. */}
+        {/* Orange and icon-only at every width, matching the Refresh on Branch Leads,
+            Pre-Sales, Physio, Diet and HR. It was a labelled sky button here, which read
+            as another filter sitting beside the date rather than the one control that
+            acts. The word lives on title/aria-label.
+            h-11 and rounded-xl rather than the h-10 the other boards use: this row's
+            search and date field are h-11, and matching the row it sits in beats matching
+            a toolbar on another screen. The colour and the icon-only are the convention;
+            the height is local. */}
         <button
           type="button"
           onClick={load}
           disabled={loading}
           title="Refresh"
-          className="flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-sky-200 bg-sky-50 px-3 text-sm font-semibold text-sky-700 shadow-sm transition hover:border-sky-300 hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-60 sm:px-4"
+          aria-label="Refresh"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-orange-500 text-white shadow-sm transition hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-60"
           data-testid="branch-review-refresh"
         >
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-          <span className="hidden sm:inline">Refresh</span>
         </button>
       </div>
 
