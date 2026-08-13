@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends
 from typing import Optional
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import uuid
 
 from database import v3_col
@@ -8,7 +8,7 @@ from utils import now_iso, normalize_slot_time
 from security import hash_password
 from deps import v3_require_roles
 from schemas.v3 import (
-    V3UserOut, V3CompleteSessionInput, V3JrPhysioWeeklyInput,
+    V3UserOut, V3CompleteSessionInput, V3AbsentSessionInput, V3JrPhysioWeeklyInput,
     V3CreateJrPhysioInput, V3LeadOut,
 )
 
@@ -320,6 +320,115 @@ async def physio_lead_sessions(lead_id: str, _: V3UserOut = Depends(v3_require_r
     return {"sessions": sessions, "assessments": assessments}
 
 
+async def _first_incomplete_before(session: dict):
+    """The lowest day number before this one that is still not completed, or None.
+
+    Ordered on session_number rather than on the date: a day that has been pushed by an
+    absence carries a later date than the day after it until the shift is applied, and
+    comparing dates would then call the sequence broken when it is not.
+    """
+    number = session.get("session_number") or 0
+    rows = await v3_col("sessions").find(
+        {"lead_id": session.get("lead_id"), "status": {"$ne": "completed"}},
+        {"_id": 0, "session_number": 1},
+    ).to_list(1000)
+    earlier = [r.get("session_number") or 0 for r in rows if (r.get("session_number") or 0) < number]
+    return min(earlier) if earlier else None
+
+
+def _shift_slot_day(slot_time: str, days: int) -> str:
+    """Move a slot to another date, keeping its time of day. Returns it untouched if it is
+    not a slot this can read — a malformed value is not worth turning into a wrong date."""
+    try:
+        day_part, _, time_part = str(slot_time or "").partition("T")
+        moved = date.fromisoformat(day_part) + timedelta(days=days)
+        return f"{moved.isoformat()}T{time_part}" if time_part else moved.isoformat()
+    except Exception:
+        return slot_time
+
+
+@router.post("/physio/sessions/{session_id}/absent")
+async def physio_mark_absent(
+    session_id: str,
+    payload: V3AbsentSessionInput,
+    user: V3UserOut = Depends(v3_require_roles("physio", "super_admin")),
+):
+    """The patient did not turn up, so the day moves rather than being lost.
+
+    This day and every uncompleted day after it shift forward together. Moving only the
+    missed one would land it on top of the next day already booked, and the package is a
+    count of days of treatment — skipping one would quietly shorten it.
+
+    The absence itself is kept on the session and written to the lead's activity, because
+    the branch needs to see that a day was missed and when; the schedule moving on its own
+    would otherwise be the only trace, and that reads as an admin error rather than a
+    patient who did not arrive.
+    """
+    session = await v3_col("sessions").find_one({"id": session_id}, {"_id": 0})
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session["status"] == "completed":
+        raise HTTPException(status_code=400, detail="This day is already completed")
+
+    blocking = await _first_incomplete_before(session)
+    if blocking is not None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Day {blocking} has not been completed yet — treatment days are worked in order",
+        )
+
+    missed_on = (session.get("slot_time") or "").split("T")[0]
+    number = session.get("session_number") or 0
+
+    # This day and everything after it that has not been done. Completed days keep the date
+    # they actually happened on.
+    to_move = await v3_col("sessions").find(
+        {"lead_id": session["lead_id"], "status": {"$ne": "completed"}},
+        {"_id": 0, "id": 1, "session_number": 1, "slot_time": 1},
+    ).to_list(1000)
+
+    moved = 0
+    for row in to_move:
+        if (row.get("session_number") or 0) < number:
+            continue
+        await v3_col("sessions").update_one(
+            {"id": row["id"]},
+            {"$set": {"slot_time": _shift_slot_day(row.get("slot_time"), 1), "updated_at": now_iso()}},
+        )
+        moved += 1
+
+    await v3_col("sessions").update_one(
+        {"id": session_id},
+        {"$push": {"absences": {
+            "date": missed_on,
+            "marked_by": user.full_name,
+            "marked_at": now_iso(),
+            "remarks": (payload.remarks or "").strip(),
+        }}},
+    )
+
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": session["lead_id"],
+        "action": "session_absent",
+        "details": (
+            f"Day {number} marked absent on {missed_on or 'an unknown date'} by {user.full_name}."
+            f" That day and {moved - 1} later day(s) moved on by one."
+            + (f" Remarks: {payload.remarks.strip()}" if (payload.remarks or "").strip() else "")
+        ),
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": now_iso(),
+    })
+
+    updated = await v3_col("sessions").find_one({"id": session_id}, {"_id": 0})
+    return {
+        "session": updated,
+        "moved": moved,
+        "message": f"Day {number} marked absent — moved to {(updated or {}).get('slot_time', '').split('T')[0] or 'the next day'}",
+    }
+
+
 @router.post("/physio/sessions/{session_id}/complete")
 async def physio_complete_session(
     session_id: str,
@@ -331,6 +440,16 @@ async def physio_complete_session(
         raise HTTPException(status_code=404, detail="Session not found")
     if session["status"] == "completed":
         raise HTTPException(status_code=400, detail="Session already completed")
+
+    # Treatment runs in order. Day 5 being ticked off while Day 4 is still open means either
+    # the wrong row was pressed or a day went unrecorded, and both are worth stopping here:
+    # the day count drives the review milestones, so a gap in it quietly moves them.
+    blocking = await _first_incomplete_before(session)
+    if blocking is not None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Day {blocking} has not been completed yet — treatment days are completed in order",
+        )
 
     await v3_col("sessions").update_one(
         {"id": session_id},

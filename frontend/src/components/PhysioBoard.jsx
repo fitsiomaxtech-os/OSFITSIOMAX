@@ -17,6 +17,7 @@ import {
   Search,
   Send,
   Users,
+  UserX,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -32,6 +33,7 @@ import {
   physioPatientDetail,
   physioSessions,
   physioCompleteSession,
+  physioMarkAbsent,
   physioReviews,
   physioRaiseReview,
   leadDocuments,
@@ -220,12 +222,23 @@ const reviewMarks = (r) => ({
   isReviewDay: r.sessionNumber > 0 && r.sessionNumber % 7 === 0,
 });
 
-// `short` is the phone label. The four full names run to about 480px and the modal gets
-// roughly 340px on a phone, so without these the row scrolls sideways and two of the four
-// tabs sit off-screen behind a gesture nobody knows is there.
+// How many treatment days between reviews. Mirrors REVIEW_AFTER_DAYS in
+// backend/routers/v3_reviews.py, which is what actually decides whether a review can be
+// raised — this only decides whether the popup says one is due. The Review tab reads the
+// real value off its own endpoint; this modal makes no such call, so it carries the
+// default. If that constant ever moves, move this with it or the banner will point at a
+// milestone the server does not agree is one.
+const REVIEW_EVERY = 7;
+
+// `short` is the phone label. The full names run long and the modal gets roughly 340px on
+// a phone, so without these the row scrolls sideways and tabs sit off-screen behind a
+// gesture nobody knows is there.
+//
+// Consultation Report is no longer a tab of its own — it is the rest of what Overview
+// already answers about this patient, and splitting "who they are" across two tabs meant
+// checking both to read one story. Three tabs also give each a third more room on a phone.
 const MODAL_TABS = [
   { key: "overview", label: "Overview", short: "Overview" },
-  { key: "report", label: "Consultation Report", short: "Report" },
   { key: "days", label: "Treatment Days", short: "Days" },
   { key: "documents", label: "Documents", short: "Docs" },
 ];
@@ -1185,6 +1198,7 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
   const [sessions, setSessions] = useState([]);
   const [assessments, setAssessments] = useState([]);
   const [completeTarget, setCompleteTarget] = useState(null);
+  const [absentTarget, setAbsentTarget] = useState(null);
   const [tab, setTab] = useState("overview");
   const isComplete = lead.physio_stage === "Complete";
 
@@ -1220,6 +1234,24 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
   const completedSessions = sessions.filter((s) => s.status === "completed");
   const upcomingSession = sessions.find((s) => s.status === "upcoming") || null;
   const lastCompleted = completedSessions[completedSessions.length - 1] || null;
+
+  // Which review milestone the completed days have reached, or 0 for none. The same
+  // arithmetic the Review tab runs — a review every REVIEW_EVERY days, so 7, 14, 21, not
+  // "7 or more", which would leave the banner up for the rest of the course.
+  const reviewMilestone = completedSessions.length > 0 && completedSessions.length % REVIEW_EVERY === 0
+    ? completedSessions.length
+    : 0;
+
+  // The lowest still-open day before a given one, or null when it is next in line. The
+  // server refuses out-of-order completion too; this is so the button can say why before
+  // it is pressed rather than after.
+  const firstOpenBefore = (s) => {
+    const n = s.session_number || 0;
+    const earlier = sessions
+      .filter((x) => x.status !== "completed" && (x.session_number || 0) < n)
+      .map((x) => x.session_number || 0);
+    return earlier.length ? Math.min(...earlier) : null;
+  };
 
   // Days still to do come first, then the ones already done — a finished day is a record,
   // an unfinished one is work, and the work should not be below thirty rows of history.
@@ -1375,8 +1407,11 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
           </div>
           )}
 
-          {tab === "report" && (
-          <div data-testid="physio-consultation-report">
+          {/* Consultation Report sits under Overview rather than in a tab of its own —
+              same patient, same question, and it used to take a second click to finish
+              reading about them. */}
+          {tab === "overview" && (
+          <div className="mt-4 border-t border-slate-100 pt-4" data-testid="physio-consultation-report">
             <p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Consultation Report</p>
             <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
               <Row label="Alternative Phone" value={lead.alternative_phone} />
@@ -1417,6 +1452,21 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
             <p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">
               Treatment Days {sessions.length > 0 && <span className="text-slate-400">({completedSessions.length} of {sessions.length} complete)</span>}
             </p>
+
+            {/* A review is raisable every seven treatment days. Nothing said so here, so a
+                milestone was only noticed on the Review tab — which is the tab you go to
+                after finishing a day, not during. Shown where the day was just ticked off. */}
+            {reviewMilestone > 0 && (
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5" data-testid="physio-review-due-banner">
+                <p className="text-[11px] font-semibold text-amber-800">
+                  {completedSessions.length} treatment days complete — week {reviewMilestone / REVIEW_EVERY} review is due.
+                  <span className="ml-1 font-normal text-amber-700">Raise it from the Review tab.</span>
+                </p>
+                <span className="rounded-md bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700">
+                  Review due
+                </span>
+              </div>
+            )}
             {sessions.length === 0 ? (
               <div className="rounded-lg border border-dashed border-slate-200 p-6 text-center text-xs text-slate-400">
                 No treatment days booked yet — Branch Admin assigns these once the Treatment Fee is collected.
@@ -1432,6 +1482,10 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
                   // the date it actually falls on, so the others stay read-only until
                   // their own date is picked in the strip behind this popup.
                   const isActiveDay = !activeDate || (s.slot_time || "").startsWith(activeDate);
+                  // The earliest day still open before this one. Ordered on the day number,
+                  // not the date: an absence pushes a day past the one after it until that
+                  // one shifts too, and comparing dates would call the order broken.
+                  const blockedBy = done ? null : firstOpenBefore(s);
                   return (
                     <Fragment key={s.id}>
                     {firstDone && (
@@ -1474,15 +1528,39 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
                       </div>
                       {done ? (
                         <span className="shrink-0 rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-semibold text-emerald-700">Complete</span>
-                      ) : isActiveDay ? (
+                      ) : blockedBy ? (
+                        // Treatment runs in order, so a later day cannot be ticked off
+                        // while an earlier one is open. Said in the button's tooltip
+                        // rather than only refused by the server after the press.
                         <Button
                           size="sm"
-                          className="shrink-0 bg-sky-600 text-xs text-white hover:bg-sky-700"
-                          onClick={() => setCompleteTarget(s)}
-                          data-testid={`physio-complete-day-${s.id}`}
+                          disabled
+                          className="shrink-0 bg-slate-100 text-xs text-slate-400 hover:bg-slate-100"
+                          title={`Day ${blockedBy} has to be finished first`}
+                          data-testid={`physio-day-out-of-order-${s.id}`}
                         >
-                          <Check className="mr-1 h-3 w-3" /> Complete
+                          <Check className="mr-1 h-3 w-3" /> After Day {blockedBy}
                         </Button>
+                      ) : isActiveDay ? (
+                        <div className="flex shrink-0 items-center gap-1.5">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="border-amber-200 text-xs text-amber-700 hover:bg-amber-50"
+                            onClick={() => setAbsentTarget(s)}
+                            data-testid={`physio-absent-day-${s.id}`}
+                          >
+                            <UserX className="mr-1 h-3 w-3" /> Absent
+                          </Button>
+                          <Button
+                            size="sm"
+                            className="bg-sky-600 text-xs text-white hover:bg-sky-700"
+                            onClick={() => setCompleteTarget(s)}
+                            data-testid={`physio-complete-day-${s.id}`}
+                          >
+                            <Check className="mr-1 h-3 w-3" /> Complete
+                          </Button>
+                        </div>
                       ) : (
                         <Button
                           size="sm"
@@ -1538,6 +1616,16 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
             session={completeTarget}
             onClose={() => setCompleteTarget(null)}
             onDone={() => { setCompleteTarget(null); loadSessions(); }}
+          />
+        )}
+
+        {absentTarget && (
+          <MarkAbsentModal
+            session={absentTarget}
+            onClose={() => setAbsentTarget(null)}
+            // Stays open on purpose: the whole schedule just moved, and closing would hide
+            // the one thing worth checking. The parent list reloads when the popup closes.
+            onDone={() => { setAbsentTarget(null); loadSessions(); }}
           />
         )}
       </div>
@@ -2064,6 +2152,70 @@ function CompleteSessionModal({ session, onClose, onDone }) {
               {submitting ? "Completing..." : "Mark Complete"}
             </Button>
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The patient did not turn up. The day is not written off — it moves to the next day, and
+ * every day after it moves with it, so the package still delivers the number of treatment
+ * days it was sold as.
+ *
+ * Says so before the press rather than after: this rewrites the dates of every remaining
+ * day, which is not something to discover from a list that quietly looks different.
+ */
+function MarkAbsentModal({ session, onClose, onDone }) {
+  const [remarks, setRemarks] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async () => {
+    setSubmitting(true);
+    try {
+      const res = await physioMarkAbsent(session.id, { remarks });
+      toast.success(res?.message || "Marked absent");
+      onDone();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Couldn't mark this day absent");
+    }
+    setSubmitting(false);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="w-full max-w-md rounded-xl bg-white shadow-2xl" data-testid="mark-absent-modal">
+        <div className="border-b p-5">
+          <h3 className="text-base font-semibold text-slate-800">Mark Day {session.session_number} Absent</h3>
+          <p className="text-[10px] text-slate-400">
+            {session.lead_name} · {session.slot_time ? `${session.slot_time.split("T")[0]} at ${slotTo12h(session.slot_time)}` : "—"}
+          </p>
+        </div>
+        <div className="space-y-3 p-5">
+          <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-[11px] text-amber-800">
+            <UserX className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>
+              Day {session.session_number} moves to the next day, and every day after it moves on by
+              one. The patient still gets all {session.total_sessions} days — nothing is lost.
+            </span>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-600">Reason (optional)</label>
+            <textarea
+              value={remarks}
+              onChange={(e) => setRemarks(e.target.value)}
+              rows={3}
+              placeholder="Did not turn up, called in sick..."
+              className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
+              data-testid="absent-remarks"
+            />
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 border-t p-4">
+          <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
+          <Button size="sm" onClick={handleSubmit} disabled={submitting} className="bg-amber-600 text-white hover:bg-amber-700" data-testid="absent-submit">
+            {submitting ? "Moving..." : "Mark Absent & Move"}
+          </Button>
         </div>
       </div>
     </div>

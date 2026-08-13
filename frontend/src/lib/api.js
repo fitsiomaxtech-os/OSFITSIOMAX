@@ -260,6 +260,8 @@ export const physioPatients = async (physioId) => (await api.get("/physio/patien
 export const physioPatientDetail = async (leadId, physioId) => (await api.get(`/physio/patient/${leadId}`, { params: physioId ? { physio_id: physioId } : {} })).data;
 export const physioSessions = async (leadId) => (await api.get(`/physio/sessions/${leadId}`)).data;
 export const physioCompleteSession = async (sessionId, payload) => (await api.post(`/physio/sessions/${sessionId}/complete`, payload)).data;
+// The patient did not turn up: this day and every uncompleted day after it move on by one.
+export const physioMarkAbsent = async (sessionId, payload) => (await api.post(`/physio/sessions/${sessionId}/absent`, payload)).data;
 export const physioWeeklyAssessment = async (leadId, week, payload, physioId) => (await api.post(`/physio/weekly-assessment/${leadId}/${week}`, payload, { params: physioId ? { physio_id: physioId } : {} })).data;
 
 export const getBranchRecommendations = async () => (await api.get("/branch/package-recommendations")).data;
@@ -396,6 +398,7 @@ export const deleteInventoryItem = async (id) => (await api.delete(`/inventory/i
 export const addInventoryStock = async (id, payload, params = {}) => (await api.post(`/inventory/items/${id}/add-stock`, payload, { params })).data;
 export const sellInventoryItem = async (id, payload, params = {}) => (await api.post(`/inventory/items/${id}/sell`, payload, { params })).data;
 export const transferInventoryItem = async (id, payload, params = {}) => (await api.post(`/inventory/items/${id}/transfer`, payload, { params })).data;
+
 
 export const saveLeadDiagnosis = async (leadId, diagnosis) => (await api.post(`/leads/${leadId}/diagnosis`, { diagnosis })).data;
 export const sellStoreItem = async (leadId, payload) => (await api.post(`/leads/${leadId}/sell-store-item`, payload)).data;

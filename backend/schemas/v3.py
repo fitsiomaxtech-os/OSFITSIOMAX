@@ -603,6 +603,12 @@ class V3CompleteSessionInput(BaseModel):
     remarks: str
 
 
+class V3AbsentSessionInput(BaseModel):
+    # Optional: a physio marking a no-show in the moment should not be held up for a
+    # sentence about it, and the date and who marked it are recorded either way.
+    remarks: Optional[str] = ""
+
+
 class V3JrPhysioWeeklyInput(BaseModel):
     jr_physio_notes: str
 
