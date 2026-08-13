@@ -531,8 +531,10 @@ export const BranchAdminBoard = ({ branchId, embedded = false }) => {
               the same screen offering four actions or two depending on which stage pill
               was lit. The consultations board is told to hide its toolbar (passing
               externalSearch does that) and is driven from here instead. */}
-          <div className="flex flex-wrap items-center gap-2 sm:gap-3" data-testid="branch-toolbar">
-            <div className="relative w-full sm:flex-1">
+          <div className="flex items-center gap-2 sm:gap-3" data-testid="branch-toolbar">
+            {/* min-w-0 so the search can shrink: a flex item defaults to its content's
+                width, which would shove the buttons off the right edge instead. */}
+            <div className="relative min-w-0 flex-1">
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
               <Input
                 className="pl-9"
@@ -547,11 +549,11 @@ export const BranchAdminBoard = ({ branchId, embedded = false }) => {
                 announces it — an unlabelled glyph that announces nothing is a button only
                 the person who built it can use.
 
-                Their own row on a phone, centred. The search box takes the full width
-                above them, so as direct children of the toolbar they sat hard left under
-                it with the rest of the line empty. From sm up they go back to trailing the
-                search on one line. */}
-            <div className="flex w-full items-center justify-center gap-2 sm:w-auto sm:justify-start sm:gap-3">
+                One row with the search at every width — the four of them trail it rather
+                than dropping to a line of their own. shrink-0 keeps them at full size and
+                lets the search give up the width instead; on the narrowest phones that
+                leaves the placeholder clipped, which costs less than a second row. */}
+            <div className="flex shrink-0 items-center gap-1.5 sm:gap-3">
             <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="branch-date-filter" centered iconOnly />
             <Button
               onClick={() => { loadBoard(); setRefreshTick((n) => n + 1); }}
