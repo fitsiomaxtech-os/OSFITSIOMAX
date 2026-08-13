@@ -11,6 +11,10 @@ from schemas.v3 import (
     V3UserOut, V3CompleteSessionInput, V3AbsentSessionInput, V3JrPhysioWeeklyInput,
     V3CreateJrPhysioInput, V3LeadOut,
 )
+# The interval that actually governs when a review can be raised. Imported rather than
+# redeclared so the Treatment Days popup marks its milestones where the reviews router
+# agrees they are.
+from routers.v3_reviews import REVIEW_AFTER_DAYS
 
 router = APIRouter(prefix="/api/v3")
 
@@ -317,7 +321,38 @@ async def physio_lead_sessions(lead_id: str, _: V3UserOut = Depends(v3_require_r
         {"lead_id": lead_id}, {"_id": 0}
     ).sort("week_number", 1).to_list(100)
 
-    return {"sessions": sessions, "assessments": assessments}
+    # What became of each review this patient's treatment has already earned. The Treatment
+    # Days list marks its milestones off this: on its own the popup can only count to seven,
+    # so it had to call every milestone "due" — including the ones a Head Physio had already
+    # written up, and including the one currently sitting on the Branch Admin's desk.
+    review_rows = await v3_col("reviews").find({"lead_id": lead_id}, {"_id": 0}).to_list(100)
+    reviews = [
+        {
+            "id": r.get("id"),
+            "status": r.get("status"),
+            "treatment_days": r.get("treatment_days") or 0,
+            # Which milestone this covers, taken from the day count stored when it was
+            # raised rather than from its position among the reviews: raising is allowed
+            # any time after a milestone, so a review raised on day 9 still covers day 7.
+            "review_number": max(1, (r.get("treatment_days") or 0) // REVIEW_AFTER_DAYS),
+            "reason": r.get("reason") or "",
+            "physio_notes": r.get("physio_notes") or "",
+            "head_physio_name": r.get("head_physio_name") or "",
+            "review_date": r.get("review_date") or "",
+            "completed_at": r.get("completed_at") or "",
+        }
+        for r in review_rows
+    ]
+    reviews.sort(key=lambda r: r["treatment_days"])
+
+    # Sent so the popup marks milestones on the same interval the reviews router enforces,
+    # instead of carrying its own copy of the number and drifting from it.
+    return {
+        "sessions": sessions,
+        "assessments": assessments,
+        "reviews": reviews,
+        "review_after_days": REVIEW_AFTER_DAYS,
+    }
 
 
 async def _first_incomplete_before(session: dict):

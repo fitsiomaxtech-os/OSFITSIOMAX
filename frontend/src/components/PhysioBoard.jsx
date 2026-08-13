@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
+  AlertCircle,
   ArrowLeft,
   Calendar,
   Check,
@@ -222,13 +223,52 @@ const reviewMarks = (r) => ({
   isReviewDay: r.sessionNumber > 0 && r.sessionNumber % 7 === 0,
 });
 
-// How many treatment days between reviews. Mirrors REVIEW_AFTER_DAYS in
-// backend/routers/v3_reviews.py, which is what actually decides whether a review can be
-// raised — this only decides whether the popup says one is due. The Review tab reads the
-// real value off its own endpoint; this modal makes no such call, so it carries the
-// default. If that constant ever moves, move this with it or the banner will point at a
-// milestone the server does not agree is one.
+// How many treatment days between reviews, used only until the real interval arrives.
+// /physio/sessions now sends review_after_days off REVIEW_AFTER_DAYS in
+// backend/routers/v3_reviews.py — the constant that actually decides whether a review can
+// be raised — so this is the value the popup draws with for the moment before the fetch
+// lands, and the fallback if an older server answers without the field.
 const REVIEW_EVERY = 7;
+
+// How one review milestone reads in the Treatment Days list. Four states, because a
+// milestone is not simply due or not: it is raised by the Physio, dispatched by the Branch
+// Admin, then written by the Head Physio, and a physio looking at the day list wants to
+// know which of those is holding rather than being told to raise a review twice.
+//
+// Only "due" asks for anything. The rest are there so a finished week reads as finished.
+const milestoneLook = (review) => {
+  const who = review?.head_physio_name;
+  switch (review?.status) {
+    case "completed":
+      return {
+        label: "Reviewed", tone: "emerald", Icon: CheckCircle2,
+        line: who ? `Reviewed by ${who}.` : "Review written.",
+      };
+    case "sent":
+      return {
+        label: "Scheduled", tone: "sky", Icon: Calendar,
+        line: who ? `With ${who}.` : "Dispatched to a Head Physio.",
+      };
+    case "send_to_review":
+      return {
+        label: "Raised", tone: "sky", Icon: Clock,
+        line: "Waiting on Branch Admin to schedule it.",
+      };
+    default:
+      return {
+        label: "Review due", tone: "amber", Icon: AlertCircle,
+        line: "Raise it from the Review tab.",
+      };
+  }
+};
+
+// Written out rather than built from the tone, because Tailwind only ships classes it can
+// see as whole strings in the source — `border-${tone}-200` compiles to nothing.
+const MILESTONE_TONES = {
+  emerald: { box: "border-emerald-200 bg-emerald-50", text: "text-emerald-800", soft: "text-emerald-700", badge: "bg-emerald-100 text-emerald-700" },
+  sky: { box: "border-sky-200 bg-sky-50", text: "text-sky-800", soft: "text-sky-700", badge: "bg-sky-100 text-sky-700" },
+  amber: { box: "border-amber-200 bg-amber-50", text: "text-amber-800", soft: "text-amber-700", badge: "bg-amber-100 text-amber-700" },
+};
 
 // `short` is the phone label. The full names run long and the modal gets roughly 340px on
 // a phone, so without these the row scrolls sideways and tabs sit off-screen behind a
@@ -1197,6 +1237,8 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
   const [submitting, setSubmitting] = useState(false);
   const [sessions, setSessions] = useState([]);
   const [assessments, setAssessments] = useState([]);
+  const [reviews, setReviews] = useState([]);
+  const [reviewEvery, setReviewEvery] = useState(REVIEW_EVERY);
   const [completeTarget, setCompleteTarget] = useState(null);
   const [absentTarget, setAbsentTarget] = useState(null);
   const [tab, setTab] = useState("overview");
@@ -1207,6 +1249,9 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
       const data = await physioSessions(lead.id);
       setSessions(data.sessions || []);
       setAssessments(data.assessments || []);
+      setReviews(data.reviews || []);
+      // Falls back to the local constant only if an older server answers without it.
+      if (data.review_after_days) setReviewEvery(data.review_after_days);
     } catch { /* silent */ }
   }, [lead.id]);
 
@@ -1235,12 +1280,38 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
   const upcomingSession = sessions.find((s) => s.status === "upcoming") || null;
   const lastCompleted = completedSessions[completedSessions.length - 1] || null;
 
-  // Which review milestone the completed days have reached, or 0 for none. The same
-  // arithmetic the Review tab runs — a review every REVIEW_EVERY days, so 7, 14, 21, not
-  // "7 or more", which would leave the banner up for the rest of the course.
-  const reviewMilestone = completedSessions.length > 0 && completedSessions.length % REVIEW_EVERY === 0
-    ? completedSessions.length
-    : 0;
+  // Every review point this patient's treatment has reached, and what became of each.
+  //
+  // This used to be a single number derived from the day count alone, which meant the
+  // popup could only ever say "due" — it said so about week 1 while the Head Physio's
+  // write-up of week 1 was already filed, and said nothing at all on day 8, when the day
+  // count is no longer a multiple of seven but the review is still outstanding. The
+  // records now come back with the sessions, so each milestone reports its own state.
+  //
+  // A milestone with no review against it is genuinely due: reaching seven completed days
+  // is what makes one raisable, and nothing else creates the record.
+  const reviewMilestones = useMemo(() => {
+    const done = sessions.filter((s) => s.status === "completed").length;
+    const reached = Math.floor(done / reviewEvery);
+    // Rank so that if a milestone somehow carries two records, the furthest-along one
+    // describes it — a completed review is the more truthful thing to show.
+    const rank = { send_to_review: 1, sent: 2, completed: 3 };
+    const byNumber = new Map();
+    for (const r of reviews) {
+      const n = r.review_number || 0;
+      if (n < 1) continue;
+      const prev = byNumber.get(n);
+      if (!prev || (rank[r.status] || 0) > (rank[prev.status] || 0)) byNumber.set(n, r);
+    }
+    // Counted off the milestones reached, then extended to cover any review already on
+    // record beyond them — a review raised at day 14 stays on the list if a day is later
+    // reopened and the count drops back under it.
+    const highest = Math.max(reached, ...[...byNumber.keys()], 0);
+    return Array.from({ length: highest }, (_, i) => {
+      const number = i + 1;
+      return { number, lastDay: number * reviewEvery, review: byNumber.get(number) || null };
+    });
+  }, [sessions, reviews, reviewEvery]);
 
   // The lowest still-open day before a given one, or null when it is next in line. The
   // server refuses out-of-order completion too; this is so the button can say why before
@@ -1455,16 +1526,41 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
 
             {/* A review is raisable every seven treatment days. Nothing said so here, so a
                 milestone was only noticed on the Review tab — which is the tab you go to
-                after finishing a day, not during. Shown where the day was just ticked off. */}
-            {reviewMilestone > 0 && (
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5" data-testid="physio-review-due-banner">
-                <p className="text-[11px] font-semibold text-amber-800">
-                  {completedSessions.length} treatment days complete — week {reviewMilestone / REVIEW_EVERY} review is due.
-                  <span className="ml-1 font-normal text-amber-700">Raise it from the Review tab.</span>
-                </p>
-                <span className="rounded-md bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700">
-                  Review due
-                </span>
+                after finishing a day, not during. Shown where the day was just ticked off.
+
+                One row per milestone, kept once it has passed rather than replaced by the
+                next: a patient twenty days in has had two reviews written about them, and
+                that they happened is part of reading their treatment. The week still
+                waiting is the only one that asks for anything. */}
+            {reviewMilestones.length > 0 && (
+              <div className="mb-3 space-y-1.5" data-testid="physio-review-milestones">
+                {reviewMilestones.map((m) => {
+                  const look = milestoneLook(m.review);
+                  const t = MILESTONE_TONES[look.tone];
+                  const on = m.review?.status === "completed"
+                    ? fmtDate(m.review.completed_at)
+                    : m.review?.status === "sent" ? fmtDate(m.review.review_date) : null;
+                  return (
+                    <div
+                      key={m.number}
+                      className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2.5 ${t.box}`}
+                      data-testid={`physio-review-milestone-${m.number}`}
+                    >
+                      <p className={`flex items-center gap-1.5 text-[11px] font-semibold ${t.text}`}>
+                        <look.Icon className="h-3.5 w-3.5 shrink-0" />
+                        <span>
+                          Week {m.number} review · days {m.lastDay - reviewEvery + 1}–{m.lastDay}
+                          <span className={`ml-1 font-normal ${t.soft}`}>
+                            {look.line}{on ? ` · ${on}` : ""}
+                          </span>
+                        </span>
+                      </p>
+                      <span className={`rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${t.badge}`}>
+                        {look.label}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             )}
             {sessions.length === 0 ? (
