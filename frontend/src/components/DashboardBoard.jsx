@@ -202,31 +202,39 @@ export const DashboardBoard = () => {
               Spot Joining is a slice of Session, not money on top: a treatment fee
               collected on the same day as the consultation, i.e. the patient signed up
               on the spot. So the four don't sum — hence the note under it, which is
-              there to stop someone adding all four and finding it over. */}
+              there to stop someone adding all four and finding it over.
+
+              Two across on a phone rather than a column of four, so the whole split is on
+              screen at once instead of scrolled past one figure at a time. The figure
+              drops to text-lg below sm: half a phone is about 130px of inner width, and a
+              rupee total like ₹7,00,015.99 at text-3xl needs roughly 200. The labels take
+              two lines' height whether they need it or not — "Total Revenue" fits one line
+              where the other three wrap, and without it its figure would sit a line above
+              its neighbours' across the 2x2. */}
           {activeTab === "revenue" && (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4" data-testid="dashboard-revenue-totals">
+            <div className="grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4" data-testid="dashboard-revenue-totals">
               <Card className="border-emerald-200 bg-emerald-50/60" data-testid="dashboard-total-revenue">
-                <CardContent className="p-4">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-emerald-700">Total Revenue</p>
-                  <p className="mt-1 text-3xl font-bold text-emerald-700">{fmtValue("revenue", activeData.total)}</p>
+                <CardContent className="p-3 sm:p-4">
+                  <p className="min-h-[2.6em] text-xs font-semibold uppercase tracking-wider text-emerald-700 sm:min-h-0">Total Revenue</p>
+                  <p className="mt-1 text-lg font-bold text-emerald-700 sm:text-3xl">{fmtValue("revenue", activeData.total)}</p>
                 </CardContent>
               </Card>
               <Card data-testid="dashboard-consultation-revenue">
-                <CardContent className="p-4">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-sky-700">Total Consultation Revenue</p>
-                  <p className="mt-1 text-3xl font-bold text-sky-700">{fmtValue("revenue", activeData.consultation)}</p>
+                <CardContent className="p-3 sm:p-4">
+                  <p className="min-h-[2.6em] text-xs font-semibold uppercase tracking-wider text-sky-700 sm:min-h-0">Total Consultation Revenue</p>
+                  <p className="mt-1 text-lg font-bold text-sky-700 sm:text-3xl">{fmtValue("revenue", activeData.consultation)}</p>
                 </CardContent>
               </Card>
               <Card data-testid="dashboard-session-revenue">
-                <CardContent className="p-4">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-violet-700">Total Session Revenue</p>
-                  <p className="mt-1 text-3xl font-bold text-violet-700">{fmtValue("revenue", activeData.session)}</p>
+                <CardContent className="p-3 sm:p-4">
+                  <p className="min-h-[2.6em] text-xs font-semibold uppercase tracking-wider text-violet-700 sm:min-h-0">Total Session Revenue</p>
+                  <p className="mt-1 text-lg font-bold text-violet-700 sm:text-3xl">{fmtValue("revenue", activeData.session)}</p>
                 </CardContent>
               </Card>
               <Card data-testid="dashboard-spot-joining-revenue">
-                <CardContent className="p-4">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-amber-700">Total Spot Joining Revenue</p>
-                  <p className="mt-1 text-3xl font-bold text-amber-700">{fmtValue("revenue", activeData.spot_joining)}</p>
+                <CardContent className="p-3 sm:p-4">
+                  <p className="min-h-[2.6em] text-xs font-semibold uppercase tracking-wider text-amber-700 sm:min-h-0">Total Spot Joining Revenue</p>
+                  <p className="mt-1 text-lg font-bold text-amber-700 sm:text-3xl">{fmtValue("revenue", activeData.spot_joining)}</p>
                 </CardContent>
               </Card>
             </div>
