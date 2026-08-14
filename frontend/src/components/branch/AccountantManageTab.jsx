@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Eye, Wallet, Stethoscope, Activity, ShoppingBag, Salad } from "lucide-react";
+import { Eye, Wallet, Stethoscope, Activity, ShoppingBag, Salad, RefreshCw } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { StatTile } from "@/components/ui/stat-tile";
 import { getBranches, getRevenueOverview } from "@/lib/api";
@@ -212,14 +213,26 @@ export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
           10px to fit, which is the point at which "Consultation Collections" and "Session
           Collections" stop being tellable apart at a glance. One control, full names, one
           row. The desktop bar is unchanged. */}
-      <select
-        value={subTab}
-        onChange={(e) => setSubTab(e.target.value)}
-        className="h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 md:hidden"
-        data-testid="accountant-manage-subtab-select"
-      >
-        {SUB_TABS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
-      </select>
+      <div className="flex items-center gap-2 md:hidden">
+        <select
+          value={subTab}
+          onChange={(e) => setSubTab(e.target.value)}
+          className="h-11 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700"
+          data-testid="accountant-manage-subtab-select"
+        >
+          {SUB_TABS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+        </select>
+        <Button
+          onClick={load}
+          disabled={loading}
+          title="Refresh"
+          aria-label="Refresh"
+          className="h-11 w-11 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
+          data-testid="accountant-manage-refresh"
+        >
+          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+        </Button>
+      </div>
 
       <div className="hidden flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1 md:flex" data-testid="accountant-manage-subtabs">
         {SUB_TABS.map((t) => (

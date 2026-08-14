@@ -144,7 +144,7 @@ const StockBadge = ({ qty, low }) => {
  * That asymmetry is the point of the split — one spelling of a tablet across the whole
  * organisation is what lets two branches transfer it to each other.
  */
-export const StoreInventoryPanel = ({ category = "tablet", branchId }) => {
+export const StoreInventoryPanel = ({ category = "tablet", branchId, reloadToken }) => {
   const CAT = CATEGORIES[category] || CATEGORIES.tablet;
   // Spread into every stock-scoped call. Empty for a Branch Admin, so their requests go
   // out exactly as they did before this prop existed.
@@ -185,7 +185,9 @@ export const StoreInventoryPanel = ({ category = "tablet", branchId }) => {
     setLoading(false);
   }, [category, CAT.noun, branchId]);
 
-  useEffect(() => { load(); }, [load]);
+  // reloadToken is bumped by the store's Refresh; `load` itself is unchanged by it, so it
+  // has to be named here or the button would do nothing on a stock shelf.
+  useEffect(() => { load(); }, [load, reloadToken]);
   // Only needed by the move form, but fetched once here rather than on each open.
   useEffect(() => { getBranches().then(setBranches).catch(() => {}); }, []);
 

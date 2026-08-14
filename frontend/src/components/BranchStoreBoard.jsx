@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Eye, Clock, CalendarCheck } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { Eye, Clock, CalendarCheck, RefreshCw } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
@@ -16,13 +16,19 @@ import {
   ViewItemModal,
 } from "@/components/PackagesBoard";
 
-const BranchItemsPanel = ({ category, itemType, emptyLabel, testidPrefix, durationLabel = "Consultation Duration" }) => {
+const BranchItemsPanel = ({ category, itemType, emptyLabel, testidPrefix, durationLabel = "Consultation Duration", reloadToken }) => {
   const [items, setItems] = useState([]);
   const [viewingItem, setViewingItem] = useState(null);
   const isSession = itemType === "session";
 
-  const loadItems = () => listStoreItems(category, itemType).then(setItems).catch(() => {});
-  useEffect(() => { loadItems(); }, []);
+  // useCallback so the effect can name it as a dependency — it was an inline function with
+  // an empty dep array, which is what the exhaustive-deps warning here was pointing at, and
+  // which also meant the list never refetched for any reason at all.
+  const loadItems = useCallback(
+    () => listStoreItems(category, itemType).then(setItems).catch(() => {}),
+    [category, itemType],
+  );
+  useEffect(() => { loadItems(); }, [loadItems, reloadToken]);
 
   const handleBook = (it) => {
     toast.info(`Booking "${it.name}" — coming soon`);
@@ -96,7 +102,7 @@ const BranchItemsPanel = ({ category, itemType, emptyLabel, testidPrefix, durati
   );
 };
 
-export const BranchConsultationsPanel = () => {
+export const BranchConsultationsPanel = ({ reloadToken }) => {
   const [sub, setSub] = useState("physiotherapy");
   return (
     <div className="space-y-4" data-testid="branch-store-panel-consultations">
@@ -123,6 +129,7 @@ export const BranchConsultationsPanel = () => {
           itemType="consultation"
           emptyLabel="No consultations available yet."
           testidPrefix="branch-consultation"
+          reloadToken={reloadToken}
         />
       )}
       {sub === "fitness" && <PlaceholderPanel label="Fitness" testid="branch-consultations-subpanel-fitness" />}
@@ -130,7 +137,7 @@ export const BranchConsultationsPanel = () => {
   );
 };
 
-export const BranchSessionsPanel = () => {
+export const BranchSessionsPanel = ({ reloadToken }) => {
   const [sub, setSub] = useState("physiotherapy");
   return (
     <div className="space-y-4" data-testid="branch-store-panel-sessions">
@@ -157,6 +164,7 @@ export const BranchSessionsPanel = () => {
           itemType="session"
           emptyLabel="No session packages available yet."
           testidPrefix="branch-session"
+          reloadToken={reloadToken}
         />
       )}
       {sub === "fitness" && <PlaceholderPanel label="Fitness" testid="branch-sessions-subpanel-fitness" />}
@@ -174,7 +182,7 @@ export const BranchSessionsPanel = () => {
  * Otherwise it is the consultation panel exactly — a Diet Consultation is priced and timed
  * the same way, which is why the backend validates it against the same rules.
  */
-export const BranchDietPanel = () => (
+export const BranchDietPanel = ({ reloadToken }) => (
   <div className="space-y-4" data-testid="branch-store-panel-diet">
     <BranchItemsPanel
       category="physiotherapy"
@@ -182,6 +190,7 @@ export const BranchDietPanel = () => (
       durationLabel="Diet Consultation Duration"
       emptyLabel="No diet packages available yet. Super Admin adds them in FITSIO STORE > Diet Package."
       testidPrefix="branch-diet"
+      reloadToken={reloadToken}
     />
   </div>
 );
@@ -198,10 +207,37 @@ const PANELS_BUILT = new Set(["consultations", "sessions", "diet", ...INVENTORY_
 
 export const FitsiomaxStorePanel = () => {
   const [tab, setTab] = useState("consultations");
+  // Bumped by Refresh and passed to whichever panel is open, so it refetches in place —
+  // rather than remounting it by key, which would also throw away the Physiotherapy /
+  // Fitness choice inside Consultations and Sessions.
+  const [reloadTick, setReloadTick] = useState(0);
 
   return (
     <div className="space-y-4" data-testid="branch-store-board">
-      <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="branch-store-subtabs">
+      {/* A dropdown on a phone, as Accountant Manage uses: seven tabs wrapped to two rows
+          and the shelf being browsed was the least prominent thing on screen. Desktop keeps
+          the bar. */}
+      <div className="flex items-center gap-2 md:hidden">
+        <select
+          value={tab}
+          onChange={(e) => setTab(e.target.value)}
+          className="h-11 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700"
+          data-testid="branch-store-subtab-select"
+        >
+          {BRANCH_STORE_TABS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+        </select>
+        <Button
+          onClick={() => setReloadTick((n) => n + 1)}
+          title="Refresh"
+          aria-label="Refresh"
+          className="h-11 w-11 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
+          data-testid="branch-store-refresh"
+        >
+          <RefreshCw className="h-4 w-4" />
+        </Button>
+      </div>
+
+      <div className="hidden flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1 md:flex" data-testid="branch-store-subtabs">
         {BRANCH_STORE_TABS.map((t) => {
           const Icon = t.icon;
           const active = tab === t.key;
@@ -218,12 +254,12 @@ export const FitsiomaxStorePanel = () => {
         })}
       </div>
 
-      {tab === "consultations" && <BranchConsultationsPanel />}
-      {tab === "sessions" && <BranchSessionsPanel />}
-      {tab === "diet" && <BranchDietPanel />}
+      {tab === "consultations" && <BranchConsultationsPanel reloadToken={reloadTick} />}
+      {tab === "sessions" && <BranchSessionsPanel reloadToken={reloadTick} />}
+      {tab === "diet" && <BranchDietPanel reloadToken={reloadTick} />}
       {/* Keyed by category: without it React keeps the same instance across a tab switch
           and the previous shelf's rows sit there until the new ones land. */}
-      {INVENTORY_TABS.has(tab) && <StoreInventoryPanel key={tab} category={tab} />}
+      {INVENTORY_TABS.has(tab) && <StoreInventoryPanel key={tab} category={tab} reloadToken={reloadTick} />}
       {!PANELS_BUILT.has(tab) && BRANCH_STORE_TABS.map((t) => tab === t.key && (
         <PlaceholderPanel key={t.key} label={t.label} testid={`branch-store-panel-${t.key}`} />
       ))}
