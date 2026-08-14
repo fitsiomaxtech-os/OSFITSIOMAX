@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Copy, Phone, PhoneCall, User, X } from "lucide-react";
+import { Copy, Phone, PhoneCall, RefreshCw, User, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
@@ -86,13 +86,28 @@ export const PatientsPortalPanel = ({ branchId }) => {
         <span className="rounded-full bg-sky-100 px-2.5 py-0.5 text-[10px] font-semibold text-sky-700">{visible.length} patients</span>
       </div>
 
-      <Input
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        placeholder="Search patient by name or phone..."
-        className="mb-3 h-10 max-w-sm"
-        data-testid="branch-patients-search"
-      />
+      {/* Refresh beside the search, icon-only and grey, as the other boards carry it. The
+          list is a snapshot of the branch board — a patient who pays or starts treatment
+          in another tab appears only on a reload, and there was no way to ask for one. */}
+      <div className="mb-3 flex items-center gap-2">
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search patient by name or phone..."
+          className="h-10 min-w-0 flex-1 sm:max-w-sm sm:flex-none"
+          data-testid="branch-patients-search"
+        />
+        <Button
+          onClick={load}
+          disabled={loading}
+          title="Refresh"
+          aria-label="Refresh"
+          className="h-10 w-10 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
+          data-testid="branch-patients-refresh"
+        >
+          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+        </Button>
+      </div>
 
       {visible.length === 0 && !loading ? (
         <div className="py-16 text-center">
@@ -163,7 +178,7 @@ export const PatientsPortalPanel = ({ branchId }) => {
 
         <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white md:block">
           <table className="min-w-full text-sm">
-            <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+            <thead className="bg-slate-500 text-left text-xs uppercase text-white">
               <tr>
                 <th className="px-4 py-2.5">Patient</th>
                 <th className="px-4 py-2.5">Phone</th>

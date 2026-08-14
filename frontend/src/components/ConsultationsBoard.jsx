@@ -1979,7 +1979,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               these percentages have to total 100 under table-fixed, and the min-width grew
               by the same 40px so no column lost real estate to make room for it. */}
           <table className="w-full min-w-[1040px] table-fixed text-sm">
-            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+            <thead className="bg-slate-500 text-xs uppercase text-white">
               <tr>
                 <th className="w-[4%] px-3 py-2 text-left align-middle">S.No</th>
                 <th className="w-[13%] px-4 py-2 text-left align-middle">Patient</th>

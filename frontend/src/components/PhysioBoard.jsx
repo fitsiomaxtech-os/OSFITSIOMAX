@@ -730,7 +730,7 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
           <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white sm:block" data-testid="physio-treatment-list-desktop">
             <div className="overflow-x-auto">
               <table className="w-full min-w-[720px] text-sm">
-                <thead className="bg-slate-50 text-left text-[10px] uppercase tracking-wider text-slate-400">
+                <thead className="bg-slate-500 text-left text-[10px] uppercase tracking-wider text-white">
                   <tr>
                     <th className="px-4 py-2.5 font-semibold">Time</th>
                     <th className="px-4 py-2.5 font-semibold">Patient</th>

@@ -723,7 +723,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false }) => {
               the stat cards row as it scrolled past. */}
           <div className="hidden w-full max-h-[65vh] overflow-auto rounded-lg border border-slate-200 bg-white md:block" data-testid="branch-list">
             <table className="w-full min-w-[640px] table-fixed divide-y divide-slate-200 text-sm">
-              <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <thead className="sticky top-0 z-10 bg-slate-500 text-left text-xs font-semibold uppercase tracking-wide text-white">
                 <tr>
                   {/* New Leads haven't had a physio assigned yet, so that column is dropped
                       only for this stage filter — every other view keeps it. */}
