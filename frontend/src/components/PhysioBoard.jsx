@@ -126,7 +126,7 @@ export const PhysioBoard = ({ physioId } = {}) => {
         <ReviewTab physioId={physioId} onCountChange={setReviewCount} toolbarSlot={slotFor("review")} />
       </div>
       <div style={{ display: activeTab === "patients" ? "block" : "none" }}>
-        <PatientsTab physioId={physioId} onCountChange={setPatientsCount} />
+        <PatientsTab physioId={physioId} onCountChange={setPatientsCount} toolbarSlot={slotFor("patients")} />
       </div>
 
       {/* Phones only. It used to render at every width, so a desk got a bar pinned
@@ -572,14 +572,14 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
           <Search className="h-4 w-4" />
         </button>
       )}
-      {/* Orange, and the only orange on the board — it is the one control that acts
+      {/* Grey, matching every other Refresh in the OS — it is the one control that acts
           rather than filters, so it should not read as another filter chip. */}
       <Button
         onClick={load}
         disabled={loading}
         title="Refresh"
         aria-label="Refresh"
-        className="h-10 w-10 shrink-0 bg-orange-500 p-0 text-white hover:bg-orange-600"
+        className="h-10 w-10 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
         data-testid="physio-treatment-refresh"
       >
         <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
@@ -992,14 +992,14 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
           <Search className="h-4 w-4" />
         </button>
       )}
-      {/* Orange, and the only orange on the board — it is the one control that acts
+      {/* Grey, matching every other Refresh in the OS — it is the one control that acts
           rather than filters, so it should not read as another filter chip. */}
       <Button
         onClick={load}
         disabled={loading}
         title="Refresh"
         aria-label="Refresh"
-        className="h-10 w-10 shrink-0 bg-orange-500 p-0 text-white hover:bg-orange-600"
+        className="h-10 w-10 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
         data-testid="physio-review-refresh"
       >
         <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
@@ -2006,7 +2006,7 @@ export function CalendarPage({ physioId, onClose }) {
   );
 }
 
-function PatientsTab({ physioId, onCountChange }) {
+function PatientsTab({ physioId, onCountChange, toolbarSlot }) {
   const [patients, setPatients] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState(null);
@@ -2036,8 +2036,27 @@ function PatientsTab({ physioId, onCountChange }) {
   // every patient has finished their full treatment course.
   useEffect(() => { onCountChange?.(ongoingCount); }, [ongoingCount, onCountChange]);
 
+  // The third tab had no Refresh at all — its caseload is a snapshot from when the board
+  // opened, so a session completed on Treatment left this list stale with no way to ask
+  // for a fresh one. Portaled into the shared slot like the other two, so the button sits
+  // in the same place whichever tab is open.
+  const toolbar = (
+    <Button
+      onClick={load}
+      disabled={loading}
+      title="Refresh"
+      aria-label="Refresh"
+      className="h-10 w-10 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
+      data-testid="physio-patients-refresh"
+    >
+      <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+    </Button>
+  );
+
   return (
     <div data-testid="physio-patients-tab">
+      {toolbarSlot ? createPortal(toolbar, toolbarSlot) : toolbar}
+
       <div className="mb-4 flex gap-1 rounded-lg border border-slate-200 bg-white p-1 w-fit">
         {[{ key: "ongoing", label: "Ongoing", count: ongoingCount }, { key: "completed", label: "Completed", count: completedCount }].map((t) => (
           <button
