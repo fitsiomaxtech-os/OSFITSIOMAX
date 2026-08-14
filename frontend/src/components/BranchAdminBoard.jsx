@@ -1733,10 +1733,13 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                       notes: (apptDraft.notes || "").trim(),
                       bookedBy: "Branch Admin",
                     });
-                    // A fresh booking hasn't been copied yet — the previous one's card
-                    // is on the clipboard, and saying otherwise would send the wrong image.
-                    setCardCopied(false);
-                  } catch (e) { toast.error(e?.response?.data?.detail || "Failed to schedule"); }
+                  } catch (e) {
+                    // Names the failure rather than reporting every one as a scheduling
+                    // failure: the booking above is only the first of several statements
+                    // here, and a fault in any of the rest used to surface as "Failed to
+                    // schedule" over a confirmation dialog that had already opened.
+                    toast.error(e?.response?.data?.detail || e?.message || "Failed to schedule");
+                  }
                 }}
                 data-testid="branch-appt-save"
               >
@@ -1828,7 +1831,8 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                 {/* Open leads: the client wants to see the sheet before it is sent
                     anywhere, and Save-as-PDF lives behind that window's print. */}
                 <Button
-                  className="h-10 w-10 shrink-0 bg-teal-600 p-0 text-white hover:bg-teal-700"
+                  variant="outline"
+                  className="h-10 w-10 shrink-0 p-0"
                   onClick={() => openPrintable(apptHtml(apptConfirm), { print: true })}
                   title="Open PDF"
                   aria-label="Open PDF"
