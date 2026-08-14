@@ -392,7 +392,11 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
     <div className={`flex flex-col gap-5 ${role === "pre_sales" ? "pb-20 md:pb-0" : ""}`} data-testid="presales-crm-page">
     <div className={role === "pre_sales" ? "hidden space-y-5 md:block" : "space-y-5"} data-testid="presales-leads-tab">
       {/* KPI Cards */}
-      <div className="flex flex-nowrap gap-3" data-testid="presales-kpi-row">
+      {/* Three across on a phone rather than all of them jammed into one nowrap row. Six
+          cards sharing 330px gave each about 50px, which truncated every label to
+          "Tota…", "Follo…" — a row of counts with no way to tell which count is which.
+          Desktop still lays them out on the single line it has room for. */}
+      <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-nowrap sm:gap-3" data-testid="presales-kpi-row">
         <KpiCard label="Total Leads" value={stageCounts.All} active={stageFilter === "All"} color="#22c55e" onClick={() => setStageFilter("All")} testid="presales-kpi-all" />
         {kpiStages.map((s) => (
           <KpiCard key={s.id} label={s.name} value={stageCounts[s.name] || 0} active={stageFilter === s.name} color={s.color} onClick={() => setStageFilter(s.name)} testid={`presales-kpi-${s.name}`} />
@@ -400,8 +404,16 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
       </div>
 
       {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-2" data-testid="presales-toolbar">
-        <div className="relative min-w-[260px] flex-1">
+      {/* Seven controls, which a phone cannot hold on one line — so it takes two, split
+          where the meaning splits: what you are looking at on top, what you can do to it
+          below. It used to be one flex-wrap row whose min-w-[260px] search forced a break
+          wherever it landed, leaving Manage Stages orphaned on a third line.
+
+          sm:contents dissolves both wrappers from sm up, so the desk still lays all seven
+          out in the single row it always had. */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center" data-testid="presales-toolbar">
+        <div className="flex items-center gap-2 sm:contents">
+        <div className="relative min-w-0 flex-1 sm:min-w-[260px]">
           <Search className="pointer-events-none absolute left-2 top-2.5 h-4 w-4 text-slate-400" />
           <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search leads by name, email, phone..." className="h-10 pl-8" data-testid="presales-search" />
         </div>
@@ -413,13 +425,16 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
             an icon cannot say WHICH source is filtered. Same reason the date filter puts
             its label back once a range is picked — a filtered screen has to admit it. */}
         <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="presales-date-filter" centered iconOnly />
+        </div>
+
+        <div className="flex items-center gap-2 sm:contents">
         <ColorSelect
           value={sourceFilter}
           options={sourceSelectOptions}
           placeholder="All Sources"
           resetLabel="All Sources"
           emptyText="No sources yet."
-          triggerClass="h-10 w-[200px] text-sm"
+          triggerClass="h-10 min-w-0 flex-1 text-sm sm:w-[200px] sm:flex-none"
           onChange={setSourceFilter}
           testid="presales-source-filter"
         />
@@ -444,8 +459,22 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
         </Button>
         {role === "super_admin" && (
-          <Button variant="outline" className="h-10" onClick={onManageStages} data-testid="presales-manage-stages-btn"><Cog className="h-4 w-4 mr-1" />Manage Stages</Button>
+          // Icon-only on a phone, like the four beside it — the words would take a third
+          // of the row for a control used once a month. The label stays on title and
+          // aria-label, and returns in full from sm up.
+          <Button
+            variant="outline"
+            className="h-10 w-10 shrink-0 p-0 sm:w-auto sm:px-4"
+            onClick={onManageStages}
+            title="Manage Stages"
+            aria-label="Manage Stages"
+            data-testid="presales-manage-stages-btn"
+          >
+            <Cog className="h-4 w-4 sm:mr-1" />
+            <span className="hidden sm:inline">Manage Stages</span>
+          </Button>
         )}
+        </div>
       </div>
 
       {/* The stage strip that used to sit here is gone. It set the same `stageFilter`
@@ -1015,9 +1044,13 @@ const ProfileTab = ({ currentUser, branches, onLogout }) => {
 };
 
 const KpiCard = ({ label, value, color, active, onClick, testid }) => (
-  <button onClick={onClick} data-testid={testid} className={`min-w-0 flex-1 rounded-2xl p-4 text-left transition ${active ? "ring-2 ring-inset" : ""}`} style={{ background: `${color}14`, border: `1px solid ${color}33`, ...(active ? { "--tw-ring-color": color } : {}) }}>
-    <p className="truncate text-xs font-medium" style={{ color }}>{label}</p>
-    <p className="mt-1 text-3xl font-bold" style={{ color }}>{value}</p>
+  <button onClick={onClick} data-testid={testid} className={`min-w-0 rounded-2xl p-3 text-left transition sm:flex-1 sm:p-4 ${active ? "ring-2 ring-inset" : ""}`} style={{ background: `${color}14`, border: `1px solid ${color}33`, ...(active ? { "--tw-ring-color": color } : {}) }}>
+    {/* Wraps on a phone instead of truncating — a stage name is only useful whole, and
+        these differ at the end ("Consultation Visit" against "Consultation Fee"). Two
+        lines' height whether or not it needs them, so the figures stay on one baseline
+        across the row. Desktop has the width to truncate rarely and stay on one line. */}
+    <p className="min-h-[2.4em] break-words text-[11px] font-medium leading-snug sm:min-h-0 sm:truncate sm:text-xs" style={{ color }}>{label}</p>
+    <p className="mt-0.5 text-2xl font-bold sm:mt-1 sm:text-3xl" style={{ color }}>{value}</p>
   </button>
 );
 
