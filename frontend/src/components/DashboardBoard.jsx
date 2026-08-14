@@ -5,7 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { SegmentedTabs } from "@/components/ui/segmented-tabs";
 import { toast } from "@/components/ui/sonner";
-import { getDashboardOverview, getRevenueOverview, mkGetTeam } from "@/lib/api";
+import { getDashboardOverview, getDashboardLeadsTrend, getRevenueOverview, mkGetTeam } from "@/lib/api";
 import { TeamCard } from "@/components/marketing/TeamCard";
 
 // The four count tabs read the same branch/vertical payload; the two people tabs are a
@@ -624,7 +624,154 @@ const ExecutiveOverview = ({ data, loading, dateFilter }) => {
         })}
       </div>
 
+      <LeadsTrend />
     </div>
+  );
+};
+
+/**
+ * Total leads by month over the last six months.
+ *
+ * One line, not one per branch. The per-branch version was removed with the branch table
+ * it read against — five lines answer "which branch is moving", and without that table
+ * beside it there was nothing to move against. This answers the simpler question the
+ * cards above leave open: the four figures say where things stand today, and this says
+ * which way they have been going.
+ *
+ * Not filtered by the board's date range, deliberately: a trend answers "which way is
+ * this going", and a six-month line inside a one-day filter would be a single point.
+ *
+ * /dashboard/leads-trend still returns a series per branch; the total is summed here
+ * rather than adding an endpoint for a figure the existing one already contains.
+ */
+const LeadsTrend = () => {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [hoverIdx, setHoverIdx] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getDashboardLeadsTrend(6)
+      .then((r) => { if (!cancelled) setData(r); })
+      .catch(() => { if (!cancelled) setData(null); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  if (loading) return <Card><CardContent className="p-5"><p className="py-10 text-center text-sm text-slate-400">Loading trend…</p></CardContent></Card>;
+  if (!data || !data.months?.length) return null;
+
+  const totals = data.months.map((_m, i) =>
+    (data.branches || []).reduce((sum, b) => sum + (b.values?.[i] || 0), 0));
+  const peak = Math.max(1, ...totals);
+
+  // A 1 / 2 / 5 × power-of-ten step, with the axis topping out at a multiple of it rather
+  // than at the data. Scaling straight to the peak leaves the highest point sitting on the
+  // frame with no gridline above it — and a step derived from the peak alone gave figures
+  // like 560, which makes the reader do the arithmetic the gridline was there to save.
+  const step = (() => {
+    const raw = peak / 4;
+    const mag = 10 ** Math.floor(Math.log10(raw));
+    const norm = raw / mag;
+    return Math.max(1, (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * mag);
+  })();
+  const axisMax = step * Math.ceil(peak / step);
+
+  // viewBox units, not pixels — the svg scales to its container and the maths stays in
+  // one coordinate space.
+  const W = 720;
+  const H = 220;
+  const PAD_L = 40;
+  const PAD_R = 12;
+  const PAD_T = 12;
+  const PAD_B = 28;
+  const plotW = W - PAD_L - PAD_R;
+  const plotH = H - PAD_T - PAD_B;
+  const x = (i) => PAD_L + (data.months.length === 1 ? plotW / 2 : (i / (data.months.length - 1)) * plotW);
+  const y = (v) => PAD_T + plotH - (v / axisMax) * plotH;
+
+  const ticks = [];
+  for (let v = 0; v <= axisMax + 1e-9; v += step) ticks.push(Math.round(v));
+
+  const monthLabel = (k) => new Date(`${k}-01T00:00:00`).toLocaleDateString("en-US", { month: "short" });
+  const LINE = "#2a78d6";
+
+  return (
+    <Card data-testid="dashboard-leads-trend">
+      <CardContent className="p-4 sm:p-5">
+        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+          <p className="text-sm font-bold text-slate-800">Leads Trend · Overall</p>
+          <p className="text-[11px] text-slate-400">Last 6 months · not affected by the date filter</p>
+        </div>
+
+        {/* No legend. One series needs no key — a swatch labelled "Overall" beside the
+            only line on the chart is a caption for something already unambiguous. */}
+        <div className="-mx-1 overflow-x-auto px-1">
+          <svg viewBox={`0 0 ${W} ${H}`} className="h-56 w-full min-w-[560px]" role="img" aria-label="Total leads over the last six months">
+            {/* Hairline grid, solid, one step off the surface — never dashed. */}
+            {ticks.map((v) => (
+              <g key={v}>
+                <line x1={PAD_L} x2={W - PAD_R} y1={y(v)} y2={y(v)} stroke="#e1e0d9" strokeWidth="1" />
+                <text x={PAD_L - 6} y={y(v) + 3} textAnchor="end" className="fill-slate-400" style={{ fontSize: 9 }}>
+                  {v.toLocaleString("en-IN")}
+                </text>
+              </g>
+            ))}
+            {data.months.map((k, i) => (
+              <text key={k} x={x(i)} y={H - 8} textAnchor="middle" className="fill-slate-400" style={{ fontSize: 9 }}>
+                {monthLabel(k)}
+              </text>
+            ))}
+
+            {hoverIdx !== null && (
+              <line x1={x(hoverIdx)} x2={x(hoverIdx)} y1={PAD_T} y2={PAD_T + plotH} stroke="#c3c2b7" strokeWidth="1" />
+            )}
+
+            <polyline
+              fill="none"
+              stroke={LINE}
+              strokeWidth="2"
+              strokeLinejoin="round"
+              strokeLinecap="round"
+              points={totals.map((v, i) => `${x(i)},${y(v)}`).join(" ")}
+            />
+            {/* Every month marked, not only the hovered one: with a single series there is
+                room for them, and they show where the readings actually are rather than
+                leaving the reader to infer them from the bends. */}
+            {totals.map((v, i) => (
+              <circle key={data.months[i]} cx={x(i)} cy={y(v)} r={hoverIdx === i ? 5 : 3} fill={LINE} stroke="#ffffff" strokeWidth="2" />
+            ))}
+
+            {/* One hit band per month, full plot height — a 2px line is impossible to
+                land on, and the band is what makes the crosshair usable. */}
+            {data.months.map((k, i) => (
+              <rect
+                key={k}
+                x={x(i) - plotW / Math.max(1, data.months.length - 1) / 2}
+                y={PAD_T}
+                width={plotW / Math.max(1, data.months.length - 1)}
+                height={plotH}
+                fill="transparent"
+                onMouseEnter={() => setHoverIdx(i)}
+                onMouseLeave={() => setHoverIdx(null)}
+              />
+            ))}
+          </svg>
+        </div>
+
+        {/* The hovered month in text, because a tooltip should enhance rather than be the
+            only way to read a value. */}
+        <div className="mt-2 min-h-[20px] text-[11px] text-slate-500">
+          {hoverIdx !== null && (
+            <span>
+              <span className="font-semibold text-slate-700">{monthLabel(data.months[hoverIdx])} {data.months[hoverIdx].slice(0, 4)}</span>
+              {" · "}
+              <b className="text-slate-700">{totals[hoverIdx].toLocaleString("en-IN")}</b> leads
+            </span>
+          )}
+        </div>
+      </CardContent>
+    </Card>
   );
 };
 
