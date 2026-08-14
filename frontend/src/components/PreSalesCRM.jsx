@@ -237,13 +237,32 @@ const LeadContactIcons = ({ lead }) => {
     ].join("\n");
     window.location.href = `https://wa.me/${num}?text=${encodeURIComponent(text)}`;
   };
+  // 40px targets with a tinted disc behind each. These now render only on the phone
+  // cards, and at 3.5 icons inside 1.5 padding they were 26px of tappable area with
+  // nothing marking them as buttons — under the 44px a thumb is generally reckoned to
+  // need, and sitting next to a card that opens the lead on tap, so a near miss opened
+  // the wrong thing entirely.
   return (
-    <div className="flex items-center justify-center gap-1">
-      <button type="button" onClick={handleCall} className="rounded-full p-1.5 text-sky-600 hover:bg-sky-50" title="Call" data-testid={`presales-call-${lead.id}`}>
-        <Phone className="h-3.5 w-3.5" />
+    <div className="flex items-center justify-center gap-2">
+      <button
+        type="button"
+        onClick={handleCall}
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-sky-50 text-sky-600 transition active:bg-sky-100"
+        title="Call"
+        aria-label={`Call ${lead.name || "lead"}`}
+        data-testid={`presales-call-${lead.id}`}
+      >
+        <Phone className="h-5 w-5" />
       </button>
-      <button type="button" onClick={handleWhatsApp} className="rounded-full p-1.5 text-emerald-600 hover:bg-emerald-50" title="WhatsApp" data-testid={`presales-whatsapp-${lead.id}`}>
-        <WhatsAppIcon className="h-3.5 w-3.5" />
+      <button
+        type="button"
+        onClick={handleWhatsApp}
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 transition active:bg-emerald-100"
+        title="WhatsApp"
+        aria-label={`WhatsApp ${lead.name || "lead"}`}
+        data-testid={`presales-whatsapp-${lead.id}`}
+      >
+        <WhatsAppIcon className="h-5 w-5" />
       </button>
     </div>
   );
