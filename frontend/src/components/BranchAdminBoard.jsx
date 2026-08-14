@@ -15,6 +15,7 @@ import {
   Activity,
   LayoutDashboard,
   FileText,
+  Printer,
   Share2,
   Download,
   ShoppingCart,
@@ -1828,17 +1829,19 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                   and aria-label rather than being dropped. Done goes with them: the header
                   X runs the same close-and-move, so it was a second button for one action. */}
               <div className="flex items-center justify-center gap-2 pt-1 sm:gap-3">
-                {/* Open leads: the client wants to see the sheet before it is sent
-                    anywhere, and Save-as-PDF lives behind that window's print. */}
+                {/* A printer, matching the receipt popup's own first button. It opens the
+                    sheet with the print dialog already up, which is what a printer icon
+                    promises — the document glyph promised a file and delivered a print.
+                    Save-as-PDF still lives behind that dialog, so nothing is lost. */}
                 <Button
                   variant="outline"
                   className="h-10 w-10 shrink-0 p-0"
                   onClick={() => openPrintable(apptHtml(apptConfirm), { print: true })}
-                  title="Open PDF"
-                  aria-label="Open PDF"
+                  title="Print"
+                  aria-label="Print"
                   data-testid="branch-appt-confirm-pdf"
                 >
-                  <FileText className="h-4 w-4" />
+                  <Printer className="h-4 w-4" />
                 </Button>
                 {/* The one the branch actually reaches for: straight to the patient's own
                     number with the confirmation typed, card image on the clipboard. */}
