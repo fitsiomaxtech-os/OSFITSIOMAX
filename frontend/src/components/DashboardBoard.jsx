@@ -567,6 +567,9 @@ const BranchesTab = ({ team, loading, branches }) => {
 const ExecutiveOverview = ({ data, loading, dateFilter }) => {
   const [prev, setPrev] = useState(null);
   const [prevLoading, setPrevLoading] = useState(false);
+  // Which of the four headline figures the charts below are drawing. Held here rather
+  // than inside either chart, so both plot the same metric and one selection drives them.
+  const [trendMetric, setTrendMetric] = useState("leads");
 
   const from = dateFilter?.from;
   const to = dateFilter?.to;
@@ -598,56 +601,65 @@ const ExecutiveOverview = ({ data, loading, dateFilter }) => {
     { key: "treatments", label: "Treatments", icon: Activity, value: data.treatments?.total ?? 0 },
     { key: "revenue", label: "Revenue", icon: IndianRupee, value: data.revenue?.total ?? 0, currency: true },
   ];
+  // `key` is also the key inside each branch's `series` on /dashboard/leads-trend, so the
+  // selected card and the lines drawn from it cannot drift apart.
+
+  const activeMetric = metrics.find((m) => m.key === trendMetric) || metrics[0];
 
   return (
     <div className="space-y-4" data-testid="dashboard-overview">
       {/* Two up on a phone rather than one. Four full-width cards stacked pushed the
           branch table two screens down, and these figures are short enough to share a
-          row. */}
+          row.
+
+          Each card is also the trend's selector — clicking one draws that metric in the
+          two charts below. The card already names the figure and prints its total, so
+          putting the choice on it costs nothing and saves a second control repeating the
+          same four words. The selected one inverts to solid slate. */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {metrics.map((m) => {
           const before = prev?.[m.key]?.total;
+          const on = m.key === trendMetric;
           return (
-            <Card key={m.key} data-testid={`dashboard-overview-${m.key}`}>
-              <CardContent className="p-3 sm:p-4">
-                <div className="flex items-start justify-between gap-2">
-                  <p className="min-w-0 truncate text-[10px] font-bold uppercase tracking-wider text-slate-500 sm:text-[11px]">{m.label}</p>
-                  <m.icon className="h-4 w-4 shrink-0 text-slate-300" />
-                </div>
-                <p className="mt-1 truncate text-2xl font-extrabold text-slate-800 sm:text-3xl">
-                  {m.currency ? fmtValue("revenue", m.value) : (m.value || 0).toLocaleString("en-IN")}
-                </p>
-                <Delta now={m.value} before={before} loading={prevLoading} available={!!from && !!to} />
-              </CardContent>
-            </Card>
+            <button
+              key={m.key}
+              type="button"
+              onClick={() => setTrendMetric(m.key)}
+              aria-pressed={on}
+              className={`rounded-xl border p-3 text-left shadow-sm transition sm:p-4 ${
+                on ? "border-slate-800 bg-slate-800" : "border-slate-200 bg-white hover:border-slate-300"
+              }`}
+              data-testid={`dashboard-overview-${m.key}`}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <p className={`min-w-0 truncate text-[10px] font-bold uppercase tracking-wider sm:text-[11px] ${on ? "text-white/80" : "text-slate-500"}`}>{m.label}</p>
+                <m.icon className={`h-4 w-4 shrink-0 ${on ? "text-white/60" : "text-slate-300"}`} />
+              </div>
+              <p className={`mt-1 truncate text-2xl font-extrabold sm:text-3xl ${on ? "text-white" : "text-slate-800"}`}>
+                {m.currency ? fmtValue("revenue", m.value) : (m.value || 0).toLocaleString("en-IN")}
+              </p>
+              <Delta now={m.value} before={before} loading={prevLoading} available={!!from && !!to} inverted={on} />
+            </button>
           );
         })}
       </div>
 
-      <LeadsTrend />
+      <BranchGrowthTrend metric={activeMetric} />
+      <LeadsTrend metric={activeMetric} />
     </div>
   );
 };
 
 /**
- * Total leads by month over the last six months.
+ * The trend payload, fetched once and shared.
  *
- * One line, not one per branch. The per-branch version was removed with the branch table
- * it read against — five lines answer "which branch is moving", and without that table
- * beside it there was nothing to move against. This answers the simpler question the
- * cards above leave open: the four figures say where things stand today, and this says
- * which way they have been going.
- *
- * Not filtered by the board's date range, deliberately: a trend answers "which way is
- * this going", and a six-month line inside a one-day filter would be a single point.
- *
- * /dashboard/leads-trend still returns a series per branch; the total is summed here
- * rather than adding an endpoint for a figure the existing one already contains.
+ * Both charts read the same six months, and both redraw on a metric change rather than
+ * refetching — the response already carries all four series, so a request per selection
+ * would be four round trips for data already in hand.
  */
-const LeadsTrend = () => {
+const useTrendData = () => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [hoverIdx, setHoverIdx] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -658,33 +670,63 @@ const LeadsTrend = () => {
     return () => { cancelled = true; };
   }, []);
 
+  return { data, loading };
+};
+
+/** The selected metric's series for one branch, falling back to the legacy `values` row
+ *  so an older payload without `series` still draws its leads line. */
+const branchSeries = (b, metricKey) => b.series?.[metricKey] || (metricKey === "leads" ? b.values : null) || [];
+
+/** Shared axis maths: a 1 / 2 / 5 × power-of-ten step, with the axis topping out at a
+ *  multiple of it rather than at the data. Scaling straight to the peak leaves the highest
+ *  point sitting on the frame with no gridline above it — and a step derived from the peak
+ *  alone gave figures like 560, which makes the reader do the arithmetic the gridline was
+ *  there to save. */
+const axisFor = (peakValue) => {
+  const peak = Math.max(1, peakValue);
+  const raw = peak / 4;
+  const mag = 10 ** Math.floor(Math.log10(raw));
+  const norm = raw / mag;
+  const step = Math.max(1, (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * mag);
+  return { step, axisMax: step * Math.ceil(peak / step) };
+};
+
+const monthLabel = (k) => new Date(`${k}-01T00:00:00`).toLocaleDateString("en-US", { month: "short" });
+
+/**
+ * Total by month over the last six months, for whichever metric is selected above.
+ *
+ * One line — the branch split is the chart above this one. This answers what the cards
+ * leave open: they say where things stand today, this says which way they have been
+ * going.
+ *
+ * Not filtered by the board's date range, deliberately: a trend answers "which way is
+ * this going", and a six-month line inside a one-day filter would be a single point.
+ *
+ * The total is summed across branches here rather than asking the endpoint for a figure
+ * its per-branch rows already contain.
+ */
+const LeadsTrend = ({ metric }) => {
+  const { data, loading } = useTrendData();
+  const [hoverIdx, setHoverIdx] = useState(null);
+
   if (loading) return <Card><CardContent className="p-5"><p className="py-10 text-center text-sm text-slate-400">Loading trend…</p></CardContent></Card>;
   if (!data || !data.months?.length) return null;
 
   const totals = data.months.map((_m, i) =>
-    (data.branches || []).reduce((sum, b) => sum + (b.values?.[i] || 0), 0));
-  const peak = Math.max(1, ...totals);
-
-  // A 1 / 2 / 5 × power-of-ten step, with the axis topping out at a multiple of it rather
-  // than at the data. Scaling straight to the peak leaves the highest point sitting on the
-  // frame with no gridline above it — and a step derived from the peak alone gave figures
-  // like 560, which makes the reader do the arithmetic the gridline was there to save.
-  const step = (() => {
-    const raw = peak / 4;
-    const mag = 10 ** Math.floor(Math.log10(raw));
-    const norm = raw / mag;
-    return Math.max(1, (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * mag);
-  })();
-  const axisMax = step * Math.ceil(peak / step);
+    (data.branches || []).reduce((sum, b) => sum + (branchSeries(b, metric.key)[i] || 0), 0));
+  const { step, axisMax } = axisFor(Math.max(...totals));
 
   // viewBox units, not pixels — the svg scales to its container and the maths stays in
   // one coordinate space.
   const W = 720;
   const H = 220;
-  const PAD_L = 40;
-  const PAD_R = 12;
-  const PAD_T = 12;
-  const PAD_B = 28;
+  // Narrow left padding: the axis figures are gone with the banded design, so the plot
+  // takes the width they were reserving.
+  const PAD_L = 14;
+  const PAD_R = 14;
+  const PAD_T = 10;
+  const PAD_B = 26;
   const plotW = W - PAD_L - PAD_R;
   const plotH = H - PAD_T - PAD_B;
   const x = (i) => PAD_L + (data.months.length === 1 ? plotW / 2 : (i / (data.months.length - 1)) * plotW);
@@ -693,29 +735,36 @@ const LeadsTrend = () => {
   const ticks = [];
   for (let v = 0; v <= axisMax + 1e-9; v += step) ticks.push(Math.round(v));
 
-  const monthLabel = (k) => new Date(`${k}-01T00:00:00`).toLocaleDateString("en-US", { month: "short" });
-  const LINE = "#2a78d6";
+  // Near-black rather than the brand blue. On a banded ground the line is the only mark
+  // that carries meaning, and ink reads against those bands at any weight where a mid
+  // blue starts to compete with them.
+  const LINE = "#18181b";
+  const readout = (v) => (metric.currency ? fmtValue("revenue", v) : v.toLocaleString("en-IN"));
 
   return (
     <Card data-testid="dashboard-leads-trend">
       <CardContent className="p-4 sm:p-5">
         <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-          <p className="text-sm font-bold text-slate-800">Leads Trend · Overall</p>
-          <p className="text-[11px] text-slate-400">Last 6 months · not affected by the date filter</p>
+          <p className="text-sm font-bold text-slate-800">OverAll</p>
+          <p className="text-[11px] text-slate-400">{metric.label} · last 6 months · not affected by the date filter</p>
         </div>
 
-        {/* No legend. One series needs no key — a swatch labelled "Overall" beside the
-            only line on the chart is a caption for something already unambiguous. */}
         <div className="-mx-1 overflow-x-auto px-1">
-          <svg viewBox={`0 0 ${W} ${H}`} className="h-56 w-full min-w-[560px]" role="img" aria-label="Total leads over the last six months">
-            {/* Hairline grid, solid, one step off the surface — never dashed. */}
-            {ticks.map((v) => (
-              <g key={v}>
-                <line x1={PAD_L} x2={W - PAD_R} y1={y(v)} y2={y(v)} stroke="#e1e0d9" strokeWidth="1" />
-                <text x={PAD_L - 6} y={y(v) + 3} textAnchor="end" className="fill-slate-400" style={{ fontSize: 9 }}>
-                  {v.toLocaleString("en-IN")}
-                </text>
-              </g>
+          <svg viewBox={`0 0 ${W} ${H}`} className="h-56 w-full min-w-[560px]" role="img" aria-label={`Total ${metric.label} over the last six months`}>
+            {/* Banded rather than ruled. The bands carry the same scale the gridlines did —
+                one band per axis step — but read as a surface the line sits on instead of
+                four rules competing with it. The figures beside them are gone with them:
+                every value is in the readout below, so the chart is left to do the one
+                thing this design is for, which is shape. */}
+            {ticks.slice(0, -1).map((v, i) => (
+              <rect
+                key={v}
+                x={PAD_L}
+                y={y(ticks[i + 1])}
+                width={plotW}
+                height={y(v) - y(ticks[i + 1])}
+                fill={i % 2 === 0 ? "#f4f4f5" : "#ffffff"}
+              />
             ))}
             {data.months.map((k, i) => (
               <text key={k} x={x(i)} y={H - 8} textAnchor="middle" className="fill-slate-400" style={{ fontSize: 9 }}>
@@ -724,23 +773,22 @@ const LeadsTrend = () => {
             ))}
 
             {hoverIdx !== null && (
-              <line x1={x(hoverIdx)} x2={x(hoverIdx)} y1={PAD_T} y2={PAD_T + plotH} stroke="#c3c2b7" strokeWidth="1" />
+              <line x1={x(hoverIdx)} x2={x(hoverIdx)} y1={PAD_T} y2={PAD_T + plotH} stroke="#d4d4d8" strokeWidth="1" />
             )}
 
             <polyline
               fill="none"
               stroke={LINE}
-              strokeWidth="2"
+              strokeWidth="1.75"
               strokeLinejoin="round"
               strokeLinecap="round"
               points={totals.map((v, i) => `${x(i)},${y(v)}`).join(" ")}
             />
-            {/* Every month marked, not only the hovered one: with a single series there is
-                room for them, and they show where the readings actually are rather than
-                leaving the reader to infer them from the bends. */}
-            {totals.map((v, i) => (
-              <circle key={data.months[i]} cx={x(i)} cy={y(v)} r={hoverIdx === i ? 5 : 3} fill={LINE} stroke="#ffffff" strokeWidth="2" />
-            ))}
+            {/* One marker, on the month under the cursor. Six permanent dots turned a thin
+                line into a beaded one, which is the opposite of what this design is. */}
+            {hoverIdx !== null && (
+              <circle cx={x(hoverIdx)} cy={y(totals[hoverIdx])} r="3.5" fill={LINE} stroke="#ffffff" strokeWidth="2" />
+            )}
 
             {/* One hit band per month, full plot height — a 2px line is impossible to
                 land on, and the band is what makes the crosshair usable. */}
@@ -766,7 +814,7 @@ const LeadsTrend = () => {
             <span>
               <span className="font-semibold text-slate-700">{monthLabel(data.months[hoverIdx])} {data.months[hoverIdx].slice(0, 4)}</span>
               {" · "}
-              <b className="text-slate-700">{totals[hoverIdx].toLocaleString("en-IN")}</b> leads
+              <b className="text-slate-700">{readout(totals[hoverIdx])}</b> {metric.label.toLowerCase()}
             </span>
           )}
         </div>
@@ -778,24 +826,162 @@ const LeadsTrend = () => {
 /** Change against the preceding window. Silent rather than "0%" when there is nothing to
  *  compare against — an unknown and a flat period are different things, and printing 0%
  *  for the first is the kind of number people act on. */
-const Delta = ({ now, before, loading, available }) => {
-  if (!available) return <p className="mt-1 text-[11px] text-slate-400">All time · no prior period</p>;
-  if (loading) return <p className="mt-1 text-[11px] text-slate-300">Comparing…</p>;
-  if (before == null) return <p className="mt-1 text-[11px] text-slate-400">No prior period</p>;
+const Delta = ({ now, before, loading, available, inverted = false }) => {
+  // On the selected card the ground is solid slate, where the muted greys this normally
+  // uses fall below readable contrast. `inverted` lifts them onto the dark instead.
+  const muted = inverted ? "text-white/70" : "text-slate-400";
+  if (!available) return <p className={`mt-1 text-[11px] ${muted}`}>All time · no prior period</p>;
+  if (loading) return <p className={`mt-1 text-[11px] ${inverted ? "text-white/50" : "text-slate-300"}`}>Comparing…</p>;
+  if (before == null) return <p className={`mt-1 text-[11px] ${muted}`}>No prior period</p>;
   if (!before) {
     // Growth from zero has no percentage — any increase is infinite. Say what happened.
-    return <p className="mt-1 text-[11px] text-slate-400">{now ? "New this period" : "None either period"}</p>;
+    return <p className={`mt-1 text-[11px] ${muted}`}>{now ? "New this period" : "None either period"}</p>;
   }
   const pct = ((now - before) / before) * 100;
   const flat = Math.abs(pct) < 0.05;
   const Icon = flat ? Minus : pct > 0 ? TrendingUp : TrendingDown;
-  const tone = flat ? "text-slate-400" : pct > 0 ? "text-emerald-600" : "text-rose-600";
+  const tone = inverted
+    ? (flat ? "text-white/70" : pct > 0 ? "text-emerald-300" : "text-rose-300")
+    : (flat ? "text-slate-400" : pct > 0 ? "text-emerald-600" : "text-rose-600");
   return (
     <p className={`mt-1 flex items-center gap-1 text-[11px] font-semibold ${tone}`}>
       <Icon className="h-3 w-3 shrink-0" />
       {flat ? "0%" : `${pct > 0 ? "+" : ""}${pct.toFixed(1)}%`}
-      <span className="font-normal text-slate-400">vs prior period</span>
+      <span className={`font-normal ${muted}`}>vs prior period</span>
     </p>
+  );
+};
+
+// Greyscale, darkest first — the reference design's own scheme. Branch identity rests on
+// the legend and the hover readout rather than on hue, which is what makes a monochrome
+// ramp safe here: four greys are not reliably tellable apart on their own.
+const BRANCH_INKS = ["#18181b", "#52525b", "#a1a1aa", "#d4d4d8", "#71717a", "#3f3f46"];
+
+/**
+ * The same six months split by branch — "which branch is moving", where the chart below
+ * answers "which way are we going overall".
+ *
+ * Draws whichever metric is selected on the cards above, so the pair never shows two
+ * different things at once.
+ */
+const BranchGrowthTrend = ({ metric }) => {
+  const { data, loading } = useTrendData();
+  const [hoverIdx, setHoverIdx] = useState(null);
+
+  if (loading) return <Card><CardContent className="p-5"><p className="py-10 text-center text-sm text-slate-400">Loading growth…</p></CardContent></Card>;
+  if (!data || !data.months?.length) return null;
+
+  const series = (data.branches || []).map((b, i) => ({
+    ...b,
+    color: BRANCH_INKS[i % BRANCH_INKS.length],
+    points: branchSeries(b, metric.key),
+  }));
+  if (!series.length) return null;
+
+  const { step, axisMax } = axisFor(Math.max(0, ...series.flatMap((s) => s.points)));
+
+  const W = 720;
+  const H = 220;
+  const PAD_L = 14;
+  const PAD_R = 14;
+  const PAD_T = 10;
+  const PAD_B = 26;
+  const plotW = W - PAD_L - PAD_R;
+  const plotH = H - PAD_T - PAD_B;
+  const x = (i) => PAD_L + (data.months.length === 1 ? plotW / 2 : (i / (data.months.length - 1)) * plotW);
+  const y = (v) => PAD_T + plotH - (v / axisMax) * plotH;
+
+  const ticks = [];
+  for (let v = 0; v <= axisMax + 1e-9; v += step) ticks.push(Math.round(v));
+  const readout = (v) => (metric.currency ? fmtValue("revenue", v) : v.toLocaleString("en-IN"));
+
+  return (
+    <Card data-testid="dashboard-branch-growth">
+      <CardContent className="p-4 sm:p-5">
+        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+          <p className="text-sm font-bold text-slate-800">OverAll Growth</p>
+          <p className="text-[11px] text-slate-400">{metric.label} by branch · last 6 months</p>
+        </div>
+
+        {/* Legend always. Four greys cannot be told apart by eye, so identity rests here
+            and in the readout — the swatch only ties a name to a line already labelled. */}
+        <div className="mb-3 flex flex-wrap gap-x-4 gap-y-1">
+          {series.map((s) => (
+            <span key={s.branch_id} className="flex items-center gap-1.5 text-[11px] font-medium text-slate-600">
+              <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: s.color }} />
+              {s.branch_name}
+            </span>
+          ))}
+        </div>
+
+        <div className="-mx-1 overflow-x-auto px-1">
+          <svg viewBox={`0 0 ${W} ${H}`} className="h-56 w-full min-w-[560px]" role="img" aria-label={`${metric.label} per branch over the last six months`}>
+            {ticks.slice(0, -1).map((v, i) => (
+              <rect
+                key={v}
+                x={PAD_L}
+                y={y(ticks[i + 1])}
+                width={plotW}
+                height={y(v) - y(ticks[i + 1])}
+                fill={i % 2 === 0 ? "#f4f4f5" : "#ffffff"}
+              />
+            ))}
+            {data.months.map((k, i) => (
+              <text key={k} x={x(i)} y={H - 8} textAnchor="middle" className="fill-slate-400" style={{ fontSize: 9 }}>
+                {monthLabel(k)}
+              </text>
+            ))}
+
+            {hoverIdx !== null && (
+              <line x1={x(hoverIdx)} x2={x(hoverIdx)} y1={PAD_T} y2={PAD_T + plotH} stroke="#d4d4d8" strokeWidth="1" />
+            )}
+
+            {series.map((s) => (
+              <polyline
+                key={s.branch_id}
+                fill="none"
+                stroke={s.color}
+                strokeWidth="1.75"
+                strokeLinejoin="round"
+                strokeLinecap="round"
+                points={s.points.map((v, i) => `${x(i)},${y(v || 0)}`).join(" ")}
+              />
+            ))}
+            {/* Markers carry a surface ring so lines crossing under them stay legible. */}
+            {hoverIdx !== null && series.map((s) => (
+              <circle key={s.branch_id} cx={x(hoverIdx)} cy={y(s.points[hoverIdx] || 0)} r="3.5" fill={s.color} stroke="#ffffff" strokeWidth="2" />
+            ))}
+
+            {data.months.map((k, i) => (
+              <rect
+                key={k}
+                x={x(i) - plotW / Math.max(1, data.months.length - 1) / 2}
+                y={PAD_T}
+                width={plotW / Math.max(1, data.months.length - 1)}
+                height={plotH}
+                fill="transparent"
+                onMouseEnter={() => setHoverIdx(i)}
+                onMouseLeave={() => setHoverIdx(null)}
+              />
+            ))}
+          </svg>
+        </div>
+
+        <div className="mt-2 min-h-[20px] text-[11px] text-slate-500">
+          {hoverIdx !== null && (
+            <span className="flex flex-wrap gap-x-3 gap-y-1">
+              <span className="font-semibold text-slate-700">{monthLabel(data.months[hoverIdx])} {data.months[hoverIdx].slice(0, 4)}</span>
+              {series.map((s) => (
+                <span key={s.branch_id}>
+                  <span className="inline-block h-2 w-2 rounded-sm align-middle" style={{ background: s.color }} />{" "}
+                  {s.branch_name} <b className="text-slate-700">{readout(s.points[hoverIdx] || 0)}</b>
+                </span>
+              ))}
+            </span>
+          )}
+        </div>
+      </CardContent>
+    </Card>
   );
 };
 

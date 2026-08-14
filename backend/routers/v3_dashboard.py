@@ -571,7 +571,13 @@ async def v3_dashboard_leads_trend(
     months: int = Query(6, ge=2, le=24),
     _: V3UserOut = Depends(v3_require_roles("super_admin")),
 ):
-    """Leads per Physiotherapy branch, by calendar month, most recent last.
+    """Leads, Appointments, Treatments and Revenue per Physiotherapy branch, by calendar
+    month, most recent last. The route keeps its leads-trend name because callers and
+    tests already use it; each branch now carries a `series` of all four alongside the
+    original `values`, which stays the leads row.
+
+    All four are counted exactly as /dashboard/overview counts them, field for field, so
+    a headline card and the line drawn under it cannot disagree about what the metric is.
 
     Takes no date filter of its own. A trend answers "which way is this going", and a
     six-month line inside a one-day filter would be a single point — the board's range
@@ -598,25 +604,78 @@ async def v3_dashboard_leads_trend(
             y -= 1
     keys.reverse()
 
-    rows = await v3_col("leads").find(
-        {"branch_id": {"$in": [b["id"] for b in branches]}, "created_at": {"$gte": f"{keys[0]}-01"}},
-        {"_id": 0, "branch_id": 1, "created_at": 1},
-    ).to_list(100000)
+    branch_ids = [b["id"] for b in branches]
+    floor = f"{keys[0]}-01"
 
-    counts: dict = {b["id"]: {k: 0 for k in keys} for b in branches}
-    for r in rows:
-        key = str(r.get("created_at", ""))[:7]
-        bucket = counts.get(r.get("branch_id"))
-        # `key in bucket` rather than a date comparison: the $gte above is a string bound,
-        # so a malformed created_at can slip past it and would otherwise land in no month
-        # at all — or worse, create one.
-        if bucket is not None and key in bucket:
-            bucket[key] += 1
+    # One bucket per metric. Each is {branch_id: {month_key: number}}, and `key in bucket`
+    # rather than a date comparison guards every add: the $gte bounds below are string
+    # comparisons, so a malformed date can slip past one and would otherwise land in no
+    # month at all — or worse, create one.
+    def empty():
+        return {bid: {k: 0.0 for k in keys} for bid in branch_ids}
+
+    def add(bucket, branch_id, raw_date, amount=1.0):
+        row = bucket.get(branch_id)
+        key = str(raw_date or "")[:7]
+        if row is not None and key in row:
+            row[key] += amount
+
+    # The four are counted exactly as /dashboard/overview counts them, field for field, so
+    # a card and the line under it can never disagree about what a metric means: leads by
+    # created_at, appointments by appointment_date, treatments as completed sessions by
+    # slot_time, revenue off the lead_activity payment trail.
+    leads_b, appts_b, treat_b, rev_b = empty(), empty(), empty(), empty()
+
+    for r in await v3_col("leads").find(
+        {"branch_id": {"$in": branch_ids}, "created_at": {"$gte": floor}},
+        {"_id": 0, "branch_id": 1, "created_at": 1},
+    ).to_list(100000):
+        add(leads_b, r.get("branch_id"), r.get("created_at"))
+
+    for r in await v3_col("leads").find(
+        {"branch_id": {"$in": branch_ids}, "appointment_date": {"$gte": floor}},
+        {"_id": 0, "branch_id": 1, "appointment_date": 1},
+    ).to_list(100000):
+        add(appts_b, r.get("branch_id"), r.get("appointment_date"))
+
+    for s in await v3_col("sessions").find(
+        {"branch_id": {"$in": branch_ids}, "status": "completed", "slot_time": {"$gte": floor}},
+        {"_id": 0, "branch_id": 1, "slot_time": 1},
+    ).to_list(100000):
+        add(treat_b, s.get("branch_id"), s.get("slot_time"))
+
+    # Revenue has no branch on the activity itself, so each payment is attributed through
+    # its lead — the same hop /dashboard/overview makes.
+    activities = await v3_col("lead_activity").find(
+        {"action": {"$in": REVENUE_ACTIONS}, "created_at": {"$gte": floor}},
+        {"_id": 0, "lead_id": 1, "details": 1, "created_at": 1},
+    ).to_list(100000)
+    act_lead_ids = list({a["lead_id"] for a in activities if a.get("lead_id")})
+    lead_branch = {
+        l["id"]: l.get("branch_id")
+        for l in await v3_col("leads").find({"id": {"$in": act_lead_ids}}, {"_id": 0, "id": 1, "branch_id": 1}).to_list(100000)
+    }
+    for a in activities:
+        add(rev_b, lead_branch.get(a.get("lead_id")), a.get("created_at"), _parse_rs_amount(a.get("details", "")))
+
+    def series(bucket, bid, currency=False):
+        return [round(bucket[bid][k], 2) if currency else int(bucket[bid][k]) for k in keys]
 
     return {
         "months": keys,
         "branches": [
-            {"branch_id": b["id"], "branch_name": b.get("branch_name", ""), "values": [counts[b["id"]][k] for k in keys]}
+            {
+                "branch_id": b["id"],
+                "branch_name": b.get("branch_name", ""),
+                # Kept as the leads series so any older caller reading `values` is unaffected.
+                "values": series(leads_b, b["id"]),
+                "series": {
+                    "leads": series(leads_b, b["id"]),
+                    "appointments": series(appts_b, b["id"]),
+                    "treatments": series(treat_b, b["id"]),
+                    "revenue": series(rev_b, b["id"], currency=True),
+                },
+            }
             for b in branches
         ],
     }
