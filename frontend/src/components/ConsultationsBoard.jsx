@@ -713,6 +713,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // "Treatments" (there's nothing to "leave" for it to count as a real stage move).
   const matchesStage = useCallback((lead, stageName) => {
     if (isConsultant && stageName === "Treatments") return lead.treatment_fee_paid != null;
+    // Diet Consultation is a stage nothing writes — see matchesConsultationStage in
+    // BranchAdminBoard for why it is read off the lead's diet flag instead. Gated to the
+    // branch pipeline: the Head Physio's own board runs on head_consultation_stage and has
+    // no such stage, so this must not fire there.
+    if (!isConsultant && stageName === "Diet Consultation") return !!lead.diet_recommended;
     return lead[stageField] === stageName;
   }, [isConsultant, stageField]);
 

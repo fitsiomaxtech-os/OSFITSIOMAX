@@ -302,6 +302,32 @@ const apptHtml = (a) => `<!doctype html><html><head><meta charset="utf-8">
 // Which of the six get a direct slot on the phone bar. The other three go behind More.
 const BOTTOM_NAV_KEYS = ["pipeline", "review", "consultations"];
 
+/**
+ * Does this lead belong under that consultation stage chip?
+ *
+ * Every stage but one is the plain string on the lead. Diet Consultation is a stage
+ * nothing ever writes: the backend sets consultation_stage to Follow Up, Consultation
+ * Visit, Fee Collected, Physio Assign, Treatment Fee and Consultation Completed, and
+ * never to this one — so the chip could only ever read 0 and its list could only ever be
+ * empty, however many diet patients the branch had.
+ *
+ * It is matched on the lead's diet flag instead, which is set when the Head Physio
+ * recommends diet, when a Diet Consultation is booked, and when the Diet Fee is
+ * collected. That is the same flag the Diet Master View's own queue is built from, so the
+ * two boards now agree on who is a diet patient.
+ *
+ * Deliberately NOT done by moving the lead's consultation_stage: diet runs alongside
+ * treatment rather than instead of it, so a patient moved into this stage would vanish
+ * from Fee Collected or Physio Assign, where their physio course still lives. The chip
+ * reads a fact about the lead; it does not relocate them.
+ *
+ * Mirrors the "Treatments" virtual stage ConsultationsBoard already matches this way.
+ */
+export const matchesConsultationStage = (lead, stageName) => {
+  if (stageName === "Diet Consultation") return !!lead.diet_recommended;
+  return lead.consultation_stage === stageName;
+};
+
 export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = null }) => {
   const [boardData, setBoardData] = useState({ leads: [], stage_counts: {} });
   const [stages, setStages] = useState([]); // dynamic Branch Stages, from Super Admin > Pipeline Stage Management
@@ -400,7 +426,9 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   }, [filteredLeads, stages]);
   const consultationCounts = useMemo(() => {
     const counts = {};
-    consultationStages.forEach((s) => { counts[s.name] = filteredLeads.filter((l) => l.consultation_stage === s.name).length; });
+    consultationStages.forEach((s) => {
+      counts[s.name] = filteredLeads.filter((l) => matchesConsultationStage(l, s.name)).length;
+    });
     return counts;
   }, [filteredLeads, consultationStages]);
   const combinedCounts = { ...consultationCounts, ...salesCounts };
