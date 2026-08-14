@@ -747,7 +747,7 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
       )}
 
       {role === "pre_sales" && (
-        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white md:hidden" data-testid="presales-bottom-nav">
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-600 bg-slate-500 md:hidden" data-testid="presales-bottom-nav">
           <div className="mx-auto flex max-w-lg items-stretch justify-around">
             {PRESALES_TABS.map((t) => {
               const Icon = t.icon;
@@ -757,7 +757,7 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
                   key={t.key}
                   type="button"
                   onClick={() => setActiveTab(t.key)}
-                  className={`flex flex-1 flex-col items-center gap-0.5 py-2.5 text-[11px] font-medium transition-colors ${active ? "text-sky-600" : "text-slate-400"}`}
+                  className={`flex flex-1 flex-col items-center gap-0.5 py-2.5 text-[11px] font-medium transition-colors ${active ? "text-white" : "text-slate-200"}`}
                   data-testid={`presales-nav-${t.key}`}
                 >
                   <Icon className="h-5 w-5" />

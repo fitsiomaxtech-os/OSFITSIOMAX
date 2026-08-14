@@ -444,7 +444,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
 
       {/* Mobile bottom bar — the Head Physio works this board on a phone between
           patients, where the cards at the top are a stretch away. Same four, thumb-high. */}
-      <nav className="fixed inset-x-0 bottom-0 z-50 flex border-t border-slate-200 bg-white shadow-[0_-2px_10px_rgba(0,0,0,0.06)] sm:hidden" data-testid="hp-bottom-nav">
+      <nav className="fixed inset-x-0 bottom-0 z-50 flex border-t border-slate-600 bg-slate-500 shadow-[0_-2px_10px_rgba(0,0,0,0.06)] sm:hidden" data-testid="hp-bottom-nav">
         {WORK_TABS.map((t) => {
           const Icon = t.icon;
           const active = workTab === t.key;
@@ -454,11 +454,14 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
               type="button"
               onClick={() => setWorkTab(t.key)}
               className={`flex flex-1 flex-col items-center gap-0.5 py-2.5 text-[11px] font-semibold transition ${
-                active ? "text-teal-700" : "text-slate-400"
+                active ? "text-white" : "text-slate-200"
               }`}
               data-testid={`hp-bottom-nav-${t.key}`}
             >
-              <span className={`rounded-full px-4 py-1 transition ${active ? "bg-teal-100" : ""}`}>
+              {/* The active pill was bg-teal-100. On the slate bar the icon inside it is
+                  now white, which that pale mint would have swallowed — a translucent
+                  white reads as the same chip and leaves the icon legible. */}
+              <span className={`rounded-full px-4 py-1 transition ${active ? "bg-white/20" : ""}`}>
                 <Icon className="h-5 w-5" />
               </span>
               {t.label}

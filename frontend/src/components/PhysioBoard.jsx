@@ -131,7 +131,7 @@ export const PhysioBoard = ({ physioId } = {}) => {
 
       {/* Phones only. It used to render at every width, so a desk got a bar pinned
           across the bottom of the window for a switcher that belongs at the top. */}
-      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white pb-[env(safe-area-inset-bottom)] md:hidden" data-testid="physio-bottom-nav">
+      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-600 bg-slate-500 pb-[env(safe-area-inset-bottom)] md:hidden" data-testid="physio-bottom-nav">
         <div className="mx-auto flex max-w-lg items-stretch justify-around">
           {VIEW_TABS.map((tab) => {
             const Icon = tab.icon;
@@ -143,7 +143,7 @@ export const PhysioBoard = ({ physioId } = {}) => {
                 type="button"
                 onClick={() => setActiveTab(tab.key)}
                 className={`flex flex-1 flex-col items-center gap-0.5 py-2.5 text-[11px] font-medium transition ${
-                  isActive ? "text-sky-600" : "text-slate-400"
+                  isActive ? "text-white" : "text-slate-200"
                 }`}
                 data-testid={`physio-bottom-tab-${tab.key}`}
               >

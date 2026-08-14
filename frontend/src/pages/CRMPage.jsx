@@ -815,7 +815,7 @@ export const CRMPage = ({ auth, onLogout }) => {
             Each carries its full name on aria-label and title, so the bar is still
             readable to a screen reader and on a long press. */}
         {showSuperAdminBoard && (
-          <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white pb-[env(safe-area-inset-bottom)] md:hidden" data-testid="super-admin-bottom-nav">
+          <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-600 bg-slate-500 pb-[env(safe-area-inset-bottom)] md:hidden" data-testid="super-admin-bottom-nav">
             <div className="flex items-stretch justify-around">
               {SUPER_ADMIN_BOTTOM_TABS.map((t) => {
                 const Icon = t.icon;
@@ -828,7 +828,7 @@ export const CRMPage = ({ auth, onLogout }) => {
                     aria-label={t.label}
                     aria-current={active ? "page" : undefined}
                     title={t.label}
-                    className={`flex flex-1 items-center justify-center py-3.5 ${active ? "text-sky-600" : "text-slate-400"}`}
+                    className={`flex flex-1 items-center justify-center py-3.5 ${active ? "text-white" : "text-slate-200"}`}
                     data-testid={`super-admin-nav-${t.key === "branch_wise" ? "branch-wise" : t.key}`}
                   >
                     <Icon className="h-6 w-6" />
@@ -842,7 +842,7 @@ export const CRMPage = ({ auth, onLogout }) => {
                 aria-expanded={showSuperAdminMenu}
                 title="More"
                 className={`flex flex-1 items-center justify-center py-3.5 ${
-                  SUPER_ADMIN_MORE_TABS.some((t) => t.key === superAdminView) || showSuperAdminMenu ? "text-sky-600" : "text-slate-400"
+                  SUPER_ADMIN_MORE_TABS.some((t) => t.key === superAdminView) || showSuperAdminMenu ? "text-white" : "text-slate-200"
                 }`}
                 data-testid="super-admin-nav-more"
               >

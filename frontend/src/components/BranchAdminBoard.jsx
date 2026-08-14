@@ -878,7 +878,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false }) => {
           VIEW_TABS re-divides the bar instead of leaving a gap. */}
       {!embedded && (
       <nav
-        className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-2px_10px_rgba(15,23,42,0.06)] backdrop-blur supports-[backdrop-filter]:bg-white/85 md:hidden"
+        className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-600 bg-slate-500/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-2px_10px_rgba(15,23,42,0.06)] backdrop-blur supports-[backdrop-filter]:bg-slate-500/85 md:hidden"
         data-testid="branch-bottom-nav"
       >
         <div className="grid" style={{ gridTemplateColumns: `repeat(${bottomTabs.length + 1}, minmax(0, 1fr))` }}>
@@ -892,12 +892,12 @@ export const BranchAdminBoard = ({ branchId, embedded = false }) => {
                 onClick={() => { setActiveView(tab.key); setShowMoreMenu(false); }}
                 aria-current={active ? "page" : undefined}
                 className={`relative flex min-w-0 flex-col items-center justify-center gap-0.5 px-0.5 py-2 transition-colors ${
-                  active ? "text-sky-600" : "text-slate-400 active:text-slate-600"
+                  active ? "text-white" : "text-slate-200 active:text-white"
                 }`}
                 data-testid={`branch-bottom-nav-${tab.key}`}
               >
                 {/* The strip sits on the top edge, where the desk tabs carry their underline. */}
-                {active && <span className="absolute inset-x-2 top-0 h-0.5 rounded-full bg-sky-500" />}
+                {active && <span className="absolute inset-x-2 top-0 h-0.5 rounded-full bg-white" />}
                 <Icon className="h-[18px] w-[18px] flex-none" />
                 <span className="w-full truncate text-center text-[9px] font-semibold leading-tight">{tab.short}</span>
               </button>
@@ -910,11 +910,11 @@ export const BranchAdminBoard = ({ branchId, embedded = false }) => {
             onClick={() => setShowMoreMenu((v) => !v)}
             aria-expanded={showMoreMenu}
             className={`relative flex min-w-0 flex-col items-center justify-center gap-0.5 px-0.5 py-2 transition-colors ${
-              moreTabs.some((t) => t.key === activeView) || showMoreMenu ? "text-sky-600" : "text-slate-400 active:text-slate-600"
+              moreTabs.some((t) => t.key === activeView) || showMoreMenu ? "text-white" : "text-slate-200 active:text-white"
             }`}
             data-testid="branch-bottom-nav-more"
           >
-            {moreTabs.some((t) => t.key === activeView) && <span className="absolute inset-x-2 top-0 h-0.5 rounded-full bg-sky-500" />}
+            {moreTabs.some((t) => t.key === activeView) && <span className="absolute inset-x-2 top-0 h-0.5 rounded-full bg-white" />}
             <MoreHorizontal className="h-[18px] w-[18px] flex-none" />
             <span className="w-full truncate text-center text-[9px] font-semibold leading-tight">More</span>
           </button>

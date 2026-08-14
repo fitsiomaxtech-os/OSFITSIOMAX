@@ -764,7 +764,10 @@ function PortalDashboard({ onLogout }) {
         {activeTab === "profile" && <ProfileTab data={data} />}
       </div>
 
-      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white" data-testid="patient-portal-bottom-nav">
+      {/* Unlike every other bottom nav in the OS this one has no md:hidden — the portal
+          shows it at all widths — so the slate is reverted from md up rather than applied
+          outright, keeping the desktop bar white as it was. */}
+      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-600 bg-slate-500 md:border-slate-200 md:bg-white" data-testid="patient-portal-bottom-nav">
         <div className="mx-auto flex max-w-lg items-stretch justify-around">
           {PORTAL_TABS.map((t) => {
             const Icon = t.icon;
@@ -774,7 +777,7 @@ function PortalDashboard({ onLogout }) {
                 key={t.key}
                 type="button"
                 onClick={() => setActiveTab(t.key)}
-                className={`flex min-w-0 flex-1 flex-col items-center gap-0.5 py-2.5 text-[10px] font-medium transition ${isActive ? "text-sky-600" : "text-slate-400"}`}
+                className={`flex min-w-0 flex-1 flex-col items-center gap-0.5 py-2.5 text-[10px] font-medium transition ${isActive ? "text-white md:text-sky-600" : "text-slate-200 md:text-slate-400"}`}
                 data-testid={`patient-portal-tab-${t.key}`}
               >
                 <Icon className="h-5 w-5 shrink-0" />
