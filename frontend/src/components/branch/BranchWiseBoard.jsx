@@ -29,7 +29,7 @@ export const BranchWiseBoard = ({ branches }) => {
     <select
       value={activeId}
       onChange={(e) => setSelectedId(e.target.value)}
-      className="h-10 w-36 shrink-0 rounded-md border border-slate-200 bg-white px-2 text-sm font-semibold text-slate-700 sm:hidden"
+      className="h-10 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-2 text-sm font-semibold text-slate-700 sm:hidden"
       data-testid="branch-wise-subtab-select"
     >
       {sortedBranches.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}

@@ -308,6 +308,9 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   const [consultationStages, setConsultationStages] = useState([]); // dynamic Consultation Stages, merged into the same stage bar
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  // Phone only: the toolbar's search is an icon until tapped. Desktop's field is always
+  // open and ignores this.
+  const [searchOpen, setSearchOpen] = useState(false);
   const [selectedLead, setSelectedLead] = useState(null);
   const [activeView, setActiveView] = useState("pipeline");
   const [showMoreMenu, setShowMoreMenu] = useState(false);
@@ -549,14 +552,51 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
               the same screen offering four actions or two depending on which stage pill
               was lit. The consultations board is told to hide its toolbar (passing
               externalSearch does that) and is driven from here instead. */}
-          {/* With a branch picker in it this row carries six controls, which no phone has
-              the width for at a readable size — so below sm it scrolls sideways with every
-              item at its natural size, rather than squeezing the search to a stub. Desktop
-              has the room and lays out as before. */}
-          <div className="flex items-center gap-2 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] sm:gap-3 sm:overflow-visible [&::-webkit-scrollbar]:hidden" data-testid="branch-toolbar">
-            {/* min-w-0 so the search can shrink: a flex item defaults to its content's
-                width, which would shove the buttons off the right edge instead. */}
-            <div className="relative w-44 shrink-0 sm:w-auto sm:min-w-0 sm:flex-1">
+          {/* Six controls on a phone. Left as fields they need roughly 520px against the
+              330 a phone gives, so the row either scrolled or squeezed the search to a
+              stub — both were reported as broken.
+
+              The search collapses to its icon instead, which is the Physio board's own
+              answer to the same problem. That buys ~140px and the remaining five fit at
+              full size; tapping it takes the whole row, since a search in use is the only
+              thing you are doing. Desktop keeps the field open beside everything else. */}
+          <div className="flex items-center gap-1.5 sm:gap-3" data-testid="branch-toolbar">
+            {searchOpen ? (
+              <div className="relative min-w-0 flex-1 sm:hidden">
+                <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                <Input
+                  autoFocus
+                  className="pl-9 pr-9"
+                  placeholder={isConsultationStage ? "Search in Consultations..." : "Search patients..."}
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  data-testid="branch-search-mobile"
+                />
+                <button
+                  type="button"
+                  onClick={() => { setSearchOpen(false); setSearchQuery(""); }}
+                  className="absolute right-2 top-2 rounded p-1 text-slate-400 hover:bg-slate-100"
+                  aria-label="Close search"
+                  data-testid="branch-search-close"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setSearchOpen(true)}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 sm:hidden"
+                aria-label="Search patients"
+                title="Search patients"
+                data-testid="branch-search-open"
+              >
+                <Search className="h-4 w-4" />
+              </button>
+            )}
+            {/* The desk's own field. min-w-0 so it can shrink: a flex item defaults to its
+                content's width, which would shove the buttons off the right edge. */}
+            <div className="relative hidden min-w-0 flex-1 sm:block">
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
               <Input
                 className="pl-9"
@@ -568,8 +608,12 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
             </div>
             {/* Branch Wise's own picker, handed down so it sits in this row rather than in
                 a bar of its own above it. Nothing renders here on a real Branch Admin's
-                board — they have one branch and never pick. */}
-            {branchPicker}
+                board — they have one branch and never pick.
+
+                It steps aside while the search is open: the expanded field takes the row,
+                and leaving these beside it would overflow again, which is the whole thing
+                being fixed. */}
+            {!searchOpen && branchPicker}
             {/* Icons only. The labels live on title/aria-label rather than being dropped,
                 so hovering still says what each one does and a screen reader still
                 announces it — an unlabelled glyph that announces nothing is a button only
@@ -579,7 +623,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                 than dropping to a line of their own. shrink-0 keeps them at full size and
                 lets the search give up the width instead; on the narrowest phones that
                 leaves the placeholder clipped, which costs less than a second row. */}
-            <div className="flex shrink-0 items-center gap-1.5 sm:gap-3">
+            <div className={`${searchOpen ? "hidden sm:flex" : "flex"} shrink-0 items-center gap-1.5 sm:gap-3`}>
             <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="branch-date-filter" centered iconOnly />
             <Button
               onClick={() => { loadBoard(); setRefreshTick((n) => n + 1); }}
