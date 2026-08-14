@@ -655,29 +655,36 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
 
         {/* The actions live in a fixed footer rather than a grid inside the scroll area:
             they apply to the client, not to whichever tab happens to be open, and they
-            should still be reachable at the bottom of a long timeline. */}
+            should still be reachable at the bottom of a long timeline.
+
+            All five on one row at every width. On a phone they are icons alone, sharing
+            the row equally so each is a full tap target; the words return from sm up.
+            Every label stays on title/aria-label, so the icon-only state still says what
+            it does to a screen reader and on a long press. */}
         {!loading && data && (
-          <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 bg-slate-50/60 px-5 py-3">
-            <button type="button" onClick={() => window.print()} className="flex items-center gap-1.5 rounded-md bg-teal-700 px-3 py-2 text-xs font-semibold text-white hover:bg-teal-800" data-testid="client-history-print">
-              <Printer className="h-3.5 w-3.5" /> Print receipt
-            </button>
-            <button type="button" onClick={() => downloadInvoice(client, data)} className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50" data-testid="client-history-invoice">
-              <FileText className="h-3.5 w-3.5" /> Download invoice
-            </button>
-            <button type="button" onClick={sendReminder} disabled={!client?.phone} className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40" data-testid="client-history-reminder">
-              <MessageCircle className="h-3.5 w-3.5" /> Send on WhatsApp
-            </button>
-            <button type="button" onClick={callClient} disabled={!client?.phone} className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40" data-testid="client-history-call">
-              <PhoneCall className="h-3.5 w-3.5" /> Call
-            </button>
-            {/* Not in the design, kept anyway: emailing a reminder already worked, and a
-                layout change is no reason to take a working action away. */}
-            <button type="button" onClick={sendEmailReminder} disabled={!client?.email} className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40" data-testid="client-history-email">
-              <Mail className="h-3.5 w-3.5" /> Email
-            </button>
+          <div className="flex flex-col gap-2 border-t border-slate-200 bg-slate-50/60 px-3 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:px-5">
+            <div className="flex items-center gap-1.5 sm:contents">
+              <button type="button" onClick={() => window.print()} title="Print receipt" aria-label="Print receipt" className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-teal-700 px-2 py-2.5 text-xs font-semibold text-white hover:bg-teal-800 sm:flex-none sm:px-3 sm:py-2" data-testid="client-history-print">
+                <Printer className="h-3.5 w-3.5 shrink-0" /> <span className="hidden sm:inline">Print receipt</span>
+              </button>
+              <button type="button" onClick={() => downloadInvoice(client, data)} title="Download invoice" aria-label="Download invoice" className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-50 sm:flex-none sm:px-3 sm:py-2" data-testid="client-history-invoice">
+                <FileText className="h-3.5 w-3.5 shrink-0" /> <span className="hidden sm:inline">Download invoice</span>
+              </button>
+              <button type="button" onClick={sendReminder} disabled={!client?.phone} title="Send on WhatsApp" aria-label="Send on WhatsApp" className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 sm:flex-none sm:px-3 sm:py-2" data-testid="client-history-reminder">
+                <MessageCircle className="h-3.5 w-3.5 shrink-0" /> <span className="hidden sm:inline">Send on WhatsApp</span>
+              </button>
+              <button type="button" onClick={callClient} disabled={!client?.phone} title="Call" aria-label="Call" className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 sm:flex-none sm:px-3 sm:py-2" data-testid="client-history-call">
+                <PhoneCall className="h-3.5 w-3.5 shrink-0" /> <span className="hidden sm:inline">Call</span>
+              </button>
+              {/* Not in the design, kept anyway: emailing a reminder already worked, and a
+                  layout change is no reason to take a working action away. */}
+              <button type="button" onClick={sendEmailReminder} disabled={!client?.email} title="Email" aria-label="Email" className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 sm:flex-none sm:px-3 sm:py-2" data-testid="client-history-email">
+                <Mail className="h-3.5 w-3.5 shrink-0" /> <span className="hidden sm:inline">Email</span>
+              </button>
+            </div>
             {/* Collecting from here only ever works against an installment schedule, so
                 rather than a dead grey button the footer says why it's unavailable. */}
-            <div className="ml-auto text-right text-[11px] text-slate-400">
+            <div className="text-right text-[11px] text-slate-400 sm:ml-auto">
               {pd.next_installment_number ? (
                 <button
                   type="button" onClick={openCollect} disabled={recording}

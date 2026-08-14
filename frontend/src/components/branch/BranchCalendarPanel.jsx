@@ -255,9 +255,16 @@ export const BranchCalendarPanel = ({ branchId }) => {
         <p className="text-base font-semibold text-slate-700" data-testid="cal-month-label">{monthLabel}</p>
         {/* Every chip is the same fixed width and always carries its year on a second
             line, so the strip is exactly as wide with "September 2025" in it as with
-            "May" — it can't grow, reflow, or overflow as the months change. */}
-        <div className="flex shrink-0 items-center gap-1.5" data-testid="cal-month-filter">
+            "May" — it can't grow, reflow, or overflow as the months change.
+
+            Six of them plus both arrows is around 690px, though, which a phone does not
+            have: the row ran off the right edge of the page. The chips now scroll inside
+            their own track on mobile while the arrows stay put either side, so the strip
+            keeps all six months and shifts the same way it always did. Desktop has the
+            room and is unchanged. */}
+        <div className="flex w-full min-w-0 items-center gap-1.5 sm:w-auto sm:shrink-0" data-testid="cal-month-filter">
           <Button size="sm" variant="outline" className="shrink-0" onClick={() => shiftStrip(-1)} data-testid="cal-prev-month"><ChevronLeft className="h-4 w-4" /></Button>
+          <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] sm:flex-none sm:overflow-visible [&::-webkit-scrollbar]:hidden">
           {monthStrip.map((d) => {
             const key = `${d.getFullYear()}-${d.getMonth()}`;
             const isViewed = key === `${monthDate.getFullYear()}-${monthDate.getMonth()}`;
@@ -267,7 +274,7 @@ export const BranchCalendarPanel = ({ branchId }) => {
                 key={key}
                 type="button"
                 onClick={() => setMonthDate(new Date(d.getFullYear(), d.getMonth(), 1))}
-                className={`w-24 shrink-0 rounded-md border py-1 text-center leading-tight transition ${
+                className={`w-20 shrink-0 rounded-md border py-1 text-center leading-tight transition sm:w-24 ${
                   isViewed
                     ? "border-sky-600 bg-sky-600 text-white shadow-sm"
                     : isCurrent
@@ -282,6 +289,7 @@ export const BranchCalendarPanel = ({ branchId }) => {
               </button>
             );
           })}
+          </div>
           <Button size="sm" variant="outline" className="shrink-0" onClick={() => shiftStrip(1)} data-testid="cal-next-month"><ChevronRight className="h-4 w-4" /></Button>
         </div>
       </div>
