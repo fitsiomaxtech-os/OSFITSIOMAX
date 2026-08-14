@@ -855,6 +855,11 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
   const [filterValue, setFilterValue] = useState(null);
   const [draft, setDraft] = useState(null); // { patient, reason, physio_notes } | null
   const [saving, setSaving] = useState(false);
+  const [viewing, setViewing] = useState(null); // the patient whose review is open
+  // The full review documents. /physio/reviews has always returned these beside the
+  // patient rows and they were dropped on the floor — the rows carry only a status and an
+  // id, so without them there is nothing to show but the badge already on screen.
+  const [reviews, setReviews] = useState([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -864,6 +869,7 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
       const [rev, pats] = await Promise.all([physioReviews(physioId), physioPatients(physioId)]);
       const byLead = Object.fromEntries((pats.patients || []).map((p) => [p.lead_id, p]));
       setThreshold(rev.review_after_days || 7);
+      setReviews(rev.reviews || []);
       setPatients((rev.patients || []).map((p) => ({ ...(byLead[p.lead_id] || {}), ...p })));
     } catch { /* silent */ }
     setLoading(false);
@@ -1084,16 +1090,27 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
                     </div>
                   </div>
                 </div>
-                {p.due_for_review && (
+                <div className="mt-2 flex gap-2">
+                  {p.due_for_review && (
+                    <Button
+                      size="sm"
+                      className="flex-1 bg-amber-600 text-xs text-white hover:bg-amber-700"
+                      onClick={() => setDraft({ patient: p, reason: "", physio_notes: "" })}
+                      data-testid={`physio-raise-review-${p.lead_id}`}
+                    >
+                      Send for Review
+                    </Button>
+                  )}
                   <Button
                     size="sm"
-                    className="mt-2 w-full bg-amber-600 text-xs text-white hover:bg-amber-700"
-                    onClick={() => setDraft({ patient: p, reason: "", physio_notes: "" })}
-                    data-testid={`physio-raise-review-${p.lead_id}`}
+                    variant="outline"
+                    className={`text-xs ${p.due_for_review ? "shrink-0" : "flex-1"}`}
+                    onClick={() => setViewing(p)}
+                    data-testid={`physio-review-view-mobile-${p.lead_id}`}
                   >
-                    Send for Review
+                    <Eye className="mr-1 h-3.5 w-3.5" />View
                   </Button>
-                )}
+                </div>
               </div>
             );
           })}
@@ -1157,19 +1174,32 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
                           ? <span className={`inline-flex whitespace-nowrap items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${badge.cls}`}>{badge.label}</span>
                           : <span className="text-slate-300">—</span>}
                       </td>
-                      <td className="px-4 py-3 text-right">
-                        {p.due_for_review ? (
-                          <Button
-                            size="sm"
-                            className="bg-amber-600 text-xs text-white hover:bg-amber-700"
-                            onClick={(e) => { e.stopPropagation(); setDraft({ patient: p, reason: "", physio_notes: "" }); }}
-                            data-testid={`physio-raise-review-row-${p.lead_id}`}
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-end gap-2">
+                          {p.due_for_review && (
+                            <Button
+                              size="sm"
+                              className="bg-amber-600 text-xs text-white hover:bg-amber-700"
+                              onClick={(e) => { e.stopPropagation(); setDraft({ patient: p, reason: "", physio_notes: "" }); }}
+                              data-testid={`physio-raise-review-row-${p.lead_id}`}
+                            >
+                              Send for Review
+                            </Button>
+                          )}
+                          {/* Always offered, review or not: the dialog is the only place
+                              the Head Physio's written report can be read from this board,
+                              and with no review yet it still answers who the patient is. */}
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); setViewing(p); }}
+                            title="View review and patient details"
+                            aria-label={`View ${p.lead_name || "patient"} review`}
+                            className="rounded p-1.5 text-slate-400 transition hover:bg-sky-50 hover:text-sky-600"
+                            data-testid={`physio-review-view-${p.lead_id}`}
                           >
-                            Send for Review
-                          </Button>
-                        ) : (
-                          <span className="text-[11px] text-slate-300">—</span>
-                        )}
+                            <Eye className="h-4 w-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -1180,6 +1210,80 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
         </div>
         </>
       )}
+
+      {/* Reading one back. The board could raise a review and show its status, but the
+          Head Physio's written report — the thing the whole hand-off exists to produce —
+          could not be read here at all. */}
+      {viewing && (() => {
+        const rev = reviews.find((r) => r.id === viewing.review_id)
+          // The row's review_id is null once a fresh milestone reopens eligibility, so fall
+          // back to this patient's most recent review rather than showing nothing.
+          || [...reviews].filter((r) => r.lead_id === viewing.lead_id)
+            .sort((a, b) => (b.raised_at || "").localeCompare(a.raised_at || ""))[0]
+          || null;
+        const badge = STATUS_BADGE[rev?.status || viewing.review_status];
+        const Line = ({ label, children }) => (
+          <div className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{label}</p>
+            <p className="mt-0.5 break-words text-sm text-slate-700">{children || "—"}</p>
+          </div>
+        );
+        const Report = ({ label, text, tone }) => (
+          <div className={`rounded-lg border p-3 ${tone}`}>
+            <p className="text-[10px] font-bold uppercase tracking-wider opacity-80">{label}</p>
+            <p className="mt-1 whitespace-pre-wrap text-sm">{text?.trim() || "Not written yet."}</p>
+          </div>
+        );
+        return (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-3" onClick={(e) => { if (e.target === e.currentTarget) setViewing(null); }}>
+            <div className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-2xl" data-testid="physio-review-view-modal">
+              <div className="flex shrink-0 items-center justify-between gap-3 bg-slate-500 px-5 py-4 text-white">
+                <div className="min-w-0">
+                  <p className="truncate text-lg font-bold">{viewing.lead_name}</p>
+                  <p className="truncate text-xs text-white/80">
+                    {viewing.patient_number || "—"}
+                    {rev?.review_number || viewing.review_number ? ` · ${ordinal(rev?.review_number || viewing.review_number)} Review` : ""}
+                  </p>
+                </div>
+                <button onClick={() => setViewing(null)} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" aria-label="Close" data-testid="physio-review-view-close">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="flex-1 space-y-4 overflow-y-auto p-5">
+                <div className="grid grid-cols-2 gap-3 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+                  <Line label="Phone">{viewing.phone}</Line>
+                  <Line label="Package">{rev?.session_package_name || viewing.session_package_name}</Line>
+                  <Line label="Sessions Done">{viewing.treatment_days}</Line>
+                  <Line label="Status">
+                    {badge
+                      ? <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${badge.cls}`}>{badge.label}</span>
+                      : "No review raised yet"}
+                  </Line>
+                  <Line label="Raised By">{rev?.physio_name}</Line>
+                  <Line label="Head Physio">{rev?.head_physio_name}</Line>
+                </div>
+
+                {rev ? (
+                  <>
+                    <Report label="Reason for Review" text={rev.reason} tone="border-slate-200 bg-white text-slate-700" />
+                    <Report label="Physio's Notes" text={rev.physio_notes} tone="border-sky-200 bg-sky-50 text-sky-900" />
+                    {/* The two the Head Physio writes back. Shown even while empty, so the
+                        physio can see the review is still with them rather than wondering
+                        whether the board simply failed to load it. */}
+                    <Report label="Head Physio's Review" text={rev.head_physio_notes} tone="border-violet-200 bg-violet-50 text-violet-900" />
+                    <Report label="Suggestions" text={rev.head_physio_suggestions} tone="border-emerald-200 bg-emerald-50 text-emerald-900" />
+                  </>
+                ) : (
+                  <p className="rounded-lg border border-dashed border-slate-200 px-3 py-8 text-center text-sm text-slate-400">
+                    No review has been raised for this patient yet.
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Raising the review — reason and notes travel with it to the Head Physio. */}
       {draft && (
