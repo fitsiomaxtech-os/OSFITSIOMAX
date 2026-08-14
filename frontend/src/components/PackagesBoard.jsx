@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Stethoscope, CalendarRange, Pill, Dumbbell, ShoppingCart, Activity, Plus, X, FlaskConical, Pencil, Trash2, ImagePlus, Wifi, MapPin, Clock, Eye, History, Salad, ChevronDown } from "lucide-react";
+import { createPortal } from "react-dom";
+import { Stethoscope, CalendarRange, Pill, Dumbbell, ShoppingCart, Activity, Plus, X, FlaskConical, Pencil, Trash2, ImagePlus, Wifi, MapPin, Clock, Eye, History, Salad, ChevronDown, RefreshCw } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -509,14 +510,14 @@ export const ViewItemModal = ({ item, kind, onClose, onEdit, canEdit = true }) =
   );
 };
 
-const SessionsPhysiotherapyPanel = () => {
+const SessionsPhysiotherapyPanel = ({ reloadToken, toolbarSlot }) => {
   const [items, setItems] = useState([]);
   const [showCreate, setShowCreate] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
   const [viewingItem, setViewingItem] = useState(null);
 
   const loadItems = () => listStoreItems("physiotherapy", "session").then(setItems).catch(() => {});
-  useEffect(() => { loadItems(); }, []);
+  useEffect(() => { loadItems(); }, [reloadToken]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDelete = async (it) => {
     if (!window.confirm(`Permanently delete "${it.name}"? This cannot be undone.`)) return;
@@ -531,7 +532,19 @@ const SessionsPhysiotherapyPanel = () => {
 
   return (
     <div className="space-y-3" data-testid="sessions-subpanel-physiotherapy">
-      <div className="flex items-center justify-end">
+      {toolbarSlot && createPortal(
+        <Button
+          onClick={() => setShowCreate(true)}
+          title="Create session package"
+          aria-label="Create session package"
+          className="h-11 w-11 shrink-0 p-0"
+          data-testid="sessions-physiotherapy-create-btn-mobile"
+        >
+          <Plus className="h-4 w-4" />
+        </Button>,
+        toolbarSlot,
+      )}
+      <div className="hidden items-center justify-end sm:flex">
         <Button size="sm" onClick={() => setShowCreate(true)} data-testid="sessions-physiotherapy-create-btn">
           <Plus className="mr-1 h-4 w-4" />Create
         </Button>
@@ -593,7 +606,7 @@ const SessionsPhysiotherapyPanel = () => {
   );
 };
 
-const SessionsPanel = () => {
+const SessionsPanel = ({ reloadToken, toolbarSlot }) => {
   const [sub, setSub] = useState("physiotherapy");
   return (
     <div className="space-y-4" data-testid="packages-panel-sessions">
@@ -614,13 +627,13 @@ const SessionsPanel = () => {
         })}
       </div>
 
-      {sub === "physiotherapy" && <SessionsPhysiotherapyPanel />}
+      {sub === "physiotherapy" && <SessionsPhysiotherapyPanel reloadToken={reloadToken} toolbarSlot={toolbarSlot} />}
       {sub === "fitness" && <PlaceholderPanel label="Fitness" testid="sessions-subpanel-fitness" />}
     </div>
   );
 };
 
-const PhysiotherapyPanel = ({ kind = "consultation" }) => {
+const PhysiotherapyPanel = ({ kind = "consultation", reloadToken, toolbarSlot }) => {
   const cfg = PACKAGE_KINDS[kind] || PACKAGE_KINDS.consultation;
   const [items, setItems] = useState([]);
   const [showCreate, setShowCreate] = useState(false);
@@ -628,7 +641,7 @@ const PhysiotherapyPanel = ({ kind = "consultation" }) => {
   const [viewingItem, setViewingItem] = useState(null);
 
   const loadItems = () => listStoreItems("physiotherapy", cfg.itemType).then(setItems).catch(() => {});
-  useEffect(() => { loadItems(); }, [cfg.itemType]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadItems(); }, [cfg.itemType, reloadToken]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDelete = async (it) => {
     if (!window.confirm(`Permanently delete "${it.name}"? This cannot be undone.`)) return;
@@ -643,7 +656,24 @@ const PhysiotherapyPanel = ({ kind = "consultation" }) => {
 
   return (
     <div className="space-y-3" data-testid="consultations-subpanel-physiotherapy">
-      <div className="flex items-center justify-end">
+      {/* Two Create buttons, one visible at a time. On a phone it belongs beside the tab
+          dropdown and Refresh, which is a row this panel does not own — so it is portaled
+          into a slot up there, and the slot itself is hidden from sm up. The labelled one
+          below is desktop's, hidden under sm. Rendering both and letting CSS choose beats
+          measuring the viewport in JS to decide which to mount. */}
+      {toolbarSlot && createPortal(
+        <Button
+          onClick={() => setShowCreate(true)}
+          title={`Create ${cfg.noun}`}
+          aria-label={`Create ${cfg.noun}`}
+          className="h-11 w-11 shrink-0 p-0"
+          data-testid="physiotherapy-create-btn-mobile"
+        >
+          <Plus className="h-4 w-4" />
+        </Button>,
+        toolbarSlot,
+      )}
+      <div className="hidden items-center justify-end sm:flex">
         <Button size="sm" onClick={() => setShowCreate(true)} data-testid="physiotherapy-create-btn">
           <Plus className="mr-1 h-4 w-4" />Create
         </Button>
@@ -717,7 +747,7 @@ const PhysiotherapyPanel = ({ kind = "consultation" }) => {
   );
 };
 
-const ConsultationsPanel = () => {
+const ConsultationsPanel = ({ reloadToken, toolbarSlot }) => {
   const [sub, setSub] = useState("physiotherapy");
   return (
     <div className="space-y-4" data-testid="packages-panel-consultations">
@@ -738,7 +768,7 @@ const ConsultationsPanel = () => {
         })}
       </div>
 
-      {sub === "physiotherapy" && <PhysiotherapyPanel />}
+      {sub === "physiotherapy" && <PhysiotherapyPanel reloadToken={reloadToken} toolbarSlot={toolbarSlot} />}
       {sub === "fitness" && <PlaceholderPanel label="Fitness" testid="consultations-subpanel-fitness" />}
     </div>
   );
@@ -759,7 +789,7 @@ const HISTORY_ACTION_LABELS = {
   consultation_follow_up_rescheduled: "Follow-Up Rescheduled · Consultation",
 };
 
-const ActivityHistoryTable = ({ fetchFn, emptyLabel, testidPrefix }) => {
+const ActivityHistoryTable = ({ fetchFn, emptyLabel, testidPrefix, reloadToken }) => {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
 
@@ -771,7 +801,7 @@ const ActivityHistoryTable = ({ fetchFn, emptyLabel, testidPrefix }) => {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { load(); }, [fetchFn]);
+  useEffect(() => { load(); }, [fetchFn, reloadToken]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="space-y-3" data-testid={`${testidPrefix}-panel`}>
@@ -824,7 +854,7 @@ const ActivityHistoryTable = ({ fetchFn, emptyLabel, testidPrefix }) => {
   );
 };
 
-const LoginHistoryTable = () => {
+const LoginHistoryTable = ({ reloadToken }) => {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
 
@@ -836,7 +866,7 @@ const LoginHistoryTable = () => {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [reloadToken]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="space-y-3" data-testid="login-history-panel">
@@ -893,7 +923,7 @@ const HISTORY_SUBTABS = [
   { key: "logins", label: "Login Tracker" },
 ];
 
-const HistoryPanel = () => {
+const HistoryPanel = ({ reloadToken }) => {
   const [sub, setSub] = useState("payments");
   return (
     <div className="space-y-3" data-testid="packages-panel-history">
@@ -910,12 +940,12 @@ const HistoryPanel = () => {
         ))}
       </div>
       {sub === "payments" && (
-        <ActivityHistoryTable fetchFn={getPaymentHistory} emptyLabel="No payments collected yet." testidPrefix="payment-history" />
+        <ActivityHistoryTable fetchFn={getPaymentHistory} emptyLabel="No payments collected yet." testidPrefix="payment-history" reloadToken={reloadToken} />
       )}
       {sub === "followups" && (
-        <ActivityHistoryTable fetchFn={getFollowUpHistory} emptyLabel="No follow-ups scheduled yet." testidPrefix="followup-history" />
+        <ActivityHistoryTable fetchFn={getFollowUpHistory} emptyLabel="No follow-ups scheduled yet." testidPrefix="followup-history" reloadToken={reloadToken} />
       )}
-      {sub === "logins" && <LoginHistoryTable />}
+      {sub === "logins" && <LoginHistoryTable reloadToken={reloadToken} />}
     </div>
   );
 };
@@ -996,7 +1026,7 @@ const BranchSelect = ({ value, options, onChange, testId }) => {
   );
 };
 
-const SuperAdminInventoryPanel = ({ category }) => {
+const SuperAdminInventoryPanel = ({ category, reloadToken }) => {
   const [branches, setBranches] = useState([]);
   const [branchId, setBranchId] = useState("");
 
@@ -1031,7 +1061,7 @@ const SuperAdminInventoryPanel = ({ category }) => {
       {branchId ? (
         // Keyed on both: without it React keeps the same instance across a change and the
         // previous branch's or shelf's rows sit there until the new ones land.
-        <StoreInventoryPanel key={`${category}-${branchId}`} category={category} branchId={branchId} />
+        <StoreInventoryPanel key={`${category}-${branchId}`} category={category} branchId={branchId} reloadToken={reloadToken} />
       ) : (
         <Card>
           <CardContent className="p-8 text-center text-sm text-slate-400">
@@ -1045,6 +1075,11 @@ const SuperAdminInventoryPanel = ({ category }) => {
 
 export const PackagesBoard = () => {
   const [tab, setTab] = useState("consultations");
+  // Bumped by Refresh and handed to whichever panel is open, so it refetches in place.
+  const [reloadTick, setReloadTick] = useState(0);
+  // A callback ref, not useRef: the portal has to re-render once the node exists, and a
+  // ref object mutating in place never triggers that.
+  const [createSlot, setCreateSlot] = useState(null);
 
   return (
     <div className="space-y-4" data-testid="packages-board">
@@ -1052,15 +1087,31 @@ export const PackagesBoard = () => {
           only listed the tabs that follow it. */}
       {/* A dropdown on a phone, the same control the Branch Admin store uses. Eight tabs
           wrapped to three rows there, which pushed the shelf being edited below the fold
-          before any of its items showed. Desktop keeps the bar. */}
-      <select
-        value={tab}
-        onChange={(e) => setTab(e.target.value)}
-        className="h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 md:hidden"
-        data-testid="packages-subtab-select"
-      >
-        {TABS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
-      </select>
+          before any of its items showed. Desktop keeps the bar.
+
+          Refresh and Create ride alongside it. Create is not this component's to render —
+          each panel owns its own, against its own item type — so the panel portals an
+          icon-only copy into the slot at the end of this row. */}
+      <div className="flex items-center gap-2 md:hidden">
+        <select
+          value={tab}
+          onChange={(e) => setTab(e.target.value)}
+          className="h-11 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700"
+          data-testid="packages-subtab-select"
+        >
+          {TABS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+        </select>
+        <Button
+          onClick={() => setReloadTick((n) => n + 1)}
+          title="Refresh"
+          aria-label="Refresh"
+          className="h-11 w-11 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
+          data-testid="packages-refresh"
+        >
+          <RefreshCw className="h-4 w-4" />
+        </Button>
+        <div ref={setCreateSlot} className="flex shrink-0 items-center" data-testid="packages-create-slot" />
+      </div>
 
       <div className="hidden flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1 md:flex" data-testid="packages-subtabs">
         {TABS.map((t) => {
@@ -1079,11 +1130,11 @@ export const PackagesBoard = () => {
         })}
       </div>
 
-      {tab === "consultations" && <ConsultationsPanel />}
-      {tab === "sessions" && <SessionsPanel />}
-      {tab === "diet" && <PhysiotherapyPanel kind="diet" />}
-      {tab === "history" && <HistoryPanel />}
-      {INVENTORY_TABS.has(tab) && <SuperAdminInventoryPanel key={tab} category={tab} />}
+      {tab === "consultations" && <ConsultationsPanel reloadToken={reloadTick} toolbarSlot={createSlot} />}
+      {tab === "sessions" && <SessionsPanel reloadToken={reloadTick} toolbarSlot={createSlot} />}
+      {tab === "diet" && <PhysiotherapyPanel kind="diet" reloadToken={reloadTick} toolbarSlot={createSlot} />}
+      {tab === "history" && <HistoryPanel reloadToken={reloadTick} />}
+      {INVENTORY_TABS.has(tab) && <SuperAdminInventoryPanel key={tab} category={tab} reloadToken={reloadTick} />}
       {/* Whatever has no panel yet. A tab graduates by being handled above rather than by
           another branch being added here. */}
       {!BUILT_TABS.has(tab) && TABS.map((t) => tab === t.key && (
