@@ -154,6 +154,34 @@ const printReceipt = (r) => openPrintable(receiptHtml(r), { print: true });
 const downloadReceipt = (r) => downloadPrintable(receiptHtml(r), `receipt-${r.receiptNo}.html`);
 const shareReceipt = (r) => sharePrintable(receiptText(r), `FITSIOMAX Receipt ${r.receiptNo}`);
 
+/** A phone rather than a desk: the two need opposite handoffs, below. */
+const isHandheld = () => (typeof window !== "undefined"
+  && (window.matchMedia?.("(pointer: coarse)").matches || navigator.maxTouchPoints > 0));
+
+/**
+ * Straight to the patient's own number with the receipt already typed.
+ *
+ * Share hands the text to whatever the OS offers and asks who it is going to; this skips
+ * that, which is the whole point — the receipt is nearly always going to the person whose
+ * number is already on it.
+ */
+const whatsappReceipt = (r) => {
+  const num = waNumber(r.phone);
+  if (!num) { toast.error("This patient has no phone number on file"); return; }
+  const url = `https://wa.me/${num}?text=${encodeURIComponent(receiptText(r))}`;
+  if (isHandheld()) {
+    // Same-tab on a phone. window.open with _blank hands mobile browsers an ambiguous
+    // new-tab context and often leaves the app on a blank white screen once WhatsApp
+    // gives control back — the same fix the appointment card needed (caf18a6).
+    window.location.href = url;
+    return;
+  }
+  // Desk: its own tab, so the board stays where it was. noopener isn't passed because it
+  // makes window.open return null; the opener is cleared by hand for the same protection.
+  const tab = window.open(url, "_blank");
+  if (tab) tab.opener = null;
+};
+
 // Month-grid helpers for the treatment-session slot picker — the same shape the PHYSIO
 // CALENDAR itself uses, so the two read as one workflow.
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -4940,12 +4968,15 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
             {/* Three actions. Done went with the tick — the header X already closes this,
                 and a fourth button that only dismisses was the one control here that did
                 nothing to the receipt. */}
+            {/* All plain but WhatsApp. Print and Share used to swap an emerald fill
+                between them depending on whether the payment was cash — with WhatsApp's
+                own brand green in the row, a second green next to it would have read as
+                two competing defaults rather than one branded button. The green here now
+                belongs to WhatsApp and means WhatsApp, nothing else. */}
             <div className="flex items-center justify-center gap-2 border-t border-slate-200 bg-slate-50 px-4 py-3 sm:gap-3 sm:px-6">
-              {/* Cash needs a bill in hand, so Print leads. Everything else already left a
-                  trail with the bank, so sharing the receipt is the more useful default. */}
               <Button
-                className={`h-10 w-10 shrink-0 p-0 ${receipt.isCash ? "bg-emerald-600 text-white hover:bg-emerald-700" : ""}`}
-                variant={receipt.isCash ? undefined : "outline"}
+                variant="outline"
+                className="h-10 w-10 shrink-0 p-0"
                 onClick={() => printReceipt(receipt)}
                 title={isSchedule(receipt) ? "Print Schedule" : "Print Bill"}
                 aria-label={isSchedule(receipt) ? "Print Schedule" : "Print Bill"}
@@ -4953,9 +4984,20 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               >
                 <Printer className="h-4 w-4" />
               </Button>
+              {/* The one the branch actually reaches for: the receipt is nearly always
+                  going to the number already printed on it. */}
               <Button
-                className={`h-10 w-10 shrink-0 p-0 ${receipt.isCash ? "" : "bg-emerald-600 text-white hover:bg-emerald-700"}`}
-                variant={receipt.isCash ? "outline" : undefined}
+                className="h-10 w-10 shrink-0 bg-[#25D366] p-0 text-white hover:bg-[#1da851]"
+                onClick={() => whatsappReceipt(receipt)}
+                title="Send on WhatsApp"
+                aria-label="Send on WhatsApp"
+                data-testid="cons-receipt-whatsapp"
+              >
+                <WhatsAppIcon className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                className="h-10 w-10 shrink-0 p-0"
                 onClick={() => shareReceipt(receipt)}
                 title="Share"
                 aria-label="Share"
