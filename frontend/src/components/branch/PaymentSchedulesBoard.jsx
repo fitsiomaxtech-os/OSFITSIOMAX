@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Eye, Printer, ChevronDown, CalendarRange, CheckCircle2, Clock, AlertTriangle } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { StatTile } from "@/components/ui/stat-tile";
+import { RecordCards } from "@/components/branch/RecordCards";
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 const todayIso = () => new Date().toISOString().slice(0, 10);
@@ -202,8 +203,27 @@ export const PaymentSchedulesBoard = ({ rows, onView }) => {
       <Card data-testid="accountant-manage-schedules">
         <CardContent className="p-4">
           <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Payment Schedules</p>
-          <div className="overflow-x-auto">
-            <table className="w-full table-fixed border-separate border-spacing-x-0 border-spacing-y-2 text-sm">
+          <RecordCards
+            rows={filtered}
+            empty="No scheduled installments."
+            testid="schedules-cards"
+            card={(r) => ({
+              key: `${r.lead_id}-${r.installment_number}`,
+              testid: `accountant-manage-schedule-card-${r.lead_id}-${r.installment_number}`,
+              title: r.client_name,
+              subtitle: `#${r.installment_number} · due ${r.due_date}`,
+              amount: <span className="text-sm font-bold text-slate-800">{fmt(r.amount)}</span>,
+              meta: [
+                <StatusBadge status={r.status} />,
+                <span className="capitalize">{r.category}</span>,
+                `${r.installments_paid}/${r.installments_total} paid`,
+              ],
+              onOpen: onView ? () => onView(r.lead_id) : undefined,
+            })}
+          />
+
+          <div className="hidden overflow-x-auto md:block">
+            <table className="w-full min-w-[58rem] table-fixed border-separate border-spacing-x-0 border-spacing-y-2 text-sm">
               <thead>
                 <tr>
                   <th className="w-[5%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">S.No</th>

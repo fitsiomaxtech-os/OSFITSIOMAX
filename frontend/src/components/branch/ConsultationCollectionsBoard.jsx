@@ -3,6 +3,7 @@ import { Eye, Banknote, CreditCard, Smartphone, Landmark, ChevronDown, CalendarD
 import { Card, CardContent } from "@/components/ui/card";
 import { MilkDateInput } from "@/components/ui/milk-calendar";
 import { StatTile } from "@/components/ui/stat-tile";
+import { RecordCards } from "@/components/branch/RecordCards";
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 const todayIso = () => new Date().toISOString().slice(0, 10);
@@ -241,8 +242,27 @@ export const ConsultationCollectionsBoard = ({
       <Card data-testid="accountant-manage-consultation">
         <CardContent className="p-4">
           <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</p>
-          <div className="overflow-x-auto">
-            <table className="w-full table-fixed border-separate border-spacing-x-0 border-spacing-y-2 text-sm">
+
+          <RecordCards
+            rows={filtered}
+            empty="No transactions yet."
+            testid="collections-cards"
+            card={(tx) => ({
+              key: tx.id,
+              testid: `collections-card-${tx.id}`,
+              title: tx.client_name || "Unknown",
+              subtitle: tx.branch_name || "—",
+              amount: <span className="text-sm font-bold text-slate-800">{fmt(tx.gross)}</span>,
+              meta: [
+                <PaymentModeBadge mode={tx.payment_mode} />,
+                <StatusBadge paid={!(tx.client_balance > 0)} />,
+              ],
+              onOpen: onView ? () => onView(tx.lead_id) : undefined,
+            })}
+          />
+
+          <div className="hidden overflow-x-auto md:block">
+            <table className="w-full min-w-[44rem] table-fixed border-separate border-spacing-x-0 border-spacing-y-2 text-sm">
               <thead>
                 <tr>
                   <th className="w-[5%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">S.No</th>

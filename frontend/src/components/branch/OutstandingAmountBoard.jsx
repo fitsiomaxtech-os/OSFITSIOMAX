@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Eye, ChevronDown, ChevronRight, ChevronLeft, Printer, FileSpreadsheet, AlertCircle, AlarmClock, CalendarClock, Users } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { StatTile } from "@/components/ui/stat-tile";
+import { RecordCards } from "@/components/branch/RecordCards";
 import { getClientTransactionHistory } from "@/lib/api";
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
@@ -320,8 +321,31 @@ export const OutstandingAmountBoard = ({ rows, onView }) => {
       <Card data-testid="accountant-manage-outstanding">
         <CardContent className="p-4">
           <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Outstanding Amount</p>
-          <div className="overflow-x-auto">
-            <table className="w-full table-fixed border-separate border-spacing-x-0 border-spacing-y-2 text-sm">
+          <RecordCards
+            rows={filtered}
+            empty="No outstanding balances."
+            testid="outstanding-cards"
+            card={(r) => ({
+              key: r.lead_id,
+              testid: `accountant-manage-outstanding-card-${r.lead_id}`,
+              title: r.client_name,
+              subtitle: r.phone || r.branch_name || "—",
+              amount: (
+                <>
+                  <span className="block text-sm font-bold text-amber-600">{fmt(r.balance)}</span>
+                  <span className="block text-[11px] text-slate-400">{fmt(r.paid_amount)} of {fmt(r.total_bill)}</span>
+                </>
+              ),
+              meta: [
+                <StatusBadge status={r.status} />,
+                r.due_date ? `Due ${r.due_date}` : null,
+              ],
+              onOpen: onView ? () => onView(r.lead_id) : undefined,
+            })}
+          />
+
+          <div className="hidden overflow-x-auto md:block">
+            <table className="w-full min-w-[62rem] table-fixed border-separate border-spacing-x-0 border-spacing-y-2 text-sm">
               <thead>
                 <tr>
                   <th className="w-[4%] px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400"></th>

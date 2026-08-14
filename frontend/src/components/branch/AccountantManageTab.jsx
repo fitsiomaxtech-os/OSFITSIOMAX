@@ -207,19 +207,26 @@ export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
         </div>
       )}
 
-      {/* Three across on a phone, which lands the nine as three even rows in declaration
-          order and keeps Payment Paid, Payment Unpaid and Store Payment together on the
-          last. Wrapping put them wherever the labels happened to run out of room, four
-          ragged rows deep. Labels wrap inside their cell rather than truncating — these
-          names differ at the end ("Consultation Collections" against "Session
-          Collections"), so an ellipsis would cut off the half that tells them apart.
-          Unchanged from sm up. */}
-      <div className="grid auto-rows-fr grid-cols-3 gap-1 rounded-lg border border-slate-200 bg-white p-1 sm:flex sm:flex-wrap sm:gap-2" data-testid="accountant-manage-subtabs">
+      {/* A dropdown on a phone. Ten tabs three-across cost four rows of the screen before
+          the figures they select had anywhere to appear — and the labels had to shrink to
+          10px to fit, which is the point at which "Consultation Collections" and "Session
+          Collections" stop being tellable apart at a glance. One control, full names, one
+          row. The desktop bar is unchanged. */}
+      <select
+        value={subTab}
+        onChange={(e) => setSubTab(e.target.value)}
+        className="h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 md:hidden"
+        data-testid="accountant-manage-subtab-select"
+      >
+        {SUB_TABS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+      </select>
+
+      <div className="hidden flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1 md:flex" data-testid="accountant-manage-subtabs">
         {SUB_TABS.map((t) => (
           <button
             key={t.key}
             onClick={() => setSubTab(t.key)}
-            className={`min-w-0 rounded-md px-1 py-2 text-center text-[10px] font-semibold leading-tight transition sm:px-3 sm:text-sm sm:font-medium ${subTabClasses(t, subTab === t.key)}`}
+            className={`min-w-0 rounded-md px-3 py-2 text-center text-sm font-medium transition ${subTabClasses(t, subTab === t.key)}`}
             data-testid={`accountant-manage-subtab-${t.key}`}
           >
             {t.label}

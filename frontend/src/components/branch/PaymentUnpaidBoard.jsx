@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Eye, ChevronDown, Printer, FileSpreadsheet, XCircle, AlarmClock, CalendarClock, Users } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { StatTile } from "@/components/ui/stat-tile";
+import { RecordCards } from "@/components/branch/RecordCards";
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 const plural = (n, noun) => `${n} ${noun}${n === 1 ? "" : "s"}`;
@@ -203,8 +204,31 @@ export const PaymentUnpaidBoard = ({ rows, onView }) => {
           <p className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-rose-600">
             <XCircle className="h-3.5 w-3.5" /> Payment Unpaid
           </p>
-          <div className="overflow-x-auto">
-            <table className="w-full table-fixed border-separate border-spacing-x-0 border-spacing-y-2 text-sm">
+          <RecordCards
+            rows={filtered}
+            empty="No unpaid clients — everyone billed has paid something."
+            testid="payment-unpaid-cards"
+            card={(r) => ({
+              key: r.lead_id,
+              testid: `accountant-manage-payment-unpaid-card-${r.lead_id}`,
+              title: r.client_name,
+              subtitle: r.phone || r.branch_name || "—",
+              amount: (
+                <>
+                  <span className="block text-sm font-bold text-rose-700">{fmt(r.balance)}</span>
+                  <span className="block text-[11px] text-slate-400">of {fmt(r.total_bill)}</span>
+                </>
+              ),
+              meta: [
+                <StatusBadge status={r.status} />,
+                r.due_date ? `Due ${r.due_date}` : null,
+              ],
+              onOpen: onView ? () => onView(r.lead_id) : undefined,
+            })}
+          />
+
+          <div className="hidden overflow-x-auto md:block">
+            <table className="w-full min-w-[54rem] table-fixed border-separate border-spacing-x-0 border-spacing-y-2 text-sm">
               <thead>
                 <tr>
                   <th className="w-[5%] px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">S.No</th>

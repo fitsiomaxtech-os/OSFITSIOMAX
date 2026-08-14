@@ -3,6 +3,7 @@ import { Eye, Banknote, CreditCard, Smartphone, Landmark, Layers, ChevronDown, C
 import { Card, CardContent } from "@/components/ui/card";
 import { MilkDateInput } from "@/components/ui/milk-calendar";
 import { StatTile } from "@/components/ui/stat-tile";
+import { RecordCards } from "@/components/branch/RecordCards";
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 const todayIso = () => new Date().toISOString().slice(0, 10);
@@ -241,8 +242,32 @@ export const SessionCollectionsBoard = ({ rows, onView }) => {
       <Card data-testid="accountant-manage-session">
         <CardContent className="p-4">
           <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Session Collections</p>
-          <div className="overflow-x-auto">
-            <table className="w-full table-fixed border-separate border-spacing-x-0 border-spacing-y-2 text-sm">
+          <RecordCards
+            rows={filtered}
+            empty="No session collections yet."
+            testid="session-collections-cards"
+            card={(tx) => ({
+              key: tx.id,
+              testid: `session-collections-card-${tx.id}`,
+              title: tx.client_name || "Unknown",
+              subtitle: tx.session_package_label || tx.branch_name || "—",
+              amount: (
+                <>
+                  <span className="block text-sm font-bold text-emerald-600">{fmt(tx.session_paid)}</span>
+                  {tx.session_due > 0 && <span className="block text-[11px] font-semibold text-amber-600">{fmt(tx.session_due)} due</span>}
+                </>
+              ),
+              meta: [
+                <PaymentModeBadge mode={tx.payment_mode} />,
+                <StatusBadge status={tx.session_status} />,
+                (tx.date || "").slice(0, 10),
+              ],
+              onOpen: onView ? () => onView(tx.lead_id) : undefined,
+            })}
+          />
+
+          <div className="hidden overflow-x-auto md:block">
+            <table className="w-full min-w-[56rem] table-fixed border-separate border-spacing-x-0 border-spacing-y-2 text-sm">
               <thead>
                 <tr>
                   <th className="w-[4%] px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400">S.No</th>

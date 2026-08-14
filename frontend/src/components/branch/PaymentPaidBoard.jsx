@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Eye, ChevronDown, ChevronRight, Printer, FileSpreadsheet, CheckCircle2, Wallet, Stethoscope, Activity } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { StatTile } from "@/components/ui/stat-tile";
+import { RecordCards } from "@/components/branch/RecordCards";
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 const plural = (n, noun) => `${n} ${noun}${n === 1 ? "" : "s"}`;
@@ -184,8 +185,29 @@ export const PaymentPaidBoard = ({ rows, onView }) => {
           <p className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-emerald-600">
             <CheckCircle2 className="h-3.5 w-3.5" /> Payment Paid
           </p>
-          <div className="overflow-x-auto">
-            <table className="w-full table-fixed border-separate border-spacing-x-0 border-spacing-y-2 text-sm">
+          {/* The desktop row expands to its own transactions; the card doesn't. Tapping it
+              opens the client's full history instead, which is the same detail and more. */}
+          <RecordCards
+            rows={filtered}
+            empty="No fully paid clients yet."
+            testid="payment-paid-cards"
+            card={(r) => ({
+              key: r.lead_id,
+              testid: `accountant-manage-payment-paid-card-${r.lead_id}`,
+              title: r.client_name,
+              subtitle: r.phone || r.branch_name || "—",
+              amount: <span className="text-sm font-bold text-emerald-700">{fmt(r.total_paid)}</span>,
+              meta: [
+                r.consultation_paid ? `Consultation ${fmt(r.consultation_paid)}` : null,
+                r.session_paid ? `Session ${fmt(r.session_paid)}` : null,
+                r.last_date || null,
+              ],
+              onOpen: onView ? () => onView(r.lead_id) : undefined,
+            })}
+          />
+
+          <div className="hidden overflow-x-auto md:block">
+            <table className="w-full min-w-[62rem] table-fixed border-separate border-spacing-x-0 border-spacing-y-2 text-sm">
               <thead>
                 <tr>
                   <th className="w-[4%] px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400"></th>
