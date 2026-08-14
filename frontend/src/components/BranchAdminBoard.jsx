@@ -302,7 +302,7 @@ const apptHtml = (a) => `<!doctype html><html><head><meta charset="utf-8">
 // Which of the six get a direct slot on the phone bar. The other three go behind More.
 const BOTTOM_NAV_KEYS = ["pipeline", "review", "consultations"];
 
-export const BranchAdminBoard = ({ branchId, embedded = false }) => {
+export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = null }) => {
   const [boardData, setBoardData] = useState({ leads: [], stage_counts: {} });
   const [stages, setStages] = useState([]); // dynamic Branch Stages, from Super Admin > Pipeline Stage Management
   const [consultationStages, setConsultationStages] = useState([]); // dynamic Consultation Stages, merged into the same stage bar
@@ -549,10 +549,14 @@ export const BranchAdminBoard = ({ branchId, embedded = false }) => {
               the same screen offering four actions or two depending on which stage pill
               was lit. The consultations board is told to hide its toolbar (passing
               externalSearch does that) and is driven from here instead. */}
-          <div className="flex items-center gap-2 sm:gap-3" data-testid="branch-toolbar">
+          {/* With a branch picker in it this row carries six controls, which no phone has
+              the width for at a readable size — so below sm it scrolls sideways with every
+              item at its natural size, rather than squeezing the search to a stub. Desktop
+              has the room and lays out as before. */}
+          <div className="flex items-center gap-2 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] sm:gap-3 sm:overflow-visible [&::-webkit-scrollbar]:hidden" data-testid="branch-toolbar">
             {/* min-w-0 so the search can shrink: a flex item defaults to its content's
                 width, which would shove the buttons off the right edge instead. */}
-            <div className="relative min-w-0 flex-1">
+            <div className="relative w-44 shrink-0 sm:w-auto sm:min-w-0 sm:flex-1">
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
               <Input
                 className="pl-9"
@@ -562,6 +566,10 @@ export const BranchAdminBoard = ({ branchId, embedded = false }) => {
                 data-testid="branch-search"
               />
             </div>
+            {/* Branch Wise's own picker, handed down so it sits in this row rather than in
+                a bar of its own above it. Nothing renders here on a real Branch Admin's
+                board — they have one branch and never pick. */}
+            {branchPicker}
             {/* Icons only. The labels live on title/aria-label rather than being dropped,
                 so hovering still says what each one does and a screen reader still
                 announces it — an unlabelled glyph that announces nothing is a button only
@@ -578,7 +586,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false }) => {
               disabled={loading}
               title="Refresh"
               aria-label="Refresh"
-              className="h-10 w-10 shrink-0 bg-orange-500 p-0 text-white hover:bg-orange-600"
+              className="h-10 w-10 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
               data-testid="branch-refresh-btn"
             >
               <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />

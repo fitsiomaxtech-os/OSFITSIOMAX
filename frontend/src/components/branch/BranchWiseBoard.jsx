@@ -20,9 +20,25 @@ export const BranchWiseBoard = ({ branches }) => {
     );
   }
 
+  /**
+   * The phone's branch picker, handed to BranchAdminBoard so it lands in that board's own
+   * toolbar beside Search and the rest, rather than sitting in a bar of its own above the
+   * stage chips. Hidden from sm up, where the tab row below takes over.
+   */
+  const picker = (
+    <select
+      value={activeId}
+      onChange={(e) => setSelectedId(e.target.value)}
+      className="h-10 w-36 shrink-0 rounded-md border border-slate-200 bg-white px-2 text-sm font-semibold text-slate-700 sm:hidden"
+      data-testid="branch-wise-subtab-select"
+    >
+      {sortedBranches.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
+    </select>
+  );
+
   return (
     <div className="space-y-4" data-testid="branch-wise-board-root">
-      <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-2" data-testid="branch-wise-subtabs">
+      <div className="hidden flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-2 sm:flex" data-testid="branch-wise-subtabs">
         {sortedBranches.map((b) => (
           <button
             key={b.id}
@@ -38,7 +54,9 @@ export const BranchWiseBoard = ({ branches }) => {
         ))}
       </div>
 
-      {activeId && <BranchAdminBoard key={activeId} branchId={activeId} embedded />}
+      {/* Keyed on the branch so switching remounts the board — its stage counts, leads and
+          filters all belong to one branch and must not survive the change. */}
+      {activeId && <BranchAdminBoard key={activeId} branchId={activeId} embedded branchPicker={picker} />}
     </div>
   );
 };
