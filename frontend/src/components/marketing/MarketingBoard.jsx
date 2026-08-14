@@ -145,7 +145,7 @@ const SourcesTab = ({ branches = [] }) => {
       const res = await mkSyncSource(showSync.id, rows);
       setSyncResult(res);
       if (res.imported > 0) {
-        toast.success(`Imported ${res.imported} · skipped ${res.skipped} (received ${res.rows_received}). Refresh Pre-Sales CRM to see them.`);
+        toast.success(`Imported ${res.imported} · skipped ${res.skipped} (received ${res.rows_received}). Refresh Pre Sales to see them.`);
       } else {
         toast.error(`No leads imported. ${res.skipped_no_phone || 0} missing phone · ${res.skipped_duplicate || 0} duplicate. See details panel.`);
       }
@@ -308,7 +308,7 @@ const SourcesTab = ({ branches = [] }) => {
 
       {showSync && (
         <DialogShell title={`Sync: ${showSync.name}`} onClose={() => { setShowSync(null); setSyncResult(null); }} testid="mk-sync-dialog">
-          <p className="text-xs text-slate-500">Paste JSON rows from your Google Sheet (each row = one object). Phones are deduped by last 10 digits. New leads land in <span className="font-semibold">Pre-Sales CRM</span> + Marketing Source → All Leads with auto round-robin if enabled.</p>
+          <p className="text-xs text-slate-500">Paste JSON rows from your Google Sheet (each row = one object). Phones are deduped by last 10 digits. New leads land in <span className="font-semibold">Pre Sales</span> + Marketing Source → All Leads with auto round-robin if enabled.</p>
           <textarea
             value={syncRows}
             onChange={(e) => setSyncRows(e.target.value)}

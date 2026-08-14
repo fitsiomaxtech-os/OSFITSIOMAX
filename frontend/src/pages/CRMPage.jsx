@@ -74,7 +74,7 @@ import { FinanceBoard } from "@/components/FinanceBoard";
 const ROLE_META = {
   super_admin: { label: "Super Admin", icon: ShieldCheck },
   business_dev: { label: "Business Development", icon: Briefcase },
-  pre_sales: { label: "Pre-sales", icon: Headphones },
+  pre_sales: { label: "Pre Sales", icon: Headphones },
   branch_admin: { label: "Branch Admin", icon: Building2 },
   head_physio: { label: "Head Physio", icon: Stethoscope },
   physio: { label: "Physio", icon: Activity },
@@ -122,7 +122,7 @@ const SUPER_ADMIN_TABS = [
   { key: "marketing", label: "Marketing Source", icon: Megaphone },
   { key: "stages", label: "CI/CD ROOTS", icon: Activity },
   { key: "hr", label: "HR Admin", icon: Users },
-  { key: "presales", label: "Pre-Sales CRM", icon: Headphones },
+  { key: "presales", label: "Pre Sales", icon: Headphones },
   { key: "branches", label: "Branch Management", icon: Building2 },
   { key: "branch_wise", label: "Branch Wise", icon: Network },
   { key: "packages", label: "FITSIO STORE", icon: Store },
@@ -271,7 +271,7 @@ export const CRMPage = ({ auth, onLogout }) => {
   const roleLabel = ROLE_META[role]?.label
     || (isDietRole(role) ? "Diet" : null)
     || (isHumanResourceRole(role) ? "Human Resource" : role);
-  const boardTitle = role === "pre_sales" ? "Pre-sales Master View" : `${roleLabel} Master View`;
+  const boardTitle = role === "pre_sales" ? "Pre Sales Master View" : `${roleLabel} Master View`;
   const myBranch = branches.find((b) => b.id === auth.user.branch_id);
   const myBranchName = myBranch?.branch_name || "";
   const VERTICAL_LABELS = { offline_physiotherapy: "Physiotherapy", offline_fitness_gym: "Fitness", offline_fitness: "Fitness" };

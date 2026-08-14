@@ -378,7 +378,7 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
     return (
       <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-slate-200 bg-white py-24 text-center" data-testid="presales-crm-locked">
         <Lock className="h-10 w-10 text-slate-300" />
-        <h2 className="text-xl font-bold text-slate-700">Pre-Sales CRM is locked</h2>
+        <h2 className="text-xl font-bold text-slate-700">Pre Sales is locked</h2>
         <p className="max-w-sm text-sm text-slate-500">This dashboard has been locked by a Super Admin. Contact your administrator to restore access.</p>
       </div>
     );
@@ -388,9 +388,15 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
   // attribute, not the `hidden` class, so the desktop leads block (hidden by class
   // on mobile, not attribute) would still count as a sibling and hand the next
   // block phantom top margin for content a phone never draws.
+  // Bottom padding for every role now, not just Pre Sales: Super Admin gets the card list
+  // on a phone too, and its own fixed bottom nav would otherwise sit on the last card.
+  // Desktop has no bar and no padding.
   return (
-    <div className={`flex flex-col gap-5 ${role === "pre_sales" ? "pb-20 md:pb-0" : ""}`} data-testid="presales-crm-page">
-    <div className={role === "pre_sales" ? "hidden space-y-5 md:block" : "space-y-5"} data-testid="presales-leads-tab">
+    <div className="flex flex-col gap-5 pb-20 md:pb-0" data-testid="presales-crm-page">
+    {/* Desk only, whoever is looking. Super Admin used to get this table on a phone while
+        the Pre Sales role got the card list below — the same screen, one of them unusable,
+        decided by who was logged in. Both now get the cards. */}
+    <div className="hidden space-y-5 md:block" data-testid="presales-leads-tab">
       {/* KPI Cards */}
       {/* Three across on a phone rather than all of them jammed into one nowrap row. Six
           cards sharing 330px gave each about 50px, which truncated every label to
@@ -617,8 +623,11 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
       </Card>
     </div>
 
-      {role === "pre_sales" && activeTab === "leads" && (
+      {activeTab === "leads" && (
         <div className="space-y-3 md:hidden" data-testid="presales-leads-mobile">
+          {/* Two rows, split by what they do: the first narrows what you are looking at,
+              the second acts on it. Seven controls will not share one line on a phone at
+              a usable size, and this is the seam that reads. */}
           <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2">
             <Search className="h-4 w-4 shrink-0 text-slate-400" />
             <Input
@@ -628,20 +637,54 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
               className="h-8 border-0 p-0 focus-visible:ring-0"
               data-testid="presales-mobile-search"
             />
-            {/* Icons only. On a phone this row also holds the search box, and three
-                labelled controls beside it leave the search field about a word wide. */}
             <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="presales-mobile-date-filter" centered iconOnly />
-            <PullFromSheetButton onPulled={() => { load(); setStageFilter("New Leads"); }} iconOnly />
             <Button
               onClick={load}
               disabled={loading}
               title="Refresh"
               aria-label="Refresh"
-              className="h-8 w-8 shrink-0 bg-orange-500 p-0 text-white hover:bg-orange-600"
+              className="h-8 w-8 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
               data-testid="presales-mobile-refresh-btn"
             >
               <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
             </Button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <ColorSelect
+              value={sourceFilter}
+              options={sourceSelectOptions}
+              placeholder="All Sources"
+              resetLabel="All Sources"
+              emptyText="No sources yet."
+              triggerClass="h-10 min-w-0 flex-1 text-sm"
+              onChange={setSourceFilter}
+              testid="presales-mobile-source-filter"
+            />
+            {/* Super Admin's alone — the Pre Sales role can work the pipeline but not
+                reshape it, and the button 403s for them anyway. */}
+            {role === "super_admin" && (
+              <Button
+                variant="outline"
+                className="h-10 w-10 shrink-0 p-0"
+                onClick={onManageStages}
+                title="Manage Stages"
+                aria-label="Manage Stages"
+                data-testid="presales-mobile-manage-stages-btn"
+              >
+                <Cog className="h-4 w-4" />
+              </Button>
+            )}
+            <Button
+              onClick={() => setShowCreate(true)}
+              title="Create Lead"
+              aria-label="Create Lead"
+              className="h-10 w-10 shrink-0 bg-sky-600 p-0 hover:bg-sky-700"
+              data-testid="presales-mobile-create-lead-btn"
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
+            <PullFromSheetButton onPulled={() => { load(); setStageFilter("New Leads"); }} iconOnly />
           </div>
 
           <StageTabBar
