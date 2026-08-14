@@ -3387,7 +3387,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         <label className="mb-1 block text-[11px] font-medium text-slate-500">
                           Due Date for Balance ({treatmentRemainingSessions} sessions, Rs.{treatmentRemainingAmount}) *
                         </label>
+                        {/* Same reason as the schedule's own rows: this field sits low in
+                            a modal, so an anchored calendar opens past its edge. */}
                         <MilkDateInput
+                          centered
+                          title="Due Date for Balance"
                           value={treatmentFeeDraft.balance_due_date}
                           onChange={(e) => setTreatmentFeeDraft({ ...treatmentFeeDraft, balance_due_date: e.target.value })}
                           className="h-9"
@@ -5194,7 +5198,13 @@ function PartialInstallmentsEditor({ installments, setInstallments, totalSession
               </div>
               <div className="col-span-2 min-w-0 sm:col-auto sm:min-w-[126px] sm:flex-[1.4]">
                 <label className="mb-1 block text-[11px] font-medium text-slate-500">Due Date *</label>
+                {/* centered, so the calendar opens as its own dialog in the middle of the
+                    screen. Anchored to the field it hung off the bottom of the schedule
+                    popup and was cut in half — the last rows of the month and the Today
+                    link were simply unreachable, which is the case this mode exists for. */}
                 <MilkDateInput
+                  centered
+                  title="Due Date"
                   value={inst.due_date}
                   disabled={isPaid}
                   onChange={(e) => {
