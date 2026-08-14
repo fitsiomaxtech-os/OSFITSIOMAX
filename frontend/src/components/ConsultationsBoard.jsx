@@ -385,6 +385,38 @@ const SeatDots = ({ taken, capacity }) => {
   );
 };
 
+/**
+ * What was knocked off this patient's Consultation Fee, or null if nothing was.
+ *
+ * Taken from the lead itself — the listed price against what was actually collected. The
+ * activity trail carries an explicit discount_amount, but a lead row never loads its
+ * activities, and by construction the two are the same figure.
+ *
+ * Null rather than zero for a fee paid in full, so the column can show a dash instead of
+ * "Rs.0" on the majority of rows. A negative gap means more than the listed fee came in,
+ * which is not a discount and is left out.
+ */
+const consultationDiscount = (l) => {
+  const listed = Number(l.package_price);
+  const paid = Number(l.package_paid);
+  if (!Number.isFinite(listed) || !Number.isFinite(paid) || listed <= 0) return null;
+  const off = Math.round((listed - paid) * 100) / 100;
+  return off > 0 ? { off, pct: (off / listed) * 100 } : null;
+};
+
+// The percentages below must total 100 under table-fixed, so the extra column cannot be
+// appended — it takes its 8% out of the six widest, and the min-width grows by the same
+// amount so nothing is squeezed to make room. Both sets are written out literally because
+// Tailwind reads the source for class names and would compile nothing from a template.
+const COLS_WITH_DISCOUNT = {
+  sno: "w-[4%]", patient: "w-[11%]", pno: "w-[9%]", phone: "w-[11%]", email: "w-[11%]",
+  stage: "w-[12%]", expert: "w-[10%]", discount: "w-[8%]", appt: "w-[9%]", updated: "w-[9%]", action: "w-[6%]",
+};
+const COLS_PLAIN = {
+  sno: "w-[4%]", patient: "w-[13%]", pno: "w-[10%]", phone: "w-[12%]", email: "w-[13%]",
+  stage: "w-[13%]", expert: "w-[11%]", discount: "", appt: "w-[9%]", updated: "w-[9%]", action: "w-[6%]",
+};
+
 export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened, externalDate, hideDateFilter = false, onCountChange, onRowsChange, externalSearch, externalDateFilter, reloadToken, mobileCards = false }) => {
   const isConsultant = viewerRole === "head_physio";
   // Head Physio tracks progress on their own independent pipeline (head_consultation_stage),
@@ -660,6 +692,9 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     if (!stageFilter) return dateAndSearchFiltered;
     return dateAndSearchFiltered.filter((l) => matchesStage(l, stageFilter));
   }, [dateAndSearchFiltered, stageFilter, matchesStage]);
+
+  const showDiscountColumn = stageFilter === "Fee Collected";
+  const cols = showDiscountColumn ? COLS_WITH_DISCOUNT : COLS_PLAIN;
 
   // Stage counts for the head bar — derived client-side from the Date Filter/search-only
   // list so they always match whichever pipeline (branch vs. head physio) is active for
@@ -1978,19 +2013,23 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
           {/* S.No took its 4% out of the four widest columns rather than being appended:
               these percentages have to total 100 under table-fixed, and the min-width grew
               by the same 40px so no column lost real estate to make room for it. */}
-          <table className="w-full min-w-[1040px] table-fixed text-sm">
+          {/* Fee Collected is the stage where a negotiated Consultation Fee has become a
+              fact, so the discount column is added there alone — on every earlier stage
+              there is no payment yet and the column would be a row of dashes. */}
+          <table className={`w-full table-fixed text-sm ${showDiscountColumn ? "min-w-[1130px]" : "min-w-[1040px]"}`}>
             <thead className="bg-slate-500 text-xs uppercase text-white">
               <tr>
-                <th className="w-[4%] px-3 py-2 text-left align-middle">S.No</th>
-                <th className="w-[13%] px-4 py-2 text-left align-middle">Patient</th>
-                <th className="w-[10%] px-4 py-2 text-left align-middle">Patient No.</th>
-                <th className="w-[12%] px-4 py-2 text-left align-middle">Phone</th>
-                <th className="w-[13%] px-4 py-2 text-left align-middle">Email</th>
-                <th className="w-[13%] px-4 py-2 text-left align-middle">{isConsultant ? "Live Stage" : "Consultation Stage"}</th>
-                <th className="w-[11%] px-4 py-2 text-left align-middle">Assigned Expert</th>
-                <th className="w-[9%] px-3 py-2 text-left align-middle">Appointment</th>
-                <th className="w-[9%] px-3 py-2 text-left align-middle">Updated</th>
-                <th className="w-[6%] px-3 py-2 text-center align-middle">Action</th>
+                <th className={`${cols.sno} px-3 py-2 text-left align-middle`}>S.No</th>
+                <th className={`${cols.patient} px-4 py-2 text-left align-middle`}>Patient</th>
+                <th className={`${cols.pno} px-4 py-2 text-left align-middle`}>Patient No.</th>
+                <th className={`${cols.phone} px-4 py-2 text-left align-middle`}>Phone</th>
+                <th className={`${cols.email} px-4 py-2 text-left align-middle`}>Email</th>
+                <th className={`${cols.stage} px-4 py-2 text-left align-middle`}>{isConsultant ? "Live Stage" : "Consultation Stage"}</th>
+                <th className={`${cols.expert} px-4 py-2 text-left align-middle`}>Assigned Expert</th>
+                {showDiscountColumn && <th className={`${cols.discount} px-3 py-2 text-left align-middle`}>Discount Applied</th>}
+                <th className={`${cols.appt} px-3 py-2 text-left align-middle`}>Appointment</th>
+                <th className={`${cols.updated} px-3 py-2 text-left align-middle`}>Updated</th>
+                <th className={`${cols.action} px-3 py-2 text-center align-middle`}>Action</th>
               </tr>
             </thead>
             <tbody>
@@ -2013,6 +2052,23 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       </span>
                     </td>
                     <td className="truncate px-4 py-3 align-middle text-slate-600" title={l.assigned_physio_name}>{l.assigned_physio_name || "—"}</td>
+                    {showDiscountColumn && (() => {
+                      const d = consultationDiscount(l);
+                      return (
+                        <td className="whitespace-nowrap px-3 py-3 align-middle text-xs">
+                          {d ? (
+                            <span
+                              className="inline-flex items-center rounded-[5px] border border-amber-200 bg-amber-50 px-2 py-0.5 font-semibold text-amber-700"
+                              title={`Listed Rs.${Number(l.package_price).toLocaleString("en-IN")}, collected Rs.${Number(l.package_paid).toLocaleString("en-IN")}`}
+                            >
+                              Rs.{d.off.toLocaleString("en-IN")} · {d.pct.toFixed(0)}%
+                            </span>
+                          ) : (
+                            <span className="text-slate-300">—</span>
+                          )}
+                        </td>
+                      );
+                    })()}
                     {/* Date and time each own a line rather than wrapping wherever the
                         column happens to run out — so the dates stack in a straight
                         edge down the column instead of breaking at a different word
