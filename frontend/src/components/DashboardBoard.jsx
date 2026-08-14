@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
-import { Users, CalendarCheck, Activity, IndianRupee, X, Building2, LayoutDashboard, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { Users, CalendarCheck, Activity, IndianRupee, X, Building2, LayoutDashboard, TrendingUp, TrendingDown, Minus, RefreshCw } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { SegmentedTabs } from "@/components/ui/segmented-tabs";
@@ -94,17 +95,21 @@ export const DashboardBoard = () => {
   const activeTabDef = DASH_TABS.find((t) => t.key === activeTab);
   const activeTeam = activeTabDef?.team || null;   // which list on the payload
 
-  useEffect(() => {
+  // A named loader rather than the fetch inline in the effect, so Refresh has something to
+  // call — the effect still owns when it runs on a date change.
+  const loadOverview = useCallback(() => {
     setLoading(true);
     // No dates on All — the endpoint reads that as unfiltered.
     const params = dateFilter.from && dateFilter.to
       ? { start_date: toIso(dateFilter.from), end_date: toIso(dateFilter.to) }
       : {};
-    getDashboardOverview(params)
+    return getDashboardOverview(params)
       .then(setData)
       .catch(() => toast.error("Failed to load dashboard"))
       .finally(() => setLoading(false));
   }, [dateFilter]);
+
+  useEffect(() => { loadOverview(); }, [loadOverview]);
 
   // Fetched once, on the first visit to either team tab, and not refetched when the date
   // range changes — /marketing/team-members counts a person's whole book and takes no
@@ -258,22 +263,38 @@ export const DashboardBoard = () => {
               </p>
             ) : (
               <>
-              <select
-                className="h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 sm:hidden"
-                value={drillBranch?.branch_id || ""}
-                onChange={(e) => {
-                  const next = activeData.physio_branches.find((b) => b.branch_id === e.target.value);
-                  setDrillBranch(next || null);
-                }}
-                data-testid="dashboard-physio-select"
-              >
-                <option value="">Pick a branch…</option>
-                {activeData.physio_branches.map((b) => (
-                  <option key={b.branch_id} value={b.branch_id}>
-                    {b.branch_name} · {fmtValue(activeTab, b.value)}
-                  </option>
-                ))}
-              </select>
+              {/* Refresh beside the picker, where the figures it reloads are being read.
+                  The dashboard had none anywhere — every number on it is a snapshot taken
+                  when the tab opened, and short of changing the date range and changing it
+                  back there was no way to ask for a fresh one. */}
+              <div className="flex items-center gap-2 sm:hidden">
+                <select
+                  className="h-11 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700"
+                  value={drillBranch?.branch_id || ""}
+                  onChange={(e) => {
+                    const next = activeData.physio_branches.find((b) => b.branch_id === e.target.value);
+                    setDrillBranch(next || null);
+                  }}
+                  data-testid="dashboard-physio-select"
+                >
+                  <option value="">Pick a branch…</option>
+                  {activeData.physio_branches.map((b) => (
+                    <option key={b.branch_id} value={b.branch_id}>
+                      {b.branch_name} · {fmtValue(activeTab, b.value)}
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  onClick={() => loadOverview()}
+                  disabled={loading}
+                  title="Refresh"
+                  aria-label="Refresh"
+                  className="h-11 w-11 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
+                  data-testid="dashboard-refresh"
+                >
+                  <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+                </Button>
+              </div>
 
               <div
                 className="hidden sm:grid sm:gap-3"
