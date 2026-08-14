@@ -570,6 +570,9 @@ const ExecutiveOverview = ({ data, loading, dateFilter }) => {
   // Which of the four headline figures the charts below are drawing. Held here rather
   // than inside either chart, so both plot the same metric and one selection drives them.
   const [trendMetric, setTrendMetric] = useState("leads");
+  // null is every branch. Scopes the four cards and the total chart; the per-branch chart
+  // keeps drawing all of them and highlights this one instead — see BranchGrowthTrend.
+  const [branchFilter, setBranchFilter] = useState(null);
 
   const from = dateFilter?.from;
   const to = dateFilter?.to;
@@ -595,19 +598,66 @@ const ExecutiveOverview = ({ data, loading, dateFilter }) => {
     return <p className="py-16 text-center text-sm text-slate-400">{loading ? "Loading..." : "No data."}</p>;
   }
 
+  // The branch list comes off the leads bucket, which carries every Physiotherapy branch
+  // whether or not it took a lead in range — so a quiet branch still offers its card
+  // rather than disappearing from the filter for the period it was quiet.
+  const branchCards = data.leads?.physio_branches || [];
+
+  /** One metric's figure, scoped to the selected branch or the whole org. */
+  const scoped = (bucket) => {
+    if (!bucket) return 0;
+    if (!branchFilter) return bucket.total ?? 0;
+    return (bucket.physio_branches || []).find((b) => b.branch_id === branchFilter)?.value ?? 0;
+  };
+
   const metrics = [
-    { key: "leads", label: "Total Leads", icon: Users, value: data.leads?.total ?? 0 },
-    { key: "appointments", label: "Appointments", icon: CalendarCheck, value: data.appointments?.total ?? 0 },
-    { key: "treatments", label: "Treatments", icon: Activity, value: data.treatments?.total ?? 0 },
-    { key: "revenue", label: "Revenue", icon: IndianRupee, value: data.revenue?.total ?? 0, currency: true },
+    { key: "leads", label: "Total Leads", icon: Users, value: scoped(data.leads) },
+    { key: "appointments", label: "Appointments", icon: CalendarCheck, value: scoped(data.appointments) },
+    { key: "treatments", label: "Treatments", icon: Activity, value: scoped(data.treatments) },
+    { key: "revenue", label: "Revenue", icon: IndianRupee, value: scoped(data.revenue), currency: true },
   ];
   // `key` is also the key inside each branch's `series` on /dashboard/leads-trend, so the
   // selected card and the lines drawn from it cannot drift apart.
+
+  /** The same figure for the preceding window, scoped the same way — otherwise a branch's
+   *  figure would be compared against the whole org's prior total. */
+  const scopedPrev = (key) => {
+    const bucket = prev?.[key];
+    if (!bucket) return undefined;
+    if (!branchFilter) return bucket.total;
+    return (bucket.physio_branches || []).find((b) => b.branch_id === branchFilter)?.value;
+  };
 
   const activeMetric = metrics.find((m) => m.key === trendMetric) || metrics[0];
 
   return (
     <div className="space-y-4" data-testid="dashboard-overview">
+      {/* Branch scope, above the figures it scopes — the row reads as "for this branch",
+          then the numbers. Clicking the selected one clears back to every branch, so the
+          filter has a way out that does not need a fifth "All" card competing with the
+          four real ones for the same row. */}
+      {branchCards.length > 0 && (
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" data-testid="dashboard-branch-filter">
+          {branchCards.map((b) => {
+            const on = branchFilter === b.branch_id;
+            return (
+              <button
+                key={b.branch_id}
+                type="button"
+                onClick={() => setBranchFilter(on ? null : b.branch_id)}
+                aria-pressed={on}
+                className={`rounded-xl border px-4 py-5 text-left text-sm font-bold uppercase tracking-wide transition sm:py-6 ${
+                  on ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                }`}
+                data-testid={`dashboard-branch-filter-${b.branch_id}`}
+              >
+                <span className="block truncate">{b.branch_name}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {/* Two up on a phone rather than one. Four full-width cards stacked pushed the
           branch table two screens down, and these figures are short enough to share a
           row.
@@ -618,7 +668,7 @@ const ExecutiveOverview = ({ data, loading, dateFilter }) => {
           same four words. The selected one inverts to solid slate. */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {metrics.map((m) => {
-          const before = prev?.[m.key]?.total;
+          const before = scopedPrev(m.key);
           const on = m.key === trendMetric;
           return (
             <button
@@ -644,8 +694,8 @@ const ExecutiveOverview = ({ data, loading, dateFilter }) => {
         })}
       </div>
 
-      <BranchGrowthTrend metric={activeMetric} />
-      <LeadsTrend metric={activeMetric} />
+      <BranchGrowthTrend metric={activeMetric} highlightBranch={branchFilter} />
+      <LeadsTrend metric={activeMetric} branchId={branchFilter} />
     </div>
   );
 };
@@ -706,15 +756,21 @@ const monthLabel = (k) => new Date(`${k}-01T00:00:00`).toLocaleDateString("en-US
  * The total is summed across branches here rather than asking the endpoint for a figure
  * its per-branch rows already contain.
  */
-const LeadsTrend = ({ metric }) => {
+const LeadsTrend = ({ metric, branchId }) => {
   const { data, loading } = useTrendData();
   const [hoverIdx, setHoverIdx] = useState(null);
 
   if (loading) return <Card><CardContent className="p-5"><p className="py-10 text-center text-sm text-slate-400">Loading trend…</p></CardContent></Card>;
   if (!data || !data.months?.length) return null;
 
+  // With a branch selected this is that branch's own line rather than the org total, so it
+  // matches the cards above, which are scoped the same way.
+  const inScope = branchId
+    ? (data.branches || []).filter((b) => b.branch_id === branchId)
+    : (data.branches || []);
+  const scopeName = branchId ? (inScope[0]?.branch_name || "") : "";
   const totals = data.months.map((_m, i) =>
-    (data.branches || []).reduce((sum, b) => sum + (branchSeries(b, metric.key)[i] || 0), 0));
+    inScope.reduce((sum, b) => sum + (branchSeries(b, metric.key)[i] || 0), 0));
   const { step, axisMax } = axisFor(Math.max(...totals));
 
   // viewBox units, not pixels — the svg scales to its container and the maths stays in
@@ -745,7 +801,7 @@ const LeadsTrend = ({ metric }) => {
     <Card data-testid="dashboard-leads-trend">
       <CardContent className="p-4 sm:p-5">
         <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-          <p className="text-sm font-bold text-slate-800">OverAll</p>
+          <p className="text-sm font-bold text-slate-800">{scopeName || "OverAll"}</p>
           <p className="text-[11px] text-slate-400">{metric.label} · last 6 months · not affected by the date filter</p>
         </div>
 
@@ -864,17 +920,21 @@ const BRANCH_INKS = ["#18181b", "#52525b", "#a1a1aa", "#d4d4d8", "#71717a", "#3f
  * Draws whichever metric is selected on the cards above, so the pair never shows two
  * different things at once.
  */
-const BranchGrowthTrend = ({ metric }) => {
+const BranchGrowthTrend = ({ metric, highlightBranch }) => {
   const { data, loading } = useTrendData();
   const [hoverIdx, setHoverIdx] = useState(null);
 
   if (loading) return <Card><CardContent className="p-5"><p className="py-10 text-center text-sm text-slate-400">Loading growth…</p></CardContent></Card>;
   if (!data || !data.months?.length) return null;
 
+  // A selected branch is highlighted here rather than filtered to. Filtering would leave
+  // this chart drawing the single line the one below already draws, and lose the very
+  // thing it is for — where that branch sits against the others.
   const series = (data.branches || []).map((b, i) => ({
     ...b,
     color: BRANCH_INKS[i % BRANCH_INKS.length],
     points: branchSeries(b, metric.key),
+    faded: !!highlightBranch && b.branch_id !== highlightBranch,
   }));
   if (!series.length) return null;
 
@@ -907,8 +967,8 @@ const BranchGrowthTrend = ({ metric }) => {
             and in the readout — the swatch only ties a name to a line already labelled. */}
         <div className="mb-3 flex flex-wrap gap-x-4 gap-y-1">
           {series.map((s) => (
-            <span key={s.branch_id} className="flex items-center gap-1.5 text-[11px] font-medium text-slate-600">
-              <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: s.color }} />
+            <span key={s.branch_id} className={`flex items-center gap-1.5 text-[11px] font-medium ${s.faded ? "text-slate-400" : "text-slate-600"}`}>
+              <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: s.color, opacity: s.faded ? 0.35 : 1 }} />
               {s.branch_name}
             </span>
           ))}
@@ -936,12 +996,15 @@ const BranchGrowthTrend = ({ metric }) => {
               <line x1={x(hoverIdx)} x2={x(hoverIdx)} y1={PAD_T} y2={PAD_T + plotH} stroke="#d4d4d8" strokeWidth="1" />
             )}
 
-            {series.map((s) => (
+            {/* Faded lines first, so the highlighted one is drawn over them rather than
+                under whichever branch happens to come later in the payload. */}
+            {[...series].sort((a, b) => Number(b.faded) - Number(a.faded)).map((s) => (
               <polyline
                 key={s.branch_id}
                 fill="none"
                 stroke={s.color}
-                strokeWidth="1.75"
+                strokeWidth={s.faded ? 1.25 : 2}
+                strokeOpacity={s.faded ? 0.3 : 1}
                 strokeLinejoin="round"
                 strokeLinecap="round"
                 points={s.points.map((v, i) => `${x(i)},${y(v || 0)}`).join(" ")}
@@ -949,7 +1012,7 @@ const BranchGrowthTrend = ({ metric }) => {
             ))}
             {/* Markers carry a surface ring so lines crossing under them stay legible. */}
             {hoverIdx !== null && series.map((s) => (
-              <circle key={s.branch_id} cx={x(hoverIdx)} cy={y(s.points[hoverIdx] || 0)} r="3.5" fill={s.color} stroke="#ffffff" strokeWidth="2" />
+              <circle key={s.branch_id} cx={x(hoverIdx)} cy={y(s.points[hoverIdx] || 0)} r="3.5" fill={s.color} fillOpacity={s.faded ? 0.3 : 1} stroke="#ffffff" strokeWidth="2" />
             ))}
 
             {data.months.map((k, i) => (
