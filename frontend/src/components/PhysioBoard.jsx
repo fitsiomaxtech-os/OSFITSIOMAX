@@ -1241,7 +1241,10 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
   const [reviewEvery, setReviewEvery] = useState(REVIEW_EVERY);
   const [completeTarget, setCompleteTarget] = useState(null);
   const [absentTarget, setAbsentTarget] = useState(null);
-  const [tab, setTab] = useState("overview");
+  // Opens on Treatment Days. The physio reaches this dialog from the day's list in order
+  // to mark someone present or absent, and Overview first meant a tab change before every
+  // single one of those. Overview is reference; this is the work.
+  const [tab, setTab] = useState("days");
   const isComplete = lead.physio_stage === "Complete";
 
   const loadSessions = useCallback(async () => {
