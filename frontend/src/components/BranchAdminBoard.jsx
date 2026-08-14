@@ -534,14 +534,21 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
               Consultation pipeline's stages too, so this one bar covers a patient's whole
               journey; selecting one of those switches the view below to the real
               Consultations board (see isConsultationStage). */}
-          <StageTabBar
-            stages={combinedStages}
-            stageFilter={stageFilter}
-            setStageFilter={setStageFilter}
-            counts={combinedCounts}
-            totalCount={totalLeads}
-            testid="branch-metric"
-          />
+          {/* order puts the toolbar above the stage cards on a phone and back below them
+              from sm up. Searching and switching branch are what this screen is opened to
+              do; nine stage chips ahead of them meant scrolling past the summary to reach
+              the controls that change it. Desktop shows both at once, where the stage bar
+              reading first is the right order. */}
+          <div className="order-2 min-w-0 sm:order-1">
+            <StageTabBar
+              stages={combinedStages}
+              stageFilter={stageFilter}
+              setStageFilter={setStageFilter}
+              counts={combinedCounts}
+              totalCount={totalLeads}
+              testid="branch-metric"
+            />
+          </div>
 
           {/* One toolbar for every stage. It used to sit inside the non-consultation
               branch, so selecting a consultation stage swapped in ConsultationsBoard's
@@ -552,7 +559,12 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
           {/* With a branch picker in it this row carries six controls, which no phone has
               the width for at a readable size — so below sm it scrolls sideways with every
               item at its natural size, rather than squeezing the search to a stub. Desktop
-              has the room and lays out as before. */}
+              has the room and lays out as before.
+
+              relative + the fade below: a row that simply stops at the screen edge reads as
+              a broken layout. The gradient says the row continues, which is the difference
+              between "cut off" and "scrollable". */}
+          <div className="relative order-1 min-w-0 sm:order-2">
           <div className="flex items-center gap-2 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] sm:gap-3 sm:overflow-visible [&::-webkit-scrollbar]:hidden" data-testid="branch-toolbar">
             {/* min-w-0 so the search can shrink: a flex item defaults to its content's
                 width, which would shove the buttons off the right edge instead. */}
@@ -607,6 +619,8 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
               iconOnly
             />
             </div>
+          </div>
+            <div className="pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-slate-50 to-transparent sm:hidden" aria-hidden="true" />
           </div>
 
           {isConsultationStage ? (
