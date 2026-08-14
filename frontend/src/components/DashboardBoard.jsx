@@ -180,6 +180,22 @@ export const DashboardBoard = () => {
             centered
           />
         </span>
+        {/* Far right of the filter row, desktop only. It complements the one beside the
+            branch picker rather than duplicating it: that one is sm:hidden, this one is
+            hidden below sm, so exactly one is on screen at any width. Sitting in the
+            header, this one reaches every tab rather than only those that draw the branch
+            section. ml-auto is scoped to sm because below it the six presets already share
+            the row edge to edge and there is no spare width to push into. */}
+        <Button
+          onClick={() => loadOverview()}
+          disabled={loading}
+          title="Refresh"
+          aria-label="Refresh"
+          className="hidden h-10 w-10 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600 sm:ml-auto sm:inline-flex"
+          data-testid="dashboard-refresh-desktop"
+        >
+          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+        </Button>
       </div>
 
       {/* Two rows of three on a phone. Six tabs in one row leaves each about a sixth of
