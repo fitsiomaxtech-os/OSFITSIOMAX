@@ -122,7 +122,7 @@ const SUPER_ADMIN_TABS = [
   { key: "marketing", label: "Marketing Source", icon: Megaphone },
   { key: "stages", label: "CI/CD ROOTS", icon: Activity },
   { key: "hr", label: "HR Admin", icon: Users },
-  { key: "presales", label: "Pre Sales", icon: Headphones },
+  { key: "presales", label: "PRE SALES", icon: Headphones },
   { key: "branches", label: "Branch Management", icon: Building2 },
   { key: "branch_wise", label: "Branch Wise", icon: Network },
   { key: "packages", label: "FITSIO STORE", icon: Store },

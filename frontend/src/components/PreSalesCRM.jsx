@@ -307,12 +307,15 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { getBranches().then(setBranches).catch(() => {}); }, []);
 
-  // Leads narrowed by Date Filter + Source filter only — feeds both the KPI
+  // Leads narrowed by Date Filter + Branch filter only — feeds both the KPI
   // summary cards and the table, so the cards stay dynamic with those two filters
   // without also collapsing to whatever single stage tab is currently selected.
   const dateSourceFiltered = useMemo(() => {
     let rows = leads;
-    if (sourceFilter) rows = rows.filter((l) => (l.source_tab || l.source_type || "") === sourceFilter);
+    // Empty is every branch, which is why the control opens on "All Branches" and its
+    // reset returns here. Leads with no branch yet are the unassigned ones and belong in
+    // the all-branches view, so they only drop out once a specific branch is picked.
+    if (sourceFilter) rows = rows.filter((l) => (l.branch_id || "") === sourceFilter);
     if (dateFilter) {
       const from = dateFilter.from?.getTime();
       const to = dateFilter.to?.getTime();
@@ -334,14 +337,10 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
     return map;
   }, [dateSourceFiltered, stages]);
 
-  const sourceOptions = useMemo(() => {
-    const set = new Set();
-    leads.forEach((l) => { const s = l.source_tab || l.source_type; if (s) set.add(s); });
-    return [...set].sort((a, b) => a.localeCompare(b));
-  }, [leads]);
-
-  // Both dropdowns take the same {value,label} shape, so they share one component.
-  const sourceSelectOptions = useMemo(() => sourceOptions.map((s) => ({ value: s, label: s })), [sourceOptions]);
+  // The toolbar filter and the per-row assign dropdown take the same {value,label} shape,
+  // so they share one list. The source list that used to sit here went with the filter it
+  // fed — the SOURCE column still shows where each lead came from, it is just no longer
+  // something you can narrow the board by.
   const branchOptions = useMemo(() => branches.map((b) => ({ value: b.id, label: branchLabel(b) })), [branches]);
 
   const filtered = useMemo(() => {
@@ -436,10 +435,10 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
         <div className="flex items-center gap-2 sm:contents">
         <ColorSelect
           value={sourceFilter}
-          options={sourceSelectOptions}
-          placeholder="All Sources"
-          resetLabel="All Sources"
-          emptyText="No sources yet."
+          options={branchOptions}
+          placeholder="All Branches"
+          resetLabel="All Branches"
+          emptyText="No branches yet."
           triggerClass="h-10 min-w-0 flex-1 text-sm sm:w-[200px] sm:flex-none"
           onChange={setSourceFilter}
           testid="presales-source-filter"
@@ -508,11 +507,13 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
                           <span className="truncate">{l.name}</span>
                         </div>
                       </td>
+                      {/* Number only. Call and WhatsApp both hand off to an app the desk
+                          does not have — tel: and wa.me open a dialer and a phone client,
+                          so on a desktop they were two icons per row that either did
+                          nothing or launched the wrong thing. They stay on the phone
+                          cards, where they work. */}
                       <td className="border-y border-slate-200 bg-white px-3 py-3 text-center transition-colors group-hover:bg-slate-50">
-                        <div className="flex flex-col items-center gap-1">
-                          <span className="font-mono text-xs text-slate-700">{l.phone || "—"}</span>
-                          <LeadContactIcons lead={l} />
-                        </div>
+                        <span className="font-mono text-xs text-slate-700">{l.phone || "—"}</span>
                       </td>
                       <td className="border-y border-slate-200 bg-white px-3 py-3 text-center text-xs text-slate-600 transition-colors group-hover:bg-slate-50">{l.email || "—"}</td>
                       <td className="border-y border-slate-200 bg-white px-3 py-3 text-center transition-colors group-hover:bg-slate-50"><SourcePill source={l.source_tab || l.source_type} /></td>
@@ -653,10 +654,10 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
           <div className="flex items-center gap-2">
             <ColorSelect
               value={sourceFilter}
-              options={sourceSelectOptions}
-              placeholder="All Sources"
-              resetLabel="All Sources"
-              emptyText="No sources yet."
+              options={branchOptions}
+              placeholder="All Branches"
+              resetLabel="All Branches"
+              emptyText="No branches yet."
               triggerClass="h-10 min-w-0 flex-1 text-sm"
               onChange={setSourceFilter}
               testid="presales-mobile-source-filter"
