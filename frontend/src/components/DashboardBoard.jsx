@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Users, CalendarCheck, Activity, IndianRupee, X, Building2, LayoutDashboard, TrendingUp, TrendingDown, Minus, RefreshCw } from "lucide-react";
+import { Users, CalendarCheck, Activity, IndianRupee, X, Building2, LayoutDashboard, TrendingUp, TrendingDown, Minus, RefreshCw, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
@@ -311,6 +311,41 @@ export const DashboardBoard = () => {
                   <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
                 </Button>
               </div>
+
+              {/* The phone's empty state. Until a branch is picked the whole screen below
+                  the dropdown was blank, which reads as a page that failed to load rather
+                  than one waiting on a choice.
+
+                  A chevron bounces up at the control that needs using, and beneath it sits
+                  a ghost of the breakdown that will land here — pulsing in sequence, so the
+                  space says "content goes here" rather than "nothing here". Both are
+                  motion-safe, so a reader who has asked for reduced motion gets the same
+                  message standing still. */}
+              {!drillBranch && (
+                <div className="rounded-xl border border-dashed border-slate-300 bg-white/60 px-4 py-8 text-center sm:hidden" data-testid="dashboard-physio-empty">
+                  <ChevronUp className="mx-auto h-5 w-5 text-sky-500 motion-safe:animate-bounce" />
+                  <p className="mt-1 text-sm font-semibold text-slate-600">Pick a branch to see its breakdown</p>
+                  <p className="mt-0.5 text-xs text-slate-400">
+                    {activeData.physio_branches.length} {activeData.physio_branches.length === 1 ? "branch" : "branches"} · each with its own split
+                  </p>
+                  <div className="mt-5 space-y-2" aria-hidden="true">
+                    {[0, 1, 2].map((i) => (
+                      <div
+                        key={i}
+                        className="flex items-center gap-3 rounded-lg bg-slate-100/80 p-3 motion-safe:animate-pulse"
+                        style={{ animationDelay: `${i * 150}ms` }}
+                      >
+                        <div className="h-8 w-8 shrink-0 rounded-full bg-slate-200" />
+                        <div className="flex-1 space-y-1.5">
+                          <div className="h-2.5 w-1/2 rounded bg-slate-200" />
+                          <div className="h-2 w-1/3 rounded bg-slate-200/80" />
+                        </div>
+                        <div className="h-3 w-12 shrink-0 rounded bg-slate-200" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div
                 className="hidden sm:grid sm:gap-3"
