@@ -25,6 +25,7 @@ import {
   UserCog,
   User,
   UserX,
+  MoreHorizontal,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -297,6 +298,9 @@ const apptHtml = (a) => `<!doctype html><html><head><meta charset="utf-8">
   <div class="foot">This is a computer-generated confirmation and needs no signature.<br>Thank you for choosing FITSIOMAX.</div>
 </div></body></html>`;
 
+// Which of the six get a direct slot on the phone bar. The other three go behind More.
+const BOTTOM_NAV_KEYS = ["pipeline", "review", "consultations"];
+
 export const BranchAdminBoard = ({ branchId, embedded = false }) => {
   const [boardData, setBoardData] = useState({ leads: [], stage_counts: {} });
   const [stages, setStages] = useState([]); // dynamic Branch Stages, from Super Admin > Pipeline Stage Management
@@ -305,6 +309,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false }) => {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedLead, setSelectedLead] = useState(null);
   const [activeView, setActiveView] = useState("pipeline");
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [consultationsSubTab, setConsultationsSubTab] = useState("head_physio");
   const [stageFilter, setStageFilter] = useState(null); // null = show all stages
   const [dateFilter, setDateFilter] = useState(null); // { from, to, label, key } | null
@@ -418,6 +423,12 @@ export const BranchAdminBoard = ({ branchId, embedded = false }) => {
     { key: "accountant_mgmt", label: "Accountant Manage", short: "Accounts", icon: BadgeIndianRupee },
     { key: "store", label: "Fitsiomax Store", short: "Store", icon: ShoppingCart },
   ];
+
+  // The phone bar carries three of the six plus More; the desktop strip above still shows
+  // all six. Both halves come off VIEW_TABS, so a tab added there lands in one or the
+  // other rather than being dropped.
+  const bottomTabs = VIEW_TABS.filter((t) => BOTTOM_NAV_KEYS.includes(t.key));
+  const moreTabs = VIEW_TABS.filter((t) => !BOTTOM_NAV_KEYS.includes(t.key));
 
   // Everything under MANAGEMENT — Experts and Calendar used to be their own
   // top-level tabs, and Manager used to sit one level deeper inside Calendar;
@@ -859,24 +870,26 @@ export const BranchAdminBoard = ({ branchId, embedded = false }) => {
       {/* Bottom nav — phones only, and only when this board owns the page (not when
           Super Admin's Branch Wise embeds it, which already has its own bottom nav —
           two fixed bottom bars fighting for the same spot was the actual bug). The top
-          strip scrolls sideways, which left Accountant Manage and Store behind a swipe;
-          down here all six are reachable by thumb. Columns are counted off VIEW_TABS
-          rather than hardcoded, so adding or dropping a tab re-divides the bar instead
-          of leaving a gap. */}
+          strip scrolls sideways, which left Accountant Manage and Store behind a swipe.
+
+          Three direct slots and a More sheet, rather than all six across the bar: six
+          gave each tab about 60px, which is why every label had to be abbreviated to fit
+          in the first place. Columns are counted rather than hardcoded, so a tab added to
+          VIEW_TABS re-divides the bar instead of leaving a gap. */}
       {!embedded && (
       <nav
         className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-2px_10px_rgba(15,23,42,0.06)] backdrop-blur supports-[backdrop-filter]:bg-white/85 md:hidden"
         data-testid="branch-bottom-nav"
       >
-        <div className="grid" style={{ gridTemplateColumns: `repeat(${VIEW_TABS.length}, minmax(0, 1fr))` }}>
-          {VIEW_TABS.map((tab) => {
+        <div className="grid" style={{ gridTemplateColumns: `repeat(${bottomTabs.length + 1}, minmax(0, 1fr))` }}>
+          {bottomTabs.map((tab) => {
             const Icon = tab.icon;
             const active = activeView === tab.key;
             return (
               <button
                 key={tab.key}
                 type="button"
-                onClick={() => setActiveView(tab.key)}
+                onClick={() => { setActiveView(tab.key); setShowMoreMenu(false); }}
                 aria-current={active ? "page" : undefined}
                 className={`relative flex min-w-0 flex-col items-center justify-center gap-0.5 px-0.5 py-2 transition-colors ${
                   active ? "text-sky-600" : "text-slate-400 active:text-slate-600"
@@ -890,8 +903,63 @@ export const BranchAdminBoard = ({ branchId, embedded = false }) => {
               </button>
             );
           })}
+          {/* Lit while one of the tabs it holds is open, so the bar still says where you
+              are once you have navigated into the sheet and it has closed behind you. */}
+          <button
+            type="button"
+            onClick={() => setShowMoreMenu((v) => !v)}
+            aria-expanded={showMoreMenu}
+            className={`relative flex min-w-0 flex-col items-center justify-center gap-0.5 px-0.5 py-2 transition-colors ${
+              moreTabs.some((t) => t.key === activeView) || showMoreMenu ? "text-sky-600" : "text-slate-400 active:text-slate-600"
+            }`}
+            data-testid="branch-bottom-nav-more"
+          >
+            {moreTabs.some((t) => t.key === activeView) && <span className="absolute inset-x-2 top-0 h-0.5 rounded-full bg-sky-500" />}
+            <MoreHorizontal className="h-[18px] w-[18px] flex-none" />
+            <span className="w-full truncate text-center text-[9px] font-semibold leading-tight">More</span>
+          </button>
         </div>
       </nav>
+      )}
+
+      {/* The three that came off the bar. Full labels here — a sheet has the width the bar
+          did not, so this is the one place "Accountant Manage" reads in full. */}
+      {!embedded && showMoreMenu && (
+        <div
+          className="fixed inset-0 z-50 flex items-end bg-slate-900/40 md:hidden"
+          onClick={() => setShowMoreMenu(false)}
+          data-testid="branch-bottom-nav-sheet"
+        >
+          <div className="w-full rounded-t-2xl bg-white p-2 pb-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-3 py-2">
+              <p className="text-sm font-semibold text-slate-700">More</p>
+              <button
+                type="button"
+                onClick={() => setShowMoreMenu(false)}
+                className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100"
+                data-testid="branch-bottom-nav-sheet-close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            {moreTabs.map((tab) => {
+              const Icon = tab.icon;
+              const active = activeView === tab.key;
+              return (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => { setActiveView(tab.key); setShowMoreMenu(false); }}
+                  className={`flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left text-sm font-medium ${active ? "bg-sky-50 text-sky-700" : "text-slate-700 hover:bg-slate-50"}`}
+                  data-testid={`branch-bottom-nav-sheet-${tab.key}`}
+                >
+                  <Icon className="h-4 w-4" />
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
       )}
     </div>
   );
