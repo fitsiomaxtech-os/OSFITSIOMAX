@@ -114,15 +114,30 @@ export const PipelineStageManagement = ({ onBack }) => {
     <div className="space-y-5" data-testid="pipeline-stages-page">
       {/* Heading removed with the others. The back link and Add Stage keep the row, so
           it still reads left-to-right as "where you came from" then "what you can do". */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      {/* One row at every width. Stacked on a phone this put the back link on a line of
+          its own above a full-bleed orange button, which read as a banner rather than as
+          "where you came from" then "what you can do". */}
+      <div className="flex items-center justify-between gap-3">
         <Button variant="ghost" size="sm" onClick={onBack} data-testid="stages-back-btn"><ArrowLeft className="h-4 w-4 mr-1" />Settings</Button>
-        <Button onClick={() => { setEditing(null); setForm({ name: "", color: PALETTE[Math.floor(Math.random() * PALETTE.length)], is_final: false }); setShowAdd(true); }} className="bg-orange-500 hover:bg-orange-600" data-testid="stages-add-btn"><Plus className="h-4 w-4 mr-1" />Add Stage</Button>
+        <Button onClick={() => { setEditing(null); setForm({ name: "", color: PALETTE[Math.floor(Math.random() * PALETTE.length)], is_final: false }); setShowAdd(true); }} className="shrink-0 bg-orange-500 hover:bg-orange-600" data-testid="stages-add-btn"><Plus className="h-4 w-4 mr-1" />Add Stage</Button>
       </div>
 
       {/* The five summary cards are gone. They printed the same five counts the tab row
           directly beneath already carries in its labels — Pre-Sales (4), Branch Lead (3)
           — so the page opened with every figure stated twice. */}
-      <div className="grid grid-cols-2 gap-2 rounded-lg bg-slate-100 p-1 sm:grid-cols-5">
+      {/* A dropdown on a phone. Five pipelines two-across left the fifth alone on a third
+          row, and the count in each label is part of the name here — "Pre-Sales (4)" — so
+          the labels cannot be shortened to make them fit. Desktop keeps the five-up row. */}
+      <select
+        value={type}
+        onChange={(e) => setType(e.target.value)}
+        className="h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 sm:hidden"
+        data-testid="stages-tab-select"
+      >
+        {TYPES.map((t) => <option key={t.key} value={t.key}>{t.label} ({counts[t.key]})</option>)}
+      </select>
+
+      <div className="hidden gap-2 rounded-lg bg-slate-100 p-1 sm:grid sm:grid-cols-5">
         {TYPES.map((t) => (
           <button
             key={t.key}

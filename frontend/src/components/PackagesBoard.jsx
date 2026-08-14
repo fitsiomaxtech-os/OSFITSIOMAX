@@ -1050,7 +1050,19 @@ export const PackagesBoard = () => {
     <div className="space-y-4" data-testid="packages-board">
       {/* No heading. The nav tab above already reads FITSIO STORE, and the line under it
           only listed the tabs that follow it. */}
-      <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="packages-subtabs">
+      {/* A dropdown on a phone, the same control the Branch Admin store uses. Eight tabs
+          wrapped to three rows there, which pushed the shelf being edited below the fold
+          before any of its items showed. Desktop keeps the bar. */}
+      <select
+        value={tab}
+        onChange={(e) => setTab(e.target.value)}
+        className="h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 md:hidden"
+        data-testid="packages-subtab-select"
+      >
+        {TABS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+      </select>
+
+      <div className="hidden flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1 md:flex" data-testid="packages-subtabs">
         {TABS.map((t) => {
           const Icon = t.icon;
           const active = tab === t.key;
