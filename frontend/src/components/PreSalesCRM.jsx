@@ -468,10 +468,11 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
         )}
         <PullFromSheetButton onPulled={load} iconOnly />
         <Button
+          variant="outline"
           onClick={() => setShowCreate(true)}
           title="Create Lead"
           aria-label="Create Lead"
-          className="h-10 w-10 shrink-0 bg-sky-600 p-0 hover:bg-sky-700"
+          className="h-10 w-10 shrink-0 p-0"
           data-testid="presales-create-lead-btn"
         >
           <Plus className="h-4 w-4" />
@@ -481,7 +482,7 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
           disabled={loading}
           title="Refresh"
           aria-label="Refresh"
-          className="h-10 w-10 shrink-0 bg-orange-500 p-0 text-white hover:bg-orange-600"
+          className="h-10 w-10 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
           data-testid="presales-refresh-btn"
         >
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
@@ -710,7 +711,8 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
               onClick={() => setShowCreate(true)}
               title="Create Lead"
               aria-label="Create Lead"
-              className="h-10 w-10 shrink-0 bg-sky-600 p-0 hover:bg-sky-700"
+              variant="outline"
+              className="h-10 w-10 shrink-0 p-0"
               data-testid="presales-mobile-create-lead-btn"
             >
               <Plus className="h-4 w-4" />
