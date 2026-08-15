@@ -408,6 +408,18 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   // shows whichever of the two it came in through, never both.
   const mirrorStage = useMemo(() => stages.find((s) => s.mirrors_stage) || null, [stages]);
   const realEntryStage = useMemo(() => stages.find((s) => !s.mirrors_stage) || null, [stages]);
+
+  // What a row's Stage chip should say. Normally the lead's own branch_stage — except under
+  // the Leads pill, where that would read "Branch Assign" on every row of a list the admin
+  // opened by clicking Leads. The lead genuinely is still at the branch's opening; "Leads"
+  // is the name for that position while it is also an unworked Pre-Sales New Lead, and it
+  // is the name the admin is looking at. Every other pill still shows the real stage, so a
+  // lead reads "Branch Assign" under Branch Assign and under All Stages.
+  const showingMirror = !!mirrorStage && stageFilter === mirrorStage.name;
+  const rowStageName = useCallback(
+    (lead) => (showingMirror && lead.branch_stage ? mirrorStage.name : lead.branch_stage),
+    [showingMirror, mirrorStage],
+  );
   const entryStageNames = [mirrorStage?.name, realEntryStage?.name].filter(Boolean);
 
   // Which desk owns this branch's leads. Comes back with the board rather than from a
@@ -769,7 +781,8 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                 );
               }
               return visible.map((lead) => {
-                const hex = lead.branch_stage ? stageColor(lead.branch_stage) : null;
+                const rowStage = rowStageName(lead);
+                const hex = rowStage ? stageColor(rowStage) : null;
                 const wa = waNumber(lead.phone);
                 return (
                   // A div, not a button: the Call and WhatsApp actions below are
@@ -797,7 +810,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                             className="shrink-0 rounded-[5px] border px-2 py-0.5 text-[10px] font-medium"
                             style={hex ? { background: `${hex}14`, color: hex, border: `1px solid ${hex}33` } : { background: "#f1f5f9", color: "#475569", border: "1px solid #e2e8f0" }}
                           >
-                            {lead.branch_stage ? stageDisplayLabel(lead.branch_stage) : "—"}
+                            {rowStage ? stageDisplayLabel(rowStage) : "—"}
                           </span>
                         </div>
                         {lead.patient_number && <p className="truncate font-mono text-[10px] text-slate-400">{lead.patient_number}</p>}
@@ -898,7 +911,8 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                     );
                   }
                   return visible.map((lead) => {
-                    const rowStageHex = lead.branch_stage ? stageColor(lead.branch_stage) : null;
+                    const rowStage = rowStageName(lead);
+                    const rowStageHex = rowStage ? stageColor(rowStage) : null;
                     return (
                       <tr
                         key={lead.id}
@@ -924,7 +938,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                             className="inline-flex items-center rounded-[5px] border px-2.5 py-0.5 text-xs font-medium"
                             style={rowStageHex ? { background: `${rowStageHex}14`, color: rowStageHex, border: `1px solid ${rowStageHex}33` } : { background: "#f1f5f9", color: "#475569", border: "1px solid #e2e8f0" }}
                           >
-                            {lead.branch_stage ? stageDisplayLabel(lead.branch_stage) : "—"}
+                            {rowStage ? stageDisplayLabel(rowStage) : "—"}
                           </span>
                         </td>
                         {showAssignedPhysio && (
@@ -968,7 +982,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
           // sit on Leads and Branch Assign at once (one reads its Pre-Sales stage, the other
           // its branch stage), so the pill the admin opened it from is what decides —
           // matching the stage strip they were just looking at.
-          openedFromMirror={!!mirrorStage && stageFilter === mirrorStage.name}
+          openedFromMirror={showingMirror}
           onClose={() => setSelectedLead(null)}
           onUpdate={handleStageUpdate}
           onOpenConsultationStage={(stage) => {
@@ -1112,6 +1126,8 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
   // pipeline shows that one and drops the other. Everything from RNR onwards is shared.
   const mirrorStageName = stages.find((s) => s.mirrors_stage)?.name;
   const realEntryStageName = stages.find((s) => !s.mirrors_stage)?.name;
+  // Matches the chip on the row that opened this popup, rather than contradicting it.
+  const headerStageName = (openedFromMirror && lead.branch_stage) ? mirrorStageName : lead.branch_stage;
   const entryStages = stages.filter((s) => (
     s.name === mirrorStageName ? openedFromMirror
       : s.name === realEntryStageName ? !openedFromMirror
@@ -1325,7 +1341,9 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                     <span className="rounded-[5px] bg-white/20 px-2 py-0.5 font-mono text-[10px] font-semibold text-white" data-testid="branch-lead-patient-number">{lead.patient_number}</span>
                   )}
                   <span className="rounded-[5px] bg-white/95 px-2.5 py-0.5 text-[11px] font-semibold text-slate-700" data-testid="branch-lead-stage">
-                    {lead.branch_stage ? stageDisplayLabel(lead.branch_stage) : "No Stage"}
+                    {/* Named the same way the row that opened this popup was: opened from
+                        Leads it reads Leads, and the pipeline below highlights Leads too. */}
+                    {headerStageName ? stageDisplayLabel(headerStageName) : "No Stage"}
                   </span>
                   {lead.consultation_fee && <span className="rounded-full bg-teal-100/95 px-2 py-0.5 text-[10px] font-semibold text-teal-800">Fee Rs.{lead.consultation_fee}</span>}
                   {lead.package_amount && <span className="rounded-full bg-emerald-100/95 px-2 py-0.5 text-[10px] font-semibold text-emerald-800">Pkg Rs.{lead.package_amount}</span>}
