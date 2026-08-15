@@ -175,7 +175,7 @@ const BranchControlTab = ({ actingUser }) => {
         {selected && <span className="text-xs text-slate-400">{selected.admin_name ? `Managed by ${selected.admin_name}` : "No admin assigned"}</span>}
 
         <div className="flex w-full flex-wrap gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1 sm:ml-auto sm:w-auto">
-          {[{ key: "branch_admin", label: "Branch Admin View" }, { key: "head_physio", label: "Head Physio View" }, { key: "physio", label: "Physio View" }].map((t) => (
+          {[{ key: "branch_admin", label: "Branch Admin View" }, { key: "head_physio", label: "CONSULTANT View" }, { key: "physio", label: "Physio View" }].map((t) => (
             <button
               key={t.key}
               type="button"
@@ -209,7 +209,7 @@ const BranchControlTab = ({ actingUser }) => {
 
       {!selectedId ? (
         <div className="rounded-lg border border-dashed border-slate-200 p-10 text-center text-sm text-slate-400" data-testid="bm-branch-control-empty">
-          Pick a branch above to open its full dashboard — Branch Admin view (Branch Leads, Consultations, Treatment Sessions, Rehab, Finance, Fitsiomax Store), Head Physio view (their own Consultations pipeline, Review, Rehab, Calendar), or Physio view (Consultations, Today, Full Calendar, Patients History for one physio) — with full control, same as they'd see it.
+          Pick a branch above to open its full dashboard — Branch Admin view (Branch Leads, Consultations, Treatment Sessions, Rehab, Finance, Fitsiomax Store), CONSULTANT view (their own Consultations pipeline, Review, Rehab, Calendar), or Physio view (Consultations, Today, Full Calendar, Patients History for one physio) — with full control, same as they'd see it.
         </div>
       ) : viewAs === "head_physio" ? (
         <HeadPhysioBoard key={`${selectedId}-hp`} branchId={selectedId} user={actingUser} />

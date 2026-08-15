@@ -208,7 +208,7 @@ export const BranchCalendarPanel = ({ branchId }) => {
     if (!draft.date) { toast.error("Pick a date"); return; }
     if (dayInfo && !dayInfo.open) { toast.error(dayInfo.reason || "The branch is closed on this date"); return; }
     if (editingId && draft.cancelled) { await cancelAppt(); return; }
-    if (!draft.doctor_id) { toast.error("Select a Head Physio"); return; }
+    if (!draft.doctor_id) { toast.error("Select a CONSULTANT"); return; }
     if (!draft.time) { toast.error("Select an available time slot"); return; }
     setSaving(true);
     try {
@@ -350,7 +350,7 @@ export const BranchCalendarPanel = ({ branchId }) => {
                         <span className="shrink-0 text-xs font-bold text-violet-600">{r.time ? to12h(r.time) : "—"}</span>
                       </div>
                       <p className="mt-0.5 truncate text-xs text-slate-500">
-                        <span className="font-semibold text-slate-400">Head Physio</span> {r.headPhysio}
+                        <span className="font-semibold text-slate-400">CONSULTANT</span> {r.headPhysio}
                       </p>
                       <p className="truncate text-xs text-slate-500">
                         <span className="font-semibold text-slate-400">Physio</span> {r.physio}
@@ -425,7 +425,7 @@ export const BranchCalendarPanel = ({ branchId }) => {
 
                       <div className="mt-2.5 grid grid-cols-1 gap-2 sm:grid-cols-2">
                         <p className="text-sm text-slate-600">
-                          <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Head Physio</span><br />
+                          <span className="text-xs font-bold uppercase tracking-wider text-slate-400">CONSULTANT</span><br />
                           {r.headPhysio}
                         </p>
                         <p className="text-sm text-slate-600">
@@ -555,10 +555,10 @@ export const BranchCalendarPanel = ({ branchId }) => {
               ) : dayInfo && dayInfo.open ? (
                 <>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-slate-600">Head Physio *</label>
-                    <p className="mb-1.5 text-[11px] text-slate-400">Available times come from each Head Physio's calendar. Branch open {to12h(dayInfo.open_time)}–{to12h(dayInfo.close_time)}.</p>
+                    <label className="mb-1 block text-xs font-semibold text-slate-600">CONSULTANT *</label>
+                    <p className="mb-1.5 text-[11px] text-slate-400">Available times come from each CONSULTANT's calendar. Branch open {to12h(dayInfo.open_time)}–{to12h(dayInfo.close_time)}.</p>
                     {dayInfo.head_physios.length === 0 ? (
-                      <p className="text-xs text-amber-600">No Head Physios assigned to this branch yet — ask HR / Super Admin.</p>
+                      <p className="text-xs text-amber-600">No CONSULTANTS assigned to this branch yet — ask HR / Super Admin.</p>
                     ) : (
                       <div className="space-y-1.5">
                         {dayInfo.head_physios.map((hp) => {
@@ -575,7 +575,7 @@ export const BranchCalendarPanel = ({ branchId }) => {
                               <div className="flex h-8 w-8 items-center justify-center rounded-full bg-teal-100 text-xs font-bold text-teal-700">{hp.full_name?.charAt(0) || "H"}</div>
                               <div className="min-w-0 flex-1">
                                 <p className="truncate text-sm font-medium text-slate-800">{hp.full_name}</p>
-                                <p className="truncate text-[10px] text-slate-400">{hp.specialization || "Head Physio"}</p>
+                                <p className="truncate text-[10px] text-slate-400">{hp.specialization || "CONSULTANT"}</p>
                               </div>
                               <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${freeCount > 0 ? "bg-emerald-50 text-emerald-600" : "bg-slate-100 text-slate-400"}`}>
                                 {freeCount > 0 ? `${freeCount} slots` : "No slots"}

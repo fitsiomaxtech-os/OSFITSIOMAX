@@ -186,7 +186,7 @@ async def physio_raise_review(
     # Enforced here as well as in the form: the Head Physio writes their review off the
     # back of these notes, so a review raised without them cannot be acted on.
     if not (payload.physio_notes or "").strip():
-        raise HTTPException(status_code=400, detail="Notes for the Head Physio are required")
+        raise HTTPException(status_code=400, detail="Notes for the CONSULTANT are required")
     lead = await _lead_or_404(lead_id)
     existing_for_lead = await v3_col("reviews").find({"lead_id": lead_id}, {"_id": 0}).to_list(50)
     days = await _treatment_days(lead_id)
@@ -292,7 +292,7 @@ async def branch_send_review(
         {"id": payload.head_physio_id, "profile_type": "head_physio"}, {"_id": 0, "id": 1, "full_name": 1}
     )
     if not hp:
-        raise HTTPException(status_code=404, detail="Head Physio not found")
+        raise HTTPException(status_code=404, detail="CONSULTANT not found")
     try:
         date.fromisoformat(payload.review_date)
     except ValueError as exc:
@@ -391,7 +391,7 @@ async def hp_complete_review(
         "id": str(uuid.uuid4()),
         "lead_id": rev["lead_id"],
         "action": "review_completed",
-        "details": f"Head Physio review completed by {user.full_name}",
+        "details": f"CONSULTANT review completed by {user.full_name}",
         "created_by": user.full_name,
         "created_by_role": user.role,
         "created_at": now,

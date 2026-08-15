@@ -181,7 +181,7 @@ def _appt_card_html(a: dict) -> str:
     if a["branch"]:
         og_desc += f" at {a['branch']}"
 
-    rows = [("Head Physio", a["head_physio"])]
+    rows = [("CONSULTANT", a["head_physio"])]
     if a["ref_no"]:
         rows.append(("Reference", a["ref_no"]))
     rows_html = "".join(

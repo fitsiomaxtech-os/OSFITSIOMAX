@@ -331,7 +331,7 @@ async def collect_package_payment(lead_id: str, payload: V3CollectPackagePayment
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     if lead.get("consultation_stage") not in ("Consultation Visit", "Fee Collected"):
-        raise HTTPException(status_code=400, detail="Consultation Fee can only be collected once the Head Physio has completed the consultation")
+        raise HTTPException(status_code=400, detail="Consultation Fee can only be collected once the CONSULTANT has completed the consultation")
     if not lead.get("package_id") or lead.get("package_price") is None:
         raise HTTPException(status_code=400, detail="No consultation package assigned yet")
 
@@ -439,7 +439,7 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
     if lead.get("consultation_stage") not in ("Fee Collected", "Physio Assign"):
         raise HTTPException(status_code=400, detail="Treatment Fee can only be collected after the Consultation Fee has been collected")
     if not lead.get("session_package_id") or lead.get("session_package_price") is None:
-        raise HTTPException(status_code=400, detail="No treatment package was selected by the Head Physio yet")
+        raise HTTPException(status_code=400, detail="No treatment package was selected by the CONSULTANT yet")
 
     # Cash/UPI/Card can be manually adjusted (discount, rounding, partial cash
     # collected); Cheque and Partial Payment keep the locked session_package_price.

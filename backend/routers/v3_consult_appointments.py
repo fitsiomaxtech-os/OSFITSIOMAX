@@ -92,7 +92,7 @@ async def _validate_slot(branch: dict, date_str: str, time_str: str, doctor_id: 
     if exclude_id:
         q["id"] = {"$ne": exclude_id}
     if await v3_col("appointments").find_one(q, {"_id": 0, "id": 1}):
-        raise HTTPException(status_code=409, detail="This Head Physio is already booked at that time")
+        raise HTTPException(status_code=409, detail="This CONSULTANT is already booked at that time")
     return slot
 
 

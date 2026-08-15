@@ -247,7 +247,7 @@ const milestoneLook = (review) => {
     case "sent":
       return {
         label: "Scheduled", tone: "sky", Icon: Calendar,
-        line: who ? `With ${who}.` : "Dispatched to a Head Physio.",
+        line: who ? `With ${who}.` : "Dispatched to a CONSULTANT.",
       };
     case "send_to_review":
       return {
@@ -882,7 +882,7 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
     // off the back of what the treating physio observed. A review raised without them
     // arrives as a name and a reason, which is not enough to review anything.
     if (!draft.physio_notes.trim()) {
-      toast.error("Add your notes for the Head Physio — they can't review the patient without them");
+      toast.error("Add your notes for the CONSULTANT — they can't review the patient without them");
       return;
     }
     setSaving(true);
@@ -944,7 +944,7 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
 
   const STATUS_BADGE = {
     completed: { label: "Review Completed", cls: "bg-emerald-100 text-emerald-700" },
-    sent: { label: "With Head Physio", cls: "bg-violet-100 text-violet-700" },
+    sent: { label: "With CONSULTANT", cls: "bg-violet-100 text-violet-700" },
     send_to_review: { label: "With Branch Admin", cls: "bg-sky-100 text-sky-700" },
   };
 
@@ -952,7 +952,7 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
     not_due: "Every patient is either due a review or already in one",
     new_review: "No one has reached a new review milestone yet",
     requests: "No requests waiting on the Branch Admin",
-    assigned: "No reviews assigned to a Head Physio",
+    assigned: "No reviews assigned to a CONSULTANT",
     completed: "No completed reviews yet",
   };
 
@@ -1261,7 +1261,7 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
                       : "No review raised yet"}
                   </Line>
                   <Line label="Raised By">{rev?.physio_name}</Line>
-                  <Line label="Head Physio">{rev?.head_physio_name}</Line>
+                  <Line label="CONSULTANT">{rev?.head_physio_name}</Line>
                 </div>
 
                 {rev ? (
@@ -1271,7 +1271,7 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
                     {/* The two the Head Physio writes back. Shown even while empty, so the
                         physio can see the review is still with them rather than wondering
                         whether the board simply failed to load it. */}
-                    <Report label="Head Physio's Review" text={rev.head_physio_notes} tone="border-violet-200 bg-violet-50 text-violet-900" />
+                    <Report label="CONSULTANT's Review" text={rev.head_physio_notes} tone="border-violet-200 bg-violet-50 text-violet-900" />
                     <Report label="Suggestions" text={rev.head_physio_suggestions} tone="border-emerald-200 bg-emerald-50 text-emerald-900" />
                   </>
                 ) : (
@@ -1312,7 +1312,7 @@ function ReviewTab({ physioId, onCountChange, toolbarSlot }) {
               </div>
               <div>
                 <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">
-                  Notes for the Head Physio <span className="text-rose-500">*</span>
+                  Notes for the CONSULTANT <span className="text-rose-500">*</span>
                 </label>
                 <textarea
                   rows={4}
@@ -1575,7 +1575,7 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
                 {totalWeeks ? (
                   <span className={allReviewed ? "font-semibold text-emerald-600" : "font-semibold text-amber-600"}>
                     {reviewedWeeks} of {totalWeeks} week{totalWeeks === 1 ? "" : "s"}
-                    {!allReviewed && " · awaiting Head Physio"}
+                    {!allReviewed && " · awaiting CONSULTANT"}
                   </span>
                 ) : (
                   <span className="text-slate-400">—</span>
@@ -2315,19 +2315,19 @@ export function PatientDetailPage({ patient, physioId, onClose, onRefresh }) {
             )}
             {lead?.physio_diagnosis_report && (
               <div className="rounded-lg border border-sky-200 bg-sky-50 p-3">
-                <p className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-sky-500">Diagnosis Report (Head Physio)</p>
+                <p className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-sky-500">Diagnosis Report (CONSULTANT)</p>
                 <p className="whitespace-pre-wrap text-xs text-sky-900">{lead.physio_diagnosis_report}</p>
               </div>
             )}
             {lead?.treatment_summary && (
               <div className="rounded-lg border border-violet-200 bg-violet-50 p-3">
-                <p className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-violet-500">Treatment Summary (Head Physio)</p>
+                <p className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-violet-500">Treatment Summary (CONSULTANT)</p>
                 <p className="whitespace-pre-wrap text-xs text-violet-900">{lead.treatment_summary}</p>
               </div>
             )}
             {lead && !lead.physio_diagnosis_report && !lead.treatment_summary && (
               <p className="rounded-lg border border-dashed border-slate-200 p-6 text-center text-xs text-slate-400">
-                No treatment details submitted by the Head Physio yet.
+                No treatment details submitted by the CONSULTANT yet.
               </p>
             )}
           </div>

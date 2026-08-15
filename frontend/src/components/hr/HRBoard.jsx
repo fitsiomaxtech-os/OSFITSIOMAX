@@ -23,7 +23,10 @@ const TABS = [
 // Physios belong to branches and may cover several, so they get the checkbox list.
 // Head Physios cover the whole organisation by definition — offering them a branch choice
 // would suggest they could be limited to one, which they can't be.
-const MULTI_BRANCH_ROLE_LABELS = { physio: "Physio" };
+// Kept in step with MULTI_BRANCH_ROLES in backend/routers/v3_hr.py. A role missing here
+// is offered a single branch on hire while the backend expects a list, so an Online
+// Physio covering three branches would get one expert record and two empty calendars.
+const MULTI_BRANCH_ROLE_LABELS = { physio: "Physio", online_physio: "Online Physio" };
 const ORG_WIDE_ROLES = new Set(["head_physio"]);
 
 export const HRBoard = () => {
@@ -629,8 +632,12 @@ const ROLE_META = {
   branch_admin_physio_fitness: { label: "BRANCH ADMIN ( PHYSIO & FITNESS )", classes: "border-emerald-300 bg-emerald-50 text-emerald-700" },
   online_physio_admin: { label: "ONLINE PHYSIO ADMIN", classes: "border-teal-300 bg-teal-50 text-teal-700" },
   online_fitness_admin: { label: "ONLINE FITNESS ADMIN", classes: "border-teal-300 bg-teal-50 text-teal-700" },
-  head_physio: { label: "HEAD PHYSIO", classes: "border-amber-300 bg-amber-50 text-amber-700" },
+  head_physio: { label: "CONSULTANT", classes: "border-amber-300 bg-amber-50 text-amber-700" },
   physio: { label: "PHYSIO", classes: "border-cyan-300 bg-cyan-50 text-cyan-700" },
+  // Blue against Physio's cyan is the same shift the family above makes from emerald to
+  // teal: the base hue says which kind of role this is, and the neighbouring one says it
+  // is the online arm of it.
+  online_physio: { label: "ONLINE PHYSIO", classes: "border-blue-300 bg-blue-50 text-blue-700" },
   marketing_head: { label: "MARKETING HEAD", classes: "border-pink-300 bg-pink-50 text-pink-700" },
   accountant: { label: "ACCOUNTANT", classes: "border-orange-300 bg-orange-50 text-orange-700" },
 };
@@ -819,7 +826,7 @@ const CreateRoleModal = ({ meta, reloadMeta, onClose }) => {
           value={label}
           onChange={(e) => setLabel(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && !duplicate) submit(); }}
-          placeholder="e.g. Nutrition Coach"
+          placeholder="e.g. Nutritionist"
           data-testid="hr-create-role-input"
         />
         {duplicate && <p className="mt-1.5 text-xs font-semibold text-red-500" data-testid="hr-create-role-duplicate">That role already exists.</p>}
@@ -1204,7 +1211,7 @@ const UserActionsModal = ({ user, onClose, onDone }) => {
             {isOrgWideRole ? (
               <Field label="Branches">
                 <p className="rounded-md border border-teal-200 bg-teal-50 px-3 py-2 text-xs font-medium text-teal-700" data-testid="hr-org-wide-branch-note">
-                  Head Physios cover every branch — no branch selection needed.
+                  CONSULTANTS cover every branch — no branch selection needed.
                 </p>
               </Field>
             ) : isMultiBranchRole ? (
@@ -1567,7 +1574,7 @@ const CreateUserModal = ({ meta, reloadMeta, onClose, onSaved }) => {
         {isOrgWideRole ? (
           <Field label="Branches">
             <p className="rounded-md border border-teal-200 bg-teal-50 px-3 py-2 text-xs font-medium text-teal-700" data-testid="hr-create-org-wide-branch-note">
-              Head Physios cover every branch — no branch selection needed.
+              CONSULTANTS cover every branch — no branch selection needed.
             </p>
           </Field>
         ) : isMultiBranchRole ? (

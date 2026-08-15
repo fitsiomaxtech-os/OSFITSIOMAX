@@ -118,7 +118,7 @@ const apptRows = (a, { compact = false } = {}) => [
   // Popup drops it: the sheet is the record and still carries it, but on screen the
   // start time is what the patient is told and a length beside it invites the question.
   compact ? null : ["Duration", `${a.duration} minutes`],
-  compact ? null : ["Head Physio", a.headPhysio],
+  compact ? null : ["CONSULTANT", a.headPhysio],
   a.branch ? ["Branch", a.branch] : null,
   ["Booked By", a.bookedBy],
 ];
@@ -270,7 +270,7 @@ const apptMessage = (a) => {
     `${to12h(a.time)} to ${endTime12h(a.time, a.duration)}`,
   ];
   if (a.branch) lines.push(`at ${a.branch}`);
-  lines.push("", REASSURANCE, "— Team Fitsiomax", "", `Head Physio: ${a.headPhysio}`);
+  lines.push("", REASSURANCE, "— Team Fitsiomax", "", `CONSULTANT: ${a.headPhysio}`);
   if (a.notes) lines.push(`Notes: ${a.notes}`);
   if (a.branchAddress) lines.push("", `Location: ${a.branchAddress}`);
   if (a.mapLocation) lines.push(a.mapLocation);
@@ -485,7 +485,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   // top-level tabs, and Manager used to sit one level deeper inside Calendar;
   // all three now live here alongside the two calendars.
   const MANAGEMENT_SUB_TABS = [
-    { key: "head_physio", label: "HEAD PHYSIO CALENDAR", icon: Calendar },
+    { key: "head_physio", label: "CONSULTANT CALENDAR", icon: Calendar },
     { key: "physio", label: "PHYSIO CALENDAR", icon: Activity },
     // Diet is the third vertical, so its calendar sits beside the other two rather than
     // anywhere new — the Branch Admin publishes a Nutrition Coach's days exactly the way
@@ -1551,7 +1551,7 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                 <Calendar className="h-5 w-5 shrink-0 text-slate-500" />
                 <div className="min-w-0">
                   <p className="text-base font-bold text-slate-800 sm:text-lg">Appointment</p>
-                  <p className="truncate text-xs text-slate-500">{lead.name} · pick a date, then the Head Physio, then their time</p>
+                  <p className="truncate text-xs text-slate-500">{lead.name} · pick a date, then the CONSULTANT, then their time</p>
                 </div>
               </div>
               <button onClick={() => setApptDraft(null)} className="shrink-0 rounded-lg border-2 border-orange-200 bg-orange-100 p-2 text-orange-600 transition hover:border-orange-300 hover:bg-orange-200 hover:text-orange-700" data-testid="branch-appt-close">
@@ -1642,14 +1642,14 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
 
               {/* STEP 2 — Head Physio */}
               <div className="w-full flex-shrink-0 border-b border-slate-200 p-4 sm:p-5 lg:w-[22rem] lg:border-b-0 lg:border-r lg:overflow-y-auto" data-testid="branch-appt-expert-panel">
-                <p className="mb-1 text-xs font-bold uppercase tracking-wider text-slate-400">2 · Head Physio</p>
+                <p className="mb-1 text-xs font-bold uppercase tracking-wider text-slate-400">2 · CONSULTANT</p>
                 <p className="mb-3 text-xs text-slate-400">Only those with availability on the picked date.</p>
                 {!apptDraft.appointment_date ? (
                   <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">Pick a date first.</p>
                 ) : apptExperts.loading ? (
                   <p className="text-sm text-slate-400">Checking availability...</p>
                 ) : apptExperts.experts.length === 0 ? (
-                  <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">No Head Physio is available on this date.</p>
+                  <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">No CONSULTANT is available on this date.</p>
                 ) : (
                   <div className="space-y-2">
                     {apptExperts.experts.map((doc) => {
@@ -1693,12 +1693,12 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                   Published availability. Booked times are shown in amber.
                 </p>
                 {!apptDraft.physio_id ? (
-                  <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">Select a Head Physio to see their available times.</p>
+                  <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">Select a CONSULTANT to see their available times.</p>
                 ) : apptSlotsForExpert.length === 0 ? (
                   <div className="rounded-lg border-2 border-amber-200 bg-amber-50 px-4 py-3" data-testid="branch-appt-no-slots">
                     <p className="text-sm font-semibold text-amber-800">No availability published for this date.</p>
                     <p className="mt-0.5 text-xs text-amber-700">
-                      Confirm with the expert, then open MANAGEMENT → HEAD PHYSIO CALENDAR and mark them available.
+                      Confirm with the expert, then open MANAGEMENT → CONSULTANT CALENDAR and mark them available.
                     </p>
                   </div>
                 ) : (
@@ -1708,7 +1708,7 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                   {apptFreeCount === 0 && (
                     <div className="mb-2 rounded-lg border-2 border-amber-200 bg-amber-50 px-3 py-2" data-testid="branch-appt-fully-booked">
                       <p className="text-xs font-semibold text-amber-800">Every published slot on this date is already booked.</p>
-                      <p className="mt-0.5 text-[11px] text-amber-700">Pick another date, or publish more availability in MANAGEMENT → HEAD PHYSIO CALENDAR.</p>
+                      <p className="mt-0.5 text-[11px] text-amber-700">Pick another date, or publish more availability in MANAGEMENT → CONSULTANT CALENDAR.</p>
                     </div>
                   )}
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4" data-testid="branch-appt-slots">

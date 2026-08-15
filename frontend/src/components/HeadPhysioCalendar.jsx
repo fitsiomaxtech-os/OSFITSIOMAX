@@ -64,8 +64,8 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
   // slot-type vocabulary and the per-slot capacity control; only the Head Physio's
   // one-per-lead consultation flow differs.
   const isRecurring = isPhysio || isCoach;
-  const roleLabel = isCoach ? "Nutrition Coach" : isPhysio ? "Physio" : "Head Physio";
-  const roleLabelPlural = isCoach ? "Nutrition Coaches" : isPhysio ? "Physios" : "Head Physios";
+  const roleLabel = isCoach ? "Nutritionist" : isPhysio ? "Physio" : "CONSULTANT";
+  const roleLabelPlural = isCoach ? "Nutritionists" : isPhysio ? "Physios" : "CONSULTANTS";
   const SLOT_TYPES = isRecurring ? SESSION_TYPES : CONSULTATION_TYPES;
   // The three calendars schedule different things and must not be read as interchangeable:
   // a Head Physio's day holds consultations (booked from Branch Leads → Appointment);

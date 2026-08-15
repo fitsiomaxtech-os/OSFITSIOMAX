@@ -217,7 +217,7 @@ function DoctorMiniCard({ physioName, headPhysioName }) {
     <div className="mb-4 flex flex-wrap items-center gap-x-6 gap-y-1 rounded-lg border border-slate-200 bg-white p-3 text-xs" data-testid="patient-portal-doctor-card">
       {headPhysioName && (
         <div>
-          <span className="text-slate-400">Head Physio</span>{" "}
+          <span className="text-slate-400">CONSULTANT</span>{" "}
           <span className="font-semibold text-slate-700">{headPhysioName}</span>
         </div>
       )}
@@ -349,7 +349,7 @@ function DietCard({ diet }) {
       <div className="space-y-2 px-4 py-3">
         {diet.coach_name && (
           <p className="text-xs text-slate-600">
-            Nutrition Coach <span className="font-semibold text-slate-800">{diet.coach_name}</span>
+            Nutritionist <span className="font-semibold text-slate-800">{diet.coach_name}</span>
           </p>
         )}
         {date && (
@@ -664,7 +664,7 @@ function ProfileTab({ data }) {
           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Your Care Team</p>
           <div className="space-y-2">
             {/* Deliberately no call/contact action here for the Head Physio — name only. */}
-            <Row label="Head Physio" value={data.head_physio_name} />
+            <Row label="CONSULTANT" value={data.head_physio_name} />
             <Row label="Physio" value={data.physio_name} />
           </div>
         </div>

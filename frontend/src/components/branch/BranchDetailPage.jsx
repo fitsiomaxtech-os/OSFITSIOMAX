@@ -196,7 +196,7 @@ const StaffTab = ({ staff }) => {
   const [section, setSection] = useState("branch_admins");
   const groups = [
     { key: "branch_admins", label: "Branch Admins", items: staff.branch_admins, color: "#0ea5e9" },
-    { key: "head_physios", label: "Head Physios", items: staff.head_physios, color: "#a855f7" },
+    { key: "head_physios", label: "CONSULTANTS", items: staff.head_physios, color: "#a855f7" },
     { key: "physios", label: "Physios", items: staff.physios, color: "#22c55e" },
     { key: "doctors", label: "Doctors (Calendar)", items: staff.doctors, color: "#f59e0b" },
   ];
@@ -353,17 +353,17 @@ const HeadPhysioTab = ({ hp, branchId, onChanged, readOnly = false }) => {
     <div className="grid gap-3 sm:grid-cols-2">
       <Card data-testid="branch-hp-calendars">
         <CardHeader className="flex flex-row items-center justify-between gap-2">
-          <CardTitle className="text-base">Head Physio Calendars</CardTitle>
-          {!readOnly && <button onClick={() => setShowAssign(true)} className="text-sky-600 hover:text-sky-700 p-1" title="Assign a Head Physio" data-testid="branch-hp-assign-btn"><UserCog className="h-4 w-4" /></button>}
+          <CardTitle className="text-base">CONSULTANT Calendars</CardTitle>
+          {!readOnly && <button onClick={() => setShowAssign(true)} className="text-sky-600 hover:text-sky-700 p-1" title="Assign a CONSULTANT" data-testid="branch-hp-assign-btn"><UserCog className="h-4 w-4" /></button>}
         </CardHeader>
         <CardContent>
-          {hp.calendars.length === 0 ? <p className="text-sm text-slate-400">No Head Physio assigned yet. Click the assign icon above to link an unassigned Head Physio from HR → Roles &amp; Credentials.</p> : (
+          {hp.calendars.length === 0 ? <p className="text-sm text-slate-400">No CONSULTANT assigned yet. Click the assign icon above to link an unassigned CONSULTANT from HR → Roles &amp; Credentials.</p> : (
             <div className="space-y-2">
               {hp.calendars.map((d) => (
                 <div key={d.id} className="flex items-center justify-between rounded-md border border-slate-200 p-3" data-testid={`branch-hp-cal-${d.id}`}>
                   <div>
                     <p className="text-sm font-semibold">{d.full_name}</p>
-                    <p className="text-xs text-slate-500">{d.specialization || "Head Physio"}</p>
+                    <p className="text-xs text-slate-500">{d.specialization || "CONSULTANT"}</p>
                     <p className="text-[11px] text-slate-400">{(d.slots || []).length} time slots configured</p>
                   </div>
                   <span className="rounded bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-600">{d.profile_type}</span>
@@ -426,8 +426,8 @@ const AssignHeadPhysioDialog = ({ branchId, onClose, onSaved }) => {
   const available = candidates.filter((c) => c.branch_id !== branchId);
 
   const save = async () => {
-    if (!pick) { toast.error("Pick a Head Physio"); return; }
-    try { await bmAssignHeadPhysio(branchId, pick); toast.success("Head Physio assigned"); onSaved(); }
+    if (!pick) { toast.error("Pick a CONSULTANT"); return; }
+    try { await bmAssignHeadPhysio(branchId, pick); toast.success("CONSULTANT assigned"); onSaved(); }
     catch (e) { toast.error(e?.response?.data?.detail || "Assign failed"); }
   };
 
@@ -435,13 +435,13 @@ const AssignHeadPhysioDialog = ({ branchId, onClose, onSaved }) => {
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" data-testid="branch-hp-assign-dialog">
       <div className="w-full max-w-md rounded-lg bg-white p-5 shadow-xl space-y-3">
         <div className="flex items-center justify-between">
-          <h3 className="text-base font-semibold">Assign Head Physio</h3>
+          <h3 className="text-base font-semibold">Assign CONSULTANT</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600" data-testid="branch-hp-assign-close"><X className="h-4 w-4" /></button>
         </div>
-        <p className="text-xs text-slate-500">Showing all Head Physios from HR → Roles &amp; Credentials. Picking one already assigned elsewhere moves them here.</p>
+        <p className="text-xs text-slate-500">Showing all CONSULTANTS from HR → Roles &amp; Credentials. Picking one already assigned elsewhere moves them here.</p>
         <select className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm" value={pick} onChange={(e) => setPick(e.target.value)} data-testid="branch-hp-assign-select">
-          <option value="">— Select Head Physio —</option>
-          {available.length === 0 && <option disabled>No other Head Physios — create one in HR</option>}
+          <option value="">— Select CONSULTANT —</option>
+          {available.length === 0 && <option disabled>No other CONSULTANTS — create one in HR</option>}
           {available.map((c) => <option key={c.id} value={c.id}>{c.full_name}{c.assigned_branch ? ` · currently at ${c.assigned_branch}` : " · unassigned"}</option>)}
         </select>
         <div className="flex gap-2 pt-2"><Button variant="outline" onClick={onClose} className="flex-1" data-testid="branch-hp-assign-cancel">Cancel</Button><Button onClick={save} className="flex-1 bg-sky-600 hover:bg-sky-700" data-testid="branch-hp-assign-submit">Assign</Button></div>

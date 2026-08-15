@@ -803,7 +803,7 @@ function LeadDetailModal({ lead, branches, onClose, onStageMove, onRefresh }) {
                         {/* Doctor Selection */}
                         {selectedSlot && (
                           <div>
-                            <label className="text-[10px] font-medium text-slate-500">Select Head Physio / Doctor</label>
+                            <label className="text-[10px] font-medium text-slate-500">Select CONSULTANT / Doctor</label>
                             <div className="mt-1 space-y-1.5" data-testid="booking-doctor-list">
                               {doctors.length === 0 ? (
                                 <p className="text-xs text-slate-400">No doctors in this branch</p>

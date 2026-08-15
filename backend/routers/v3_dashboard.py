@@ -685,7 +685,7 @@ ROLE_LABELS = {
     "branch_admin": "Branch Admin",
     "pre_sales": "Pre-Sales",
     "super_admin": "Super Admin",
-    "head_physio": "Head Physio",
+    "head_physio": "CONSULTANT",
     "physio": "Physio",
 }
 
@@ -809,7 +809,7 @@ async def v3_dashboard_branch_breakdown(
             },
             {
                 "key": "head_physio",
-                "label": "Head Physio",
+                "label": "CONSULTANT",
                 **build(head_physio_roster, appt_rows, lambda r: r.get("doctor_id"), lambda r: r.get("doctor_name")),
             },
             {

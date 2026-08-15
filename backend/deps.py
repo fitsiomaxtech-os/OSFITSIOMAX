@@ -105,12 +105,35 @@ def is_branch_admin_role(role: str) -> bool:
     return (role or "").strip().lower() in BRANCH_ADMIN_ROLES
 
 
+# Roles that are a Physio under another name, on the same footing as BRANCH_ADMIN_ROLES
+# above. An Online Physio treats patients over video instead of on the floor; the board,
+# the sessions, the reviews and the reach are identical, so it is the same permissions
+# under a second slug rather than a parallel set that would drift.
+#
+# Exact match, for the same reason: a loose rule on the "physio" token would also catch
+# `head_physio` and hand a treating physio the CONSULTANT's pipeline.
+PHYSIO_ROLES = frozenset({"physio", "online_physio"})
+
+
+def is_physio_role(role: str) -> bool:
+    """Whether this role treats patients as a Physio does.
+
+    Like is_branch_admin_role, this is for the *scoping* checks as well as the gate: an
+    endpoint that narrows to the logged-in physio's own patients has to narrow for these
+    too. Missing one shows them every physio's book rather than locking them out.
+    """
+    return (role or "").strip().lower() in PHYSIO_ROLES
+
+
 def v3_require_roles(*roles: str):
     async def checker(user: V3UserOut = Depends(v3_current_user)) -> V3UserOut:
-        # Anywhere branch_admin is allowed, its aliases are allowed. Done here rather than
-        # at the 80-odd call sites so the next branch endpoint added is covered by default
-        # instead of being one someone remembered to list the second role on.
-        allowed = "branch_admin" in roles and is_branch_admin_role(user.role)
+        # Anywhere branch_admin or physio is allowed, its aliases are allowed. Done here
+        # rather than at the 80-odd call sites so the next endpoint added is covered by
+        # default instead of being one someone remembered to list the second role on.
+        allowed = (
+            ("branch_admin" in roles and is_branch_admin_role(user.role))
+            or ("physio" in roles and is_physio_role(user.role))
+        )
         if user.role not in roles and not allowed:
             raise HTTPException(status_code=403, detail="Not allowed")
         return user

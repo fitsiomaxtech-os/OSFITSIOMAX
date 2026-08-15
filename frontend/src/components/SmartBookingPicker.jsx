@@ -89,7 +89,7 @@ const DateFirstPicker = ({ branchId, value, onChange }) => {
     <div className="space-y-3" data-testid="date-first-picker">
       <p className="flex items-center gap-1.5 text-[11px] text-slate-500" data-testid="smart-slot-type-hint">
         <CalendarDays className="h-3 w-3 text-teal-500" />
-        Showing <b className="text-teal-700">Initial Consultation</b> slots only (defined on Head Physio Calendar).
+        Showing <b className="text-teal-700">Initial Consultation</b> slots only (defined on CONSULTANT Calendar).
       </p>
 
       <div>
@@ -213,7 +213,7 @@ const DoctorFirstPicker = ({ branchId, value, onChange }) => {
         >
           <option value="">-- select a doctor --</option>
           {experts.map((e) => (
-            <option key={e.id} value={e.id}>{e.full_name}{e.profile_type === "head_physio" ? " · Head Physio" : ""}</option>
+            <option key={e.id} value={e.id}>{e.full_name}{e.profile_type === "head_physio" ? " · CONSULTANT" : ""}</option>
           ))}
         </select>
         {experts.length === 0 && <p className="mt-1 text-xs text-slate-400">No doctors set up for this branch yet.</p>}

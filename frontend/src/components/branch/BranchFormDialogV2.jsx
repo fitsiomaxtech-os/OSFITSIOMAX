@@ -19,7 +19,7 @@ const TABS = [
   { key: "details", label: "Branch Details", icon: MapPin },
   { key: "hours", label: "Opening Hours", icon: Clock },
   { key: "finance", label: "Finance Summary", icon: BarChart3 },
-  { key: "head_physio", label: "Head Physio", icon: Stethoscope },
+  { key: "head_physio", label: "CONSULTANT", icon: Stethoscope },
 ];
 
 const DAYS = [
@@ -98,11 +98,11 @@ export const BranchFormDialogV2 = ({ branch, onClose, onSaved }) => {
   const availableHeadPhysios = useMemo(() => hpCandidates.filter((c) => c.branch_id !== branch?.id), [hpCandidates, branch?.id]);
 
   const assignHeadPhysio = async () => {
-    if (!hpPick) { toast.error("Pick a Head Physio"); return; }
+    if (!hpPick) { toast.error("Pick a CONSULTANT"); return; }
     setHpSaving(true);
     try {
       await bmAssignHeadPhysio(branch.id, hpPick);
-      toast.success("Head Physio assigned");
+      toast.success("CONSULTANT assigned");
       setHpPick("");
       await loadHpCandidates();
     } catch (e) { toast.error(e?.response?.data?.detail || "Assign failed"); }
@@ -315,14 +315,14 @@ export const BranchFormDialogV2 = ({ branch, onClose, onSaved }) => {
               <div>
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Assigned to this branch</p>
                 {assignedHeadPhysios.length === 0 ? (
-                  <p className="text-sm text-slate-400">No Head Physio assigned yet.</p>
+                  <p className="text-sm text-slate-400">No CONSULTANT assigned yet.</p>
                 ) : (
                   <div className="space-y-2">
                     {assignedHeadPhysios.map((d) => (
                       <div key={d.id} className="flex items-center justify-between rounded-md border border-slate-200 p-3" data-testid={`bf2-hp-assigned-${d.id}`}>
                         <div>
                           <p className="text-sm font-semibold text-slate-800">{d.full_name}</p>
-                          <p className="text-xs text-slate-500">{d.specialization || "Head Physio"} · {(d.slots || []).length} time slots configured</p>
+                          <p className="text-xs text-slate-500">{d.specialization || "CONSULTANT"} · {(d.slots || []).length} time slots configured</p>
                         </div>
                         <span className="rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-600">Current</span>
                       </div>
@@ -332,12 +332,12 @@ export const BranchFormDialogV2 = ({ branch, onClose, onSaved }) => {
               </div>
 
               <div className="border-t border-slate-200 pt-4">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Assign a Head Physio</p>
-                <p className="mb-2 text-xs text-slate-500">Showing all Head Physios from HR → Roles &amp; Credentials. Picking one already assigned elsewhere moves them to this branch.</p>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Assign a CONSULTANT</p>
+                <p className="mb-2 text-xs text-slate-500">Showing all CONSULTANTS from HR → Roles &amp; Credentials. Picking one already assigned elsewhere moves them to this branch.</p>
                 <div className="flex gap-2">
                   <select className="h-10 flex-1 rounded-md border border-slate-200 px-3 text-sm" value={hpPick} onChange={(e) => setHpPick(e.target.value)} data-testid="bf2-hp-select">
-                    <option value="">— Select Head Physio —</option>
-                    {availableHeadPhysios.length === 0 && <option disabled>No other Head Physios — create one in HR</option>}
+                    <option value="">— Select CONSULTANT —</option>
+                    {availableHeadPhysios.length === 0 && <option disabled>No other CONSULTANTS — create one in HR</option>}
                     {availableHeadPhysios.map((c) => (
                       <option key={c.id} value={c.id}>{c.full_name}{c.assigned_branch ? ` · currently at ${c.assigned_branch}` : " · unassigned"}</option>
                     ))}

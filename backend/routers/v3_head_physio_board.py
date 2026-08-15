@@ -198,7 +198,7 @@ async def hp_recommend_package(
         "id": str(uuid.uuid4()),
         "lead_id": payload.lead_id,
         "action": "package_recommended",
-        "details": f"Head Physio recommended {payload.recommended_weeks} weeks, {payload.sessions_per_week} sessions/week ({total_sessions} total). Notes: {payload.notes}",
+        "details": f"CONSULTANT recommended {payload.recommended_weeks} weeks, {payload.sessions_per_week} sessions/week ({total_sessions} total). Notes: {payload.notes}",
         "created_by": user.full_name,
         "created_by_role": user.role,
         "created_at": now_iso(),

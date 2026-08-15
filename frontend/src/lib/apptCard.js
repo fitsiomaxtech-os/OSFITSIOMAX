@@ -82,7 +82,7 @@ export const apptCardPng = async (a) => {
   const GREET_H = 44;
   const NOTE_H = cancelled ? 58 : 26 + noteLines.length * 26 + 30;
   const FACT_H = 40;
-  const facts = [["Head Physio", a.headPhysio], ...(a.refNo ? [["Reference", a.refNo]] : [])];
+  const facts = [["CONSULTANT", a.headPhysio], ...(a.refNo ? [["Reference", a.refNo]] : [])];
   const ADDR_H = addrLines.length ? 22 + addrLines.length * 24 + 14 : 0;
   const H = HEADER_H + PAD + HERO_H + 26 + GREET_H + NOTE_H + 14 + facts.length * FACT_H + ADDR_H + PAD + 40;
 

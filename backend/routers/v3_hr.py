@@ -5,7 +5,7 @@ import uuid
 
 from database import v3_col
 from utils import now_iso
-from deps import v3_require_roles, is_diet_role
+from deps import v3_require_roles, is_diet_role, is_physio_role
 from security import hash_password
 from schemas.v3 import V3UserOut
 
@@ -20,13 +20,17 @@ DEFAULT_DEPARTMENTS = ["Pre-Sales", "Branch", "HR", "Accounts", "Operations", "M
 # slugs listed here rather than custom roles: a role whose name is typed by hand cannot be
 # aliased to branch_admin safely.
 #
-# Ordered next to branch_admin because this list is what the Designation and Create User
-# dropdowns render, and a reader picking between them wants the family together.
+# "online_physio" is the same idea one rung down: a Physio who treats over video, on the
+# Physio board with the Physio's reach. See PHYSIO_ROLES in deps.py.
+#
+# Ordered next to the role each is an alias of, because this list is what the Designation
+# and Create User dropdowns render, and a reader picking between them wants the family
+# together.
 DEFAULT_ROLES = [
     "super_admin", "business_dev", "pre_sales",
     "branch_admin", "branch_admin_physio", "branch_admin_fitness", "branch_admin_physio_fitness",
     "online_physio_admin", "online_fitness_admin",
-    "head_physio", "physio", "marketing_head", "accountant",
+    "head_physio", "physio", "online_physio", "marketing_head", "accountant",
 ]
 
 # Both consultant roles can be assigned to more than one branch (a linked `doctors`
@@ -37,9 +41,21 @@ DEFAULT_ROLES = [
 # A Nutrition Coach belongs to a branch and holds a calendar there, exactly like a Physio,
 # so hiring one has to create the matching `doctors` record or they log in to a board with
 # no calendar behind it and nothing explains why.
-MULTI_BRANCH_ROLES = {"physio", "nutrition_coach"}
+MULTI_BRANCH_ROLES = {"physio", "online_physio", "nutrition_coach"}
 ORG_WIDE_ROLES = {"head_physio"}
 EXPERT_ROLES = MULTI_BRANCH_ROLES | ORG_WIDE_ROLES
+
+
+def expert_profile_type(role: str) -> str:
+    """The `doctors.profile_type` an expert record gets for a role.
+
+    Usually the role slug itself. Online Physio is the exception and has to be: every
+    physio query in the OS — the board's own _resolve_doctor, session assignment, the
+    finance scoping check — looks for profile_type "physio". Stamping "online_physio"
+    on the record instead would create an expert nothing can find, and the role would
+    log in to an empty board with no error to explain it.
+    """
+    return "physio" if is_physio_role(role) else role
 
 
 def _slugify_role(label: str) -> str:
@@ -375,7 +391,7 @@ async def create_user_account(payload: UserAccountCreate, _: V3UserOut = Depends
             await v3_col("doctors").insert_one({
                 "id": str(uuid.uuid4()),
                 "full_name": payload.full_name,
-                "profile_type": payload.role,
+                "profile_type": expert_profile_type(payload.role),
                 "branch_id": b_id,
                 "specialization": "",
                 "slots": [],
@@ -439,7 +455,7 @@ async def update_user_account(user_id: str, payload: UserAccountUpdate, caller: 
         # one. Branches removed from the list are left as-is so their existing calendar
         # slots/appointments aren't destroyed by an accidental unassign.
         existing_docs = await v3_col("doctors").find(
-            {"user_id": user_id, "profile_type": user["role"]}, {"_id": 0, "branch_id": 1}
+            {"user_id": user_id, "profile_type": expert_profile_type(user["role"])}, {"_id": 0, "branch_id": 1}
         ).to_list(50)
         existing_branch_ids = {d.get("branch_id") for d in existing_docs}
         for b_id in branch_ids:
@@ -447,7 +463,7 @@ async def update_user_account(user_id: str, payload: UserAccountUpdate, caller: 
                 await v3_col("doctors").insert_one({
                     "id": str(uuid.uuid4()),
                     "full_name": user["full_name"],
-                    "profile_type": user["role"],
+                    "profile_type": expert_profile_type(user["role"]),
                     "branch_id": b_id,
                     "specialization": "",
                     "slots": [],
@@ -471,10 +487,10 @@ async def update_user_role(user_id: str, role: str, caller: V3UserOut = Depends(
     if role in EXPERT_ROLES:
         user = await v3_col("users").find_one({"id": user_id}, {"_id": 0})
         existing_docs = await v3_col("doctors").find(
-            {"user_id": user_id, "profile_type": role}, {"_id": 0, "branch_id": 1}
+            {"user_id": user_id, "profile_type": expert_profile_type(role)}, {"_id": 0, "branch_id": 1}
         ).to_list(50)
         existing_branch_ids = {d.get("branch_id") for d in existing_docs}
-        # A Head Physio needs exactly one record and it belongs to no branch; a Physio
+        # A CONSULTANT needs exactly one record and it belongs to no branch; a Physio
         # needs one per branch they cover.
         wanted = [None] if role in ORG_WIDE_ROLES else (user.get("branch_ids") or [user.get("branch_id")])
         for b_id in wanted:
@@ -482,7 +498,7 @@ async def update_user_role(user_id: str, role: str, caller: V3UserOut = Depends(
                 await v3_col("doctors").insert_one({
                     "id": str(uuid.uuid4()),
                     "full_name": user["full_name"],
-                    "profile_type": role,
+                    "profile_type": expert_profile_type(role),
                     "branch_id": b_id,
                     "specialization": "",
                     "slots": [],

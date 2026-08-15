@@ -5,7 +5,7 @@ import uuid
 
 from database import v3_col
 from utils import now_iso, derive_branch_code
-from deps import v3_require_roles, is_branch_admin_role
+from deps import v3_require_roles, is_branch_admin_role, is_physio_role, PHYSIO_ROLES
 import lead_control
 from schemas.v3 import V3UserOut
 
@@ -152,7 +152,7 @@ async def assign_head_physio(branch_id: str, payload: AssignHeadPhysio, _: V3Use
         raise HTTPException(status_code=404, detail="Branch not found")
     doctor = await v3_col("doctors").find_one({"id": payload.doctor_id, "profile_type": "head_physio"}, {"_id": 0})
     if not doctor:
-        raise HTTPException(status_code=404, detail="Head Physio not found")
+        raise HTTPException(status_code=404, detail="CONSULTANT not found")
 
     # Assigns or moves this Head Physio to the given branch (overwrites any prior branch link).
     await v3_col("doctors").update_one({"id": payload.doctor_id}, {"$set": {"branch_id": branch_id}})
@@ -192,7 +192,9 @@ async def branch_performance(branch_id: str, _: V3UserOut = Depends(v3_require_r
     revenue = rev_rows[0] if rev_rows else {"consultation_fees": 0, "package_revenue": 0}
 
     doctors = await v3_col("doctors").count_documents({"branch_id": branch_id})
-    physios = await v3_col("users").count_documents({"branch_id": branch_id, "role": "physio", "is_active": True})
+    # Both physio slugs — an Online Physio is one of the branch's physios, and counting
+    # only the floor ones understates the team on every branch that runs online.
+    physios = await v3_col("users").count_documents({"branch_id": branch_id, "role": {"$in": list(PHYSIO_ROLES)}, "is_active": True})
     head_physios = await v3_col("users").count_documents({"branch_id": branch_id, "role": "head_physio", "is_active": True})
 
     return {
@@ -261,7 +263,7 @@ async def branch_detail(branch_id: str, user: V3UserOut = Depends(v3_require_rol
 
     staff_rows = await v3_col("users").find({"branch_id": branch_id, "is_active": True}, {"_id": 0, "password": 0}).to_list(500)
     head_physios = [u for u in staff_rows if u.get("role") == "head_physio"]
-    physios = [u for u in staff_rows if u.get("role") == "physio"]
+    physios = [u for u in staff_rows if is_physio_role(u.get("role"))]
     branch_admins = [u for u in staff_rows if u.get("role") == "branch_admin"]
 
     doctors = await v3_col("doctors").find({"branch_id": branch_id}, {"_id": 0}).to_list(500)

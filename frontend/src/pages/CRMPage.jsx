@@ -81,11 +81,14 @@ const ROLE_META = {
   branch_admin_physio_fitness: { label: "Branch Admin (Physio & Fitness)", icon: Building2 },
   online_physio_admin: { label: "Online Physio Admin", icon: Building2 },
   online_fitness_admin: { label: "Online Fitness Admin", icon: Building2 },
-  head_physio: { label: "Head Physio", icon: Stethoscope },
+  head_physio: { label: "CONSULTANT", icon: Stethoscope },
   physio: { label: "Physio", icon: Activity },
+  online_physio: { label: "Online Physio", icon: Activity },
   accountant: { label: "Accountant", icon: BadgeIndianRupee },
   human_resource: { label: "Human Resource", icon: UserPlus },
-  nutrition_coach: { label: "Diet", icon: Salad },
+  // Nutritionist names the person; Diet stays the name of the service they run, which
+  // is why the Diet Consultation stage, the Diet calendar and the diet fees keep theirs.
+  nutrition_coach: { label: "Nutritionist", icon: Salad },
 };
 
 /** Whether a role slug should land on the recruitment board.
@@ -138,6 +141,18 @@ const BRANCH_ADMIN_ROLES = [
   "online_fitness_admin",
 ];
 const isBranchAdminRole = (role) => BRANCH_ADMIN_ROLES.includes(String(role || "").trim().toLowerCase());
+
+/** Whether a role gets the Physio board.
+ *
+ * An Online Physio treats over video what a Physio treats on the floor — same patients,
+ * sessions, reviews and board — so it lands on the same one rather than a near-copy.
+ *
+ * Matched exactly for the same reason isBranchAdminRole is: a loose match on the "physio"
+ * token would also catch head_physio and drop the CONSULTANT onto a treating physio's
+ * board. Kept in step with PHYSIO_ROLES in backend/deps.py — a role that passes here and
+ * fails there would render the whole board and 403 every call in it.
+ */
+const isPhysioRole = (role) => ["physio", "online_physio"].includes(String(role || "").trim().toLowerCase());
 
 // Same destinations as the desktop tab strip below. On a phone, three get a direct
 // bottom-nav slot each; the rest sit behind a "More" sheet — both derived from this one
@@ -296,9 +311,15 @@ export const CRMPage = ({ auth, onLogout }) => {
   // raw value gives. Named roles come from ROLE_META; the two families that accept
   // arbitrary wording are named by what they are.
   const roleLabel = ROLE_META[role]?.label
-    || (isDietRole(role) ? "Diet" : null)
+    || (isDietRole(role) ? "Nutritionist" : null)
     || (isHumanResourceRole(role) ? "Human Resource" : role);
-  const boardTitle = role === "pre_sales" ? "Pre Sales Master View" : `${roleLabel} Master View`;
+  // CONSULTANT and NUTRITIONIST stand alone, in caps and with no "Master View" after
+  // them. They are named for the clinician rather than for a desk that administers
+  // something, so the suffix was describing a view they do not have.
+  const isClinicianTitle = role === "head_physio" || isDietRole(role);
+  const boardTitle = isClinicianTitle
+    ? roleLabel.toUpperCase()
+    : role === "pre_sales" ? "Pre Sales Master View" : `${roleLabel} Master View`;
   const myBranch = branches.find((b) => b.id === auth.user.branch_id);
   const myBranchName = myBranch?.branch_name || "";
   const VERTICAL_LABELS = { offline_physiotherapy: "Physiotherapy", offline_fitness_gym: "Fitness", offline_fitness: "Fitness" };
@@ -654,7 +675,7 @@ export const CRMPage = ({ auth, onLogout }) => {
   const showPreSalesBoard = role === "pre_sales";
   const showBranchBoard = isBranchAdminRole(role);
   const showHeadPhysioBoard = role === "head_physio";
-  const showPhysioBoard = role === "physio";
+  const showPhysioBoard = isPhysioRole(role);
   const showDietBoard = isDietRole(role);
   const showAccountantBoard = role === "accountant";
   const showHumanResourceBoard = isHumanResourceRole(role);

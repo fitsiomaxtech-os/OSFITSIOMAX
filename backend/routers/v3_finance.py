@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional
 
 from database import v3_col
-from deps import v3_require_roles, is_branch_admin_role
+from deps import v3_require_roles, is_branch_admin_role, is_physio_role
 from schemas.v3 import V3UserOut, V3MarkInstallmentPaidInput
 from stage_utils import entry_branch_stage_names
 from utils import generate_transaction_id
@@ -658,7 +658,7 @@ async def client_transaction_history(
         raise HTTPException(status_code=404, detail="Client not found")
     if is_branch_admin_role(user.role) and lead.get("branch_id") != user.branch_id:
         raise HTTPException(status_code=404, detail="Client not found")
-    if user.role == "physio":
+    if is_physio_role(user.role):
         doctor = await v3_col("doctors").find_one({"user_id": user.id, "profile_type": "physio"}, {"_id": 0, "id": 1})
         if not doctor or lead.get("assigned_physio_id") != doctor["id"]:
             raise HTTPException(status_code=404, detail="Client not found")

@@ -142,7 +142,7 @@ export const BranchReviewPanel = ({ branchId }) => {
   }, [hpAvail.experts, sendDraft?.head_physio_id]);
 
   const submitSend = async () => {
-    if (!sendDraft.head_physio_id) { toast.error("Pick a Head Physio"); return; }
+    if (!sendDraft.head_physio_id) { toast.error("Pick a CONSULTANT"); return; }
     if (!sendDraft.review_date) { toast.error("Pick a review date"); return; }
     setSending(true);
     try {
@@ -153,7 +153,7 @@ export const BranchReviewPanel = ({ branchId }) => {
         review_duration: sendDraft.duration || null,
         notes: sendDraft.notes || null,
       });
-      toast.success("Review sent to the Head Physio");
+      toast.success("Review sent to the CONSULTANT");
       setSendDraft(null);
       await load();
       setSub("pending");
@@ -192,7 +192,7 @@ export const BranchReviewPanel = ({ branchId }) => {
         <td className="whitespace-nowrap px-4 py-3 align-middle">
           {r.status === "send_to_review" ? (
             <Button size="sm" className="bg-amber-600 text-xs text-white hover:bg-amber-700" onClick={() => openSend(r)} data-testid={`branch-review-send-${r.id}`}>
-              <Send className="mr-1.5 h-3.5 w-3.5" /> Send to Head Physio
+              <Send className="mr-1.5 h-3.5 w-3.5" /> Send to CONSULTANT
             </Button>
           ) : r.status === "sent" ? (
             <Button size="sm" variant="outline" className="text-xs" onClick={() => openSend(r)} data-testid={`branch-review-reassign-${r.id}`}>
@@ -244,7 +244,7 @@ export const BranchReviewPanel = ({ branchId }) => {
           </div>
           {sub !== "send" && (
             <div className="flex justify-between gap-2">
-              <dt className="text-slate-400">Head Physio</dt>
+              <dt className="text-slate-400">CONSULTANT</dt>
               <dd className="min-w-0 text-right">
                 <span className="truncate font-medium text-violet-700">{r.head_physio_name || "—"}</span>
                 <p className={`text-[10px] ${overdue ? "text-rose-600" : "text-slate-400"}`}>
@@ -261,7 +261,7 @@ export const BranchReviewPanel = ({ branchId }) => {
         <div className="mt-2.5 flex gap-2 border-t border-slate-100 pt-2.5">
           {r.status === "send_to_review" ? (
             <Button size="sm" className="flex-1 bg-amber-600 text-xs text-white hover:bg-amber-700" onClick={() => openSend(r)} data-testid={`branch-review-card-send-${r.id}`}>
-              <Send className="mr-1.5 h-3.5 w-3.5" /> Send to Head Physio
+              <Send className="mr-1.5 h-3.5 w-3.5" /> Send to CONSULTANT
             </Button>
           ) : r.status === "sent" ? (
             <Button size="sm" variant="outline" className="flex-1 text-xs" onClick={() => openSend(r)} data-testid={`branch-review-card-reassign-${r.id}`}>
@@ -309,7 +309,7 @@ export const BranchReviewPanel = ({ branchId }) => {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search patient, number, phone or Head Physio..."
+            placeholder="Search patient, number, phone or CONSULTANT..."
             className="h-11 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-10 text-sm text-slate-700 shadow-sm outline-none transition placeholder:text-slate-400 hover:border-slate-300 focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
             data-testid="branch-review-search"
           />
@@ -395,8 +395,8 @@ export const BranchReviewPanel = ({ branchId }) => {
                 <th className="whitespace-nowrap px-4 py-2.5">Phone</th>
                 <th className="whitespace-nowrap px-4 py-2.5">Physio</th>
                 <th className="whitespace-nowrap px-4 py-2.5">Weeks</th>
-                {sub !== "send" && <th className="whitespace-nowrap px-4 py-2.5">Head Physio</th>}
-                <th className="whitespace-nowrap px-4 py-2.5">{sub === "send" ? "Send to Head Physio" : "Action"}</th>
+                {sub !== "send" && <th className="whitespace-nowrap px-4 py-2.5">CONSULTANT</th>}
+                <th className="whitespace-nowrap px-4 py-2.5">{sub === "send" ? "Send to CONSULTANT" : "Action"}</th>
                 <th className="whitespace-nowrap px-4 py-2.5">View</th>
               </tr>
             </thead>
@@ -419,9 +419,9 @@ export const BranchReviewPanel = ({ branchId }) => {
               <div className="flex min-w-0 items-center gap-3">
                 <CalendarIcon className="h-6 w-6 shrink-0 text-slate-500" />
                 <div className="min-w-0">
-                  <p className="text-lg font-bold text-slate-800">Send to Head Physio</p>
+                  <p className="text-lg font-bold text-slate-800">Send to CONSULTANT</p>
                   <p className="truncate text-xs text-slate-500">
-                    {sendDraft.review.lead_name} · {sendDraft.review.treatment_days} treatment days · pick a date, then the Head Physio, then their time
+                    {sendDraft.review.lead_name} · {sendDraft.review.treatment_days} treatment days · pick a date, then the CONSULTANT, then their time
                   </p>
                 </div>
               </div>
@@ -508,14 +508,14 @@ export const BranchReviewPanel = ({ branchId }) => {
 
               {/* STEP 2 — Head Physio */}
               <div className="w-full flex-shrink-0 border-b border-slate-200 p-5 lg:w-[22rem] lg:border-b-0 lg:border-r lg:overflow-y-auto" data-testid="branch-review-hp-panel">
-                <p className="mb-1 text-xs font-bold uppercase tracking-wider text-slate-400">2 · Head Physio</p>
+                <p className="mb-1 text-xs font-bold uppercase tracking-wider text-slate-400">2 · CONSULTANT</p>
                 <p className="mb-3 text-xs text-slate-400">Only those with availability on the picked date.</p>
                 {!sendDraft.review_date ? (
                   <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">Pick a date first.</p>
                 ) : hpAvail.loading ? (
                   <p className="text-sm text-slate-400">Checking availability...</p>
                 ) : hpAvail.experts.length === 0 ? (
-                  <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">No Head Physio is available on this date.</p>
+                  <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">No CONSULTANT is available on this date.</p>
                 ) : (
                   <div className="space-y-2">
                     {hpAvail.experts.map((doc) => {
@@ -551,12 +551,12 @@ export const BranchReviewPanel = ({ branchId }) => {
                 <p className="mb-1 text-xs font-bold uppercase tracking-wider text-slate-400">3 · Time Slot</p>
                 <p className="mb-3 text-xs text-slate-400">Published availability only.</p>
                 {!sendDraft.head_physio_id ? (
-                  <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">Select a Head Physio to see their available times.</p>
+                  <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">Select a CONSULTANT to see their available times.</p>
                 ) : sendSlots.length === 0 ? (
                   <div className="rounded-lg border-2 border-amber-200 bg-amber-50 px-4 py-3" data-testid="branch-review-no-slots">
                     <p className="text-sm font-semibold text-amber-800">No availability published for this date.</p>
                     <p className="mt-0.5 text-xs text-amber-700">
-                      Confirm with the Head Physio, then open MANAGEMENT → CONSULTANT CALENDAR and mark them available.
+                      Confirm with the CONSULTANT, then open MANAGEMENT → CONSULTANT CALENDAR and mark them available.
                     </p>
                   </div>
                 ) : (
@@ -596,7 +596,7 @@ export const BranchReviewPanel = ({ branchId }) => {
                   <textarea
                     rows={3}
                     className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-teal-400 focus:outline-none focus:ring-1 focus:ring-teal-400"
-                    placeholder="Optional notes for the Head Physio..."
+                    placeholder="Optional notes for the CONSULTANT..."
                     value={sendDraft.notes}
                     onChange={(e) => setSendDraft({ ...sendDraft, notes: e.target.value })}
                     data-testid="branch-review-notes"
@@ -630,11 +630,11 @@ export const BranchReviewPanel = ({ branchId }) => {
             </div>
             <div className="flex-1 space-y-3 overflow-y-auto p-5 text-sm">
               {[
-                ["Status", viewing.status === "send_to_review" ? "Waiting to be sent" : viewing.status === "sent" ? "With the Head Physio" : "Completed"],
+                ["Status", viewing.status === "send_to_review" ? "Waiting to be sent" : viewing.status === "sent" ? "With the CONSULTANT" : "Completed"],
                 ["Treatment Days", `${viewing.treatment_days}`],
                 ["Package", viewing.session_package_name || "—"],
                 ["Raised By", `${viewing.physio_name || "—"} · ${dmy(viewing.raised_at)}`],
-                ["Head Physio", viewing.head_physio_name || "Not sent yet"],
+                ["CONSULTANT", viewing.head_physio_name || "Not sent yet"],
                 ["Review Date", dmy(viewing.review_date)],
               ].map(([k, v]) => (
                 <div key={k} className="flex justify-between border-b border-slate-100 pb-2">
@@ -644,7 +644,7 @@ export const BranchReviewPanel = ({ branchId }) => {
               ))}
               {viewing.reason && <Block label="Reason" text={viewing.reason} />}
               {viewing.physio_notes && <Block label="Physio's Notes" text={viewing.physio_notes} />}
-              {viewing.head_physio_notes && <Block label="Head Physio's Review" text={viewing.head_physio_notes} tone="emerald" />}
+              {viewing.head_physio_notes && <Block label="CONSULTANT's Review" text={viewing.head_physio_notes} tone="emerald" />}
               {viewing.head_physio_suggestions && <Block label="Suggestions" text={viewing.head_physio_suggestions} tone="emerald" />}
             </div>
             <div className="flex justify-end border-t border-slate-200 bg-slate-50 px-6 py-3.5">

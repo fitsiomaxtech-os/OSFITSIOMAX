@@ -1887,7 +1887,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   };
 
   const submitDietAssign = async () => {
-    if (!coachPick) { toast.error("Choose a Nutrition Coach"); return; }
+    if (!coachPick) { toast.error("Choose a Nutritionist"); return; }
     if (!dietSlot) { toast.error("Pick the consultation date and time"); return; }
     setAssigningDiet(true);
     try {
@@ -2135,7 +2135,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               })}
               {filtered.length === 0 && (
                 <tr><td colSpan="10" className="px-4 py-8 text-center text-sm text-slate-400">
-                  {loading ? "Loading…" : "No leads in consultations yet. Book an appointment with a Head Physio to populate this list."}
+                  {loading ? "Loading…" : "No leads in consultations yet. Book an appointment with a CONSULTANT to populate this list."}
                 </td></tr>
               )}
             </tbody>
@@ -2507,7 +2507,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-blue-700">
                         <Calendar className="h-3.5 w-3.5" /> Move to Stage
                       </p>
-                      <p className="mb-2 text-xs text-slate-600">Schedule the Consultation Date & Time to send this patient to the Head Physio.</p>
+                      <p className="mb-2 text-xs text-slate-600">Schedule the Consultation Date & Time to send this patient to the CONSULTANT.</p>
                       <div className="flex items-center gap-1.5 [justify-content:safe_center] [&>*]:shrink-0">
                         <Button
                           size="sm"
@@ -2530,7 +2530,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         <Bell className="h-3.5 w-3.5" /> Consultation Scheduled
                       </p>
                       <p className="mb-2 text-xs text-slate-600">
-                        {activeFollowUp ? `Scheduled for ${activeFollowUp.date} at ${activeFollowUp.time} — waiting on the Head Physio.` : "Waiting on the Head Physio."}
+                        {activeFollowUp ? `Scheduled for ${activeFollowUp.date} at ${activeFollowUp.time} — waiting on the CONSULTANT.` : "Waiting on the CONSULTANT."}
                       </p>
                       <div className="flex items-center gap-1.5 [justify-content:safe_center] [&>*]:shrink-0">
                         <Button
@@ -3131,7 +3131,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       ) : (
                         <>
                       <div>
-                        <label className="mb-1 block text-[11px] font-medium text-slate-500">Treatment Package (chosen by Head Physio)</label>
+                        <label className="mb-1 block text-[11px] font-medium text-slate-500">Treatment Package (chosen by CONSULTANT)</label>
                         <div className="flex h-9 items-center rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700" data-testid="cons-treatment-fee-item-readonly">
                           {selectedLead.session_package_name || "—"}{selectedLead.session_package_sessions ? ` · ${selectedLead.session_package_sessions} sessions` : ""}
                         </div>
@@ -3295,7 +3295,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     <button onClick={() => setTreatmentFeeDraft(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-treatment-fee-close"><X className="h-4 w-4" /></button>
                   </div>
                   <div>
-                    <label className="mb-1 block text-[11px] font-medium text-slate-500">Treatment Package (chosen by Head Physio)</label>
+                    <label className="mb-1 block text-[11px] font-medium text-slate-500">Treatment Package (chosen by CONSULTANT)</label>
                     <div className="flex h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-700" data-testid="cons-treatment-fee-item-readonly">
                       {selectedLead.session_package_name || "—"}{selectedLead.session_package_sessions ? ` · ${selectedLead.session_package_sessions} sessions` : ""}
                     </div>
@@ -3877,7 +3877,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       <p className="font-semibold text-slate-700">{selectedLead.name}</p>
                       <p className="mt-0.5">
                         {selectedLead.diet_recommended
-                          ? <span className="font-semibold text-orange-600">Diet recommended by the Head Physio</span>
+                          ? <span className="font-semibold text-orange-600">Diet recommended by the CONSULTANT</span>
                           : "No diet was recommended at the consultation — a Diet Consultation can still be booked if the patient wants one."}
                       </p>
                       {selectedLead.diet_appointment_at && (
@@ -3888,11 +3888,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       )}
                     </div>
 
-                    <p className="text-[11px] text-slate-500">Nutrition Coaches in this branch — pick one to choose their consultation time</p>
+                    <p className="text-[11px] text-slate-500">Nutritionists in this branch — pick one to choose their consultation time</p>
 
                     {coachOptions.length === 0 ? (
                       <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-4 text-center text-xs text-slate-400" data-testid="cons-diet-no-coaches">
-                        No Nutrition Coach for this branch yet. Add one under HR Admin, then publish their days in MANAGEMENT &gt; DIET CALENDAR.
+                        No Nutritionist for this branch yet. Add one under HR Admin, then publish their days in MANAGEMENT &gt; DIET CALENDAR.
                       </p>
                     ) : (
                       <div className="max-h-32 space-y-1.5 overflow-y-auto">

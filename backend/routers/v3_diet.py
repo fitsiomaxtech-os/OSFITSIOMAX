@@ -175,7 +175,7 @@ async def assign_diet(
 
     coach = await v3_col("doctors").find_one({"id": payload.coach_id, "profile_type": COACH}, {"_id": 0})
     if not coach:
-        raise HTTPException(status_code=404, detail="Nutrition Coach not found")
+        raise HTTPException(status_code=404, detail="Nutritionist not found")
 
     slots = sorted({normalize_slot_time(s) for s in payload.slot_times})
     if not slots:
@@ -289,7 +289,7 @@ async def book_diet_appointment(
 
     coach = await v3_col("doctors").find_one({"id": payload.coach_id, "profile_type": COACH}, {"_id": 0})
     if not coach:
-        raise HTTPException(status_code=404, detail="Nutrition Coach not found")
+        raise HTTPException(status_code=404, detail="Nutritionist not found")
 
     slot = normalize_slot_time(payload.slot_time)
     if slot not in (coach.get("slots") or []):
