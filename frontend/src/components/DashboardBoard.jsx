@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Users, CalendarCheck, Activity, IndianRupee, X, Building2, LayoutDashboard, TrendingUp, TrendingDown, Minus, RefreshCw, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -727,6 +727,61 @@ const useTrendData = () => {
  *  so an older payload without `series` still draws its leads line. */
 const branchSeries = (b, metricKey) => b.series?.[metricKey] || (metricKey === "leads" ? b.values : null) || [];
 
+/**
+ * The drawing width, measured rather than assumed.
+ *
+ * A fixed viewBox with a fixed height scales to whichever axis runs out first, and on a
+ * wide card that is the height — so the plot was drawn at its natural ratio and centred,
+ * leaving a margin down each side. Measuring lets the viewBox be the real pixel box: the
+ * chart fills the card, and strokes, text and circles stay the size they are declared
+ * instead of being scaled along with the geometry.
+ */
+const useMeasuredWidth = (fallback = 720) => {
+  const ref = useRef(null);
+  const [width, setWidth] = useState(fallback);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    const apply = () => setWidth(Math.max(320, Math.round(el.clientWidth)));
+    apply();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", apply);
+      return () => window.removeEventListener("resize", apply);
+    }
+    const ro = new ResizeObserver(apply);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  return [ref, width];
+};
+
+/**
+ * A Catmull-Rom spline written out as cubic béziers — the curved line the design asks for.
+ *
+ * Worth knowing what a curve costs: between two months it bows above or below the straight
+ * path, so the ink between readings suggests values that were never measured, and a series
+ * that touches zero can dip visually below it. The readings themselves stay exact, which
+ * is why every point is also marked and printed in the readout.
+ */
+const smoothPath = (pts) => {
+  if (!pts.length) return "";
+  if (pts.length < 3) return pts.map((p, i) => `${i ? "L" : "M"} ${p[0]},${p[1]}`).join(" ");
+  const t = 0.2; // Low tension: enough to read as a curve, not enough to loop or overshoot far.
+  let d = `M ${pts[0][0]},${pts[0][1]}`;
+  for (let i = 0; i < pts.length - 1; i += 1) {
+    const p0 = pts[i - 1] || pts[i];
+    const p1 = pts[i];
+    const p2 = pts[i + 1];
+    const p3 = pts[i + 2] || p2;
+    d += ` C ${p1[0] + (p2[0] - p0[0]) * t},${p1[1] + (p2[1] - p0[1]) * t}`
+      + ` ${p2[0] - (p3[0] - p1[0]) * t},${p2[1] - (p3[1] - p1[1]) * t}`
+      + ` ${p2[0]},${p2[1]}`;
+  }
+  return d;
+};
+
 /** Shared axis maths: a 1 / 2 / 5 × power-of-ten step, with the axis topping out at a
  *  multiple of it rather than at the data. Scaling straight to the peak leaves the highest
  *  point sitting on the frame with no gridline above it — and a step derived from the peak
@@ -923,6 +978,7 @@ const BRANCH_INKS = ["#18181b", "#52525b", "#a1a1aa", "#d4d4d8", "#71717a", "#3f
 const BranchGrowthTrend = ({ metric, highlightBranch }) => {
   const { data, loading } = useTrendData();
   const [hoverIdx, setHoverIdx] = useState(null);
+  const [wrapRef, W] = useMeasuredWidth();
 
   if (loading) return <Card><CardContent className="p-5"><p className="py-10 text-center text-sm text-slate-400">Loading growth…</p></CardContent></Card>;
   if (!data || !data.months?.length) return null;
@@ -938,21 +994,20 @@ const BranchGrowthTrend = ({ metric, highlightBranch }) => {
   }));
   if (!series.length) return null;
 
-  const { step, axisMax } = axisFor(Math.max(0, ...series.flatMap((s) => s.points)));
+  const { axisMax } = axisFor(Math.max(0, ...series.flatMap((s) => s.points)));
 
-  const W = 720;
-  const H = 220;
-  const PAD_L = 14;
-  const PAD_R = 14;
-  const PAD_T = 10;
-  const PAD_B = 26;
-  const plotW = W - PAD_L - PAD_R;
+  const H = 300;
+  const PAD_L = 18;
+  const PAD_R = 18;
+  // Headroom at the top and a little under the baseline, because a curve bows past its
+  // own points — without it the highest peak clips against the frame.
+  const PAD_T = 24;
+  const PAD_B = 34;
+  const plotW = Math.max(1, W - PAD_L - PAD_R);
   const plotH = H - PAD_T - PAD_B;
   const x = (i) => PAD_L + (data.months.length === 1 ? plotW / 2 : (i / (data.months.length - 1)) * plotW);
   const y = (v) => PAD_T + plotH - (v / axisMax) * plotH;
 
-  const ticks = [];
-  for (let v = 0; v <= axisMax + 1e-9; v += step) ticks.push(Math.round(v));
   const readout = (v) => (metric.currency ? fmtValue("revenue", v) : v.toLocaleString("en-IN"));
 
   return (
@@ -965,54 +1020,60 @@ const BranchGrowthTrend = ({ metric, highlightBranch }) => {
 
         {/* Legend always. Four greys cannot be told apart by eye, so identity rests here
             and in the readout — the swatch only ties a name to a line already labelled. */}
-        <div className="mb-3 flex flex-wrap gap-x-4 gap-y-1">
+        <div className="mb-2 flex flex-wrap justify-center gap-x-8 gap-y-2">
           {series.map((s) => (
-            <span key={s.branch_id} className={`flex items-center gap-1.5 text-[11px] font-medium ${s.faded ? "text-slate-400" : "text-slate-600"}`}>
-              <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: s.color, opacity: s.faded ? 0.35 : 1 }} />
+            <span key={s.branch_id} className={`flex items-center gap-2 text-xs font-bold uppercase tracking-wide ${s.faded ? "text-slate-400" : "text-slate-700"}`}>
+              <span className="h-3 w-3 shrink-0 rounded-[2px]" style={{ background: s.color, opacity: s.faded ? 0.35 : 1 }} />
               {s.branch_name}
             </span>
           ))}
         </div>
 
-        <div className="-mx-1 overflow-x-auto px-1">
-          <svg viewBox={`0 0 ${W} ${H}`} className="h-56 w-full min-w-[560px]" role="img" aria-label={`${metric.label} per branch over the last six months`}>
-            {ticks.slice(0, -1).map((v, i) => (
-              <rect
-                key={v}
-                x={PAD_L}
-                y={y(ticks[i + 1])}
-                width={plotW}
-                height={y(v) - y(ticks[i + 1])}
-                fill={i % 2 === 0 ? "#f4f4f5" : "#ffffff"}
-              />
-            ))}
+        {/* No bands and no gridlines — a single hairline baseline, as the design has it.
+            Nothing is left on the chart to read a value off, which is what the permanent
+            markers and the readout below are for. */}
+        <div ref={wrapRef}>
+          <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`${metric.label} per branch over the last six months`}>
+            <line x1={PAD_L} x2={W - PAD_R} y1={y(0)} y2={y(0)} stroke="#e4e4e7" strokeWidth="1" />
+
             {data.months.map((k, i) => (
-              <text key={k} x={x(i)} y={H - 8} textAnchor="middle" className="fill-slate-400" style={{ fontSize: 9 }}>
+              <text key={k} x={x(i)} y={H - 12} textAnchor="middle" className="fill-slate-400" style={{ fontSize: 11 }}>
                 {monthLabel(k)}
               </text>
             ))}
 
             {hoverIdx !== null && (
-              <line x1={x(hoverIdx)} x2={x(hoverIdx)} y1={PAD_T} y2={PAD_T + plotH} stroke="#d4d4d8" strokeWidth="1" />
+              <line x1={x(hoverIdx)} x2={x(hoverIdx)} y1={PAD_T} y2={y(0)} stroke="#e4e4e7" strokeWidth="1" />
             )}
 
             {/* Faded lines first, so the highlighted one is drawn over them rather than
                 under whichever branch happens to come later in the payload. */}
             {[...series].sort((a, b) => Number(b.faded) - Number(a.faded)).map((s) => (
-              <polyline
+              <path
                 key={s.branch_id}
                 fill="none"
                 stroke={s.color}
-                strokeWidth={s.faded ? 1.25 : 2}
-                strokeOpacity={s.faded ? 0.3 : 1}
+                strokeWidth={s.faded ? 1.5 : 2.25}
+                strokeOpacity={s.faded ? 0.25 : 1}
                 strokeLinejoin="round"
                 strokeLinecap="round"
-                points={s.points.map((v, i) => `${x(i)},${y(v || 0)}`).join(" ")}
+                d={smoothPath(s.points.map((v, i) => [x(i), y(v || 0)]))}
               />
             ))}
-            {/* Markers carry a surface ring so lines crossing under them stay legible. */}
-            {hoverIdx !== null && series.map((s) => (
-              <circle key={s.branch_id} cx={x(hoverIdx)} cy={y(s.points[hoverIdx] || 0)} r="3.5" fill={s.color} fillOpacity={s.faded ? 0.3 : 1} stroke="#ffffff" strokeWidth="2" />
+
+            {/* Every reading marked, always. The curve between them is interpolation; these
+                are the only places on the chart where the ink is a measurement. */}
+            {[...series].sort((a, b) => Number(b.faded) - Number(a.faded)).map((s) => (
+              s.points.map((v, i) => (
+                <circle
+                  key={`${s.branch_id}-${i}`}
+                  cx={x(i)}
+                  cy={y(v || 0)}
+                  r={hoverIdx === i && !s.faded ? 5 : 3.5}
+                  fill={s.color}
+                  fillOpacity={s.faded ? 0.25 : 1}
+                />
+              ))
             ))}
 
             {data.months.map((k, i) => (
