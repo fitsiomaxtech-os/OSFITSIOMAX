@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   ArrowLeft, MapPin, Clock, Calendar as CalendarIcon, Mail, Phone, User, RefreshCw, Pencil,
-  Users, BarChart3, Stethoscope, Activity, ListChecks, FileText, Wallet, UserCog, X, Route,
+  Users, BarChart3, Stethoscope, Activity, ListChecks, FileText, Wallet, UserCog, X,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { bmDetail, updateBranch, bmReassignAdmin, hrBranchAdminCandidates, bmHeadPhysioCandidates, bmAssignHeadPhysio } from "@/lib/api";
 import { BranchFormDialogV2 } from "@/components/branch/BranchFormDialogV2";
-import { LeadControlSwitch, normalizeLeadControl, leadControlLabel } from "@/components/branch/LeadControlSwitch";
+import { LeadControlSwitch, normalizeLeadControl } from "@/components/branch/LeadControlSwitch";
 import { slotTo12h } from "@/lib/time";
 import { MilkDateInput } from "@/components/ui/milk-calendar";
 
@@ -33,16 +33,26 @@ export const BranchDetailPage = ({ branchId, onBack, readOnly = false }) => {
 
   return (
     <div className="space-y-5" data-testid="branch-detail-page">
-      <div className="flex items-start justify-between">
-        <div className="flex items-center gap-3">
+      {/* Wraps as a whole once the controls no longer fit beside the name — the button
+          group gained a two-part switch, and a long address left the two halves fighting
+          over the same line on a phone. */}
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
           {onBack && <Button variant="ghost" size="sm" onClick={onBack} data-testid="branch-detail-back"><ArrowLeft className="h-4 w-4 mr-1" />Branches</Button>}
-          <div>
+          <div className="min-w-0">
             <h2 className="text-2xl font-bold text-slate-900">{b.branch_name}</h2>
             <p className="text-sm text-slate-500"><MapPin className="inline h-3 w-3 mr-1" />{b.address}</p>
           </div>
         </div>
-        <div className="flex gap-2">
+        {/* Wraps rather than overflowing: three controls plus a two-part switch is more
+            than a phone header holds on one line. */}
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <Button variant="outline" onClick={load} data-testid="branch-detail-refresh"><RefreshCw className="h-4 w-4" /></Button>
+          {/* Between Refresh and Edit, not down in the Summary card. It is a control the
+              branch is operated by rather than a detail about it, and it belongs with the
+              other two. Read-only viewers still see which desk owns the leads — the switch
+              renders disabled rather than being hidden. */}
+          <HeaderLeadControl branch={b} onChanged={load} readOnly={readOnly} />
           {!readOnly && <Button variant="outline" onClick={() => setShowEdit(true)} data-testid="branch-detail-edit"><Pencil className="h-4 w-4 mr-1" />Edit</Button>}
         </div>
       </div>
@@ -90,14 +100,6 @@ const SummaryTab = ({ data, branchId, onChanged, readOnly = false }) => {
           <Row icon={<CalendarIcon className="h-4 w-4 text-slate-400" />} label="Opened Date" value={b.opened_date || "—"} />
           <Row icon={<Clock className="h-4 w-4 text-slate-400" />} label="Opening Hours" value={b.opening_hours || "—"} />
           <Row icon={<FileText className="h-4 w-4 text-slate-400" />} label="Vertical" value={b.vertical} />
-          {/* Editable in place rather than read-only: this is the switch a clinic flips
-              when the Pre-Sales desk is empty, and making them open Edit > Branch
-              Details for one toggle is the kind of friction that leaves it wrong. */}
-          <Row
-            icon={<Route className="h-4 w-4 text-slate-400" />}
-            label="Lead Control"
-            value={readOnly ? leadControlLabel(b.lead_control) : <InlineLeadControl branch={b} onChanged={onChanged} />}
-          />
           <Row icon={<CalendarIcon className="h-4 w-4 text-slate-400" />} label="Created" value={(b.created_at || "").slice(0, 10) || "—"} />
         </CardContent>
       </Card>
@@ -134,26 +136,25 @@ const SummaryTab = ({ data, branchId, onChanged, readOnly = false }) => {
   );
 };
 
-// The value is a div, not a p: Lead Control passes a control rather than a string, and
-// a div inside a p is invalid markup the browser silently unnests.
 const Row = ({ icon, label, value }) => (
   <div className="flex items-start gap-3">
     {icon}
-    <div className="min-w-0 flex-1">
+    <div className="flex-1">
       <p className="text-[11px] uppercase tracking-wide text-slate-400">{label}</p>
-      <div className="text-sm font-medium text-slate-800">{value}</div>
+      <p className="text-sm font-medium text-slate-800">{value}</p>
     </div>
   </div>
 );
 
 /**
- * Lead Control on the Summary card, saving on click.
+ * Lead Control in the branch header, saving on confirm.
  *
- * Optimistic: the switch moves at once and reverts if the save fails. A round trip
- * plus a parent reload is long enough that a segmented control feels broken without
- * it, and the failure path is a toast plus the old value back.
+ * Optimistic: the switch moves as soon as the dialog is accepted and reverts if the
+ * save fails. The confirm has already made this a deliberate act, so the control
+ * should look decided rather than sitting inert through a round trip; the failure
+ * path is a toast plus the old value back.
  */
-const InlineLeadControl = ({ branch, onChanged }) => {
+const HeaderLeadControl = ({ branch, onChanged, readOnly = false }) => {
   const [value, setValue] = useState(normalizeLeadControl(branch.lead_control));
   const [saving, setSaving] = useState(false);
 
@@ -176,12 +177,16 @@ const InlineLeadControl = ({ branch, onChanged }) => {
   };
 
   return (
-    <div className="max-w-xs" data-testid="branch-summary-lead-control">
-      <LeadControlSwitch value={value} onChange={pick} busy={saving} size="sm" testid="branch-detail-lead-control" />
-      <p className="mt-1 text-[11px] font-normal text-slate-400">
-        {value === "branch_admin" ? "Skips the Pre-Sales pipeline." : "Starts in the Pre-Sales pipeline."}
-      </p>
-    </div>
+    <LeadControlSwitch
+      value={value}
+      onChange={pick}
+      busy={saving}
+      disabled={readOnly}
+      confirm
+      branchName={branch.branch_name}
+      size="sm"
+      testid="branch-detail-lead-control"
+    />
   );
 };
 

@@ -10,6 +10,7 @@ import uuid
 from database import v3_col
 from utils import now_iso
 from deps import v3_require_roles
+import lead_control
 from constants import V3_BRANCH_STAGES, V3_CONSULTATION_STAGES, V3_HEAD_CONSULTATION_STAGES
 from schemas.v3 import (
     V3UserOut, V3LeadOut,
@@ -276,7 +277,15 @@ async def v3_branch_board_new(branch_id: str, _: V3UserOut = Depends(v3_require_
                 lead_list.append(V3LeadOut(**lead))
             except Exception as e:
                 logging.getLogger(__name__).error(f"branch-board: skipping unparseable lead {lead.get('id')}: {e}")
-        return {"leads": [lead.model_dump() for lead in lead_list], "stage_counts": stage_counts}
+        # The board tells the client which desk owns this branch's leads, so the Pre Sales
+        # tab appears and disappears on the same fetch as the leads it works on rather
+        # than needing a second round trip to /branches to find out.
+        branch = await v3_col("branches").find_one({"id": branch_id}, {"_id": 0, "lead_control": 1})
+        return {
+            "leads": [lead.model_dump() for lead in lead_list],
+            "stage_counts": stage_counts,
+            "lead_control": lead_control.normalize((branch or {}).get("lead_control")),
+        }
     except HTTPException:
         raise
     except Exception as e:

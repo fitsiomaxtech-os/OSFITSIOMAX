@@ -424,6 +424,8 @@ const SourceLeadControl = ({ source, branch, onSaved }) => {
         onChange={pick}
         disabled={unbranched || !branch}
         busy={saving}
+        confirm
+        branchName={branch?.branch_name}
         size="sm"
         testid={`mk-lead-control-${source.id}`}
       />

@@ -7,6 +7,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Phone,
+  PhoneCall,
   Mail,
   Search,
   Stethoscope,
@@ -60,6 +61,7 @@ import MissedClassPanel from "@/components/branch/MissedClassPanel";
 import { BranchReviewPanel } from "@/components/branch/BranchReviewPanel";
 import { PatientsPortalPanel } from "@/components/branch/PatientsPortalPanel";
 import { CreateLeadModal } from "@/components/CreateLeadModal";
+import { PreSalesCRM } from "@/components/PreSalesCRM";
 import { MilkCalendar, MilkDateInput, MilkTimeInput } from "@/components/ui/milk-calendar";
 import { LOGO_URL, PRINTABLE_STYLES, escapeHtml, rowsHtml, openPrintable } from "@/lib/printable";
 
@@ -328,7 +330,7 @@ export const matchesConsultationStage = (lead, stageName) => {
   return lead.consultation_stage === stageName;
 };
 
-export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = null }) => {
+export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = null, currentUser = null }) => {
   const [boardData, setBoardData] = useState({ leads: [], stage_counts: {} });
   const [stages, setStages] = useState([]); // dynamic Branch Stages, from Super Admin > Pipeline Stage Management
   const [consultationStages, setConsultationStages] = useState([]); // dynamic Consultation Stages, merged into the same stage bar
@@ -379,6 +381,11 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   // rename it) — read structurally off position 0 rather than hardcoding the label, since
   // Pipeline Stage Management lets it be renamed at any time.
   const firstStageName = stages[0]?.name;
+
+  // Which desk owns this branch's leads. Comes back with the board rather than from a
+  // second call, so the Pre Sales tab appears the moment a Super Admin flips the switch
+  // and this board is refreshed — no stale tab pointing at leads that have moved on.
+  const leadControl = boardData.lead_control === "branch_admin" ? "branch_admin" : "pre_sales";
 
   // Branch Leads' stage bar shows both pipelines' stages in one continuous strip, so a
   // branch admin never needs to leave this tab to track a patient's whole journey. Any
@@ -448,6 +455,13 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   // `short` is what the bottom nav shows — six full labels will not fit across a phone,
   // and a truncated "Accountant Ma…" reads worse than a word chosen to be short.
   const VIEW_TABS = [
+    // Only when this branch runs its own leads (Lead Control = Branch Admin). It leads the
+    // strip because it is the earlier step: leads are qualified here first and reach Branch
+    // Leads once an appointment is booked. A branch on Pre-Sales control never sees it —
+    // that work is happening on the Pre-Sales desk's own board.
+    ...(leadControl === "branch_admin"
+      ? [{ key: "presales", label: "Pre Sales", short: "Pre Sales", icon: PhoneCall }]
+      : []),
     { key: "pipeline", label: "Branch Leads", short: "Leads", icon: LayoutDashboard },
     { key: "review", label: "Review", short: "Review", icon: ClipboardCheck },
     { key: "consultations", label: "MANAGEMENT", short: "Manage", icon: Stethoscope },
@@ -513,7 +527,19 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
         })}
       </div>
 
-      {activeView === "consultations" ? (
+      {activeView === "presales" ? (
+        // The real Pre-Sales board, not a copy of it. Everything a rep does to qualify a
+        // lead — RNR attempts, follow-up dates, the appointment that hands it on — is
+        // already built here, and rebuilding a lookalike would leave two versions of the
+        // same pipeline to keep in step.
+        <PreSalesCRM
+          role="branch_admin"
+          currentUser={currentUser}
+          branchId={branchId}
+          branchControlled
+          embedded
+        />
+      ) : activeView === "consultations" ? (
         <div className="space-y-4" data-testid="branch-consultations-headphysio">
           {/* Three across on a phone, so the six land as two even rows in the order they
               are declared. Left to wrap on their own they came out ragged — four rows,

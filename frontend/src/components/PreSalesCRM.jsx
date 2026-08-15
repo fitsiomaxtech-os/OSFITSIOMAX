@@ -293,7 +293,34 @@ const PRESALES_TABS = [
 
 const PRESALES_CRM_LOCKED = false;
 
-export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => {
+/**
+ * The Pre-Sales pipeline.
+ *
+ * Mounted in three places: the Pre Sales role's own view, Super Admin > PRE SALES, and —
+ * when a branch runs on Branch Admin Lead Control — as the first tab of that branch's
+ * Branch Admin Master View. The third is why `branchControlled` exists: the same board,
+ * pointed at the other half of the leads.
+ *
+ * @param branchControlled  false shows leads whose branch leaves them to Pre-Sales (the
+ *                          Pre-Sales desk's own book). true shows the leads a branch has
+ *                          taken over, which is exactly what its Branch Admin works.
+ *                          The two are complements, so no lead is on both boards and
+ *                          none is on neither.
+ * @param branchId          the branch this board is pinned to, when it is pinned to one.
+ *                          Stands in for currentUser.branch_id so a Super Admin drilled
+ *                          into a branch schedules against that branch, not none.
+ * @param embedded          drop the phone bottom-padding; the host board already pads for
+ *                          its own fixed nav and two lots of it leave a dead band.
+ */
+export const PreSalesCRM = ({
+  onManageStages,
+  role,
+  currentUser,
+  onLogout,
+  branchControlled = false,
+  branchId = null,
+  embedded = false,
+}) => {
   const [stages, setStages] = useState([]);
   const [leads, setLeads] = useState([]);
   const [branches, setBranches] = useState([]);
@@ -313,21 +340,29 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [stgs, ldList] = await Promise.all([stagesList("pre_sales"), getLeads({})]);
+      // Scoped to the branch when this board is pinned to one. The API already scopes a
+      // Branch Admin to their own branch, but a Super Admin drilled into a branch is not
+      // scoped by anything — without this they would see every branch's taken-over leads
+      // on one branch's tab.
+      const [stgs, ldList] = await Promise.all([
+        stagesList("pre_sales"),
+        getLeads(branchId ? { branch_id: branchId } : {}),
+      ]);
       setStages(stgs);
-      // Lead Control: a branch set to "branch_admin" works its own leads, so they never
-      // belong on this board. Filtered here at the source rather than in each memo below
-      // — the KPI cards, the stage tabs, the table and the pipeline view all read from
-      // this one list, and a lead hidden from three of the four would be worse than
-      // showing it everywhere. The backend resolves the flag from the lead's branch on
-      // every fetch, so flipping the switch empties or refills this board on refresh.
-      setLeads(ldList.filter((l) => l.lead_control !== "branch_admin"));
+      // Lead Control splits the leads between two copies of this board: the Pre-Sales
+      // desk's own, and the one a branch gets when it takes its leads over. Filtered here
+      // at the source rather than in each memo below — the KPI cards, the stage tabs, the
+      // table and the pipeline view all read from this one list, and a lead hidden from
+      // three of the four would be worse than showing it everywhere. The backend resolves
+      // the flag from each lead's branch on every fetch, so flipping the switch moves
+      // leads between the two boards on the next refresh.
+      setLeads(ldList.filter((l) => (l.lead_control === "branch_admin") === branchControlled));
       // If a lead is currently open in the detail dialog, refresh its reference
       // so saved edits show up immediately.
       setEditing((prev) => prev ? (ldList.find((l) => l.id === prev.id) || prev) : prev);
     } catch (e) { toast.error("Failed to load"); }
     setLoading(false);
-  }, []);
+  }, [branchControlled, branchId]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { getBranches().then(setBranches).catch(() => {}); }, []);
@@ -416,7 +451,7 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
   // on a phone too, and its own fixed bottom nav would otherwise sit on the last card.
   // Desktop has no bar and no padding.
   return (
-    <div className="flex flex-col gap-5 pb-20 md:pb-0" data-testid="presales-crm-page">
+    <div className={`flex flex-col gap-5 ${embedded ? "" : "pb-20 md:pb-0"}`} data-testid="presales-crm-page">
     {/* Desk only, whoever is looking. Super Admin used to get this table on a phone while
         the Pre Sales role got the card list below — the same screen, one of them unusable,
         decided by who was logged in. Both now get the cards. */}
@@ -613,11 +648,14 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
                           options={branchOptions}
                           placeholder="— Assign —"
                           emptyText="No branches available."
-                          onChange={async (branchId) => {
-                            if (!branchId) return;
+                          // pickedBranchId, not branchId — the component now takes a
+                          // branchId prop, and a parameter shadowing it here would read
+                          // like the board's own branch rather than the row's choice.
+                          onChange={async (pickedBranchId) => {
+                            if (!pickedBranchId) return;
                             try {
-                              await scheduleAppointment(l.id, { department: "physio", mode: "offline", branch_id: branchId });
-                              toast.success(`Assigned to ${branchLabel(branches.find((b) => b.id === branchId)) || "branch"}`);
+                              await scheduleAppointment(l.id, { department: "physio", mode: "offline", branch_id: pickedBranchId });
+                              toast.success(`Assigned to ${branchLabel(branches.find((b) => b.id === pickedBranchId)) || "branch"}`);
                               load();
                             } catch (err) { toast.error(err?.response?.data?.detail || "Failed to assign branch"); }
                           }}
@@ -815,11 +853,14 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
       )}
 
       {editing && (
-        <LeadDetailDialog lead={editing} stages={stages} currentUser={currentUser} onClose={() => setEditing(null)} onSaved={load} onMoveStage={moveToStage} />
+        <LeadDetailDialog lead={editing} stages={stages} currentUser={currentUser} pinnedBranchId={branchId} onClose={() => setEditing(null)} onSaved={load} onMoveStage={moveToStage} />
       )}
 
       {showCreate && (
-        <CreateLeadModal onClose={() => setShowCreate(false)} onSaved={load} />
+        // Pinned to this board's branch when it has one. A lead created on a Branch
+        // Admin's Pre Sales tab with no branch would be an unbranched lead, which always
+        // belongs to Pre-Sales — it would vanish from the board that created it.
+        <CreateLeadModal onClose={() => setShowCreate(false)} onSaved={load} branchId={branchId} isSuperAdmin={role === "super_admin"} />
       )}
 
       {confirmDelete && (
@@ -1163,7 +1204,10 @@ const rnrDetail = (details) => {
   return stripped.charAt(0).toUpperCase() + stripped.slice(1);
 };
 
-const LeadDetailDialog = ({ lead, stages, currentUser, onClose, onSaved, onMoveStage }) => {
+// pinnedBranchId: set when the board is a single branch's, which is how a Super Admin
+// drilled into a branch gets a branch for the appointment flow — they have none of their
+// own, and without it every appointment asks them to pick one they already chose.
+const LeadDetailDialog = ({ lead, stages, currentUser, pinnedBranchId = null, onClose, onSaved, onMoveStage }) => {
   const [tab, setTab] = useState("overview");
   const [showEdit, setShowEdit] = useState(false);
   const [currentLead, setCurrentLead] = useState(lead);
@@ -1697,7 +1741,8 @@ const LeadDetailDialog = ({ lead, stages, currentUser, onClose, onSaved, onMoveS
       )}
 
       {appointmentDraft && !showEdit && (() => {
-        const myBranchName = branches.find((b) => b.id === currentUser?.branch_id)?.branch_name || branches.find((b) => b.id === currentUser?.branch_id)?.name || "";
+        const myBranch = pinnedBranchId || currentUser?.branch_id;
+        const myBranchName = branches.find((b) => b.id === myBranch)?.branch_name || branches.find((b) => b.id === myBranch)?.name || "";
         const resolvedBranchName = () => myBranchName || branches.find((b) => b.id === appointmentDraft.branch_id)?.branch_name || branches.find((b) => b.id === appointmentDraft.branch_id)?.name || "your branch";
         const closeAll = () => { setAppointmentDraft(null); setAppointmentResult(null); };
         return (
@@ -1829,7 +1874,12 @@ const LeadDetailDialog = ({ lead, stages, currentUser, onClose, onSaved, onMoveS
                       appointment_time: appointmentDraft.appointment_time,
                       remarks: appointmentDraft.remarks,
                     };
-                    if (!myBranchName) payload.branch_id = appointmentDraft.branch_id;
+                    // Sent explicitly when the board is pinned to a branch. Leaving it out
+                    // lets the API infer the branch from whoever is logged in, which is
+                    // right for a Branch Admin and wrong for a Super Admin drilled into a
+                    // branch — they have none, and the appointment would land nowhere.
+                    if (pinnedBranchId) payload.branch_id = pinnedBranchId;
+                    else if (!myBranchName) payload.branch_id = appointmentDraft.branch_id;
                     const updated = await scheduleAppointment(currentLead.id, payload);
                     setCurrentLead(updated);
                     setAppointmentResult({
