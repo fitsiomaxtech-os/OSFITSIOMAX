@@ -452,16 +452,20 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
         </div>
 
         <div className="flex items-center gap-2 sm:contents">
-        <ColorSelect
-          value={sourceFilter}
-          options={branchOptions}
-          placeholder="All Branches"
-          resetLabel="All Branches"
-          emptyText="No branches yet."
-          triggerClass="h-10 min-w-0 flex-1 text-sm sm:w-[200px] sm:flex-none"
-          onChange={setSourceFilter}
-          testid="presales-source-filter"
-        />
+        {/* Super Admin's alone. A Pre Sales rep works one branch's book, so a control that
+            narrows the board to a branch either does nothing or hides their own leads. */}
+        {role === "super_admin" && (
+          <ColorSelect
+            value={sourceFilter}
+            options={branchOptions}
+            placeholder="All Branches"
+            resetLabel="All Branches"
+            emptyText="No branches yet."
+            triggerClass="h-10 min-w-0 flex-1 text-sm sm:w-[200px] sm:flex-none"
+            onChange={setSourceFilter}
+            testid="presales-source-filter"
+          />
+        )}
         <PullFromSheetButton onPulled={load} iconOnly />
         <Button
           onClick={() => setShowCreate(true)}
@@ -670,17 +674,24 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
             </Button>
           </div>
 
-          <div className="flex items-center gap-2">
-            <ColorSelect
-              value={sourceFilter}
-              options={branchOptions}
-              placeholder="All Branches"
-              resetLabel="All Branches"
-              emptyText="No branches yet."
-              triggerClass="h-10 min-w-0 flex-1 text-sm"
-              onChange={setSourceFilter}
-              testid="presales-mobile-source-filter"
-            />
+          {/* Right-aligned for Pre Sales. With the branch filter and Manage Stages both
+              being Super Admin's, this row is two icons for them — and two controls
+              bunched at the left edge with the rest of the line empty reads as something
+              that failed to load rather than as a toolbar. */}
+          <div className={`flex items-center gap-2 ${role === "super_admin" ? "" : "justify-end"}`}>
+            {/* Super Admin's alone, as on the desk toolbar. */}
+            {role === "super_admin" && (
+              <ColorSelect
+                value={sourceFilter}
+                options={branchOptions}
+                placeholder="All Branches"
+                resetLabel="All Branches"
+                emptyText="No branches yet."
+                triggerClass="h-10 min-w-0 flex-1 text-sm"
+                onChange={setSourceFilter}
+                testid="presales-mobile-source-filter"
+              />
+            )}
             {/* Super Admin's alone — the Pre Sales role can work the pipeline but not
                 reshape it, and the button 403s for them anyway. */}
             {role === "super_admin" && (
