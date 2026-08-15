@@ -4,7 +4,7 @@ from utils import now_iso, derive_branch_code, generate_patient_number
 from security import hash_password
 from constants import (
     V3_VERTICALS, V3_BRANCH_STAGES, V3_STAGES, V3_CONSULTATION_STAGES, V3_HEAD_CONSULTATION_STAGES,
-    BRANCH_ADMIN_ENTRY_STAGE, BRANCH_ADMIN_RNR_STAGE, BRANCH_ADMIN_LEADS_STAGE,
+    BRANCH_ADMIN_ENTRY_STAGE, BRANCH_ADMIN_RNR_STAGE,
 )
 import lead_control
 from stage_utils import get_first_stage_name, first_branch_stage_for, realign_branch_stage_leads
@@ -229,58 +229,41 @@ async def ensure_branch_admin_stages() -> None:
             await realign_branch_stage_leads(branch["id"], lead_control.BRANCH_ADMIN)
 
 
-async def ensure_branch_leads_stage() -> None:
-    """Split a branch-run board's opening in two: "Leads" for raw arrivals, "Branch Assign"
-    for leads somebody handed to the branch.
+# The stage briefly promoted from the mirrored "Leads" pill into a real branch stage, and
+# rolled back again. Named here rather than in constants.py because nothing but the rollback
+# below refers to it any more.
+_ROLLED_BACK_LEADS_STAGE = "Leads"
 
-    Branch Assign shipped as the single entry stage, which meant every lead the branch had
-    ever received sat there whatever its origin, and the Pre-Sales "Leads" view had to be
-    layered on top as a second reading of the same people. Two readings of one population
-    is what made a lead show under Leads and under Follow Up at the same time. Making Leads
-    a real stage puts every lead in exactly one pill again.
 
-    The existing backlog moves to Leads: it arrived by import, not by assignment. Branch
-    Assign keeps its place in the pipeline and fills from the assign-branch paths.
+async def undo_branch_leads_stage() -> None:
+    """Take the Branch pipeline back off the real "Leads" stage, leaving the mirrored pill.
 
-    Idempotent, and a no-op on a database that never got the Branch Assign stage.
+    Reverting that change in code is not enough on its own: the stage row and the leads
+    moved onto it are still in the database, and the mirrored pill this code draws is also
+    called "Leads" — so the board would render the pair of them, two pills with one name and
+    the branch's leads split across both. This puts the data back to match the code.
+
+    Idempotent, and a no-op on any database that never took the change.
     """
-    if await v3_col("pipeline_stages").find_one({"type": "sales", "name": BRANCH_ADMIN_LEADS_STAGE}, {"_id": 0, "id": 1}):
-        return
-    assign = await v3_col("pipeline_stages").find_one(
-        {"type": "sales", "name": BRANCH_ADMIN_ENTRY_STAGE}, {"_id": 0, "id": 1, "order": 1}
+    leads_stage = await v3_col("pipeline_stages").find_one(
+        {"type": "sales", "name": _ROLLED_BACK_LEADS_STAGE}, {"_id": 0, "id": 1, "order": 1}
     )
-    if not assign:
+    if not leads_stage:
         return
-    # Leads takes the slot Branch Assign is in and pushes it (and everything after) along,
-    # so raw arrivals read as the earlier step they are.
+    # Back where they were: everything on Leads arrived by import and was moved off Branch
+    # Assign by the change now being undone.
+    await v3_col("leads").update_many(
+        {"branch_stage": _ROLLED_BACK_LEADS_STAGE},
+        {"$set": {"branch_stage": BRANCH_ADMIN_ENTRY_STAGE, "updated_at": now_iso()}},
+    )
+    await v3_col("pipeline_stages").delete_one({"id": leads_stage["id"]})
+    # Close the gap it left, so Branch Assign is back at the head of the pipeline.
     await v3_col("pipeline_stages").update_many(
-        {"type": "sales", "order": {"$gte": assign["order"]}}, {"$inc": {"order": 1}}
+        {"type": "sales", "order": {"$gt": leads_stage["order"]}}, {"$inc": {"order": -1}}
     )
-    await v3_col("pipeline_stages").insert_one({
-        "id": str(uuid.uuid4()),
-        "name": BRANCH_ADMIN_LEADS_STAGE,
-        "color": "#6366f1",
-        "type": "sales",
-        "order": assign["order"],
-        "is_final": False,
-        "applies_to": lead_control.BRANCH_ADMIN,
-        "entry": True,
-        "created_at": now_iso(),
-    })
-    # Marked now rather than at creation: this is the point at which there are two openings
-    # to tell apart, and the flag is what lets a lead's popup show only its own.
-    await v3_col("pipeline_stages").update_one({"id": assign["id"]}, {"$set": {"entry": True}})
-
-    branches = await v3_col("branches").find({}, {"_id": 0, "id": 1, "lead_control": 1}).to_list(1000)
-    branch_ids = [
-        b["id"] for b in branches
-        if lead_control.normalize(b.get("lead_control")) == lead_control.BRANCH_ADMIN
-    ]
-    if branch_ids:
-        await v3_col("leads").update_many(
-            {"branch_id": {"$in": branch_ids}, "branch_stage": BRANCH_ADMIN_ENTRY_STAGE},
-            {"$set": {"branch_stage": BRANCH_ADMIN_LEADS_STAGE, "updated_at": now_iso()}},
-        )
+    # `entry` only ever existed to tell the two openings apart. With one opening again,
+    # nothing reads it, and leaving it behind would mislead the next person to look.
+    await v3_col("pipeline_stages").update_many({"type": "sales"}, {"$unset": {"entry": ""}})
 
 
 # Maps deprecated consultation_stage labels (legacy 6-stage flow) to the new 7-stage flow.
