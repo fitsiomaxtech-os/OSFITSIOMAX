@@ -1,7 +1,7 @@
 from typing import List, Optional, Set
 
 import lead_control
-from constants import BRANCH_ADMIN_RNR_STAGE
+from constants import BRANCH_ADMIN_ENTRY_STAGE, BRANCH_ADMIN_RNR_STAGE
 from database import v3_col
 from utils import now_iso
 
@@ -9,9 +9,10 @@ from utils import now_iso
 # ---------------------------------------------------------------- Branch ("sales") stages
 #
 # The Branch pipeline is not the same shape for every branch: a branch running its own
-# leads (Lead Control = Branch Admin) opens at "Branch Assign" and has an RNR stage, while
-# a branch fed by the Pre-Sales desk opens at "New Appointment" and has neither. Both live
-# in the one `sales` stage list, told apart by `applies_to` — see constants.py.
+# leads (Lead Control = Branch Admin) opens at "Leads" or "Branch Assign" depending on how
+# the lead arrived, and has an RNR stage, while a branch fed by the Pre-Sales desk opens at
+# "New Appointment" and has none of them. All of it lives in the one `sales` stage list,
+# told apart by `applies_to` — see constants.py.
 #
 # Everything that reads or writes a lead's branch_stage must go through these, because the
 # entry stage is no longer a single global name. Writing the wrong mode's entry stage onto
@@ -59,6 +60,21 @@ async def first_branch_stage_for_branch(branch_id: Optional[str], fallback: str)
     if not branch_id:
         return fallback
     return await first_branch_stage_for(await lead_control.branch_lead_control(branch_id), fallback)
+
+
+async def assigned_branch_stage_for_branch(branch_id: Optional[str], fallback: str) -> str:
+    """The stage for a lead somebody handed to this branch, rather than one that arrived raw.
+
+    A branch-run board opens in two places — "Leads" for raw arrivals and "Branch Assign"
+    for leads assigned to it — so the paths that perform an assignment ask for this one
+    while imports keep taking the ordinary entry stage. A Pre-Sales-fed branch has only the
+    one opening, so both questions give the same answer there.
+    """
+    control = await lead_control.branch_lead_control(branch_id) if branch_id else lead_control.DEFAULT
+    names = await branch_stage_names_for(control, [])
+    if BRANCH_ADMIN_ENTRY_STAGE in names:
+        return BRANCH_ADMIN_ENTRY_STAGE
+    return names[0] if names else fallback
 
 
 async def entry_branch_stage_names() -> Set[str]:
