@@ -8,9 +8,9 @@ import { stagesList, stagesCreate, stagesUpdate, stagesDelete, stagesReorder, re
 
 const PALETTE = ["#6366f1", "#3b82f6", "#0ea5e9", "#06b6d4", "#14b8a6", "#22c55e", "#84cc16", "#eab308", "#f59e0b", "#f97316", "#ef4444", "#ec4899", "#a855f7", "#64748b"];
 
-// Every pipeline Super Admin can shape, in one table. The tab strip, the KPI row, the card
-// title and the load-all-counts call are all derived from it, so a sixth pipeline is one
-// entry rather than four separate edits that can drift apart.
+// Every pipeline Super Admin can shape, in one table. The tab strip, the dropdown and the
+// card title are all derived from it, so a sixth pipeline is one entry rather than three
+// separate edits that can drift apart.
 //
 // Recruitment is the odd one out: its records are candidates in their own collection, not
 // leads, and they reference a stage by id — so renaming one here rewrites nothing and
@@ -36,16 +36,17 @@ const TONE_CLASSES = {
 export const PipelineStageManagement = ({ onBack }) => {
   const [type, setType] = useState("pre_sales");
   const [stages, setStages] = useState([]);
-  const [counts, setCounts] = useState(Object.fromEntries(TYPES.map((t) => [t.key, 0])));
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ name: "", color: "#6366f1", is_final: false });
   const [resetting, setResetting] = useState(false);
 
+  // One request, for the pipeline being looked at. It used to fetch all five and keep only
+  // the active list, the other four existing solely to put a count in a tab label — with
+  // the counts gone so is the reason, so a load and every pipeline switch costs one call
+  // instead of five.
   const load = useCallback(async () => {
-    const lists = await Promise.all(TYPES.map((t) => stagesList(t.key)));
-    setCounts(Object.fromEntries(TYPES.map((t, i) => [t.key, lists[i].length])));
-    setStages(lists[TYPES.findIndex((t) => t.key === type)] || []);
+    setStages(await stagesList(type));
   }, [type]);
 
   useEffect(() => { load(); }, [load]);
@@ -122,19 +123,19 @@ export const PipelineStageManagement = ({ onBack }) => {
         <Button onClick={() => { setEditing(null); setForm({ name: "", color: PALETTE[Math.floor(Math.random() * PALETTE.length)], is_final: false }); setShowAdd(true); }} className="shrink-0 bg-orange-500 hover:bg-orange-600" data-testid="stages-add-btn"><Plus className="h-4 w-4 mr-1" />Add Stage</Button>
       </div>
 
-      {/* The five summary cards are gone. They printed the same five counts the tab row
-          directly beneath already carries in its labels — Pre-Sales (4), Branch Lead (3)
-          — so the page opened with every figure stated twice. */}
-      {/* A dropdown on a phone. Five pipelines two-across left the fifth alone on a third
-          row, and the count in each label is part of the name here — "Pre-Sales (4)" — so
-          the labels cannot be shortened to make them fit. Desktop keeps the five-up row. */}
+      {/* A dropdown on a phone: five pipelines two-across left the fifth alone on a third
+          row. Desktop keeps the five-up bar.
+
+          Neither carries a stage count any more. The number belonged to the pipeline
+          rather than to the choice, and the list below states it by simply being the
+          list — a tab reading "Pre-Sales (4)" above four visible rows said it twice. */}
       <select
         value={type}
         onChange={(e) => setType(e.target.value)}
         className="h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 sm:hidden"
         data-testid="stages-tab-select"
       >
-        {TYPES.map((t) => <option key={t.key} value={t.key}>{t.label} ({counts[t.key]})</option>)}
+        {TYPES.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
       </select>
 
       <div className="hidden gap-2 rounded-lg bg-slate-100 p-1 sm:grid sm:grid-cols-5">
@@ -145,7 +146,7 @@ export const PipelineStageManagement = ({ onBack }) => {
             className={`rounded-md py-2 text-sm font-semibold ${type === t.key ? `bg-white shadow ${TONE_CLASSES[t.tone].text}` : "text-slate-500"}`}
             data-testid={`stages-tab-${t.key}`}
           >
-            {t.label} ({counts[t.key]})
+            {t.label}
           </button>
         ))}
       </div>
