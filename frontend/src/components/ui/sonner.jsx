@@ -23,12 +23,12 @@ const Toaster = ({
             "group-[.toast]:bg-primary group-[.toast]:text-primary-foreground",
           cancelButton:
             "group-[.toast]:bg-muted group-[.toast]:text-muted-foreground",
-          // Two overrides. Sonner reveals its close button on hover, which never happens on
-          // a phone — and this board is used on one — so it is forced visible. And it takes
-          // the toast's own colour rather than a panel of its own, which a solid background
-          // would make of it against the tinted success and error toasts richColors draws.
+          // Red, at the faintest wash that still reads as red — dismissing is the one
+          // destructive thing a toast offers, and it should look like it without shouting
+          // over the message. Forced visible too: sonner only reveals this on hover, which
+          // never happens on a phone, and these boards are used on one.
           closeButton:
-            "group-[.toast]:!opacity-100 group-[.toast]:!bg-transparent group-[.toast]:!text-current group-[.toast]:!border-transparent group-[.toast]:hover:!bg-black/10",
+            "group-[.toast]:!opacity-100 group-[.toast]:!bg-red-500/10 group-[.toast]:!border-red-400 group-[.toast]:!text-red-600 group-[.toast]:hover:!bg-red-500/20",
         },
       }}
       {...props} />
