@@ -18,6 +18,7 @@ import {
   getLeadRemarks, getLeadActivity,
   saveConsultationDecision, markConsultationCompleted, getBranches,
   listTextPresets, addTextPreset, deleteTextPreset,
+  getTreatmentTypes,
 } from "@/lib/api";
 import { waNumber } from "@/lib/phone";
 import { endTime12h, to12h } from "@/lib/time";
@@ -480,6 +481,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   const [treatmentEditing, setTreatmentEditing] = useState(false);
   const [savingTreatment, setSavingTreatment] = useState(false);
   const treatmentDebounceRef = useRef(null);
+  // The catalogue behind Treatment Summary's tick-list — Super Admin > Treatment. Empty
+  // until someone fills it, and the box falls back to free text while it is, so a clinic
+  // that has not populated it can still finish a consultation.
+  const [treatmentTypes, setTreatmentTypes] = useState([]);
 
   // Collect Fee popup (Branch Admin only) — at the Consultation Fee stage, Cash/UPI/Card only
   const [collectFeeDraft, setCollectFeeDraft] = useState(null); // { amount, payment_mode } | null
@@ -837,6 +842,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   }, [selectedLead?.id]);
 
   useEffect(() => {
+    getTreatmentTypes().then(setTreatmentTypes).catch(() => setTreatmentTypes([]));
+  }, []);
+
+  useEffect(() => {
     if (!selectedLead?.id || detailTab !== "timeline") return;
     getLeadRemarks(selectedLead.id).then(setTimelineRemarks).catch(() => setTimelineRemarks([]));
     getLeadActivity(selectedLead.id).then(setTimelineActivity).catch(() => setTimelineActivity([]));
@@ -944,7 +953,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
 
   // ---- Head Physio's treatment summary ----
   const autoSaveTreatment = async (text) => {
-    if (!text.trim()) return;
+    // Empty writes through, unlike the diagnosis box above. With a tick-list, clearing the
+    // last box is a deliberate act; refusing it would leave the old summary on the server
+    // while the screen showed nothing ticked. Only ever reached from a user edit — the
+    // draft is seeded by setTreatmentDraft, which does not route through here.
     setSavingTreatment(true);
     try {
       const updated = await saveTreatmentSummary(selectedLead.id, text.trim(), false);
@@ -976,7 +988,9 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       const p = pendingWriteRef.current;
       if (p.leadId !== openLeadId) return;
       if (p.diag && p.diag.trim()) savePhysioDiagnosis(openLeadId, p.diag.trim(), false).catch(() => {});
-      if (p.treat && p.treat.trim()) saveTreatmentSummary(openLeadId, p.treat.trim(), false).catch(() => {});
+      // `!== null` rather than truthy: p.treat is only set by an edit, so an empty string
+      // here means the boxes were deliberately cleared and that has to reach the server.
+      if (p.treat !== null) saveTreatmentSummary(openLeadId, p.treat.trim(), false).catch(() => {});
       pendingWriteRef.current = { leadId: null, diag: null, treat: null };
     };
   }, [openLeadId]);
@@ -2255,6 +2269,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     rows={3}
                     placeholder="What treatment should be given to the patient..."
                     presetKind="treatment_summary"
+                    choices={treatmentTypes}
                     testPrefix="cons-treatment-summary"
                   />
                 )}
@@ -5369,9 +5384,76 @@ function PresetPicker({ kind, onPick, currentText, testPrefix }) {
  * Save & Lock flow may still carry a locked flag; the Edit button calls the
  * backend unlock endpoint for those before reopening them for editing.
  */
+/**
+ * The stored text is one treatment per line.
+ *
+ * A line that exactly matches a catalogue name is a ticked treatment; anything else is
+ * text somebody wrote before the catalogue existed, or after it while it was empty. Both
+ * are kept: the split never discards a line, and the join puts the unmatched ones back.
+ * Splitting on commas instead would have shredded existing prose into fake treatments.
+ */
+const splitSummaryLines = (text) => String(text || "").split("\n").map((s) => s.trim()).filter(Boolean);
+
+/**
+ * Treatment Summary as a tick-list off the Super Admin catalogue.
+ *
+ * Checked items are written back in catalogue order rather than click order, so the saved
+ * text is the same whichever order they were ticked in and a re-open does not look edited.
+ * Free text that predates the catalogue rides along at the end, shown but not editable
+ * here — it is somebody's clinical note and this control has no business rewriting it.
+ */
+function TreatmentChecklist({ options, value, onChange, testPrefix }) {
+  const names = options.map((o) => o.name);
+  const lines = splitSummaryLines(value);
+  const known = new Set(names);
+  const checked = new Set(lines.filter((l) => known.has(l)));
+  const carried = lines.filter((l) => !known.has(l));
+
+  const toggle = (name) => {
+    const next = new Set(checked);
+    if (next.has(name)) next.delete(name); else next.add(name);
+    onChange([...names.filter((n) => next.has(n)), ...carried].join("\n"));
+  };
+
+  return (
+    <div data-testid={`${testPrefix}-checklist`}>
+      <div className="max-h-44 space-y-0.5 overflow-y-auto rounded-md border border-slate-200 bg-white p-1.5">
+        {options.map((o) => {
+          const on = checked.has(o.name);
+          return (
+            <label
+              key={o.id}
+              className={`flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs transition ${on ? "bg-indigo-50 font-semibold text-indigo-800" : "text-slate-700 hover:bg-slate-50"}`}
+              data-testid={`${testPrefix}-option-${o.id}`}
+            >
+              <input
+                type="checkbox"
+                checked={on}
+                onChange={() => toggle(o.name)}
+                className="h-3.5 w-3.5 shrink-0 accent-indigo-600"
+              />
+              <span className="min-w-0 flex-1 truncate">{o.name}</span>
+            </label>
+          );
+        })}
+      </div>
+      {carried.length > 0 && (
+        <div className="mt-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5" data-testid={`${testPrefix}-carried`}>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-700">Also written</p>
+          <p className="whitespace-pre-wrap text-[11px] text-amber-900">{carried.join("\n")}</p>
+        </div>
+      )}
+      <p className="mt-1.5 text-[11px] text-slate-400">
+        {checked.size === 0 ? "Tick every treatment this patient is going away with." : `${checked.size} selected.`}
+      </p>
+    </div>
+  );
+}
+
 function LockableTextBox({
   icon: Icon, label, accent, value, onChange, editing, locked, savedText,
   saving, canEdit, onEdit, onUnlock, rows, placeholder, testPrefix, presetKind,
+  choices,
 }) {
   const colors = {
     sky: { border: "border-sky-200", bg: "bg-sky-50", text: "text-sky-700", btn: "bg-sky-600 hover:bg-sky-700" },
@@ -5379,6 +5461,7 @@ function LockableTextBox({
   }[accent] || { border: "border-sky-200", bg: "bg-sky-50", text: "text-sky-700", btn: "bg-sky-600 hover:bg-sky-700" };
 
   const showEditor = canEdit && (editing || !savedText);
+  const hasChoices = Array.isArray(choices) && choices.length > 0;
 
   return (
     <div className={`rounded-lg border ${colors.border} ${colors.bg} p-3`} data-testid={testPrefix}>
@@ -5391,22 +5474,32 @@ function LockableTextBox({
 
       {showEditor ? (
         <>
-          {presetKind && (
-            <PresetPicker
-              kind={presetKind}
-              currentText={value}
-              onPick={onChange}
-              testPrefix={testPrefix}
-            />
+          {/* Tick-list when a catalogue exists, free text when it does not. The fallback is
+              load-bearing rather than tidy: Confirm & Save refuses an empty Treatment
+              Summary, so a clinic that has not filled Super Admin > Treatment yet would be
+              unable to finish any consultation if the box had no other way to be written. */}
+          {hasChoices ? (
+            <TreatmentChecklist options={choices} value={value} onChange={onChange} testPrefix={testPrefix} />
+          ) : (
+            <>
+              {presetKind && (
+                <PresetPicker
+                  kind={presetKind}
+                  currentText={value}
+                  onPick={onChange}
+                  testPrefix={testPrefix}
+                />
+              )}
+              <textarea
+                value={value}
+                onChange={(e) => onChange(e.target.value)}
+                rows={rows}
+                placeholder={placeholder}
+                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-xs"
+                data-testid={`${testPrefix}-input`}
+              />
+            </>
           )}
-          <textarea
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            rows={rows}
-            placeholder={placeholder}
-            className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-xs"
-            data-testid={`${testPrefix}-input`}
-          />
           {/* No Done button: the box saves as you type and flushes whatever is left when
               the popup closes, so there was nothing for it to do that wasn't already
               happening. The status line renders only when it has something to say —

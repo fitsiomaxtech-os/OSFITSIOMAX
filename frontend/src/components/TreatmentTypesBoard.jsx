@@ -216,6 +216,15 @@ const CreateTreatmentDialog = ({ existing = [], onClose, onSaved }) => {
         <div className="space-y-3 p-5">
           <div>
             <label className="mb-1 block text-xs font-medium text-slate-700">Treatment Name *</label>
+            {/* Two lines, and they earn their space: the first says where the name will
+                actually be seen, which is the thing that makes people write it carefully;
+                the second says how to write it, with a good and a bad example side by
+                side rather than an abstract rule about brevity. */}
+            <p className="mb-1.5 text-[11px] leading-relaxed text-slate-500">
+              Appears as a tick box on every patient's Treatment Summary, for the CONSULTANT to select during a consultation.
+              <br />
+              Keep it short and specific — <span className="font-medium text-slate-600">"Dry Needling"</span>, not <span className="italic">"needling therapy for lower back pain"</span>.
+            </p>
             <Input
               value={name}
               autoFocus
