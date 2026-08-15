@@ -5429,8 +5429,14 @@ function TreatmentChecklist({ options, value, onChange, testPrefix }) {
 
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState(null);
+  const [query, setQuery] = useState("");
   const wrapRef = useRef(null);
   const panelRef = useRef(null);
+
+  // Clearing on close rather than in each of the four things that close it — the chevron,
+  // Done, Escape and a click outside — so the field cannot come back still holding a
+  // filter from last time with the full list showing behind it.
+  useEffect(() => { if (!open) setQuery(""); }, [open]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -5456,8 +5462,7 @@ function TreatmentChecklist({ options, value, onChange, testPrefix }) {
   // Positioned fixed off a measurement, the same way ColorSelect does it: the panel lives
   // inside a scrolling modal, and an absolutely-placed one would be clipped by it. Flips
   // above the trigger when there is no room below, and is pinned inside the viewport.
-  const togglePanel = () => {
-    if (open) { setOpen(false); return; }
+  const openPanel = () => {
     const r = wrapRef.current.getBoundingClientRect();
     const height = Math.min(80 + options.length * 34, 320);
     const room = window.innerHeight - r.bottom;
@@ -5470,6 +5475,11 @@ function TreatmentChecklist({ options, value, onChange, testPrefix }) {
     });
     setOpen(true);
   };
+
+  // Split from openPanel because the search field only ever opens — typing into a box
+  // that closes the list it is filtering is not a thing anyone wants. The chevron is the
+  // only control that closes.
+  const togglePanel = () => { if (open) setOpen(false); else openPanel(); };
 
   // Ticks first in catalogue order, then whatever was written — one field, two halves,
   // rebuilt the same way from whichever of them changed.
@@ -5487,21 +5497,35 @@ function TreatmentChecklist({ options, value, onChange, testPrefix }) {
     commit(checked, splitSummaryLines(text));
   };
 
-  const triggerLabel = picked.length === 0
-    ? "Select treatments"
-    : picked.length === 1 ? picked[0] : `${picked.length} treatments selected`;
+  const q = query.trim().toLowerCase();
+  const shown = q ? options.filter((o) => (o.name || "").toLowerCase().includes(q)) : options;
 
   return (
     <div data-testid={`${testPrefix}-checklist`}>
+      {/* A search field rather than a label: with a long catalogue, typing three letters
+          beats scrolling a list to find one name. Focusing it opens the list, so it still
+          behaves as the dropdown it replaced — the chevron is kept for the same reason,
+          as the affordance that says there is a list behind this. */}
       <div className="relative" ref={wrapRef}>
+        <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => { setQuery(e.target.value); if (!open) openPanel(); }}
+          onFocus={() => { if (!open) openPanel(); }}
+          onKeyDown={(e) => { if (e.key === "Escape") setOpen(false); }}
+          placeholder="Search treatment..."
+          className="w-full rounded-md border border-slate-200 bg-white py-2 pl-8 pr-8 text-xs text-slate-700 outline-none placeholder:text-slate-400 focus:border-indigo-300"
+          data-testid={`${testPrefix}-search`}
+        />
         <button
           type="button"
           onClick={togglePanel}
-          className={`flex w-full items-center justify-between gap-1.5 rounded-md border px-3 py-2 text-xs font-semibold transition ${picked.length ? "border-indigo-200 bg-white text-indigo-800" : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"}`}
+          className="absolute right-1 top-1 rounded p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+          aria-label={open ? "Hide treatments" : "Show treatments"}
           data-testid={`${testPrefix}-trigger`}
         >
-          <span className="min-w-0 truncate">{triggerLabel}</span>
-          <ChevronDown className={`h-3.5 w-3.5 shrink-0 opacity-60 transition ${open ? "rotate-180" : ""}`} />
+          <ChevronDown className={`h-3.5 w-3.5 transition ${open ? "rotate-180" : ""}`} />
         </button>
       </div>
 
@@ -5513,8 +5537,14 @@ function TreatmentChecklist({ options, value, onChange, testPrefix }) {
           style={pos}
           data-testid={`${testPrefix}-panel`}
         >
+          {/* One treatment per row, top to bottom, whether the list is the whole catalogue
+              or the three names a search left. */}
           <div className="max-h-64 space-y-0.5 overflow-y-auto p-1.5">
-            {options.map((o) => {
+            {shown.length === 0 ? (
+              <p className="px-2 py-6 text-center text-[11px] text-slate-400" data-testid={`${testPrefix}-no-match`}>
+                No treatment matches "{query.trim()}".
+              </p>
+            ) : shown.map((o) => {
               const on = checked.has(o.name);
               return (
                 <label
