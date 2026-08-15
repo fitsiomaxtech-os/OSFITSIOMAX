@@ -39,16 +39,8 @@ import {
   createManualLead,
   createSheetConnection,
   createVertical,
-  getAppointments,
   getAvailableDoctors,
-  getBranchBoard,
   getBranches,
-  getDoctors,
-  getLeads,
-  getMasterBoard,
-  getBranchMasterBoard,
-  getSheetConnections,
-  getVerticals,
   qualifyLead,
   saveSheetMapping,
   syncSheetConnection,
@@ -183,13 +175,6 @@ const SUPER_ADMIN_BOTTOM_TABS = SUPER_ADMIN_TABS.filter((t) => SUPER_ADMIN_BOTTO
 const SUPER_ADMIN_MORE_TABS = SUPER_ADMIN_TABS.filter((t) => !SUPER_ADMIN_BOTTOM_KEYS.includes(t.key));
 
 
-const verticalDefaults = [
-  "offline_physiotherapy",
-  "online_physiotherapy",
-  "online_fitness",
-  "offline_fitness_gym",
-];
-
 const defaultLead = {
   name: "",
   phone: "",
@@ -298,7 +283,6 @@ export const CRMPage = ({ auth, onLogout }) => {
     extra_fields: {},
   });
 
-  const [loading, setLoading] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showPhysioCalendar, setShowPhysioCalendar] = useState(false);
   const [showHPCalendar, setShowHPCalendar] = useState(false);
@@ -345,52 +329,33 @@ export const CRMPage = ({ auth, onLogout }) => {
     }
   };
 
+  /**
+   * The branch list, and nothing else.
+   *
+   * This used to fetch eight endpoints on every login — the master board, the branch
+   * master board, every lead, every doctor, every appointment, the verticals, the sheet
+   * connections and a branch board — from the days when this page rendered the boards
+   * itself. Every board now loads its own data, and all eight results were being thrown
+   * away: masterBoard, branchMaster, branchBoard, doctors, verticals and sheetConnections
+   * were set and never read, appointments fed a variable nothing used, and leads was read
+   * only by two legacy dialogs whose state is never set.
+   *
+   * So the page opened by making eight requests it discarded, several of which 403 for a
+   * CONSULTANT or a Physio, and held "Loading boards..." on screen until the slowest of
+   * them came back. Branches is the one that is genuinely used: the branch name beside the
+   * role in the header, and the two Super Admin boards that take it as a prop.
+   *
+   * Nothing reports progress for it. The indicator that used to sit bottom-right spoke
+   * for the eight-endpoint version; each board now shows its own loading, and a toast for
+   * one branch list is reporting work nobody is waiting on.
+   */
   const loadEverything = async () => {
-    setLoading(true);
-    const canManageSheets = ["super_admin", "business_dev"].includes(role);
-
-    const [masterData, branchMasterData, branchRows, leadRows, doctorRows, appointmentRows, verticalRows, sheetRows] =
-      await Promise.all([
-        safeCall(() => getMasterBoard(), { stage_counts: {}, total: 0 }),
-        role === "super_admin" ? safeCall(() => getBranchMasterBoard(), { branch_stage_counts: {}, total: 0 }) : Promise.resolve({ branch_stage_counts: {}, total: 0 }),
-        safeCall(() => getBranches(), []),
-        safeCall(() =>
-          getLeads({
-            stage: leadStageFilter || undefined,
-            branch_id: leadBranchFilter || undefined,
-            start_date: leadDateFrom ? `${leadDateFrom}T00:00:00` : undefined,
-            end_date: leadDateTo ? `${leadDateTo}T23:59:59` : undefined,
-          }),
-        []),
-        safeCall(() => getDoctors({}), []),
-        safeCall(() => getAppointments(appointmentFilter === "all" ? {} : { view: appointmentFilter }), []),
-        safeCall(() => getVerticals(), []),
-        canManageSheets ? safeCall(() => getSheetConnections(), []) : Promise.resolve([]),
-      ]);
-
-    setMasterBoard(masterData);
-    setBranchMaster(branchMasterData);
-    setBranches(branchRows);
-    setLeads(leadRows);
-    setDoctors(doctorRows);
-    setAppointments(appointmentRows);
-    setVerticals(verticalRows.length ? verticalRows : verticalDefaults.map((name) => ({ id: name, name })));
-    setSheetConnections(sheetRows);
-
-    const branchId = isBranchAdminRole(role) ? auth.user.branch_id : branchRows[0]?.id;
-    if (branchId) {
-      const data = await safeCall(() => getBranchBoard(branchId), { stage_counts: {} });
-      setBranchBoard(data);
-    } else {
-      setBranchBoard({ stage_counts: {} });
-    }
-
-    setLoading(false);
+    setBranches(await safeCall(() => getBranches(), []));
   };
 
   useEffect(() => {
     loadEverything();
-  }, [leadStageFilter, leadBranchFilter, leadDateFrom, leadDateTo, appointmentFilter]);
+  }, []);
 
   // The header search is phone-only, so a window growing past the breakpoint takes the
   // bar off screen. Drop the query with it — otherwise the list stays filtered by text
@@ -1016,11 +981,11 @@ export const CRMPage = ({ auth, onLogout }) => {
         </div>
       </div>
 
-      {loading && (
-        <div className="fixed bottom-4 right-4 rounded-md bg-slate-900 px-3 py-2 text-sm text-white" data-testid="role-board-loading-indicator">
-          Loading boards...
-        </div>
-      )}
+      {/* No "Loading boards..." indicator any more. It spoke for the eight-endpoint load
+          this page used to run, and nothing on screen waits for what is left: each board
+          fetches and reports its own loading, and the one request here only fills in the
+          branch name beside the role. A toast for it would be reporting work the reader
+          is not waiting on. */}
     </div>
   );
 };
