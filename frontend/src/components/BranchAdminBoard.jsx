@@ -339,12 +339,16 @@ export const matchesConsultationStage = (lead, stageName) => {
  * `stage` field instead. Same idea as the Diet Consultation chip above — the pill reads a
  * fact about the lead rather than claiming to own its position.
  *
- * A lead can therefore match both Leads and a real branch stage at once, which is intended:
- * these pills are filters over one list, not a partition of it.
+ * That reading alone is not enough, though. Moving a lead to Appointment on this board does
+ * not touch its Pre-Sales stage — the two pipelines track different things — so a lead the
+ * branch had plainly dealt with stayed listed under Leads for good. Hence the second half
+ * of the match: a mirrored pill only claims a lead while it is still sitting at the
+ * branch's own opening. Move it anywhere and it leaves Leads for the stage it was moved to.
  */
-export const matchesBranchStage = (lead, stage) => (
-  stage?.mirrors_stage ? lead.stage === stage.mirrors_stage : lead.branch_stage === stage?.name
-);
+export const matchesBranchStage = (lead, stage) => {
+  if (!stage?.mirrors_stage) return lead.branch_stage === stage?.name;
+  return lead.stage === stage.mirrors_stage && lead.branch_stage === stage.unmoved_branch_stage;
+};
 
 export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = null, currentUser = null }) => {
   const [boardData, setBoardData] = useState({ leads: [], stage_counts: {}, stages: [] });
@@ -1416,8 +1420,10 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                     // the lead already is, and writing to it would move the lead inside the
                     // Pre-Sales pipeline, which this board does not own.
                     const isMirror = !!s.mirrors_stage;
+                    // Highlighted on the same terms the board filters by, so the pipeline
+                    // here agrees with the pill the lead was listed under.
                     const isActive = isMirror
-                      ? lead.stage === s.mirrors_stage
+                      ? matchesBranchStage(lead, s)
                       : (lead.branch_stage === stage || lead.consultation_stage === stage);
                     const consultationOnly = isConsultationOnlyStage(stage);
                     // A Consultation-only stage isn't reachable until the lead has actually

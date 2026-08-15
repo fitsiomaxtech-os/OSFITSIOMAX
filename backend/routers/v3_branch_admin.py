@@ -45,11 +45,14 @@ async def _branch_stages(branch_id: str) -> list:
     rows = await v3_col("pipeline_stages").find({"type": "sales"}, {"_id": 0}).sort("order", 1).to_list(200)
     stages = [r for r in rows if not r.get("applies_to") or r.get("applies_to") == control]
     if control == lead_control.BRANCH_ADMIN:
-        stages.insert(0, await _presales_mirror_stage())
+        # Read before inserting: the branch's own opening is whatever sits first here, and
+        # the mirror needs its name to know which leads it has stopped applying to.
+        entry = stages[0]["name"] if stages else V3_BRANCH_STAGES[0]
+        stages.insert(0, await _presales_mirror_stage(entry))
     return stages
 
 
-async def _presales_mirror_stage() -> dict:
+async def _presales_mirror_stage(entry_stage_name: str) -> dict:
     """The "Leads" pill: the branch's own Pre-Sales New Leads, shown on Branch Leads.
 
     A branch running its own leads works them on its embedded Pre-Sales board first, so the
@@ -61,6 +64,13 @@ async def _presales_mirror_stage() -> dict:
     the point being visibility, not a change of ownership. `mirrors_stage` is the client's
     signal to count and filter it against that other field, and because no such stage
     exists in the collection, /branch-stage rejects any attempt to move a lead onto it.
+
+    It stops applying the moment the branch works the lead. A lead's Pre-Sales stage does
+    not change when a branch admin moves it to Appointment on this board — the two pipelines
+    track different things — so on the Pre-Sales reading alone it would still be a New Lead
+    and stay listed here forever. `unmoved_branch_stage` is the second half of the match:
+    the lead is only shown under Leads while it is still sitting at the branch's own
+    opening, so moving it anywhere takes it out of this pill and into that stage.
     """
     return {
         "id": "presales-new-leads",
@@ -73,6 +83,7 @@ async def _presales_mirror_stage() -> dict:
         "applies_to": lead_control.BRANCH_ADMIN,
         # Resolved live — Super Admin can rename the Pre-Sales entry stage.
         "mirrors_stage": await get_first_stage_name("pre_sales", "New Leads"),
+        "unmoved_branch_stage": entry_stage_name,
     }
 
 
@@ -316,11 +327,20 @@ async def v3_branch_board_new(branch_id: str, _: V3UserOut = Depends(v3_require_
         stage_counts = {}
         branch_stages = await _branch_stages(branch_id)
         for stage in branch_stages:
-            # The Leads pill mirrors the Pre-Sales pipeline, so it counts against the lead's
-            # `stage`; every real branch stage counts against `branch_stage`.
+            # The Leads pill mirrors the Pre-Sales pipeline, so it counts a lead against its
+            # `stage` — and only while that lead is still at the branch's opening, or one
+            # the branch has already moved on would go on being counted here as well as in
+            # the stage it was moved to. Every real branch stage counts on `branch_stage`.
             mirrors = stage.get("mirrors_stage")
-            field, wanted = ("stage", mirrors) if mirrors else ("branch_stage", stage["name"])
-            stage_counts[stage["name"]] = sum(1 for lead in leads if lead.get(field) == wanted)
+            if mirrors:
+                unmoved = stage.get("unmoved_branch_stage")
+                matches = sum(
+                    1 for lead in leads
+                    if lead.get("stage") == mirrors and lead.get("branch_stage") == unmoved
+                )
+            else:
+                matches = sum(1 for lead in leads if lead.get("branch_stage") == stage["name"])
+            stage_counts[stage["name"]] = matches
         # One malformed lead document shouldn't 500 the whole board — skip it and keep
         # showing every other lead rather than failing the entire list.
         lead_list = []
