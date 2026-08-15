@@ -5461,9 +5461,11 @@ function TreatmentChecklist({ options, value, onChange, testPrefix }) {
   // above the trigger when there is no room below, and is pinned inside the viewport.
   const openPanel = () => {
     const r = wrapRef.current.getBoundingClientRect();
-    const height = Math.min(80 + options.length * 34, 320);
+    // Half the rows now that the list is two columns, so the panel is shorter as well as
+    // wider. Both still clamp: never past 320px tall, never wider than the viewport.
+    const height = Math.min(80 + Math.ceil(options.length / 2) * 34, 320);
     const room = window.innerHeight - r.bottom;
-    const width = Math.min(Math.max(r.width, 240), window.innerWidth - 16);
+    const width = Math.min(Math.max(r.width, 440), window.innerWidth - 16);
     const left = Math.min(Math.max(8, r.left), window.innerWidth - width - 8);
     setPos({
       left,
@@ -5507,77 +5509,30 @@ function TreatmentChecklist({ options, value, onChange, testPrefix }) {
     commit(next);
   };
 
-  // Three then a count. Every chip at once would grow the field to four lines on a phone
-  // and push the Treatment card's own controls down with it.
-  const CHIP_LIMIT = 3;
-  const chipsShown = picked.slice(0, CHIP_LIMIT);
-  const chipOverflow = picked.length - chipsShown.length;
 
   return (
     <div data-testid={`${testPrefix}-checklist`}>
-      {/* One box, three faces: a search field while open, the selected chips while shut
-          with something picked, and the placeholder while shut with nothing. The chevron
-          is walled off behind a divider on the right and is what closes the list — the
-          field itself only ever opens, since typing into a box that closes the list it is
-          filtering helps nobody. */}
+      {/* The bar is only ever a search field now — what is selected is listed under it,
+          not held inside it. The chevron is walled off behind a divider on the right and
+          is what closes the list; the field itself only ever opens, since typing into a
+          box that closes the list it is filtering helps nobody. */}
       <div
-        className={`flex items-center gap-1 rounded-lg border bg-white px-2 py-1.5 transition ${open ? "border-indigo-400 ring-1 ring-indigo-100" : "border-slate-200"}`}
+        className={`flex items-center gap-2 rounded-lg border bg-white px-2 py-1.5 transition ${open ? "border-indigo-400 ring-1 ring-indigo-100" : "border-slate-200"}`}
         ref={wrapRef}
       >
-        {open ? (
-          <>
-            <Search className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-            <input
-              type="text"
-              value={query}
-              autoFocus
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Escape") setOpen(false); }}
-              placeholder="Search treatments..."
-              className="min-w-0 flex-1 border-0 bg-transparent py-0.5 text-xs text-slate-700 outline-none placeholder:text-slate-400"
-              data-testid={`${testPrefix}-search`}
-            />
-          </>
-        ) : picked.length > 0 ? (
-          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1" data-testid={`${testPrefix}-chips`}>
-            {chipsShown.map((n) => (
-              <span key={n} className="inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200 bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700">
-                <span className="truncate">{numberOf(n)}. {n}</span>
-                <button
-                  type="button"
-                  onClick={() => toggle(n)}
-                  className="shrink-0 text-slate-400 transition hover:text-rose-600"
-                  aria-label={`Remove ${n}`}
-                  data-testid={`${testPrefix}-chip-remove-${n}`}
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </span>
-            ))}
-            {chipOverflow > 0 && (
-              <button
-                type="button"
-                onClick={openPanel}
-                className="rounded-md border border-slate-200 bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600 hover:bg-slate-200"
-                data-testid={`${testPrefix}-chip-overflow`}
-              >
-                +{chipOverflow}
-              </button>
-            )}
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={openPanel}
-            className="flex min-w-0 flex-1 items-center gap-2 py-0.5 text-left text-xs text-slate-400"
-            data-testid={`${testPrefix}-placeholder`}
-          >
-            <Search className="h-3.5 w-3.5 shrink-0" />
-            <span className="truncate">Search treatments...</span>
-          </button>
-        )}
+        <Search className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => { setQuery(e.target.value); if (!open) openPanel(); }}
+          onFocus={() => { if (!open) openPanel(); }}
+          onKeyDown={(e) => { if (e.key === "Escape") setOpen(false); }}
+          placeholder="Search treatments..."
+          className="min-w-0 flex-1 border-0 bg-transparent py-0.5 text-xs text-slate-700 outline-none placeholder:text-slate-400"
+          data-testid={`${testPrefix}-search`}
+        />
 
-        <div className="shrink-0 border-l border-slate-200 pl-1">
+        <div className="shrink-0 border-l border-slate-200 pl-2">
           <button
             type="button"
             onClick={togglePanel}
@@ -5617,36 +5572,69 @@ function TreatmentChecklist({ options, value, onChange, testPrefix }) {
             </span>
           </div>
 
-          {/* One treatment per row, top to bottom, numbered as in the catalogue. */}
-          <div className="max-h-64 overflow-y-auto">
+          {/* Two columns, numbered as in the catalogue. Fifteen treatments across two
+              columns is eight rows rather than fifteen, so the whole list is on screen
+              without scrolling — which is the point of the wider panel. One column below
+              sm, where two would leave about 90px a name. */}
+          <div className="max-h-64 overflow-y-auto p-1">
             {shown.length === 0 ? (
               <p className="px-3 py-6 text-center text-[11px] text-slate-400" data-testid={`${testPrefix}-no-match`}>
                 No treatment matches "{query.trim()}".
               </p>
-            ) : shown.map((o) => {
-              const on = checked.has(o.name);
-              return (
-                <label
-                  key={o.id}
-                  className={`flex cursor-pointer items-center gap-2.5 px-3 py-1.5 text-xs transition ${on ? "bg-indigo-50 font-semibold text-indigo-800" : "text-slate-700 hover:bg-slate-50"}`}
-                  data-testid={`${testPrefix}-option-${o.id}`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={on}
-                    onChange={() => toggle(o.name)}
-                    className="h-3.5 w-3.5 shrink-0 accent-indigo-600"
-                  />
-                  <span className="min-w-0 flex-1 truncate">{o.n}. {o.name}</span>
-                </label>
-              );
-            })}
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2">
+                {shown.map((o) => {
+                  const on = checked.has(o.name);
+                  return (
+                    <label
+                      key={o.id}
+                      className={`flex cursor-pointer items-center gap-2.5 rounded px-2 py-1.5 text-xs transition ${on ? "bg-indigo-50 font-semibold text-indigo-800" : "text-slate-700 hover:bg-slate-50"}`}
+                      data-testid={`${testPrefix}-option-${o.id}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={on}
+                        onChange={() => toggle(o.name)}
+                        className="h-3.5 w-3.5 shrink-0 accent-indigo-600"
+                      />
+                      <span className="min-w-0 flex-1 truncate">{o.n}. {o.name}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
         </div>
       )}
 
-      {picked.length === 0 && (
+      {/* What is selected, under the bar rather than inside it, one per line. Stacked
+          rather than wrapped into chips so a long name reads whole and the list can be
+          counted down at a glance — which is what someone about to Confirm & Save is
+          doing. Every one of them shows: with a row each there is no need to hide the
+          fourth behind a "+N", and it scrolls past eight rather than growing the card. */}
+      {picked.length > 0 ? (
+        <div className="mt-2 max-h-40 space-y-1 overflow-y-auto" data-testid={`${testPrefix}-selected`}>
+          {picked.map((n) => (
+            <div
+              key={n}
+              className="flex items-center gap-2 rounded-md border border-indigo-200 bg-indigo-50 px-2 py-1.5"
+              data-testid={`${testPrefix}-selected-${n}`}
+            >
+              <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-indigo-800">{numberOf(n)}. {n}</span>
+              <button
+                type="button"
+                onClick={() => toggle(n)}
+                className="shrink-0 text-indigo-400 transition hover:text-rose-600"
+                aria-label={`Remove ${n}`}
+                data-testid={`${testPrefix}-remove-${n}`}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : (
         <p className="mt-1.5 text-[11px] text-slate-400">Tick every treatment this patient is going away with.</p>
       )}
     </div>
