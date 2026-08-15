@@ -273,6 +273,57 @@ async def ensure_branch_leads_stage() -> None:
     await v3_col("pipeline_stages").update_one({"id": assign["id"]}, {"$set": {"entry": True}})
 
 
+async def _migration_done(name: str) -> bool:
+    """One-shot guard for migrations that must not run a second time.
+
+    Most migrations here are safe to re-run because they map a dead value onto a live one:
+    running them twice changes nothing. A migration that moves leads a branch admin can move
+    back by hand is not like that — re-running it would silently undo their work on the next
+    restart — so it records that it has run and never runs again.
+    """
+    if await v3_col("migrations").find_one({"name": name}, {"_id": 0, "name": 1}):
+        return True
+    await v3_col("migrations").insert_one({"name": name, "ran_at": now_iso()})
+    return False
+
+
+async def backfill_leads_stage_from_presales() -> None:
+    """Put a branch's un-worked Pre-Sales New Leads onto its Leads stage.
+
+    Leads was added as an empty stage that only new arrivals would reach, which left every
+    lead already at Pre-Sales New Leads sitting on Branch Assign and invisible under Leads.
+    This is the one-time catch-up for them.
+
+    Only leads still sitting on the entry stage move. A lead already worked on the branch
+    board — at Follow Up, Appointment, anywhere past the opening — stays exactly where the
+    admin put it, whatever the Pre-Sales side still says about it: where a lead is on this
+    board is the branch's own record, and a backfill has no business overruling it.
+    """
+    if await _migration_done("backfill_leads_stage_from_presales"):
+        return
+    leads_stage = await v3_col("pipeline_stages").find_one(
+        {"type": "sales", "name": BRANCH_ADMIN_LEADS_STAGE}, {"_id": 0, "id": 1}
+    )
+    if not leads_stage:
+        return
+    presales_entry = await get_first_stage_name("pre_sales", "New Leads")
+    branches = await v3_col("branches").find({}, {"_id": 0, "id": 1, "lead_control": 1}).to_list(1000)
+    branch_ids = [
+        b["id"] for b in branches
+        if lead_control.normalize(b.get("lead_control")) == lead_control.BRANCH_ADMIN
+    ]
+    if not branch_ids:
+        return
+    await v3_col("leads").update_many(
+        {
+            "branch_id": {"$in": branch_ids},
+            "branch_stage": BRANCH_ADMIN_ENTRY_STAGE,
+            "stage": presales_entry,
+        },
+        {"$set": {"branch_stage": BRANCH_ADMIN_LEADS_STAGE, "updated_at": now_iso()}},
+    )
+
+
 # Maps deprecated consultation_stage labels (legacy 6-stage flow) to the new 7-stage flow.
 # Idempotent: runs every startup; only touches leads with a legacy value.
 _LEGACY_CONSULTATION_STAGE_MAP = {
