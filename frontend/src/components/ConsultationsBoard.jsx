@@ -2254,6 +2254,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
 
                 {(isConsultant || selectedLead.treatment_summary) && (
                   <LockableTextBox
+                    // Keyed by lead: the tick-list holds its written half in local state,
+                    // and without a remount here that text would follow you to the next
+                    // patient opened from the list behind this popup.
+                    key={selectedLead.id}
                     icon={ClipboardList}
                     label="Treatment Summary"
                     accent="indigo"
@@ -5407,8 +5411,21 @@ function TreatmentChecklist({ options, value, onChange, testPrefix }) {
   const lines = splitSummaryLines(value);
   const known = new Set(names);
   const checked = new Set(lines.filter((l) => known.has(l)));
-  const carried = lines.filter((l) => !known.has(l));
   const picked = names.filter((n) => checked.has(n));
+
+  /**
+   * The written half, held locally rather than derived from `value` on every render.
+   *
+   * It has to be: the round trip strips blank lines, so a derived textarea would swallow
+   * the newline the moment Enter was pressed and drop the cursor back to the end of the
+   * previous line. Seeded once from whatever is in the field that is not a catalogue
+   * name — which is both notes written here and any prose that predates the catalogue.
+   *
+   * Safe to keep local because the call site keys this component by lead id, so moving
+   * to another patient remounts it rather than carrying one patient's notes to the next.
+   */
+  const [manual, setManual] = useState(() => lines.filter((l) => !known.has(l)).join("\n"));
+  const manualLines = splitSummaryLines(manual);
 
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState(null);
@@ -5454,10 +5471,20 @@ function TreatmentChecklist({ options, value, onChange, testPrefix }) {
     setOpen(true);
   };
 
+  // Ticks first in catalogue order, then whatever was written — one field, two halves,
+  // rebuilt the same way from whichever of them changed.
+  const commit = (nextChecked, nextManualLines) =>
+    onChange([...names.filter((n) => nextChecked.has(n)), ...nextManualLines].join("\n"));
+
   const toggle = (name) => {
     const next = new Set(checked);
     if (next.has(name)) next.delete(name); else next.add(name);
-    onChange([...names.filter((n) => next.has(n)), ...carried].join("\n"));
+    commit(next, manualLines);
+  };
+
+  const writeManual = (text) => {
+    setManual(text);
+    commit(checked, splitSummaryLines(text));
   };
 
   const triggerLabel = picked.length === 0
@@ -5542,15 +5569,23 @@ function TreatmentChecklist({ options, value, onChange, testPrefix }) {
         </div>
       )}
 
-      {carried.length > 0 && (
-        <div className="mt-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5" data-testid={`${testPrefix}-carried`}>
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-700">Also written</p>
-          <p className="whitespace-pre-wrap text-[11px] text-amber-900">{carried.join("\n")}</p>
-        </div>
-      )}
+      {/* The written half. Always here, not only when the list falls short — a consultation
+          usually needs both: which treatments, and what about this patient in particular.
+          Saved into the same field, below the ticks. */}
+      <div className="mt-2">
+        <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">Write it yourself (optional)</p>
+        <textarea
+          value={manual}
+          onChange={(e) => writeManual(e.target.value)}
+          rows={3}
+          placeholder="Anything the list above does not cover — dosage, sequence, precautions..."
+          className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-xs"
+          data-testid={`${testPrefix}-manual`}
+        />
+      </div>
 
-      {picked.length === 0 && (
-        <p className="mt-1.5 text-[11px] text-slate-400">Tick every treatment this patient is going away with.</p>
+      {picked.length === 0 && !manual.trim() && (
+        <p className="mt-1.5 text-[11px] text-slate-400">Tick the treatments, write the detail, or both.</p>
       )}
     </div>
   );
