@@ -7,7 +7,7 @@ from database import v3_col
 from utils import now_iso, normalize_slot_time, derive_branch_code
 from security import hash_password
 from deps import v3_current_user, v3_require_roles, is_branch_admin_role
-from stage_utils import get_first_stage_name
+from stage_utils import get_first_stage_name, realign_branch_stage_leads
 import lead_control
 from schemas.v3 import (
     V3UserOut, V3VerticalCreate, V3VerticalOut,
@@ -166,6 +166,12 @@ async def v3_update_branch(branch_id: str, payload: V3BranchUpdate, _: V3UserOut
         if updates["lead_control"] not in lead_control.VALID:
             raise HTTPException(status_code=400, detail=f"lead_control must be one of {list(lead_control.VALID)}")
     await v3_col("branches").update_one({"id": branch_id}, {"$set": updates})
+    # The two modes open on different stages — Branch Assign + RNR for a branch running its
+    # own leads, New Appointment for one fed by Pre-Sales. Leads already sitting on the old
+    # mode's stages are rehomed now, in the same request as the flip, so the board the admin
+    # lands on after switching is the full backlog rather than a board missing most of it.
+    if "lead_control" in updates and updates["lead_control"] != lead_control.normalize(existing.get("lead_control")):
+        await realign_branch_stage_leads(branch_id, updates["lead_control"])
     updated = await v3_col("branches").find_one({"id": branch_id}, {"_id": 0})
     return V3BranchOut(**updated)
 

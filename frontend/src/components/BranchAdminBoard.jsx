@@ -331,8 +331,7 @@ export const matchesConsultationStage = (lead, stageName) => {
 };
 
 export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = null, currentUser = null }) => {
-  const [boardData, setBoardData] = useState({ leads: [], stage_counts: {} });
-  const [stages, setStages] = useState([]); // dynamic Branch Stages, from Super Admin > Pipeline Stage Management
+  const [boardData, setBoardData] = useState({ leads: [], stage_counts: {}, stages: [] });
   const [consultationStages, setConsultationStages] = useState([]); // dynamic Consultation Stages, merged into the same stage bar
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -369,8 +368,14 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   }, [branchId]);
 
   useEffect(() => { loadBoard(); }, [loadBoard]);
-  useEffect(() => { stagesList("sales").then(setStages).catch(() => {}); }, []);
   useEffect(() => { stagesList("consultation").then(setConsultationStages).catch(() => {}); }, []);
+
+  // Branch Stages come with the board rather than from /stages, because which ones this
+  // branch has depends on its Lead Control: a branch running its own leads opens at Branch
+  // Assign and has an RNR stage, one fed by the Pre-Sales desk opens at New Appointment and
+  // has neither. Arriving on the same response as lead_control keeps the strip and the tabs
+  // describing the same mode — a separate fetch would briefly disagree after a flip.
+  const stages = useMemo(() => boardData.stages || [], [boardData.stages]);
 
   const stageColor = useCallback(
     (name) => stages.find((s) => s.name === name)?.color || "#64748b",

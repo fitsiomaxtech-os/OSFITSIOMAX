@@ -2,8 +2,12 @@ import uuid
 from database import db, v2_col, v3_col
 from utils import now_iso, derive_branch_code, generate_patient_number
 from security import hash_password
-from constants import V3_VERTICALS, V3_BRANCH_STAGES, V3_STAGES, V3_CONSULTATION_STAGES, V3_HEAD_CONSULTATION_STAGES
-from stage_utils import get_first_stage_name
+from constants import (
+    V3_VERTICALS, V3_BRANCH_STAGES, V3_STAGES, V3_CONSULTATION_STAGES, V3_HEAD_CONSULTATION_STAGES,
+    BRANCH_ADMIN_ENTRY_STAGE, BRANCH_ADMIN_RNR_STAGE,
+)
+import lead_control
+from stage_utils import get_first_stage_name, first_branch_stage_for, realign_branch_stage_leads
 
 
 # Maps deprecated branch_stage labels (legacy 8-stage flow) to the new flow.
@@ -39,7 +43,10 @@ async def migrate_branch_stages() -> None:
     # Pipeline Stage Management (e.g. "New Appointment" -> "New Leads"), and every legacy
     # mapping below that used to hardcode the literal "New Appointment" must land on whatever
     # that stage is actually called now, or the leads become invisible orphans on the board.
-    first_branch_stage = await get_first_stage_name("sales", "New Appointment")
+    # Pinned to the Pre-Sales side: the two modes now share order 0, so "the first sales
+    # stage" is ambiguous on its own. Legacy leads predate Lead Control and belong on the
+    # original entry stage; ensure_branch_admin_stages then rehomes the branch-run ones.
+    first_branch_stage = await first_branch_stage_for(lead_control.PRE_SALES, "New Appointment")
     legacy_branch_stage_map = {
         old: (first_branch_stage if new == "New Appointment" else new)
         for old, new in _LEGACY_BRANCH_STAGE_MAP.items()
@@ -65,13 +72,22 @@ async def migrate_branch_stages() -> None:
     # in "All Stages" but invisible in every individual stage pill.
     valid_branch_stages = set(await v3_col("pipeline_stages").distinct("name", {"type": "sales"}))
     if valid_branch_stages:
-        # $nin against names only (not None/"") is deliberate: a missing/None/empty branch_stage
-        # is never "in" that list of real names either, so it's naturally caught by this same
-        # filter and doesn't need a separate query.
-        await v3_col("leads").update_many(
-            {"branch_id": {"$ne": None}, "branch_stage": {"$nin": list(valid_branch_stages)}},
-            {"$set": {"branch_stage": first_branch_stage, "updated_at": now_iso()}},
-        )
+        # Which entry stage an orphan lands on depends on the branch it belongs to: a branch
+        # running its own leads opens at Branch Assign, one fed by Pre-Sales at New Appointment.
+        # Grouped by control so this stays two writes rather than one per branch.
+        control_map = await lead_control.branch_control_map()
+        branches_by_control = {}
+        for branch_id, control in control_map.items():
+            branches_by_control.setdefault(control, []).append(branch_id)
+        for control, branch_ids in branches_by_control.items():
+            entry_stage = await first_branch_stage_for(control, first_branch_stage)
+            # $nin against names only (not None/"") is deliberate: a missing/None/empty branch_stage
+            # is never "in" that list of real names either, so it's naturally caught by this same
+            # filter and doesn't need a separate query.
+            await v3_col("leads").update_many(
+                {"branch_id": {"$in": branch_ids}, "branch_stage": {"$nin": list(valid_branch_stages)}},
+                {"$set": {"branch_stage": entry_stage, "updated_at": now_iso()}},
+            )
     # Re-seed pipeline_stages of type=sales with the new names if any legacy entries exist.
     legacy_sales = await v3_col("pipeline_stages").find(
         {"type": "sales", "name": {"$in": list(_LEGACY_BRANCH_STAGE_MAP.keys())}},
@@ -142,6 +158,75 @@ async def ensure_rnr_stage() -> None:
         "is_final": False,
         "created_at": now_iso(),
     })
+
+
+async def ensure_branch_admin_stages() -> None:
+    """Give the Branch pipeline its Branch-Admin-only opening: Branch Assign, then RNR.
+
+    A branch fed by the Pre-Sales desk receives leads already qualified and booked, so its
+    board opens at "New Appointment". A branch running its own leads receives them raw and
+    has to work them itself, so it opens at "Branch Assign" and needs somewhere to park the
+    calls nobody picks up. Both shapes share one `sales` stage list and are told apart by
+    `applies_to` (see constants.py), which is why this inserts stages rather than renaming
+    the existing one — a rename would drag every Pre-Sales branch along with it.
+
+    Idempotent: kept as a no-op once Branch Assign exists, so a Super Admin who later
+    renames or deletes either stage does not get it silently recreated on next boot.
+    """
+    existing = await v3_col("pipeline_stages").find_one(
+        {"type": "sales", "applies_to": lead_control.BRANCH_ADMIN}, {"_id": 0, "id": 1}
+    )
+    if existing:
+        return
+    # Position both new stages against whatever the current entry stage is, rather than
+    # against the literal "New Appointment" — Pipeline Stage Management may have renamed it.
+    entry = await v3_col("pipeline_stages").find(
+        {"type": "sales"}, {"_id": 0, "id": 1, "name": 1, "order": 1}
+    ).sort("order", 1).limit(1).to_list(1)
+    if not entry:
+        return  # stages not seeded yet; _ensure_seed builds the list first
+    entry_stage = entry[0]
+    entry_order = entry_stage["order"]
+
+    # The stage that was global until now becomes the Pre-Sales-side entry only. Every
+    # later stage (Follow Up onwards) stays shared and just shifts to make room for RNR.
+    await v3_col("pipeline_stages").update_one(
+        {"id": entry_stage["id"]}, {"$set": {"applies_to": lead_control.PRE_SALES}}
+    )
+    await v3_col("pipeline_stages").update_many(
+        {"type": "sales", "order": {"$gt": entry_order}}, {"$inc": {"order": 1}}
+    )
+    await v3_col("pipeline_stages").insert_many([
+        {
+            "id": str(uuid.uuid4()),
+            "name": BRANCH_ADMIN_ENTRY_STAGE,
+            "color": "#0ea5e9",
+            "type": "sales",
+            # Shares the entry slot with the Pre-Sales stage it stands in for: only one of
+            # the two is ever visible to a given branch, so they never collide on a board.
+            "order": entry_order,
+            "is_final": False,
+            "applies_to": lead_control.BRANCH_ADMIN,
+            "created_at": now_iso(),
+        },
+        {
+            "id": str(uuid.uuid4()),
+            "name": BRANCH_ADMIN_RNR_STAGE,
+            "color": "#ef4444",
+            "type": "sales",
+            "order": entry_order + 1,
+            "is_final": False,
+            "applies_to": lead_control.BRANCH_ADMIN,
+            "created_at": now_iso(),
+        },
+    ])
+
+    # Branches already switched to Branch Admin have a backlog sitting on the stage that
+    # just became Pre-Sales-only — it would vanish from their board otherwise.
+    branches = await v3_col("branches").find({}, {"_id": 0, "id": 1, "lead_control": 1}).to_list(1000)
+    for branch in branches:
+        if lead_control.normalize(branch.get("lead_control")) == lead_control.BRANCH_ADMIN:
+            await realign_branch_stage_leads(branch["id"], lead_control.BRANCH_ADMIN)
 
 
 # Maps deprecated consultation_stage labels (legacy 6-stage flow) to the new 7-stage flow.

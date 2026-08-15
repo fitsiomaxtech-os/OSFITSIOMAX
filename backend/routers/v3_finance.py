@@ -7,7 +7,7 @@ from typing import Optional
 from database import v3_col
 from deps import v3_require_roles, is_branch_admin_role
 from schemas.v3 import V3UserOut, V3MarkInstallmentPaidInput
-from stage_utils import get_first_stage_name
+from stage_utils import entry_branch_stage_names
 from utils import generate_transaction_id
 
 
@@ -46,8 +46,10 @@ async def get_branch_finance(
     total_package = sum(l.get("package_paid", 0) for l in package_leads)
 
     all_branch_leads = await v3_col("leads").find(base_query, {"_id": 0}).to_list(2000)
-    first_branch_stage = await get_first_stage_name("sales", "New Appointment")
-    leads_with_no_fee = [l for l in all_branch_leads if (l.get("consultation_fee") or 0) == 0 and l.get("branch_stage") not in (None, first_branch_stage)]
+    # Both modes' entry stages, since this list spans branches under either Lead Control —
+    # a lead still sitting where it landed hasn't been worked yet and owes nothing.
+    untouched_stages = {None} | await entry_branch_stage_names()
+    leads_with_no_fee = [l for l in all_branch_leads if (l.get("consultation_fee") or 0) == 0 and l.get("branch_stage") not in untouched_stages]
     pending_count = len(leads_with_no_fee)
 
     # Per-branch breakdown — only meaningfully populated when viewing more than one
@@ -553,11 +555,11 @@ async def revenue_overview(
         r["total_revenue"] = r["consultation_total"] + r["session_total"] + r["diet_total"] + r["store_total"]
     by_branch = sorted(by_branch_acc.values(), key=lambda r: -r["total_revenue"])
 
-    first_branch_stage = await get_first_stage_name("sales", "New Appointment")
+    untouched_stages = {None} | await entry_branch_stage_names()
     pending_leads_raw = [
         l for l in leads
         if not (l.get("consultation_fee") or l.get("package_paid") or l.get("treatment_fee_paid"))
-        and l.get("branch_stage") not in (None, first_branch_stage)
+        and l.get("branch_stage") not in untouched_stages
     ]
     pending_count = len(pending_leads_raw)
     pending_leads = [

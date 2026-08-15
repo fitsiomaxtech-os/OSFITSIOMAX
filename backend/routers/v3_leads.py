@@ -7,7 +7,7 @@ from database import v3_col
 from utils import now_iso, normalize_slot_time, generate_patient_number
 from deps import v3_current_user, v3_require_roles, is_branch_admin_role
 from constants import V3_STAGES
-from stage_utils import get_first_stage_name
+from stage_utils import first_branch_stage_for_branch
 import lead_control
 from schemas.v3 import (
     V3UserOut, V3LeadCreate, V3LeadUpdate, V3LeadOut,
@@ -65,7 +65,7 @@ async def v3_manual_lead(payload: V3LeadCreate, _: V3UserOut = Depends(v3_requir
     # A lead created directly against a branch (e.g. a walk-in added by Super Admin/Branch
     # Admin) must land on the branch's own New Lead stage too, same as sheet/Meta-imported
     # leads — otherwise it has a branch_id but no branch_stage and never shows on that board.
-    branch_stage = await get_first_stage_name("sales", "New Appointment") if payload.branch_id else None
+    branch_stage = await first_branch_stage_for_branch(payload.branch_id, "New Appointment") if payload.branch_id else None
     patient_number = await generate_patient_number(payload.branch_id) if payload.branch_id else None
     lead = {
         "id": str(uuid.uuid4()),
@@ -140,12 +140,14 @@ async def v3_edit_lead(
     # Hand-off bridge: when stage is set to "Appointment" via PUT, push lead into Branch Admin's
     # New Lead column (only if branch_stage isn't already set on the lead).
     if updates.get("stage") == "Appointment" and "branch_stage" not in updates and existing is not None and not existing.get("branch_stage"):
-        updates["branch_stage"] = await get_first_stage_name("sales", "New Appointment")
+        updates["branch_stage"] = await first_branch_stage_for_branch(
+            updates.get("branch_id") or existing.get("branch_id"), "New Appointment"
+        )
 
     # Reassigning to a different branch must reset branch_stage — otherwise the lead silently
     # carries its old branch's pipeline position (e.g. "Portfolio") onto the new branch's board.
     if "branch_id" in updates and "branch_stage" not in updates and existing is not None and existing.get("branch_id") != updates["branch_id"]:
-        updates["branch_stage"] = await get_first_stage_name("sales", "New Appointment")
+        updates["branch_stage"] = await first_branch_stage_for_branch(updates["branch_id"], "New Appointment")
 
     filter_query: Dict[str, object] = {"id": lead_id}
     if is_branch_admin_role(user.role) and user.branch_id:
@@ -179,7 +181,7 @@ async def v3_assign_branch(lead_id: str, payload: V3AssignBranchInput, _: V3User
     existing_lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0, "patient_number": 1})
     if not existing_lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    new_branch_stage = await get_first_stage_name("sales", "New Appointment")
+    new_branch_stage = await first_branch_stage_for_branch(payload.branch_id, "New Appointment")
     updates = {"branch_id": payload.branch_id, "stage": "Appointment", "branch_stage": new_branch_stage, "updated_at": now_iso()}
     # A lead created without a branch (e.g. straight from Pre-Sales) never got a Patient
     # Number — this is its first branch, so assign one now instead of leaving it blank forever.
@@ -200,7 +202,11 @@ async def v3_confirm_lead(lead_id: str, user: V3UserOut = Depends(v3_require_rol
     if is_branch_admin_role(user.role):
         filter_query["branch_id"] = user.branch_id
 
-    new_branch_stage = await get_first_stage_name("sales", "New Appointment")
+    # Read the lead's branch before writing: the entry stage it lands on depends on that
+    # branch's Lead Control, and a branch_admin caller's own branch_id is not necessarily
+    # the lead's when a Super Admin is the one confirming.
+    target = await v3_col("leads").find_one(filter_query, {"_id": 0, "branch_id": 1})
+    new_branch_stage = await first_branch_stage_for_branch((target or {}).get("branch_id"), "New Appointment")
     result = await v3_col("leads").update_one(filter_query, {"$set": {"stage": "Appointment", "branch_stage": new_branch_stage, "updated_at": now_iso()}})
     if result.matched_count == 0:
         exists = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0, "id": 1})
@@ -242,7 +248,7 @@ async def v3_book_appointment(lead_id: str, payload: V3BookAppointmentInput, use
         "created_at": now_iso(),
     }
     await v3_col("appointments").insert_one(appointment.copy())
-    new_branch_stage = await get_first_stage_name("sales", "New Appointment")
+    new_branch_stage = await first_branch_stage_for_branch(appointment["branch_id"], "New Appointment")
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {"stage": "Appointment", "branch_stage": new_branch_stage, "updated_at": now_iso()}})
     return V3AppointmentOut(**appointment)
 
@@ -323,7 +329,7 @@ async def v3_move_stage(lead_id: str, payload: V3MoveStageInput, user: V3UserOut
     # Hand-off bridge: when pre-sales moves a lead into "Appointment", make it visible
     # in Branch Admin > Appointment > New Lead column (only if not already on a branch stage).
     if payload.stage == "Appointment" and not lead.get("branch_stage"):
-        updates["branch_stage"] = await get_first_stage_name("sales", "New Appointment")
+        updates["branch_stage"] = await first_branch_stage_for_branch(lead.get("branch_id"), "New Appointment")
     await v3_col("leads").update_one({"id": lead_id}, {"$set": updates})
     activity = {
         "id": str(uuid.uuid4()),
@@ -403,7 +409,7 @@ async def v3_schedule_appointment(lead_id: str, payload: V3AppointmentScheduleIn
             raise HTTPException(status_code=404, detail="Branch not found")
         branch_name = b.get("branch_name") or b.get("name")
     # Online appointments have no branch, so there's no branch board for them to sit in.
-    new_branch_stage = await get_first_stage_name("sales", "New Appointment") if branch_id else None
+    new_branch_stage = await first_branch_stage_for_branch(branch_id, "New Appointment") if branch_id else None
     updates = {
         "stage": "Appointment",
         "appointment_mode": payload.mode,

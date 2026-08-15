@@ -12,6 +12,7 @@ from utils import now_iso
 from deps import v3_require_roles
 import lead_control
 from constants import V3_BRANCH_STAGES, V3_CONSULTATION_STAGES, V3_HEAD_CONSULTATION_STAGES
+from stage_utils import branch_stage_names_for_branch
 from schemas.v3 import (
     V3UserOut, V3LeadOut,
     V3BranchStageInput, V3CollectFeeInput, V3AssignPhysioInput, V3ConsultationStageInput,
@@ -21,12 +22,28 @@ from schemas.v3 import (
 router = APIRouter(prefix="/api/v3")
 
 
-async def _branch_stage_names() -> list:
+async def _branch_stage_names(branch_id: Optional[str] = None) -> list:
     """Live Branch Stages as configured in Super Admin > Pipeline Stage Management,
-    falling back to the built-in defaults if none have been configured yet."""
+    falling back to the built-in defaults if none have been configured yet.
+
+    Scoped to one branch when given: the opening stages differ by Lead Control, so a branch
+    running its own leads gets Branch Assign + RNR where a Pre-Sales-fed one gets New
+    Appointment. Passing no branch returns every mode's stages, which is what callers
+    validating across the whole org (rather than against one board) want.
+    """
+    if branch_id:
+        return await branch_stage_names_for_branch(branch_id, V3_BRANCH_STAGES)
     rows = await v3_col("pipeline_stages").find({"type": "sales"}, {"_id": 0, "name": 1}).sort("order", 1).to_list(200)
     names = [r["name"] for r in rows]
     return names or V3_BRANCH_STAGES
+
+
+async def _branch_stages(branch_id: str) -> list:
+    """Full stage documents for one branch's board — the client needs colours and order,
+    not just names, and must not be handed the other Lead Control mode's stages."""
+    control = await lead_control.branch_lead_control(branch_id)
+    rows = await v3_col("pipeline_stages").find({"type": "sales"}, {"_id": 0}).sort("order", 1).to_list(200)
+    return [r for r in rows if not r.get("applies_to") or r.get("applies_to") == control]
 
 
 async def _consultation_stage_names() -> list:
@@ -267,7 +284,8 @@ async def v3_branch_board_new(branch_id: str, _: V3UserOut = Depends(v3_require_
     try:
         leads = await v3_col("leads").find({"branch_id": branch_id}, {"_id": 0}).sort("updated_at", -1).to_list(20000)
         stage_counts = {}
-        for stage in await _branch_stage_names():
+        branch_stages = await _branch_stages(branch_id)
+        for stage in [s["name"] for s in branch_stages]:
             stage_counts[stage] = sum(1 for lead in leads if lead.get("branch_stage") == stage)
         # One malformed lead document shouldn't 500 the whole board — skip it and keep
         # showing every other lead rather than failing the entire list.
@@ -285,6 +303,10 @@ async def v3_branch_board_new(branch_id: str, _: V3UserOut = Depends(v3_require_
             "leads": [lead.model_dump() for lead in lead_list],
             "stage_counts": stage_counts,
             "lead_control": lead_control.normalize((branch or {}).get("lead_control")),
+            # Sent with the board rather than fetched separately from /stages, which has no
+            # branch to scope by: the stage strip must match the Lead Control on the same
+            # response, or a flipped branch briefly renders the other mode's stages.
+            "stages": branch_stages,
         }
     except HTTPException:
         raise
@@ -295,11 +317,14 @@ async def v3_branch_board_new(branch_id: str, _: V3UserOut = Depends(v3_require_
 
 @router.post("/leads/{lead_id}/branch-stage")
 async def v3_move_branch_stage(lead_id: str, payload: V3BranchStageInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
-    if payload.branch_stage not in await _branch_stage_names():
-        raise HTTPException(status_code=400, detail="Invalid branch stage")
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
+    # Validated against this lead's own branch, not the whole sales list: Branch Assign and
+    # RNR only exist for a branch running its own leads, and moving a Pre-Sales-fed lead
+    # onto one would strand it on a stage its board never draws.
+    if payload.branch_stage not in await _branch_stage_names(lead.get("branch_id")):
+        raise HTTPException(status_code=400, detail="Invalid branch stage")
     old_stage = lead.get("branch_stage", "Unknown")
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {"branch_stage": payload.branch_stage, "updated_at": now_iso()}})
     activity = {

@@ -168,7 +168,17 @@ export const PipelineStageManagement = ({ onBack }) => {
                     </div>
                   </td>
                   <td><span className="inline-block h-3 w-3 rounded-full" style={{ background: s.color }} /></td>
-                  <td className="font-medium" style={{ color: s.color }}>{s.name}</td>
+                  <td className="font-medium" style={{ color: s.color }}>
+                    {s.name}
+                    {/* The Branch pipeline holds both Lead Control modes' opening stages at
+                        once, so it lists two entry stages and an RNR that most branches
+                        never see. Without this the pair reads as an accidental duplicate. */}
+                    {s.applies_to ? (
+                      <span className="ml-2 rounded border border-slate-200 px-1.5 py-0.5 text-[10px] font-normal uppercase tracking-wide text-slate-500">
+                        {s.applies_to === "branch_admin" ? "Branch Admin only" : "Pre Sales only"}
+                      </span>
+                    ) : null}
+                  </td>
                   <td><span className="inline-flex h-7 min-w-[2rem] items-center justify-center rounded border border-slate-200 px-2 text-xs">{s.lead_count || 0}</span></td>
                   <td>{s.is_final ? <Flag className="h-4 w-4 text-green-500" /> : null}</td>
                   <td className="space-x-2">

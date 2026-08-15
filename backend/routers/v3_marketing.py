@@ -11,7 +11,7 @@ from deps import v3_require_roles, v3_current_user
 from constants import V3_STAGES
 from security import hash_password
 from schemas.v3 import V3UserOut
-from stage_utils import get_first_stage_name
+from stage_utils import first_branch_stage_for
 import lead_control
 from pydantic import BaseModel
 from typing import Literal
@@ -582,9 +582,10 @@ async def sync_source(source_id: str, payload: MarketingSyncInput, _: V3UserOut 
     skipped_no_phone = 0
     skipped_duplicate = 0
     sample_errors: List[str] = []
-    first_branch_stage = await get_first_stage_name("sales", "New Appointment")
-    # Resolved once for the whole sync — every row from a source shares its branch.
+    # Resolved once for the whole sync — every row from a source shares its branch, and so
+    # shares the entry stage that branch's Lead Control puts them on.
     source_control = await lead_control.branch_lead_control(source.get("branch_id"))
+    first_branch_stage = await first_branch_stage_for(source_control, "New Appointment")
 
     for idx, row in enumerate(payload.rows):
         phone_raw = str(row.get(phone_key, "") or "").strip()

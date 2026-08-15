@@ -27,7 +27,7 @@ from database import v3_col
 from utils import now_iso, generate_patient_number
 from deps import v3_require_roles, is_branch_admin_role
 from schemas.v3 import V3UserOut
-from stage_utils import get_first_stage_name
+from stage_utils import first_branch_stage_for
 import lead_control
 from routers.v3_marketing import (
     auto_map_columns, normalize_phone, STANDARD_FIELDS, round_robin_assign,
@@ -314,9 +314,10 @@ async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Di
     skipped_no_phone = 0
     skipped_duplicate = 0
     sample_errors = []
-    first_branch_stage = await get_first_stage_name("sales", "New Appointment")
-    # Resolved once for the whole import — every row from a source shares its branch.
+    # Resolved once for the whole import — every row from a source shares its branch, and so
+    # shares the entry stage that branch's Lead Control puts them on.
     source_control = await lead_control.branch_lead_control(source.get("branch_id"))
+    first_branch_stage = await first_branch_stage_for(source_control, "New Appointment")
 
     for idx, row in enumerate(rows):
         phone_raw = str(row.get(phone_key, "") or "").strip()

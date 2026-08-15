@@ -29,6 +29,20 @@ V3_BRANCH_STAGES = [
     "Cancelled",
 ]
 
+# The Branch ("sales") pipeline is one shared list, but its opening stages depend on who
+# works the lead first — see lead_control. A sales stage may carry an `applies_to` of
+# "pre_sales" or "branch_admin" to appear only for branches under that Lead Control;
+# a stage with no `applies_to` (the default, and every stage that shipped before this)
+# belongs to both and is what the bulk of the pipeline stays.
+#
+# A branch on Pre-Sales control opens at "New Appointment" — the lead was already worked
+# and qualified by the Pre-Sales desk, so it arrives as a booked appointment. A branch
+# running its own leads has done none of that yet: the lead is raw, so it opens at
+# "Branch Assign" and gets an RNR stage for the calls that go unanswered, mirroring the
+# Pre-Sales desk's own New Leads -> RNR -> Follow Up shape.
+BRANCH_ADMIN_ENTRY_STAGE = "Branch Assign"
+BRANCH_ADMIN_RNR_STAGE = "RNR"
+
 # Branch's own consultation pipeline. "New Appointment" was retired — consultations
 # now begin at Follow Up (see seed.migrate_consultation_stages). The Head Physio's
 # independent pipeline below still has its own New Appointment stage.
