@@ -43,19 +43,6 @@ V3_BRANCH_STAGES = [
 BRANCH_ADMIN_ENTRY_STAGE = "Branch Assign"
 BRANCH_ADMIN_RNR_STAGE = "RNR"
 
-# A branch running its own leads has two ways a lead can arrive, so it has two opening
-# stages rather than one:
-#
-#   "Leads"         — nobody sent it here. It came in raw off a marketing source, or was
-#                     added at the branch itself. This is the ordinary entry stage.
-#   "Branch Assign" — somebody handed it to this branch specifically (assign-branch, or a
-#                     lead moved onto the branch by an edit).
-#
-# They are alternatives, never both: a lead occupies exactly one branch_stage, which is
-# what keeps each pill on the board a disjoint list. Both carry `entry: True` so a lead's
-# popup can show the one it actually came in through and drop the other.
-BRANCH_ADMIN_LEADS_STAGE = "Leads"
-
 # Branch's own consultation pipeline. "New Appointment" was retired — consultations
 # now begin at Follow Up (see seed.migrate_consultation_stages). The Head Physio's
 # independent pipeline below still has its own New Appointment stage.

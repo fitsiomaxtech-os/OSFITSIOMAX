@@ -7,7 +7,7 @@ from database import v3_col
 from utils import now_iso, normalize_slot_time, generate_patient_number
 from deps import v3_current_user, v3_require_roles, is_branch_admin_role
 from constants import V3_STAGES
-from stage_utils import first_branch_stage_for_branch, assigned_branch_stage_for_branch
+from stage_utils import first_branch_stage_for_branch
 import lead_control
 from schemas.v3 import (
     V3UserOut, V3LeadCreate, V3LeadUpdate, V3LeadOut,
@@ -147,9 +147,7 @@ async def v3_edit_lead(
     # Reassigning to a different branch must reset branch_stage — otherwise the lead silently
     # carries its old branch's pipeline position (e.g. "Portfolio") onto the new branch's board.
     if "branch_id" in updates and "branch_stage" not in updates and existing is not None and existing.get("branch_id") != updates["branch_id"]:
-        # Moved onto this branch by an edit, which is an assignment — so it opens on the
-        # assigned stage rather than alongside the branch's own raw arrivals.
-        updates["branch_stage"] = await assigned_branch_stage_for_branch(updates["branch_id"], "New Appointment")
+        updates["branch_stage"] = await first_branch_stage_for_branch(updates["branch_id"], "New Appointment")
 
     filter_query: Dict[str, object] = {"id": lead_id}
     if is_branch_admin_role(user.role) and user.branch_id:
@@ -183,8 +181,7 @@ async def v3_assign_branch(lead_id: str, payload: V3AssignBranchInput, _: V3User
     existing_lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0, "patient_number": 1})
     if not existing_lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    # The assign-branch path by definition: somebody is handing this lead to the branch.
-    new_branch_stage = await assigned_branch_stage_for_branch(payload.branch_id, "New Appointment")
+    new_branch_stage = await first_branch_stage_for_branch(payload.branch_id, "New Appointment")
     updates = {"branch_id": payload.branch_id, "stage": "Appointment", "branch_stage": new_branch_stage, "updated_at": now_iso()}
     # A lead created without a branch (e.g. straight from Pre-Sales) never got a Patient
     # Number — this is its first branch, so assign one now instead of leaving it blank forever.
