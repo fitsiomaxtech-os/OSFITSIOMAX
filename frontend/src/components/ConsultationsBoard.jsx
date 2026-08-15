@@ -5408,6 +5408,51 @@ function TreatmentChecklist({ options, value, onChange, testPrefix }) {
   const known = new Set(names);
   const checked = new Set(lines.filter((l) => known.has(l)));
   const carried = lines.filter((l) => !known.has(l));
+  const picked = names.filter((n) => checked.has(n));
+
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState(null);
+  const wrapRef = useRef(null);
+  const panelRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDocClick = (e) => {
+      if (wrapRef.current?.contains(e.target) || panelRef.current?.contains(e.target)) return;
+      setOpen(false);
+    };
+    // Scrolling inside the panel must not dismiss it. The house dropdown closes on any
+    // scroll because it is a short single-select; this one has its own scrollbar, and
+    // closing on that would put everything past the sixth treatment out of reach.
+    const onScroll = (e) => { if (!panelRef.current?.contains(e.target)) setOpen(false); };
+    const onResize = () => setOpen(false);
+    document.addEventListener("mousedown", onDocClick);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onResize);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [open]);
+
+  // Positioned fixed off a measurement, the same way ColorSelect does it: the panel lives
+  // inside a scrolling modal, and an absolutely-placed one would be clipped by it. Flips
+  // above the trigger when there is no room below, and is pinned inside the viewport.
+  const togglePanel = () => {
+    if (open) { setOpen(false); return; }
+    const r = wrapRef.current.getBoundingClientRect();
+    const height = Math.min(80 + options.length * 34, 320);
+    const room = window.innerHeight - r.bottom;
+    const width = Math.min(Math.max(r.width, 240), window.innerWidth - 16);
+    const left = Math.min(Math.max(8, r.left), window.innerWidth - width - 8);
+    setPos({
+      left,
+      width,
+      ...(room > height ? { top: r.bottom + 4 } : { bottom: window.innerHeight - r.top + 4 }),
+    });
+    setOpen(true);
+  };
 
   const toggle = (name) => {
     const next = new Set(checked);
@@ -5415,37 +5460,98 @@ function TreatmentChecklist({ options, value, onChange, testPrefix }) {
     onChange([...names.filter((n) => next.has(n)), ...carried].join("\n"));
   };
 
+  const triggerLabel = picked.length === 0
+    ? "Select treatments"
+    : picked.length === 1 ? picked[0] : `${picked.length} treatments selected`;
+
   return (
     <div data-testid={`${testPrefix}-checklist`}>
-      <div className="max-h-44 space-y-0.5 overflow-y-auto rounded-md border border-slate-200 bg-white p-1.5">
-        {options.map((o) => {
-          const on = checked.has(o.name);
-          return (
-            <label
-              key={o.id}
-              className={`flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs transition ${on ? "bg-indigo-50 font-semibold text-indigo-800" : "text-slate-700 hover:bg-slate-50"}`}
-              data-testid={`${testPrefix}-option-${o.id}`}
-            >
-              <input
-                type="checkbox"
-                checked={on}
-                onChange={() => toggle(o.name)}
-                className="h-3.5 w-3.5 shrink-0 accent-indigo-600"
-              />
-              <span className="min-w-0 flex-1 truncate">{o.name}</span>
-            </label>
-          );
-        })}
+      <div className="relative" ref={wrapRef}>
+        <button
+          type="button"
+          onClick={togglePanel}
+          className={`flex w-full items-center justify-between gap-1.5 rounded-md border px-3 py-2 text-xs font-semibold transition ${picked.length ? "border-indigo-200 bg-white text-indigo-800" : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"}`}
+          data-testid={`${testPrefix}-trigger`}
+        >
+          <span className="min-w-0 truncate">{triggerLabel}</span>
+          <ChevronDown className={`h-3.5 w-3.5 shrink-0 opacity-60 transition ${open ? "rotate-180" : ""}`} />
+        </button>
       </div>
+
+      {open && pos && (
+        // Above the lead modal's own z-50, or it would open behind the popup it sits in.
+        <div
+          ref={panelRef}
+          className="fixed z-[60] flex flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl"
+          style={pos}
+          data-testid={`${testPrefix}-panel`}
+        >
+          <div className="max-h-64 space-y-0.5 overflow-y-auto p-1.5">
+            {options.map((o) => {
+              const on = checked.has(o.name);
+              return (
+                <label
+                  key={o.id}
+                  className={`flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs transition ${on ? "bg-indigo-50 font-semibold text-indigo-800" : "text-slate-700 hover:bg-slate-50"}`}
+                  data-testid={`${testPrefix}-option-${o.id}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={on}
+                    onChange={() => toggle(o.name)}
+                    className="h-3.5 w-3.5 shrink-0 accent-indigo-600"
+                  />
+                  <span className="min-w-0 flex-1 truncate">{o.name}</span>
+                </label>
+              );
+            })}
+          </div>
+          <div className="flex items-center justify-between gap-2 border-t border-slate-100 bg-slate-50 px-2 py-1.5">
+            <span className="text-[11px] text-slate-500">{picked.length} selected</span>
+            <Button
+              size="sm"
+              onClick={() => setOpen(false)}
+              className="h-7 bg-indigo-600 px-3 text-[11px] hover:bg-indigo-700"
+              data-testid={`${testPrefix}-done`}
+            >
+              Done
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* The picks stay readable with the panel shut — a trigger reading "4 treatments
+          selected" says how many, not which, and which is the part that matters when you
+          are about to Confirm & Save. */}
+      {picked.length > 0 && (
+        <div className="mt-1.5 flex flex-wrap gap-1" data-testid={`${testPrefix}-chips`}>
+          {picked.map((n) => (
+            <span key={n} className="inline-flex items-center gap-1 rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-700">
+              {n}
+              <button
+                type="button"
+                onClick={() => toggle(n)}
+                className="text-indigo-400 transition hover:text-indigo-700"
+                aria-label={`Remove ${n}`}
+                data-testid={`${testPrefix}-chip-remove-${n}`}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
       {carried.length > 0 && (
         <div className="mt-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5" data-testid={`${testPrefix}-carried`}>
           <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-700">Also written</p>
           <p className="whitespace-pre-wrap text-[11px] text-amber-900">{carried.join("\n")}</p>
         </div>
       )}
-      <p className="mt-1.5 text-[11px] text-slate-400">
-        {checked.size === 0 ? "Tick every treatment this patient is going away with." : `${checked.size} selected.`}
-      </p>
+
+      {picked.length === 0 && (
+        <p className="mt-1.5 text-[11px] text-slate-400">Tick every treatment this patient is going away with.</p>
+      )}
     </div>
   );
 }
