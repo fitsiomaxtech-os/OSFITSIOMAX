@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { bmCreateWithExistingAdmin, updateBranch, hrBranchAdminCandidates, bmPerformance, bmHeadPhysioCandidates, bmAssignHeadPhysio, getVerticals } from "@/lib/api";
 import { MilkDateInput, MilkTimeInput } from "@/components/ui/milk-calendar";
+import { LeadControlSwitch, normalizeLeadControl, BRANCH_ADMIN } from "@/components/branch/LeadControlSwitch";
 
 // "offline_physiotherapy" -> "Offline Physiotherapy". The stored name stays snake_case,
 // because it is matched against elsewhere; only the label is prettied.
@@ -49,6 +50,7 @@ export const BranchFormDialogV2 = ({ branch, onClose, onSaved }) => {
     map_location: branch?.map_location || "",
     opened_date: branch?.opened_date || "",
     vertical: branch?.vertical || "offline_physiotherapy",
+    lead_control: normalizeLeadControl(branch?.lead_control),
     weekly_hours: branch?.weekly_hours && Object.keys(branch.weekly_hours).length ? { ...emptyWeekly(), ...branch.weekly_hours } : emptyWeekly(),
     holidays: branch?.holidays || [],
   });
@@ -124,14 +126,14 @@ export const BranchFormDialogV2 = ({ branch, onClose, onSaved }) => {
         await updateBranch(branch.id, {
           branch_name: form.branch_name, code: form.code || undefined, address: form.address, admin_phone: form.admin_phone,
           phone: form.phone, email: form.email, map_location: form.map_location,
-          opened_date: form.opened_date, vertical: form.vertical, weekly_hours: form.weekly_hours, holidays: form.holidays,
+          opened_date: form.opened_date, vertical: form.vertical, lead_control: form.lead_control, weekly_hours: form.weekly_hours, holidays: form.holidays,
         });
         toast.success("Branch updated");
       } else {
         await bmCreateWithExistingAdmin({
           branch_name: form.branch_name, code: form.code || undefined, address: form.address, admin_user_id: form.admin_user_id, admin_phone: form.admin_phone,
           phone: form.phone, email: form.email, map_location: form.map_location,
-          opened_date: form.opened_date, vertical: form.vertical, weekly_hours: form.weekly_hours, holidays: form.holidays,
+          opened_date: form.opened_date, vertical: form.vertical, lead_control: form.lead_control, weekly_hours: form.weekly_hours, holidays: form.holidays,
         });
         toast.success("Branch created — finance summary will populate once leads are assigned.");
       }
@@ -203,6 +205,20 @@ export const BranchFormDialogV2 = ({ branch, onClose, onSaved }) => {
               <Field label="Map Location" className="sm:col-span-1">
                 <Input value={form.map_location} onChange={(e) => set("map_location", e.target.value)} placeholder="Google Maps URL or lat,lng" data-testid="bf2-map" />
                 {form.map_location && <a href={form.map_location.startsWith("http") ? form.map_location : `https://www.google.com/maps?q=${encodeURIComponent(form.map_location)}`} target="_blank" rel="noopener noreferrer" className="mt-1 inline-block text-[11px] text-sky-600 hover:underline" data-testid="bf2-map-preview">Open in Google Maps →</a>}
+              </Field>
+              {/* Last in the grid and spanning it: this one changes who works the
+                  branch's leads, so it reads as its own decision rather than as one
+                  more contact field. */}
+              <Field label="Lead Control" className="sm:col-span-2">
+                <LeadControlSwitch value={form.lead_control} onChange={(v) => set("lead_control", v)} testid="bf2-lead-control" />
+                <p className="mt-1.5 text-[11px] text-slate-500">
+                  {form.lead_control === BRANCH_ADMIN
+                    ? "This branch's leads skip the Pre-Sales pipeline and go straight to the Branch Admin. No Pre-Sales rep is assigned."
+                    : "New leads land in the Pre-Sales pipeline first and are shared out across the Pre-Sales team."}
+                </p>
+                <p className="mt-1 text-[11px] text-slate-400">
+                  Applies to leads already in the pipeline too, not only new ones. Leads with no branch yet always stay with Pre-Sales.
+                </p>
               </Field>
             </div>
           )}

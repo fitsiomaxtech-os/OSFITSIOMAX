@@ -315,7 +315,13 @@ export const PreSalesCRM = ({ onManageStages, role, currentUser, onLogout }) => 
     try {
       const [stgs, ldList] = await Promise.all([stagesList("pre_sales"), getLeads({})]);
       setStages(stgs);
-      setLeads(ldList);
+      // Lead Control: a branch set to "branch_admin" works its own leads, so they never
+      // belong on this board. Filtered here at the source rather than in each memo below
+      // — the KPI cards, the stage tabs, the table and the pipeline view all read from
+      // this one list, and a lead hidden from three of the four would be worse than
+      // showing it everywhere. The backend resolves the flag from the lead's branch on
+      // every fetch, so flipping the switch empties or refills this board on refresh.
+      setLeads(ldList.filter((l) => l.lead_control !== "branch_admin"));
       // If a lead is currently open in the detail dialog, refresh its reference
       // so saved edits show up immediately.
       setEditing((prev) => prev ? (ldList.find((l) => l.id === prev.id) || prev) : prev);

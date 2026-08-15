@@ -12,6 +12,7 @@ from constants import V3_STAGES
 from security import hash_password
 from schemas.v3 import V3UserOut
 from stage_utils import get_first_stage_name
+import lead_control
 from pydantic import BaseModel
 from typing import Literal
 
@@ -230,10 +231,26 @@ UNOWNED_LEAD = {"$or": [
 ]}
 
 
+async def unowned_pre_sales_query() -> Dict[str, Any]:
+    """UNOWNED_LEAD, minus the branches that work their own leads.
+
+    A branch on Branch Admin Lead Control gets no Pre-Sales agent by design, so its
+    leads are unowned on purpose. Without this they would read as a backlog on the
+    Team & Distribution tab and the Distribute button would hand them to Pre-Sales,
+    quietly undoing the switch. Leads with no branch are still fair game — nobody
+    else can work them.
+    """
+    controls = await lead_control.branch_control_map()
+    skip = [bid for bid, c in controls.items() if c == lead_control.BRANCH_ADMIN]
+    if not skip:
+        return UNOWNED_LEAD
+    return {"$and": [UNOWNED_LEAD, {"branch_id": {"$nin": skip}}]}
+
+
 @router.get("/unassigned-count")
 async def unassigned_lead_count(_: V3UserOut = Depends(v3_require_roles("super_admin"))):
     """How many leads carry no Pre-Sales agent — the backlog the button below clears."""
-    return {"count": await v3_col("leads").count_documents(UNOWNED_LEAD)}
+    return {"count": await v3_col("leads").count_documents(await unowned_pre_sales_query())}
 
 
 @router.post("/distribute-unassigned")
@@ -263,7 +280,7 @@ async def distribute_unassigned_leads(_: V3UserOut = Depends(v3_require_roles("s
             detail="No active Pre-Sales team is set. Use 'Refresh Team from Users' first.",
         )
 
-    rows = await v3_col("leads").find(UNOWNED_LEAD, {"_id": 0, "id": 1}).to_list(100000)
+    rows = await v3_col("leads").find(await unowned_pre_sales_query(), {"_id": 0, "id": 1}).to_list(100000)
     if not rows:
         return {"assigned": 0, "per_agent": {}, "message": "Every lead already has an agent."}
 
@@ -566,6 +583,8 @@ async def sync_source(source_id: str, payload: MarketingSyncInput, _: V3UserOut 
     skipped_duplicate = 0
     sample_errors: List[str] = []
     first_branch_stage = await get_first_stage_name("sales", "New Appointment")
+    # Resolved once for the whole sync — every row from a source shares its branch.
+    source_control = await lead_control.branch_lead_control(source.get("branch_id"))
 
     for idx, row in enumerate(payload.rows):
         phone_raw = str(row.get(phone_key, "") or "").strip()
@@ -594,7 +613,8 @@ async def sync_source(source_id: str, payload: MarketingSyncInput, _: V3UserOut 
             if key not in mapped_values and value not in (None, ""):
                 custom_payload[key] = value
 
-        assigned = await round_robin_assign("pre_sales")
+        # No Pre-Sales rep on a lead the Pre-Sales desk will never see.
+        assigned = None if source_control == lead_control.BRANCH_ADMIN else await round_robin_assign("pre_sales")
         source_branch_id = source.get("branch_id")
         patient_number = await generate_patient_number(source_branch_id) if source_branch_id else None
         lead = {

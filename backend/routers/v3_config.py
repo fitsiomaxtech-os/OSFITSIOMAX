@@ -8,6 +8,7 @@ from utils import now_iso, normalize_slot_time, derive_branch_code
 from security import hash_password
 from deps import v3_current_user, v3_require_roles, is_branch_admin_role
 from stage_utils import get_first_stage_name
+import lead_control
 from schemas.v3 import (
     V3UserOut, V3VerticalCreate, V3VerticalOut,
     V3BranchCreate, V3BranchOut, V3BranchUpdate,
@@ -127,6 +128,7 @@ async def v3_create_branch(payload: V3BranchCreate, _: V3UserOut = Depends(v3_re
         "admin_email": payload.admin_email.lower(),
         "admin_phone": payload.admin_phone,
         "vertical": payload.vertical,
+        "lead_control": lead_control.normalize(payload.lead_control),
         "created_at": now_iso(),
     }
     await v3_col("branches").insert_one(branch.copy())
@@ -158,6 +160,11 @@ async def v3_update_branch(branch_id: str, payload: V3BranchUpdate, _: V3UserOut
         if clash:
             raise HTTPException(status_code=409, detail=f"Branch code '{new_code}' is already used by another branch")
         updates["code"] = new_code
+    if "lead_control" in updates:
+        # Rejected rather than defaulted: a typo here silently hands every lead at the
+        # branch to the wrong desk, and the caller would never see it.
+        if updates["lead_control"] not in lead_control.VALID:
+            raise HTTPException(status_code=400, detail=f"lead_control must be one of {list(lead_control.VALID)}")
     await v3_col("branches").update_one({"id": branch_id}, {"$set": updates})
     updated = await v3_col("branches").find_one({"id": branch_id}, {"_id": 0})
     return V3BranchOut(**updated)

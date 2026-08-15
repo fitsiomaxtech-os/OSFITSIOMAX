@@ -8,6 +8,7 @@ from utils import now_iso, normalize_slot_time, generate_patient_number
 from deps import v3_current_user, v3_require_roles, is_branch_admin_role
 from constants import V3_STAGES
 from stage_utils import get_first_stage_name
+import lead_control
 from schemas.v3 import (
     V3UserOut, V3LeadCreate, V3LeadUpdate, V3LeadOut,
     V3AssignBranchInput, V3BookAppointmentInput, V3AppointmentOut,
@@ -49,7 +50,14 @@ async def v3_get_leads(
         query["created_at"] = created_query
 
     rows = await v3_col("leads").find(query, {"_id": 0}).sort("updated_at", -1).to_list(20000)
-    return [V3LeadOut(**row) for row in rows]
+    # Lead Control is read from the branch here rather than stored on the lead, so a
+    # branch switched to "branch_admin" hands over the leads it already has instead of
+    # only the next import. One query for every branch, not one per lead.
+    control_by_branch = await lead_control.branch_control_map()
+    return [
+        V3LeadOut(**{**row, "lead_control": lead_control.control_for_lead(row, control_by_branch)})
+        for row in rows
+    ]
 
 
 @router.post("/leads/manual", response_model=V3LeadOut)

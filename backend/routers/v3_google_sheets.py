@@ -28,6 +28,7 @@ from utils import now_iso, generate_patient_number
 from deps import v3_require_roles, is_branch_admin_role
 from schemas.v3 import V3UserOut
 from stage_utils import get_first_stage_name
+import lead_control
 from routers.v3_marketing import (
     auto_map_columns, normalize_phone, STANDARD_FIELDS, round_robin_assign,
 )
@@ -314,6 +315,8 @@ async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Di
     skipped_duplicate = 0
     sample_errors = []
     first_branch_stage = await get_first_stage_name("sales", "New Appointment")
+    # Resolved once for the whole import — every row from a source shares its branch.
+    source_control = await lead_control.branch_lead_control(source.get("branch_id"))
 
     for idx, row in enumerate(rows):
         phone_raw = str(row.get(phone_key, "") or "").strip()
@@ -338,7 +341,8 @@ async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Di
             if key not in mapped_values and value not in (None, ""):
                 custom_payload[key] = value
 
-        assigned = await round_robin_assign("pre_sales")
+        # No Pre-Sales rep on a lead the Pre-Sales desk will never see.
+        assigned = None if source_control == lead_control.BRANCH_ADMIN else await round_robin_assign("pre_sales")
         source_branch_id = source.get("branch_id")
         patient_number = await generate_patient_number(source_branch_id) if source_branch_id else None
         lead = {

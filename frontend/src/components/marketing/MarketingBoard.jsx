@@ -13,9 +13,11 @@ import {
   mkGetTeam, mkCreateTeamMember, mkAllLeads, mkAssignLead, mkDeleteLead, mkBulkDelete,
   mkGetSources, mkCreateSource, mkUpdateSource, mkDeleteSource, mkSyncSource,
   gsStatus, gsAuthUrl, gsDisconnect, gsPull,
+  getBranches, updateBranch,
 } from "@/lib/api";
 import { MaskedContact } from "@/components/MaskedContact";
 import { SourcePill } from "@/components/marketing/SourcePill";
+import { LeadControlSwitch, normalizeLeadControl, BRANCH_ADMIN } from "@/components/branch/LeadControlSwitch";
 
 const SUB_TABS = [
   { key: "all_leads", label: "All Leads", icon: Layers },
@@ -36,7 +38,14 @@ const TabBtn = ({ active, label, Icon, onClick, testid }) => (
 
 // ============ Sources ============
 
-const SourcesTab = ({ branches = [] }) => {
+const SourcesTab = ({ branches: branchesProp = [] }) => {
+  // Its own copy rather than the prop alone. Lead Control is edited from these cards
+  // and lives on the branch, so the value has to come back fresh after a save — the
+  // prop is loaded once at the app root and would go stale the moment it is changed.
+  const [branches, setBranches] = useState(branchesProp);
+  const loadBranches = useCallback(() => getBranches().then(setBranches).catch((e) => console.warn("[branches]", e?.message || e)), []);
+  useEffect(() => { loadBranches(); }, [loadBranches]);
+
   const [sources, setSources] = useState([]);
   const [gs, setGs] = useState({ connected: false });
   const [showAdd, setShowAdd] = useState(false);
@@ -245,6 +254,9 @@ const SourcesTab = ({ branches = [] }) => {
               {s.spreadsheet_id && <p className="text-[10px] text-slate-400">ID: <code>{s.spreadsheet_id.slice(0, 24)}…</code></p>}
               <p>Rows: <span className="font-semibold">{s.row_count || 0}</span> · Last sync: {s.last_synced ? s.last_synced.slice(0, 16).replace("T", " ") : "Never"}</p>
               <p>Mappings: <span className="font-semibold">{Object.keys(s.column_mapping || {}).length}</span> · Custom fields: {(s.custom_fields || []).length}</p>
+
+              <SourceLeadControl source={s} branch={branches.find((b) => b.id === s.branch_id)} onSaved={loadBranches} />
+
               <div className="flex flex-wrap gap-2 pt-2">
                 {s.source_type === "google_sheets" && s.spreadsheet_id && gs.connected && (
                   <Button
@@ -361,6 +373,67 @@ const SourcesTab = ({ branches = [] }) => {
               )}
         </DialogShell>
       )}
+    </div>
+  );
+};
+
+/**
+ * Lead Control on a source card — who works the leads this source brings in.
+ *
+ * The setting belongs to the branch, not the source, and the card says so: two sources
+ * pointing at one branch move together, and the branch name is on the label so that is
+ * not a surprise. It is here because this is where leads enter the OS, which is where
+ * you think about where they should go.
+ *
+ * A source tagged "All Branches" has no branch to hand leads to, so the switch is off
+ * and says why instead of pretending to work.
+ */
+const SourceLeadControl = ({ source, branch, onSaved }) => {
+  const [value, setValue] = useState(normalizeLeadControl(branch?.lead_control));
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => { setValue(normalizeLeadControl(branch?.lead_control)); }, [branch?.lead_control]);
+
+  const unbranched = !source.branch_id;
+
+  const pick = async (next) => {
+    if (!branch) return;
+    const prev = value;
+    setValue(next);
+    setSaving(true);
+    try {
+      await updateBranch(branch.id, { lead_control: next });
+      toast.success(next === BRANCH_ADMIN
+        ? `${branch.branch_name}: leads go straight to the Branch Admin`
+        : `${branch.branch_name}: leads start with Pre-Sales`);
+      onSaved && onSaved();
+    } catch (e) {
+      setValue(prev);
+      toast.error(e?.response?.data?.detail || "Could not change Lead Control");
+    }
+    setSaving(false);
+  };
+
+  return (
+    <div className="rounded-md border border-slate-200 bg-slate-50/60 p-2" data-testid={`mk-source-lead-control-${source.id}`}>
+      <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+        Lead Control{branch ? ` · ${branch.branch_name}` : ""}
+      </p>
+      <LeadControlSwitch
+        value={value}
+        onChange={pick}
+        disabled={unbranched || !branch}
+        busy={saving}
+        size="sm"
+        testid={`mk-lead-control-${source.id}`}
+      />
+      <p className="mt-1.5 text-[10px] leading-snug text-slate-400">
+        {unbranched
+          ? "Tag this source to a branch to choose. Leads with no branch always start with Pre-Sales."
+          : value === BRANCH_ADMIN
+            ? "These leads skip Pre-Sales and land on the branch board. Set on the branch, so every source for it follows."
+            : "These leads start in the Pre-Sales pipeline. Set on the branch, so every source for it follows."}
+      </p>
     </div>
   );
 };

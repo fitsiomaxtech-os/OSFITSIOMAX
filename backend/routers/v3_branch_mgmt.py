@@ -6,6 +6,7 @@ import uuid
 from database import v3_col
 from utils import now_iso, derive_branch_code
 from deps import v3_require_roles, is_branch_admin_role
+import lead_control
 from schemas.v3 import V3UserOut
 
 
@@ -26,6 +27,7 @@ class BranchAssignedCreate(BaseModel):
     weekly_hours: Optional[Dict[str, Any]] = None
     holidays: Optional[List[str]] = None
     code: Optional[str] = None  # short unique prefix for Patient Numbers, e.g. "ANN" — auto-derived if omitted
+    lead_control: Optional[str] = None  # "pre_sales" | "branch_admin" — see backend/lead_control.py
 
 
 class AssignAdmin(BaseModel):
@@ -96,6 +98,7 @@ async def create_branch_with_existing_admin(payload: BranchAssignedCreate, _: V3
         "map_location": payload.map_location or "",
         "weekly_hours": payload.weekly_hours or {},
         "holidays": payload.holidays or [],
+        "lead_control": lead_control.normalize(payload.lead_control),
         "created_at": now_iso(),
     }
     await v3_col("branches").insert_one(branch.copy())

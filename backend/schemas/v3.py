@@ -59,6 +59,7 @@ class V3BranchCreate(BaseModel):
     admin_phone: Optional[str] = ""
     vertical: str = "offline_physiotherapy"
     code: Optional[str] = None  # short unique prefix for Patient Numbers, e.g. "ANN" — auto-derived if omitted
+    lead_control: Optional[str] = None  # "pre_sales" | "branch_admin" — see backend/lead_control.py
 
 
 class V3BranchOut(BaseModel):
@@ -80,6 +81,9 @@ class V3BranchOut(BaseModel):
     map_location: Optional[str] = ""
     weekly_hours: Optional[Dict[str, Any]] = None
     holidays: Optional[List[str]] = None
+    # Absent on every branch made before Lead Control existed; the readers default it
+    # to "pre_sales" rather than this schema, so an old branch keeps the old behaviour.
+    lead_control: Optional[str] = None
     created_at: str
 
 
@@ -98,6 +102,7 @@ class V3BranchUpdate(BaseModel):
     map_location: Optional[str] = None
     weekly_hours: Optional[Dict[str, Any]] = None
     holidays: Optional[List[str]] = None
+    lead_control: Optional[str] = None  # "pre_sales" | "branch_admin"
 
 
 class V3DoctorCreate(BaseModel):
@@ -197,6 +202,10 @@ class V3LeadOut(BaseModel):
     consultation_stage: Optional[str] = None
     head_consultation_stage: Optional[str] = None  # Head Physio's own pipeline, independent from consultation_stage
     branch_id: Optional[str] = None
+    # Not stored on the lead — GET /leads resolves it from the lead's branch on the way
+    # out, so flipping a branch's switch rehomes the leads already in flight. See
+    # backend/lead_control.py.
+    lead_control: Optional[str] = None
     notes: Optional[str] = ""
     extra_fields: Dict[str, Any]
     consultation_fee: Optional[float] = None
