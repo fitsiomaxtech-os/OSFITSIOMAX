@@ -632,32 +632,6 @@ const ExecutiveOverview = ({ data, loading, dateFilter }) => {
 
   return (
     <div className="space-y-4" data-testid="dashboard-overview">
-      {/* Branch scope, above the figures it scopes — the row reads as "for this branch",
-          then the numbers. Clicking the selected one clears back to every branch, so the
-          filter has a way out that does not need a fifth "All" card competing with the
-          four real ones for the same row. */}
-      {branchCards.length > 0 && (
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" data-testid="dashboard-branch-filter">
-          {branchCards.map((b) => {
-            const on = branchFilter === b.branch_id;
-            return (
-              <button
-                key={b.branch_id}
-                type="button"
-                onClick={() => setBranchFilter(on ? null : b.branch_id)}
-                aria-pressed={on}
-                className={`rounded-xl border px-4 py-5 text-left text-sm font-bold uppercase tracking-wide transition sm:py-6 ${
-                  on ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
-                }`}
-                data-testid={`dashboard-branch-filter-${b.branch_id}`}
-              >
-                <span className="block truncate">{b.branch_name}</span>
-              </button>
-            );
-          })}
-        </div>
-      )}
-
       {/* Two up on a phone rather than one. Four full-width cards stacked pushed the
           branch table two screens down, and these figures are short enough to share a
           row.
@@ -693,6 +667,32 @@ const ExecutiveOverview = ({ data, loading, dateFilter }) => {
           );
         })}
       </div>
+
+      {/* Branch scope, under the figures it scopes and directly above the charts it also
+          drives — so it sits between the two things it changes rather than opening the
+          board with a control. Clicking the selected one clears back to every branch,
+          which is why there is no fifth "All" card competing for the row. */}
+      {branchCards.length > 0 && (
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" data-testid="dashboard-branch-filter">
+          {branchCards.map((b) => {
+            const on = branchFilter === b.branch_id;
+            return (
+              <button
+                key={b.branch_id}
+                type="button"
+                onClick={() => setBranchFilter(on ? null : b.branch_id)}
+                aria-pressed={on}
+                className={`rounded-xl border px-4 py-5 text-left text-sm font-bold uppercase tracking-wide transition sm:py-6 ${
+                  on ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                }`}
+                data-testid={`dashboard-branch-filter-${b.branch_id}`}
+              >
+                <span className="block truncate">{b.branch_name}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       <BranchGrowthTrend metric={activeMetric} highlightBranch={branchFilter} />
       <LeadsTrend metric={activeMetric} branchId={branchFilter} />
