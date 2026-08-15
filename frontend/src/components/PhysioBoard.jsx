@@ -443,6 +443,42 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
   // just that group. Tapping an already-active tile clears back to "all".
   const [rowFilter, setRowFilter] = useState("all");
 
+  /**
+   * Patients who have finished their whole course — a different unit from the three
+   * cards beside it, which all count days.
+   *
+   * "Completed 80" means eighty treatment days are done across everyone; it says nothing
+   * about how many people that finished. This is the count of patients with no day left,
+   * which is the one that answers "how many did we see through to the end".
+   *
+   * Deliberately not scoped by the date filter. Whether a course is finished is a fact
+   * about the patient as of now, not about a range of days, and pretending otherwise
+   * would need the date each patient's last session landed on. The card says "of N
+   * patients" so the unit is legible next to the day counts.
+   *
+   * Declared above visibleRows because that memo reads finished.rows, in its body and in
+   * its dependency array. A const is in the temporal dead zone until its own line runs,
+   * so with this below it the memo threw "Cannot access 'finished' before initialization"
+   * on the first render of the tab — a build the compiler and the linter both pass.
+   */
+  const finished = useMemo(() => {
+    const inTreatment = leads.filter((l) => (l.total_sessions || 0) > 0);
+    const done = inTreatment.filter((l) => (l.completed_sessions || 0) >= l.total_sessions);
+    return {
+      done: done.length,
+      patients: inTreatment.length,
+      // The rows the tile shows when selected. Built off the same predicate as the count
+      // so the list can never disagree with the figure above it.
+      rows: done.map((l) => ({
+        key: `finished-${l.id}`,
+        lead: l,
+        time: "",
+        label: `${l.completed_sessions} of ${l.total_sessions} days`,
+        done: true,
+      })),
+    };
+  }, [leads]);
+
   const visibleRows = useMemo(() => {
     const q = search.trim().toLowerCase();
     // Treatment Completed swaps the list rather than narrowing it. A patient with no days
@@ -471,37 +507,6 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
     const total = leads.reduce((n, l) => n + (l.total_sessions || 0), 0);
     const completed = leads.reduce((n, l) => n + (l.completed_sessions || 0), 0);
     return { total, completed, pending: total - completed };
-  }, [leads]);
-
-  /**
-   * Patients who have finished their whole course — a different unit from the three
-   * cards beside it, which all count days.
-   *
-   * "Completed 80" means eighty treatment days are done across everyone; it says nothing
-   * about how many people that finished. This is the count of patients with no day left,
-   * which is the one that answers "how many did we see through to the end".
-   *
-   * Deliberately not scoped by the date filter. Whether a course is finished is a fact
-   * about the patient as of now, not about a range of days, and pretending otherwise
-   * would need the date each patient's last session landed on. The card says "of N
-   * patients" so the unit is legible next to the day counts.
-   */
-  const finished = useMemo(() => {
-    const inTreatment = leads.filter((l) => (l.total_sessions || 0) > 0);
-    const done = inTreatment.filter((l) => (l.completed_sessions || 0) >= l.total_sessions);
-    return {
-      done: done.length,
-      patients: inTreatment.length,
-      // The rows the tile shows when selected. Built off the same predicate as the count
-      // so the list can never disagree with the figure above it.
-      rows: done.map((l) => ({
-        key: `finished-${l.id}`,
-        lead: l,
-        time: "",
-        label: `${l.completed_sessions} of ${l.total_sessions} days`,
-        done: true,
-      })),
-    };
   }, [leads]);
 
   const countFor = (date) => (
