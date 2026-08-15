@@ -333,18 +333,12 @@ export const matchesConsultationStage = (lead, stageName) => {
 /**
  * Does this lead belong under this Branch stage?
  *
- * Nearly always a branch_stage comparison. The exception is the "Leads" pill, which the
- * board sends down carrying `mirrors_stage`: it shows the branch's own Pre-Sales New Leads
- * without those leads having been written to, so it has to be matched on the Pre-Sales
- * `stage` field instead. Same idea as the Diet Consultation chip above — the pill reads a
- * fact about the lead rather than claiming to own its position.
- *
- * A lead can therefore match both Leads and a real branch stage at once, which is intended:
- * these pills are filters over one list, not a partition of it.
+ * A plain branch_stage comparison, and deliberately nothing cleverer. "Leads" was briefly
+ * a second reading of the Pre-Sales pipeline layered over the same people, which put one
+ * lead under Leads and under Follow Up at once. It is a real stage now, so every pill on
+ * the board is a disjoint list and a lead shows up in exactly the one it currently sits on.
  */
-export const matchesBranchStage = (lead, stage) => (
-  stage?.mirrors_stage ? lead.stage === stage.mirrors_stage : lead.branch_stage === stage?.name
-);
+export const matchesBranchStage = (lead, stage) => lead.branch_stage === stage?.name;
 
 export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = null, currentUser = null }) => {
   const [boardData, setBoardData] = useState({ leads: [], stage_counts: {}, stages: [] });
@@ -398,13 +392,16 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     [stages],
   );
 
-  // The two ways a lead can open its journey on this board: the mirrored Pre-Sales "Leads"
-  // pill, and the branch's own real entry stage ("Branch Assign", or "New Appointment" on
-  // Pre-Sales control). Both are pre-physio, so both drop the Physio column; a lead's popup
-  // shows whichever of the two it came in through, never both.
-  const mirrorStage = useMemo(() => stages.find((s) => s.mirrors_stage) || null, [stages]);
-  const realEntryStage = useMemo(() => stages.find((s) => !s.mirrors_stage) || null, [stages]);
-  const entryStageNames = [mirrorStage?.name, realEntryStage?.name].filter(Boolean);
+  // A branch-run board opens in two places — "Leads" for raw arrivals, "Branch Assign" for
+  // leads handed to it — and the backend flags both. Nothing has a physio yet at either, so
+  // both drop that column; a lead's popup shows the one it actually came in through. A
+  // Pre-Sales-fed branch flags neither, and keeps its single opening on show throughout.
+  const entryStageNames = useMemo(() => {
+    const flagged = stages.filter((s) => s.entry).map((s) => s.name);
+    // A Pre-Sales-fed branch flags nothing, so its single opening is read off position 0 —
+    // the way this worked before there were two of them.
+    return flagged.length ? flagged : [stages[0]?.name].filter(Boolean);
+  }, [stages]);
 
   // Which desk owns this branch's leads. Comes back with the board rather than from a
   // second call, so the Pre Sales tab appears the moment a Super Admin flips the switch
@@ -960,11 +957,6 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
           branchId={branchId}
           stages={stages}
           consultationStages={consultationStages}
-          // Which of the two entry stages this lead's pipeline should open on. A lead can
-          // sit on Leads and Branch Assign at once (one reads its Pre-Sales stage, the other
-          // its branch stage), so the pill the admin opened it from is what decides —
-          // matching the stage strip they were just looking at.
-          openedFromMirror={!!mirrorStage && stageFilter === mirrorStage.name}
           onClose={() => setSelectedLead(null)}
           onUpdate={handleStageUpdate}
           onOpenConsultationStage={(stage) => {
@@ -1102,17 +1094,17 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
 };
 
 /* ─── Branch Lead Detail Modal ─── */
-function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, onUpdate, onMoved, onOpenConsultationStage, openedFromMirror = false }) {
-  // The board offers two entry stages — the mirrored Pre-Sales "Leads" pill and the branch's
-  // own first stage — but a single lead only ever came in through one of them, so its
+function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, onUpdate, onMoved, onOpenConsultationStage }) {
+  // A branch-run board opens in two places — "Leads" for raw arrivals, "Branch Assign" for
+  // leads handed to it — but any one lead came in through exactly one of them, so its
   // pipeline shows that one and drops the other. Everything from RNR onwards is shared.
-  const mirrorStageName = stages.find((s) => s.mirrors_stage)?.name;
-  const realEntryStageName = stages.find((s) => !s.mirrors_stage)?.name;
-  const entryStages = stages.filter((s) => (
-    s.name === mirrorStageName ? openedFromMirror
-      : s.name === realEntryStageName ? !openedFromMirror
-        : true
-  ));
+  //
+  // Once a lead has moved past its opening there is nothing on it recording which one it
+  // was, so the pipeline falls back to the first — the entry stages are alternatives at the
+  // same position, and the pills after it are what the admin is actually reading by then.
+  const entryNames = stages.filter((s) => s.entry).map((s) => s.name);
+  const ownEntry = entryNames.includes(lead.branch_stage) ? lead.branch_stage : entryNames[0];
+  const entryStages = stages.filter((s) => !s.entry || s.name === ownEntry);
   // Same merge as the main Branch Leads stage bar — one continuous pipeline covering both
   // branch_stage and consultation_stage, with shared names (e.g. "Follow Up") kept to a
   // single pill backed by the sales-side field.
@@ -1411,14 +1403,7 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                 <div className="flex flex-wrap gap-2 px-4 py-3">
                   {(pipelineStages || []).map((s) => {
                     const stage = s.name;
-                    // The mirrored "Leads" pill reads the lead's Pre-Sales stage instead of
-                    // its branch stage, and is never a move target: it exists to show where
-                    // the lead already is, and writing to it would move the lead inside the
-                    // Pre-Sales pipeline, which this board does not own.
-                    const isMirror = !!s.mirrors_stage;
-                    const isActive = isMirror
-                      ? lead.stage === s.mirrors_stage
-                      : (lead.branch_stage === stage || lead.consultation_stage === stage);
+                    const isActive = lead.branch_stage === stage || lead.consultation_stage === stage;
                     const consultationOnly = isConsultationOnlyStage(stage);
                     // A Consultation-only stage isn't reachable until the lead has actually
                     // entered that pipeline (schedule-branch-appointment seeds
@@ -1426,7 +1411,6 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                     const notYetReached = consultationOnly && !lead.consultation_stage;
                     const tint = s.color || "#64748b";
                     const handleClick = () => {
-                      if (isMirror) return;
                       if (stage === "Appointment Date & Time") {
                         setApptDraft({
                           appointment_date: lead.appointment_date || new Date(Date.now() + 86400000).toISOString().slice(0, 10),
@@ -1459,7 +1443,7 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                       <button
                         key={s.id}
                         type="button"
-                        disabled={isActive || notYetReached || isMirror}
+                        disabled={isActive || notYetReached}
                         onClick={handleClick}
                         className="rounded-lg px-3 py-1.5 text-xs font-semibold transition-all hover:shadow-md disabled:cursor-not-allowed disabled:opacity-90"
                         style={isActive ? { background: tint, color: "#ffffff" } : { background: `${tint}14`, color: tint, border: `1px solid ${tint}33` }}
