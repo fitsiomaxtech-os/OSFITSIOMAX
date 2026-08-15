@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Optional, Dict
 from pydantic import BaseModel
+import re
 import uuid
 
 from database import v3_col
@@ -14,6 +15,7 @@ from schemas.v3 import (
     V3BranchCreate, V3BranchOut, V3BranchUpdate,
     V3TeamMemberCreate, V3TeamMemberOut,
     V3DoctorCreate, V3DoctorSlotsInput, V3DoctorOut,
+    V3TreatmentTypeCreate, V3TreatmentTypeOut,
 )
 
 router = APIRouter(prefix="/api/v3")
@@ -60,6 +62,54 @@ async def v3_delete_vertical(vertical_id: str, _: V3UserOut = Depends(v3_require
         )
     await v3_col("verticals").delete_one({"id": vertical_id})
     return {"message": "Service type deleted"}
+
+
+# ---- Treatment types ----------------------------------------------------------------
+# The catalogue of treatments the clinic offers, by name — Super Admin > Treatment.
+# Deliberately just a name and nothing else: it is a list to pick from, and every price,
+# session count and duration already lives on a package in FITSIO STORE. Adding those
+# fields here would create a second place to maintain them and a question about which
+# one is right.
+
+
+@router.get("/treatment-types", response_model=List[V3TreatmentTypeOut])
+async def v3_get_treatment_types(_: V3UserOut = Depends(v3_current_user)):
+    # Any signed-in user reads it: this is a picklist, and the people who would pick from
+    # it are the ones treating patients, not the one maintaining the list.
+    rows = await v3_col("treatment_types").find({}, {"_id": 0}).sort("name", 1).to_list(500)
+    return [V3TreatmentTypeOut(**row) for row in rows]
+
+
+@router.post("/treatment-types", response_model=V3TreatmentTypeOut)
+async def v3_add_treatment_type(payload: V3TreatmentTypeCreate, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    name = (payload.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Treatment name is required")
+    # Case-insensitive: "Dry Needling" and "dry needling" are the same treatment, and a
+    # picklist holding both is a picklist nobody trusts.
+    clash = await v3_col("treatment_types").find_one(
+        {"name": {"$regex": f"^{re.escape(name)}$", "$options": "i"}}, {"_id": 0, "name": 1}
+    )
+    if clash:
+        raise HTTPException(status_code=409, detail=f"'{clash['name']}' already exists")
+    doc = {"id": str(uuid.uuid4()), "name": name, "created_at": now_iso()}
+    await v3_col("treatment_types").insert_one(doc.copy())
+    return V3TreatmentTypeOut(**doc)
+
+
+@router.delete("/treatment-types/{treatment_type_id}")
+async def v3_delete_treatment_type(treatment_type_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    """Remove a treatment from the catalogue.
+
+    No in-use check, unlike service types: nothing in the OS references a treatment type
+    yet, so there is nothing to strand. The moment something does — a package, a session,
+    a lead — this needs the same guard v3_delete_vertical has, refusing while it is
+    referenced and naming what still holds it.
+    """
+    res = await v3_col("treatment_types").delete_one({"id": treatment_type_id})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Treatment not found")
+    return {"message": "Treatment deleted"}
 
 
 @router.get("/branches", response_model=List[V3BranchOut])

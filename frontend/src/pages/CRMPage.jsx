@@ -5,6 +5,7 @@ import {
   Briefcase,
   Building2,
   CalendarDays,
+  ClipboardList,
   Headphones,
   LayoutDashboard,
   LogOut,
@@ -69,6 +70,7 @@ import { HumanResourceBoard } from "@/components/hr/HumanResourceBoard";
 import { BranchManagementBoard } from "@/components/branch/BranchManagementBoard";
 import { BranchWiseBoard } from "@/components/branch/BranchWiseBoard";
 import { PackagesBoard } from "@/components/PackagesBoard";
+import { TreatmentTypesBoard } from "@/components/TreatmentTypesBoard";
 import { FinanceBoard } from "@/components/FinanceBoard";
 
 const ROLE_META = {
@@ -165,6 +167,9 @@ const SUPER_ADMIN_TABS = [
   { key: "stages", label: "CI/CD ROOTS", icon: Activity },
   { key: "hr", label: "HR Admin", icon: Users },
   { key: "presales", label: "PRE SALES", icon: Headphones },
+  // Beside PRE SALES because it is the other end of the same journey — leads are worked
+  // there, treatment is delivered here — rather than among the branch and catalogue tabs.
+  { key: "treatment", label: "Treatment", icon: ClipboardList },
   { key: "branches", label: "Branch Management", icon: Building2 },
   { key: "branch_wise", label: "Branch Wise", icon: Network },
   { key: "packages", label: "FITSIO STORE", icon: Store },
@@ -955,6 +960,10 @@ export const CRMPage = ({ auth, onLogout }) => {
 
         {showSuperAdminBoard && superAdminView === "presales" && (
           <PreSalesCRM onManageStages={() => setSuperAdminView("stages")} role={role} currentUser={auth.user} />
+        )}
+
+        {showSuperAdminBoard && superAdminView === "treatment" && (
+          <TreatmentTypesBoard />
         )}
 
         {showSuperAdminBoard && superAdminView === "stages" && (

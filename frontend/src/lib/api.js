@@ -75,6 +75,11 @@ export const getVerticals = async () => (await api.get("/verticals")).data;
 export const createVertical = async (payload) => (await api.post("/verticals", payload)).data;
 export const deleteVertical = async (id) => (await api.delete(`/verticals/${id}`)).data;
 
+// Treatment catalogue — Super Admin > Treatment.
+export const getTreatmentTypes = async () => (await api.get("/treatment-types")).data;
+export const createTreatmentType = async (payload) => (await api.post("/treatment-types", payload)).data;
+export const deleteTreatmentType = async (id) => (await api.delete(`/treatment-types/${id}`)).data;
+
 export const getBranches = async () => (await api.get("/branches")).data;
 export const createBranch = async (payload) => (await api.post("/branches", payload)).data;
 export const updateBranch = async (branchId, payload) => (await api.put(`/branches/${branchId}`, payload)).data;

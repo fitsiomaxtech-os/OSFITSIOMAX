@@ -50,6 +50,18 @@ class V3VerticalOut(BaseModel):
     created_at: str
 
 
+class V3TreatmentTypeCreate(BaseModel):
+    name: str
+
+
+class V3TreatmentTypeOut(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    name: str
+    created_at: str
+
+
 class V3BranchCreate(BaseModel):
     branch_name: str
     address: str
