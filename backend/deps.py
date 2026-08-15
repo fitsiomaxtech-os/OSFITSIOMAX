@@ -68,9 +68,37 @@ async def v3_current_user(authorization: str = Header(...)) -> V3UserOut:
     return V3UserOut(**user)
 
 
+# Roles that are a Branch Admin under another name. An Online Physio Admin runs a branch's
+# online practice and needs the same board and the same reach over it — one branch's leads,
+# patients, calendars, store and accounts — so rather than a second set of permissions this
+# is the same set under a second slug.
+#
+# Matched exactly, unlike the HR and Diet predicates below. Those match loosely because
+# their roles are typed by hand and the wording varies. Doing that here would be dangerous:
+# any rule matching a token like "physio" or "online" would also catch the plain `physio`
+# role and hand a treating physio the branch's finances. So the slug is fixed, and it is in
+# DEFAULT_ROLES instead, which puts it in the Create User dropdown — nobody has to type it.
+BRANCH_ADMIN_ROLES = frozenset({"branch_admin", "online_physio_admin"})
+
+
+def is_branch_admin_role(role: str) -> bool:
+    """Whether this role holds Branch Admin's authority over its own branch.
+
+    Used for the branch *scoping* checks as well as the gate: an endpoint that narrows its
+    query to user.branch_id for a branch_admin has to narrow it for these too. Missing one
+    of those does not lock the role out — it does the opposite, and shows them every branch
+    in the company.
+    """
+    return (role or "").strip().lower() in BRANCH_ADMIN_ROLES
+
+
 def v3_require_roles(*roles: str):
     async def checker(user: V3UserOut = Depends(v3_current_user)) -> V3UserOut:
-        if user.role not in roles:
+        # Anywhere branch_admin is allowed, its aliases are allowed. Done here rather than
+        # at the 80-odd call sites so the next branch endpoint added is covered by default
+        # instead of being one someone remembered to list the second role on.
+        allowed = "branch_admin" in roles and is_branch_admin_role(user.role)
+        if user.role not in roles and not allowed:
             raise HTTPException(status_code=403, detail="Not allowed")
         return user
 

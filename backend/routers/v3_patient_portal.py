@@ -22,7 +22,7 @@ from fastapi.responses import FileResponse
 from database import v3_col
 from utils import now_iso
 from security import hash_password, verify_password
-from deps import v3_require_roles
+from deps import v3_require_roles, is_branch_admin_role
 from routers.v3_lead_documents import DOC_DIR, is_shared_with_patient
 from schemas.v3 import V3UserOut, V3PortalAccountInput, V3PatientPortalLogin, V3PatientPortalGoogleLogin
 
@@ -78,7 +78,7 @@ def has_treatment(lead: dict) -> bool:
 @router.get("/leads/{lead_id}/portal-account")
 async def get_portal_account(lead_id: str, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
     lead = await _lead_or_404(lead_id)
-    if user.role == "branch_admin" and lead.get("branch_id") != user.branch_id:
+    if is_branch_admin_role(user.role) and lead.get("branch_id") != user.branch_id:
         raise HTTPException(status_code=404, detail="Patient not found")
     account = await v3_col("patient_portal_accounts").find_one({"lead_id": lead_id}, {"_id": 0, "email": 1, "created_at": 1})
     if not account:
@@ -97,7 +97,7 @@ async def create_or_reset_portal_account(
     since re-sharing a lost password is the same action either way. The plaintext
     password is returned only here, this once — nothing later can ever read it back."""
     lead = await _lead_or_404(lead_id)
-    if user.role == "branch_admin" and lead.get("branch_id") != user.branch_id:
+    if is_branch_admin_role(user.role) and lead.get("branch_id") != user.branch_id:
         raise HTTPException(status_code=404, detail="Patient not found")
     if not has_treatment(lead):
         raise HTTPException(

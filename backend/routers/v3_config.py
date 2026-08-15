@@ -6,7 +6,7 @@ import uuid
 from database import v3_col
 from utils import now_iso, normalize_slot_time, derive_branch_code
 from security import hash_password
-from deps import v3_current_user, v3_require_roles
+from deps import v3_current_user, v3_require_roles, is_branch_admin_role
 from stage_utils import get_first_stage_name
 from schemas.v3 import (
     V3UserOut, V3VerticalCreate, V3VerticalOut,
@@ -192,7 +192,7 @@ async def v3_get_doctors(
 ):
     query: Dict[str, object] = {}
     scope_branch = None
-    if user.role in ["branch_admin", "head_physio", "physio"] and user.branch_id:
+    if (is_branch_admin_role(user.role) or user.role in ["head_physio", "physio"]) and user.branch_id:
         scope_branch = user.branch_id
     elif branch_id:
         scope_branch = branch_id
@@ -243,7 +243,7 @@ async def v3_delete_doctor(doctor_id: str, user: V3UserOut = Depends(v3_require_
     doctor = await v3_col("doctors").find_one({"id": doctor_id}, {"_id": 0})
     if not doctor:
         raise HTTPException(status_code=404, detail="Expert not found")
-    if user.role == "branch_admin" and doctor.get("branch_id") != user.branch_id:
+    if is_branch_admin_role(user.role) and doctor.get("branch_id") != user.branch_id:
         raise HTTPException(status_code=404, detail="Expert not found")
     if doctor.get("user_id"):
         raise HTTPException(status_code=400, detail="This expert is linked to a login account — remove the login in Roles & Credentials instead")

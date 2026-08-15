@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional
 
 from database import v3_col
-from deps import v3_require_roles
+from deps import v3_require_roles, is_branch_admin_role
 from schemas.v3 import V3UserOut, V3MarkInstallmentPaidInput
 from stage_utils import get_first_stage_name
 from utils import generate_transaction_id
@@ -29,7 +29,7 @@ async def get_branch_finance(
     # Branch Admin is always locked to their own branch. Super Admin and Accountant can
     # optionally scope to one branch_id — or, if none is passed, see every branch
     # aggregated together (Accountant's default view: all branches' finance at once).
-    if user.role == "branch_admin":
+    if is_branch_admin_role(user.role):
         branch_id = user.branch_id
         if not branch_id:
             return {"summary": {}, "transactions": []}
@@ -368,7 +368,7 @@ async def revenue_overview(
     view and Branch Admin's own read-only tab) — date-range + branch scoped, built
     from the lead_activity payment trail (the only place these collections carry a
     real timestamp) rather than summing lead fields, which have no date dimension."""
-    if user.role == "branch_admin":
+    if is_branch_admin_role(user.role):
         branch_id = user.branch_id
     today = datetime.now(timezone.utc).date().isoformat()
     lead_query = {"branch_id": branch_id} if branch_id else {}
@@ -654,7 +654,7 @@ async def client_transaction_history(
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Client not found")
-    if user.role == "branch_admin" and lead.get("branch_id") != user.branch_id:
+    if is_branch_admin_role(user.role) and lead.get("branch_id") != user.branch_id:
         raise HTTPException(status_code=404, detail="Client not found")
     if user.role == "physio":
         doctor = await v3_col("doctors").find_one({"user_id": user.id, "profile_type": "physio"}, {"_id": 0, "id": 1})
@@ -805,7 +805,7 @@ async def mark_installment_paid(
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Client not found")
-    if user.role == "branch_admin" and lead.get("branch_id") != user.branch_id:
+    if is_branch_admin_role(user.role) and lead.get("branch_id") != user.branch_id:
         raise HTTPException(status_code=404, detail="Client not found")
 
     details = lead.get("treatment_fee_payment_details") or {}

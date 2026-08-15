@@ -76,6 +76,7 @@ const ROLE_META = {
   business_dev: { label: "Business Development", icon: Briefcase },
   pre_sales: { label: "Pre Sales", icon: Headphones },
   branch_admin: { label: "Branch Admin", icon: Building2 },
+  online_physio_admin: { label: "Online Physio Admin", icon: Building2 },
   head_physio: { label: "Head Physio", icon: Stethoscope },
   physio: { label: "Physio", icon: Activity },
   accountant: { label: "Accountant", icon: BadgeIndianRupee },
@@ -111,6 +112,19 @@ const isHumanResourceRole = (role) => {
   if (r.includes("human_resource")) return true;
   return r.split("_").some((t) => ["hr", "recruiter", "recruitment", "talent"].includes(t));
 };
+
+/** Whether a role gets the Branch Admin board.
+ *
+ * An Online Physio Admin runs a branch's online practice with a Branch Admin's authority
+ * over it, so it lands on the same board rather than a near-copy of one.
+ *
+ * Matched exactly, unlike the two predicates above — they match loosely because their
+ * roles are typed by hand, and doing that here would catch the plain `physio` role on the
+ * "physio" token and open the branch's accounts to a treating physio. Kept in step with
+ * BRANCH_ADMIN_ROLES in backend/deps.py: a role that passes here and fails there would
+ * render the whole board and 403 every call in it.
+ */
+const isBranchAdminRole = (role) => ["branch_admin", "online_physio_admin"].includes(String(role || "").trim().toLowerCase());
 
 // Same destinations as the desktop tab strip below. On a phone, three get a direct
 // bottom-nav slot each; the rest sit behind a "More" sheet — both derived from this one
@@ -324,7 +338,7 @@ export const CRMPage = ({ auth, onLogout }) => {
     setVerticals(verticalRows.length ? verticalRows : verticalDefaults.map((name) => ({ id: name, name })));
     setSheetConnections(sheetRows);
 
-    const branchId = role === "branch_admin" ? auth.user.branch_id : branchRows[0]?.id;
+    const branchId = isBranchAdminRole(role) ? auth.user.branch_id : branchRows[0]?.id;
     if (branchId) {
       const data = await safeCall(() => getBranchBoard(branchId), { stage_counts: {} });
       setBranchBoard(data);
@@ -625,7 +639,7 @@ export const CRMPage = ({ auth, onLogout }) => {
   const showSuperAdminBoard = role === "super_admin";
   const showBusinessDevBoard = role === "business_dev";
   const showPreSalesBoard = role === "pre_sales";
-  const showBranchBoard = role === "branch_admin";
+  const showBranchBoard = isBranchAdminRole(role);
   const showHeadPhysioBoard = role === "head_physio";
   const showPhysioBoard = role === "physio";
   const showDietBoard = isDietRole(role);

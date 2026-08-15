@@ -5,7 +5,7 @@ import uuid
 
 from database import v3_col
 from utils import now_iso, normalize_slot_time, generate_patient_number
-from deps import v3_current_user, v3_require_roles
+from deps import v3_current_user, v3_require_roles, is_branch_admin_role
 from constants import V3_STAGES
 from stage_utils import get_first_stage_name
 from schemas.v3 import (
@@ -35,7 +35,7 @@ async def v3_get_leads(
     # A Pre-Sales user only gets branch-scoped once a branch is actually assigned to
     # them (Super Admin > Roles & Credentials) — one left unassigned still sees every
     # branch's leads, same as before.
-    if user.role in ["branch_admin", "head_physio", "physio", "pre_sales"] and user.branch_id:
+    if (is_branch_admin_role(user.role) or user.role in ["head_physio", "physio", "pre_sales"]) and user.branch_id:
         query["branch_id"] = user.branch_id
     elif branch_id:
         query["branch_id"] = branch_id
@@ -140,7 +140,7 @@ async def v3_edit_lead(
         updates["branch_stage"] = await get_first_stage_name("sales", "New Appointment")
 
     filter_query: Dict[str, object] = {"id": lead_id}
-    if user.role == "branch_admin" and user.branch_id:
+    if is_branch_admin_role(user.role) and user.branch_id:
         filter_query["branch_id"] = user.branch_id
 
     result = await v3_col("leads").update_one(filter_query, {"$set": updates})
@@ -189,7 +189,7 @@ async def v3_assign_branch(lead_id: str, payload: V3AssignBranchInput, _: V3User
 @router.post("/leads/{lead_id}/confirm", response_model=V3LeadOut)
 async def v3_confirm_lead(lead_id: str, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
     filter_query = {"id": lead_id}
-    if user.role == "branch_admin":
+    if is_branch_admin_role(user.role):
         filter_query["branch_id"] = user.branch_id
 
     new_branch_stage = await get_first_stage_name("sales", "New Appointment")

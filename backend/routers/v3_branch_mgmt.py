@@ -5,7 +5,7 @@ import uuid
 
 from database import v3_col
 from utils import now_iso, derive_branch_code
-from deps import v3_require_roles
+from deps import v3_require_roles, is_branch_admin_role
 from schemas.v3 import V3UserOut
 
 
@@ -246,7 +246,7 @@ async def performance_summary(_: V3UserOut = Depends(v3_require_roles("super_adm
 async def branch_detail(branch_id: str, user: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev", "marketing_head", "branch_admin"))):
     # A Branch Admin may view their own branch's detail (read-only Manager view);
     # everyone else with a management role may view any branch.
-    if user.role == "branch_admin" and user.branch_id != branch_id:
+    if is_branch_admin_role(user.role) and user.branch_id != branch_id:
         raise HTTPException(status_code=403, detail="You can only view your own branch")
     branch = await v3_col("branches").find_one({"id": branch_id}, {"_id": 0})
     if not branch:

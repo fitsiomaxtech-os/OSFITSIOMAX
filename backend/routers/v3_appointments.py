@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from database import v3_col
 from utils import now_iso
-from deps import v3_current_user, v3_require_roles
+from deps import v3_current_user, v3_require_roles, is_branch_admin_role
 from schemas.v3 import V3UserOut, V3AppointmentOut
 
 router = APIRouter(prefix="/api/v3")
@@ -13,7 +13,7 @@ router = APIRouter(prefix="/api/v3")
 @router.get("/appointments", response_model=List[V3AppointmentOut])
 async def v3_get_appointments(view: Optional[str] = None, user: V3UserOut = Depends(v3_current_user)):
     query = {}
-    if user.role == "branch_admin" and user.branch_id:
+    if is_branch_admin_role(user.role) and user.branch_id:
         query["branch_id"] = user.branch_id
     if view == "today":
         today = datetime.now(timezone.utc).date().isoformat()

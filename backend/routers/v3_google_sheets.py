@@ -25,7 +25,7 @@ from google.oauth2.credentials import Credentials
 
 from database import v3_col
 from utils import now_iso, generate_patient_number
-from deps import v3_require_roles
+from deps import v3_require_roles, is_branch_admin_role
 from schemas.v3 import V3UserOut
 from stage_utils import get_first_stage_name
 from routers.v3_marketing import (
@@ -214,7 +214,7 @@ async def auto_sync_sources(user: V3UserOut = Depends(v3_require_roles("super_ad
     branch (or another branch's) isn't theirs to pull."""
     connected = await v3_col("google_sheets_tokens").find_one({"id": TOKEN_DOC_ID}, {"_id": 0, "refresh_token": 1})
     query = {"source_type": "google_sheets", "is_active": True}
-    if user.role == "branch_admin":
+    if is_branch_admin_role(user.role):
         query["branch_id"] = user.branch_id
     sources = await v3_col("marketing_sources").find(
         query,
@@ -398,7 +398,7 @@ async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Di
 
 @router.post("/pull/{source_id}")
 async def pull_source(source_id: str, range_: str = Query("A1:Z10000"), user: V3UserOut = Depends(v3_require_roles("super_admin", "pre_sales", "branch_admin"))):
-    if user.role == "branch_admin":
+    if is_branch_admin_role(user.role):
         source = await v3_col("marketing_sources").find_one({"id": source_id}, {"_id": 0, "branch_id": 1})
         if not source:
             raise HTTPException(status_code=404, detail="Source not found")

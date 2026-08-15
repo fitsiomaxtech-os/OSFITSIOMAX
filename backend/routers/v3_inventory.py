@@ -27,7 +27,7 @@ from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 
 from database import v3_col
-from deps import v3_require_roles
+from deps import v3_require_roles, is_branch_admin_role
 from schemas.v3 import V3UserOut
 from utils import generate_transaction_id, now_iso
 
@@ -67,7 +67,7 @@ async def _scope_branch(user: V3UserOut, branch_id: Optional[str]) -> str:
     query parameter, and stock is the kind of thing worth being strict about. Super Admin
     has no branch of their own, so they name one.
     """
-    if user.role == "branch_admin":
+    if is_branch_admin_role(user.role):
         if not user.branch_id:
             raise _err(400, "Your login is not attached to a branch")
         if branch_id and branch_id != user.branch_id:
