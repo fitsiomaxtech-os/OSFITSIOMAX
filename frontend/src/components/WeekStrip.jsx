@@ -84,7 +84,11 @@ export const WeekStrip = ({ value, onChange, counts = {}, testid = "week-strip",
         })}
       </div>
 
-      <div className="flex shrink-0 items-center gap-1">
+      {/* Wider gaps on a phone only. At gap-1 the two chevrons are 4px apart and read as
+          one control, and they are thumb targets there rather than pointer targets — the
+          group wraps onto its own line at that width, so the room costs nothing. Desktop
+          keeps the tight spacing it had. */}
+      <div className="flex shrink-0 items-center gap-2.5 sm:gap-1">
         {selected !== today && (
           <button
             type="button"
