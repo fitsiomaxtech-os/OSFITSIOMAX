@@ -637,7 +637,7 @@ const ExecutiveOverview = ({ data, loading, dateFilter }) => {
           row.
 
           Each card is also the trend's selector — clicking one draws that metric in the
-          two charts below. The card already names the figure and prints its total, so
+          chart below. The card already names the figure and prints its total, so
           putting the choice on it costs nothing and saves a second control repeating the
           same four words. The selected one inverts to solid slate. */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -695,7 +695,6 @@ const ExecutiveOverview = ({ data, loading, dateFilter }) => {
       )}
 
       <BranchGrowthTrend metric={activeMetric} highlightBranch={branchFilter} />
-      <LeadsTrend metric={activeMetric} branchId={branchFilter} />
     </div>
   );
 };
@@ -782,157 +781,19 @@ const smoothPath = (pts) => {
   return d;
 };
 
-/** Shared axis maths: a 1 / 2 / 5 × power-of-ten step, with the axis topping out at a
- *  multiple of it rather than at the data. Scaling straight to the peak leaves the highest
- *  point sitting on the frame with no gridline above it — and a step derived from the peak
- *  alone gave figures like 560, which makes the reader do the arithmetic the gridline was
- *  there to save. */
+/** The axis ceiling: a 1 / 2 / 5 × power-of-ten step, topped out at a multiple of it
+ *  rather than at the data. Scaling straight to the peak would leave the highest reading
+ *  sitting on the frame with no room above it. */
 const axisFor = (peakValue) => {
   const peak = Math.max(1, peakValue);
   const raw = peak / 4;
   const mag = 10 ** Math.floor(Math.log10(raw));
   const norm = raw / mag;
   const step = Math.max(1, (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * mag);
-  return { step, axisMax: step * Math.ceil(peak / step) };
+  return { axisMax: step * Math.ceil(peak / step) };
 };
 
 const monthLabel = (k) => new Date(`${k}-01T00:00:00`).toLocaleDateString("en-US", { month: "short" });
-
-/**
- * Total by month over the last six months, for whichever metric is selected above.
- *
- * One line — the branch split is the chart above this one. This answers what the cards
- * leave open: they say where things stand today, this says which way they have been
- * going.
- *
- * Not filtered by the board's date range, deliberately: a trend answers "which way is
- * this going", and a six-month line inside a one-day filter would be a single point.
- *
- * The total is summed across branches here rather than asking the endpoint for a figure
- * its per-branch rows already contain.
- */
-const LeadsTrend = ({ metric, branchId }) => {
-  const { data, loading } = useTrendData();
-  const [hoverIdx, setHoverIdx] = useState(null);
-
-  if (loading) return <Card><CardContent className="p-5"><p className="py-10 text-center text-sm text-slate-400">Loading trend…</p></CardContent></Card>;
-  if (!data || !data.months?.length) return null;
-
-  // With a branch selected this is that branch's own line rather than the org total, so it
-  // matches the cards above, which are scoped the same way.
-  const inScope = branchId
-    ? (data.branches || []).filter((b) => b.branch_id === branchId)
-    : (data.branches || []);
-  const scopeName = branchId ? (inScope[0]?.branch_name || "") : "";
-  const totals = data.months.map((_m, i) =>
-    inScope.reduce((sum, b) => sum + (branchSeries(b, metric.key)[i] || 0), 0));
-  const { step, axisMax } = axisFor(Math.max(...totals));
-
-  // viewBox units, not pixels — the svg scales to its container and the maths stays in
-  // one coordinate space.
-  const W = 720;
-  const H = 220;
-  // Narrow left padding: the axis figures are gone with the banded design, so the plot
-  // takes the width they were reserving.
-  const PAD_L = 14;
-  const PAD_R = 14;
-  const PAD_T = 10;
-  const PAD_B = 26;
-  const plotW = W - PAD_L - PAD_R;
-  const plotH = H - PAD_T - PAD_B;
-  const x = (i) => PAD_L + (data.months.length === 1 ? plotW / 2 : (i / (data.months.length - 1)) * plotW);
-  const y = (v) => PAD_T + plotH - (v / axisMax) * plotH;
-
-  const ticks = [];
-  for (let v = 0; v <= axisMax + 1e-9; v += step) ticks.push(Math.round(v));
-
-  // Near-black rather than the brand blue. On a banded ground the line is the only mark
-  // that carries meaning, and ink reads against those bands at any weight where a mid
-  // blue starts to compete with them.
-  const LINE = "#18181b";
-  const readout = (v) => (metric.currency ? fmtValue("revenue", v) : v.toLocaleString("en-IN"));
-
-  return (
-    <Card data-testid="dashboard-leads-trend">
-      <CardContent className="p-4 sm:p-5">
-        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-          <p className="text-sm font-bold text-slate-800">{scopeName || "OverAll"}</p>
-          <p className="text-[11px] text-slate-400">{metric.label} · last 6 months · not affected by the date filter</p>
-        </div>
-
-        <div className="-mx-1 overflow-x-auto px-1">
-          <svg viewBox={`0 0 ${W} ${H}`} className="h-56 w-full min-w-[560px]" role="img" aria-label={`Total ${metric.label} over the last six months`}>
-            {/* Banded rather than ruled. The bands carry the same scale the gridlines did —
-                one band per axis step — but read as a surface the line sits on instead of
-                four rules competing with it. The figures beside them are gone with them:
-                every value is in the readout below, so the chart is left to do the one
-                thing this design is for, which is shape. */}
-            {ticks.slice(0, -1).map((v, i) => (
-              <rect
-                key={v}
-                x={PAD_L}
-                y={y(ticks[i + 1])}
-                width={plotW}
-                height={y(v) - y(ticks[i + 1])}
-                fill={i % 2 === 0 ? "#f4f4f5" : "#ffffff"}
-              />
-            ))}
-            {data.months.map((k, i) => (
-              <text key={k} x={x(i)} y={H - 8} textAnchor="middle" className="fill-slate-400" style={{ fontSize: 9 }}>
-                {monthLabel(k)}
-              </text>
-            ))}
-
-            {hoverIdx !== null && (
-              <line x1={x(hoverIdx)} x2={x(hoverIdx)} y1={PAD_T} y2={PAD_T + plotH} stroke="#d4d4d8" strokeWidth="1" />
-            )}
-
-            <polyline
-              fill="none"
-              stroke={LINE}
-              strokeWidth="1.75"
-              strokeLinejoin="round"
-              strokeLinecap="round"
-              points={totals.map((v, i) => `${x(i)},${y(v)}`).join(" ")}
-            />
-            {/* One marker, on the month under the cursor. Six permanent dots turned a thin
-                line into a beaded one, which is the opposite of what this design is. */}
-            {hoverIdx !== null && (
-              <circle cx={x(hoverIdx)} cy={y(totals[hoverIdx])} r="3.5" fill={LINE} stroke="#ffffff" strokeWidth="2" />
-            )}
-
-            {/* One hit band per month, full plot height — a 2px line is impossible to
-                land on, and the band is what makes the crosshair usable. */}
-            {data.months.map((k, i) => (
-              <rect
-                key={k}
-                x={x(i) - plotW / Math.max(1, data.months.length - 1) / 2}
-                y={PAD_T}
-                width={plotW / Math.max(1, data.months.length - 1)}
-                height={plotH}
-                fill="transparent"
-                onMouseEnter={() => setHoverIdx(i)}
-                onMouseLeave={() => setHoverIdx(null)}
-              />
-            ))}
-          </svg>
-        </div>
-
-        {/* The hovered month in text, because a tooltip should enhance rather than be the
-            only way to read a value. */}
-        <div className="mt-2 min-h-[20px] text-[11px] text-slate-500">
-          {hoverIdx !== null && (
-            <span>
-              <span className="font-semibold text-slate-700">{monthLabel(data.months[hoverIdx])} {data.months[hoverIdx].slice(0, 4)}</span>
-              {" · "}
-              <b className="text-slate-700">{readout(totals[hoverIdx])}</b> {metric.label.toLowerCase()}
-            </span>
-          )}
-        </div>
-      </CardContent>
-    </Card>
-  );
-};
 
 /** Change against the preceding window. Silent rather than "0%" when there is nothing to
  *  compare against — an unknown and a flat period are different things, and printing 0%
@@ -969,11 +830,8 @@ const Delta = ({ now, before, loading, available, inverted = false }) => {
 const BRANCH_INKS = ["#18181b", "#52525b", "#a1a1aa", "#d4d4d8", "#71717a", "#3f3f46"];
 
 /**
- * The same six months split by branch — "which branch is moving", where the chart below
- * answers "which way are we going overall".
- *
- * Draws whichever metric is selected on the cards above, so the pair never shows two
- * different things at once.
+ * Six months split by branch — which branch is moving, and how they sit against each
+ * other. Draws whichever metric is selected on the cards above.
  */
 const BranchGrowthTrend = ({ metric, highlightBranch }) => {
   const { data, loading } = useTrendData();
@@ -983,9 +841,9 @@ const BranchGrowthTrend = ({ metric, highlightBranch }) => {
   if (loading) return <Card><CardContent className="p-5"><p className="py-10 text-center text-sm text-slate-400">Loading growth…</p></CardContent></Card>;
   if (!data || !data.months?.length) return null;
 
-  // A selected branch is highlighted here rather than filtered to. Filtering would leave
-  // this chart drawing the single line the one below already draws, and lose the very
-  // thing it is for — where that branch sits against the others.
+  // A selected branch is highlighted rather than filtered to: dropping the other lines
+  // would lose the very thing this chart is for, which is where that branch sits against
+  // them.
   const series = (data.branches || []).map((b, i) => ({
     ...b,
     color: BRANCH_INKS[i % BRANCH_INKS.length],
