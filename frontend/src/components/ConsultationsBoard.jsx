@@ -2254,9 +2254,9 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
 
                 {(isConsultant || selectedLead.treatment_summary) && (
                   <LockableTextBox
-                    // Keyed by lead: the tick-list holds its written half in local state,
-                    // and without a remount here that text would follow you to the next
-                    // patient opened from the list behind this popup.
+                    // Keyed by lead so the tick-list remounts between patients. It holds
+                    // the open/search state, and without this the panel would stay open
+                    // across a switch, showing the next patient's ticks mid-search.
                     key={selectedLead.id}
                     icon={ClipboardList}
                     label="Treatment Summary"
@@ -5414,18 +5414,15 @@ function TreatmentChecklist({ options, value, onChange, testPrefix }) {
   const picked = names.filter((n) => checked.has(n));
 
   /**
-   * The written half, held locally rather than derived from `value` on every render.
+   * Lines that are not catalogue names: prose written before the catalogue existed, or
+   * through the written box that used to sit under this control.
    *
-   * It has to be: the round trip strips blank lines, so a derived textarea would swallow
-   * the newline the moment Enter was pressed and drop the cursor back to the end of the
-   * previous line. Seeded once from whatever is in the field that is not a catalogue
-   * name — which is both notes written here and any prose that predates the catalogue.
-   *
-   * Safe to keep local because the call site keys this component by lead id, so moving
-   * to another patient remounts it rather than carrying one patient's notes to the next.
+   * Carried through every save rather than dropped. There is no longer any way to edit it
+   * from here, but somebody's clinical note is not this control's to delete — without
+   * this, the first tick on an old consultation would silently wipe whatever the
+   * CONSULTANT had written. It stays visible in the saved view of the field.
    */
-  const [manual, setManual] = useState(() => lines.filter((l) => !known.has(l)).join("\n"));
-  const manualLines = splitSummaryLines(manual);
+  const carried = lines.filter((l) => !known.has(l));
 
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState(null);
@@ -5433,8 +5430,8 @@ function TreatmentChecklist({ options, value, onChange, testPrefix }) {
   const wrapRef = useRef(null);
   const panelRef = useRef(null);
 
-  // Clearing on close rather than in each of the four things that close it — the chevron,
-  // Done, Escape and a click outside — so the field cannot come back still holding a
+  // Clearing on close rather than in each of the three things that close it — the chevron,
+  // Escape and a click outside — so the field cannot come back still holding a
   // filter from last time with the full list showing behind it.
   useEffect(() => { if (!open) setQuery(""); }, [open]);
 
@@ -5481,20 +5478,15 @@ function TreatmentChecklist({ options, value, onChange, testPrefix }) {
   // only control that closes.
   const togglePanel = () => { if (open) setOpen(false); else openPanel(); };
 
-  // Ticks first in catalogue order, then whatever was written — one field, two halves,
-  // rebuilt the same way from whichever of them changed.
-  const commit = (nextChecked, nextManualLines) =>
-    onChange([...names.filter((n) => nextChecked.has(n)), ...nextManualLines].join("\n"));
+  // Ticks first in catalogue order, then anything carried — one field, rebuilt the same
+  // way whichever box was ticked.
+  const commit = (nextChecked) =>
+    onChange([...names.filter((n) => nextChecked.has(n)), ...carried].join("\n"));
 
   const toggle = (name) => {
     const next = new Set(checked);
     if (next.has(name)) next.delete(name); else next.add(name);
-    commit(next, manualLines);
-  };
-
-  const writeManual = (text) => {
-    setManual(text);
-    commit(checked, splitSummaryLines(text));
+    commit(next);
   };
 
   // Numbered off the catalogue, not off the filtered view, so "3. Sciatica" is still
@@ -5512,11 +5504,11 @@ function TreatmentChecklist({ options, value, onChange, testPrefix }) {
     const next = new Set(checked);
     if (allShownChecked) shown.forEach((o) => next.delete(o.name));
     else shown.forEach((o) => next.add(o.name));
-    commit(next, manualLines);
+    commit(next);
   };
 
   // Three then a count. Every chip at once would grow the field to four lines on a phone
-  // and push the written box off the card.
+  // and push the Treatment card's own controls down with it.
   const CHIP_LIMIT = 3;
   const chipsShown = picked.slice(0, CHIP_LIMIT);
   const chipOverflow = picked.length - chipsShown.length;
@@ -5651,39 +5643,11 @@ function TreatmentChecklist({ options, value, onChange, testPrefix }) {
             })}
           </div>
 
-          {/* Kept from the version before this one, where it was asked for by name. The
-              reference design has no footer; the chevron and a click outside close the
-              list too, so this is the third way rather than the only one. */}
-          <div className="flex items-center justify-end border-t border-slate-100 bg-slate-50 px-2 py-1.5">
-            <Button
-              size="sm"
-              onClick={() => setOpen(false)}
-              className="h-7 bg-indigo-600 px-3 text-[11px] hover:bg-indigo-700"
-              data-testid={`${testPrefix}-done`}
-            >
-              Done
-            </Button>
-          </div>
         </div>
       )}
 
-      {/* The written half. Always here, not only when the list falls short — a consultation
-          usually needs both: which treatments, and what about this patient in particular.
-          Saved into the same field, below the ticks. */}
-      <div className="mt-2">
-        <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">Write it yourself (optional)</p>
-        <textarea
-          value={manual}
-          onChange={(e) => writeManual(e.target.value)}
-          rows={3}
-          placeholder="Anything the list above does not cover — dosage, sequence, precautions..."
-          className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-xs"
-          data-testid={`${testPrefix}-manual`}
-        />
-      </div>
-
-      {picked.length === 0 && !manual.trim() && (
-        <p className="mt-1.5 text-[11px] text-slate-400">Tick the treatments, write the detail, or both.</p>
+      {picked.length === 0 && (
+        <p className="mt-1.5 text-[11px] text-slate-400">Tick every treatment this patient is going away with.</p>
       )}
     </div>
   );
