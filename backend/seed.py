@@ -4,7 +4,7 @@ from utils import now_iso, derive_branch_code, generate_patient_number
 from security import hash_password
 from constants import (
     V3_VERTICALS, V3_BRANCH_STAGES, V3_STAGES, V3_CONSULTATION_STAGES, V3_HEAD_CONSULTATION_STAGES,
-    BRANCH_ADMIN_ENTRY_STAGE, BRANCH_ADMIN_RNR_STAGE,
+    BRANCH_ADMIN_ENTRY_STAGE, BRANCH_ADMIN_RNR_STAGE, BRANCH_ADMIN_LEADS_STAGE,
 )
 import lead_control
 from stage_utils import get_first_stage_name, first_branch_stage_for, realign_branch_stage_leads
@@ -229,45 +229,99 @@ async def ensure_branch_admin_stages() -> None:
             await realign_branch_stage_leads(branch["id"], lead_control.BRANCH_ADMIN)
 
 
-# The stage briefly promoted from the mirrored "Leads" pill into a real branch stage, and
-# rolled back again. Named here rather than in constants.py because nothing but the rollback
-# below refers to it any more.
-_ROLLED_BACK_LEADS_STAGE = "Leads"
+async def ensure_branch_leads_stage() -> None:
+    """Split a branch-run board's opening in two: "Leads" for raw arrivals, "Branch Assign"
+    for leads somebody handed to the branch.
 
+    Branch Assign shipped as the single entry stage, which meant every lead the branch had
+    ever received sat there whatever its origin, and the Pre-Sales "Leads" view had to be
+    layered on top as a second reading of the same people. Two readings of one population
+    is what made a lead show under Leads and under Follow Up at the same time. Making Leads
+    a real stage puts every lead in exactly one pill again.
 
-async def undo_branch_leads_stage() -> None:
-    """Take the Branch pipeline back off the real "Leads" stage, leaving the mirrored pill.
+    Nothing already on the board moves. The backlog stays on Branch Assign exactly where it
+    is, and Leads opens empty and fills with what arrives from here on — so this adds a
+    stage without rewriting a single lead.
 
-    Reverting that change in code is not enough on its own: the stage row and the leads
-    moved onto it are still in the database, and the mirrored pill this code draws is also
-    called "Leads" — so the board would render the pair of them, two pills with one name and
-    the branch's leads split across both. This puts the data back to match the code.
-
-    Idempotent, and a no-op on any database that never took the change.
+    Idempotent, and a no-op on a database that never got the Branch Assign stage.
     """
+    if await v3_col("pipeline_stages").find_one({"type": "sales", "name": BRANCH_ADMIN_LEADS_STAGE}, {"_id": 0, "id": 1}):
+        return
+    assign = await v3_col("pipeline_stages").find_one(
+        {"type": "sales", "name": BRANCH_ADMIN_ENTRY_STAGE}, {"_id": 0, "id": 1, "order": 1}
+    )
+    if not assign:
+        return
+    # Leads takes the slot Branch Assign is in and pushes it (and everything after) along,
+    # so raw arrivals read as the earlier step they are.
+    await v3_col("pipeline_stages").update_many(
+        {"type": "sales", "order": {"$gte": assign["order"]}}, {"$inc": {"order": 1}}
+    )
+    await v3_col("pipeline_stages").insert_one({
+        "id": str(uuid.uuid4()),
+        "name": BRANCH_ADMIN_LEADS_STAGE,
+        "color": "#6366f1",
+        "type": "sales",
+        "order": assign["order"],
+        "is_final": False,
+        "applies_to": lead_control.BRANCH_ADMIN,
+        "entry": True,
+        "created_at": now_iso(),
+    })
+    # Marked now rather than at creation: this is the point at which there are two openings
+    # to tell apart, and the flag is what lets a lead's popup show only its own.
+    await v3_col("pipeline_stages").update_one({"id": assign["id"]}, {"$set": {"entry": True}})
+
+
+async def _migration_done(name: str) -> bool:
+    """One-shot guard for migrations that must not run a second time.
+
+    Most migrations here are safe to re-run because they map a dead value onto a live one:
+    running them twice changes nothing. A migration that moves leads a branch admin can move
+    back by hand is not like that — re-running it would silently undo their work on the next
+    restart — so it records that it has run and never runs again.
+    """
+    if await v3_col("migrations").find_one({"name": name}, {"_id": 0, "name": 1}):
+        return True
+    await v3_col("migrations").insert_one({"name": name, "ran_at": now_iso()})
+    return False
+
+
+async def backfill_leads_stage_from_presales() -> None:
+    """Put a branch's un-worked Pre-Sales New Leads onto its Leads stage.
+
+    Leads was added as an empty stage that only new arrivals would reach, which left every
+    lead already at Pre-Sales New Leads sitting on Branch Assign and invisible under Leads.
+    This is the one-time catch-up for them.
+
+    Only leads still sitting on the entry stage move. A lead already worked on the branch
+    board — at Follow Up, Appointment, anywhere past the opening — stays exactly where the
+    admin put it, whatever the Pre-Sales side still says about it: where a lead is on this
+    board is the branch's own record, and a backfill has no business overruling it.
+    """
+    if await _migration_done("backfill_leads_stage_from_presales"):
+        return
     leads_stage = await v3_col("pipeline_stages").find_one(
-        {"type": "sales", "name": _ROLLED_BACK_LEADS_STAGE}, {"_id": 0, "id": 1, "order": 1}
+        {"type": "sales", "name": BRANCH_ADMIN_LEADS_STAGE}, {"_id": 0, "id": 1}
     )
     if not leads_stage:
         return
-    # Back where they were: everything on Leads arrived by import and was moved off Branch
-    # Assign by the change now being undone.
+    presales_entry = await get_first_stage_name("pre_sales", "New Leads")
+    branches = await v3_col("branches").find({}, {"_id": 0, "id": 1, "lead_control": 1}).to_list(1000)
+    branch_ids = [
+        b["id"] for b in branches
+        if lead_control.normalize(b.get("lead_control")) == lead_control.BRANCH_ADMIN
+    ]
+    if not branch_ids:
+        return
     await v3_col("leads").update_many(
-        {"branch_stage": _ROLLED_BACK_LEADS_STAGE},
-        {"$set": {"branch_stage": BRANCH_ADMIN_ENTRY_STAGE, "updated_at": now_iso()}},
+        {
+            "branch_id": {"$in": branch_ids},
+            "branch_stage": BRANCH_ADMIN_ENTRY_STAGE,
+            "stage": presales_entry,
+        },
+        {"$set": {"branch_stage": BRANCH_ADMIN_LEADS_STAGE, "updated_at": now_iso()}},
     )
-    await v3_col("pipeline_stages").delete_one({"id": leads_stage["id"]})
-    # Close the gap it left, so Branch Assign is back at the head of the pipeline.
-    await v3_col("pipeline_stages").update_many(
-        {"type": "sales", "order": {"$gt": leads_stage["order"]}}, {"$inc": {"order": -1}}
-    )
-    # `entry` only ever existed to tell the two openings apart. With one opening again,
-    # nothing reads it, and leaving it behind would mislead the next person to look.
-    await v3_col("pipeline_stages").update_many({"type": "sales"}, {"$unset": {"entry": ""}})
-    # The catch-up that filled Leads from Pre-Sales New Leads is a one-shot, and its marker
-    # outlives the code being reverted. Left behind, it would sit there claiming the work was
-    # already done and quietly stop that migration ever running again if it is reapplied.
-    await v3_col("migrations").delete_one({"name": "backfill_leads_stage_from_presales"})
 
 
 # Maps deprecated consultation_stage labels (legacy 6-stage flow) to the new 7-stage flow.
