@@ -334,6 +334,7 @@ export const bmAssignHeadPhysio = async (branchId, doctor_id) => (await api.patc
 export const bmPerformance = async (branchId) => (await api.get(`/branch-mgmt/${branchId}/performance`)).data;
 export const bmPerformanceSummary = async () => (await api.get("/branch-mgmt/performance-summary")).data;
 export const bmDetail = async (branchId) => (await api.get(`/branch-mgmt/${branchId}/detail`)).data;
+export const bmLeadControlHistory = async (branchId) => (await api.get(`/branches/${branchId}/lead-control-history`)).data;
 
 // Google Sheets OAuth
 export const gsStatus = async () => (await api.get("/marketing/google-sheets/status")).data;

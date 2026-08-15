@@ -2,12 +2,13 @@ import { useCallback, useEffect, useState } from "react";
 import {
   ArrowLeft, MapPin, Clock, Calendar as CalendarIcon, Mail, Phone, User, RefreshCw, Pencil,
   Users, BarChart3, Stethoscope, Activity, ListChecks, FileText, Wallet, UserCog, X,
+  ArrowLeftRight,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
-import { bmDetail, updateBranch, bmReassignAdmin, hrBranchAdminCandidates, bmHeadPhysioCandidates, bmAssignHeadPhysio } from "@/lib/api";
+import { bmDetail, updateBranch, bmReassignAdmin, hrBranchAdminCandidates, bmHeadPhysioCandidates, bmAssignHeadPhysio, bmLeadControlHistory } from "@/lib/api";
 import { BranchFormDialogV2 } from "@/components/branch/BranchFormDialogV2";
 import { LeadControlSwitch, normalizeLeadControl } from "@/components/branch/LeadControlSwitch";
 import { slotTo12h } from "@/lib/time";
@@ -18,6 +19,7 @@ const TABS = [
   { key: "staff", label: "Staff", icon: Users },
   { key: "performance", label: "Performance", icon: Activity },
   { key: "head_physio", label: "Experts", icon: Stethoscope },
+  { key: "lead_management", label: "Lead Management", icon: ArrowLeftRight },
 ];
 
 export const BranchDetailPage = ({ branchId, onBack, readOnly = false }) => {
@@ -48,20 +50,19 @@ export const BranchDetailPage = ({ branchId, onBack, readOnly = false }) => {
             than a phone header holds on one line. */}
         <div className="flex flex-wrap items-center justify-end gap-2">
           <Button variant="outline" onClick={load} data-testid="branch-detail-refresh"><RefreshCw className="h-4 w-4" /></Button>
-          {/* Between Refresh and Edit, not down in the Summary card. It is a control the
-              branch is operated by rather than a detail about it, and it belongs with the
-              other two. Read-only viewers still see which desk owns the leads — the switch
-              renders disabled rather than being hidden. */}
-          <HeaderLeadControl branch={b} onChanged={load} readOnly={readOnly} />
+          {/* The Lead Control switch used to sit here, between Refresh and Edit. It has
+              moved to the Lead Management tab, where the record of past switches gives it
+              the context a bare toggle in a header could not. */}
           {!readOnly && <Button variant="outline" onClick={() => setShowEdit(true)} data-testid="branch-detail-edit"><Pencil className="h-4 w-4 mr-1" />Edit</Button>}
         </div>
       </div>
 
-      {/* Four across on a phone rather than wrapping Experts onto a line of its own.
-          The icon goes above the label and the text shrinks, which is what the Manage
-          sub-tabs one bar up already do — the two sit on the same screen and should not
-          each solve this differently. Unchanged from sm up. */}
-      <div className="grid grid-cols-4 gap-1 border-b border-slate-200 pb-2 sm:flex sm:flex-wrap sm:gap-2" data-testid="branch-detail-tabs">
+      {/* Three across on a phone, so the five tabs fall 3 + 2 rather than being squeezed
+          onto one line where "Lead Management" would have nowhere to go. The icon sits
+          above the label and the text shrinks, which is what the Manage sub-tabs one bar
+          up already do — the two share a screen and should not each solve this
+          differently. Unchanged from sm up. */}
+      <div className="grid grid-cols-3 gap-1 border-b border-slate-200 pb-2 sm:flex sm:flex-wrap sm:gap-2" data-testid="branch-detail-tabs">
         {TABS.map((t) => {
           const Icon = t.icon;
           const active = tab === t.key;
@@ -77,6 +78,7 @@ export const BranchDetailPage = ({ branchId, onBack, readOnly = false }) => {
       {tab === "staff" && <StaffTab staff={data.staff} />}
       {tab === "performance" && <PerformanceTab perf={data.performance} />}
       {tab === "head_physio" && <HeadPhysioTab hp={data.head_physio_section} branchId={branchId} onChanged={load} readOnly={readOnly} />}
+      {tab === "lead_management" && <LeadManagementTab branch={b} branchId={branchId} onChanged={load} readOnly={readOnly} />}
 
       {showEdit && <BranchFormDialogV2 branch={b} onClose={() => setShowEdit(false)} onSaved={() => { setShowEdit(false); load(); }} />}
     </div>
@@ -146,8 +148,103 @@ const Row = ({ icon, label, value }) => (
   </div>
 );
 
+// ---------- Lead Management tab ----------
+
+const LEAD_CONTROL_LABEL = { pre_sales: "Pre Sales", branch_admin: "Branch Admin" };
+
+/** "2026-08-15T14:05:22+05:30" -> "15 Aug 2026, 2:05 PM". The stamp as it was written. */
+const formatChangedAt = (iso) => {
+  const d = new Date(iso || "");
+  if (Number.isNaN(d.getTime())) return iso || "—";
+  return `${d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}, ${d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })}`;
+};
+
 /**
- * Lead Control in the branch header, saving on confirm.
+ * Which desk works this branch's leads, and every time that has been changed.
+ *
+ * The switch was a lone toggle in the page header before this. It decides where a whole
+ * branch's leads live, and a control that consequential reads better next to the record of
+ * when it was last thrown than tucked between Refresh and Edit.
+ */
+const LeadManagementTab = ({ branch, branchId, onChanged, readOnly = false }) => {
+  const [history, setHistory] = useState(null); // null = still loading, [] = never switched
+
+  const loadHistory = useCallback(() => {
+    bmLeadControlHistory(branchId)
+      .then(setHistory)
+      .catch(() => setHistory([]));
+  }, [branchId]);
+  useEffect(() => { loadHistory(); }, [loadHistory]);
+
+  const current = normalizeLeadControl(branch.lead_control);
+
+  return (
+    <div className="space-y-4" data-testid="branch-lead-management-tab">
+      <Card>
+        <CardHeader><CardTitle className="text-base">Lead Control</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-slate-600">
+            {current === "branch_admin"
+              ? "This branch works its own leads. They skip the Pre-Sales desk and go straight to the Branch Admin, who handles the Pre-Sales stages as well."
+              : "The Pre-Sales desk qualifies this branch's leads first, and hands each one over once an appointment is booked."}
+          </p>
+          {/* Reloads the table on change as well as the branch, so the switch just thrown
+              shows up as the newest row without needing the tab reopened. */}
+          <HeaderLeadControl
+            branch={branch}
+            onChanged={() => { onChanged && onChanged(); loadHistory(); }}
+            readOnly={readOnly}
+          />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle className="text-base">Switch History</CardTitle></CardHeader>
+        <CardContent>
+          {history === null ? (
+            <p className="text-sm text-slate-500" data-testid="lead-control-history-loading">Loading…</p>
+          ) : history.length === 0 ? (
+            // Says "not seen" rather than "never happened": switches made before this was
+            // recorded left no trace, and the table should not claim otherwise.
+            <p className="text-sm text-slate-500" data-testid="lead-control-history-empty">
+              No switches recorded for this branch yet.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[520px] divide-y divide-slate-200 text-sm" data-testid="lead-control-history-table">
+                <thead className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-3 py-2">Date &amp; Time</th>
+                    <th className="px-3 py-2">From</th>
+                    <th className="px-3 py-2">To</th>
+                    <th className="px-3 py-2">Changed By</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {history.map((row) => (
+                    <tr key={row.id} data-testid={`lead-control-history-row-${row.id}`}>
+                      <td className="whitespace-nowrap px-3 py-2 text-slate-700">{formatChangedAt(row.changed_at)}</td>
+                      <td className="px-3 py-2 text-slate-500">{LEAD_CONTROL_LABEL[row.from_control] || row.from_control || "—"}</td>
+                      <td className="px-3 py-2">
+                        <span className="rounded-[5px] border border-sky-200 bg-sky-50 px-2 py-0.5 text-xs font-medium text-sky-700">
+                          {LEAD_CONTROL_LABEL[row.to_control] || row.to_control || "—"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-slate-600">{row.changed_by || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
+
+/**
+ * The Lead Control switch itself, saving on confirm.
  *
  * Optimistic: the switch moves as soon as the dialog is accepted and reverts if the
  * save fails. The confirm has already made this a deliberate act, so the control

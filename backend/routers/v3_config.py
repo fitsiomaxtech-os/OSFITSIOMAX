@@ -195,7 +195,7 @@ async def v3_create_branch(payload: V3BranchCreate, _: V3UserOut = Depends(v3_re
 
 
 @router.put("/branches/{branch_id}", response_model=V3BranchOut)
-async def v3_update_branch(branch_id: str, payload: V3BranchUpdate, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
+async def v3_update_branch(branch_id: str, payload: V3BranchUpdate, user: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev"))):
     existing = await v3_col("branches").find_one({"id": branch_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Branch not found")
@@ -222,8 +222,35 @@ async def v3_update_branch(branch_id: str, payload: V3BranchUpdate, _: V3UserOut
     # lands on after switching is the full backlog rather than a board missing most of it.
     if "lead_control" in updates and updates["lead_control"] != lead_control.normalize(existing.get("lead_control")):
         await realign_branch_stage_leads(branch_id, updates["lead_control"])
+        # Every flip is recorded. The switch moves a whole branch's leads between two desks,
+        # and the branch itself only ever carries the answer as it stands now — so without
+        # this there is nothing to say when the handover happened or who called it.
+        await v3_col("branch_lead_control_history").insert_one({
+            "id": str(uuid.uuid4()),
+            "branch_id": branch_id,
+            "from_control": lead_control.normalize(existing.get("lead_control")),
+            "to_control": updates["lead_control"],
+            "changed_by": user.full_name,
+            "changed_by_role": user.role,
+            "changed_at": now_iso(),
+        })
     updated = await v3_col("branches").find_one({"id": branch_id}, {"_id": 0})
     return V3BranchOut(**updated)
+
+
+@router.get("/branches/{branch_id}/lead-control-history")
+async def v3_lead_control_history(
+    branch_id: str,
+    _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev")),
+):
+    """Every Lead Control switch this branch has been through, newest first.
+
+    Empty for a branch that has never been switched, including every branch that existed
+    before this was recorded — an empty table means "no flip seen", not "no flips ever".
+    """
+    return await v3_col("branch_lead_control_history").find(
+        {"branch_id": branch_id}, {"_id": 0}
+    ).sort("changed_at", -1).to_list(200)
 
 
 @router.delete("/branches/{branch_id}")
