@@ -68,17 +68,30 @@ async def v3_current_user(authorization: str = Header(...)) -> V3UserOut:
     return V3UserOut(**user)
 
 
-# Roles that are a Branch Admin under another name. An Online Physio Admin runs a branch's
-# online practice and needs the same board and the same reach over it — one branch's leads,
-# patients, calendars, store and accounts — so rather than a second set of permissions this
-# is the same set under a second slug.
+# Roles that are a Branch Admin under another name. A branch is run by one of these whether
+# it sells physiotherapy, fitness, both, or runs online — the job is the same job, over one
+# branch's leads, patients, calendars, store and accounts. So rather than a set of
+# permissions each, this is Branch Admin's one set under several slugs.
+#
+# The distinction they carry is which practice the person runs, and that is a label on the
+# user, not a different reach into the data: a Branch Admin (Fitness) still needs the whole
+# of their branch. Anything that should genuinely differ between them belongs in a check on
+# the branch's vertical, not in a fork of these permissions.
 #
 # Matched exactly, unlike the HR and Diet predicates below. Those match loosely because
 # their roles are typed by hand and the wording varies. Doing that here would be dangerous:
-# any rule matching a token like "physio" or "online" would also catch the plain `physio`
-# role and hand a treating physio the branch's finances. So the slug is fixed, and it is in
-# DEFAULT_ROLES instead, which puts it in the Create User dropdown — nobody has to type it.
-BRANCH_ADMIN_ROLES = frozenset({"branch_admin", "online_physio_admin"})
+# any rule matching a token like "physio", "fitness" or "online" would also catch the plain
+# `physio` role and hand a treating physio the branch's finances. So the slugs are fixed,
+# and they are in DEFAULT_ROLES instead, which puts them in the Create User and Designation
+# dropdowns — nobody has to type one.
+BRANCH_ADMIN_ROLES = frozenset({
+    "branch_admin",
+    "branch_admin_physio",
+    "branch_admin_fitness",
+    "branch_admin_physio_fitness",
+    "online_physio_admin",
+    "online_fitness_admin",
+})
 
 
 def is_branch_admin_role(role: str) -> bool:

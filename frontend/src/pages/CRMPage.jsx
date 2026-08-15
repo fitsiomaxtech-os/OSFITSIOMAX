@@ -76,7 +76,11 @@ const ROLE_META = {
   business_dev: { label: "Business Development", icon: Briefcase },
   pre_sales: { label: "Pre Sales", icon: Headphones },
   branch_admin: { label: "Branch Admin", icon: Building2 },
+  branch_admin_physio: { label: "Branch Admin (Physio)", icon: Building2 },
+  branch_admin_fitness: { label: "Branch Admin (Fitness)", icon: Building2 },
+  branch_admin_physio_fitness: { label: "Branch Admin (Physio & Fitness)", icon: Building2 },
   online_physio_admin: { label: "Online Physio Admin", icon: Building2 },
+  online_fitness_admin: { label: "Online Fitness Admin", icon: Building2 },
   head_physio: { label: "Head Physio", icon: Stethoscope },
   physio: { label: "Physio", icon: Activity },
   accountant: { label: "Accountant", icon: BadgeIndianRupee },
@@ -115,8 +119,9 @@ const isHumanResourceRole = (role) => {
 
 /** Whether a role gets the Branch Admin board.
  *
- * An Online Physio Admin runs a branch's online practice with a Branch Admin's authority
- * over it, so it lands on the same board rather than a near-copy of one.
+ * A branch is run by one of these whether it sells physiotherapy, fitness, both, or runs
+ * online. The name says which practice the person runs; the job is the same job, so they
+ * land on the same board rather than on near-copies of one.
  *
  * Matched exactly, unlike the two predicates above — they match loosely because their
  * roles are typed by hand, and doing that here would catch the plain `physio` role on the
@@ -124,7 +129,15 @@ const isHumanResourceRole = (role) => {
  * BRANCH_ADMIN_ROLES in backend/deps.py: a role that passes here and fails there would
  * render the whole board and 403 every call in it.
  */
-const isBranchAdminRole = (role) => ["branch_admin", "online_physio_admin"].includes(String(role || "").trim().toLowerCase());
+const BRANCH_ADMIN_ROLES = [
+  "branch_admin",
+  "branch_admin_physio",
+  "branch_admin_fitness",
+  "branch_admin_physio_fitness",
+  "online_physio_admin",
+  "online_fitness_admin",
+];
+const isBranchAdminRole = (role) => BRANCH_ADMIN_ROLES.includes(String(role || "").trim().toLowerCase());
 
 // Same destinations as the desktop tab strip below. On a phone, three get a direct
 // bottom-nav slot each; the rest sit behind a "More" sheet — both derived from this one

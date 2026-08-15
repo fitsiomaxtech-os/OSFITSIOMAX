@@ -619,11 +619,16 @@ const ROLE_META = {
   super_admin: { label: "SUPER ADMIN", classes: "border-purple-300 bg-purple-50 text-purple-700" },
   business_dev: { label: "BUSINESS DEV", classes: "border-indigo-300 bg-indigo-50 text-indigo-700" },
   pre_sales: { label: "PRE SALES", classes: "border-sky-300 bg-sky-50 text-sky-700" },
+  // The Branch Admin family shares emerald, and the online arm shares teal, on purpose:
+  // the hue says which kind of role this is and the label says which practice it runs.
+  // Handing each of the six its own colour would spend the whole palette on one job and
+  // leave the list looking like six unrelated roles rather than two groups of one.
   branch_admin: { label: "BRANCH ADMIN", classes: "border-emerald-300 bg-emerald-50 text-emerald-700" },
-  // Teal rather than Branch Admin's emerald: it carries the same authority, but over the
-  // online practice, and two roles wearing one colour in the user list is two roles nobody
-  // can tell apart at a glance.
+  branch_admin_physio: { label: "BRANCH ADMIN ( PHYSIO )", classes: "border-emerald-300 bg-emerald-50 text-emerald-700" },
+  branch_admin_fitness: { label: "BRANCH ADMIN ( FITNESS )", classes: "border-emerald-300 bg-emerald-50 text-emerald-700" },
+  branch_admin_physio_fitness: { label: "BRANCH ADMIN ( PHYSIO & FITNESS )", classes: "border-emerald-300 bg-emerald-50 text-emerald-700" },
   online_physio_admin: { label: "ONLINE PHYSIO ADMIN", classes: "border-teal-300 bg-teal-50 text-teal-700" },
+  online_fitness_admin: { label: "ONLINE FITNESS ADMIN", classes: "border-teal-300 bg-teal-50 text-teal-700" },
   head_physio: { label: "HEAD PHYSIO", classes: "border-amber-300 bg-amber-50 text-amber-700" },
   physio: { label: "PHYSIO", classes: "border-cyan-300 bg-cyan-50 text-cyan-700" },
   marketing_head: { label: "MARKETING HEAD", classes: "border-pink-300 bg-pink-50 text-pink-700" },

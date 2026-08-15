@@ -14,11 +14,20 @@ router = APIRouter(prefix="/api/v3/hr")
 
 
 DEFAULT_DEPARTMENTS = ["Pre-Sales", "Branch", "HR", "Accounts", "Operations", "Marketing", "Experts"]
-# "online_physio_admin" is the Online Physio Admin: a Branch Admin for a branch's online
-# practice, holding the same board and the same reach over one branch. See BRANCH_ADMIN_ROLES
-# in deps.py for why it is a fixed slug listed here rather than a custom role — a role whose
-# name is typed by hand cannot be aliased to branch_admin safely.
-DEFAULT_ROLES = ["super_admin", "business_dev", "pre_sales", "branch_admin", "online_physio_admin", "head_physio", "physio", "marketing_head", "accountant"]
+# The branch_admin_* and online_*_admin entries are all Branch Admin, named for the practice
+# the person runs — physio, fitness, both, or the online arm. They hold the same board and
+# the same reach over one branch. See BRANCH_ADMIN_ROLES in deps.py for why these are fixed
+# slugs listed here rather than custom roles: a role whose name is typed by hand cannot be
+# aliased to branch_admin safely.
+#
+# Ordered next to branch_admin because this list is what the Designation and Create User
+# dropdowns render, and a reader picking between them wants the family together.
+DEFAULT_ROLES = [
+    "super_admin", "business_dev", "pre_sales",
+    "branch_admin", "branch_admin_physio", "branch_admin_fitness", "branch_admin_physio_fitness",
+    "online_physio_admin", "online_fitness_admin",
+    "head_physio", "physio", "marketing_head", "accountant",
+]
 
 # Both consultant roles can be assigned to more than one branch (a linked `doctors`
 # record is kept in sync per branch) — every other role stays pinned to a single branch.
