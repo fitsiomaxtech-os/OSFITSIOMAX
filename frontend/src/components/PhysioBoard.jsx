@@ -17,6 +17,7 @@ import {
   RefreshCw,
   Search,
   Send,
+  UserCheck,
   Users,
   UserX,
   X,
@@ -212,6 +213,7 @@ const TILE = {
   pending: "#d97706",
   review: "#7c3aed",
   request: "#db2777",
+  finished: "#4f46e5",
 };
 
 // Every 7th treatment day is a review milestone — reviewsSoFar counts how many the patient
@@ -466,6 +468,27 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
     return { total, completed, pending: total - completed };
   }, [leads]);
 
+  /**
+   * Patients who have finished their whole course — a different unit from the three
+   * cards beside it, which all count days.
+   *
+   * "Completed 80" means eighty treatment days are done across everyone; it says nothing
+   * about how many people that finished. This is the count of patients with no day left,
+   * which is the one that answers "how many did we see through to the end".
+   *
+   * Deliberately not scoped by the date filter. Whether a course is finished is a fact
+   * about the patient as of now, not about a range of days, and pretending otherwise
+   * would need the date each patient's last session landed on. The card says "of N
+   * patients" so the unit is legible next to the day counts.
+   */
+  const finished = useMemo(() => {
+    const inTreatment = leads.filter((l) => (l.total_sessions || 0) > 0);
+    return {
+      done: inTreatment.filter((l) => (l.completed_sessions || 0) >= l.total_sessions).length,
+      patients: inTreatment.length,
+    };
+  }, [leads]);
+
   const countFor = (date) => (
     leads.filter((l) => l.appointment_date === date).length
     + sessions.filter((s) => (s.slot_time || "").startsWith(date)).length
@@ -595,7 +618,10 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
           two different ones. The heading stays: it names the range the counts answer to. */}
       <div className="mb-4" data-testid="physio-treatment-summary">
         <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">{filterValue ? filterValue.label : "Overall Treatment"}</p>
-        <div className="grid grid-cols-3 gap-2 sm:gap-3">
+        {/* Two by two on a phone rather than four across: at ~85px a card the labels
+            break mid-word and the figures are the only thing left readable. One row from
+            sm up, as before. */}
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
           <StatTile
             icon={Calendar} label="Total Days" value={filterStats.total} color={TILE.total}
             onClick={() => setRowFilter("all")} active={rowFilter === "all"} testid="physio-stat-total"
@@ -608,6 +634,15 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
           <StatTile
             icon={Clock} label="Pending" value={filterStats.pending} sub="Days left" color={TILE.pending}
             onClick={() => setRowFilter(rowFilter === "pending" ? "all" : "pending")} active={rowFilter === "pending"} testid="physio-stat-pending"
+          />
+          {/* No onClick: the three beside it filter the day list, and this one counts
+              patients rather than days — there is no set of rows in that list it could
+              narrow to. StatTile renders a plain div without one, so it is not announced
+              as something to press. */}
+          <StatTile
+            icon={UserCheck} label="Treatment Completed" value={finished.done} color={TILE.finished}
+            sub={finished.patients ? `of ${finished.patients} patients` : null}
+            testid="physio-stat-treatment-completed"
           />
         </div>
       </div>
