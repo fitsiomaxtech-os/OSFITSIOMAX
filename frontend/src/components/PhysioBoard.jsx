@@ -445,7 +445,11 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
 
   const visibleRows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    let rows = dayRows;
+    // Treatment Completed swaps the list rather than narrowing it. A patient with no days
+    // left has nothing booked on any date, so filtering the selected day by "is finished"
+    // would show an empty list on every day of the week — the tile would look broken
+    // rather than filtered. Search still applies on top.
+    let rows = rowFilter === "finished" ? finished.rows : dayRows;
     if (q) {
       rows = rows.filter((r) => (
         (r.lead.name || "").toLowerCase().includes(q) || (r.lead.phone || "").toLowerCase().includes(q)
@@ -453,12 +457,13 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
     }
     if (rowFilter === "completed") rows = rows.filter((r) => r.done);
     else if (rowFilter === "pending") rows = rows.filter((r) => !r.done);
+    // "finished" needs no filter of its own — finished.rows is already exactly that set.
     // Incomplete cards always show first, completed (green) cards always last —
     // each group keeps its own time order from rowsFor's sort.
     const incomplete = rows.filter((r) => !r.done);
     const completed = rows.filter((r) => r.done);
     return [...incomplete, ...completed];
-  }, [dayRows, search, rowFilter]);
+  }, [dayRows, finished.rows, search, rowFilter]);
 
   // Every treatment day this physio holds, regardless of date — the default when
   // no Meta-style date filter is active.
@@ -483,9 +488,19 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
    */
   const finished = useMemo(() => {
     const inTreatment = leads.filter((l) => (l.total_sessions || 0) > 0);
+    const done = inTreatment.filter((l) => (l.completed_sessions || 0) >= l.total_sessions);
     return {
-      done: inTreatment.filter((l) => (l.completed_sessions || 0) >= l.total_sessions).length,
+      done: done.length,
       patients: inTreatment.length,
+      // The rows the tile shows when selected. Built off the same predicate as the count
+      // so the list can never disagree with the figure above it.
+      rows: done.map((l) => ({
+        key: `finished-${l.id}`,
+        lead: l,
+        time: "",
+        label: `${l.completed_sessions} of ${l.total_sessions} days`,
+        done: true,
+      })),
     };
   }, [leads]);
 
@@ -635,13 +650,10 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
             icon={Clock} label="Pending" value={filterStats.pending} sub="Days left" color={TILE.pending}
             onClick={() => setRowFilter(rowFilter === "pending" ? "all" : "pending")} active={rowFilter === "pending"} testid="physio-stat-pending"
           />
-          {/* No onClick: the three beside it filter the day list, and this one counts
-              patients rather than days — there is no set of rows in that list it could
-              narrow to. StatTile renders a plain div without one, so it is not announced
-              as something to press. */}
           <StatTile
             icon={UserCheck} label="Treatment Completed" value={finished.done} color={TILE.finished}
             sub={finished.patients ? `of ${finished.patients} patients` : null}
+            onClick={() => setRowFilter(rowFilter === "finished" ? "all" : "finished")} active={rowFilter === "finished"}
             testid="physio-stat-treatment-completed"
           />
         </div>
@@ -700,13 +712,36 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
         </button>
       </div>
 
+      {/* The week strip above is still on screen but no longer drives this list, and a day
+          tapped with no visible effect reads as a bug. Says so, and offers the way back. */}
+      {rowFilter === "finished" && (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2" data-testid="physio-finished-banner">
+          <p className="text-[11px] font-medium text-indigo-800">
+            Showing every patient who finished their course — not tied to the day selected above.
+          </p>
+          <button
+            type="button"
+            onClick={() => setRowFilter("all")}
+            className="shrink-0 rounded-md border border-indigo-200 bg-white px-2 py-1 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100"
+            data-testid="physio-finished-banner-back"
+          >
+            Back to the day
+          </button>
+        </div>
+      )}
+
       {visibleRows.length === 0 && !loading ? (
         <div className="text-center py-16">
           <ClipboardList className="h-10 w-10 text-slate-200 mx-auto mb-3" />
+          {/* The finished list is not tied to the selected day, so it cannot borrow the
+              "nothing booked for <date>" wording — that would send someone looking through
+              the week for patients who by definition have nothing booked at all. */}
           <p className="text-sm text-slate-400">
-            {search.trim()
-              ? `No patient matches "${search.trim()}" on this day`
-              : `Nothing booked for ${new Date(`${selectedDate}T00:00:00`).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}`}
+            {rowFilter === "finished"
+              ? (search.trim() ? `No finished patient matches "${search.trim()}"` : "No patient has finished their course yet")
+              : search.trim()
+                ? `No patient matches "${search.trim()}" on this day`
+                : `Nothing booked for ${new Date(`${selectedDate}T00:00:00`).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}`}
           </p>
         </div>
       ) : (
