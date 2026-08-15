@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
-import { bmDetail, updateBranch, bmReassignAdmin, hrBranchAdminCandidates, bmHeadPhysioCandidates, bmAssignHeadPhysio, bmLeadControlHistory } from "@/lib/api";
+import { bmDetail, updateBranch, bmReassignAdmin, hrBranchAdminCandidates, bmHeadPhysioCandidates, bmAssignHeadPhysio, bmLeadControlHistory, bmPreSalesMembers } from "@/lib/api";
 import { BranchFormDialogV2 } from "@/components/branch/BranchFormDialogV2";
 import { LeadControlSwitch, normalizeLeadControl } from "@/components/branch/LeadControlSwitch";
 import { slotTo12h } from "@/lib/time";
@@ -168,6 +168,9 @@ const formatChangedAt = (iso) => {
  */
 const LeadManagementTab = ({ branch, branchId, onChanged, readOnly = false }) => {
   const [history, setHistory] = useState(null); // null = still loading, [] = never switched
+  // Fetched up front, not when the dialog opens: the confirm needs the list the moment it
+  // appears, and a spinner inside a decision like this one is worse than a moment's wait.
+  const [preSalesMembers, setPreSalesMembers] = useState([]);
 
   const loadHistory = useCallback(() => {
     bmLeadControlHistory(branchId)
@@ -175,6 +178,9 @@ const LeadManagementTab = ({ branch, branchId, onChanged, readOnly = false }) =>
       .catch(() => setHistory([]));
   }, [branchId]);
   useEffect(() => { loadHistory(); }, [loadHistory]);
+  useEffect(() => {
+    bmPreSalesMembers(branchId).then(setPreSalesMembers).catch(() => setPreSalesMembers([]));
+  }, [branchId]);
 
   const current = normalizeLeadControl(branch.lead_control);
 
@@ -192,6 +198,7 @@ const LeadManagementTab = ({ branch, branchId, onChanged, readOnly = false }) =>
               shows up as the newest row without needing the tab reopened. */}
           <HeaderLeadControl
             branch={branch}
+            preSalesMembers={preSalesMembers}
             onChanged={() => { onChanged && onChanged(); loadHistory(); }}
             readOnly={readOnly}
           />
@@ -211,12 +218,13 @@ const LeadManagementTab = ({ branch, branchId, onChanged, readOnly = false }) =>
             </p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[520px] divide-y divide-slate-200 text-sm" data-testid="lead-control-history-table">
+              <table className="w-full min-w-[680px] divide-y divide-slate-200 text-sm" data-testid="lead-control-history-table">
                 <thead className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                   <tr>
                     <th className="px-3 py-2">Date &amp; Time</th>
                     <th className="px-3 py-2">From</th>
                     <th className="px-3 py-2">To</th>
+                    <th className="px-3 py-2">Handed To</th>
                     <th className="px-3 py-2">Changed By</th>
                   </tr>
                 </thead>
@@ -230,6 +238,9 @@ const LeadManagementTab = ({ branch, branchId, onChanged, readOnly = false }) =>
                           {LEAD_CONTROL_LABEL[row.to_control] || row.to_control || "—"}
                         </span>
                       </td>
+                      {/* Only a hand-back to Pre-Sales names someone. Going the other way
+                          the branch takes its own leads, so there is nobody to name. */}
+                      <td className="px-3 py-2 text-slate-600">{row.assigned_to_name || "—"}</td>
                       <td className="px-3 py-2 text-slate-600">{row.changed_by || "—"}</td>
                     </tr>
                   ))}
@@ -251,19 +262,22 @@ const LeadManagementTab = ({ branch, branchId, onChanged, readOnly = false }) =>
  * should look decided rather than sitting inert through a round trip; the failure
  * path is a toast plus the old value back.
  */
-const HeaderLeadControl = ({ branch, onChanged, readOnly = false }) => {
+const HeaderLeadControl = ({ branch, onChanged, readOnly = false, preSalesMembers = null }) => {
   const [value, setValue] = useState(normalizeLeadControl(branch.lead_control));
   const [saving, setSaving] = useState(false);
 
   // The parent reloads after a save, and Edit > Branch Details can change this too.
   useEffect(() => { setValue(normalizeLeadControl(branch.lead_control)); }, [branch.lead_control]);
 
-  const pick = async (next) => {
+  const pick = async (next, assigneeId = null) => {
     const prev = value;
     setValue(next);
     setSaving(true);
     try {
-      await updateBranch(branch.id, { lead_control: next });
+      await updateBranch(branch.id, {
+        lead_control: next,
+        ...(assigneeId ? { lead_control_assignee_id: assigneeId } : {}),
+      });
       toast.success(next === "branch_admin" ? "Leads now go straight to the Branch Admin" : "Leads now start with Pre-Sales");
       onChanged && onChanged();
     } catch (e) {
@@ -281,6 +295,7 @@ const HeaderLeadControl = ({ branch, onChanged, readOnly = false }) => {
       disabled={readOnly}
       confirm
       branchName={branch.branch_name}
+      preSalesMembers={preSalesMembers}
       size="sm"
       testid="branch-detail-lead-control"
     />

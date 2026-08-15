@@ -215,6 +215,20 @@ async def v3_update_branch(branch_id: str, payload: V3BranchUpdate, user: V3User
         # branch to the wrong desk, and the caller would never see it.
         if updates["lead_control"] not in lead_control.VALID:
             raise HTTPException(status_code=400, detail=f"lead_control must be one of {list(lead_control.VALID)}")
+    # Names a person, not a branch field — pulled out before the branch is written so it
+    # does not end up stored on the document.
+    assignee_id = updates.pop("lead_control_assignee_id", None)
+    assignee = None
+    if assignee_id and updates.get("lead_control") == lead_control.PRE_SALES:
+        assignee = await v3_col("users").find_one(
+            {"id": assignee_id, "role": "pre_sales", "branch_id": branch_id},
+            {"_id": 0, "id": 1, "full_name": 1},
+        )
+        # Checked rather than trusted: this hands a branch's entire book to whoever is
+        # named, so a stale or wrong id must fail loudly instead of assigning the leads
+        # to nobody and looking like it worked.
+        if not assignee:
+            raise HTTPException(status_code=400, detail="That Pre-Sales member is not attached to this branch")
     await v3_col("branches").update_one({"id": branch_id}, {"$set": updates})
     # The two modes open on different stages — Branch Assign + RNR for a branch running its
     # own leads, New Appointment for one fed by Pre-Sales. Leads already sitting on the old
@@ -222,6 +236,19 @@ async def v3_update_branch(branch_id: str, payload: V3BranchUpdate, user: V3User
     # lands on after switching is the full backlog rather than a board missing most of it.
     if "lead_control" in updates and updates["lead_control"] != lead_control.normalize(existing.get("lead_control")):
         await realign_branch_stage_leads(branch_id, updates["lead_control"])
+        # A branch that ran its own leads had no Pre-Sales rep on any of them, so handing
+        # the book back left every lead sitting in the Pre-Sales pipeline unowned. The rep
+        # named on the switch takes them, which is the whole point of being asked.
+        if assignee:
+            await v3_col("leads").update_many(
+                {"branch_id": branch_id},
+                {"$set": {
+                    "assigned_user_id": assignee["id"],
+                    "assigned_user_name": assignee.get("full_name", ""),
+                    "assigned_user_role": "pre_sales",
+                    "updated_at": now_iso(),
+                }},
+            )
         # Every flip is recorded. The switch moves a whole branch's leads between two desks,
         # and the branch itself only ever carries the answer as it stands now — so without
         # this there is nothing to say when the handover happened or who called it.
@@ -232,10 +259,31 @@ async def v3_update_branch(branch_id: str, payload: V3BranchUpdate, user: V3User
             "to_control": updates["lead_control"],
             "changed_by": user.full_name,
             "changed_by_role": user.role,
+            "assigned_to_id": assignee["id"] if assignee else None,
+            "assigned_to_name": assignee.get("full_name", "") if assignee else None,
             "changed_at": now_iso(),
         })
     updated = await v3_col("branches").find_one({"id": branch_id}, {"_id": 0})
     return V3BranchOut(**updated)
+
+
+@router.get("/branches/{branch_id}/pre-sales-members")
+async def v3_branch_pre_sales_members(
+    branch_id: str,
+    _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev")),
+):
+    """The Pre-Sales reps attached to this branch, for the hand-back dropdown.
+
+    Scoped to the branch rather than the whole Pre-Sales desk: returning a branch's book
+    to Pre-Sales means handing it to someone who covers that branch. A branch with nobody
+    attached comes back empty, and the dialog says so rather than offering a dead control —
+    the fix for that is attaching a Pre-Sales user to the branch in HR Admin.
+    """
+    rows = await v3_col("users").find(
+        {"role": "pre_sales", "branch_id": branch_id, "is_active": {"$ne": False}},
+        {"_id": 0, "id": 1, "full_name": 1, "email": 1},
+    ).sort("full_name", 1).to_list(200)
+    return rows
 
 
 @router.get("/branches/{branch_id}/lead-control-history")

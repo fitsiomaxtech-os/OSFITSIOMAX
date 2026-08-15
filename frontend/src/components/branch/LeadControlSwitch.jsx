@@ -42,6 +42,7 @@ export const LeadControlSwitch = ({
   testid = "lead-control",
   confirm = false,
   branchName = "",
+  preSalesMembers = null,
 }) => {
   const current = normalizeLeadControl(value);
   const [pending, setPending] = useState(null);
@@ -96,8 +97,11 @@ export const LeadControlSwitch = ({
         <LeadControlConfirm
           next={pending}
           branchName={branchName}
+          preSalesMembers={preSalesMembers}
           onCancel={() => setPending(null)}
-          onConfirm={() => { const chosen = pending; setPending(null); onChange(chosen); }}
+          // The rep is passed alongside the new setting rather than saved separately, so a
+          // hand-back and the person it went to are one act that either happens or doesn't.
+          onConfirm={(assigneeId) => { const chosen = pending; setPending(null); onChange(chosen, assigneeId); }}
         />
       )}
     </>
@@ -109,10 +113,17 @@ export const LeadControlSwitch = ({
  * part people get wrong is that this moves the leads already in the pipeline, not just
  * the next import, and a dialog that does not say so is not worth showing.
  */
-const LeadControlConfirm = ({ next, branchName, onCancel, onConfirm }) => {
+const LeadControlConfirm = ({ next, branchName, preSalesMembers, onCancel, onConfirm }) => {
   const toBranch = next === BRANCH_ADMIN;
   const who = branchName ? `${branchName}'s` : "This branch's";
   const Icon = toBranch ? Hospital : Headset;
+  // Only on the way back to Pre-Sales, and only where the caller supplied a list. Handing
+  // the other way assigns nobody — a branch working its own leads has no Pre-Sales rep on
+  // them — and the places that pass no list (the Edit dialog, a source card) are unchanged.
+  const [assigneeId, setAssigneeId] = useState("");
+  const asksForAssignee = !toBranch && Array.isArray(preSalesMembers);
+  const noMembers = asksForAssignee && preSalesMembers.length === 0;
+  const blocked = asksForAssignee && !assigneeId;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" data-testid="lead-control-confirm">
       <div className="w-full max-w-md space-y-4 rounded-xl bg-white p-5 shadow-2xl">
@@ -140,10 +151,43 @@ const LeadControlConfirm = ({ next, branchName, onCancel, onConfirm }) => {
             </p>
           </div>
         </div>
+
+        {/* Who picks the book up. Asked rather than left to round-robin because these leads
+            are arriving all at once and with no rep on them at all — the branch was working
+            them itself until a moment ago. */}
+        {asksForAssignee && (
+          <div className="space-y-1.5">
+            <label htmlFor="lead-control-assignee" className="block text-xs font-semibold text-slate-700">
+              Hand these leads to
+            </label>
+            {noMembers ? (
+              // A dropdown with nothing in it reads as a bug. Say what is missing and where
+              // it is fixed, and do not pretend the switch can go ahead.
+              <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-800" data-testid="lead-control-no-members">
+                No Pre-Sales member is attached to {branchName || "this branch"} yet. Add one in HR Admin — give a Pre-Sales user this branch — then switch.
+              </p>
+            ) : (
+              <select
+                id="lead-control-assignee"
+                value={assigneeId}
+                onChange={(e) => setAssigneeId(e.target.value)}
+                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                data-testid="lead-control-assignee-select"
+              >
+                <option value="">Select a Pre-Sales member…</option>
+                {preSalesMembers.map((m) => (
+                  <option key={m.id} value={m.id}>{m.full_name || m.email}</option>
+                ))}
+              </select>
+            )}
+          </div>
+        )}
+
         <div className="flex justify-end gap-2 pt-1">
           <Button variant="outline" onClick={onCancel} data-testid="lead-control-confirm-cancel">Cancel</Button>
           <Button
-            onClick={onConfirm}
+            onClick={() => onConfirm(assigneeId || null)}
+            disabled={blocked}
             className={toBranch ? "bg-sky-600 hover:bg-sky-700" : "bg-emerald-600 hover:bg-emerald-700"}
             data-testid="lead-control-confirm-ok"
           >

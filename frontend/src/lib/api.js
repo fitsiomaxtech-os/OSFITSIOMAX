@@ -335,6 +335,7 @@ export const bmPerformance = async (branchId) => (await api.get(`/branch-mgmt/${
 export const bmPerformanceSummary = async () => (await api.get("/branch-mgmt/performance-summary")).data;
 export const bmDetail = async (branchId) => (await api.get(`/branch-mgmt/${branchId}/detail`)).data;
 export const bmLeadControlHistory = async (branchId) => (await api.get(`/branches/${branchId}/lead-control-history`)).data;
+export const bmPreSalesMembers = async (branchId) => (await api.get(`/branches/${branchId}/pre-sales-members`)).data;
 
 // Google Sheets OAuth
 export const gsStatus = async () => (await api.get("/marketing/google-sheets/status")).data;

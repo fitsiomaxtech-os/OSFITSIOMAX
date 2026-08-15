@@ -115,6 +115,11 @@ class V3BranchUpdate(BaseModel):
     weekly_hours: Optional[Dict[str, Any]] = None
     holidays: Optional[List[str]] = None
     lead_control: Optional[str] = None  # "pre_sales" | "branch_admin"
+    # Who picks the branch's leads up when lead_control returns to "pre_sales". Not stored
+    # on the branch — it names the Pre-Sales rep the leads are handed to, and is recorded
+    # against that switch. Ignored when switching the other way, since a branch working its
+    # own leads has no Pre-Sales rep on them at all.
+    lead_control_assignee_id: Optional[str] = None
 
 
 class V3DoctorCreate(BaseModel):
