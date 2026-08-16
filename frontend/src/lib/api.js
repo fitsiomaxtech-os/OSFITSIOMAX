@@ -325,6 +325,7 @@ export const hrRenameDepartment = async (id, name) => (await api.patch(`/hr/depa
 export const hrDeleteDepartment = async (id) => (await api.delete(`/hr/departments/${id}`)).data;
 export const hrAddDesignation = async (deptId, name) => (await api.post(`/hr/departments/${deptId}/designations`, { name })).data;
 export const hrDeleteDesignation = async (deptId, name) => (await api.delete(`/hr/departments/${deptId}/designations`, { params: { name } })).data;
+export const hrRenameDesignation = async (deptId, oldName, newName) => (await api.patch(`/hr/departments/${deptId}/designations`, { old_name: oldName, new_name: newName })).data;
 export const hrEmployees = async (params = {}) => {
   const q = new URLSearchParams();
   Object.entries(params).forEach(([k, v]) => { if (v) q.set(k, v); });

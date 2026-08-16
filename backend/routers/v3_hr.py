@@ -109,6 +109,11 @@ class DesignationCreate(BaseModel):
     name: str
 
 
+class DesignationRename(BaseModel):
+    old_name: str
+    new_name: str
+
+
 class EmployeeCreate(BaseModel):
     full_name: str
     email: Optional[str] = ""
@@ -709,6 +714,32 @@ async def remove_designation(dept_id: str, name: str, _: V3UserOut = Depends(v3_
     res = await v3_col("hr_departments").update_one({"id": dept_id}, {"$pull": {"designations": name}})
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Department not found")
+    return await v3_col("hr_departments").find_one({"id": dept_id}, {"_id": 0})
+
+
+@router.patch("/departments/{dept_id}/designations")
+async def rename_designation(dept_id: str, payload: DesignationRename, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    old_name = payload.old_name.strip()
+    new_name = payload.new_name.strip()
+    if not new_name:
+        raise HTTPException(status_code=400, detail="Designation name is required")
+    dept = await v3_col("hr_departments").find_one({"id": dept_id}, {"_id": 0})
+    if not dept:
+        raise HTTPException(status_code=404, detail="Department not found")
+    if old_name not in dept.get("designations", []):
+        raise HTTPException(status_code=404, detail="That designation isn't in this department")
+    if new_name.lower() != old_name.lower():
+        clash = await v3_col("hr_departments").find_one(
+            {"designations": {"$regex": f"^{re.escape(new_name)}$", "$options": "i"}}, {"_id": 0, "name": 1},
+        )
+        if clash:
+            raise HTTPException(status_code=409, detail=f'"{new_name}" already belongs to {clash["name"]}')
+    designations = [new_name if d == old_name else d for d in dept.get("designations", [])]
+    await v3_col("hr_departments").update_one({"id": dept_id}, {"$set": {"designations": designations}})
+    # Every employee's `designation` is a plain string, not a reference, so the rename has
+    # to be pushed to them explicitly or they'd keep showing the old title.
+    if new_name != old_name:
+        await v3_col("employees").update_many({"designation": old_name}, {"$set": {"designation": new_name}})
     return await v3_col("hr_departments").find_one({"id": dept_id}, {"_id": 0})
 
 
