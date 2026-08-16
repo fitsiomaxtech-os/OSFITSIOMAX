@@ -62,7 +62,7 @@ const SourcesTab = ({ branches: branchesProp = [] }) => {
   const [showSync, setShowSync] = useState(null);
   const [showMap, setShowMap] = useState(null);
   const [showEdit, setShowEdit] = useState(null);
-  const [form, setForm] = useState({ name: "", sheet_url: "", spreadsheet_id: "", sheet_name: "Sheet1", source_type: "google_sheets", headers: "", branchIds: [], verticals: [] });
+  const [form, setForm] = useState({ name: "", sheet_url: "", spreadsheet_id: "", sheet_names: ["Sheet1"], source_type: "google_sheets", headers: "", branchIds: [], verticals: [] });
   const [syncRows, setSyncRows] = useState(`[\n  {"name":"Aarav Sharma","phone":"9000000001","email":"aarav@example.com","city":"Chennai","condition":"Lower back pain","age":34}\n]`);
   const [syncResult, setSyncResult] = useState(null);
   const [pullResult, setPullResult] = useState(null);
@@ -149,9 +149,9 @@ const SourcesTab = ({ branches: branchesProp = [] }) => {
     }
     const headers = form.headers.split(",").map((h) => h.trim()).filter(Boolean);
     try {
-      await mkCreateSource({ name: form.name, sheet_url: form.sheet_url, source_type: form.source_type, headers, spreadsheet_id: sheetId, sheet_name: form.sheet_name || "Sheet1", branch_ids: form.branchIds, verticals: form.verticals });
+      await mkCreateSource({ name: form.name, sheet_url: form.sheet_url, source_type: form.source_type, headers, spreadsheet_id: sheetId, sheet_names: form.sheet_names.length ? form.sheet_names : ["Sheet1"], branch_ids: form.branchIds, verticals: form.verticals });
       toast.success("Source added");
-      setForm({ name: "", sheet_url: "", spreadsheet_id: "", sheet_name: "Sheet1", source_type: "google_sheets", headers: "", branchIds: [], verticals: [] });
+      setForm({ name: "", sheet_url: "", spreadsheet_id: "", sheet_names: ["Sheet1"], source_type: "google_sheets", headers: "", branchIds: [], verticals: [] });
       setShowAdd(false);
       load();
     } catch (e) { toast.error(e?.response?.data?.detail || "Create failed"); }
@@ -325,7 +325,7 @@ const SourcesTab = ({ branches: branchesProp = [] }) => {
               {form.spreadsheet_id && (
                 <p className="text-[10px] text-emerald-600">✓ Sheet ID detected: <code className="rounded bg-emerald-50 px-1">{form.spreadsheet_id.slice(0, 24)}…</code></p>
               )}
-              <SheetTabPicker spreadsheetId={form.spreadsheet_id} value={form.sheet_name} onChange={(v) => setForm({ ...form, sheet_name: v })} testid="mk-add-source-sheetname" />
+              <SheetTabPicker spreadsheetId={form.spreadsheet_id} values={form.sheet_names} onChange={(v) => setForm({ ...form, sheet_names: v })} testid="mk-add-source-sheetname" />
               <p className="text-xs text-amber-700 bg-amber-50 rounded p-2">
                 <strong>Important:</strong> the sheet must be either accessible to the Google account you connected, OR shared as “Anyone with the link can view”.
               </p>
@@ -416,14 +416,16 @@ const SourcesTab = ({ branches: branchesProp = [] }) => {
 // Branch Management, where a branch's own state is the thing on screen while you decide.
 
 /**
- * The worksheet/tab name field, upgraded from a guess to a pick.
+ * Which worksheet/tab(s) get pulled, upgraded from a typed guess to a pick.
  *
  * Once a spreadsheet ID is known, this loads that sheet's actual tabs (debounced, so it
- * doesn't fire on every keystroke of the URL) and swaps the free-text input for a select of
- * real tab names — only the picked tab is ever pulled. If the lookup fails (not connected
- * yet, sheet not shared), it falls back to the plain text input rather than blocking entry.
+ * doesn't fire on every keystroke of the URL) and swaps the free-text input for a checklist
+ * of real tab names — one or several can be picked, and only those are ever pulled (a
+ * spreadsheet with one lead-form tab per branch, say, can be pulled as one source). If the
+ * lookup fails (not connected yet, sheet not shared), it falls back to a comma-separated
+ * text input rather than blocking entry.
  */
-const SheetTabPicker = ({ spreadsheetId, value, onChange, testid }) => {
+const SheetTabPicker = ({ spreadsheetId, values, onChange, testid }) => {
   const [tabs, setTabs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -441,23 +443,37 @@ const SheetTabPicker = ({ spreadsheetId, value, onChange, testid }) => {
     return () => { alive = false; clearTimeout(timer); };
   }, [spreadsheetId]);
 
+  const toggle = (tab) => onChange(values.includes(tab) ? values.filter((t) => t !== tab) : [...values, tab]);
+
   if (tabs.length > 0) {
+    // Whatever was already picked stays checkable even if it fell out of the freshly
+    // loaded list (a tab renamed since this source was last saved, say).
+    const extra = values.filter((v) => !tabs.includes(v));
     return (
       <div>
-        <select className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm" value={value} onChange={(e) => onChange(e.target.value)} data-testid={testid}>
-          {value && !tabs.includes(value) && <option value={value}>{value}</option>}
-          {tabs.map((t) => <option key={t} value={t}>{t}</option>)}
-        </select>
-        <p className="mt-1 text-[10px] text-emerald-600">✓ {tabs.length} tab{tabs.length === 1 ? "" : "s"} found — only the picked one is pulled.</p>
+        <div className="max-h-40 space-y-1 overflow-y-auto rounded-md border border-slate-200 p-2" data-testid={testid}>
+          {[...tabs, ...extra].map((t) => (
+            <label key={t} className="flex items-center gap-2 rounded px-1.5 py-1 text-xs hover:bg-slate-50">
+              <input type="checkbox" checked={values.includes(t)} onChange={() => toggle(t)} data-testid={`${testid}-${t}`} />
+              {t}
+            </label>
+          ))}
+        </div>
+        <p className="mt-1 text-[10px] text-emerald-600">✓ {tabs.length} tab{tabs.length === 1 ? "" : "s"} found — pick one or more; only those are pulled.</p>
       </div>
     );
   }
 
   return (
     <div>
-      <Input placeholder="Worksheet/Tab name (default: Sheet1)" value={value} onChange={(e) => onChange(e.target.value)} data-testid={testid} />
+      <Input
+        placeholder="Worksheet/Tab name(s), comma separated (default: Sheet1)"
+        value={values.join(", ")}
+        onChange={(e) => onChange(e.target.value.split(",").map((t) => t.trim()).filter(Boolean))}
+        data-testid={testid}
+      />
       {loading && <p className="mt-1 text-[10px] text-slate-400">Loading tabs…</p>}
-      {failed && <p className="mt-1 text-[10px] text-amber-600">Couldn't load tabs automatically — type the tab name, or check the sheet is shared.</p>}
+      {failed && <p className="mt-1 text-[10px] text-amber-600">Couldn't load tabs automatically — type tab name(s) comma-separated, or check the sheet is shared.</p>}
     </div>
   );
 };
@@ -519,7 +535,7 @@ const EditSourceDialog = ({ source, branches = [], verticals = [], onClose, onSa
   const [sourceType, setSourceType] = useState(source.source_type || "google_sheets");
   const [sheetUrl, setSheetUrl] = useState(source.sheet_url || "");
   const [spreadsheetId, setSpreadsheetId] = useState(source.spreadsheet_id || "");
-  const [sheetName, setSheetName] = useState(source.sheet_name || "Sheet1");
+  const [sheetNames, setSheetNames] = useState(source.sheet_names || (source.sheet_name ? [source.sheet_name] : ["Sheet1"]));
   const [headers, setHeaders] = useState(initialHeaders);
   const [branchIds, setBranchIds] = useState(source.branch_ids || (source.branch_id ? [source.branch_id] : []));
   const [sourceVerticals, setSourceVerticals] = useState(source.verticals || []);
@@ -550,7 +566,7 @@ const EditSourceDialog = ({ source, branches = [], verticals = [], onClose, onSa
     };
     if (sourceType === "google_sheets") {
       payload.spreadsheet_id = spreadsheetId || extractSheetId(sheetUrl);
-      payload.sheet_name = sheetName || "Sheet1";
+      payload.sheet_names = sheetNames.length ? sheetNames : ["Sheet1"];
     }
     // Only touch headers/mapping if the user actually changed them — avoids
     // silently wiping any manual "Edit Mapping" customization on every save.
@@ -576,7 +592,7 @@ const EditSourceDialog = ({ source, branches = [], verticals = [], onClose, onSa
           {spreadsheetId && (
             <p className="text-[10px] text-emerald-600">✓ Sheet ID detected: <code className="rounded bg-emerald-50 px-1">{spreadsheetId.slice(0, 24)}…</code></p>
           )}
-          <SheetTabPicker spreadsheetId={spreadsheetId} value={sheetName} onChange={setSheetName} testid="mk-edit-source-sheetname" />
+          <SheetTabPicker spreadsheetId={spreadsheetId} values={sheetNames} onChange={setSheetNames} testid="mk-edit-source-sheetname" />
           <p className="text-xs text-amber-700 bg-amber-50 rounded p-2">
             <strong>Important:</strong> the sheet must be either accessible to the Google account you connected, OR shared as “Anyone with the link can view”.
           </p>

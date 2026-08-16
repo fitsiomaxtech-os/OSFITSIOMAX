@@ -288,57 +288,56 @@ async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Di
     if not creds:
         return {"error": "not_connected", "imported": 0}
 
-    sheet_name = source.get("sheet_name") or "Sheet1"
-    a1_range = f"'{sheet_name}'!{range_}"
-    persist_updates: Dict[str, Any] = {}
+    # A source can be pulled from several tabs of the same spreadsheet at once (e.g. one
+    # lead-form tab per branch, all in one sheet). Falls back to the legacy singular
+    # sheet_name the same way normalize_source backfills branch_ids, so an older source
+    # still pulls its one tab exactly as before.
+    sheet_names = source.get("sheet_names") or ([source["sheet_name"]] if source.get("sheet_name") else ["Sheet1"])
 
     try:
         svc = await asyncio.to_thread(lambda: build("sheets", "v4", credentials=creds))
-        try:
-            resp = await asyncio.to_thread(lambda: svc.spreadsheets().values().get(spreadsheetId=source["spreadsheet_id"], range=a1_range).execute())
-        except Exception as range_err:
-            # If the configured tab name doesn't exist, auto-discover the first real tab and retry once.
-            err_text = str(range_err)
-            if "Unable to parse range" in err_text or "Unable to parse" in err_text or "Requested entity was not found" in err_text:
-                meta = await asyncio.to_thread(lambda: svc.spreadsheets().get(spreadsheetId=source["spreadsheet_id"], fields="sheets.properties.title").execute())
-                tab_titles = [s["properties"]["title"] for s in meta.get("sheets", []) if s.get("properties")]
-                if not tab_titles:
-                    return {"error": "no_tabs_found", "imported": 0}
-                discovered = tab_titles[0]
-                a1_range = f"'{discovered}'!{range_}"
-                resp = await asyncio.to_thread(lambda: svc.spreadsheets().values().get(spreadsheetId=source["spreadsheet_id"], range=a1_range).execute())
-                # Persist the discovered tab so subsequent pulls skip this fallback
-                persist_updates["sheet_name"] = discovered
-                persist_updates["available_tabs"] = tab_titles
-            else:
-                raise
     except Exception as e:
         return {"error": f"sheets_api: {str(e)[:200]}", "imported": 0}
 
-    values = resp.get("values", [])
-    if not values:
+    # Fetched per tab rather than once — tabs in the same spreadsheet often have different
+    # layouts (a job-application tab living alongside branch lead-form tabs, say), so each
+    # tab's headers are mapped on their own further down instead of assuming one shared
+    # column layout for everything pulled.
+    per_tab = []
+    tabs_missing = []
+    for tab_name in sheet_names:
+        a1_range = f"'{tab_name}'!{range_}"
+        try:
+            resp = await asyncio.to_thread(lambda a1=a1_range: svc.spreadsheets().values().get(spreadsheetId=source["spreadsheet_id"], range=a1).execute())
+        except Exception as range_err:
+            err_text = str(range_err)
+            if "Unable to parse range" in err_text or "Requested entity was not found" in err_text:
+                tabs_missing.append(tab_name)
+                continue
+            return {"error": f"sheets_api: {err_text[:200]}", "imported": 0}
+        values = resp.get("values", [])
+        if not values:
+            continue
+        headers = [str(h).strip() for h in values[0]]
+        rows = []
+        for r in values[1:]:
+            padded = list(r) + [""] * (len(headers) - len(r))
+            rows.append({headers[i]: padded[i] for i in range(len(headers))})
+        per_tab.append((tab_name, headers, rows))
+
+    if not per_tab:
         await v3_col("marketing_sources").update_one({"id": source_id}, {"$set": {"last_synced": now_iso()}})
+        if tabs_missing:
+            return {"error": f"tabs_not_found: {', '.join(tabs_missing)}", "imported": 0}
         return {"imported": 0, "skipped": 0, "rows_received": 0, "message": "Sheet is empty"}
 
-    headers = [str(h).strip() for h in values[0]]
-    rows = []
-    for r in values[1:]:
-        padded = list(r) + [""] * (len(headers) - len(r))
-        rows.append({headers[i]: padded[i] for i in range(len(headers))})
-
-    mapping = dict(source.get("column_mapping") or {})
-    if not all(k in mapping for k in ("name", "phone")):
-        inferred = auto_map_columns(headers)
-        for k, v in inferred.items():
-            mapping.setdefault(k, v)
-    if "phone" not in mapping:
-        mapping["phone"] = headers[0] if headers else "phone"
-
-    phone_key = mapping["phone"]
+    stored_mapping = dict(source.get("column_mapping") or {})
     imported = 0
     skipped_no_phone = 0
     skipped_duplicate = 0
+    rows_received = 0
     sample_errors = []
+    last_headers, last_mapping = [], {}
     # A source tagged to exactly one branch still auto-assigns every row to it, same as
     # before this field became a list. With zero or several branches there's no single one
     # to route a row to, so branch_ids becomes a tag only — same as an untagged
@@ -352,73 +351,87 @@ async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Di
     source_control = await lead_control.branch_lead_control(source_branch_id)
     first_branch_stage = await first_branch_stage_for(source_control, "New Appointment")
 
-    for idx, row in enumerate(rows):
-        phone_raw = str(row.get(phone_key, "") or "").strip()
-        phone_norm = normalize_phone(phone_raw)
-        if not phone_norm:
-            skipped_no_phone += 1
-            if len(sample_errors) < 3:
-                sample_errors.append(f"row {idx + 2}: missing phone in column '{phone_key}'")
-            continue
-        exists = await v3_col("leads").find_one({"phone_normalized": phone_norm}, {"_id": 0, "id": 1})
-        if exists:
-            skipped_duplicate += 1
-            continue
-        std_payload = {}
-        for std in STANDARD_FIELDS:
-            src_key = mapping.get(std)
-            if src_key and src_key in row:
-                std_payload[std] = row[src_key]
-        custom_payload = {}
-        mapped_values = set(mapping.values())
-        for key, value in row.items():
-            if key not in mapped_values and value not in (None, ""):
-                custom_payload[key] = value
+    for tab_name, headers, rows in per_tab:
+        rows_received += len(rows)
+        # The saved mapping is reused only if this tab's headers still contain every column
+        # it points at — otherwise this tab gets its own headers auto-mapped fresh rather
+        # than reading from the wrong columns.
+        if stored_mapping and all(h in headers for h in stored_mapping.values()):
+            mapping = dict(stored_mapping)
+        else:
+            mapping = auto_map_columns(headers)
+        if "phone" not in mapping:
+            mapping["phone"] = headers[0] if headers else "phone"
+        phone_key = mapping["phone"]
+        last_headers, last_mapping = headers, mapping
 
-        # No Pre-Sales rep on a lead the Pre-Sales desk will never see.
-        assigned = None if source_control == lead_control.BRANCH_ADMIN else await round_robin_assign("pre_sales")
-        patient_number = await generate_patient_number(source_branch_id) if source_branch_id else None
-        lead = {
-            "id": str(uuid.uuid4()),
-            "patient_number": patient_number,
-            "name": (std_payload.get("name") or "").strip() or "Unknown",
-            "phone": phone_raw,
-            "phone_normalized": phone_norm,
-            "email": std_payload.get("email", ""),
-            "vertical": std_payload.get("vertical") or default_vertical,
-            "source_tab": source["name"],
-            "source_type": "google_sheets",
-            # Pre-Sales stage stays normal ("New Leads") regardless — a source tagged with a
-            # branch only ADDS the branch assignment, landing the lead in that branch's New
-            # Appointment column too, without pulling it out of the usual Pre-Sales workflow.
-            "stage": "New Leads",
-            "branch_id": source_branch_id,
-            "branch_stage": first_branch_stage if source_branch_id else None,
-            "notes": std_payload.get("notes", ""),
-            "extra_fields": {**{k: v for k, v in std_payload.items() if k not in ("name", "email", "phone", "vertical", "notes")}, **custom_payload},
-            "assigned_user_id": assigned["id"] if assigned else None,
-            "assigned_user_name": assigned["full_name"] if assigned else None,
-            "assigned_user_role": "pre_sales" if assigned else None,
-            "marketing_source_id": source_id,
-            "created_at": now_iso(),
-            "updated_at": now_iso(),
-        }
-        await v3_col("leads").insert_one(lead.copy())
-        imported += 1
+        for idx, row in enumerate(rows):
+            phone_raw = str(row.get(phone_key, "") or "").strip()
+            phone_norm = normalize_phone(phone_raw)
+            if not phone_norm:
+                skipped_no_phone += 1
+                if len(sample_errors) < 3:
+                    sample_errors.append(f"{tab_name} row {idx + 2}: missing phone in column '{phone_key}'")
+                continue
+            exists = await v3_col("leads").find_one({"phone_normalized": phone_norm}, {"_id": 0, "id": 1})
+            if exists:
+                skipped_duplicate += 1
+                continue
+            std_payload = {}
+            for std in STANDARD_FIELDS:
+                src_key = mapping.get(std)
+                if src_key and src_key in row:
+                    std_payload[std] = row[src_key]
+            custom_payload = {}
+            mapped_values = set(mapping.values())
+            for key, value in row.items():
+                if key not in mapped_values and value not in (None, ""):
+                    custom_payload[key] = value
+
+            # No Pre-Sales rep on a lead the Pre-Sales desk will never see.
+            assigned = None if source_control == lead_control.BRANCH_ADMIN else await round_robin_assign("pre_sales")
+            patient_number = await generate_patient_number(source_branch_id) if source_branch_id else None
+            lead = {
+                "id": str(uuid.uuid4()),
+                "patient_number": patient_number,
+                "name": (std_payload.get("name") or "").strip() or "Unknown",
+                "phone": phone_raw,
+                "phone_normalized": phone_norm,
+                "email": std_payload.get("email", ""),
+                "vertical": std_payload.get("vertical") or default_vertical,
+                "source_tab": f"{source['name']} · {tab_name}" if len(sheet_names) > 1 else source["name"],
+                "source_type": "google_sheets",
+                # Pre-Sales stage stays normal ("New Leads") regardless — a source tagged with a
+                # branch only ADDS the branch assignment, landing the lead in that branch's New
+                # Appointment column too, without pulling it out of the usual Pre-Sales workflow.
+                "stage": "New Leads",
+                "branch_id": source_branch_id,
+                "branch_stage": first_branch_stage if source_branch_id else None,
+                "notes": std_payload.get("notes", ""),
+                "extra_fields": {**{k: v for k, v in std_payload.items() if k not in ("name", "email", "phone", "vertical", "notes")}, **custom_payload},
+                "assigned_user_id": assigned["id"] if assigned else None,
+                "assigned_user_name": assigned["full_name"] if assigned else None,
+                "assigned_user_role": "pre_sales" if assigned else None,
+                "marketing_source_id": source_id,
+                "created_at": now_iso(),
+                "updated_at": now_iso(),
+            }
+            await v3_col("leads").insert_one(lead.copy())
+            imported += 1
 
     new_row_count = (source.get("row_count") or 0) + imported
     update = {
         "last_synced": now_iso(),
         "row_count": new_row_count,
-        "headers_detected": headers,
+        "headers_detected": last_headers,
+        "sheet_names": [t for t, _, _ in per_tab],
         "last_sync_imported": imported,
         "last_sync_skipped_no_phone": skipped_no_phone,
         "last_sync_skipped_duplicate": skipped_duplicate,
-        "last_sync_rows_received": len(rows),
+        "last_sync_rows_received": rows_received,
     }
-    if mapping != (source.get("column_mapping") or {}):
-        update["column_mapping"] = mapping
-    update.update(persist_updates)
+    if last_mapping and last_mapping != stored_mapping:
+        update["column_mapping"] = last_mapping
     await v3_col("marketing_sources").update_one({"id": source_id}, {"$set": update})
 
     return {
@@ -426,10 +439,10 @@ async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Di
         "skipped": skipped_no_phone + skipped_duplicate,
         "skipped_no_phone": skipped_no_phone,
         "skipped_duplicate": skipped_duplicate,
-        "rows_received": len(rows),
-        "phone_column_used": phone_key,
-        "mapping_used": mapping,
-        "sample_errors": sample_errors,
+        "rows_received": rows_received,
+        "phone_column_used": last_mapping.get("phone"),
+        "mapping_used": last_mapping,
+        "sample_errors": sample_errors + [f"tab not found: {t}" for t in tabs_missing],
     }
 
 

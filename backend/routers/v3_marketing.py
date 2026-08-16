@@ -113,6 +113,7 @@ class MarketingSourceCreate(BaseModel):
     name: str
     sheet_url: Optional[str] = ""
     sheet_name: Optional[str] = "Sheet1"
+    sheet_names: Optional[List[str]] = None  # several tabs of the same spreadsheet, pulled together
     spreadsheet_id: Optional[str] = ""
     source_type: Literal["meta", "seo", "referral", "walk_in", "website", "csv_import", "google_sheets", "other"] = "google_sheets"
     headers: Optional[List[str]] = None
@@ -129,6 +130,7 @@ class MarketingSourceUpdate(BaseModel):
     sheet_url: Optional[str] = None
     spreadsheet_id: Optional[str] = None
     sheet_name: Optional[str] = None
+    sheet_names: Optional[List[str]] = None
     headers: Optional[List[str]] = None
     branch_ids: Optional[List[str]] = None  # pass [] to clear back to "All Branches"
     verticals: Optional[List[str]] = None
@@ -506,6 +508,9 @@ def normalize_source(doc: Dict[str, Any]) -> Dict[str, Any]:
     if "branch_ids" not in doc:
         legacy = doc.get("branch_id")
         doc["branch_ids"] = [legacy] if legacy else []
+    if "sheet_names" not in doc:
+        legacy_tab = doc.get("sheet_name")
+        doc["sheet_names"] = [legacy_tab] if legacy_tab else ["Sheet1"]
     doc.setdefault("verticals", [])
     doc.setdefault("is_archived", False)
     return doc
@@ -541,6 +546,7 @@ async def create_source(payload: MarketingSourceCreate, _: V3UserOut = Depends(v
         "sheet_url": payload.sheet_url or "",
         "spreadsheet_id": spreadsheet_id,
         "sheet_name": payload.sheet_name or "Sheet1",
+        "sheet_names": payload.sheet_names or [payload.sheet_name or "Sheet1"],
         "column_mapping": column_mapping,
         "custom_fields": detected_custom,
         "headers_detected": payload.headers or [],
