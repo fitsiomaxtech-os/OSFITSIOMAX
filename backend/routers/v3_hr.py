@@ -72,6 +72,21 @@ async def _all_role_names() -> list:
     return DEFAULT_ROLES + [r["name"] for r in await _custom_roles()]
 
 
+async def _seeded_departments() -> list:
+    """The 7 departments this app already shipped with (previously a hardcoded
+    constant, never a real collection) — seeded once so "Add Department" grows this
+    list instead of replacing it, and existing employees' `department` values keep
+    matching something. Designations are grouped into each department from here on,
+    starting empty until a Super Admin assigns the existing designations manually."""
+    if await v3_col("hr_departments").count_documents({}) == 0:
+        now = now_iso()
+        await v3_col("hr_departments").insert_many([
+            {"id": str(uuid.uuid4()), "name": name, "designations": [], "created_at": now}
+            for name in DEFAULT_DEPARTMENTS
+        ])
+    return await v3_col("hr_departments").find({}, {"_id": 0}).sort("created_at", 1).to_list(500)
+
+
 # The hues the built-in roles already wear. A custom role picks from the same set rather
 # than a free hex, so one added today can't arrive in a colour nothing else in the OS uses
 # — and so the value can be checked here instead of trusting whatever the client sends.
@@ -84,6 +99,14 @@ ROLE_COLORS = [
 class CustomRoleCreate(BaseModel):
     label: str
     color: Optional[str] = None
+
+
+class DepartmentCreate(BaseModel):
+    name: str
+
+
+class DesignationCreate(BaseModel):
+    name: str
 
 
 class EmployeeCreate(BaseModel):
@@ -599,11 +622,67 @@ async def add_custom_role(payload: CustomRoleCreate, _: V3UserOut = Depends(v3_r
     return role
 
 
+@router.get("/departments")
+async def list_departments(_: V3UserOut = Depends(v3_require_roles("super_admin", "marketing_head"))):
+    depts = await _seeded_departments()
+    counts = {}
+    for row in await v3_col("employees").aggregate([
+        {"$group": {"_id": "$department", "n": {"$sum": 1}}},
+    ]).to_list(500):
+        counts[row["_id"]] = row["n"]
+    return [{**d, "employee_count": counts.get(d["name"], 0)} for d in depts]
+
+
+@router.post("/departments")
+async def create_department(payload: DepartmentCreate, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Department name is required")
+    existing = await _seeded_departments()
+    if any(d["name"].lower() == name.lower() for d in existing):
+        raise HTTPException(status_code=409, detail="This department already exists")
+    dept = {"id": str(uuid.uuid4()), "name": name, "designations": [], "created_at": now_iso()}
+    await v3_col("hr_departments").insert_one(dept.copy())
+    return dept
+
+
+@router.delete("/departments/{dept_id}")
+async def delete_department(dept_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    res = await v3_col("hr_departments").delete_one({"id": dept_id})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Department not found")
+    return {"message": "Department deleted"}
+
+
+@router.post("/departments/{dept_id}/designations")
+async def add_designation(dept_id: str, payload: DesignationCreate, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Designation name is required")
+    dept = await v3_col("hr_departments").find_one({"id": dept_id}, {"_id": 0})
+    if not dept:
+        raise HTTPException(status_code=404, detail="Department not found")
+    if any(d.lower() == name.lower() for d in dept.get("designations", [])):
+        raise HTTPException(status_code=409, detail="This designation is already in this department")
+    await v3_col("hr_departments").update_one({"id": dept_id}, {"$push": {"designations": name}})
+    return await v3_col("hr_departments").find_one({"id": dept_id}, {"_id": 0})
+
+
+@router.delete("/departments/{dept_id}/designations")
+async def remove_designation(dept_id: str, name: str, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    res = await v3_col("hr_departments").update_one({"id": dept_id}, {"$pull": {"designations": name}})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Department not found")
+    return await v3_col("hr_departments").find_one({"id": dept_id}, {"_id": 0})
+
+
 @router.get("/meta")
 async def hr_meta(_: V3UserOut = Depends(v3_require_roles("super_admin", "marketing_head"))):
     custom = await _custom_roles()
+    depts = await _seeded_departments()
     return {
-        "departments": DEFAULT_DEPARTMENTS,
+        "departments": [d["name"] for d in depts],
+        "department_designations": {d["name"]: d.get("designations", []) for d in depts},
         "roles": DEFAULT_ROLES + [r["name"] for r in custom],
         "custom_roles": custom,
     }

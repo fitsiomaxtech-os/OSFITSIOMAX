@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Users, ShieldCheck, BarChart3, Plus, Pencil, Trash2, Eye, EyeOff, KeyRound, X, UserPlus, MoreVertical, CheckCircle2, XCircle, AlertOctagon, CalendarOff, ChevronDown } from "lucide-react";
+import { Users, ShieldCheck, BarChart3, Plus, Pencil, Trash2, Eye, EyeOff, KeyRound, X, UserPlus, MoreVertical, CheckCircle2, XCircle, AlertOctagon, CalendarOff, ChevronDown, FolderTree } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,6 +7,7 @@ import { toast } from "@/components/ui/sonner";
 import {
   hrDashboard, hrEmployees, hrCreateEmployee, hrUpdateEmployee, hrDeleteEmployee,
   hrUsers, hrCreateUser, hrUpdateUser, hrResetPassword, hrDeactivateUser, hrActivateUser, hrDeleteUserPermanent, hrUpdateUserRole, hrMeta, hrAddCustomRole,
+  hrDepartments, hrCreateDepartment, hrDeleteDepartment, hrAddDesignation, hrDeleteDesignation,
   getBranches,
 } from "@/lib/api";
 import { MilkDateInput } from "@/components/ui/milk-calendar";
@@ -16,6 +17,7 @@ const TABS = [
   { key: "dashboard", label: "Dashboard", icon: BarChart3 },
   { key: "employees", label: "Employees", icon: Users },
   { key: "roles", label: "Roles & Credentials", icon: ShieldCheck },
+  { key: "departments", label: "Departments & Designation", short: "Depts", icon: FolderTree },
 ];
 
 // Both consultant roles can cover more than one branch — every other role keeps the
@@ -35,7 +37,7 @@ export const HRBoard = () => {
   // here rather than inside EmployeesTab because the thing that decides the filter and the
   // thing that applies it are on opposite sides of the tab switch.
   const [empFilter, setEmpFilter] = useState(null);
-  const [meta, setMeta] = useState({ departments: [], roles: [], custom_roles: [] });
+  const [meta, setMeta] = useState({ departments: [], department_designations: {}, roles: [], custom_roles: [] });
   const reloadMeta = useCallback(() => hrMeta().then((m) => {
     // Before setMeta, so the first render after a reload already has the colours rather
     // than painting every custom role grey and correcting itself a frame later.
@@ -49,10 +51,11 @@ export const HRBoard = () => {
   return (
     <div className="flex flex-col gap-5" data-testid="hr-board">
       {/* No heading. The nav tab above already reads HR Admin. */}
-      <SegmentedTabs tabs={TABS} value={tab} onChange={setTab} testid="hr-subtab" />
+      <SegmentedTabs tabs={TABS} value={tab} onChange={setTab} testid="hr-subtab" mobileCols={4} />
       {tab === "dashboard" && <DashboardTab onNavigate={(t, f) => { setEmpFilter(f || null); setTab(t); }} />}
       {tab === "employees" && <EmployeesTab meta={meta} initialFilter={empFilter} />}
       {tab === "roles" && <RolesTab meta={meta} reloadMeta={reloadMeta} />}
+      {tab === "departments" && <DepartmentsTab reloadMeta={reloadMeta} />}
     </div>
   );
 };
@@ -513,17 +516,19 @@ const AddEmployeeModal = ({ employee, meta, onClose, onSaved }) => {
   const [form, setForm] = useState(employee ? { ...blankEmployee, ...employee } : blankEmployee);
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
-  // Designation is the person's role, so it's picked from the same role list HR uses
-  // everywhere else rather than typed freehand. Stored as the display label
-  // ("HEAD PHYSIO"), which is what existing employee records already hold. An employee
-  // whose designation predates this list keeps it as an option so editing them never
-  // silently blanks the field.
+  // Designation options are scoped to whichever Department is selected (grouped from
+  // the Departments & Designation tab). Departments not grouped yet fall back to the
+  // full role list, so the form stays usable while that grouping is still in progress.
+  // An employee whose designation predates this list keeps it as an option so editing
+  // them never silently blanks the field.
   const designationOptions = useMemo(() => {
+    const grouped = (meta.department_designations || {})[form.department] || [];
     const fromRoles = (meta.roles || []).map(roleLabel);
+    const base = grouped.length > 0 ? grouped : fromRoles;
     const current = (form.designation || "").trim();
-    const all = current && !fromRoles.includes(current) ? [...fromRoles, current] : fromRoles;
+    const all = current && !base.includes(current) ? [...base, current] : base;
     return ["", ...all];
-  }, [meta.roles, form.designation]);
+  }, [meta.department_designations, meta.roles, form.department, form.designation]);
 
   const submit = async () => {
     if (!form.full_name.trim()) { toast.error("Full name required"); setTab("personal"); return; }
@@ -891,6 +896,121 @@ const CreateRoleModal = ({ meta, reloadMeta, onClose }) => {
             {saving ? "Adding..." : "Add Role"}
           </Button>
         </div>
+      </div>
+    </div>
+  );
+};
+
+// ---------- Departments & Designation ----------
+
+const DepartmentsTab = ({ reloadMeta }) => {
+  const [depts, setDepts] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [newDeptName, setNewDeptName] = useState("");
+  const [addingDept, setAddingDept] = useState(false);
+  const [newDesig, setNewDesig] = useState({}); // { [deptId]: draftText }
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { setDepts(await hrDepartments()); }
+    catch (e) { toast.error(e?.response?.data?.detail || "Failed to load departments"); }
+    setLoading(false);
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const addDepartment = async () => {
+    const name = newDeptName.trim();
+    if (!name) return;
+    setAddingDept(true);
+    try {
+      await hrCreateDepartment(name);
+      setNewDeptName("");
+      toast.success(`${name} added`);
+      load();
+      reloadMeta();
+    } catch (e) { toast.error(e?.response?.data?.detail || "Failed to add department"); }
+    setAddingDept(false);
+  };
+
+  const removeDepartment = async (d) => {
+    if (!window.confirm(`Delete "${d.name}"? Employees already in this department keep it as text.`)) return;
+    try { await hrDeleteDepartment(d.id); load(); reloadMeta(); }
+    catch (e) { toast.error(e?.response?.data?.detail || "Failed to delete department"); }
+  };
+
+  const addDesignation = async (d) => {
+    const name = (newDesig[d.id] || "").trim();
+    if (!name) return;
+    try {
+      await hrAddDesignation(d.id, name);
+      setNewDesig((prev) => ({ ...prev, [d.id]: "" }));
+      load();
+      reloadMeta();
+    } catch (e) { toast.error(e?.response?.data?.detail || "Failed to add designation"); }
+  };
+
+  const removeDesignation = async (d, designation) => {
+    try { await hrDeleteDesignation(d.id, designation); load(); reloadMeta(); }
+    catch (e) { toast.error(e?.response?.data?.detail || "Failed to remove designation"); }
+  };
+
+  return (
+    <div className="space-y-4" data-testid="hr-departments-tab">
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          placeholder="New department name..."
+          value={newDeptName}
+          onChange={(e) => setNewDeptName(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") addDepartment(); }}
+          className="w-full sm:w-64"
+          data-testid="hr-dept-add-input"
+        />
+        <Button onClick={addDepartment} disabled={addingDept || !newDeptName.trim()} className="w-full bg-orange-500 hover:bg-orange-600 sm:w-auto" data-testid="hr-dept-add-btn">
+          <Plus className="mr-1 h-4 w-4" />Add Department
+        </Button>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" data-testid="hr-dept-cards">
+        {depts.map((d) => (
+          <Card key={d.id} className="min-w-0" data-testid={`hr-dept-card-${d.id}`}>
+            <CardHeader className="flex flex-row items-start justify-between gap-2 pb-2">
+              <div className="min-w-0">
+                <CardTitle className="truncate text-base">{d.name}</CardTitle>
+                <p className="text-xs text-slate-500">{d.employee_count} employee{d.employee_count === 1 ? "" : "s"}</p>
+              </div>
+              <button onClick={() => removeDepartment(d)} className="shrink-0 text-slate-400 hover:text-red-500" data-testid={`hr-dept-delete-${d.id}`} title="Delete department">
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex flex-wrap gap-1.5">
+                {(d.designations || []).length === 0 && <p className="text-xs text-slate-400">No designations yet.</p>}
+                {(d.designations || []).map((desig) => (
+                  <span key={desig} className="inline-flex items-center gap-1 rounded-full bg-orange-50 px-2.5 py-1 text-xs font-medium text-orange-700" data-testid={`hr-dept-designation-${d.id}-${desig}`}>
+                    {desig}
+                    <button onClick={() => removeDesignation(d, desig)} className="text-orange-400 hover:text-orange-700" aria-label={`Remove ${desig}`}>
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+              <div className="flex items-center gap-2">
+                <Input
+                  placeholder="Add designation..."
+                  value={newDesig[d.id] || ""}
+                  onChange={(e) => setNewDesig((prev) => ({ ...prev, [d.id]: e.target.value }))}
+                  onKeyDown={(e) => { if (e.key === "Enter") addDesignation(d); }}
+                  className="h-8 text-sm"
+                  data-testid={`hr-dept-designation-input-${d.id}`}
+                />
+                <Button size="sm" variant="outline" onClick={() => addDesignation(d)} disabled={!(newDesig[d.id] || "").trim()} data-testid={`hr-dept-designation-add-${d.id}`}>
+                  <Plus className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+        {!loading && depts.length === 0 && <p className="col-span-full text-sm text-slate-400">No departments yet. Add one above.</p>}
       </div>
     </div>
   );

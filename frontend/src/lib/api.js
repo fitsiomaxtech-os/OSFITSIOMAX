@@ -319,6 +319,11 @@ export const resetAllLeads = async () => (await api.post("/admin/reset-all-leads
 export const hrDashboard = async () => (await api.get("/hr/dashboard")).data;
 export const hrMeta = async () => (await api.get("/hr/meta")).data;
 export const hrAddCustomRole = async (label, color) => (await api.post("/hr/roles", { label, color })).data;
+export const hrDepartments = async () => (await api.get("/hr/departments")).data;
+export const hrCreateDepartment = async (name) => (await api.post("/hr/departments", { name })).data;
+export const hrDeleteDepartment = async (id) => (await api.delete(`/hr/departments/${id}`)).data;
+export const hrAddDesignation = async (deptId, name) => (await api.post(`/hr/departments/${deptId}/designations`, { name })).data;
+export const hrDeleteDesignation = async (deptId, name) => (await api.delete(`/hr/departments/${deptId}/designations`, { params: { name } })).data;
 export const hrEmployees = async (params = {}) => {
   const q = new URLSearchParams();
   Object.entries(params).forEach(([k, v]) => { if (v) q.set(k, v); });
