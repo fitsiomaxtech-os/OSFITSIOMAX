@@ -116,11 +116,11 @@ export const PipelineStageManagement = ({ onBack }) => {
       {/* Heading removed with the others. The back link and Add Stage keep the row, so
           it still reads left-to-right as "where you came from" then "what you can do". */}
       {/* One row at every width. Stacked on a phone this put the back link on a line of
-          its own above a full-bleed orange button, which read as a banner rather than as
+          its own above a full-bleed sky button, which read as a banner rather than as
           "where you came from" then "what you can do". */}
       <div className="flex items-center justify-between gap-3">
         <Button variant="ghost" size="sm" onClick={onBack} data-testid="stages-back-btn"><ArrowLeft className="h-4 w-4 mr-1" />Settings</Button>
-        <Button onClick={() => { setEditing(null); setForm({ name: "", color: PALETTE[Math.floor(Math.random() * PALETTE.length)], is_final: false }); setShowAdd(true); }} className="shrink-0 bg-orange-500 hover:bg-orange-600" data-testid="stages-add-btn"><Plus className="h-4 w-4 mr-1" />Add Stage</Button>
+        <Button onClick={() => { setEditing(null); setForm({ name: "", color: PALETTE[Math.floor(Math.random() * PALETTE.length)], is_final: false }); setShowAdd(true); }} className="shrink-0 bg-sky-600 hover:bg-sky-700" data-testid="stages-add-btn"><Plus className="h-4 w-4 mr-1" />Add Stage</Button>
       </div>
 
       {/* A dropdown on a phone: five pipelines two-across left the fifth alone on a third

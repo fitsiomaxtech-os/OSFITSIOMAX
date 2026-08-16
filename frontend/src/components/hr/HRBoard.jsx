@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Users, ShieldCheck, BarChart3, Plus, Pencil, Trash2, Eye, EyeOff, KeyRound, X, UserPlus, MoreVertical, CheckCircle2, XCircle, AlertOctagon, CalendarOff, ChevronDown, FolderTree } from "lucide-react";
+import { Users, ShieldCheck, BarChart3, Plus, Pencil, Trash2, Eye, EyeOff, KeyRound, X, UserPlus, MoreVertical, CheckCircle2, XCircle, AlertOctagon, CalendarOff, ChevronDown, FolderTree, Search } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -73,7 +73,7 @@ const KPI = ({ label, value, icon: Icon, onClick, hint, testid }) => {
     <Tag
       {...(onClick ? { type: "button", onClick } : {})}
       className={`w-full rounded-xl border-2 border-slate-200 bg-white px-4 py-3.5 text-left transition ${
-        onClick ? "cursor-pointer hover:border-orange-300 hover:shadow-sm" : ""
+        onClick ? "cursor-pointer hover:border-sky-300 hover:shadow-sm" : ""
       }`}
       data-testid={testid}
     >
@@ -138,11 +138,11 @@ const DashboardTab = ({ onNavigate }) => {
                   key={d.name}
                   type="button"
                   onClick={() => onNavigate("employees", { department: d.name })}
-                  className="rounded-xl border-2 border-slate-200 bg-white px-4 py-3.5 text-left transition hover:border-orange-300 hover:shadow-sm"
+                  className="rounded-xl border-2 border-slate-200 bg-white px-4 py-3.5 text-left transition hover:border-sky-300 hover:shadow-sm"
                   data-testid={`hr-dept-${d.name}`}
                 >
                   <span className="block truncate text-[11px] font-bold uppercase tracking-wider text-slate-500">{d.name}</span>
-                  <span className="mt-1 block text-3xl font-extrabold text-orange-500">{d.count}</span>
+                  <span className="mt-1 block text-3xl font-extrabold text-sky-600">{d.count}</span>
                   <span className="mt-0.5 block text-[10px] text-slate-400">
                     {headcount ? `${Math.round((d.count / headcount) * 100)}% of staff` : ""}
                   </span>
@@ -156,24 +156,167 @@ const DashboardTab = ({ onNavigate }) => {
   );
 };
 
+// ---------- shared: search, filter, directory ----------
+
+/**
+ * Collapses to a bare icon until clicked, so an empty search box doesn't sit open and
+ * take up a quarter of the toolbar on every visit. Opens straight into a focused field;
+ * closes itself back to the icon on blur, but only if it's empty — a live query never
+ * disappears out from under someone.
+ */
+const SearchIconInput = ({ value, onChange, placeholder = "Search...", testid }) => {
+  const [open, setOpen] = useState(Boolean(value));
+  const ref = useRef(null);
+
+  useEffect(() => { if (open) ref.current?.focus(); }, [open]);
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 transition hover:border-sky-300 hover:text-sky-600"
+        title="Search"
+        aria-label="Search"
+        data-testid={testid}
+      >
+        <Search className="h-4 w-4" />
+      </button>
+    );
+  }
+
+  return (
+    <div className="relative w-full sm:w-64">
+      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+      <Input
+        ref={ref}
+        autoFocus
+        value={value}
+        onChange={onChange}
+        onBlur={() => { if (!value) setOpen(false); }}
+        placeholder={placeholder}
+        className="pl-9"
+        data-testid={testid}
+      />
+    </div>
+  );
+};
+
+/** A pill tab for switching between departments (and "All Department"). Not built from
+ *  SegmentedTabs — that component splits its track evenly across a fixed tab count, which
+ *  doesn't fit a list that grows every time someone adds a department. */
+const TabPill = ({ active, onClick, children, testid }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className={`shrink-0 rounded-full border px-3.5 py-1.5 text-sm font-medium transition ${
+      active ? "border-sky-600 bg-sky-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"
+    }`}
+    data-testid={testid}
+  >
+    {children}
+  </button>
+);
+
+const DesignationFilterSelect = ({ value, onChange, options, testid }) => (
+  <select
+    value={value}
+    onChange={(e) => onChange(e.target.value)}
+    className={`h-10 rounded-md border px-3 text-sm font-medium ${value ? "border-sky-300 bg-sky-50 text-sky-700" : "border-slate-200 bg-white text-slate-600"}`}
+    title="Filter by designation"
+    data-testid={testid}
+  >
+    <option value="">All Designations</option>
+    {options.map((d) => <option key={d} value={d}>{d}</option>)}
+  </select>
+);
+
+/** The mobile card list and desktop table that show a filtered set of employees —
+ *  identical markup whether it's reached from the Employees tab or from a department
+ *  tab on Departments & Designation, so the two never drift into two different tables. */
+const EmployeeDirectory = ({ employees, onView }) => (
+  <>
+    <div className="space-y-2 md:hidden" data-testid="hr-emp-cards">
+      {employees.map((e) => (
+        <div key={e.id} className="rounded-xl border border-slate-200 bg-white p-3" data-testid={`hr-emp-card-${e.id}`}>
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="truncate font-medium text-slate-800">{e.full_name}</p>
+              <p className="text-xs text-slate-400">{e.employee_code}</p>
+            </div>
+            <span className={`shrink-0 rounded px-2 py-0.5 text-xs ${e.status === "active" ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}`}>{e.status || "active"}</span>
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600">
+            <span>{e.designation || "—"}{e.department ? ` · ${e.department}` : ""}</span>
+            <span className="font-semibold text-emerald-600">₹{Number(e.net_salary || 0).toLocaleString("en-IN")}</span>
+          </div>
+          <div className="mt-1 text-xs text-slate-500">{e.email}{e.phone ? ` · ${e.phone}` : ""}</div>
+          <div className="mt-2 flex items-center gap-3 border-t border-slate-100 pt-2">
+            <button onClick={() => onView(e)} className="flex items-center gap-1 text-xs font-medium text-sky-600" data-testid={`hr-emp-card-view-${e.id}`}><Eye className="h-3.5 w-3.5" />View</button>
+          </div>
+        </div>
+      ))}
+      {employees.length === 0 && <p className="rounded-xl border border-dashed border-slate-200 py-8 text-center text-sm text-slate-400">No employees.</p>}
+    </div>
+
+    <Card className="hidden md:block">
+      <CardHeader><CardTitle className="text-base">Employee Directory</CardTitle></CardHeader>
+      <CardContent className="p-0">
+        <div className="overflow-auto">
+          <table className="min-w-full text-sm">
+            <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+              <tr><th className="px-3 py-2">S.No</th><th className="px-3 py-2">Employee</th><th className="px-3 py-2">Dept</th><th className="px-3 py-2">Designation</th><th className="px-3 py-2">Contact</th><th className="px-3 py-2">Joining</th><th className="px-3 py-2">Net Salary</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Actions</th></tr>
+            </thead>
+            <tbody>
+              {employees.map((e, i) => (
+                <tr key={e.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`hr-emp-row-${e.id}`}>
+                  <td className="px-3 py-2 text-slate-500">{i + 1}</td>
+                  <td className="px-3 py-2">
+                    <p className="font-medium text-slate-800">{e.full_name}</p>
+                    <p className="text-xs text-slate-400">{e.employee_code}</p>
+                  </td>
+                  <td className="px-3 py-2 text-slate-600">{e.department || "—"}</td>
+                  <td className="px-3 py-2 text-slate-600">{e.designation || "—"}</td>
+                  <td className="px-3 py-2 text-xs text-slate-600">{e.email}<br />{e.phone}</td>
+                  <td className="px-3 py-2 text-slate-500">{e.joining_date || "—"}</td>
+                  <td className="px-3 py-2 font-semibold text-emerald-600">₹{Number(e.net_salary || 0).toLocaleString("en-IN")}</td>
+                  <td className="px-3 py-2"><span className={`rounded px-2 py-0.5 text-xs ${e.status === "active" ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}`}>{e.status || "active"}</span></td>
+                  <td className="px-3 py-2">
+                    <button onClick={() => onView(e)} title="View employee" className="text-slate-500 hover:text-sky-600" data-testid={`hr-emp-view-${e.id}`}><Eye className="h-4 w-4" /></button>
+                  </td>
+                </tr>
+              ))}
+              {employees.length === 0 && <tr><td colSpan="9" className="px-3 py-6 text-center text-slate-400">No employees.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
+  </>
+);
+
 // ---------- Employees ----------
 
 const EmployeesTab = ({ meta, initialFilter }) => {
   const [employees, setEmployees] = useState([]);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState(initialFilter?.status || "active");
-  // Arrived at from a Department Strength bar or a Departments & Designation card.
-  // Cleared by its own chip rather than by going back, so the way out is next to the
-  // thing that narrowed the list.
+  // Arrived at from a Department Strength bar or a Departments & Designation tab.
   const [department, setDepartment] = useState(initialFilter?.department || "");
   const [designation, setDesignation] = useState(initialFilter?.designation || "");
-  const [sortAZ, setSortAZ] = useState(null); // null = as-loaded | "asc" | "desc"
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
   const [viewing, setViewing] = useState(null);
 
   const load = useCallback(() => hrEmployees({ status: filterStatus === "all" ? "" : filterStatus }).then(setEmployees).catch((e) => console.warn("[load failed]", e?.message || e)), [filterStatus]);
   useEffect(() => { load(); }, [load]);
+
+  // Designation options narrow to whichever department is picked, so the dropdown never
+  // offers a combination ("Accountant" under "Doctors") that would filter to nothing.
+  const designationOptions = useMemo(() => {
+    const pool = department ? employees.filter((e) => (e.department || "Unassigned") === department) : employees;
+    return [...new Set(pool.map((e) => e.designation).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  }, [employees, department]);
 
   const filtered = employees.filter((e) => {
     // "Unassigned" is what the Dashboard calls an employee with no department, so it has
@@ -184,9 +327,6 @@ const EmployeesTab = ({ meta, initialFilter }) => {
     const q = search.toLowerCase();
     return (e.full_name || "").toLowerCase().includes(q) || (e.email || "").toLowerCase().includes(q) || (e.employee_code || "").toLowerCase().includes(q);
   });
-  if (sortAZ) {
-    filtered.sort((a, b) => (a.full_name || "").localeCompare(b.full_name || "") * (sortAZ === "asc" ? 1 : -1));
-  }
 
   const remove = async (emp) => {
     if (!window.confirm(`Delete employee ${emp.full_name}?`)) return;
@@ -202,14 +342,15 @@ const EmployeesTab = ({ meta, initialFilter }) => {
 
   // flex+gap, not space-y — the desktop table below is hidden by class on mobile.
   return (
-    <div className="flex flex-col gap-4" data-testid="hr-employees-tab">
+    <div className="flex flex-col gap-3" data-testid="hr-employees-tab">
+      {/* Filters row */}
       <div className="flex flex-wrap items-center gap-2">
-        <button onClick={() => setFilterStatus("active")} className={`rounded-md px-3 py-2 text-sm font-medium ${filterStatus === "active" ? "bg-orange-500 text-white" : "bg-slate-100 text-slate-600"}`} data-testid="hr-emp-tab-active">Active Employees ({active})</button>
+        <button onClick={() => setFilterStatus("active")} className={`rounded-md px-3 py-2 text-sm font-medium ${filterStatus === "active" ? "bg-sky-600 text-white" : "bg-slate-100 text-slate-600"}`} data-testid="hr-emp-tab-active">Active Employees ({active})</button>
         <button onClick={() => setFilterStatus("left")} className={`rounded-md px-3 py-2 text-sm font-medium ${filterStatus === "left" ? "bg-slate-700 text-white" : "bg-slate-100 text-slate-600"}`} data-testid="hr-emp-tab-left">Left ({left})</button>
         <select
           value={department}
-          onChange={(e) => setDepartment(e.target.value)}
-          className={`h-10 rounded-md border px-3 text-sm font-medium ${department ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-600"}`}
+          onChange={(e) => { setDepartment(e.target.value); setDesignation(""); }}
+          className={`h-10 rounded-md border px-3 text-sm font-medium ${department ? "border-sky-300 bg-sky-50 text-sky-700" : "border-slate-200 bg-white text-slate-600"}`}
           title="Filter by department"
           data-testid="hr-emp-dept-filter"
         >
@@ -217,87 +358,16 @@ const EmployeesTab = ({ meta, initialFilter }) => {
           {meta.departments.map((d) => <option key={d} value={d}>{d}</option>)}
           {hasUnassigned && <option value="Unassigned">Unassigned</option>}
         </select>
-        {designation && (
-          <button
-            onClick={() => setDesignation("")}
-            className="inline-flex items-center gap-1.5 rounded-md border border-orange-300 bg-orange-50 px-3 py-2 text-sm font-medium text-orange-700 hover:bg-orange-100"
-            title="Clear the designation filter"
-            data-testid="hr-emp-designation-chip"
-          >
-            {designation} <X className="h-3.5 w-3.5" />
-          </button>
-        )}
-        <div className="flex-1" />
-        <button
-          onClick={() => setSortAZ((s) => (s === "asc" ? "desc" : "asc"))}
-          className={`rounded-md px-3 py-2 text-sm font-medium ${sortAZ ? "bg-orange-500 text-white" : "bg-slate-100 text-slate-600"}`}
-          data-testid="hr-emp-sort-az"
-        >
-          {sortAZ === "desc" ? "Z → A" : "A → Z"}
-        </button>
-        <Input placeholder="Search employee..." value={search} onChange={(e) => setSearch(e.target.value)} className="w-full sm:w-64" data-testid="hr-emp-search" />
-        <Button onClick={() => { setEditing(null); setShowAdd(true); }} className="w-full bg-orange-500 hover:bg-orange-600 sm:w-auto" data-testid="hr-emp-add-btn"><Plus className="h-4 w-4 mr-1" />Add Employee</Button>
+        <DesignationFilterSelect value={designation} onChange={setDesignation} options={designationOptions} testid="hr-emp-designation-filter" />
       </div>
 
-      <div className="space-y-2 md:hidden" data-testid="hr-emp-cards">
-        {filtered.map((e) => (
-          <div key={e.id} className="rounded-xl border border-slate-200 bg-white p-3" data-testid={`hr-emp-card-${e.id}`}>
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <p className="truncate font-medium text-slate-800">{e.full_name}</p>
-                <p className="text-xs text-slate-400">{e.employee_code}</p>
-              </div>
-              <span className={`shrink-0 rounded px-2 py-0.5 text-xs ${e.status === "active" ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}`}>{e.status || "active"}</span>
-            </div>
-            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600">
-              <span>{e.designation || "—"}{e.department ? ` · ${e.department}` : ""}</span>
-              <span className="font-semibold text-emerald-600">₹{Number(e.net_salary || 0).toLocaleString("en-IN")}</span>
-            </div>
-            <div className="mt-1 text-xs text-slate-500">{e.email}{e.phone ? ` · ${e.phone}` : ""}</div>
-            <div className="mt-2 flex items-center gap-3 border-t border-slate-100 pt-2">
-              <button onClick={() => setViewing(e)} className="flex items-center gap-1 text-xs font-medium text-sky-600" data-testid={`hr-emp-card-view-${e.id}`}><Eye className="h-3.5 w-3.5" />View</button>
-            </div>
-          </div>
-        ))}
-        {filtered.length === 0 && <p className="rounded-xl border border-dashed border-slate-200 py-8 text-center text-sm text-slate-400">No employees.</p>}
+      {/* Actions row */}
+      <div className="flex items-center justify-end gap-2">
+        <SearchIconInput value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search employee..." testid="hr-emp-search" />
+        <Button onClick={() => { setEditing(null); setShowAdd(true); }} className="bg-sky-600 hover:bg-sky-700" data-testid="hr-emp-add-btn"><Plus className="h-4 w-4 mr-1" />Add Employee</Button>
       </div>
 
-      <Card className="hidden md:block">
-        <CardHeader><CardTitle className="text-base">Employee Directory</CardTitle></CardHeader>
-        <CardContent className="p-0">
-          <div className="overflow-auto">
-            <table className="min-w-full text-sm">
-              <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-                <tr><th className="px-3 py-2">S.No</th><th className="px-3 py-2">Employee</th><th className="px-3 py-2">Dept</th><th className="px-3 py-2">Designation</th><th className="px-3 py-2">Contact</th><th className="px-3 py-2">Joining</th><th className="px-3 py-2">Net Salary</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Actions</th></tr>
-              </thead>
-              <tbody>
-                {filtered.map((e, i) => (
-                  <tr key={e.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`hr-emp-row-${e.id}`}>
-                    <td className="px-3 py-2 text-slate-500">{i + 1}</td>
-                    <td className="px-3 py-2">
-                      <p className="font-medium text-slate-800">{e.full_name}</p>
-                      <p className="text-xs text-slate-400">{e.employee_code}</p>
-                    </td>
-                    <td className="px-3 py-2 text-slate-600">{e.department || "—"}</td>
-                    <td className="px-3 py-2 text-slate-600">{e.designation || "—"}</td>
-                    <td className="px-3 py-2 text-xs text-slate-600">{e.email}<br />{e.phone}</td>
-                    <td className="px-3 py-2 text-slate-500">{e.joining_date || "—"}</td>
-                    <td className="px-3 py-2 font-semibold text-emerald-600">₹{Number(e.net_salary || 0).toLocaleString("en-IN")}</td>
-                    <td className="px-3 py-2"><span className={`rounded px-2 py-0.5 text-xs ${e.status === "active" ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}`}>{e.status || "active"}</span></td>
-                    <td className="px-3 py-2">
-                      {/* One way in. Edit and Delete now live inside the view popup, where
-                          you can see who you are about to change before you change them —
-                          this eye previously had no handler at all and did nothing. */}
-                      <button onClick={() => setViewing(e)} title="View employee" className="text-slate-500 hover:text-sky-600" data-testid={`hr-emp-view-${e.id}`}><Eye className="h-4 w-4" /></button>
-                    </td>
-                  </tr>
-                ))}
-                {filtered.length === 0 && <tr><td colSpan="9" className="px-3 py-6 text-center text-slate-400">No employees.</td></tr>}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
+      <EmployeeDirectory employees={filtered} onView={setViewing} />
 
       {viewing && (
         <EmployeeViewModal
@@ -416,7 +486,7 @@ const EmployeeViewModal = ({ employee: e, onClose, onEdit, onDelete }) => (
         </button>
         <div className="flex gap-2">
           <Button variant="outline" onClick={onClose} data-testid="hr-emp-view-cancel">Close</Button>
-          <Button onClick={onEdit} className="bg-orange-500 hover:bg-orange-600" data-testid="hr-emp-view-edit">
+          <Button onClick={onEdit} className="bg-sky-600 hover:bg-sky-700" data-testid="hr-emp-view-edit">
             <Pencil className="mr-1.5 h-4 w-4" /> Edit
           </Button>
         </div>
@@ -495,7 +565,7 @@ const ManualDateInput = ({ value, onChange, placeholder = "DD-MM-YYYY", testid }
         inputMode="numeric"
         maxLength={10}
         className={`h-9 w-full rounded-md border px-3 text-sm outline-none transition placeholder:text-slate-400 focus:ring-1 ${
-          invalid || future ? "border-rose-300 focus:border-rose-400 focus:ring-rose-300" : "border-slate-200 focus:border-orange-400 focus:ring-orange-300"
+          invalid || future ? "border-rose-300 focus:border-rose-400 focus:ring-rose-300" : "border-slate-200 focus:border-sky-400 focus:ring-sky-300"
         }`}
         data-testid={testid}
       />
@@ -528,9 +598,12 @@ const blankEmployee = {
   status: "active", notes: "",
 };
 
-const AddEmployeeModal = ({ employee, meta, onClose, onSaved }) => {
+const AddEmployeeModal = ({ employee, meta, initialDepartment, onClose, onSaved }) => {
   const [tab, setTab] = useState("personal");
-  const [form, setForm] = useState(employee ? { ...blankEmployee, ...employee } : blankEmployee);
+  // initialDepartment only seeds a brand-new form — editing keeps using the record's own
+  // department, and `employee` (not the department field) is what submit() checks to
+  // decide create vs. update, so this never risks turning a create into an update.
+  const [form, setForm] = useState(employee ? { ...blankEmployee, ...employee } : { ...blankEmployee, department: initialDepartment || "" });
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
   // Designation options are scoped to whichever Department is selected (grouped from
@@ -573,7 +646,7 @@ const AddEmployeeModal = ({ employee, meta, onClose, onSaved }) => {
         </div>
         <div className="flex flex-wrap gap-2 border-b border-slate-200 px-5 py-2 text-xs">
           {EMP_TABS.map((t) => (
-            <button key={t.key} onClick={() => setTab(t.key)} className={`rounded px-3 py-1 ${tab === t.key ? "bg-orange-50 text-orange-600 font-semibold" : "text-slate-600 hover:bg-slate-50"}`} data-testid={`hr-emp-modal-tab-${t.key}`}>{t.label}</button>
+            <button key={t.key} onClick={() => setTab(t.key)} className={`rounded px-3 py-1 ${tab === t.key ? "bg-sky-50 text-sky-600 font-semibold" : "text-slate-600 hover:bg-slate-50"}`} data-testid={`hr-emp-modal-tab-${t.key}`}>{t.label}</button>
           ))}
         </div>
         <div className="max-h-[60vh] overflow-y-auto p-5">
@@ -631,7 +704,7 @@ const AddEmployeeModal = ({ employee, meta, onClose, onSaved }) => {
         </div>
         <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-3">
           <Button variant="outline" onClick={onClose} data-testid="hr-emp-modal-cancel">Cancel</Button>
-          <Button onClick={submit} className="bg-orange-500 hover:bg-orange-600" data-testid="hr-emp-modal-submit">✓ {employee ? "Save" : "Add Employee"}</Button>
+          <Button onClick={submit} className="bg-sky-600 hover:bg-sky-700" data-testid="hr-emp-modal-submit">✓ {employee ? "Save" : "Add Employee"}</Button>
         </div>
       </div>
     </div>
@@ -924,13 +997,20 @@ const DepartmentsTab = ({ meta, reloadMeta }) => {
   const [depts, setDepts] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(false);
+  // "" selects the All Department tab; otherwise a department name.
+  const [selectedDept, setSelectedDept] = useState("");
+  const [designationFilter, setDesignationFilter] = useState("");
+  const [search, setSearch] = useState("");
   const [newDeptName, setNewDeptName] = useState("");
-  const [addingDept, setAddingDept] = useState(false);
+  const [addingDept, setAddingDept] = useState(false); // the trailing "+" tab, opened
   const [managing, setManaging] = useState(null); // department being edited in the modal
   const [viewingDesignation, setViewingDesignation] = useState(null); // designation label, or null
   const [editingDeptId, setEditingDeptId] = useState(null);
   const [editDeptName, setEditDeptName] = useState("");
   const [renamingDept, setRenamingDept] = useState(false);
+  const [showAddEmployee, setShowAddEmployee] = useState(false);
+  const [editingEmployee, setEditingEmployee] = useState(null);
+  const [viewingEmployee, setViewingEmployee] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -958,10 +1038,14 @@ const DepartmentsTab = ({ meta, reloadMeta }) => {
     return counts;
   }, [employees]);
 
+  const selectedDeptObj = useMemo(() => depts.find((d) => d.name === selectedDept) || null, [depts, selectedDept]);
+
+  const selectTab = (name) => { setSelectedDept(name); setDesignationFilter(""); };
+
   const addDepartment = async () => {
     const name = newDeptName.trim();
     if (!name) return;
-    setAddingDept(true);
+    setAddingDept(false);
     try {
       await hrCreateDepartment(name);
       setNewDeptName("");
@@ -969,13 +1053,16 @@ const DepartmentsTab = ({ meta, reloadMeta }) => {
       load();
       reloadMeta();
     } catch (e) { toast.error(e?.response?.data?.detail || "Failed to add department"); }
-    setAddingDept(false);
   };
 
   const removeDepartment = async (d) => {
     if (!window.confirm(`Delete "${d.name}"? Employees already in this department keep it as text.`)) return;
-    try { await hrDeleteDepartment(d.id); load(); reloadMeta(); }
-    catch (e) { toast.error(e?.response?.data?.detail || "Failed to delete department"); }
+    try {
+      await hrDeleteDepartment(d.id);
+      if (selectedDept === d.name) setSelectedDept("");
+      load();
+      reloadMeta();
+    } catch (e) { toast.error(e?.response?.data?.detail || "Failed to delete department"); }
   };
 
   const startEditDept = (d) => { setEditingDeptId(d.id); setEditDeptName(d.name); };
@@ -988,6 +1075,7 @@ const DepartmentsTab = ({ meta, reloadMeta }) => {
     try {
       await hrRenameDepartment(d.id, name);
       toast.success(`Renamed to ${name}`);
+      if (selectedDept === d.name) setSelectedDept(name);
       cancelEditDept();
       load();
       reloadMeta();
@@ -999,78 +1087,130 @@ const DepartmentsTab = ({ meta, reloadMeta }) => {
   // checklist's in-progress picks would otherwise be lost.
   const viewEmployees = (label) => setViewingDesignation(label);
 
+  const removeEmployee = async (emp) => {
+    if (!window.confirm(`Delete employee ${emp.full_name}?`)) return;
+    try { await hrDeleteEmployee(emp.id); toast.success("Deleted"); setViewingEmployee(null); load(); }
+    catch (e) { toast.error(e?.response?.data?.detail || "Delete failed"); }
+  };
+
+  // Scoped to the selected tab, same as the Employees tab's own designation dropdown —
+  // "All Department" sees every designation in use, a specific tab only its own.
+  const deptScopedEmployees = selectedDept ? employees.filter((e) => (e.department || "Unassigned") === selectedDept) : employees;
+  const designationFilterOptions = useMemo(
+    () => [...new Set(deptScopedEmployees.map((e) => e.designation).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    [deptScopedEmployees]
+  );
+
+  const filteredEmployees = deptScopedEmployees.filter((e) => {
+    if (designationFilter && e.designation !== designationFilter) return false;
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (e.full_name || "").toLowerCase().includes(q) || (e.email || "").toLowerCase().includes(q) || (e.employee_code || "").toLowerCase().includes(q);
+  });
+
   return (
-    <div className="space-y-4" data-testid="hr-departments-tab">
+    <div className="flex flex-col gap-3" data-testid="hr-departments-tab">
+      {/* Department tabs: All Department, then one per department, then + to add one. */}
+      <div className="flex flex-wrap items-center gap-2" data-testid="hr-dept-tabs">
+        <TabPill active={selectedDept === ""} onClick={() => selectTab("")} testid="hr-dept-tab-all">
+          All Department
+        </TabPill>
+        {depts.map((d) => (
+          <TabPill key={d.id} active={selectedDept === d.name} onClick={() => selectTab(d.name)} testid={`hr-dept-tab-${d.id}`}>
+            {d.name}
+          </TabPill>
+        ))}
+        {addingDept ? (
+          <span className="inline-flex items-center gap-1">
+            <Input
+              autoFocus
+              placeholder="Department name..."
+              value={newDeptName}
+              onChange={(e) => setNewDeptName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") addDepartment(); if (e.key === "Escape") { setAddingDept(false); setNewDeptName(""); } }}
+              className="h-9 w-40 text-sm"
+              data-testid="hr-dept-add-input"
+            />
+            <button onClick={addDepartment} disabled={!newDeptName.trim()} className="shrink-0 text-emerald-600 hover:text-emerald-700" title="Add department" data-testid="hr-dept-add-confirm">
+              <CheckCircle2 className="h-4 w-4" />
+            </button>
+            <button onClick={() => { setAddingDept(false); setNewDeptName(""); }} className="shrink-0 text-slate-400 hover:text-slate-600" title="Cancel" data-testid="hr-dept-add-cancel">
+              <X className="h-4 w-4" />
+            </button>
+          </span>
+        ) : (
+          <button
+            onClick={() => setAddingDept(true)}
+            title="Add department"
+            aria-label="Add department"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-dashed border-sky-300 text-sky-600 transition hover:bg-sky-50"
+            data-testid="hr-dept-tab-add"
+          >
+            <Plus className="h-4 w-4" />
+          </button>
+        )}
+      </div>
+
+      {/* Selected department's own actions — nothing to rename/delete/manage on "All". */}
+      {selectedDeptObj && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-sky-100 bg-sky-50/60 px-3 py-2" data-testid="hr-dept-actionbar">
+          {editingDeptId === selectedDeptObj.id ? (
+            <div className="flex min-w-0 flex-1 items-center gap-1.5">
+              <Input
+                autoFocus
+                value={editDeptName}
+                onChange={(e) => setEditDeptName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") saveEditDept(selectedDeptObj); if (e.key === "Escape") cancelEditDept(); }}
+                className="h-8 max-w-xs text-sm"
+                data-testid={`hr-dept-edit-input-${selectedDeptObj.id}`}
+              />
+              <button onClick={() => saveEditDept(selectedDeptObj)} disabled={renamingDept} className="shrink-0 text-emerald-600 hover:text-emerald-700" data-testid={`hr-dept-edit-save-${selectedDeptObj.id}`} title="Save">
+                <CheckCircle2 className="h-4 w-4" />
+              </button>
+              <button onClick={cancelEditDept} className="shrink-0 text-slate-400 hover:text-slate-600" data-testid={`hr-dept-edit-cancel-${selectedDeptObj.id}`} title="Cancel">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          ) : (
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-slate-800">{selectedDeptObj.name}</p>
+              <p className="text-xs text-slate-500">
+                {selectedDeptObj.employee_count} employee{selectedDeptObj.employee_count === 1 ? "" : "s"} · {(selectedDeptObj.designations || []).length} designation{(selectedDeptObj.designations || []).length === 1 ? "" : "s"}
+              </p>
+            </div>
+          )}
+          {editingDeptId !== selectedDeptObj.id && (
+            <div className="flex shrink-0 items-center gap-1">
+              <Button size="sm" variant="outline" onClick={() => setManaging(selectedDeptObj)} data-testid={`hr-dept-manage-${selectedDeptObj.id}`}>
+                <FolderTree className="mr-1 h-3.5 w-3.5" />Manage Designations
+              </Button>
+              <button onClick={() => startEditDept(selectedDeptObj)} className="rounded-md p-2 text-slate-400 hover:bg-white hover:text-sky-600" title="Rename department" data-testid={`hr-dept-edit-${selectedDeptObj.id}`}>
+                <Pencil className="h-4 w-4" />
+              </button>
+              <button onClick={() => removeDepartment(selectedDeptObj)} className="rounded-md p-2 text-slate-400 hover:bg-white hover:text-red-500" title="Delete department" data-testid={`hr-dept-delete-${selectedDeptObj.id}`}>
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {!loading && depts.length === 0 && <p className="text-sm text-slate-400">No departments yet — use the + tab above to add one.</p>}
+
+      {/* Filters row */}
       <div className="flex flex-wrap items-center gap-2">
-        <Input
-          placeholder="New department name..."
-          value={newDeptName}
-          onChange={(e) => setNewDeptName(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") addDepartment(); }}
-          className="w-full sm:w-64"
-          data-testid="hr-dept-add-input"
-        />
-        <Button onClick={addDepartment} disabled={addingDept || !newDeptName.trim()} className="w-full bg-orange-500 hover:bg-orange-600 sm:w-auto" data-testid="hr-dept-add-btn">
-          <Plus className="mr-1 h-4 w-4" />Add Department
+        <DesignationFilterSelect value={designationFilter} onChange={setDesignationFilter} options={designationFilterOptions} testid="hr-dept-designation-filter" />
+      </div>
+
+      {/* Actions row */}
+      <div className="flex items-center justify-end gap-2">
+        <SearchIconInput value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search employee..." testid="hr-dept-emp-search" />
+        <Button onClick={() => { setEditingEmployee(null); setShowAddEmployee(true); }} className="bg-sky-600 hover:bg-sky-700" data-testid="hr-dept-emp-add-btn">
+          <Plus className="h-4 w-4 mr-1" />Add Employee
         </Button>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" data-testid="hr-dept-cards">
-        {depts.map((d) => (
-          <Card key={d.id} className="min-w-0" data-testid={`hr-dept-card-${d.id}`}>
-            <CardHeader className="flex flex-row items-start justify-between gap-2 pb-2">
-              {editingDeptId === d.id ? (
-                <div className="flex min-w-0 flex-1 items-center gap-1.5">
-                  <Input
-                    autoFocus
-                    value={editDeptName}
-                    onChange={(e) => setEditDeptName(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") saveEditDept(d); if (e.key === "Escape") cancelEditDept(); }}
-                    className="h-8 text-sm"
-                    data-testid={`hr-dept-edit-input-${d.id}`}
-                  />
-                  <button onClick={() => saveEditDept(d)} disabled={renamingDept} className="shrink-0 text-emerald-600 hover:text-emerald-700" data-testid={`hr-dept-edit-save-${d.id}`} title="Save">
-                    <CheckCircle2 className="h-4 w-4" />
-                  </button>
-                  <button onClick={cancelEditDept} className="shrink-0 text-slate-400 hover:text-slate-600" data-testid={`hr-dept-edit-cancel-${d.id}`} title="Cancel">
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-              ) : (
-                <>
-                  <div className="min-w-0">
-                    <CardTitle className="truncate text-base">{d.name}</CardTitle>
-                    <p className="text-xs text-slate-500">{d.employee_count} employee{d.employee_count === 1 ? "" : "s"}</p>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    <button onClick={() => startEditDept(d)} className="text-slate-400 hover:text-sky-600" data-testid={`hr-dept-edit-${d.id}`} title="Rename department">
-                      <Pencil className="h-4 w-4" />
-                    </button>
-                    <button onClick={() => removeDepartment(d)} className="text-slate-400 hover:text-red-500" data-testid={`hr-dept-delete-${d.id}`} title="Delete department">
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                </>
-              )}
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex flex-wrap gap-1.5">
-                {(d.designations || []).length === 0 && <p className="text-xs text-slate-400">No designations yet.</p>}
-                {(d.designations || []).map((desig) => (
-                  <span key={desig} className="inline-flex items-center gap-1 rounded-full bg-orange-50 px-2.5 py-1 text-xs font-medium text-orange-700" data-testid={`hr-dept-designation-${d.id}-${desig}`}>
-                    {desig}
-                    {designationCounts[desig] > 0 && <span className="text-orange-400">· {designationCounts[desig]}</span>}
-                  </span>
-                ))}
-              </div>
-              <Button size="sm" variant="outline" onClick={() => setManaging(d)} className="w-full" data-testid={`hr-dept-manage-${d.id}`}>
-                Manage Designations
-              </Button>
-            </CardContent>
-          </Card>
-        ))}
-        {!loading && depts.length === 0 && <p className="col-span-full text-sm text-slate-400">No departments yet. Add one above.</p>}
-      </div>
+      <EmployeeDirectory employees={filteredEmployees} onView={setViewingEmployee} />
 
       {managing && (
         <DepartmentDesignationsModal
@@ -1091,6 +1231,25 @@ const DepartmentsTab = ({ meta, reloadMeta }) => {
           departmentNames={depts.map((d) => d.name)}
           onClose={() => setViewingDesignation(null)}
           onChanged={() => { load(); reloadMeta(); }}
+        />
+      )}
+
+      {viewingEmployee && (
+        <EmployeeViewModal
+          employee={viewingEmployee}
+          onClose={() => setViewingEmployee(null)}
+          onEdit={() => { setEditingEmployee(viewingEmployee); setViewingEmployee(null); setShowAddEmployee(true); }}
+          onDelete={() => removeEmployee(viewingEmployee)}
+        />
+      )}
+
+      {showAddEmployee && (
+        <AddEmployeeModal
+          employee={editingEmployee}
+          initialDepartment={selectedDept}
+          meta={meta}
+          onClose={() => { setShowAddEmployee(false); setEditingEmployee(null); }}
+          onSaved={() => { setShowAddEmployee(false); setEditingEmployee(null); load(); reloadMeta(); }}
         />
       )}
     </div>
@@ -1186,7 +1345,7 @@ const DepartmentDesignationsModal = ({ department, allDepartments, allDesignatio
         </div>
         <div className="flex items-center justify-end gap-2 border-t border-slate-200 px-5 py-3">
           <Button variant="outline" onClick={onClose} data-testid="hr-dept-manage-cancel">Cancel</Button>
-          <Button onClick={save} disabled={saving} className="bg-orange-500 hover:bg-orange-600" data-testid="hr-dept-manage-save">
+          <Button onClick={save} disabled={saving} className="bg-sky-600 hover:bg-sky-700" data-testid="hr-dept-manage-save">
             {saving ? "Saving..." : "Save"}
           </Button>
         </div>
@@ -1225,7 +1384,7 @@ const DesignationEmployeesModal = ({ designation, employees, departmentNames, on
         <div className="flex-1 space-y-2 overflow-y-auto p-3">
           {employees.map((e) => (
             <div key={e.id} className="flex flex-wrap items-center gap-3 rounded-md border border-slate-100 px-3 py-2" data-testid={`hr-designation-employee-row-${e.id}`}>
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-orange-100 text-xs font-bold text-orange-700">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sky-100 text-xs font-bold text-sky-700">
                 {(e.full_name || "?").charAt(0).toUpperCase()}
               </span>
               <div className="min-w-0 flex-1">
@@ -1508,15 +1667,17 @@ const UserActionsModal = ({ user, onClose, onDone }) => {
               </div>
             </button>
 
+            {/* Violet, not blue — Edit sits right above this in the same blue the rest of
+                the app now uses, and two actions in one colour here would read as one. */}
             <button
               onClick={() => setMode("password")}
-              className="flex items-center gap-3 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2.5 text-left hover:bg-orange-100"
+              className="flex items-center gap-3 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2.5 text-left hover:bg-violet-100"
               data-testid="hr-actions-change-password"
             >
-              <KeyRound className="h-4 w-4 text-orange-600" />
+              <KeyRound className="h-4 w-4 text-violet-600" />
               <div>
-                <p className="text-sm font-semibold text-orange-700">Change Password</p>
-                <p className="text-[11px] text-orange-600">Set a new password for this user.</p>
+                <p className="text-sm font-semibold text-violet-700">Change Password</p>
+                <p className="text-[11px] text-violet-600">Set a new password for this user.</p>
               </div>
             </button>
 
@@ -1626,7 +1787,7 @@ const UserActionsModal = ({ user, onClose, onDone }) => {
             <PasswordInput placeholder="Confirm new password" value={confirmPwd} onChange={(e) => setConfirmPwd(e.target.value)} testid="hr-actions-password-confirm" />
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => { setMode(null); setPwd(""); setConfirmPwd(""); }} className="flex-1" data-testid="hr-actions-password-back">Back</Button>
-              <Button onClick={submitPwd} disabled={busy} className="flex-1 bg-orange-500 hover:bg-orange-600" data-testid="hr-actions-password-save">Update Password</Button>
+              <Button onClick={submitPwd} disabled={busy} className="flex-1 bg-violet-600 hover:bg-violet-700" data-testid="hr-actions-password-save">Update Password</Button>
             </div>
           </div>
         )}

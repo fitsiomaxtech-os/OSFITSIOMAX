@@ -190,7 +190,7 @@ const MemberLeadsModal = ({ member, tier, onClose }) => {
             <Tile
               label={narrowed ? "Filtered Results" : "Showing All"}
               value={data?.filtered ?? "—"}
-              tone={narrowed ? "border-orange-100 bg-orange-50/60 text-orange-600" : "border-slate-200 bg-slate-50 text-slate-500"}
+              tone={narrowed ? "border-sky-100 bg-sky-50/60 text-sky-600" : "border-slate-200 bg-slate-50 text-slate-500"}
             />
           </div>
 
