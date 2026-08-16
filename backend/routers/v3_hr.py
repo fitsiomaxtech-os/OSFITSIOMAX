@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, field_validator
+import re
 import uuid
 
 from database import v3_col
@@ -59,7 +60,6 @@ def expert_profile_type(role: str) -> str:
 
 
 def _slugify_role(label: str) -> str:
-    import re
     slug = re.sub(r"[^a-z0-9]+", "_", label.strip().lower()).strip("_")
     return slug
 
@@ -664,6 +664,14 @@ async def add_designation(dept_id: str, payload: DesignationCreate, _: V3UserOut
         raise HTTPException(status_code=404, detail="Department not found")
     if any(d.lower() == name.lower() for d in dept.get("designations", [])):
         raise HTTPException(status_code=409, detail="This designation is already in this department")
+    # A designation belongs to exactly one department — the picker disables options
+    # already claimed elsewhere, but that's a UI-level guard; this is the real boundary.
+    other = await v3_col("hr_departments").find_one(
+        {"id": {"$ne": dept_id}, "designations": {"$regex": f"^{re.escape(name)}$", "$options": "i"}},
+        {"_id": 0, "name": 1},
+    )
+    if other:
+        raise HTTPException(status_code=409, detail=f'"{name}" already belongs to {other["name"]}')
     await v3_col("hr_departments").update_one({"id": dept_id}, {"$push": {"designations": name}})
     return await v3_col("hr_departments").find_one({"id": dept_id}, {"_id": 0})
 

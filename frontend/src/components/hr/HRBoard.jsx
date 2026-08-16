@@ -55,7 +55,7 @@ export const HRBoard = () => {
       {tab === "dashboard" && <DashboardTab onNavigate={(t, f) => { setEmpFilter(f || null); setTab(t); }} />}
       {tab === "employees" && <EmployeesTab meta={meta} initialFilter={empFilter} />}
       {tab === "roles" && <RolesTab meta={meta} reloadMeta={reloadMeta} />}
-      {tab === "departments" && <DepartmentsTab reloadMeta={reloadMeta} />}
+      {tab === "departments" && <DepartmentsTab meta={meta} reloadMeta={reloadMeta} onNavigate={(t, f) => { setEmpFilter(f || null); setTab(t); }} />}
     </div>
   );
 };
@@ -162,9 +162,11 @@ const EmployeesTab = ({ meta, initialFilter }) => {
   const [employees, setEmployees] = useState([]);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState(initialFilter?.status || "active");
-  // Arrived at from a Department Strength bar. Cleared by its own chip rather than by
-  // going back to the Dashboard, so the way out is next to the thing that narrowed the list.
+  // Arrived at from a Department Strength bar or a Departments & Designation card.
+  // Cleared by its own chip rather than by going back, so the way out is next to the
+  // thing that narrowed the list.
   const [department, setDepartment] = useState(initialFilter?.department || "");
+  const [designation, setDesignation] = useState(initialFilter?.designation || "");
   const [sortAZ, setSortAZ] = useState(null); // null = as-loaded | "asc" | "desc"
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -177,6 +179,7 @@ const EmployeesTab = ({ meta, initialFilter }) => {
     // "Unassigned" is what the Dashboard calls an employee with no department, so it has
     // to match the empty field here or that bar would open an empty list.
     if (department && (e.department || "Unassigned") !== department) return false;
+    if (designation && e.designation !== designation) return false;
     if (!search) return true;
     const q = search.toLowerCase();
     return (e.full_name || "").toLowerCase().includes(q) || (e.email || "").toLowerCase().includes(q) || (e.employee_code || "").toLowerCase().includes(q);
@@ -208,6 +211,16 @@ const EmployeesTab = ({ meta, initialFilter }) => {
             data-testid="hr-emp-dept-chip"
           >
             {department} <X className="h-3.5 w-3.5" />
+          </button>
+        )}
+        {designation && (
+          <button
+            onClick={() => setDesignation("")}
+            className="inline-flex items-center gap-1.5 rounded-md border border-orange-300 bg-orange-50 px-3 py-2 text-sm font-medium text-orange-700 hover:bg-orange-100"
+            title="Clear the designation filter"
+            data-testid="hr-emp-designation-chip"
+          >
+            {designation} <X className="h-3.5 w-3.5" />
           </button>
         )}
         <div className="flex-1" />
@@ -903,20 +916,39 @@ const CreateRoleModal = ({ meta, reloadMeta, onClose }) => {
 
 // ---------- Departments & Designation ----------
 
-const DepartmentsTab = ({ reloadMeta }) => {
+const DepartmentsTab = ({ meta, reloadMeta, onNavigate }) => {
   const [depts, setDepts] = useState([]);
+  const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(false);
   const [newDeptName, setNewDeptName] = useState("");
   const [addingDept, setAddingDept] = useState(false);
-  const [newDesig, setNewDesig] = useState({}); // { [deptId]: draftText }
+  const [managing, setManaging] = useState(null); // department being edited in the modal
 
   const load = useCallback(async () => {
     setLoading(true);
-    try { setDepts(await hrDepartments()); }
-    catch (e) { toast.error(e?.response?.data?.detail || "Failed to load departments"); }
+    try {
+      const [d, e] = await Promise.all([hrDepartments(), hrEmployees({})]);
+      setDepts(d);
+      setEmployees(e);
+    } catch (e) { toast.error(e?.response?.data?.detail || "Failed to load departments"); }
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
+
+  // Every designation an employee could be given: the role list (same source the Add
+  // Employee form falls back to) plus any designation only found on an employee record
+  // (e.g. typed before this list existed), so the picker never hides one still in use.
+  const allDesignations = useMemo(() => {
+    const fromRoles = (meta?.roles || []).map(roleLabel);
+    const fromEmployees = employees.map((e) => e.designation).filter(Boolean);
+    return [...new Set([...fromRoles, ...fromEmployees])].sort((a, b) => a.localeCompare(b));
+  }, [meta?.roles, employees]);
+
+  const designationCounts = useMemo(() => {
+    const counts = {};
+    employees.forEach((e) => { if (e.designation) counts[e.designation] = (counts[e.designation] || 0) + 1; });
+    return counts;
+  }, [employees]);
 
   const addDepartment = async () => {
     const name = newDeptName.trim();
@@ -938,20 +970,9 @@ const DepartmentsTab = ({ reloadMeta }) => {
     catch (e) { toast.error(e?.response?.data?.detail || "Failed to delete department"); }
   };
 
-  const addDesignation = async (d) => {
-    const name = (newDesig[d.id] || "").trim();
-    if (!name) return;
-    try {
-      await hrAddDesignation(d.id, name);
-      setNewDesig((prev) => ({ ...prev, [d.id]: "" }));
-      load();
-      reloadMeta();
-    } catch (e) { toast.error(e?.response?.data?.detail || "Failed to add designation"); }
-  };
-
-  const removeDesignation = async (d, designation) => {
-    try { await hrDeleteDesignation(d.id, designation); load(); reloadMeta(); }
-    catch (e) { toast.error(e?.response?.data?.detail || "Failed to remove designation"); }
+  const viewEmployees = (label) => {
+    setManaging(null);
+    onNavigate("employees", { designation: label });
   };
 
   return (
@@ -988,29 +1009,127 @@ const DepartmentsTab = ({ reloadMeta }) => {
                 {(d.designations || []).map((desig) => (
                   <span key={desig} className="inline-flex items-center gap-1 rounded-full bg-orange-50 px-2.5 py-1 text-xs font-medium text-orange-700" data-testid={`hr-dept-designation-${d.id}-${desig}`}>
                     {desig}
-                    <button onClick={() => removeDesignation(d, desig)} className="text-orange-400 hover:text-orange-700" aria-label={`Remove ${desig}`}>
-                      <X className="h-3 w-3" />
-                    </button>
+                    {designationCounts[desig] > 0 && <span className="text-orange-400">· {designationCounts[desig]}</span>}
                   </span>
                 ))}
               </div>
-              <div className="flex items-center gap-2">
-                <Input
-                  placeholder="Add designation..."
-                  value={newDesig[d.id] || ""}
-                  onChange={(e) => setNewDesig((prev) => ({ ...prev, [d.id]: e.target.value }))}
-                  onKeyDown={(e) => { if (e.key === "Enter") addDesignation(d); }}
-                  className="h-8 text-sm"
-                  data-testid={`hr-dept-designation-input-${d.id}`}
-                />
-                <Button size="sm" variant="outline" onClick={() => addDesignation(d)} disabled={!(newDesig[d.id] || "").trim()} data-testid={`hr-dept-designation-add-${d.id}`}>
-                  <Plus className="h-3.5 w-3.5" />
-                </Button>
-              </div>
+              <Button size="sm" variant="outline" onClick={() => setManaging(d)} className="w-full" data-testid={`hr-dept-manage-${d.id}`}>
+                Manage Designations
+              </Button>
             </CardContent>
           </Card>
         ))}
         {!loading && depts.length === 0 && <p className="col-span-full text-sm text-slate-400">No departments yet. Add one above.</p>}
+      </div>
+
+      {managing && (
+        <DepartmentDesignationsModal
+          department={managing}
+          allDepartments={depts}
+          allDesignations={allDesignations}
+          designationCounts={designationCounts}
+          onClose={() => setManaging(null)}
+          onViewEmployees={viewEmployees}
+          onSaved={() => { setManaging(null); load(); reloadMeta(); }}
+        />
+      )}
+    </div>
+  );
+};
+
+// A designation belongs to exactly one department — this modal is the one place that's
+// enforced. Options already grouped under a different department are disabled here as a
+// UI-level guard; the backend re-checks it too on save, since that's the boundary that
+// actually matters.
+const DepartmentDesignationsModal = ({ department, allDepartments, allDesignations, designationCounts, onClose, onViewEmployees, onSaved }) => {
+  const [selected, setSelected] = useState(() => new Set(department.designations || []));
+  const [saving, setSaving] = useState(false);
+
+  const claimedElsewhere = useMemo(() => {
+    const set = new Set();
+    allDepartments.forEach((d) => {
+      if (d.id === department.id) return;
+      (d.designations || []).forEach((desig) => set.add(desig));
+    });
+    return set;
+  }, [allDepartments, department.id]);
+
+  const toggle = (label) => {
+    if (claimedElsewhere.has(label)) return;
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(label)) next.delete(label); else next.add(label);
+      return next;
+    });
+  };
+
+  const save = async () => {
+    const before = new Set(department.designations || []);
+    const toAdd = [...selected].filter((l) => !before.has(l));
+    const toRemove = [...before].filter((l) => !selected.has(l));
+    setSaving(true);
+    try {
+      for (const label of toAdd) await hrAddDesignation(department.id, label);
+      for (const label of toRemove) await hrDeleteDesignation(department.id, label);
+      toast.success(`${department.name} updated`);
+      onSaved();
+    } catch (e) { toast.error(e?.response?.data?.detail || "Failed to save"); }
+    setSaving(false);
+  };
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" data-testid="hr-dept-manage-modal">
+      <div className="flex max-h-[80vh] w-full max-w-lg flex-col rounded-lg bg-white shadow-xl">
+        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
+          <div>
+            <h3 className="text-base font-semibold">{department.name} — Designations</h3>
+            <p className="text-xs text-slate-500">Pick which designations belong to this department.</p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600" data-testid="hr-dept-manage-close"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="flex-1 space-y-1 overflow-y-auto p-3">
+          {allDesignations.map((label) => {
+            const disabled = claimedElsewhere.has(label);
+            const checked = selected.has(label);
+            const count = designationCounts[label] || 0;
+            return (
+              <div
+                key={label}
+                className={`flex items-center gap-3 rounded-md px-2 py-2 ${disabled ? "opacity-50" : "hover:bg-slate-50"}`}
+                data-testid={`hr-dept-designation-row-${label}`}
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  disabled={disabled}
+                  onChange={() => toggle(label)}
+                  className="h-4 w-4 shrink-0"
+                  data-testid={`hr-dept-designation-checkbox-${label}`}
+                />
+                <span className="min-w-0 flex-1 truncate text-sm text-slate-800">{label}</span>
+                {disabled && <span className="shrink-0 text-[10px] text-slate-400">In another department</span>}
+                <span className="shrink-0 text-xs text-slate-500">{count} employee{count === 1 ? "" : "s"}</span>
+                {count > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => onViewEmployees(label)}
+                    className="shrink-0 text-xs font-medium text-sky-600 hover:text-sky-700"
+                    data-testid={`hr-dept-designation-view-${label}`}
+                  >
+                    View
+                  </button>
+                )}
+              </div>
+            );
+          })}
+          {allDesignations.length === 0 && <p className="px-2 py-6 text-center text-sm text-slate-400">No designations exist yet.</p>}
+        </div>
+        <div className="flex items-center justify-end gap-2 border-t border-slate-200 px-5 py-3">
+          <Button variant="outline" onClick={onClose} data-testid="hr-dept-manage-cancel">Cancel</Button>
+          <Button onClick={save} disabled={saving} className="bg-orange-500 hover:bg-orange-600" data-testid="hr-dept-manage-save">
+            {saving ? "Saving..." : "Save"}
+          </Button>
+        </div>
       </div>
     </div>
   );
