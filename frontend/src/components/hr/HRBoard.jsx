@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Users, ShieldCheck, BarChart3, Plus, Pencil, Trash2, Eye, EyeOff, KeyRound, X, UserPlus, MoreVertical, CheckCircle2, XCircle, AlertOctagon, CalendarOff, ChevronDown, FolderTree, Search } from "lucide-react";
+import { Users, ShieldCheck, BarChart3, Plus, Pencil, Trash2, Eye, EyeOff, KeyRound, X, UserPlus, MoreVertical, CheckCircle2, XCircle, AlertOctagon, CalendarOff, ChevronDown, ChevronUp, GripVertical, FolderTree, Search } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,7 +7,7 @@ import { toast } from "@/components/ui/sonner";
 import {
   hrDashboard, hrEmployees, hrCreateEmployee, hrUpdateEmployee, hrDeleteEmployee,
   hrUsers, hrCreateUser, hrUpdateUser, hrResetPassword, hrDeactivateUser, hrActivateUser, hrDeleteUserPermanent, hrUpdateUserRole, hrMeta, hrAddCustomRole,
-  hrDepartments, hrCreateDepartment, hrRenameDepartment, hrDeleteDepartment, hrAddDesignation, hrRenameDesignation,
+  hrDepartments, hrCreateDepartment, hrRenameDepartment, hrDeleteDepartment, hrAddDesignation, hrRenameDesignation, hrReorderDesignations,
   getBranches,
 } from "@/lib/api";
 import { MilkDateInput } from "@/components/ui/milk-calendar";
@@ -1297,6 +1297,11 @@ const DesignationsTab = ({ meta, reloadMeta }) => {
   const [claimDeptId, setClaimDeptId] = useState({}); // label -> department picked to claim it into
   const [claiming, setClaiming] = useState(null);
 
+  // Which row a drag started on — only meaningful within the same department's list, since
+  // "first row" only means something inside one department's own order.
+  const [dragDeptId, setDragDeptId] = useState(null);
+  const [dragIndex, setDragIndex] = useState(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -1386,6 +1391,25 @@ const DesignationsTab = ({ meta, reloadMeta }) => {
     setClaiming(null);
   };
 
+  // Applied optimistically — the drag (or arrow click) already showed the new order, so it
+  // shouldn't visibly snap back while the request is in flight — then reconciled with the
+  // server, or rolled back with a fresh load if the save itself failed.
+  const reorder = async (deptId, fromIndex, toIndex) => {
+    if (fromIndex === toIndex || toIndex < 0) return;
+    const dept = depts.find((d) => d.id === deptId);
+    if (!dept || toIndex >= (dept.designations || []).length) return;
+    const list = [...dept.designations];
+    const [moved] = list.splice(fromIndex, 1);
+    list.splice(toIndex, 0, moved);
+    setDepts((prev) => prev.map((d) => (d.id === deptId ? { ...d, designations: list } : d)));
+    try {
+      await hrReorderDesignations(deptId, list);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Failed to reorder");
+      load();
+    }
+  };
+
   const visibleDepts = depts.filter((d) => (d.designations || []).some(matches));
   const visibleUnclaimed = unclaimed.filter(matches);
 
@@ -1432,11 +1456,36 @@ const DesignationsTab = ({ meta, reloadMeta }) => {
           <Card key={d.id} data-testid={`hr-designation-dept-${d.id}`}>
             <CardHeader className="pb-2"><CardTitle className="text-sm">{d.name}</CardTitle></CardHeader>
             <CardContent className="space-y-1">
-              {(d.designations || []).filter(matches).map((label) => {
+              {/* Dragging (and the up/down fallback for touch) only make sense against the
+                  department's real order, which a search filter would scramble the
+                  indices of — so reordering is only offered with the search box empty. */}
+              {(d.designations || []).filter(matches).map((label, index) => {
                 const count = designationCounts[label] || 0;
                 const isEditing = editingKey === `${d.id}:${label}`;
+                const reorderable = !q && !isEditing;
+                const total = d.designations.length;
                 return (
-                  <div key={label} className="flex items-center gap-2 rounded-md px-2 py-2 hover:bg-slate-50" data-testid={`hr-designation-row-${d.id}-${label}`}>
+                  <div
+                    key={label}
+                    draggable={reorderable}
+                    onDragStart={(e) => {
+                      // Firefox won't continue a drag past dragstart unless dataTransfer
+                      // actually carries something — the label itself is as good as any.
+                      e.dataTransfer.setData("text/plain", label);
+                      e.dataTransfer.effectAllowed = "move";
+                      setDragDeptId(d.id); setDragIndex(index);
+                    }}
+                    onDragOver={(e) => { if (reorderable && dragDeptId === d.id) e.preventDefault(); }}
+                    onDrop={(e) => {
+                      if (!(reorderable && dragDeptId === d.id) || dragIndex === null) return;
+                      e.preventDefault();
+                      reorder(d.id, dragIndex, index);
+                      setDragDeptId(null); setDragIndex(null);
+                    }}
+                    onDragEnd={() => { setDragDeptId(null); setDragIndex(null); }}
+                    className={`flex items-center gap-2 rounded-md px-2 py-2 hover:bg-slate-50 ${reorderable ? "cursor-grab active:cursor-grabbing" : ""}`}
+                    data-testid={`hr-designation-row-${d.id}-${label}`}
+                  >
                     {isEditing ? (
                       <>
                         <Input
@@ -1456,7 +1505,22 @@ const DesignationsTab = ({ meta, reloadMeta }) => {
                       </>
                     ) : (
                       <>
+                        {reorderable ? (
+                          <GripVertical className="h-4 w-4 shrink-0 text-slate-300" />
+                        ) : (
+                          <span className="w-4 shrink-0" />
+                        )}
                         <span className="min-w-0 flex-1 truncate text-sm text-slate-800">{label}</span>
+                        {reorderable && (
+                          <div className="flex shrink-0 flex-col">
+                            <button onClick={() => reorder(d.id, index, index - 1)} disabled={index === 0} className="text-slate-300 hover:text-sky-600 disabled:pointer-events-none disabled:opacity-30" title="Move up" data-testid={`hr-designation-up-${d.id}-${label}`}>
+                              <ChevronUp className="h-3.5 w-3.5" />
+                            </button>
+                            <button onClick={() => reorder(d.id, index, index + 1)} disabled={index === total - 1} className="text-slate-300 hover:text-sky-600 disabled:pointer-events-none disabled:opacity-30" title="Move down" data-testid={`hr-designation-down-${d.id}-${label}`}>
+                              <ChevronDown className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        )}
                         <button onClick={() => startRename(d.id, label)} className="shrink-0 text-slate-400 hover:text-sky-600" title="Rename designation" data-testid={`hr-designation-edit-${d.id}-${label}`}>
                           <Pencil className="h-3.5 w-3.5" />
                         </button>

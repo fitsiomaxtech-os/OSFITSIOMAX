@@ -114,6 +114,10 @@ class DesignationRename(BaseModel):
     new_name: str
 
 
+class DesignationReorder(BaseModel):
+    designations: List[str]
+
+
 class EmployeeCreate(BaseModel):
     full_name: str
     email: Optional[str] = ""
@@ -740,6 +744,19 @@ async def rename_designation(dept_id: str, payload: DesignationRename, _: V3User
     # to be pushed to them explicitly or they'd keep showing the old title.
     if new_name != old_name:
         await v3_col("employees").update_many({"designation": old_name}, {"$set": {"designation": new_name}})
+    return await v3_col("hr_departments").find_one({"id": dept_id}, {"_id": 0})
+
+
+@router.put("/departments/{dept_id}/designations/order")
+async def reorder_designations(dept_id: str, payload: DesignationReorder, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    dept = await v3_col("hr_departments").find_one({"id": dept_id}, {"_id": 0})
+    if not dept:
+        raise HTTPException(status_code=404, detail="Department not found")
+    # Reorders only — never adds or drops one, so a stale client can't silently lose a
+    # designation someone else just added to this department.
+    if set(payload.designations) != set(dept.get("designations", [])):
+        raise HTTPException(status_code=400, detail="Reordered list must contain exactly the designations already in this department")
+    await v3_col("hr_departments").update_one({"id": dept_id}, {"$set": {"designations": payload.designations}})
     return await v3_col("hr_departments").find_one({"id": dept_id}, {"_id": 0})
 
 
