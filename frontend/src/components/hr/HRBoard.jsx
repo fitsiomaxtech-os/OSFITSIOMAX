@@ -343,22 +343,40 @@ const EmployeesTab = ({ meta, initialFilter }) => {
   // flex+gap, not space-y — the desktop table below is hidden by class on mobile.
   return (
     <div className="flex flex-col gap-3" data-testid="hr-employees-tab">
-      {/* Filters row */}
+      {/* Status row */}
       <div className="flex flex-wrap items-center gap-2">
         <button onClick={() => setFilterStatus("active")} className={`rounded-md px-3 py-2 text-sm font-medium ${filterStatus === "active" ? "bg-sky-600 text-white" : "bg-slate-100 text-slate-600"}`} data-testid="hr-emp-tab-active">Active Employees ({active})</button>
         <button onClick={() => setFilterStatus("left")} className={`rounded-md px-3 py-2 text-sm font-medium ${filterStatus === "left" ? "bg-slate-700 text-white" : "bg-slate-100 text-slate-600"}`} data-testid="hr-emp-tab-left">Left ({left})</button>
-        <select
-          value={department}
-          onChange={(e) => { setDepartment(e.target.value); setDesignation(""); }}
-          className={`h-10 rounded-md border px-3 text-sm font-medium ${department ? "border-sky-300 bg-sky-50 text-sky-700" : "border-slate-200 bg-white text-slate-600"}`}
-          title="Filter by department"
-          data-testid="hr-emp-dept-filter"
-        >
-          <option value="">All Departments</option>
-          {meta.departments.map((d) => <option key={d} value={d}>{d}</option>)}
-          {hasUnassigned && <option value="Unassigned">Unassigned</option>}
-        </select>
-        <DesignationFilterSelect value={designation} onChange={setDesignation} options={designationOptions} testid="hr-emp-designation-filter" />
+      </div>
+
+      {/* Department row — same pill tabs as Departments & Designation, so filtering by
+          department reads the same way in both places. */}
+      <div className="flex flex-wrap items-center gap-2" data-testid="hr-emp-dept-filter">
+        <TabPill active={department === ""} onClick={() => { setDepartment(""); setDesignation(""); }} testid="hr-emp-dept-filter-all">
+          All Departments
+        </TabPill>
+        {meta.departments.map((d) => (
+          <TabPill key={d} active={department === d} onClick={() => { setDepartment(d); setDesignation(""); }} testid={`hr-emp-dept-filter-${d}`}>
+            {d}
+          </TabPill>
+        ))}
+        {hasUnassigned && (
+          <TabPill active={department === "Unassigned"} onClick={() => { setDepartment("Unassigned"); setDesignation(""); }} testid="hr-emp-dept-filter-unassigned">
+            Unassigned
+          </TabPill>
+        )}
+      </div>
+
+      {/* Designation row — narrows to whichever department is picked above. */}
+      <div className="flex flex-wrap items-center gap-2" data-testid="hr-emp-designation-filter">
+        <TabPill active={designation === ""} onClick={() => setDesignation("")} testid="hr-emp-designation-filter-all">
+          All Designations
+        </TabPill>
+        {designationOptions.map((d) => (
+          <TabPill key={d} active={designation === d} onClick={() => setDesignation(d)} testid={`hr-emp-designation-filter-${d}`}>
+            {d}
+          </TabPill>
+        ))}
       </div>
 
       {/* Actions row */}
