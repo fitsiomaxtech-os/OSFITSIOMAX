@@ -116,7 +116,11 @@ class MarketingSourceCreate(BaseModel):
     spreadsheet_id: Optional[str] = ""
     source_type: Literal["meta", "seo", "referral", "walk_in", "website", "csv_import", "google_sheets", "other"] = "google_sheets"
     headers: Optional[List[str]] = None
-    branch_id: Optional[str] = None  # if set, every lead pulled from this source auto-assigns to this branch
+    # Every lead pulled from this source auto-assigns to the branch when exactly one is
+    # given. With zero or several, there's no single branch to route a row to, so they're
+    # tags only (see _normalize_source / _internal_pull_source).
+    branch_ids: Optional[List[str]] = None
+    verticals: Optional[List[str]] = None
 
 
 class MarketingSourceUpdate(BaseModel):
@@ -126,10 +130,12 @@ class MarketingSourceUpdate(BaseModel):
     spreadsheet_id: Optional[str] = None
     sheet_name: Optional[str] = None
     headers: Optional[List[str]] = None
-    branch_id: Optional[str] = None  # pass "" to clear back to "All Branches"
+    branch_ids: Optional[List[str]] = None  # pass [] to clear back to "All Branches"
+    verticals: Optional[List[str]] = None
     column_mapping: Optional[Dict[str, str]] = None
     custom_fields: Optional[List[str]] = None
     is_active: Optional[bool] = None
+    is_archived: Optional[bool] = None
     auto_sync_enabled: Optional[bool] = None
     auto_sync_interval_minutes: Optional[int] = None
 
@@ -493,18 +499,38 @@ async def bulk_delete_leads(payload: BulkDelete, _: V3UserOut = Depends(v3_requi
 
 # ============ sources ============
 
+def normalize_source(doc: Dict[str, Any]) -> Dict[str, Any]:
+    """Backfills the branch_ids/verticals/is_archived shape onto a source document that may
+    predate them. Applied on every read so old docs (still carrying only a singular
+    `branch_id`) and new docs look identical to callers — no one-off migration needed."""
+    if "branch_ids" not in doc:
+        legacy = doc.get("branch_id")
+        doc["branch_ids"] = [legacy] if legacy else []
+    doc.setdefault("verticals", [])
+    doc.setdefault("is_archived", False)
+    return doc
+
+
+async def _validate_targets(branch_ids: Optional[List[str]], verticals: Optional[List[str]]) -> None:
+    for bid in (branch_ids or []):
+        branch = await v3_col("branches").find_one({"id": bid}, {"_id": 0, "id": 1})
+        if not branch:
+            raise HTTPException(status_code=404, detail=f"Branch not found: {bid}")
+    for name in (verticals or []):
+        vertical = await v3_col("verticals").find_one({"name": name}, {"_id": 0, "name": 1})
+        if not vertical:
+            raise HTTPException(status_code=404, detail=f"Vertical not found: {name}")
+
+
 @router.get("/sources")
 async def list_sources(_: V3UserOut = Depends(v3_require_roles("super_admin"))):
     rows = await v3_col("marketing_sources").find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
-    return rows
+    return [normalize_source(r) for r in rows]
 
 
 @router.post("/sources")
 async def create_source(payload: MarketingSourceCreate, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
-    if payload.branch_id:
-        branch = await v3_col("branches").find_one({"id": payload.branch_id}, {"_id": 0, "id": 1})
-        if not branch:
-            raise HTTPException(status_code=404, detail="Branch not found")
+    await _validate_targets(payload.branch_ids, payload.verticals)
     spreadsheet_id = payload.spreadsheet_id or (extract_spreadsheet_id(payload.sheet_url) if payload.sheet_url else "")
     column_mapping = auto_map_columns(payload.headers or []) if payload.headers else {}
     detected_custom = [h for h in (payload.headers or []) if h not in column_mapping.values()]
@@ -518,10 +544,12 @@ async def create_source(payload: MarketingSourceCreate, _: V3UserOut = Depends(v
         "column_mapping": column_mapping,
         "custom_fields": detected_custom,
         "headers_detected": payload.headers or [],
-        "branch_id": payload.branch_id or None,
+        "branch_ids": payload.branch_ids or [],
+        "verticals": payload.verticals or [],
         "row_count": 0,
         "last_synced": None,
         "is_active": True,
+        "is_archived": False,
         "created_at": now_iso(),
     }
     await v3_col("marketing_sources").insert_one(source.copy())
@@ -530,10 +558,7 @@ async def create_source(payload: MarketingSourceCreate, _: V3UserOut = Depends(v
 
 @router.patch("/sources/{source_id}")
 async def update_source(source_id: str, payload: MarketingSourceUpdate, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
-    if payload.branch_id:
-        branch = await v3_col("branches").find_one({"id": payload.branch_id}, {"_id": 0, "id": 1})
-        if not branch:
-            raise HTTPException(status_code=404, detail="Branch not found")
+    await _validate_targets(payload.branch_ids, payload.verticals)
     updates = {k: v for k, v in payload.model_dump().items() if v is not None and k != "headers"}
     if payload.sheet_url and not payload.spreadsheet_id:
         extracted = extract_spreadsheet_id(payload.sheet_url)
@@ -549,7 +574,7 @@ async def update_source(source_id: str, payload: MarketingSourceUpdate, _: V3Use
     res = await v3_col("marketing_sources").update_one({"id": source_id}, {"$set": updates})
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Source not found")
-    return await v3_col("marketing_sources").find_one({"id": source_id}, {"_id": 0})
+    return normalize_source(await v3_col("marketing_sources").find_one({"id": source_id}, {"_id": 0}))
 
 
 @router.delete("/sources/{source_id}")

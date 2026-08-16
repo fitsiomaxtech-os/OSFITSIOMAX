@@ -30,7 +30,7 @@ from schemas.v3 import V3UserOut
 from stage_utils import first_branch_stage_for
 import lead_control
 from routers.v3_marketing import (
-    auto_map_columns, normalize_phone, STANDARD_FIELDS, round_robin_assign,
+    auto_map_columns, normalize_phone, STANDARD_FIELDS, round_robin_assign, normalize_source,
 )
 
 
@@ -201,6 +201,28 @@ async def list_spreadsheets(_: V3UserOut = Depends(v3_require_roles("super_admin
     )
 
 
+@router.get("/tabs")
+async def list_tabs(spreadsheet_id: str = Query(...), _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    """Tabs (worksheets) inside one already-known spreadsheet — unlike /spreadsheets above,
+    this needs no Drive access: the caller already has the ID from a pasted URL, and
+    `spreadsheets.get` only reads the one sheet it's pointed at. Used by the Add/Edit Source
+    popup to let the tab be picked rather than typed."""
+    creds = await _get_creds()
+    if not creds:
+        raise HTTPException(status_code=400, detail="Not connected to Google. Click 'Continue with Google' first.")
+    try:
+        svc = await asyncio.to_thread(lambda: build("sheets", "v4", credentials=creds))
+        meta = await asyncio.to_thread(lambda: svc.spreadsheets().get(
+            spreadsheetId=spreadsheet_id, fields="sheets.properties.title",
+        ).execute())
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Could not read that sheet: {str(e)[:200]}")
+    tabs = [s["properties"]["title"] for s in meta.get("sheets", []) if s.get("properties")]
+    if not tabs:
+        raise HTTPException(status_code=404, detail="No tabs found in that spreadsheet")
+    return {"tabs": tabs}
+
+
 # ---------- Auto-sync settings (lightweight — accessible to pre_sales too) ----------
 
 class AutoSyncToggle(BaseModel):
@@ -216,7 +238,9 @@ async def auto_sync_sources(user: V3UserOut = Depends(v3_require_roles("super_ad
     connected = await v3_col("google_sheets_tokens").find_one({"id": TOKEN_DOC_ID}, {"_id": 0, "refresh_token": 1})
     query = {"source_type": "google_sheets", "is_active": True}
     if is_branch_admin_role(user.role):
-        query["branch_id"] = user.branch_id
+        # Matches a doc whose branch_ids array contains this branch — also catches any
+        # not-yet-normalized doc still on the legacy singular branch_id field.
+        query["$or"] = [{"branch_ids": user.branch_id}, {"branch_id": user.branch_id}]
     sources = await v3_col("marketing_sources").find(
         query,
         {"_id": 0},
@@ -256,6 +280,7 @@ async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Di
     source = await v3_col("marketing_sources").find_one({"id": source_id}, {"_id": 0})
     if not source:
         return {"error": "source_not_found", "imported": 0}
+    source = normalize_source(source)
     if not source.get("spreadsheet_id"):
         return {"error": "no_spreadsheet_id", "imported": 0}
 
@@ -314,9 +339,17 @@ async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Di
     skipped_no_phone = 0
     skipped_duplicate = 0
     sample_errors = []
+    # A source tagged to exactly one branch still auto-assigns every row to it, same as
+    # before this field became a list. With zero or several branches there's no single one
+    # to route a row to, so branch_ids becomes a tag only — same as an untagged
+    # "All Branches" source has always behaved.
+    branch_ids = source.get("branch_ids") or []
+    source_branch_id = branch_ids[0] if len(branch_ids) == 1 else None
+    verticals = source.get("verticals") or []
+    default_vertical = verticals[0] if len(verticals) == 1 else "offline_physiotherapy"
     # Resolved once for the whole import — every row from a source shares its branch, and so
     # shares the entry stage that branch's Lead Control puts them on.
-    source_control = await lead_control.branch_lead_control(source.get("branch_id"))
+    source_control = await lead_control.branch_lead_control(source_branch_id)
     first_branch_stage = await first_branch_stage_for(source_control, "New Appointment")
 
     for idx, row in enumerate(rows):
@@ -344,7 +377,6 @@ async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Di
 
         # No Pre-Sales rep on a lead the Pre-Sales desk will never see.
         assigned = None if source_control == lead_control.BRANCH_ADMIN else await round_robin_assign("pre_sales")
-        source_branch_id = source.get("branch_id")
         patient_number = await generate_patient_number(source_branch_id) if source_branch_id else None
         lead = {
             "id": str(uuid.uuid4()),
@@ -353,7 +385,7 @@ async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Di
             "phone": phone_raw,
             "phone_normalized": phone_norm,
             "email": std_payload.get("email", ""),
-            "vertical": std_payload.get("vertical") or "offline_physiotherapy",
+            "vertical": std_payload.get("vertical") or default_vertical,
             "source_tab": source["name"],
             "source_type": "google_sheets",
             # Pre-Sales stage stays normal ("New Leads") regardless — a source tagged with a
@@ -404,10 +436,11 @@ async def _internal_pull_source(source_id: str, range_: str = "A1:Z10000") -> Di
 @router.post("/pull/{source_id}")
 async def pull_source(source_id: str, range_: str = Query("A1:Z10000"), user: V3UserOut = Depends(v3_require_roles("super_admin", "pre_sales", "branch_admin"))):
     if is_branch_admin_role(user.role):
-        source = await v3_col("marketing_sources").find_one({"id": source_id}, {"_id": 0, "branch_id": 1})
+        source = await v3_col("marketing_sources").find_one({"id": source_id}, {"_id": 0, "branch_id": 1, "branch_ids": 1})
         if not source:
             raise HTTPException(status_code=404, detail="Source not found")
-        if not source.get("branch_id") or source["branch_id"] != user.branch_id:
+        source = normalize_source(source)
+        if user.branch_id not in source["branch_ids"]:
             raise HTTPException(status_code=403, detail="This sheet source isn't assigned to your branch")
     result = await _internal_pull_source(source_id, range_)
     if result.get("error"):

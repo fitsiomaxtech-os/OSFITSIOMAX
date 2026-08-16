@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   FileSpreadsheet, Layers, Users, ChevronDown,
-  Plus, RefreshCw, Trash2, Link as LinkIcon, ArrowRightLeft, X, Pencil,
+  Plus, RefreshCw, Trash2, Archive, ArchiveRestore, Link as LinkIcon, ArrowRightLeft, X, Pencil,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -11,13 +11,20 @@ import {
   mkGetDistribution, mkPatchDistribution, mkRefreshDistribution,
   mkUnassignedCount, mkDistributeUnassigned,
   mkGetTeam, mkCreateTeamMember, mkAllLeads, mkAssignLead, mkDeleteLead, mkBulkDelete,
-  mkGetSources, mkCreateSource, mkUpdateSource, mkDeleteSource, mkSyncSource,
-  gsStatus, gsAuthUrl, gsDisconnect, gsPull,
-  getBranches, updateBranch,
+  mkGetSources, mkCreateSource, mkUpdateSource, mkSyncSource,
+  gsStatus, gsAuthUrl, gsDisconnect, gsPull, gsListTabs,
+  getBranches, getVerticals,
 } from "@/lib/api";
 import { MaskedContact } from "@/components/MaskedContact";
 import { SourcePill } from "@/components/marketing/SourcePill";
-import { LeadControlSwitch, normalizeLeadControl, BRANCH_ADMIN } from "@/components/branch/LeadControlSwitch";
+
+// "offline_physiotherapy" -> "Offline Physiotherapy". The stored name stays snake_case
+// (matched against branches.vertical/verticals.name elsewhere); only the label is prettied.
+const prettyVertical = (v) => String(v || "")
+  .split("_")
+  .filter(Boolean)
+  .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+  .join(" ");
 
 const SUB_TABS = [
   { key: "all_leads", label: "All Leads", icon: Layers },
@@ -39,20 +46,23 @@ const TabBtn = ({ active, label, Icon, onClick, testid }) => (
 // ============ Sources ============
 
 const SourcesTab = ({ branches: branchesProp = [] }) => {
-  // Its own copy rather than the prop alone. Lead Control is edited from these cards
-  // and lives on the branch, so the value has to come back fresh after a save — the
-  // prop is loaded once at the app root and would go stale the moment it is changed.
   const [branches, setBranches] = useState(branchesProp);
   const loadBranches = useCallback(() => getBranches().then(setBranches).catch((e) => console.warn("[branches]", e?.message || e)), []);
   useEffect(() => { loadBranches(); }, [loadBranches]);
 
+  const [verticals, setVerticals] = useState([]);
+  useEffect(() => { getVerticals().then(setVerticals).catch((e) => console.warn("[verticals]", e?.message || e)); }, []);
+
   const [sources, setSources] = useState([]);
+  // Which of them are shown — archiving hides a source without losing its config or the
+  // leads it already brought in, so there has to be somewhere to see it again.
+  const [sourceView, setSourceView] = useState("active");
   const [gs, setGs] = useState({ connected: false });
   const [showAdd, setShowAdd] = useState(false);
   const [showSync, setShowSync] = useState(null);
   const [showMap, setShowMap] = useState(null);
   const [showEdit, setShowEdit] = useState(null);
-  const [form, setForm] = useState({ name: "", sheet_url: "", spreadsheet_id: "", sheet_name: "Sheet1", source_type: "google_sheets", headers: "", branch_id: "" });
+  const [form, setForm] = useState({ name: "", sheet_url: "", spreadsheet_id: "", sheet_name: "Sheet1", source_type: "google_sheets", headers: "", branchIds: [], verticals: [] });
   const [syncRows, setSyncRows] = useState(`[\n  {"name":"Aarav Sharma","phone":"9000000001","email":"aarav@example.com","city":"Chennai","condition":"Lower back pain","age":34}\n]`);
   const [syncResult, setSyncResult] = useState(null);
   const [pullResult, setPullResult] = useState(null);
@@ -139,9 +149,9 @@ const SourcesTab = ({ branches: branchesProp = [] }) => {
     }
     const headers = form.headers.split(",").map((h) => h.trim()).filter(Boolean);
     try {
-      await mkCreateSource({ name: form.name, sheet_url: form.sheet_url, source_type: form.source_type, headers, spreadsheet_id: sheetId, sheet_name: form.sheet_name || "Sheet1", branch_id: form.branch_id || null });
+      await mkCreateSource({ name: form.name, sheet_url: form.sheet_url, source_type: form.source_type, headers, spreadsheet_id: sheetId, sheet_name: form.sheet_name || "Sheet1", branch_ids: form.branchIds, verticals: form.verticals });
       toast.success("Source added");
-      setForm({ name: "", sheet_url: "", spreadsheet_id: "", sheet_name: "Sheet1", source_type: "google_sheets", headers: "", branch_id: "" });
+      setForm({ name: "", sheet_url: "", spreadsheet_id: "", sheet_name: "Sheet1", source_type: "google_sheets", headers: "", branchIds: [], verticals: [] });
       setShowAdd(false);
       load();
     } catch (e) { toast.error(e?.response?.data?.detail || "Create failed"); }
@@ -170,21 +180,16 @@ const SourcesTab = ({ branches: branchesProp = [] }) => {
     load();
   };
 
-  const remove = async (id) => {
-    await mkDeleteSource(id);
-    load();
-  };
-
   // No gate on editing. Reaching this screen already means a Super Admin session,
   // and that is the check now — the one-time code that used to sit here was removed
   // at the branch's request.
   //
-  // Delete keeps a confirm, because it is the one action here that destroys a
-  // configured source and cannot be undone from the app. That is a misclick guard,
-  // not a lock: it asks nothing you have to go and find.
-  const confirmRemove = async (source) => {
-    if (!window.confirm(`Delete the source "${source.name}"? Leads already imported stay; the feed stops.`)) return;
-    await remove(source.id);
+  // Archive, not delete — nothing here destroys a configured source or the leads it
+  // already brought in, so there's nothing a confirm dialog needs to guard against.
+  // It's reversible from the Archived tab.
+  const toggleArchive = async (s) => {
+    await mkUpdateSource(s.id, { is_archived: !s.is_archived });
+    load();
   };
 
   return (
@@ -225,13 +230,22 @@ const SourcesTab = ({ branches: branchesProp = [] }) => {
         </CardContent>
       </Card>
 
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-slate-600">Connect data feeds. Paste sheet headers to auto-detect column mappings.</p>
         <Button onClick={() => setShowAdd(true)} data-testid="mk-add-source-btn"><Plus className="mr-1 h-4 w-4" />Add Source</Button>
       </div>
 
+      <div className="flex flex-wrap items-center gap-2">
+        <button onClick={() => setSourceView("active")} className={`rounded-md px-3 py-2 text-sm font-medium ${sourceView === "active" ? "bg-sky-600 text-white" : "bg-slate-100 text-slate-600"}`} data-testid="mk-source-tab-active">
+          Active ({sources.filter((s) => !s.is_archived).length})
+        </button>
+        <button onClick={() => setSourceView("archived")} className={`rounded-md px-3 py-2 text-sm font-medium ${sourceView === "archived" ? "bg-slate-700 text-white" : "bg-slate-100 text-slate-600"}`} data-testid="mk-source-tab-archived">
+          Archived ({sources.filter((s) => s.is_archived).length})
+        </button>
+      </div>
+
       <div className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {sources.map((s) => (
+        {sources.filter((s) => (sourceView === "archived" ? s.is_archived : !s.is_archived)).map((s) => (
           <Card key={s.id} data-testid={`mk-source-card-${s.id}`} className="min-w-0 border-slate-200">
             <CardHeader className="flex flex-row items-start justify-between gap-2">
               <div>
@@ -239,14 +253,26 @@ const SourcesTab = ({ branches: branchesProp = [] }) => {
                 <div className="mt-1 flex flex-wrap items-center gap-2">
                   <SourcePill source={s.source_type} />
                   <span className={`inline-flex h-5 items-center rounded-full px-2 text-[10px] font-semibold ${s.is_active ? "bg-green-100 text-green-700" : "bg-slate-200 text-slate-600"}`}>{s.is_active ? "Active" : "Inactive"}</span>
-                  <span className={`inline-flex h-5 items-center rounded-full px-2 text-[10px] font-semibold ${s.branch_id ? "bg-violet-100 text-violet-700" : "bg-slate-100 text-slate-500"}`} data-testid={`mk-source-branch-${s.id}`}>
-                    {s.branch_id ? (branches.find((b) => b.id === s.branch_id)?.branch_name || "Unknown branch") : "All Branches"}
-                  </span>
+                  {(s.branch_ids || []).length === 0 && (s.verticals || []).length === 0 && (
+                    <span className="inline-flex h-5 items-center rounded-full bg-slate-100 px-2 text-[10px] font-semibold text-slate-500" data-testid={`mk-source-branch-${s.id}`}>All Branches</span>
+                  )}
+                  {(s.branch_ids || []).map((bid) => (
+                    <span key={bid} className="inline-flex h-5 items-center rounded-full bg-violet-100 px-2 text-[10px] font-semibold text-violet-700" data-testid={`mk-source-branch-${s.id}`}>
+                      {branches.find((b) => b.id === bid)?.branch_name || "Unknown branch"}
+                    </span>
+                  ))}
+                  {(s.verticals || []).map((v) => (
+                    <span key={v} className="inline-flex h-5 items-center rounded-full bg-indigo-100 px-2 text-[10px] font-semibold text-indigo-700" data-testid={`mk-source-vertical-${s.id}`}>
+                      {prettyVertical(v)}
+                    </span>
+                  ))}
                 </div>
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={() => setShowEdit(s)} className="text-slate-400 hover:text-sky-600" data-testid={`mk-source-edit-${s.id}`} title="Edit source"><Pencil className="h-4 w-4" /></button>
-                <button onClick={() => confirmRemove(s)} className="text-slate-400 hover:text-red-500" data-testid={`mk-source-delete-${s.id}`} title="Delete source"><Trash2 className="h-4 w-4" /></button>
+                <button onClick={() => toggleArchive(s)} className="text-slate-400 hover:text-amber-600" data-testid={`mk-source-archive-${s.id}`} title={s.is_archived ? "Unarchive source" : "Archive source"}>
+                  {s.is_archived ? <ArchiveRestore className="h-4 w-4" /> : <Archive className="h-4 w-4" />}
+                </button>
               </div>
             </CardHeader>
             <CardContent className="space-y-2 text-xs text-slate-600">
@@ -254,8 +280,6 @@ const SourcesTab = ({ branches: branchesProp = [] }) => {
               {s.spreadsheet_id && <p className="text-[10px] text-slate-400">ID: <code>{s.spreadsheet_id.slice(0, 24)}…</code></p>}
               <p>Rows: <span className="font-semibold">{s.row_count || 0}</span> · Last sync: {s.last_synced ? s.last_synced.slice(0, 16).replace("T", " ") : "Never"}</p>
               <p>Mappings: <span className="font-semibold">{Object.keys(s.column_mapping || {}).length}</span> · Custom fields: {(s.custom_fields || []).length}</p>
-
-              <SourceLeadControl source={s} branch={branches.find((b) => b.id === s.branch_id)} onSaved={loadBranches} />
 
               <div className="flex flex-wrap gap-2 pt-2">
                 {s.source_type === "google_sheets" && s.spreadsheet_id && gs.connected && (
@@ -282,7 +306,11 @@ const SourcesTab = ({ branches: branchesProp = [] }) => {
             </CardContent>
           </Card>
         ))}
-        {sources.length === 0 && <p className="col-span-full text-sm text-slate-400">No sources yet. Click <span className="font-semibold">Add Source</span> to begin.</p>}
+        {sources.filter((s) => (sourceView === "archived" ? s.is_archived : !s.is_archived)).length === 0 && (
+          <p className="col-span-full text-sm text-slate-400">
+            {sourceView === "archived" ? "No archived sources." : <>No sources yet. Click <span className="font-semibold">Add Source</span> to begin.</>}
+          </p>
+        )}
       </div>
 
       {showAdd && (
@@ -297,7 +325,7 @@ const SourcesTab = ({ branches: branchesProp = [] }) => {
               {form.spreadsheet_id && (
                 <p className="text-[10px] text-emerald-600">✓ Sheet ID detected: <code className="rounded bg-emerald-50 px-1">{form.spreadsheet_id.slice(0, 24)}…</code></p>
               )}
-              <Input placeholder="Worksheet/Tab name (default: Sheet1)" value={form.sheet_name} onChange={(e) => setForm({ ...form, sheet_name: e.target.value })} data-testid="mk-add-source-sheetname" />
+              <SheetTabPicker spreadsheetId={form.spreadsheet_id} value={form.sheet_name} onChange={(v) => setForm({ ...form, sheet_name: v })} testid="mk-add-source-sheetname" />
               <p className="text-xs text-amber-700 bg-amber-50 rounded p-2">
                 <strong>Important:</strong> the sheet must be either accessible to the Google account you connected, OR shared as “Anyone with the link can view”.
               </p>
@@ -308,12 +336,18 @@ const SourcesTab = ({ branches: branchesProp = [] }) => {
           )}
           <Input placeholder="Headers (comma separated, e.g. Lead Name, Mobile, Email) — optional" value={form.headers} onChange={(e) => setForm({ ...form, headers: e.target.value })} data-testid="mk-add-source-headers" />
           <p className="text-xs text-slate-400">Headers auto-map to: name, phone, email, vertical, condition, age, preferred_branch, budget, notes.</p>
-          <label className="text-xs font-medium text-slate-600">Branch</label>
-          <select className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm" value={form.branch_id} onChange={(e) => setForm({ ...form, branch_id: e.target.value })} data-testid="mk-add-source-branch">
-            <option value="">All Branches (leads go to Pre-Sales as usual)</option>
-            {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
-          </select>
-          <p className="text-xs text-slate-400">Pick a branch if this sheet only ever has leads for ONE branch — every lead pulled from it will auto-assign straight there.</p>
+          <TargetPicker
+            branches={branches}
+            verticals={verticals}
+            branchIds={form.branchIds}
+            onBranchIdsChange={(v) => setForm({ ...form, branchIds: v })}
+            sourceVerticals={form.verticals}
+            onVerticalsChange={(v) => setForm({ ...form, verticals: v })}
+            testid="mk-add-source-target"
+          />
+          <p className="text-xs text-slate-400">
+            Leave both empty for All Branches (leads go to Pre-Sales as usual). Pick exactly ONE branch to auto-assign every lead pulled from it straight there. Picking several branches and/or verticals just tags this source for filtering — leads still land in the general Pre-Sales pool.
+          </p>
           <Button onClick={submit} className="w-full" data-testid="mk-add-source-submit">Create Source</Button>
         </DialogShell>
       )}
@@ -350,7 +384,7 @@ const SourcesTab = ({ branches: branchesProp = [] }) => {
       )}
 
       {showEdit && (
-        <EditSourceDialog source={showEdit} branches={branches} onClose={() => setShowEdit(null)} onSaved={() => { setShowEdit(null); load(); }} />
+        <EditSourceDialog source={showEdit} branches={branches} verticals={verticals} onClose={() => setShowEdit(null)} onSaved={() => { setShowEdit(null); load(); }} />
       )}
 
       {showManage && (
@@ -377,70 +411,109 @@ const SourcesTab = ({ branches: branchesProp = [] }) => {
   );
 };
 
+// Lead Control (Pre-Sales vs Branch Admin) used to have a switch on this card, but the
+// setting lives on the branch, not the source — it's now only changed from Branch Wise /
+// Branch Management, where a branch's own state is the thing on screen while you decide.
+
 /**
- * Lead Control on a source card — who works the leads this source brings in.
+ * The worksheet/tab name field, upgraded from a guess to a pick.
  *
- * The setting belongs to the branch, not the source, and the card says so: two sources
- * pointing at one branch move together, and the branch name is on the label so that is
- * not a surprise. It is here because this is where leads enter the OS, which is where
- * you think about where they should go.
- *
- * A source tagged "All Branches" has no branch to hand leads to, so the switch is off
- * and says why instead of pretending to work.
+ * Once a spreadsheet ID is known, this loads that sheet's actual tabs (debounced, so it
+ * doesn't fire on every keystroke of the URL) and swaps the free-text input for a select of
+ * real tab names — only the picked tab is ever pulled. If the lookup fails (not connected
+ * yet, sheet not shared), it falls back to the plain text input rather than blocking entry.
  */
-const SourceLeadControl = ({ source, branch, onSaved }) => {
-  const [value, setValue] = useState(normalizeLeadControl(branch?.lead_control));
-  const [saving, setSaving] = useState(false);
+const SheetTabPicker = ({ spreadsheetId, value, onChange, testid }) => {
+  const [tabs, setTabs] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [failed, setFailed] = useState(false);
 
-  useEffect(() => { setValue(normalizeLeadControl(branch?.lead_control)); }, [branch?.lead_control]);
+  useEffect(() => {
+    if (!spreadsheetId) { setTabs([]); setFailed(false); return; }
+    let alive = true;
+    setLoading(true);
+    setFailed(false);
+    const timer = setTimeout(() => {
+      gsListTabs(spreadsheetId)
+        .then((r) => { if (alive) { setTabs(r.tabs || []); setLoading(false); } })
+        .catch(() => { if (alive) { setTabs([]); setFailed(true); setLoading(false); } });
+    }, 500);
+    return () => { alive = false; clearTimeout(timer); };
+  }, [spreadsheetId]);
 
-  const unbranched = !source.branch_id;
-
-  const pick = async (next) => {
-    if (!branch) return;
-    const prev = value;
-    setValue(next);
-    setSaving(true);
-    try {
-      await updateBranch(branch.id, { lead_control: next });
-      toast.success(next === BRANCH_ADMIN
-        ? `${branch.branch_name}: leads go straight to the Branch Admin`
-        : `${branch.branch_name}: leads start with Pre-Sales`);
-      onSaved && onSaved();
-    } catch (e) {
-      setValue(prev);
-      toast.error(e?.response?.data?.detail || "Could not change Lead Control");
-    }
-    setSaving(false);
-  };
+  if (tabs.length > 0) {
+    return (
+      <div>
+        <select className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm" value={value} onChange={(e) => onChange(e.target.value)} data-testid={testid}>
+          {value && !tabs.includes(value) && <option value={value}>{value}</option>}
+          {tabs.map((t) => <option key={t} value={t}>{t}</option>)}
+        </select>
+        <p className="mt-1 text-[10px] text-emerald-600">✓ {tabs.length} tab{tabs.length === 1 ? "" : "s"} found — only the picked one is pulled.</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="rounded-md border border-slate-200 bg-slate-50/60 p-2" data-testid={`mk-source-lead-control-${source.id}`}>
-      <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-        Lead Control{branch ? ` · ${branch.branch_name}` : ""}
-      </p>
-      <LeadControlSwitch
-        value={value}
-        onChange={pick}
-        disabled={unbranched || !branch}
-        busy={saving}
-        confirm
-        branchName={branch?.branch_name}
-        size="sm"
-        testid={`mk-lead-control-${source.id}`}
-      />
-      <p className="mt-1.5 text-[10px] leading-snug text-slate-400">
-        {unbranched
-          ? "Tag this source to a branch to choose. Leads with no branch always start with Pre-Sales."
-          : value === BRANCH_ADMIN
-            ? "These leads skip Pre-Sales and land on the branch board. Set on the branch, so every source for it follows."
-            : "These leads start in the Pre-Sales pipeline. Set on the branch, so every source for it follows."}
-      </p>
+    <div>
+      <Input placeholder="Worksheet/Tab name (default: Sheet1)" value={value} onChange={(e) => onChange(e.target.value)} data-testid={testid} />
+      {loading && <p className="mt-1 text-[10px] text-slate-400">Loading tabs…</p>}
+      {failed && <p className="mt-1 text-[10px] text-amber-600">Couldn't load tabs automatically — type the tab name, or check the sheet is shared.</p>}
     </div>
   );
 };
 
-const EditSourceDialog = ({ source, branches = [], onClose, onSaved }) => {
+/**
+ * Which branches/verticals a source is tagged to. Several of either can be picked on one
+ * card — with more than one branch there's no single branch a row obviously belongs to, so
+ * beyond exactly one selected branch this is a tag for organizing/filtering only (see the
+ * backend's _internal_pull_source for the one-branch-still-auto-assigns rule).
+ */
+const TargetPicker = ({ branches, verticals, branchIds, onBranchIdsChange, sourceVerticals, onVerticalsChange, testid }) => (
+  <div className="grid gap-3 sm:grid-cols-2">
+    <div>
+      <label className="text-xs font-medium text-slate-600">Branches</label>
+      <div className="mt-1 max-h-36 space-y-1 overflow-y-auto rounded-md border border-slate-200 p-2" data-testid={`${testid}-branches`}>
+        {branches.map((b) => {
+          const checked = branchIds.includes(b.id);
+          return (
+            <label key={b.id} className="flex items-center gap-2 rounded px-1.5 py-1 text-xs hover:bg-slate-50">
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={(e) => onBranchIdsChange(e.target.checked ? [...branchIds, b.id] : branchIds.filter((id) => id !== b.id))}
+                data-testid={`${testid}-branch-${b.id}`}
+              />
+              {b.branch_name}
+            </label>
+          );
+        })}
+        {branches.length === 0 && <p className="px-1.5 py-1 text-[11px] text-slate-400">No branches yet</p>}
+      </div>
+    </div>
+    <div>
+      <label className="text-xs font-medium text-slate-600">Verticals</label>
+      <div className="mt-1 max-h-36 space-y-1 overflow-y-auto rounded-md border border-slate-200 p-2" data-testid={`${testid}-verticals`}>
+        {verticals.map((v) => {
+          const checked = sourceVerticals.includes(v.name);
+          return (
+            <label key={v.id} className="flex items-center gap-2 rounded px-1.5 py-1 text-xs hover:bg-slate-50">
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={(e) => onVerticalsChange(e.target.checked ? [...sourceVerticals, v.name] : sourceVerticals.filter((n) => n !== v.name))}
+                data-testid={`${testid}-vertical-${v.id}`}
+              />
+              {prettyVertical(v.name)}
+            </label>
+          );
+        })}
+        {verticals.length === 0 && <p className="px-1.5 py-1 text-[11px] text-slate-400">No verticals yet</p>}
+      </div>
+    </div>
+  </div>
+);
+
+const EditSourceDialog = ({ source, branches = [], verticals = [], onClose, onSaved }) => {
   const initialHeaders = (source.headers_detected || []).join(", ");
   const [name, setName] = useState(source.name || "");
   const [sourceType, setSourceType] = useState(source.source_type || "google_sheets");
@@ -448,7 +521,8 @@ const EditSourceDialog = ({ source, branches = [], onClose, onSaved }) => {
   const [spreadsheetId, setSpreadsheetId] = useState(source.spreadsheet_id || "");
   const [sheetName, setSheetName] = useState(source.sheet_name || "Sheet1");
   const [headers, setHeaders] = useState(initialHeaders);
-  const [branchId, setBranchId] = useState(source.branch_id || "");
+  const [branchIds, setBranchIds] = useState(source.branch_ids || (source.branch_id ? [source.branch_id] : []));
+  const [sourceVerticals, setSourceVerticals] = useState(source.verticals || []);
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(!!source.auto_sync_enabled);
   const [autoSyncInterval, setAutoSyncInterval] = useState(String(source.auto_sync_interval_minutes || 60));
 
@@ -469,7 +543,8 @@ const EditSourceDialog = ({ source, branches = [], onClose, onSaved }) => {
       name: name.trim(),
       source_type: sourceType,
       sheet_url: sheetUrl,
-      branch_id: branchId || "",
+      branch_ids: branchIds,
+      verticals: sourceVerticals,
       auto_sync_enabled: autoSyncEnabled,
       auto_sync_interval_minutes: Number(autoSyncInterval) || 60,
     };
@@ -501,7 +576,7 @@ const EditSourceDialog = ({ source, branches = [], onClose, onSaved }) => {
           {spreadsheetId && (
             <p className="text-[10px] text-emerald-600">✓ Sheet ID detected: <code className="rounded bg-emerald-50 px-1">{spreadsheetId.slice(0, 24)}…</code></p>
           )}
-          <Input placeholder="Worksheet/Tab name (default: Sheet1)" value={sheetName} onChange={(e) => setSheetName(e.target.value)} data-testid="mk-edit-source-sheetname" />
+          <SheetTabPicker spreadsheetId={spreadsheetId} value={sheetName} onChange={setSheetName} testid="mk-edit-source-sheetname" />
           <p className="text-xs text-amber-700 bg-amber-50 rounded p-2">
             <strong>Important:</strong> the sheet must be either accessible to the Google account you connected, OR shared as “Anyone with the link can view”.
           </p>
@@ -522,12 +597,18 @@ const EditSourceDialog = ({ source, branches = [], onClose, onSaved }) => {
       )}
       <Input placeholder="Headers (comma separated, e.g. Lead Name, Mobile, Email) — optional" value={headers} onChange={(e) => setHeaders(e.target.value)} data-testid="mk-edit-source-headers" />
       <p className="text-xs text-slate-400">Changing headers re-detects the column mapping. Leave as-is to keep your current mapping.</p>
-      <label className="text-xs font-medium text-slate-600">Branch</label>
-      <select className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm" value={branchId} onChange={(e) => setBranchId(e.target.value)} data-testid="mk-edit-source-branch">
-        <option value="">All Branches (leads go to Pre-Sales as usual)</option>
-        {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
-      </select>
-      <p className="text-xs text-slate-400">Pick a branch if this sheet only ever has leads for ONE branch — every lead pulled from it will auto-assign straight there.</p>
+      <TargetPicker
+        branches={branches}
+        verticals={verticals}
+        branchIds={branchIds}
+        onBranchIdsChange={setBranchIds}
+        sourceVerticals={sourceVerticals}
+        onVerticalsChange={setSourceVerticals}
+        testid="mk-edit-source-target"
+      />
+      <p className="text-xs text-slate-400">
+        Leave both empty for All Branches (leads go to Pre-Sales as usual). Pick exactly ONE branch to auto-assign every lead pulled from it straight there. Picking several branches and/or verticals just tags this source for filtering — leads still land in the general Pre-Sales pool.
+      </p>
       <Button onClick={save} className="w-full" data-testid="mk-edit-source-save">Save Changes</Button>
     </DialogShell>
   );
