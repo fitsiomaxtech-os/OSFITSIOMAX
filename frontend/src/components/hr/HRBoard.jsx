@@ -313,10 +313,21 @@ const EmployeesTab = ({ meta, initialFilter }) => {
 
   // Designation options narrow to whichever department is picked, so the dropdown never
   // offers a combination ("Accountant" under "Doctors") that would filter to nothing.
+  //
+  // Sourced from the department's own configured designation list (Departments &
+  // Designation → Manage Designations) rather than from who currently holds one — a
+  // designation with zero employees today (a newly added admin type, say) still needs to
+  // show up as a filter, or there'd be no way to filter for the first person hired into it.
+  // Falls back to deriving from employees when no single department is selected (there's no
+  // one department's list to scope "All Departments" or "Unassigned" to).
   const designationOptions = useMemo(() => {
+    if (department && department !== "Unassigned") {
+      const configured = (meta.department_designations || {})[department] || [];
+      if (configured.length > 0) return configured;
+    }
     const pool = department ? employees.filter((e) => (e.department || "Unassigned") === department) : employees;
     return [...new Set(pool.map((e) => e.designation).filter(Boolean))].sort((a, b) => a.localeCompare(b));
-  }, [employees, department]);
+  }, [employees, department, meta.department_designations]);
 
   const filtered = employees.filter((e) => {
     // "Unassigned" is what the Dashboard calls an employee with no department, so it has
