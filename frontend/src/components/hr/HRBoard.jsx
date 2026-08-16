@@ -55,7 +55,7 @@ export const HRBoard = () => {
       {tab === "dashboard" && <DashboardTab onNavigate={(t, f) => { setEmpFilter(f || null); setTab(t); }} />}
       {tab === "employees" && <EmployeesTab meta={meta} initialFilter={empFilter} />}
       {tab === "roles" && <RolesTab meta={meta} reloadMeta={reloadMeta} />}
-      {tab === "departments" && <DepartmentsTab meta={meta} reloadMeta={reloadMeta} />}
+      {tab === "departments" && <DepartmentsDesignationTab meta={meta} reloadMeta={reloadMeta} />}
     </div>
   );
 };
@@ -1022,6 +1022,33 @@ const CreateRoleModal = ({ meta, reloadMeta, onClose }) => {
 
 // ---------- Departments & Designation ----------
 
+const DEPT_DESIGNATION_SUB_TABS = [
+  { key: "departments", label: "Departments" },
+  { key: "designations", label: "Designation" },
+];
+
+// Browsing a department's people and managing the designation list itself used to share
+// one screen (a "Manage Designations" button opened the latter as a popup over the
+// former). Split into two plain tabs instead: Designation is now a page of its own rather
+// than a dialog, which is what it needed to be able to show every department's list at
+// once with a search bar over the top of it.
+const DepartmentsDesignationTab = ({ meta, reloadMeta }) => {
+  const [subTab, setSubTab] = useState("departments");
+  return (
+    <div className="space-y-4" data-testid="hr-dept-designation-tab">
+      <div className="flex flex-wrap gap-2" data-testid="hr-dept-designation-subtabs">
+        {DEPT_DESIGNATION_SUB_TABS.map((t) => (
+          <TabPill key={t.key} active={subTab === t.key} onClick={() => setSubTab(t.key)} testid={`hr-dept-designation-subtab-${t.key}`}>
+            {t.label}
+          </TabPill>
+        ))}
+      </div>
+      {subTab === "departments" && <DepartmentsTab meta={meta} reloadMeta={reloadMeta} />}
+      {subTab === "designations" && <DesignationsTab meta={meta} reloadMeta={reloadMeta} />}
+    </div>
+  );
+};
+
 const DepartmentsTab = ({ meta, reloadMeta }) => {
   const [depts, setDepts] = useState([]);
   const [employees, setEmployees] = useState([]);
@@ -1032,17 +1059,12 @@ const DepartmentsTab = ({ meta, reloadMeta }) => {
   const [search, setSearch] = useState("");
   const [newDeptName, setNewDeptName] = useState("");
   const [addingDept, setAddingDept] = useState(false); // the trailing "+" tab, opened
-  const [managing, setManaging] = useState(null); // department being edited in the modal
-  const [viewingDesignation, setViewingDesignation] = useState(null); // designation label, or null
   const [editingDeptId, setEditingDeptId] = useState(null);
   const [editDeptName, setEditDeptName] = useState("");
   const [renamingDept, setRenamingDept] = useState(false);
   const [showAddEmployee, setShowAddEmployee] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState(null);
   const [viewingEmployee, setViewingEmployee] = useState(null);
-  // Seeds the Add Employee form the moment a brand-new designation is created, so the very
-  // next thing typed is the person who holds it rather than a separate trip back in.
-  const [pendingDesignation, setPendingDesignation] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1055,26 +1077,7 @@ const DepartmentsTab = ({ meta, reloadMeta }) => {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  // Every designation an employee could be given: the role list (same source the Add
-  // Employee form falls back to) plus any designation only found on an employee record
-  // (e.g. typed before this list existed), so the picker never hides one still in use.
-  const allDesignations = useMemo(() => {
-    const fromRoles = (meta?.roles || []).map(roleLabel);
-    const fromEmployees = employees.map((e) => e.designation).filter(Boolean);
-    return [...new Set([...fromRoles, ...fromEmployees])].sort((a, b) => a.localeCompare(b));
-  }, [meta?.roles, employees]);
-
-  const designationCounts = useMemo(() => {
-    const counts = {};
-    employees.forEach((e) => { if (e.designation) counts[e.designation] = (counts[e.designation] || 0) + 1; });
-    return counts;
-  }, [employees]);
-
   const selectedDeptObj = useMemo(() => depts.find((d) => d.name === selectedDept) || null, [depts, selectedDept]);
-  // Re-derived from the live list rather than held as its own snapshot, so a rename made
-  // inside the modal (which reloads depts but leaves `managing` pointing at the same id)
-  // shows the new designation name immediately instead of the stale one it was opened with.
-  const managingDept = useMemo(() => (managing ? depts.find((d) => d.id === managing.id) || managing : null), [managing, depts]);
 
   const selectTab = (name) => { setSelectedDept(name); setDesignationFilter(""); };
 
@@ -1117,27 +1120,6 @@ const DepartmentsTab = ({ meta, reloadMeta }) => {
       reloadMeta();
     } catch (e) { toast.error(e?.response?.data?.detail || "Failed to rename department"); }
     setRenamingDept(false);
-  };
-
-  // Opens on top of the designations checklist rather than navigating away — the
-  // checklist's in-progress picks would otherwise be lost.
-  const viewEmployees = (label) => setViewingDesignation(label);
-
-  // A rename stays inside the modal — reload the data it's reading from (managingDept
-  // above picks the fresh copy back up) rather than closing it, so renaming several
-  // designations in one visit doesn't mean reopening the modal each time.
-  const designationRenamed = () => { load(); reloadMeta(); };
-
-  // A genuinely new designation is different: there's no one to view yet, so the useful
-  // next step is entering them, not sitting on an empty list. Closes the checklist and
-  // opens Add Employee pre-filled with this department and the designation just created.
-  const designationCreated = (label) => {
-    setManaging(null);
-    load();
-    reloadMeta();
-    setPendingDesignation(label);
-    setEditingEmployee(null);
-    setShowAddEmployee(true);
   };
 
   const removeEmployee = async (emp) => {
@@ -1234,9 +1216,6 @@ const DepartmentsTab = ({ meta, reloadMeta }) => {
           )}
           {editingDeptId !== selectedDeptObj.id && (
             <div className="flex shrink-0 items-center gap-1">
-              <Button size="sm" variant="outline" onClick={() => setManaging(selectedDeptObj)} data-testid={`hr-dept-manage-${selectedDeptObj.id}`}>
-                <FolderTree className="mr-1 h-3.5 w-3.5" />Manage Designations
-              </Button>
               <button onClick={() => startEditDept(selectedDeptObj)} className="rounded-md p-2 text-slate-400 hover:bg-white hover:text-sky-600" title="Rename department" data-testid={`hr-dept-edit-${selectedDeptObj.id}`}>
                 <Pencil className="h-4 w-4" />
               </button>
@@ -1265,30 +1244,6 @@ const DepartmentsTab = ({ meta, reloadMeta }) => {
 
       <EmployeeDirectory employees={filteredEmployees} onView={setViewingEmployee} />
 
-      {managing && (
-        <DepartmentDesignationsModal
-          department={managingDept}
-          allDepartments={depts}
-          allDesignations={allDesignations}
-          designationCounts={designationCounts}
-          onClose={() => setManaging(null)}
-          onViewEmployees={viewEmployees}
-          onSaved={() => { setManaging(null); load(); reloadMeta(); }}
-          onRenamed={designationRenamed}
-          onCreateNew={designationCreated}
-        />
-      )}
-
-      {viewingDesignation && (
-        <DesignationEmployeesModal
-          designation={viewingDesignation}
-          employees={employees.filter((e) => e.designation === viewingDesignation)}
-          departmentNames={depts.map((d) => d.name)}
-          onClose={() => setViewingDesignation(null)}
-          onChanged={() => { load(); reloadMeta(); }}
-        />
-      )}
-
       {viewingEmployee && (
         <EmployeeViewModal
           employee={viewingEmployee}
@@ -1302,84 +1257,93 @@ const DepartmentsTab = ({ meta, reloadMeta }) => {
         <AddEmployeeModal
           employee={editingEmployee}
           initialDepartment={selectedDept}
-          initialDesignation={pendingDesignation}
           meta={meta}
-          onClose={() => { setShowAddEmployee(false); setEditingEmployee(null); setPendingDesignation(""); }}
-          onSaved={() => { setShowAddEmployee(false); setEditingEmployee(null); setPendingDesignation(""); load(); reloadMeta(); }}
+          onClose={() => { setShowAddEmployee(false); setEditingEmployee(null); }}
+          onSaved={() => { setShowAddEmployee(false); setEditingEmployee(null); load(); reloadMeta(); }}
         />
       )}
     </div>
   );
 };
 
-// A designation belongs to exactly one department — this modal is the one place that's
-// enforced. Options already grouped under a different department are disabled here as a
-// UI-level guard; the backend re-checks it too on save, since that's the boundary that
-// actually matters.
+// A page now rather than a popup opened from one department — this needs to show every
+// department's designations at once (with a search bar over the top) which a
+// single-department-scoped dialog couldn't.
 //
-// A designation already in this department can only be renamed here, never removed —
-// unchecking used to call the same delete the department picker uses elsewhere, which
-// silently orphaned every employee holding it rather than warning anyone. Renaming instead
-// (with the change pushed to those employees, same as a department rename) is the one edit
-// that can't lose track of who holds a title. A completely new designation is still a
-// one-line "Add".
-const DepartmentDesignationsModal = ({ department, allDepartments, allDesignations, designationCounts, onClose, onViewEmployees, onSaved, onRenamed, onCreateNew }) => {
-  // Staging only for brand-new additions picked from the list below — a designation this
-  // department already has never sits in here, it's read straight off `department` instead
-  // (see isMine), so a rename elsewhere can't leave this set holding a name that no longer
-  // exists.
-  const [selected, setSelected] = useState(() => new Set());
-  const [saving, setSaving] = useState(false);
+// An already-claimed designation can only be renamed here, never removed — unchecking
+// used to call the same delete the department picker used elsewhere, which silently
+// orphaned every employee holding it rather than warning anyone. Renaming instead (cascaded
+// to those employees, same as a department rename) is the one edit that can't lose track of
+// who holds a title. A brand new designation still needs picking which department it
+// belongs to, since a designation belongs to exactly one — the backend re-checks that too.
+const DesignationsTab = ({ meta, reloadMeta }) => {
+  const [depts, setDepts] = useState([]);
+  const [employees, setEmployees] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [search, setSearch] = useState("");
+  const [viewingDesignation, setViewingDesignation] = useState(null);
+  const [showAddEmployee, setShowAddEmployee] = useState(false);
+  const [pendingDepartment, setPendingDepartment] = useState("");
+  const [pendingDesignation, setPendingDesignation] = useState("");
 
-  const [editingLabel, setEditingLabel] = useState(null);
+  const [editingKey, setEditingKey] = useState(null); // `${deptId}:${label}`
   const [editValue, setEditValue] = useState("");
   const [renaming, setRenaming] = useState(false);
 
+  const [newDeptId, setNewDeptId] = useState("");
   const [newLabel, setNewLabel] = useState("");
   const [creating, setCreating] = useState(false);
 
-  const isMine = (label) => (department.designations || []).includes(label);
+  const [claimDeptId, setClaimDeptId] = useState({}); // label -> department picked to claim it into
+  const [claiming, setClaiming] = useState(null);
 
-  const claimedElsewhere = useMemo(() => {
-    const set = new Set();
-    allDepartments.forEach((d) => {
-      if (d.id === department.id) return;
-      (d.designations || []).forEach((desig) => set.add(desig));
-    });
-    return set;
-  }, [allDepartments, department.id]);
-
-  const toggle = (label) => {
-    if (claimedElsewhere.has(label) || isMine(label)) return;
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(label)) next.delete(label); else next.add(label);
-      return next;
-    });
-  };
-
-  const save = async () => {
-    setSaving(true);
+  const load = useCallback(async () => {
+    setLoading(true);
     try {
-      for (const label of selected) await hrAddDesignation(department.id, label);
-      toast.success(`${department.name} updated`);
-      onSaved();
-    } catch (e) { toast.error(e?.response?.data?.detail || "Failed to save"); }
-    setSaving(false);
-  };
+      const [d, e] = await Promise.all([hrDepartments(), hrEmployees({})]);
+      setDepts(d);
+      setEmployees(e);
+    } catch (e) { toast.error(e?.response?.data?.detail || "Failed to load designations"); }
+    setLoading(false);
+  }, []);
+  useEffect(() => { load(); }, [load]);
 
-  const startRename = (label) => { setEditingLabel(label); setEditValue(label); };
-  const cancelRename = () => { setEditingLabel(null); setEditValue(""); };
+  const designationCounts = useMemo(() => {
+    const counts = {};
+    employees.forEach((e) => { if (e.designation) counts[e.designation] = (counts[e.designation] || 0) + 1; });
+    return counts;
+  }, [employees]);
 
-  const saveRename = async (oldLabel) => {
+  const claimedLabels = useMemo(() => {
+    const set = new Set();
+    depts.forEach((d) => (d.designations || []).forEach((l) => set.add(l)));
+    return set;
+  }, [depts]);
+
+  // Exists as a role or on an employee record, but no department has claimed it yet — the
+  // department picker elsewhere falls back to the full role list for exactly this reason.
+  const unclaimed = useMemo(() => {
+    const fromRoles = (meta?.roles || []).map(roleLabel);
+    const fromEmployees = employees.map((e) => e.designation).filter(Boolean);
+    return [...new Set([...fromRoles, ...fromEmployees])].filter((l) => !claimedLabels.has(l)).sort((a, b) => a.localeCompare(b));
+  }, [meta?.roles, employees, claimedLabels]);
+
+  const q = search.trim().toLowerCase();
+  const matches = (label) => !q || label.toLowerCase().includes(q);
+
+  const startRename = (deptId, label) => { setEditingKey(`${deptId}:${label}`); setEditValue(label); };
+  const cancelRename = () => { setEditingKey(null); setEditValue(""); };
+
+  const saveRename = async (deptId, oldLabel) => {
     const next = editValue.trim();
     if (!next || next === oldLabel) { cancelRename(); return; }
     setRenaming(true);
     try {
-      await hrRenameDesignation(department.id, oldLabel, next);
+      await hrRenameDesignation(deptId, oldLabel, next);
       toast.success(`Renamed to ${next}`);
       cancelRename();
-      onRenamed();
+      load();
+      reloadMeta();
     } catch (e) { toast.error(e?.response?.data?.detail || "Failed to rename"); }
     setRenaming(false);
   };
@@ -1387,134 +1351,185 @@ const DepartmentDesignationsModal = ({ department, allDepartments, allDesignatio
   // Compared on letters alone, matching the duplicate check used when a role is created —
   // "Diet Manage" and "diet manage" are the same designation as far as this is concerned.
   const key = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-  const newLabelExists = !!newLabel.trim() && allDesignations.some((d) => key(d) === key(newLabel));
+  const newLabelExists = !!newLabel.trim() && [...claimedLabels, ...unclaimed].some((d) => key(d) === key(newLabel));
 
+  // A brand new designation is different from renaming one: there's no one to view yet, so
+  // the useful next step is entering them, not sitting on an empty list.
   const createNew = async () => {
     const label = newLabel.trim();
-    if (!label || newLabelExists) return;
+    if (!label || !newDeptId || newLabelExists) return;
     setCreating(true);
     try {
-      await hrAddDesignation(department.id, label);
+      await hrAddDesignation(newDeptId, label);
+      const dept = depts.find((d) => d.id === newDeptId);
       setNewLabel("");
-      onCreateNew(label);
+      toast.success(`${label} added to ${dept?.name || "department"}`);
+      await load();
+      reloadMeta();
+      setPendingDepartment(dept?.name || "");
+      setPendingDesignation(label);
+      setShowAddEmployee(true);
     } catch (e) { toast.error(e?.response?.data?.detail || "Failed to add designation"); }
     setCreating(false);
   };
 
-  return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" data-testid="hr-dept-manage-modal">
-      <div className="flex max-h-[80vh] w-full max-w-lg flex-col rounded-lg bg-white shadow-xl">
-        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
-          <div>
-            <h3 className="text-base font-semibold">{department.name} — Designations</h3>
-            <p className="text-xs text-slate-500">Rename one already here, or add a new one below.</p>
-          </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600" data-testid="hr-dept-manage-close"><X className="h-4 w-4" /></button>
-        </div>
+  const claim = async (label) => {
+    const deptId = claimDeptId[label];
+    if (!deptId) { toast.error("Pick a department first"); return; }
+    setClaiming(label);
+    try {
+      await hrAddDesignation(deptId, label);
+      toast.success(`${label} added to ${depts.find((d) => d.id === deptId)?.name || "department"}`);
+      load();
+      reloadMeta();
+    } catch (e) { toast.error(e?.response?.data?.detail || "Failed to add"); }
+    setClaiming(null);
+  };
 
-        <div className="border-b border-slate-200 px-5 py-3">
-          <label className="mb-1 block text-xs font-medium text-slate-600">Add a new designation</label>
-          <div className="flex gap-2">
+  const visibleDepts = depts.filter((d) => (d.designations || []).some(matches));
+  const visibleUnclaimed = unclaimed.filter(matches);
+
+  if (loading && depts.length === 0) return <p className="text-sm text-slate-500">Loading...</p>;
+
+  return (
+    <div className="space-y-4" data-testid="hr-designations-tab">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm text-slate-600">Every designation, grouped by department. Rename one, or add a brand new one.</p>
+        <SearchIconInput value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search designations..." testid="hr-designation-search" />
+      </div>
+
+      <Card>
+        <CardHeader className="pb-2"><CardTitle className="text-base">Add a new designation</CardTitle></CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap gap-2">
+            <select
+              value={newDeptId}
+              onChange={(e) => setNewDeptId(e.target.value)}
+              className="h-9 min-w-[10rem] rounded-md border border-slate-200 px-3 text-sm"
+              data-testid="hr-designation-new-dept"
+            >
+              <option value="">Department...</option>
+              {depts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </select>
             <Input
               value={newLabel}
               onChange={(e) => setNewLabel(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter" && !newLabelExists) createNew(); }}
+              onKeyDown={(e) => { if (e.key === "Enter" && newDeptId && !newLabelExists) createNew(); }}
               placeholder="e.g. Nutritionist"
-              className="h-9 flex-1"
-              data-testid="hr-dept-designation-new-input"
+              className="h-9 min-w-[10rem] flex-1"
+              data-testid="hr-designation-new-input"
             />
-            <Button onClick={createNew} disabled={creating || !newLabel.trim() || newLabelExists} className="bg-sky-600 hover:bg-sky-700" data-testid="hr-dept-designation-new-submit">
+            <Button onClick={createNew} disabled={creating || !newDeptId || !newLabel.trim() || newLabelExists} className="bg-sky-600 hover:bg-sky-700" data-testid="hr-designation-new-submit">
               {creating ? "Adding..." : "Add"}
             </Button>
           </div>
-          {newLabelExists && <p className="mt-1 text-[11px] font-semibold text-red-500" data-testid="hr-dept-designation-new-duplicate">That designation already exists.</p>}
-        </div>
+          {newLabelExists && <p className="mt-1.5 text-[11px] font-semibold text-red-500" data-testid="hr-designation-new-duplicate">That designation already exists.</p>}
+        </CardContent>
+      </Card>
 
-        <div className="flex-1 space-y-1 overflow-y-auto p-3">
-          {allDesignations.map((label) => {
-            const disabled = claimedElsewhere.has(label);
-            const mine = isMine(label);
-            const count = designationCounts[label] || 0;
-            const isEditing = editingLabel === label;
-
-            if (mine) {
-              return (
-                <div key={label} className="flex items-center gap-2 rounded-md px-2 py-2 hover:bg-slate-50" data-testid={`hr-dept-designation-row-${label}`}>
-                  {isEditing ? (
-                    <>
-                      <Input
-                        autoFocus
-                        value={editValue}
-                        onChange={(e) => setEditValue(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === "Enter") saveRename(label); if (e.key === "Escape") cancelRename(); }}
-                        className="h-8 flex-1 text-sm"
-                        data-testid={`hr-dept-designation-rename-input-${label}`}
-                      />
-                      <button onClick={() => saveRename(label)} disabled={renaming} className="shrink-0 text-emerald-600 hover:text-emerald-700" title="Save" data-testid={`hr-dept-designation-rename-save-${label}`}>
-                        <CheckCircle2 className="h-4 w-4" />
-                      </button>
-                      <button onClick={cancelRename} className="shrink-0 text-slate-400 hover:text-slate-600" title="Cancel" data-testid={`hr-dept-designation-rename-cancel-${label}`}>
-                        <X className="h-4 w-4" />
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <span className="min-w-0 flex-1 truncate text-sm text-slate-800">{label}</span>
-                      <button onClick={() => startRename(label)} className="shrink-0 text-slate-400 hover:text-sky-600" title="Rename designation" data-testid={`hr-dept-designation-edit-${label}`}>
-                        <Pencil className="h-3.5 w-3.5" />
-                      </button>
-                      <span className="shrink-0 text-xs text-slate-500">{count} employee{count === 1 ? "" : "s"}</span>
-                      {count > 0 && (
-                        <button type="button" onClick={() => onViewEmployees(label)} className="shrink-0 text-xs font-medium text-sky-600 hover:text-sky-700" data-testid={`hr-dept-designation-view-${label}`}>
-                          View
+      <div className="space-y-3">
+        {visibleDepts.map((d) => (
+          <Card key={d.id} data-testid={`hr-designation-dept-${d.id}`}>
+            <CardHeader className="pb-2"><CardTitle className="text-sm">{d.name}</CardTitle></CardHeader>
+            <CardContent className="space-y-1">
+              {(d.designations || []).filter(matches).map((label) => {
+                const count = designationCounts[label] || 0;
+                const isEditing = editingKey === `${d.id}:${label}`;
+                return (
+                  <div key={label} className="flex items-center gap-2 rounded-md px-2 py-2 hover:bg-slate-50" data-testid={`hr-designation-row-${d.id}-${label}`}>
+                    {isEditing ? (
+                      <>
+                        <Input
+                          autoFocus
+                          value={editValue}
+                          onChange={(e) => setEditValue(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") saveRename(d.id, label); if (e.key === "Escape") cancelRename(); }}
+                          className="h-8 flex-1 text-sm"
+                          data-testid={`hr-designation-rename-input-${d.id}-${label}`}
+                        />
+                        <button onClick={() => saveRename(d.id, label)} disabled={renaming} className="shrink-0 text-emerald-600 hover:text-emerald-700" title="Save" data-testid={`hr-designation-rename-save-${d.id}-${label}`}>
+                          <CheckCircle2 className="h-4 w-4" />
                         </button>
-                      )}
-                    </>
-                  )}
+                        <button onClick={cancelRename} className="shrink-0 text-slate-400 hover:text-slate-600" title="Cancel" data-testid={`hr-designation-rename-cancel-${d.id}-${label}`}>
+                          <X className="h-4 w-4" />
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <span className="min-w-0 flex-1 truncate text-sm text-slate-800">{label}</span>
+                        <button onClick={() => startRename(d.id, label)} className="shrink-0 text-slate-400 hover:text-sky-600" title="Rename designation" data-testid={`hr-designation-edit-${d.id}-${label}`}>
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                        <span className="shrink-0 text-xs text-slate-500">{count} employee{count === 1 ? "" : "s"}</span>
+                        {count > 0 && (
+                          <button type="button" onClick={() => setViewingDesignation(label)} className="shrink-0 text-xs font-medium text-sky-600 hover:text-sky-700" data-testid={`hr-designation-view-${d.id}-${label}`}>
+                            View
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </CardContent>
+          </Card>
+        ))}
+        {visibleDepts.length === 0 && depts.length > 0 && <p className="text-sm text-slate-400">No designations match "{search}".</p>}
+        {depts.length === 0 && <p className="text-sm text-slate-400">No departments yet — add one on the Departments tab first.</p>}
+      </div>
+
+      {visibleUnclaimed.length > 0 && (
+        <Card data-testid="hr-designation-unclaimed">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Not yet in a department</CardTitle>
+            <p className="text-xs text-slate-500">These exist as roles or on an employee record, but aren't grouped under a department yet.</p>
+          </CardHeader>
+          <CardContent className="space-y-1">
+            {visibleUnclaimed.map((label) => {
+              const count = designationCounts[label] || 0;
+              return (
+                <div key={label} className="flex flex-wrap items-center gap-2 rounded-md px-2 py-2 hover:bg-slate-50" data-testid={`hr-designation-unclaimed-row-${label}`}>
+                  <span className="min-w-0 flex-1 truncate text-sm text-slate-800">{label}</span>
+                  <span className="shrink-0 text-xs text-slate-500">{count} employee{count === 1 ? "" : "s"}</span>
+                  <select
+                    value={claimDeptId[label] || ""}
+                    onChange={(e) => setClaimDeptId({ ...claimDeptId, [label]: e.target.value })}
+                    className="h-8 shrink-0 rounded-md border border-slate-200 px-2 text-xs"
+                    data-testid={`hr-designation-unclaimed-dept-${label}`}
+                  >
+                    <option value="">Department...</option>
+                    {depts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                  </select>
+                  <Button size="sm" variant="outline" onClick={() => claim(label)} disabled={claiming === label || !claimDeptId[label]} data-testid={`hr-designation-unclaimed-add-${label}`}>
+                    {claiming === label ? "Adding..." : "Add"}
+                  </Button>
                 </div>
               );
-            }
+            })}
+          </CardContent>
+        </Card>
+      )}
 
-            const checked = selected.has(label);
-            return (
-              <div
-                key={label}
-                className={`flex items-center gap-3 rounded-md px-2 py-2 ${disabled ? "opacity-50" : "hover:bg-slate-50"}`}
-                data-testid={`hr-dept-designation-row-${label}`}
-              >
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  disabled={disabled}
-                  onChange={() => toggle(label)}
-                  className="h-4 w-4 shrink-0"
-                  data-testid={`hr-dept-designation-checkbox-${label}`}
-                />
-                <span className="min-w-0 flex-1 truncate text-sm text-slate-800">{label}</span>
-                {disabled && <span className="shrink-0 text-[10px] text-slate-400">In another department</span>}
-                <span className="shrink-0 text-xs text-slate-500">{count} employee{count === 1 ? "" : "s"}</span>
-                {count > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => onViewEmployees(label)}
-                    className="shrink-0 text-xs font-medium text-sky-600 hover:text-sky-700"
-                    data-testid={`hr-dept-designation-view-${label}`}
-                  >
-                    View
-                  </button>
-                )}
-              </div>
-            );
-          })}
-          {allDesignations.length === 0 && <p className="px-2 py-6 text-center text-sm text-slate-400">No designations exist yet.</p>}
-        </div>
-        <div className="flex items-center justify-end gap-2 border-t border-slate-200 px-5 py-3">
-          <Button variant="outline" onClick={onClose} data-testid="hr-dept-manage-cancel">Cancel</Button>
-          <Button onClick={save} disabled={saving || selected.size === 0} className="bg-sky-600 hover:bg-sky-700" data-testid="hr-dept-manage-save">
-            {saving ? "Saving..." : "Save"}
-          </Button>
-        </div>
-      </div>
+      {viewingDesignation && (
+        <DesignationEmployeesModal
+          designation={viewingDesignation}
+          employees={employees.filter((e) => e.designation === viewingDesignation)}
+          departmentNames={depts.map((d) => d.name)}
+          onClose={() => setViewingDesignation(null)}
+          onChanged={() => { load(); reloadMeta(); }}
+        />
+      )}
+
+      {showAddEmployee && (
+        <AddEmployeeModal
+          employee={null}
+          initialDepartment={pendingDepartment}
+          initialDesignation={pendingDesignation}
+          meta={meta}
+          onClose={() => { setShowAddEmployee(false); setPendingDepartment(""); setPendingDesignation(""); }}
+          onSaved={() => { setShowAddEmployee(false); setPendingDepartment(""); setPendingDesignation(""); load(); reloadMeta(); }}
+        />
+      )}
     </div>
   );
 };
