@@ -7,7 +7,7 @@ from stage_utils import get_closing_stage_name
 from deps import v3_current_user, v3_require_roles
 from constants import V3_STAGES, V3_BRANCH_STAGES
 from schemas.v3 import V3UserOut, V3LeadOut
-from routers.v3_finance import REVENUE_ACTIONS, CONSULTATION_FEE_ACTIONS, _parse_rs_amount, _revenue_category
+from routers.v3_finance import REVENUE_ACTIONS, CONSULTATION_FEE_ACTIONS, _parse_rs_amount, _revenue_category, _lead_session_summary
 
 router = APIRouter(prefix="/api/v3")
 
@@ -443,11 +443,14 @@ async def v3_dashboard_overview(
     end_date: Optional[str] = Query(None),
     _: V3UserOut = Depends(v3_require_roles("super_admin")),
 ):
-    """Super Admin's new Dashboard (the default landing view) — Leads / Appointments /
-    Treatments / Revenue for a date range, each split into the Physiotherapy branches
-    (one count per branch) plus one aggregate per other vertical. Revenue is built off
-    the lead_activity payment trail like finance/revenue-overview — leads/appointments/
-    sessions carry no payment date of their own, activity log entries do."""
+    """Super Admin's new Dashboard (the default landing view), and the Branches &
+    Verticals Overview tab — Leads / Appointments / Consultations / Treatments /
+    Sessions Booked / Revenue / Pending Session Amount for a date range, each split into
+    the Physiotherapy branches (one count per branch) plus one aggregate per other
+    vertical. Revenue is built off the lead_activity payment trail like
+    finance/revenue-overview — leads/appointments/sessions carry no payment date of
+    their own, activity log entries do. Pending Session Amount is the one field that
+    ignores start_date/end_date — see the comment at its bucket for why."""
     branches = await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1, "vertical": 1}).to_list(500)
     branch_by_id = {b["id"]: b for b in branches}
     physio_branches = [b for b in branches if b.get("vertical") == "offline_physiotherapy"]
@@ -496,15 +499,27 @@ async def v3_dashboard_overview(
         bid = l.get("branch_id")
         add_to_bucket(appt_bucket, bid, l.get("vertical") or branch_vertical(bid))
 
+    # One query, two buckets: `sessions_booked` is every session scheduled in range,
+    # `treatments` is the subset actually completed — same as it was, just no longer a
+    # second round trip to re-ask the same collection with one field's filter removed.
     treat_bucket = new_bucket()
-    sess_query = {"status": "completed"}
-    sess_query.update(_date_range_query("slot_time", start_date, end_date))
-    sess_rows = await v3_col("sessions").find(sess_query, {"_id": 0, "branch_id": 1}).to_list(50000)
+    sessions_booked_bucket = new_bucket()
+    sess_query = _date_range_query("slot_time", start_date, end_date)
+    sess_rows = await v3_col("sessions").find(sess_query, {"_id": 0, "branch_id": 1, "status": 1}).to_list(50000)
     for s in sess_rows:
         bid = s.get("branch_id")
-        add_to_bucket(treat_bucket, bid, branch_vertical(bid))
+        vertical = branch_vertical(bid)
+        add_to_bucket(sessions_booked_bucket, bid, vertical)
+        if s.get("status") == "completed":
+            add_to_bucket(treat_bucket, bid, vertical)
 
     revenue_bucket = new_bucket()
+    consultations_bucket = new_bucket()
+    # revenue_split below totals consultation/session/diet org-wide only — these two mirror
+    # it per branch/vertical, for cards (Overview tab) that need "Consultations Revenue"
+    # or "Session Amount Collected" for one branch rather than the whole business.
+    consultation_revenue_bucket = new_bucket()
+    session_revenue_bucket = new_bucket()
     # The same Consultation / Session split Accountant Manage reports, so the Dashboard's
     # headline figures and the Collections boards can't disagree about what a payment was
     # for. `action` and `created_at` have to be projected for this — the branch buckets
@@ -542,18 +557,55 @@ async def v3_dashboard_overview(
     for a in activities:
         lead = activity_lead_map.get(a.get("lead_id"), {})
         bid = lead.get("branch_id")
+        vertical = lead.get("vertical") or branch_vertical(bid)
         amount = _parse_rs_amount(a.get("details", ""))
-        add_to_bucket(revenue_bucket, bid, lead.get("vertical") or branch_vertical(bid), amount)
+        add_to_bucket(revenue_bucket, bid, vertical, amount)
         category = _revenue_category(a.get("action", ""))
         revenue_split[category] += amount
+        if category == "consultation":
+            add_to_bucket(consultation_revenue_bucket, bid, vertical, amount)
+        elif category == "session":
+            add_to_bucket(session_revenue_bucket, bid, vertical, amount)
         if category == "session" and str(a.get("created_at", ""))[:10] in consult_days.get(a.get("lead_id"), ()):
             revenue_split["spot_joining"] += amount
+        # A consultation held, not just booked — counted off the same Consultation Fee
+        # actions consult_days above already keys on, so this and Appointment Booked can
+        # read differently on purpose: an appointment with no fee collected yet was
+        # scheduled but hasn't happened.
+        if a.get("action", "") in CONSULTATION_FEE_ACTIONS:
+            add_to_bucket(consultations_bucket, bid, vertical)
+
+    # An outstanding balance, not an event — what's owed right now on each patient's
+    # session/treatment package. Deliberately not scoped to start_date/end_date: a
+    # balance owed doesn't have a date the way a payment or a lead does, so filtering it
+    # by the range above would make "pending" mean something different every time the
+    # date filter changed.
+    pending_bucket = new_bucket()
+    pending_leads = await v3_col("leads").find(
+        {},
+        {
+            "_id": 0, "branch_id": 1, "vertical": 1,
+            "session_package_sessions": 1, "package_sessions": 1,
+            "session_package_name": 1, "package_name": 1,
+            "treatment_fee_payment_details": 1, "treatment_fee_paid": 1,
+        },
+    ).to_list(50000)
+    for lead in pending_leads:
+        due = _lead_session_summary(lead).get("due") or 0
+        if due:
+            bid = lead.get("branch_id")
+            add_to_bucket(pending_bucket, bid, lead.get("vertical") or branch_vertical(bid), due)
 
     return {
         "applied_filters": {"start_date": start_date, "end_date": end_date},
         "leads": format_bucket(leads_bucket),
         "appointments": format_bucket(appt_bucket),
+        "consultations": format_bucket(consultations_bucket),
         "treatments": format_bucket(treat_bucket),
+        "sessions_booked": format_bucket(sessions_booked_bucket),
+        "consultation_revenue": format_bucket(consultation_revenue_bucket, currency=True),
+        "session_revenue": format_bucket(session_revenue_bucket, currency=True),
+        "pending_session_amount": format_bucket(pending_bucket, currency=True),
         # spot_joining is a slice of session, not money on top of it — total stays
         # consultation + session + diet.
         "revenue": {

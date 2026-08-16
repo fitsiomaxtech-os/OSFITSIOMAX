@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Plus, Pencil, Trash2, X, Users, MapPin, Phone, Mail, TrendingUp, RefreshCw, Layers, LayoutDashboard, ChevronDown, BadgeIndianRupee, Building2, Stethoscope } from "lucide-react";
+import { Plus, Pencil, Trash2, X, Users, MapPin, Phone, Mail, TrendingUp, RefreshCw, Layers, LayoutDashboard, ChevronDown, BadgeIndianRupee, Building2, Stethoscope, BarChart3, CalendarDays } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,8 +9,10 @@ import {
   bmList, bmCreateWithExistingAdmin, bmReassignAdmin,
   updateBranch, deleteBranch, hrBranchAdminCandidates,
   getVerticals, createVertical, deleteVertical, getDoctors,
+  getDashboardOverview,
 } from "@/lib/api";
 import { StatTile } from "@/components/ui/stat-tile";
+import { MilkDateInput } from "@/components/ui/milk-calendar";
 import { BranchDetailPage } from "@/components/branch/BranchDetailPage";
 import { BranchFormDialogV2 } from "@/components/branch/BranchFormDialogV2";
 import { BranchAdminBoard } from "@/components/BranchAdminBoard";
@@ -26,13 +28,14 @@ const isOnlineVertical = (v) => String(v || "").startsWith("online_");
 // No Service Type tab. It is a setting, not a board — it was a tab holding one text field,
 // and it now opens from MANAGER, the only tab that ever needs it.
 const TABS = [
+  { key: "overview", label: "Overview", icon: BarChart3 },
+  { key: "ac_overview", label: "Analytics", icon: BadgeIndianRupee },
   { key: "creation", label: "MANAGER", icon: Users },
   { key: "branch_control", label: "Branch Control", icon: LayoutDashboard },
-  { key: "ac_overview", label: "Accountant Management", icon: BadgeIndianRupee },
 ];
 
 export const BranchManagementBoard = ({ actingUser } = {}) => {
-  const [tab, setTab] = useState("creation");
+  const [tab, setTab] = useState("overview");
   const [drilledBranchId, setDrilledBranchId] = useState(null);
   // A callback ref, not useRef: the portal has to re-render once the node exists, and a
   // ref object mutating in place never triggers that.
@@ -75,9 +78,159 @@ export const BranchManagementBoard = ({ actingUser } = {}) => {
         })}
         <div ref={setActionSlot} className="ml-auto flex shrink-0 items-center gap-2 pr-1" data-testid="bm-subtab-actions" />
       </div>
+      {tab === "overview" && <OverviewTab />}
       {tab === "creation" && <CreationTab onDrillIn={setDrilledBranchId} actionSlot={actionSlot} />}
       {tab === "branch_control" && <BranchControlTab actingUser={actingUser} />}
       {tab === "ac_overview" && <AccountantManagementBoard />}
+    </div>
+  );
+};
+
+// ---------- Overview ----------
+
+const OVERVIEW_DATE_PRESETS = [
+  { key: "today", label: "Today" },
+  { key: "this_week", label: "This Week" },
+  { key: "this_month", label: "This Month" },
+  { key: "custom", label: "Custom" },
+];
+
+// Every card's number is one metric read off /dashboard/overview's buckets — each bucket
+// already carries a per-branch and a per-vertical breakdown, currency ones just need
+// formatting on the way out.
+const OVERVIEW_METRICS = [
+  { key: "leads", label: "All Leads" },
+  { key: "appointments", label: "Appointment Booked" },
+  { key: "consultations", label: "Consultations" },
+  { key: "consultation_revenue", label: "Consultations Revenue", currency: true },
+  { key: "sessions_booked", label: "Sessions Total Booked" },
+  { key: "session_revenue", label: "Session Amount Collected", currency: true },
+  // Not scoped to the date filter above on the backend — see the comment on
+  // pending_bucket in v3_dashboard.py. Shown here anyway, since a card missing from this
+  // row would read as "not tracked" rather than "always current".
+  { key: "pending_session_amount", label: "Pending Session Amount", currency: true },
+];
+
+const overviewStartOfDay = (d) => { const n = new Date(d); n.setHours(0, 0, 0, 0); return n; };
+const overviewStartOfWeek = (d) => { const x = overviewStartOfDay(d); x.setDate(x.getDate() - x.getDay()); return x; };
+const overviewStartOfMonth = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
+const overviewToIso = (d) => d.toISOString().slice(0, 10);
+
+/** total for "All", otherwise whichever physio branch or vertical the card row picked. */
+const overviewValueFor = (bucket, key) => {
+  if (!bucket) return 0;
+  if (!key || key === "all") return bucket.total;
+  const branchHit = (bucket.physio_branches || []).find((b) => b.branch_id === key);
+  if (branchHit) return branchHit.value;
+  const vertHit = (bucket.verticals || []).find((v) => v.vertical === key);
+  return vertHit ? vertHit.value : 0;
+};
+
+/**
+ * The landing tab for Branches & Verticals — leads through pending balance, for whichever
+ * branch or vertical the row of cards below the date filter picks, all fed by the one
+ * /dashboard/overview call the main Dashboard already uses (same figures, same math, so
+ * this tab and that one can never disagree about what a number means).
+ */
+const OverviewTab = () => {
+  const [preset, setPreset] = useState("this_month");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [selected, setSelected] = useState("all");
+
+  const { startDate, endDate } = useMemo(() => {
+    const today = new Date();
+    if (preset === "today") return { startDate: overviewToIso(today), endDate: overviewToIso(today) };
+    if (preset === "this_week") return { startDate: overviewToIso(overviewStartOfWeek(today)), endDate: overviewToIso(today) };
+    if (preset === "this_month") return { startDate: overviewToIso(overviewStartOfMonth(today)), endDate: overviewToIso(today) };
+    return { startDate: customFrom, endDate: customTo };
+  }, [preset, customFrom, customTo]);
+
+  const load = useCallback(() => {
+    if (preset === "custom" && (!customFrom || !customTo)) return;
+    setLoading(true);
+    getDashboardOverview({ start_date: startDate, end_date: endDate })
+      .then(setData)
+      .catch(() => setData(null))
+      .finally(() => setLoading(false));
+  }, [startDate, endDate, preset, customFrom, customTo]);
+
+  useEffect(() => { load(); }, [load]);
+
+  // "All" plus one card per Physiotherapy branch plus one per other vertical (Offline
+  // Fitness, Online Physiotherapy, Online Fitness) — read off the leads bucket, but any
+  // bucket would do, since /dashboard/overview seeds every one with the same branch/
+  // vertical set regardless of whether it has data yet.
+  const cards = useMemo(() => {
+    if (!data) return [{ key: "all", label: "All" }];
+    const branchCards = (data.leads.physio_branches || []).map((b) => ({ key: b.branch_id, label: b.branch_name }));
+    const verticalCards = (data.leads.verticals || []).map((v) => ({ key: v.vertical, label: v.label }));
+    return [{ key: "all", label: "All" }, ...branchCards, ...verticalCards];
+  }, [data]);
+
+  const fmt = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
+
+  return (
+    <div className="space-y-4" data-testid="bm-overview-tab">
+      {/* Date filter */}
+      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white p-3" data-testid="bm-overview-date-filter">
+        <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-0.5">
+          {OVERVIEW_DATE_PRESETS.map((p) => (
+            <button
+              key={p.key}
+              onClick={() => setPreset(p.key)}
+              className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${preset === p.key ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100"}`}
+              data-testid={`bm-overview-preset-${p.key}`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+        {preset === "custom" && (
+          <div className="flex items-center gap-1.5 text-xs text-slate-500">
+            <CalendarDays className="h-3.5 w-3.5" />
+            <MilkDateInput value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className="h-8 rounded-md border border-slate-200 px-2 text-xs" data-testid="bm-overview-custom-from" />
+            <span>to</span>
+            <MilkDateInput value={customTo} onChange={(e) => setCustomTo(e.target.value)} className="h-8 rounded-md border border-slate-200 px-2 text-xs" data-testid="bm-overview-custom-to" />
+          </div>
+        )}
+      </div>
+
+      {/* Branch / vertical cards */}
+      <div className="flex flex-wrap items-center gap-2" data-testid="bm-overview-cards">
+        {cards.map((c) => (
+          <button
+            key={c.key}
+            type="button"
+            onClick={() => setSelected(c.key)}
+            className={`shrink-0 rounded-full border px-3.5 py-1.5 text-sm font-medium transition ${
+              selected === c.key ? "border-sky-600 bg-sky-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"
+            }`}
+            data-testid={`bm-overview-card-${c.key}`}
+          >
+            {c.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Summary metrics, for whichever card above is selected */}
+      {loading && !data ? (
+        <p className="py-10 text-center text-sm text-slate-400">Loading...</p>
+      ) : (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4" data-testid="bm-overview-metrics">
+          {OVERVIEW_METRICS.map((m) => {
+            const value = overviewValueFor(data?.[m.key], selected);
+            return (
+              <div key={m.key} className="rounded-xl border-2 border-slate-200 bg-white px-4 py-3.5" data-testid={`bm-overview-metric-${m.key}`}>
+                <span className="block truncate text-[11px] font-bold uppercase tracking-wider text-slate-500">{m.label}</span>
+                <span className="mt-1 block text-3xl font-extrabold text-slate-800">{m.currency ? fmt(value) : value}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 };
