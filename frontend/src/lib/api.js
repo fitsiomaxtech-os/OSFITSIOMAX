@@ -321,6 +321,7 @@ export const hrMeta = async () => (await api.get("/hr/meta")).data;
 export const hrAddCustomRole = async (label, color) => (await api.post("/hr/roles", { label, color })).data;
 export const hrDepartments = async () => (await api.get("/hr/departments")).data;
 export const hrCreateDepartment = async (name) => (await api.post("/hr/departments", { name })).data;
+export const hrRenameDepartment = async (id, name) => (await api.patch(`/hr/departments/${id}`, { name })).data;
 export const hrDeleteDepartment = async (id) => (await api.delete(`/hr/departments/${id}`)).data;
 export const hrAddDesignation = async (deptId, name) => (await api.post(`/hr/departments/${deptId}/designations`, { name })).data;
 export const hrDeleteDesignation = async (deptId, name) => (await api.delete(`/hr/departments/${deptId}/designations`, { params: { name } })).data;

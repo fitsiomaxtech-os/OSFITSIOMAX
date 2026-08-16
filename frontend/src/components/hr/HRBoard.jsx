@@ -7,7 +7,7 @@ import { toast } from "@/components/ui/sonner";
 import {
   hrDashboard, hrEmployees, hrCreateEmployee, hrUpdateEmployee, hrDeleteEmployee,
   hrUsers, hrCreateUser, hrUpdateUser, hrResetPassword, hrDeactivateUser, hrActivateUser, hrDeleteUserPermanent, hrUpdateUserRole, hrMeta, hrAddCustomRole,
-  hrDepartments, hrCreateDepartment, hrDeleteDepartment, hrAddDesignation, hrDeleteDesignation,
+  hrDepartments, hrCreateDepartment, hrRenameDepartment, hrDeleteDepartment, hrAddDesignation, hrDeleteDesignation,
   getBranches,
 } from "@/lib/api";
 import { MilkDateInput } from "@/components/ui/milk-calendar";
@@ -196,6 +196,9 @@ const EmployeesTab = ({ meta, initialFilter }) => {
 
   const active = employees.filter((e) => (e.status || "active") === "active").length;
   const left = employees.filter((e) => (e.status || "active") !== "active").length;
+  // Offered only when it would actually match someone — otherwise every install shows an
+  // "Unassigned" option that filters to an empty list.
+  const hasUnassigned = employees.some((e) => !e.department);
 
   // flex+gap, not space-y — the desktop table below is hidden by class on mobile.
   return (
@@ -203,16 +206,17 @@ const EmployeesTab = ({ meta, initialFilter }) => {
       <div className="flex flex-wrap items-center gap-2">
         <button onClick={() => setFilterStatus("active")} className={`rounded-md px-3 py-2 text-sm font-medium ${filterStatus === "active" ? "bg-orange-500 text-white" : "bg-slate-100 text-slate-600"}`} data-testid="hr-emp-tab-active">Active Employees ({active})</button>
         <button onClick={() => setFilterStatus("left")} className={`rounded-md px-3 py-2 text-sm font-medium ${filterStatus === "left" ? "bg-slate-700 text-white" : "bg-slate-100 text-slate-600"}`} data-testid="hr-emp-tab-left">Left ({left})</button>
-        {department && (
-          <button
-            onClick={() => setDepartment("")}
-            className="inline-flex items-center gap-1.5 rounded-md border border-orange-300 bg-orange-50 px-3 py-2 text-sm font-medium text-orange-700 hover:bg-orange-100"
-            title="Clear the department filter"
-            data-testid="hr-emp-dept-chip"
-          >
-            {department} <X className="h-3.5 w-3.5" />
-          </button>
-        )}
+        <select
+          value={department}
+          onChange={(e) => setDepartment(e.target.value)}
+          className={`h-10 rounded-md border px-3 text-sm font-medium ${department ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 bg-white text-slate-600"}`}
+          title="Filter by department"
+          data-testid="hr-emp-dept-filter"
+        >
+          <option value="">All Departments</option>
+          {meta.departments.map((d) => <option key={d} value={d}>{d}</option>)}
+          {hasUnassigned && <option value="Unassigned">Unassigned</option>}
+        </select>
         {designation && (
           <button
             onClick={() => setDesignation("")}
@@ -924,6 +928,9 @@ const DepartmentsTab = ({ meta, reloadMeta }) => {
   const [addingDept, setAddingDept] = useState(false);
   const [managing, setManaging] = useState(null); // department being edited in the modal
   const [viewingDesignation, setViewingDesignation] = useState(null); // designation label, or null
+  const [editingDeptId, setEditingDeptId] = useState(null);
+  const [editDeptName, setEditDeptName] = useState("");
+  const [renamingDept, setRenamingDept] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -971,6 +978,23 @@ const DepartmentsTab = ({ meta, reloadMeta }) => {
     catch (e) { toast.error(e?.response?.data?.detail || "Failed to delete department"); }
   };
 
+  const startEditDept = (d) => { setEditingDeptId(d.id); setEditDeptName(d.name); };
+  const cancelEditDept = () => { setEditingDeptId(null); setEditDeptName(""); };
+
+  const saveEditDept = async (d) => {
+    const name = editDeptName.trim();
+    if (!name || name === d.name) { cancelEditDept(); return; }
+    setRenamingDept(true);
+    try {
+      await hrRenameDepartment(d.id, name);
+      toast.success(`Renamed to ${name}`);
+      cancelEditDept();
+      load();
+      reloadMeta();
+    } catch (e) { toast.error(e?.response?.data?.detail || "Failed to rename department"); }
+    setRenamingDept(false);
+  };
+
   // Opens on top of the designations checklist rather than navigating away — the
   // checklist's in-progress picks would otherwise be lost.
   const viewEmployees = (label) => setViewingDesignation(label);
@@ -995,13 +1019,39 @@ const DepartmentsTab = ({ meta, reloadMeta }) => {
         {depts.map((d) => (
           <Card key={d.id} className="min-w-0" data-testid={`hr-dept-card-${d.id}`}>
             <CardHeader className="flex flex-row items-start justify-between gap-2 pb-2">
-              <div className="min-w-0">
-                <CardTitle className="truncate text-base">{d.name}</CardTitle>
-                <p className="text-xs text-slate-500">{d.employee_count} employee{d.employee_count === 1 ? "" : "s"}</p>
-              </div>
-              <button onClick={() => removeDepartment(d)} className="shrink-0 text-slate-400 hover:text-red-500" data-testid={`hr-dept-delete-${d.id}`} title="Delete department">
-                <Trash2 className="h-4 w-4" />
-              </button>
+              {editingDeptId === d.id ? (
+                <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                  <Input
+                    autoFocus
+                    value={editDeptName}
+                    onChange={(e) => setEditDeptName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") saveEditDept(d); if (e.key === "Escape") cancelEditDept(); }}
+                    className="h-8 text-sm"
+                    data-testid={`hr-dept-edit-input-${d.id}`}
+                  />
+                  <button onClick={() => saveEditDept(d)} disabled={renamingDept} className="shrink-0 text-emerald-600 hover:text-emerald-700" data-testid={`hr-dept-edit-save-${d.id}`} title="Save">
+                    <CheckCircle2 className="h-4 w-4" />
+                  </button>
+                  <button onClick={cancelEditDept} className="shrink-0 text-slate-400 hover:text-slate-600" data-testid={`hr-dept-edit-cancel-${d.id}`} title="Cancel">
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className="min-w-0">
+                    <CardTitle className="truncate text-base">{d.name}</CardTitle>
+                    <p className="text-xs text-slate-500">{d.employee_count} employee{d.employee_count === 1 ? "" : "s"}</p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <button onClick={() => startEditDept(d)} className="text-slate-400 hover:text-sky-600" data-testid={`hr-dept-edit-${d.id}`} title="Rename department">
+                      <Pencil className="h-4 w-4" />
+                    </button>
+                    <button onClick={() => removeDepartment(d)} className="text-slate-400 hover:text-red-500" data-testid={`hr-dept-delete-${d.id}`} title="Delete department">
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                </>
+              )}
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="flex flex-wrap gap-1.5">

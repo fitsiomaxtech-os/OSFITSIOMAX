@@ -646,6 +646,29 @@ async def create_department(payload: DepartmentCreate, _: V3UserOut = Depends(v3
     return dept
 
 
+@router.patch("/departments/{dept_id}")
+async def rename_department(dept_id: str, payload: DepartmentCreate, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Department name is required")
+    dept = await v3_col("hr_departments").find_one({"id": dept_id}, {"_id": 0})
+    if not dept:
+        raise HTTPException(status_code=404, detail="Department not found")
+    if name.lower() != dept["name"].lower():
+        clash = await v3_col("hr_departments").find_one(
+            {"id": {"$ne": dept_id}, "name": {"$regex": f"^{re.escape(name)}$", "$options": "i"}}, {"_id": 0, "id": 1}
+        )
+        if clash:
+            raise HTTPException(status_code=409, detail="This department already exists")
+    await v3_col("hr_departments").update_one({"id": dept_id}, {"$set": {"name": name}})
+    # Every employee's `department` is a plain string, not a reference, so the rename has
+    # to be pushed to them explicitly or they'd keep showing the old name and stop being
+    # counted for the department they're actually still in.
+    if name != dept["name"]:
+        await v3_col("employees").update_many({"department": dept["name"]}, {"$set": {"department": name}})
+    return await v3_col("hr_departments").find_one({"id": dept_id}, {"_id": 0})
+
+
 @router.delete("/departments/{dept_id}")
 async def delete_department(dept_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
     res = await v3_col("hr_departments").delete_one({"id": dept_id})
