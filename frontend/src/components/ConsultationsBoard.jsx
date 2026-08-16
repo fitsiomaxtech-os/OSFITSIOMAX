@@ -1714,7 +1714,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       }
     }
     if (!items.length) {
-      toast.error("No Diet Package priced yet — add one in FITSIO STORE > Diet Package.");
+      toast.error("No Diet Package priced yet — add one in Services and Products > Diet Package.");
       return;
     }
     setDietFeeDraft({

@@ -164,7 +164,7 @@ const SUPER_ADMIN_TABS = [
   { key: "treatment", label: "Treatment", icon: ClipboardList },
   { key: "branches", label: "Branches & Verticals", icon: Building2 },
   { key: "branch_wise", label: "Branch Wise", icon: Network },
-  { key: "packages", label: "FITSIO STORE", icon: Store },
+  { key: "packages", label: "Services and Products", icon: Store },
 ];
 
 const SUPER_ADMIN_BOTTOM_KEYS = ["dashboard", "hr", "branches"];

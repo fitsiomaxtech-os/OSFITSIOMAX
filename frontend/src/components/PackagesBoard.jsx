@@ -1083,8 +1083,8 @@ export const PackagesBoard = () => {
 
   return (
     <div className="space-y-4" data-testid="packages-board">
-      {/* No heading. The nav tab above already reads FITSIO STORE, and the line under it
-          only listed the tabs that follow it. */}
+      {/* No heading. The nav tab above already reads Services and Products, and the line
+          under it only listed the tabs that follow it. */}
       {/* A dropdown on a phone, the same control the Branch Admin store uses. Eight tabs
           wrapped to three rows there, which pushed the shelf being edited below the fold
           before any of its items showed. Desktop keeps the bar.

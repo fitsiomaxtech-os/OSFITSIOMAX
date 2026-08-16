@@ -188,7 +188,7 @@ export const BranchDietPanel = ({ reloadToken }) => (
       category="physiotherapy"
       itemType="diet"
       durationLabel="Diet Consultation Duration"
-      emptyLabel="No diet packages available yet. Super Admin adds them in FITSIO STORE > Diet Package."
+      emptyLabel="No diet packages available yet. Super Admin adds them in Services and Products > Diet Package."
       testidPrefix="branch-diet"
       reloadToken={reloadToken}
     />
