@@ -55,7 +55,7 @@ export const HRBoard = () => {
       {tab === "dashboard" && <DashboardTab onNavigate={(t, f) => { setEmpFilter(f || null); setTab(t); }} />}
       {tab === "employees" && <EmployeesTab meta={meta} initialFilter={empFilter} />}
       {tab === "roles" && <RolesTab meta={meta} reloadMeta={reloadMeta} />}
-      {tab === "departments" && <DepartmentsTab meta={meta} reloadMeta={reloadMeta} onNavigate={(t, f) => { setEmpFilter(f || null); setTab(t); }} />}
+      {tab === "departments" && <DepartmentsTab meta={meta} reloadMeta={reloadMeta} />}
     </div>
   );
 };
@@ -916,13 +916,14 @@ const CreateRoleModal = ({ meta, reloadMeta, onClose }) => {
 
 // ---------- Departments & Designation ----------
 
-const DepartmentsTab = ({ meta, reloadMeta, onNavigate }) => {
+const DepartmentsTab = ({ meta, reloadMeta }) => {
   const [depts, setDepts] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(false);
   const [newDeptName, setNewDeptName] = useState("");
   const [addingDept, setAddingDept] = useState(false);
   const [managing, setManaging] = useState(null); // department being edited in the modal
+  const [viewingDesignation, setViewingDesignation] = useState(null); // designation label, or null
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -970,10 +971,9 @@ const DepartmentsTab = ({ meta, reloadMeta, onNavigate }) => {
     catch (e) { toast.error(e?.response?.data?.detail || "Failed to delete department"); }
   };
 
-  const viewEmployees = (label) => {
-    setManaging(null);
-    onNavigate("employees", { designation: label });
-  };
+  // Opens on top of the designations checklist rather than navigating away — the
+  // checklist's in-progress picks would otherwise be lost.
+  const viewEmployees = (label) => setViewingDesignation(label);
 
   return (
     <div className="space-y-4" data-testid="hr-departments-tab">
@@ -1031,6 +1031,16 @@ const DepartmentsTab = ({ meta, reloadMeta, onNavigate }) => {
           onClose={() => setManaging(null)}
           onViewEmployees={viewEmployees}
           onSaved={() => { setManaging(null); load(); reloadMeta(); }}
+        />
+      )}
+
+      {viewingDesignation && (
+        <DesignationEmployeesModal
+          designation={viewingDesignation}
+          employees={employees.filter((e) => e.designation === viewingDesignation)}
+          departmentNames={depts.map((d) => d.name)}
+          onClose={() => setViewingDesignation(null)}
+          onChanged={() => { load(); reloadMeta(); }}
         />
       )}
     </div>
@@ -1129,6 +1139,65 @@ const DepartmentDesignationsModal = ({ department, allDepartments, allDesignatio
           <Button onClick={save} disabled={saving} className="bg-orange-500 hover:bg-orange-600" data-testid="hr-dept-manage-save">
             {saving ? "Saving..." : "Save"}
           </Button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Row-based list of every employee holding one designation, opened from the
+// designations checklist. Department is editable right here — reassigning someone out
+// of a department they're incorrectly parked in is the main reason to open this list.
+const DesignationEmployeesModal = ({ designation, employees, departmentNames, onClose, onChanged }) => {
+  const [savingId, setSavingId] = useState(null);
+
+  const changeDepartment = async (emp, department) => {
+    if (department === (emp.department || "")) return;
+    setSavingId(emp.id);
+    try {
+      await hrUpdateEmployee(emp.id, { department });
+      toast.success(`${emp.full_name} moved to ${department}`);
+      onChanged();
+    } catch (e) { toast.error(e?.response?.data?.detail || "Failed to update"); }
+    setSavingId(null);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" data-testid="hr-designation-employees-modal">
+      <div className="flex max-h-[80vh] w-full max-w-lg flex-col rounded-lg bg-white shadow-xl">
+        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
+          <div>
+            <h3 className="text-base font-semibold">{designation}</h3>
+            <p className="text-xs text-slate-500">{employees.length} employee{employees.length === 1 ? "" : "s"}</p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600" data-testid="hr-designation-employees-close"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="flex-1 space-y-2 overflow-y-auto p-3">
+          {employees.map((e) => (
+            <div key={e.id} className="flex flex-wrap items-center gap-3 rounded-md border border-slate-100 px-3 py-2" data-testid={`hr-designation-employee-row-${e.id}`}>
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-orange-100 text-xs font-bold text-orange-700">
+                {(e.full_name || "?").charAt(0).toUpperCase()}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-slate-800">{e.full_name}</p>
+                <p className="truncate text-xs text-slate-500">{e.employee_code}{e.email ? ` · ${e.email}` : ""}{e.phone ? ` · ${e.phone}` : ""}</p>
+              </div>
+              <select
+                value={e.department || ""}
+                disabled={savingId === e.id}
+                onChange={(ev) => changeDepartment(e, ev.target.value)}
+                className="h-8 shrink-0 rounded-md border border-slate-200 px-2 text-xs"
+                data-testid={`hr-designation-employee-dept-${e.id}`}
+              >
+                <option value="">— Unassigned —</option>
+                {departmentNames.map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </div>
+          ))}
+          {employees.length === 0 && <p className="px-2 py-6 text-center text-sm text-slate-400">No employees hold this designation.</p>}
+        </div>
+        <div className="flex items-center justify-end border-t border-slate-200 px-5 py-3">
+          <Button variant="outline" onClick={onClose} data-testid="hr-designation-employees-done">Done</Button>
         </div>
       </div>
     </div>
