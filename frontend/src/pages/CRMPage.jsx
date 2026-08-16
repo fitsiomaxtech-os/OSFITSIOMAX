@@ -155,15 +155,15 @@ const isPhysioRole = (role) => ["physio", "online_physio"].includes(String(role 
 // Dashboard now carries the same headline counts, per branch and per date range.
 const SUPER_ADMIN_TABS = [
   { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { key: "branches", label: "Branches & Verticals", icon: Building2 },
+  { key: "hr", label: "HR Admin", icon: Users },
+  { key: "branch_wise", label: "Branch Wise", icon: Network },
   { key: "marketing", label: "Marketing Source", icon: Megaphone },
   { key: "stages", label: "CI/CD ROOTS", icon: Activity },
-  { key: "hr", label: "HR Admin", icon: Users },
   { key: "presales", label: "PRE SALES", icon: Headphones },
   // Beside PRE SALES because it is the other end of the same journey — leads are worked
   // there, treatment is delivered here — rather than among the branch and catalogue tabs.
   { key: "treatment", label: "Treatment", icon: ClipboardList },
-  { key: "branches", label: "Branches & Verticals", icon: Building2 },
-  { key: "branch_wise", label: "Branch Wise", icon: Network },
   { key: "packages", label: "Services and Products", icon: Store },
 ];
 
