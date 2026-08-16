@@ -15,8 +15,8 @@ router = APIRouter(prefix="/api/v3/branch-mgmt")
 
 class BranchAssignedCreate(BaseModel):
     branch_name: str
-    address: str
-    admin_user_id: str = Field(..., description="Existing user with role=branch_admin")
+    address: Optional[str] = ""  # online-vertical branches have no physical address
+    admin_user_id: str = Field(..., description="Existing user with a Branch Admin role")
     admin_phone: Optional[str] = ""
     vertical: Optional[str] = "offline_physiotherapy"
     opened_date: Optional[str] = ""
@@ -66,8 +66,8 @@ async def create_branch_with_existing_admin(payload: BranchAssignedCreate, _: V3
     user = await v3_col("users").find_one({"id": payload.admin_user_id, "is_active": True}, {"_id": 0, "password": 0})
     if not user:
         raise HTTPException(status_code=404, detail="Branch admin user not found")
-    if user.get("role") != "branch_admin":
-        raise HTTPException(status_code=400, detail=f"User role is '{user.get('role')}', must be 'branch_admin'")
+    if not is_branch_admin_role(user.get("role")):
+        raise HTTPException(status_code=400, detail=f"User role is '{user.get('role')}', must be a Branch Admin role")
     # Soft check: warn if user already assigned to another branch
     already = await v3_col("branches").find_one({"admin_user_id": payload.admin_user_id}, {"_id": 0, "id": 1, "branch_name": 1})
     if already:
@@ -115,8 +115,8 @@ async def reassign_branch_admin(branch_id: str, payload: AssignAdmin, _: V3UserO
     user = await v3_col("users").find_one({"id": payload.admin_user_id, "is_active": True}, {"_id": 0, "password": 0})
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    if user.get("role") != "branch_admin":
-        raise HTTPException(status_code=400, detail=f"User role must be branch_admin (current: {user.get('role')})")
+    if not is_branch_admin_role(user.get("role")):
+        raise HTTPException(status_code=400, detail=f"User role must be a Branch Admin role (current: {user.get('role')})")
     other = await v3_col("branches").find_one({"admin_user_id": payload.admin_user_id, "id": {"$ne": branch_id}}, {"_id": 0, "branch_name": 1})
     if other:
         raise HTTPException(status_code=409, detail=f"User already manages '{other.get('branch_name')}'")

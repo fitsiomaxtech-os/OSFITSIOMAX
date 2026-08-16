@@ -162,7 +162,7 @@ const SUPER_ADMIN_TABS = [
   // Beside PRE SALES because it is the other end of the same journey — leads are worked
   // there, treatment is delivered here — rather than among the branch and catalogue tabs.
   { key: "treatment", label: "Treatment", icon: ClipboardList },
-  { key: "branches", label: "Branch Management", icon: Building2 },
+  { key: "branches", label: "Branches & Verticals", icon: Building2 },
   { key: "branch_wise", label: "Branch Wise", icon: Network },
   { key: "packages", label: "FITSIO STORE", icon: Store },
 ];

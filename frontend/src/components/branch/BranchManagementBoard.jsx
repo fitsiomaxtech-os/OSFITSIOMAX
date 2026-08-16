@@ -18,6 +18,11 @@ import { HeadPhysioBoard } from "@/components/HeadPhysioBoard";
 import { PhysioBoard } from "@/components/PhysioBoard";
 import { AccountantManagementBoard } from "@/components/branch/AccountantManagementBoard";
 
+// Every default vertical is named "online_..."/"offline_..." — read off that prefix
+// rather than a separate stored field, so the tag on a card can never disagree with
+// its actual vertical. Same helper as BranchFormDialogV2's own mode toggle.
+const isOnlineVertical = (v) => String(v || "").startsWith("online_");
+
 // No Service Type tab. It is a setting, not a board — it was a tab holding one text field,
 // and it now opens from MANAGER, the only tab that ever needs it.
 const TABS = [
@@ -39,7 +44,7 @@ export const BranchManagementBoard = ({ actingUser } = {}) => {
 
   return (
     <div className="space-y-5" data-testid="branch-mgmt-board">
-      {/* No heading. The nav tab above already reads Branch Management. */}
+      {/* No heading. The nav tab above already reads Branches & Verticals. */}
       {/* The tab row carries the active tab's actions on its right. They used to sit on
           the KPI row below, where a page action read as part of the figures. A portal
           rather than lifted state: Refresh and Add Branch act on CreationTab's own data,
@@ -239,6 +244,7 @@ const CreationTab = ({ onDrillIn, actionSlot }) => {
   const [showServiceTypes, setShowServiceTypes] = useState(false);
   const [physioCount, setPhysioCount] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [modeFilter, setModeFilter] = useState("all"); // "all" | "online" | "offline"
 
   /** `notify` is set only by the Refresh button. The same loader runs on mount and after
    *  every save, and none of those should announce themselves. */
@@ -272,6 +278,10 @@ const CreationTab = ({ onDrillIn, actionSlot }) => {
     try { await deleteBranch(b.id); toast.success("Branch deleted"); load(); }
     catch (e) { toast.error(e?.response?.data?.detail || "Delete failed"); }
   };
+
+  const filteredBranches = modeFilter === "all"
+    ? branches
+    : branches.filter((b) => isOnlineVertical(b.vertical) === (modeFilter === "online"));
 
   // Rendered into the tab bar above. All three are icon-only there: a labelled button in a
   // row of tabs reads as another tab, and the row has no width to spare for the word anyway.
@@ -327,17 +337,40 @@ const CreationTab = ({ onDrillIn, actionSlot }) => {
         <StatTile label="Total Doctors" value={branches.reduce((a, b) => a + (b.doctors_count || 0), 0)} icon={Stethoscope} color="#a855f7" testid="bm-kpi-doctors" />
       </div>
 
+      <div className="flex items-center justify-end">
+        <select
+          value={modeFilter}
+          onChange={(e) => setModeFilter(e.target.value)}
+          className="h-9 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700"
+          data-testid="bm-mode-filter"
+        >
+          <option value="all">All Branches</option>
+          <option value="offline">Offline Only</option>
+          <option value="online">Online Only</option>
+        </select>
+      </div>
+
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {branches.length === 0 && <Card><CardContent className="p-6 text-center text-sm text-slate-400">No branches yet. Click <span className="font-semibold">Add Branch</span> to start.</CardContent></Card>}
-        {branches.map((b) => (
+        {filteredBranches.length === 0 && (
+          <Card><CardContent className="p-6 text-center text-sm text-slate-400">
+            {branches.length === 0 ? <>No branches yet. Click <span className="font-semibold">Add Branch</span> to start.</> : "No branches match this filter."}
+          </CardContent></Card>
+        )}
+        {filteredBranches.map((b) => (
           <Card key={b.id} className="border-slate-200 cursor-pointer hover:shadow-md transition" data-testid={`bm-branch-card-${b.id}`} onClick={() => onDrillIn && onDrillIn(b.id)}>
             <CardHeader className="flex flex-row items-start justify-between gap-2">
               <div>
                 <CardTitle className="flex items-center gap-1.5 text-base text-slate-900 hover:text-sky-700">
                   {b.branch_name}
                   {b.code && <span className="rounded bg-sky-50 px-1.5 py-0.5 text-[10px] font-semibold text-sky-600" data-testid={`bm-branch-code-${b.id}`}>{b.code}</span>}
+                  <span
+                    className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${isOnlineVertical(b.vertical) ? "bg-violet-50 text-violet-600" : "bg-emerald-50 text-emerald-600"}`}
+                    data-testid={`bm-branch-mode-${b.id}`}
+                  >
+                    {isOnlineVertical(b.vertical) ? "Online" : "Offline"}
+                  </span>
                 </CardTitle>
-                <p className="mt-0.5 inline-flex items-center text-xs text-slate-500"><MapPin className="h-3 w-3 mr-1" />{b.address}</p>
+                {b.address && <p className="mt-0.5 inline-flex items-center text-xs text-slate-500"><MapPin className="h-3 w-3 mr-1" />{b.address}</p>}
               </div>
               <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
                 <button onClick={(e) => { e.stopPropagation(); setEditing(b); setShowAdd(true); }} className="text-blue-500 hover:text-blue-700" data-testid={`bm-branch-edit-${b.id}`}><Pencil className="h-4 w-4" /></button>

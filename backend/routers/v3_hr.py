@@ -6,7 +6,7 @@ import uuid
 
 from database import v3_col
 from utils import now_iso
-from deps import v3_require_roles, is_diet_role, is_physio_role
+from deps import v3_require_roles, is_diet_role, is_physio_role, BRANCH_ADMIN_ROLES
 from security import hash_password
 from schemas.v3 import V3UserOut
 
@@ -576,7 +576,11 @@ async def delete_user_permanent(user_id: str, current: V3UserOut = Depends(v3_re
 
 @router.get("/branch-admin-candidates")
 async def branch_admin_candidates(_: V3UserOut = Depends(v3_require_roles("super_admin"))):
-    rows = await v3_col("users").find({"role": "branch_admin", "is_active": True}, {"_id": 0, "password": 0}).to_list(500)
+    # Every role that holds Branch Admin's authority (Physio-only, Fitness-only, both,
+    # or either online arm) — not just the literal "branch_admin" slug. Same set the
+    # backend's own scoping checks use (deps.BRANCH_ADMIN_ROLES), so a branch can be
+    # handed to any of them, not only the plain one.
+    rows = await v3_col("users").find({"role": {"$in": list(BRANCH_ADMIN_ROLES)}, "is_active": True}, {"_id": 0, "password": 0}).to_list(500)
     branches = {}
     async for b in v3_col("branches").find({}, {"_id": 0}):
         branches[b.get("admin_user_id")] = b
@@ -586,6 +590,7 @@ async def branch_admin_candidates(_: V3UserOut = Depends(v3_require_roles("super
             "id": u["id"],
             "full_name": u.get("full_name"),
             "email": u.get("email"),
+            "role": u.get("role"),
             "branch_id": u.get("branch_id"),
             "assigned_branch": branches.get(u["id"], {}).get("branch_name") if branches.get(u["id"]) else None,
         })

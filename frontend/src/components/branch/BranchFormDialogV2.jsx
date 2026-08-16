@@ -35,10 +35,15 @@ const DAYS = [
 const defaultDay = { is_open: true, open: "09:00", close: "20:00" };
 const emptyWeekly = () => Object.fromEntries(DAYS.map((d) => [d.key, { ...defaultDay }]));
 
+// Every default vertical is named "online_..."/"offline_..." — mode is read straight
+// off that prefix rather than stored as a separate field, so the two can never disagree.
+const isOnlineVertical = (v) => String(v || "").startsWith("online_");
+
 export const BranchFormDialogV2 = ({ branch, onClose, onSaved }) => {
   const isEdit = !!branch;
   const [tab, setTab] = useState("details");
   const [candidates, setCandidates] = useState([]);
+  const [mode, setMode] = useState(() => (isOnlineVertical(branch?.vertical) ? "online" : "offline"));
   const [form, setForm] = useState({
     branch_name: branch?.branch_name || "",
     code: branch?.code || "",
@@ -84,14 +89,31 @@ export const BranchFormDialogV2 = ({ branch, onClose, onSaved }) => {
     return () => { alive = false; };
   }, []);
 
-  // Whatever this branch already carries stays in the list even if it has since been
-  // removed, so opening an old branch cannot silently reassign its vertical on save.
+  // Narrowed to whichever mode (Online/Offline) is picked above, so the dropdown only
+  // ever offers verticals consistent with it. Whatever this branch already carries stays
+  // in the list even if it's since been removed, so opening an old branch can't silently
+  // reassign its vertical on save.
   const verticals = useMemo(() => {
     const base = verticalOptions.length
       ? verticalOptions
       : ["offline_physiotherapy", "online_physiotherapy", "fitness"];
-    return !form.vertical || base.includes(form.vertical) ? base : [form.vertical, ...base];
-  }, [verticalOptions, form.vertical]);
+    const matching = base.filter((v) => isOnlineVertical(v) === (mode === "online"));
+    if (form.vertical && !matching.includes(form.vertical) && isOnlineVertical(form.vertical) === (mode === "online")) {
+      return [form.vertical, ...matching];
+    }
+    return matching;
+  }, [verticalOptions, form.vertical, mode]);
+
+  // Switching mode drops any vertical that no longer matches it, rather than letting
+  // "Online" sit selected next to a still-picked offline vertical.
+  const changeMode = (nextMode) => {
+    setMode(nextMode);
+    if (isOnlineVertical(form.vertical) !== (nextMode === "online")) {
+      const base = verticalOptions.length ? verticalOptions : ["offline_physiotherapy", "online_physiotherapy", "fitness"];
+      const firstMatch = base.find((v) => isOnlineVertical(v) === (nextMode === "online")) || "";
+      setForm((p) => ({ ...p, vertical: firstMatch, address: nextMode === "online" ? "" : p.address }));
+    }
+  };
 
   const available = useMemo(() => candidates.filter((c) => !c.assigned_branch || c.id === branch?.admin_user_id), [candidates, branch?.admin_user_id]);
   const assignedHeadPhysios = useMemo(() => hpCandidates.filter((c) => c.branch_id === branch?.id), [hpCandidates, branch?.id]);
@@ -119,7 +141,9 @@ export const BranchFormDialogV2 = ({ branch, onClose, onSaved }) => {
   const removeHoliday = (d) => setForm((p) => ({ ...p, holidays: p.holidays.filter((x) => x !== d) }));
 
   const submit = async () => {
-    if (!form.branch_name.trim() || !form.address.trim()) { setTab("details"); toast.error("Branch name + address required"); return; }
+    if (!form.branch_name.trim() || (mode === "offline" && !form.address.trim())) {
+      setTab("details"); toast.error(mode === "offline" ? "Branch name + address required" : "Branch name required"); return;
+    }
     if (!isEdit && !form.admin_user_id) { setTab("details"); toast.error("Select a Branch Admin"); return; }
     try {
       if (isEdit) {
@@ -168,6 +192,22 @@ export const BranchFormDialogV2 = ({ branch, onClose, onSaved }) => {
         <div className="max-h-[60vh] overflow-y-auto p-5">
           {tab === "details" && (
             <div className="grid gap-3 sm:grid-cols-2" data-testid="bf2-details-tab">
+              <Field label="Mode" className="sm:col-span-2">
+                <div className="inline-flex rounded-md border border-slate-200 p-0.5" data-testid="bf2-mode">
+                  {["offline", "online"].map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => changeMode(m)}
+                      className={`rounded px-4 py-1.5 text-sm font-medium capitalize transition ${mode === m ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}
+                      data-testid={`bf2-mode-${m}`}
+                    >
+                      {m}
+                    </button>
+                  ))}
+                </div>
+                {mode === "online" && <p className="mt-1.5 text-[11px] text-slate-400">No physical address needed for an online branch.</p>}
+              </Field>
               <Field label="Branch Name *"><Input value={form.branch_name} onChange={(e) => set("branch_name", e.target.value)} data-testid="bf2-name" placeholder="e.g. Anna Nagar" /></Field>
               <Field label="Branch Code">
                 <Input
@@ -191,16 +231,22 @@ export const BranchFormDialogV2 = ({ branch, onClose, onSaved }) => {
                   <div className="h-10 rounded-md border border-slate-200 bg-slate-50 px-3 text-sm flex items-center text-slate-600">{branch.admin_name || "Unassigned"} <span className="ml-2 text-[10px] text-slate-400">(reassign via Detail page)</span></div>
                 ) : (
                   <select className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm" value={form.admin_user_id} onChange={(e) => set("admin_user_id", e.target.value)} data-testid="bf2-admin">
-                    <option value="">— Select branch_admin user —</option>
-                    {available.length === 0 && <option disabled>No available branch_admin users — create one in HR</option>}
-                    {available.map((c) => <option key={c.id} value={c.id}>{c.full_name} · {c.email}</option>)}
+                    <option value="">— Select a Branch Admin —</option>
+                    {available.length === 0 && <option disabled>No available Branch Admins — create one in HR</option>}
+                    {available.map((c) => <option key={c.id} value={c.id}>{c.full_name} · {prettyVertical(c.role)} · {c.email}</option>)}
                   </select>
                 )}
+                {/* Any Admins-department role (Physio-only, Fitness-only, both, or either
+                    online arm), not just the plain branch_admin slug — see
+                    deps.BRANCH_ADMIN_ROLES for the full set. */}
+                <p className="mt-1 text-[11px] text-slate-400">Shows every unassigned Branch Admin role from HR → Roles &amp; Credentials.</p>
               </Field>
               <Field label="Admin Phone"><Input value={form.admin_phone} onChange={(e) => set("admin_phone", e.target.value)} placeholder="+91 …" data-testid="bf2-admin-phone" /></Field>
               <Field label="Branch Phone"><Input value={form.phone} onChange={(e) => set("phone", e.target.value)} placeholder="Front-desk phone" data-testid="bf2-phone" /></Field>
               <Field label="Branch Email"><Input value={form.email} onChange={(e) => set("email", e.target.value)} placeholder="branch@example.com" data-testid="bf2-email" /></Field>
-              <Field label="Address *" className="sm:col-span-2"><Input value={form.address} onChange={(e) => set("address", e.target.value)} placeholder="Street, City, PIN" data-testid="bf2-address" /></Field>
+              {mode === "offline" && (
+                <Field label="Address *" className="sm:col-span-2"><Input value={form.address} onChange={(e) => set("address", e.target.value)} placeholder="Street, City, PIN" data-testid="bf2-address" /></Field>
+              )}
               <Field label="Opened Date"><MilkDateInput  value={form.opened_date} onChange={(e) => set("opened_date", e.target.value)} data-testid="bf2-opened-date" /></Field>
               <Field label="Map Location" className="sm:col-span-1">
                 <Input value={form.map_location} onChange={(e) => set("map_location", e.target.value)} placeholder="Google Maps URL or lat,lng" data-testid="bf2-map" />
