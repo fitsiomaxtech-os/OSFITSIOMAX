@@ -337,17 +337,22 @@ const CreationTab = ({ onDrillIn, actionSlot }) => {
         <StatTile label="Total Doctors" value={branches.reduce((a, b) => a + (b.doctors_count || 0), 0)} icon={Stethoscope} color="#a855f7" testid="bm-kpi-doctors" />
       </div>
 
-      <div className="flex items-center justify-end">
-        <select
-          value={modeFilter}
-          onChange={(e) => setModeFilter(e.target.value)}
-          className="h-9 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700"
-          data-testid="bm-mode-filter"
-        >
-          <option value="all">All Branches</option>
-          <option value="offline">Offline Only</option>
-          <option value="online">Online Only</option>
-        </select>
+      {/* Pills, not a dropdown — the online/offline split used to be a hidden option inside
+          "All Branches" that nothing on screen hinted at. */}
+      <div className="flex flex-wrap items-center justify-end gap-2" data-testid="bm-mode-filter">
+        {[["all", "All Branches"], ["offline", "Offline"], ["online", "Online"]].map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setModeFilter(key)}
+            className={`shrink-0 rounded-full border px-3.5 py-1.5 text-sm font-medium transition ${
+              modeFilter === key ? "border-sky-600 bg-sky-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"
+            }`}
+            data-testid={`bm-mode-filter-${key}`}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
