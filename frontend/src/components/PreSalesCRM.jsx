@@ -488,7 +488,12 @@ const PreSalesAnalyticsPanel = ({ branches, branchGroup, sourceFilter }) => {
             const value = presalesAnalyticsValueFor(data?.[m.key], sourceFilter, branchGroup);
             return (
               <div key={m.key} className="rounded-xl border-2 border-slate-200 bg-white px-4 py-3.5" data-testid={`presales-analytics-metric-${m.key}`}>
-                <span className="block truncate text-[11px] font-bold uppercase tracking-wider text-slate-500">{m.label}</span>
+                {/* Wraps rather than truncating. Seven-up leaves a card too narrow for
+                    the longer names, and "TREATMENT PURCHASE …" on two of them gave no
+                    way to tell the count from the revenue. The two-line floor keeps the
+                    figures on one baseline across the row whether a label takes one line
+                    or two. */}
+                <span className="block min-h-[2.5em] text-[11px] font-bold uppercase leading-tight tracking-wider text-slate-500">{m.label}</span>
                 {/* Steps down at the width the row goes seven-up: a card is ~170px
                     there, and "₹5,54,752" at the larger size runs straight out of it. */}
                 <span className="mt-1 block truncate text-3xl font-extrabold text-slate-800 xl:text-2xl">{m.currency ? fmt(value) : value}</span>
