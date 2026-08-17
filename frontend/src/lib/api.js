@@ -261,8 +261,18 @@ export const getBranchFinance = async (params = {}) => {
   if (params.end_date) query.set("end_date", params.end_date);
   if (params.search) query.set("search", params.search);
   if (params.branch_id) query.set("branch_id", params.branch_id);
+  if (params.mode) query.set("mode", params.mode);
+  if (params.approved !== undefined && params.approved !== null) query.set("approved", params.approved);
   return (await api.get(`/branch/finance?${query.toString()}`)).data;
 };
+
+// ---- Finance: Approvals / Expenses / Profit (Accountant) ----
+export const approveTransaction = async (activityId) => (await api.post(`/finance/transactions/${activityId}/approve`)).data;
+export const unapproveTransaction = async (activityId) => (await api.post(`/finance/transactions/${activityId}/unapprove`)).data;
+export const getFinanceExpenses = async (params = {}) => (await api.get("/finance/expenses", { params })).data;
+export const createFinanceExpense = async (payload) => (await api.post("/finance/expenses", payload)).data;
+export const deleteFinanceExpense = async (expenseId) => (await api.delete(`/finance/expenses/${expenseId}`)).data;
+export const getFinanceProfit = async (params = {}) => (await api.get("/finance/profit", { params })).data;
 
 export const getRevenueOverview = async (params = {}) => (await api.get("/finance/revenue-overview", { params })).data;
 

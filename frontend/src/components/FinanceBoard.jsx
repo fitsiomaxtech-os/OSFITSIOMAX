@@ -20,7 +20,7 @@ const FEE_FILTERS = [
   { key: "package", label: "Package" },
 ];
 
-export const FinanceBoard = ({ branchId } = {}) => {
+export const FinanceBoard = ({ branchId, mode } = {}) => {
   const [data, setData] = useState({ summary: {}, transactions: [] });
   const [loading, setLoading] = useState(false);
   const [feeType, setFeeType] = useState("all");
@@ -37,11 +37,15 @@ export const FinanceBoard = ({ branchId } = {}) => {
       if (endDate) params.end_date = endDate;
       if (searchQuery.trim()) params.search = searchQuery.trim();
       if (branchId) params.branch_id = branchId;
+      // "online" | "offline" — the Accountant's Summary tab own vertical filter, passed
+      // straight through to the backend since a transaction carries no branch data of
+      // its own to filter by client-side.
+      if (mode) params.mode = mode;
       const result = await getBranchFinance(params);
       setData(result);
     } catch { /* silent */ }
     setLoading(false);
-  }, [feeType, startDate, endDate, searchQuery, branchId]);
+  }, [feeType, startDate, endDate, searchQuery, branchId, mode]);
 
   useEffect(() => { loadFinance(); }, [loadFinance]);
 

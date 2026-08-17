@@ -66,7 +66,7 @@ import { BranchWiseBoard } from "@/components/branch/BranchWiseBoard";
 import { FinanceWiseBoard } from "@/components/branch/FinanceWiseBoard";
 import { PackagesBoard } from "@/components/PackagesBoard";
 import { OperationsBoard } from "@/components/OperationsBoard";
-import { FinanceBoard } from "@/components/FinanceBoard";
+import { AccountantBoard } from "@/components/finance/AccountantBoard";
 
 const ROLE_META = {
   super_admin: { label: "Super Admin", icon: ShieldCheck },
@@ -1071,16 +1071,7 @@ export const CRMPage = ({ auth, onLogout }) => {
           <HumanResourceBoard user={auth.user} />
         )}
 
-        {showAccountantBoard && (
-          <div className="space-y-4" data-testid="accountant-board-root">
-            <div>
-              <h2 className="text-2xl font-bold text-slate-900">Finance</h2>
-              <p className="text-sm text-slate-500">Fees collected across every branch.</p>
-            </div>
-            <FinanceBoard />
-          </div>
-        )}
-
+        {showAccountantBoard && <AccountantBoard />}
 
         </div>
       </div>

@@ -251,6 +251,16 @@ export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
         <p className="py-10 text-center text-sm text-slate-400">Loading...</p>
       ) : subTab === "total_revenue" ? (
         <div className="space-y-4" data-testid="accountant-manage-total-revenue">
+          {/* Collected is every payment taken; Approved is the slice of it the
+              Accountant's own Approvals tab has signed off on — a review step, not a
+              second total, so the two are shown side by side rather than as competing
+              headline figures. */}
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-1 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-xs" data-testid="accountant-manage-approval-summary">
+            <span className="text-slate-500">Collected: <span className="font-semibold text-slate-800">{fmt(k.total_collected)}</span></span>
+            <span className="text-slate-500">Approved: <span className="font-semibold text-emerald-600">{fmt(k.total_approved)}</span></span>
+            <span className="text-slate-500">Pending Approval: <span className="font-semibold text-amber-600">{fmt(k.total_pending_approval)}</span></span>
+          </div>
+
           {/* Five across from lg, so the whole split reads on one line. Two-up on a phone
               leaves the odd one centred rather than stranded in a column of its own. */}
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">

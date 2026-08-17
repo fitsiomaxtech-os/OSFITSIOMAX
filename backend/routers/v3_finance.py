@@ -2,6 +2,7 @@ import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from typing import Optional
 
 from database import v3_col
@@ -14,6 +15,13 @@ from utils import generate_transaction_id
 def _now():
     return datetime.now(timezone.utc).isoformat()
 
+
+# Every default vertical is named "online_.../offline_..." — same helper as
+# _is_online_vertical in v3_dashboard.py, read off the same prefix.
+def _is_online_vertical(vertical) -> bool:
+    return str(vertical or "").startswith("online_")
+
+
 router = APIRouter(prefix="/api/v3")
 
 
@@ -24,6 +32,12 @@ async def get_branch_finance(
     end_date: Optional[str] = None,
     search: Optional[str] = None,
     branch_id: Optional[str] = None,
+    # "online" | "offline" — filtered off each lead's own vertical, same split as
+    # Branches & Verticals' own mode pills. Accountant's Summary tab.
+    mode: Optional[str] = None,
+    # Approvals tab: pass False to see what still needs review, True for what's
+    # cleared. Left unset for Summary, which shows every collection either way.
+    approved: Optional[bool] = None,
     user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "accountant")),
 ):
     # Branch Admin is always locked to their own branch. Super Admin and Accountant can
@@ -35,6 +49,8 @@ async def get_branch_finance(
             return {"summary": {}, "transactions": []}
 
     base_query = {"branch_id": branch_id} if branch_id else {}
+    if mode in ("online", "offline"):
+        base_query["vertical"] = {"$regex": f"^{mode}_"}
 
     consultation_query = {**base_query, "consultation_fee": {"$gt": 0}}
     package_query = {**base_query, "package_paid": {"$gt": 0}}
@@ -141,6 +157,10 @@ async def get_branch_finance(
             if q not in name and q not in phone:
                 continue
 
+        is_approved = bool(act.get("approved"))
+        if approved is not None and is_approved != approved:
+            continue
+
         transactions.append({
             "id": act.get("id", ""),
             # The readable id printed on the patient's receipt. Empty on collections taken
@@ -156,9 +176,189 @@ async def get_branch_finance(
             "collected_at": act.get("created_at", ""),
             "branch_stage": lead.get("branch_stage", ""),
             "branch_name": branch_name_map.get(lead.get("branch_id"), ""),
+            "vertical": lead.get("vertical", ""),
+            # Whether the Accountant has cleared this collection — set only via
+            # POST /finance/transactions/{id}/approve, never at collection time, so a
+            # branch's own book never reads as pre-approved before anyone reviewed it.
+            "approved": is_approved,
+            "approved_by": act.get("approved_by") or "",
+            "approved_at": act.get("approved_at") or "",
         })
 
+    approved_total = sum(t["amount"] for t in transactions if t["approved"])
+    pending_approval = [t for t in transactions if not t["approved"]]
+    summary["approved_total"] = approved_total
+    summary["pending_approval_total"] = sum(t["amount"] for t in pending_approval)
+    summary["pending_approval_count"] = len(pending_approval)
+
     return {"summary": summary, "transactions": transactions}
+
+
+@router.post("/finance/transactions/{activity_id}/approve")
+async def approve_transaction(
+    activity_id: str,
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant")),
+):
+    """Accountant's Approvals tab: marks one collected payment reviewed. Written onto
+    the lead_activity record itself (approved/approved_by/approved_at) rather than a
+    separate collection, since every reader of that collection — branch/finance
+    (get_branch_finance), revenue_overview, this endpoint — already keys off its id and
+    needs no second lookup to know a row's approval state. Branch Admin cannot approve:
+    approval exists to have someone other than whoever collected it sign off.
+    """
+    res = await v3_col("lead_activity").update_one(
+        {"id": activity_id},
+        {"$set": {"approved": True, "approved_by": user.full_name, "approved_at": _now()}},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    return {"message": "Approved"}
+
+
+@router.post("/finance/transactions/{activity_id}/unapprove")
+async def unapprove_transaction(
+    activity_id: str,
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant")),
+):
+    """Undoes an approval taken by mistake. Clears who/when rather than leaving the
+    previous approver's name on a row that is, again, unreviewed."""
+    res = await v3_col("lead_activity").update_one(
+        {"id": activity_id},
+        {"$set": {"approved": False}, "$unset": {"approved_by": "", "approved_at": ""}},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    return {"message": "Approval removed"}
+
+
+# ---------- Expenses (Accountant) ----------
+
+class ExpenseCreate(BaseModel):
+    category: str
+    amount: float
+    branch_id: Optional[str] = None  # blank = an org-wide expense, not one branch's own
+    note: Optional[str] = ""
+    expense_date: Optional[str] = None  # defaults to today if omitted
+
+
+@router.get("/finance/expenses")
+async def list_expenses(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    branch_id: Optional[str] = None,
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "accountant")),
+):
+    if is_branch_admin_role(user.role):
+        branch_id = user.branch_id
+    query = {}
+    if branch_id:
+        query["branch_id"] = branch_id
+    date_query = {}
+    if start_date:
+        date_query["$gte"] = start_date
+    if end_date:
+        date_query["$lte"] = end_date
+    if date_query:
+        query["expense_date"] = date_query
+    rows = await v3_col("expenses").find(query, {"_id": 0}).sort("expense_date", -1).to_list(2000)
+    branch_docs = await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1}).to_list(500)
+    branch_name_map = {b["id"]: b.get("branch_name", "") for b in branch_docs}
+    for r in rows:
+        r["branch_name"] = branch_name_map.get(r.get("branch_id"), "") if r.get("branch_id") else "All Branches"
+    return {"expenses": rows, "total": sum(r.get("amount", 0) for r in rows)}
+
+
+@router.post("/finance/expenses")
+async def create_expense(payload: ExpenseCreate, user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant"))):
+    if payload.amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be greater than zero")
+    if not payload.category.strip():
+        raise HTTPException(status_code=400, detail="Category is required")
+    doc = {
+        "id": str(uuid.uuid4()),
+        "category": payload.category.strip(),
+        "amount": payload.amount,
+        "branch_id": payload.branch_id or None,
+        "note": (payload.note or "").strip(),
+        "expense_date": payload.expense_date or _now()[:10],
+        "created_by": user.full_name,
+        "created_at": _now(),
+    }
+    await v3_col("expenses").insert_one(doc.copy())
+    return doc
+
+
+@router.delete("/finance/expenses/{expense_id}")
+async def delete_expense(expense_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin", "accountant"))):
+    res = await v3_col("expenses").delete_one({"id": expense_id})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Expense not found")
+    return {"message": "Expense deleted"}
+
+
+# ---------- Profit (Accountant) ----------
+
+@router.get("/finance/profit")
+async def finance_profit(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    branch_id: Optional[str] = None,
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "accountant")),
+):
+    """Revenue for the window (every collection — same total Accountant Manage's own
+    Total Revenue tile shows, not only approved ones: approval is a review step, not a
+    gate on whether money collected counts as revenue) minus Expenses logged against
+    the same window and branch."""
+    if is_branch_admin_role(user.role):
+        branch_id = user.branch_id
+
+    lead_query = {"branch_id": branch_id} if branch_id else {}
+    leads = await v3_col("leads").find(lead_query, {"_id": 0, "id": 1}).to_list(20000)
+    lead_ids = [l["id"] for l in leads]
+
+    activity_query = {"action": {"$in": REVENUE_ACTIONS}}
+    if lead_ids:
+        activity_query["lead_id"] = {"$in": lead_ids}
+    date_query = {}
+    if start_date:
+        date_query["$gte"] = start_date
+    if end_date:
+        date_query["$lte"] = end_date + "T23:59:59"
+    if date_query:
+        activity_query["created_at"] = date_query
+    activities = await v3_col("lead_activity").find(activity_query, {"_id": 0, "details": 1}).to_list(20000)
+    revenue = sum(_parse_rs_amount(a.get("details", "")) for a in activities)
+
+    store_query = {"kind": "sale"}
+    if branch_id:
+        store_query["branch_id"] = branch_id
+    if date_query:
+        store_query["created_at"] = date_query
+    store_sales = await v3_col("inventory_movements").find(store_query, {"_id": 0, "amount": 1}).to_list(5000)
+    revenue += sum(float(s.get("amount") or 0) for s in store_sales)
+
+    expense_query = {"branch_id": branch_id} if branch_id else {}
+    expense_date_query = {}
+    if start_date:
+        expense_date_query["$gte"] = start_date
+    if end_date:
+        expense_date_query["$lte"] = end_date
+    if expense_date_query:
+        expense_query["expense_date"] = expense_date_query
+    expenses = await v3_col("expenses").find(expense_query, {"_id": 0, "amount": 1, "category": 1}).to_list(2000)
+    total_expense = sum(e.get("amount", 0) for e in expenses)
+
+    by_category = {}
+    for e in expenses:
+        cat = e.get("category") or "Uncategorized"
+        by_category[cat] = by_category.get(cat, 0) + (e.get("amount") or 0)
+
+    return {
+        "revenue": revenue,
+        "expense": total_expense,
+        "profit": revenue - total_expense,
+        "expense_by_category": [{"category": k, "amount": v} for k, v in sorted(by_category.items(), key=lambda kv: -kv[1])],
+    }
 
 
 # ---------- AC Overview > Total Revenue (Super Admin / Accountant) ----------
@@ -458,6 +658,7 @@ async def revenue_overview(
         # than redefining it. discount_amount is negative when more than the listed fee was
         # collected; it is passed through as-is and left to the caller to read.
         discount_amount = act.get("discount_amount")
+        is_approved = bool(act.get("approved"))
         transactions.append({
             "id": act.get("id", ""),
             "transaction_id": act.get("transaction_id") or "",
@@ -484,6 +685,11 @@ async def revenue_overview(
             "session_paid": session.get("paid"),
             "session_due": session.get("due"),
             "session_status": session.get("status"),
+            # Set only via POST /finance/transactions/{id}/approve — see get_branch_finance
+            # for why this lives on the activity record itself rather than a second table.
+            "approved": is_approved,
+            "approved_by": act.get("approved_by") or "",
+            "approved_at": act.get("approved_at") or "",
         })
 
     # Fitsiomax Store counter sales — tablets, supplements and equipment handed over the
@@ -545,6 +751,12 @@ async def revenue_overview(
             "phone": "",
             "payment_mode": mode,
             "client_balance": 0.0,
+            # Store sales aren't reviewed here — see approve_transaction's docstring —
+            # so this stays permanently false rather than left out, keeping every
+            # transaction dict in this list the same shape.
+            "approved": False,
+            "approved_by": "",
+            "approved_at": "",
         })
 
     total_collected = consultation_total + session_total + diet_total + store_total
@@ -616,12 +828,20 @@ async def revenue_overview(
     outstanding_clients.sort(key=lambda r: -r["balance"])
     payment_schedule.sort(key=lambda r: r["due_date"])
 
+    # Off the full list, not the 500-row slice returned below — a branch with more than
+    # 500 collections in the window would otherwise under-count its own approved total.
+    total_approved = sum(t["gross"] for t in transactions if t["approved"])
+
     return {
         "kpis": {
             "total_collected": total_collected,
             "pending_count": pending_count,
             "refunds": 0.0,  # not tracked yet — no refund flow exists in the system
             "net_revenue": total_collected,
+            # Reviewed via the Accountant's own Approvals tab — see approve_transaction.
+            # Store sales are never approvable, so this can never reach total_collected.
+            "total_approved": total_approved,
+            "total_pending_approval": total_collected - total_approved,
         },
         "breakdown": {
             "consultation_revenue": consultation_total,
