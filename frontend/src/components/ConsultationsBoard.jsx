@@ -438,9 +438,52 @@ const consultationDiscount = (l) => {
 // amount so nothing is squeezed to make room. Both sets are written out literally because
 // Tailwind reads the source for class names and would compile nothing from a template.
 const COLS_WITH_DISCOUNT = {
-  sno: "w-[4%]", patient: "w-[11%]", pno: "w-[9%]", phone: "w-[11%]", email: "w-[11%]",
-  stage: "w-[12%]", expert: "w-[10%]", discount: "w-[8%]", appt: "w-[9%]", updated: "w-[9%]", action: "w-[6%]",
+  sno: "w-[4%]", patient: "w-[10%]", pno: "w-[8%]", phone: "w-[10%]", email: "w-[10%]",
+  stage: "w-[11%]", expert: "w-[9%]", collected: "w-[9%]", discount: "w-[7%]",
+  appt: "w-[9%]", updated: "w-[8%]", action: "w-[5%]",
 };
+
+/**
+ * The three fees a patient can pay, each collected at its own point and stored separately.
+ *
+ * Fee Collected holds anyone who has paid anything, which made it one list answering three
+ * different questions — "who paid to be seen", "who bought treatment", "who took a diet
+ * plan" — and the branch could not read any of them off it.
+ *
+ * Consultation is first and is the widest: it is the fee that puts a patient in this stage
+ * at all, so nearly everyone here has one. The other two are what they went on to buy.
+ *
+ * `paid` reads the amount rather than a flag because there is no flag — the amount being
+ * present is what "collected" means, and 0 is not a collection.
+ */
+const FEE_TABS = [
+  {
+    key: "consultation",
+    label: "Consultation",
+    tone: "#0284c7",
+    paid: (l) => Number(l.package_paid) || 0,
+    item: (l) => l.package_name || l.consultation_item_name || "",
+    mode: (l) => l.package_payment_mode || "",
+  },
+  {
+    key: "treatment",
+    label: "Treatment",
+    tone: "#059669",
+    paid: (l) => Number(l.treatment_fee_paid) || 0,
+    item: (l) => l.session_package_name || "",
+    mode: (l) => l.treatment_fee_payment_mode || "",
+  },
+  {
+    key: "diet",
+    label: "Diet",
+    tone: "#d97706",
+    paid: (l) => Number(l.diet_fee_paid) || 0,
+    item: (l) => l.diet_package_name || "",
+    mode: (l) => l.diet_fee_payment_mode || "",
+  },
+];
+
+const rupees = (n) => `Rs.${Math.round(Number(n) || 0).toLocaleString("en-IN")}`;
 const COLS_PLAIN = {
   sno: "w-[4%]", patient: "w-[13%]", pno: "w-[10%]", phone: "w-[12%]", email: "w-[13%]",
   stage: "w-[13%]", expert: "w-[11%]", discount: "", appt: "w-[9%]", updated: "w-[9%]", action: "w-[6%]",
@@ -726,13 +769,40 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     return lead[stageField] === stageName;
   }, [isConsultant, stageField]);
 
-  const filtered = useMemo(() => {
+  const inStage = useMemo(() => {
     if (!stageFilter) return dateAndSearchFiltered;
     return dateAndSearchFiltered.filter((l) => matchesStage(l, stageFilter));
   }, [dateAndSearchFiltered, stageFilter, matchesStage]);
 
   const showDiscountColumn = stageFilter === "Fee Collected";
   const cols = showDiscountColumn ? COLS_WITH_DISCOUNT : COLS_PLAIN;
+
+  // Which of the three fees the Fee Collected list is showing. Consultation first: it is
+  // the fee that puts a patient in this stage, so it is the one that answers "everyone".
+  const [feeTab, setFeeTab] = useState("consultation");
+  const activeFee = FEE_TABS.find((t) => t.key === feeTab) || FEE_TABS[0];
+
+  // Counted off the stage's own rows so each tab says how many are behind it before it is
+  // opened — an empty Diet tab should read as empty from the outside, not on arrival.
+  const feeCounts = useMemo(() => {
+    if (!showDiscountColumn) return {};
+    const out = {};
+    for (const t of FEE_TABS) out[t.key] = inStage.filter((l) => t.paid(l) > 0).length;
+    return out;
+  }, [inStage, showDiscountColumn]);
+
+  const feeTotals = useMemo(() => {
+    if (!showDiscountColumn) return {};
+    const out = {};
+    for (const t of FEE_TABS) out[t.key] = inStage.reduce((sum, l) => sum + t.paid(l), 0);
+    return out;
+  }, [inStage, showDiscountColumn]);
+
+  // Outside Fee Collected the tabs do not exist, so the stage's rows pass through whole.
+  const filtered = useMemo(
+    () => (showDiscountColumn ? inStage.filter((l) => activeFee.paid(l) > 0) : inStage),
+    [inStage, showDiscountColumn, activeFee],
+  );
 
   // Stage counts for the head bar — derived client-side from the Date Filter/search-only
   // list so they always match whichever pipeline (branch vs. head physio) is active for
@@ -1970,6 +2040,42 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
         </Button>
       </div>
 
+      {/* Which fee the Fee Collected list is showing. Only here: this stage is the one
+          place where a patient may have paid up to three separate things, and everywhere
+          else there is nothing yet to split. Each tab carries its own count and total, so
+          the three questions the branch actually asks of this stage — what came in from
+          consultations, from treatment, from diet — are answered without opening a row.
+
+          Above both the phone cards and the desk table, because it governs both: it filters
+          `filtered`, which each of them renders. */}
+      {showDiscountColumn && (
+        <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-slate-200 bg-white p-1" data-testid="cons-fee-tabs">
+          {FEE_TABS.map((t) => {
+            const on = t.key === activeFee.key;
+            return (
+              <button
+                key={t.key}
+                type="button"
+                onClick={() => setFeeTab(t.key)}
+                className={`flex-1 rounded-md px-3 py-2 text-left transition sm:flex-none ${on ? "text-white" : "text-slate-600 hover:bg-slate-50"}`}
+                style={on ? { background: t.tone } : undefined}
+                data-testid={`cons-fee-tab-${t.key}`}
+              >
+                <span className="block text-xs font-semibold">
+                  {t.label}
+                  <span className={`ml-1.5 rounded px-1.5 py-px text-[10px] font-bold ${on ? "bg-white/25" : "bg-slate-100 text-slate-500"}`}>
+                    {feeCounts[t.key] ?? 0}
+                  </span>
+                </span>
+                <span className={`block text-[11px] font-bold ${on ? "text-white/90" : "text-slate-400"}`}>
+                  {rupees(feeTotals[t.key] ?? 0)}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {mobileCards && (
         <div className="space-y-2 sm:hidden" data-testid="cons-mobile-cards">
           {filtered.length === 0 ? (
@@ -2073,6 +2179,9 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 <th className={`${cols.email} px-4 py-2 text-left align-middle`}>Email</th>
                 <th className={`${cols.stage} px-4 py-2 text-left align-middle`}>{isConsultant ? "Live Stage" : "Consultation Stage"}</th>
                 <th className={`${cols.expert} px-4 py-2 text-left align-middle`}>Assigned Expert</th>
+                {/* Named for the tab rather than a bare "Collected": three tabs showing a
+                    column of the same name is three lists that look identical. */}
+                {showDiscountColumn && <th className={`${cols.collected} px-3 py-2 text-left align-middle`}>{activeFee.label} Fee</th>}
                 {showDiscountColumn && <th className={`${cols.discount} px-3 py-2 text-left align-middle`}>Discount Applied</th>}
                 <th className={`${cols.appt} px-3 py-2 text-left align-middle`}>Appointment</th>
                 <th className={`${cols.updated} px-3 py-2 text-left align-middle`}>Updated</th>
@@ -2099,6 +2208,22 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       </span>
                     </td>
                     <td className="truncate px-4 py-3 align-middle text-slate-600" title={l.assigned_physio_name}>{l.assigned_physio_name || "—"}</td>
+                    {showDiscountColumn && (
+                      // The amount this row contributes to the tab's total, with what it
+                      // bought under it — a column of figures with no idea what was sold
+                      // is a number nobody can check.
+                      <td className="whitespace-nowrap px-3 py-3 align-middle text-xs" data-testid={`cons-fee-${activeFee.key}-${l.id}`}>
+                        <span className="font-semibold" style={{ color: activeFee.tone }}>{rupees(activeFee.paid(l))}</span>
+                        {activeFee.item(l) && (
+                          <span className="block max-w-full truncate text-[10px] text-slate-400" title={activeFee.item(l)}>
+                            {activeFee.item(l)}
+                          </span>
+                        )}
+                        {activeFee.mode(l) && (
+                          <span className="block text-[10px] uppercase tracking-wide text-slate-300">{activeFee.mode(l)}</span>
+                        )}
+                      </td>
+                    )}
                     {showDiscountColumn && (() => {
                       const d = consultationDiscount(l);
                       return (
@@ -2148,8 +2273,15 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 );
               })}
               {filtered.length === 0 && (
-                <tr><td colSpan="10" className="px-4 py-8 text-center text-sm text-slate-400">
-                  {loading ? "Loading…" : "No leads in consultations yet. Book an appointment with a CONSULTANT to populate this list."}
+                <tr><td colSpan={showDiscountColumn ? 12 : 10} className="px-4 py-8 text-center text-sm text-slate-400">
+                  {loading
+                    ? "Loading…"
+                    // An empty tab is not an empty stage: saying "no leads in consultations"
+                    // under a Diet tab reads as the board being broken rather than as nobody
+                    // having bought a diet plan.
+                    : showDiscountColumn
+                      ? `No ${activeFee.label.toLowerCase()} fee collected${stageFilter ? "" : " yet"}.`
+                      : "No leads in consultations yet. Book an appointment with a CONSULTANT to populate this list."}
                 </td></tr>
               )}
             </tbody>
