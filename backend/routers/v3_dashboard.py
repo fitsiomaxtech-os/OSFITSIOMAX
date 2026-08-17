@@ -507,9 +507,15 @@ async def v3_dashboard_overview(
         bid = l.get("branch_id")
         add_to_bucket(leads_bucket, bid, l.get("vertical") or branch_vertical(bid))
 
+    # A lead that actually has an appointment, not merely one whose appointment_date falls
+    # in range — with no dates the range clause is empty, and this counted every lead in the
+    # system as booked. The date filter was doing the work of the existence check, which
+    # held right up until a range with no dates in it was asked for.
     appt_bucket = new_bucket()
+    appt_query = {"appointment_date": {"$nin": [None, ""]}}
+    appt_query.update(_date_range_query("appointment_date", start_date, end_date))
     appt_rows = await v3_col("leads").find(
-        _date_range_query("appointment_date", start_date, end_date), {"_id": 0, "branch_id": 1, "vertical": 1}
+        appt_query, {"_id": 0, "branch_id": 1, "vertical": 1}
     ).to_list(50000)
     for l in appt_rows:
         bid = l.get("branch_id")
@@ -543,10 +549,15 @@ async def v3_dashboard_overview(
     consultation_revenue_bucket = new_bucket()
     session_revenue_bucket = new_bucket()
     # How many patients bought a treatment package, against session_revenue_bucket's how
-    # much they paid for them. Counted off the same payments, so the pair can never
-    # disagree about what a purchase was — and a count nothing reported until now: the
-    # session figures were all money and slots, with no "how many signed up".
+    # much they paid for them — a count nothing reported until now: the session figures
+    # were all money and slots, with no "how many signed up".
+    #
+    # One per patient, not one per payment. A package bought on a payment schedule logs a
+    # treatment_fee_collected for every installment (see mark_installment_paid), so
+    # counting the payments made a patient paying in three parts look like three
+    # purchases — which is how this managed to exceed the consultation count.
     treatment_purchase_bucket = new_bucket()
+    treatment_purchase_leads: set = set()
     # The same Consultation / Session split Accountant Manage reports, so the Dashboard's
     # headline figures and the Collections boards can't disagree about what a payment was
     # for. `action` and `created_at` have to be projected for this — the branch buckets
@@ -593,7 +604,10 @@ async def v3_dashboard_overview(
             add_to_bucket(consultation_revenue_bucket, bid, vertical, amount)
         elif category == "session":
             add_to_bucket(session_revenue_bucket, bid, vertical, amount)
-            add_to_bucket(treatment_purchase_bucket, bid, vertical)
+            purchase_lead = a.get("lead_id")
+            if purchase_lead and purchase_lead not in treatment_purchase_leads:
+                treatment_purchase_leads.add(purchase_lead)
+                add_to_bucket(treatment_purchase_bucket, bid, vertical)
         if category == "session" and str(a.get("created_at", ""))[:10] in consult_days.get(a.get("lead_id"), ()):
             revenue_split["spot_joining"] += amount
         # A consultation held, not just booked — counted off the same Consultation Fee
