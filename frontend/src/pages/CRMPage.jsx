@@ -62,6 +62,7 @@ import { HRBoard } from "@/components/hr/HRBoard";
 import { HumanResourceBoard } from "@/components/hr/HumanResourceBoard";
 import { BranchManagementBoard } from "@/components/branch/BranchManagementBoard";
 import { BranchWiseBoard } from "@/components/branch/BranchWiseBoard";
+import { FinanceWiseBoard } from "@/components/branch/FinanceWiseBoard";
 import { PackagesBoard } from "@/components/PackagesBoard";
 import { FinanceBoard } from "@/components/FinanceBoard";
 
@@ -171,6 +172,7 @@ const SUPER_ADMIN_TABS = [
   { key: "branches", label: "Branches & Verticals", icon: Building2 },
   { key: "hr", label: "HR Admin", icon: Users },
   { key: "branch_wise", label: "Branch Wise", icon: Network },
+  { key: "finance", label: "Finance", icon: BadgeIndianRupee },
   { key: "presales", label: "Sales Master View", icon: Headphones },
   // Treatment moved inside Services and Products (as its own sub-tab, next to Vending
   // Machine) rather than sitting here as a peer of the catalogue that holds it.
@@ -988,6 +990,10 @@ export const CRMPage = ({ auth, onLogout }) => {
 
         {showSuperAdminBoard && superAdminView === "branch_wise" && (
           <BranchWiseBoard branches={branches} />
+        )}
+
+        {showSuperAdminBoard && superAdminView === "finance" && (
+          <FinanceWiseBoard branches={branches} />
         )}
 
         {showSuperAdminBoard && superAdminView === "packages" && (
