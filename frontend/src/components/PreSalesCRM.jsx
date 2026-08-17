@@ -723,6 +723,9 @@ export const PreSalesCRM = ({
   // is the only one, so the two can never sit on screen disagreeing about the current page.
   masterView: masterViewProp,
   onMasterViewChange,
+  // Operations' Pre Sales tab: pinned to one rep, on top of whatever branchId already
+  // narrows to. Nothing else passes this, so every existing caller is unaffected.
+  assignedUserId = null,
 }) => {
   const [stages, setStages] = useState([]);
   const [leads, setLeads] = useState([]);
@@ -823,6 +826,9 @@ export const PreSalesCRM = ({
       );
       rows = rows.filter((l) => groupBranchIds.has(l.branch_id || ""));
     }
+    if (assignedUserId) {
+      rows = rows.filter((l) => l.assigned_user_id === assignedUserId);
+    }
     // The same complement load() splits the two boards on, applied here as a filter rather
     // than at the source: this view is meant to hold both halves, and narrowing it is a
     // question the user asks of it, not the shape of what it fetched.
@@ -841,7 +847,7 @@ export const PreSalesCRM = ({
       });
     }
     return rows;
-  }, [leads, sourceFilter, dateFilter, isSuperAdminMasterView, branchGroup, branches, showHandledByFilter, handledByFilter]);
+  }, [leads, sourceFilter, dateFilter, isSuperAdminMasterView, branchGroup, branches, showHandledByFilter, handledByFilter, assignedUserId]);
 
   const stageCounts = useMemo(() => {
     const map = { All: dateSourceFiltered.length };

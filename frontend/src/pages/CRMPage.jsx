@@ -23,6 +23,7 @@ import {
   UserPlus,
   UserRound,
   Users,
+  Workflow,
   X,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -64,6 +65,7 @@ import { BranchManagementBoard } from "@/components/branch/BranchManagementBoard
 import { BranchWiseBoard } from "@/components/branch/BranchWiseBoard";
 import { FinanceWiseBoard } from "@/components/branch/FinanceWiseBoard";
 import { PackagesBoard } from "@/components/PackagesBoard";
+import { OperationsBoard } from "@/components/OperationsBoard";
 import { FinanceBoard } from "@/components/FinanceBoard";
 
 const ROLE_META = {
@@ -172,6 +174,10 @@ const SUPER_ADMIN_TABS = [
   { key: "branches", label: "Branches & Verticals", icon: Building2 },
   { key: "hr", label: "HR Admin", icon: Users },
   { key: "branch_wise", label: "Branch Wise", icon: Network },
+  // Every team, one designation at a time — Pre Sales/Branch/Consultant/Physio/
+  // Nutritionist/Client each reached the way Branch Control already reaches a branch's
+  // own board, generalised past just branches and physios.
+  { key: "operations", label: "Operations", icon: Workflow },
   { key: "finance", label: "Finance", icon: BadgeIndianRupee },
   { key: "presales", label: "Sales Master View", icon: Headphones },
   // Treatment moved inside Services and Products (as its own sub-tab, next to Vending
@@ -990,6 +996,10 @@ export const CRMPage = ({ auth, onLogout }) => {
 
         {showSuperAdminBoard && superAdminView === "branch_wise" && (
           <BranchWiseBoard branches={branches} />
+        )}
+
+        {showSuperAdminBoard && superAdminView === "operations" && (
+          <OperationsBoard actingUser={auth.user} branches={branches} />
         )}
 
         {showSuperAdminBoard && superAdminView === "finance" && (
