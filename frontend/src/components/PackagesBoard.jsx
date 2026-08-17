@@ -239,8 +239,9 @@ const CreateConsultationModal = ({ item, onClose, onSaved, kind = "consultation"
   );
 };
 
-const WEEKS_OPTIONS = [1, 2, 3, 4, 5];
-const SESSIONS_PER_WEEK = 7;
+// A package's session count doesn't vary by Online vs Offline, only the per-session
+// price does — no dropdown to configure it, it's fixed for every package.
+const FIXED_SESSIONS = 7;
 
 const CreateSessionPackageModal = ({ item, onClose, onSaved }) => {
   const isEdit = Boolean(item);
@@ -248,10 +249,6 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved }) => {
   const [description, setDescription] = useState(item?.description || "");
   const [priceOnline, setPriceOnline] = useState(item?.price_online ?? DEFAULT_PRICE_ONLINE);
   const [priceOffline, setPriceOffline] = useState(item?.price_offline ?? DEFAULT_PRICE_OFFLINE);
-  // Sessions always come from Weeks x 7 — a package's session count doesn't vary
-  // by Online vs Offline, only the per-session price does. Fall back to deriving
-  // Weeks from an existing item's session count when editing older data.
-  const [weeks, setWeeks] = useState(item?.sessions_online ? Math.max(1, Math.round(item.sessions_online / SESSIONS_PER_WEEK)) : 1);
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(item?.image_url || null);
   const [saving, setSaving] = useState(false);
@@ -264,7 +261,7 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved }) => {
     setImagePreview(URL.createObjectURL(file));
   };
 
-  const sessions = Number(weeks) * SESSIONS_PER_WEEK;
+  const sessions = FIXED_SESSIONS;
   const totalOnline = (Number(priceOnline) || 0) * sessions;
   const totalOffline = (Number(priceOffline) || 0) * sessions;
 
@@ -363,18 +360,6 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved }) => {
 
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600">Online &amp; Offline Setup</label>
-            <div className="mb-2">
-              <label className="mb-0.5 block text-[10px] font-semibold text-slate-500">Number of Weeks</label>
-              <select
-                value={weeks}
-                onChange={(e) => setWeeks(Number(e.target.value))}
-                className="h-8 w-full rounded-md border border-slate-200 px-2 text-sm"
-                data-testid="session-create-weeks"
-              >
-                {WEEKS_OPTIONS.map((w) => <option key={w} value={w}>{w} Week{w > 1 ? "s" : ""}</option>)}
-              </select>
-              <p className="mt-1 text-[10px] text-slate-400">{sessions} sessions ({weeks} week{weeks > 1 ? "s" : ""} × {SESSIONS_PER_WEEK} sessions/week)</p>
-            </div>
             <div className="grid grid-cols-2 gap-2" data-testid="session-create-mode-boxes">
               <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 p-3">
                 <p className="mb-2 flex items-center gap-1 text-xs font-bold text-emerald-800"><Wifi className="h-3 w-3" />Online Mode</p>
