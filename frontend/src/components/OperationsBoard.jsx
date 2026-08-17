@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Building2, Headphones, Stethoscope, Activity, Salad, UserRound, ChevronDown, ChevronUp, Search } from "lucide-react";
+import { Building2, Headphones, Stethoscope, Activity, Salad, UserRound, ChevronDown, ChevronUp, Search, Users } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { getDoctors, bmPreSalesMembers, getLeads } from "@/lib/api";
 import { BranchAdminBoard } from "@/components/BranchAdminBoard";
 import { HeadPhysioBoard } from "@/components/HeadPhysioBoard";
@@ -78,14 +79,28 @@ const EmptyPrompt = ({ text, testid }) => (
 
 // ---------- Branch tab: pick a branch, see that branch admin's full board ----------
 
-const OperationsBranchTab = ({ branches }) => {
+const OperationsBranchTab = ({ branches, onNavigateToBranchManager }) => {
   const [selectedId, setSelectedId] = useState("");
   useEffect(() => {
     if (!selectedId && branches && branches.length) setSelectedId(findDefaultBranchId(branches));
   }, [branches, selectedId]);
   return (
     <div className="space-y-4" data-testid="ops-branch-tab">
-      <OperationsBranchPicker branches={branches} selectedId={selectedId} onSelect={setSelectedId} testid="ops-branch-picker" />
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <OperationsBranchPicker branches={branches} selectedId={selectedId} onSelect={setSelectedId} testid="ops-branch-picker" />
+        {/* Reverse of MANAGER's "Go to Operations" button — jumps back to Branches &
+            Verticals > MANAGER, the list this branch's admin is managed from. Only once a
+            branch is actually picked; before that there's no admin record to jump to. */}
+        {selectedId && onNavigateToBranchManager && (
+          <Button
+            className="h-9 shrink-0 gap-2 bg-indigo-600 px-3 text-white hover:bg-indigo-700"
+            onClick={onNavigateToBranchManager}
+            data-testid="ops-branch-goto-manager-btn"
+          >
+            <Users className="h-4 w-4" /> Branch Manager
+          </Button>
+        )}
+      </div>
       {selectedId ? (
         <BranchAdminBoard key={selectedId} branchId={selectedId} embedded />
       ) : (
@@ -365,7 +380,7 @@ const OperationsClientTab = ({ branches }) => {
  * scoped rather than org-wide) an employee, and see exactly what they'd see, with full
  * control, no separate login needed.
  */
-export const OperationsBoard = ({ actingUser, branches = [], initialTab = "pre_sales" }) => {
+export const OperationsBoard = ({ actingUser, branches = [], initialTab = "pre_sales", onNavigateToBranchManager }) => {
   const [tab, setTab] = useState(initialTab);
 
   return (
@@ -389,7 +404,7 @@ export const OperationsBoard = ({ actingUser, branches = [], initialTab = "pre_s
       </div>
 
       {tab === "pre_sales" && <OperationsPreSalesTab branches={branches} actingUser={actingUser} />}
-      {tab === "branch" && <OperationsBranchTab branches={branches} />}
+      {tab === "branch" && <OperationsBranchTab branches={branches} onNavigateToBranchManager={onNavigateToBranchManager} />}
       {tab === "consultant" && <OperationsConsultantTab branches={branches} actingUser={actingUser} />}
       {tab === "physio" && (
         <OperationsPersonTab

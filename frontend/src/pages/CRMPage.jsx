@@ -376,6 +376,13 @@ export const CRMPage = ({ auth, onLogout }) => {
     setOperationsInitialTab("branch");
     setSuperAdminView("operations");
   };
+  // The reverse jump: Operations > Branch's own "Branch Manager" button lands back on
+  // Branches & Verticals' MANAGER tab, same pair as the one above just run the other way.
+  const [branchesInitialTab, setBranchesInitialTab] = useState("overview");
+  const goToBranchesManager = () => {
+    setBranchesInitialTab("creation");
+    setSuperAdminView("branches");
+  };
 
   const safeCall = async (fn, fallback) => {
     try {
@@ -1003,7 +1010,7 @@ export const CRMPage = ({ auth, onLogout }) => {
         )}
 
         {showSuperAdminBoard && superAdminView === "branches" && (
-          <BranchManagementBoard actingUser={auth.user} onNavigateToOperations={goToOperationsBranch} />
+          <BranchManagementBoard actingUser={auth.user} onNavigateToOperations={goToOperationsBranch} initialTab={branchesInitialTab} />
         )}
 
         {showSuperAdminBoard && superAdminView === "branch_wise" && (
@@ -1011,7 +1018,7 @@ export const CRMPage = ({ auth, onLogout }) => {
         )}
 
         {showSuperAdminBoard && superAdminView === "operations" && (
-          <OperationsBoard actingUser={auth.user} branches={branches} initialTab={operationsInitialTab} />
+          <OperationsBoard actingUser={auth.user} branches={branches} initialTab={operationsInitialTab} onNavigateToBranchManager={goToBranchesManager} />
         )}
 
         {showSuperAdminBoard && superAdminView === "finance" && (

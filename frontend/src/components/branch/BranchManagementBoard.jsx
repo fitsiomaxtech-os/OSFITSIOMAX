@@ -33,8 +33,8 @@ const TABS = [
   { key: "branch_control", label: "Branch Control", icon: LayoutDashboard },
 ];
 
-export const BranchManagementBoard = ({ actingUser, onNavigateToOperations } = {}) => {
-  const [tab, setTab] = useState("overview");
+export const BranchManagementBoard = ({ actingUser, onNavigateToOperations, initialTab = "overview" } = {}) => {
+  const [tab, setTab] = useState(initialTab);
   const [drilledBranchId, setDrilledBranchId] = useState(null);
   // A callback ref, not useRef: the portal has to re-render once the node exists, and a
   // ref object mutating in place never triggers that.
