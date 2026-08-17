@@ -99,6 +99,7 @@ export const deleteLead = async (leadId) => (await api.delete(`/leads/${leadId}`
 export const bulkDeleteLeads = async (leadIds, confirm) => (await api.post("/branch/leads/bulk-delete", { lead_ids: leadIds, confirm })).data;
 export const getPortalAccountStatus = async (leadId) => (await api.get(`/leads/${leadId}/portal-account`)).data;
 export const createOrResetPortalAccount = async (leadId, payload) => (await api.post(`/leads/${leadId}/portal-account`, payload)).data;
+export const getClientPortalPreview = async (leadId) => (await api.get(`/leads/${leadId}/portal-preview`)).data;
 
 export const listTestimonials = async () => (await api.get("/testimonials/manage")).data;
 export const addTestimonial = async (payload) => (await api.post("/testimonials", payload)).data;

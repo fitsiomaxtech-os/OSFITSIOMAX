@@ -6,7 +6,7 @@ import { HeadPhysioBoard } from "@/components/HeadPhysioBoard";
 import { PhysioBoard } from "@/components/PhysioBoard";
 import { DietBoard } from "@/components/DietBoard";
 import { PreSalesCRM } from "@/components/PreSalesCRM";
-import { ClientHistoryModal } from "@/components/branch/ClientHistoryModal";
+import { ClientPortalPreview } from "@/components/ClientPortalPreview";
 
 // Same helper BranchManagementBoard.jsx, PreSalesCRM.jsx, MarketingBoard.jsx and
 // BranchStoreBoard.jsx each already carry their own copy of.
@@ -288,13 +288,9 @@ const OperationsClientTab = ({ branches }) => {
       {!selectedBranchId ? (
         <EmptyPrompt text="Pick a branch above" testid="ops-client-empty-branch" />
       ) : !selectedClientId ? (
-        <EmptyPrompt text="Pick a client above to see their history" testid="ops-client-empty-person" />
+        <EmptyPrompt text="Pick a client above to see their portal" testid="ops-client-empty-person" />
       ) : (
-        <ClientHistoryModal
-          leadId={selectedClientId}
-          onClose={() => setSelectedClientId("")}
-          onChanged={() => {}}
-        />
+        <ClientPortalPreview key={selectedClientId} leadId={selectedClientId} />
       )}
     </div>
   );
@@ -308,8 +304,8 @@ const OperationsClientTab = ({ branches }) => {
  * scoped rather than org-wide) an employee, and see exactly what they'd see, with full
  * control, no separate login needed.
  */
-export const OperationsBoard = ({ actingUser, branches = [] }) => {
-  const [tab, setTab] = useState("pre_sales");
+export const OperationsBoard = ({ actingUser, branches = [], initialTab = "pre_sales" }) => {
+  const [tab, setTab] = useState(initialTab);
 
   return (
     <div className="space-y-4" data-testid="operations-board">

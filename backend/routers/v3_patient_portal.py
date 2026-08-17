@@ -214,15 +214,12 @@ async def patient_portal_logout(authorization: str = Header(...)):
     return {"message": "Logged out"}
 
 
-@router.get("/patient-portal/me")
-async def patient_portal_me(lead_id: str = Depends(_current_patient_lead_id)):
-    """Backs all four Client Portal tabs (Sessions / Treatment / Payment History /
-    Profile) in one call — this is the patient's own read-only mirror of what the
-    Physio's Patient Detail page already shows, minus anything staff-only (no head
-    physio contact info; that's deliberately not returned here at all)."""
-    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
-    if not lead:
-        raise HTTPException(status_code=404, detail="Patient not found")
+async def _build_portal_payload(lead: dict) -> dict:
+    """Everything all four Client Portal tabs (Sessions / Treatment / Payment History /
+    Profile) render from — shared by the patient's own `/patient-portal/me` and staff's
+    `/leads/{lead_id}/portal-preview`, so a Super Admin looking at a patient's Operations
+    board sees exactly what that patient sees, not a second hand-maintained copy of it."""
+    lead_id = lead["id"]
 
     # `sessions` is physio treatment days only — diet check-ins live in their own
     # collection, so nothing here can miscount one as the other.
@@ -356,6 +353,29 @@ async def patient_portal_me(lead_id: str = Depends(_current_patient_lead_id)):
             "diet_payment_mode": lead.get("diet_fee_payment_mode"),
         },
     }
+
+
+@router.get("/patient-portal/me")
+async def patient_portal_me(lead_id: str = Depends(_current_patient_lead_id)):
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    return await _build_portal_payload(lead)
+
+
+# --------------------------------------------------------------- Staff: preview a patient's
+# --------------------------------------------------------------- own portal, without logging
+# --------------------------------------------------------------- in as them
+
+@router.get("/leads/{lead_id}/portal-preview")
+async def staff_view_patient_portal(lead_id: str, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
+    """Operations' Client tab reaching a patient's own board the same way it already
+    reaches a Physio's or Pre Sales rep's — no separate portal login needed, and (unlike
+    the patient's own session) no password or account is involved at all."""
+    lead = await _lead_or_404(lead_id)
+    if is_branch_admin_role(user.role) and lead.get("branch_id") != user.branch_id:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    return await _build_portal_payload(lead)
 
 
 # ------------------------------------------------------------------ Patient: own documents

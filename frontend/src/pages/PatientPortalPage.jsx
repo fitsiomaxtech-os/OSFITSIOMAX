@@ -231,7 +231,10 @@ function DoctorMiniCard({ physioName, headPhysioName }) {
   );
 }
 
-function SessionsTab({ data }) {
+// Exported (Sessions/Treatment/Payment only — pure renders off `data`, nothing
+// auth-bound) so Operations' Client tab can show a staff-side preview of a patient's
+// own portal without duplicating three tabs' worth of markup.
+export function SessionsTab({ data }) {
   const completedPct = data.total_sessions > 0 ? Math.round((data.completed_sessions / data.total_sessions) * 100) : 0;
   return (
     <div className="space-y-4" data-testid="patient-portal-sessions-tab">
@@ -390,7 +393,7 @@ function DietCard({ diet }) {
   );
 }
 
-function TreatmentTab({ data }) {
+export function TreatmentTab({ data }) {
   return (
     <div className="space-y-4" data-testid="patient-portal-treatment-tab">
       <DoctorMiniCard physioName={data.physio_name} headPhysioName={data.head_physio_name} />
@@ -459,7 +462,7 @@ function TreatmentTab({ data }) {
   );
 }
 
-function PaymentTab({ data }) {
+export function PaymentTab({ data }) {
   const p = data.payment || {};
   // All three fees. The diet one was missing, so a patient who paid for a diet
   // consultation was shown a Total that did not include their own money.
