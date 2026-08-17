@@ -479,13 +479,19 @@ const PreSalesAnalyticsPanel = ({ branches, branchGroup, sourceFilter }) => {
       {loading && !data ? (
         <p className="py-10 text-center text-sm text-slate-400">Loading...</p>
       ) : (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4" data-testid="presales-analytics-metrics">
+        // All seven across one row on a wide screen — they are one funnel read
+        // left to right, and wrapping the last three onto a second line broke that
+        // into two groups it does not actually have. Narrower widths still wrap:
+        // seven cards on a laptop would leave no room for the figures themselves.
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7" data-testid="presales-analytics-metrics">
           {PRESALES_ANALYTICS_METRICS.map((m) => {
             const value = presalesAnalyticsValueFor(data?.[m.key], sourceFilter, branchGroup);
             return (
               <div key={m.key} className="rounded-xl border-2 border-slate-200 bg-white px-4 py-3.5" data-testid={`presales-analytics-metric-${m.key}`}>
                 <span className="block truncate text-[11px] font-bold uppercase tracking-wider text-slate-500">{m.label}</span>
-                <span className="mt-1 block text-3xl font-extrabold text-slate-800">{m.currency ? fmt(value) : value}</span>
+                {/* Steps down at the width the row goes seven-up: a card is ~170px
+                    there, and "₹5,54,752" at the larger size runs straight out of it. */}
+                <span className="mt-1 block truncate text-3xl font-extrabold text-slate-800 xl:text-2xl">{m.currency ? fmt(value) : value}</span>
               </div>
             );
           })}
@@ -756,28 +762,33 @@ export const PreSalesCRM = ({
         </div>
       )}
 
-      {/* KPI Cards */}
+      {/* KPI Cards — the Leads pane only. They are that table's stage filter, not a
+          summary: each one selects a stage and the list below narrows to it. Analytics
+          has no such table to narrow, and its own cards already open with All Leads, so
+          on that pane these were a second row of counts answering nothing. */}
       {/* Three across on a phone rather than all of them jammed into one nowrap row. Six
           cards sharing 330px gave each about 50px, which truncated every label to
           "Tota…", "Follo…" — a row of counts with no way to tell which count is which.
           Desktop still lays them out on the single line it has room for. */}
-      <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-nowrap sm:gap-3" data-testid="presales-kpi-row">
-        {isMarketingHeadFunnel ? (
-          <>
-            <KpiCard label="All" value={funnelCounts.all} active={stageFilter === "all"} color="#22c55e" onClick={() => setStageFilter("all")} testid="presales-kpi-all" />
-            {MARKETING_HEAD_FUNNEL.map((b) => (
-              <KpiCard key={b.key} label={b.label} value={funnelCounts[b.key] || 0} active={stageFilter === b.key} color={b.color} onClick={() => setStageFilter(b.key)} testid={`presales-kpi-${b.key}`} />
-            ))}
-          </>
-        ) : (
-          <>
-            <KpiCard label="Total Leads" value={stageCounts.All} active={stageFilter === "All"} color="#22c55e" onClick={() => setStageFilter("All")} testid="presales-kpi-all" />
-            {kpiStages.map((s) => (
-              <KpiCard key={s.id} label={s.name} value={stageCounts[s.name] || 0} active={stageFilter === s.name} color={s.color} onClick={() => setStageFilter(s.name)} testid={`presales-kpi-${s.name}`} />
-            ))}
-          </>
-        )}
-      </div>
+      {!(masterView === "analytics" && isSuperAdminMasterView) && (
+        <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-nowrap sm:gap-3" data-testid="presales-kpi-row">
+          {isMarketingHeadFunnel ? (
+            <>
+              <KpiCard label="All" value={funnelCounts.all} active={stageFilter === "all"} color="#22c55e" onClick={() => setStageFilter("all")} testid="presales-kpi-all" />
+              {MARKETING_HEAD_FUNNEL.map((b) => (
+                <KpiCard key={b.key} label={b.label} value={funnelCounts[b.key] || 0} active={stageFilter === b.key} color={b.color} onClick={() => setStageFilter(b.key)} testid={`presales-kpi-${b.key}`} />
+              ))}
+            </>
+          ) : (
+            <>
+              <KpiCard label="Total Leads" value={stageCounts.All} active={stageFilter === "All"} color="#22c55e" onClick={() => setStageFilter("All")} testid="presales-kpi-all" />
+              {kpiStages.map((s) => (
+                <KpiCard key={s.id} label={s.name} value={stageCounts[s.name] || 0} active={stageFilter === s.name} color={s.color} onClick={() => setStageFilter(s.name)} testid={`presales-kpi-${s.name}`} />
+              ))}
+            </>
+          )}
+        </div>
+      )}
 
       {masterView === "analytics" && isSuperAdminMasterView ? (
         <PreSalesAnalyticsPanel branches={branches} branchGroup={branchGroup} sourceFilter={sourceFilter} />
