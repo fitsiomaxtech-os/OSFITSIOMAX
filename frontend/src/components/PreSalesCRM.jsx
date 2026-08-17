@@ -420,7 +420,10 @@ const presalesAnalyticsValueFor = (bucket, branchId, group) => {
  * what the other was showing.
  */
 const PreSalesAnalyticsPanel = ({ branches, branchGroup, sourceFilter }) => {
-  const [preset, setPreset] = useState("this_month");
+  // Opens on everything rather than the current month. The month is a narrowing to reach
+  // for, not the question the board is first asked — and a card that silently showed one
+  // month's worth read as the total until you noticed the range control above it.
+  const [preset, setPreset] = useState("all");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const [data, setData] = useState(null);
