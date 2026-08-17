@@ -128,19 +128,49 @@ const OperationsBranchTab = ({ branches, actingUser }) => {
 
 // ---------- Consultant tab: pick a branch, see its Consultants' board ----------
 //
-// No employee dropdown here, unlike Physio/Nutritionist below — a Consultant (Head
-// Physio) covers every branch by definition rather than belonging to one, so
-// HeadPhysioBoard already shows every Consultant relevant to the branch picked, the same
-// way Branches & Verticals > Branch Control's own "CONSULTANT View" does.
-
+// The dropdown here is read-only, unlike Physio/Nutritionist below — a Consultant (Head
+// Physio) covers every branch by default rather than belonging to one, and HeadPhysioBoard
+// shows one shared queue for the whole branch rather than a view filtered to one person, so
+// picking a different name wouldn't change anything below it. It's here purely so the branch
+// a Super Admin has assigned a Consultant to (Branches & Verticals > that branch > Assign
+// Head Physio) is visible at a glance, the same names HeadPhysioBoard is already showing
+// the combined queue for.
 const OperationsConsultantTab = ({ branches, actingUser }) => {
   const [selectedId, setSelectedId] = useState("");
+  const [consultants, setConsultants] = useState([]);
   useEffect(() => {
     if (!selectedId && branches && branches.length) setSelectedId(findDefaultBranchId(branches));
   }, [branches, selectedId]);
+
+  useEffect(() => {
+    if (!selectedId) { setConsultants([]); return; }
+    getDoctors({ branch_id: selectedId })
+      .then((rows) => setConsultants((rows || []).filter((d) => d.profile_type === "head_physio")))
+      .catch(() => setConsultants([]));
+  }, [selectedId]);
+
   return (
     <div className="space-y-4" data-testid="ops-consultant-tab">
-      <OperationsBranchPicker branches={branches} selectedId={selectedId} onSelect={setSelectedId} testid="ops-consultant-picker" />
+      <div className="flex flex-wrap items-center gap-3">
+        <OperationsBranchPicker branches={branches} selectedId={selectedId} onSelect={setSelectedId} testid="ops-consultant-picker" />
+        {selectedId && (
+          <div className="relative" title="Assigned via Branches & Verticals — the board below always shows the whole branch queue">
+            <select
+              disabled
+              value={consultants[0]?.id || ""}
+              className="h-10 min-w-[220px] cursor-not-allowed appearance-none rounded-md border border-slate-200 bg-slate-50 px-3 pr-8 text-sm text-slate-600"
+              data-testid="ops-consultant-person-select"
+            >
+              {consultants.length === 0 ? (
+                <option value="">No Consultant assigned to this branch</option>
+              ) : (
+                consultants.map((c) => <option key={c.id} value={c.id}>{c.full_name}</option>)
+              )}
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          </div>
+        )}
+      </div>
       {selectedId ? (
         <HeadPhysioBoard key={`${selectedId}-hp`} branchId={selectedId} user={actingUser} />
       ) : (
