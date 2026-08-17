@@ -935,6 +935,11 @@ export const PreSalesCRM = ({
     return map;
   }, [dateSourceFiltered]);
 
+  // Total plus up to eight stage cards. Declared here rather than further down because
+  // kpiCardModels below reads it — a const referenced above its own declaration is a
+  // ReferenceError at render, not a hoisted undefined.
+  const kpiStages = stages.slice(0, 8);
+
   /**
    * One list of cards for whichever row this board is showing, so the desk and the phone
    * render the same set from the same source. They used to be two pieces of JSX, and the
@@ -1021,9 +1026,6 @@ export const PreSalesCRM = ({
     try { await updateLead(leadId, { stage: stageName }); toast.success(`Moved to ${stageName}`); load(); }
     catch (e) { toast.error(e?.response?.data?.detail || "Move failed"); }
   };
-
-  // Pick KPI cards: total + up to 8 stage cards
-  const kpiStages = stages.slice(0, 8);
 
   // Branches under the selected group â€” every one under All, just the offline ones under
   // Offline, just the online ones under Online. Super Admin only.
