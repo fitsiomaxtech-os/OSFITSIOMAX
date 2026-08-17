@@ -495,6 +495,14 @@ const FEE_TABS = [
     paid: (l) => Number(l.package_paid) || 0,
     item: (l) => l.package_name || l.consultation_item_name || "",
     mode: (l) => l.package_payment_mode || "",
+    // What a patient on this tab may go on to buy. A branch sells in one order —
+    // consultation, then treatment, then diet — so each tab's useful question is about the
+    // rung after it: of the people who paid to be seen, who bought a package and who did
+    // not. Asking it the other way round (of the treatment buyers, who paid a consultation)
+    // answers nothing, because paying for the consultation is how they got here.
+    //
+    // Diet is the last rung and so offers nothing: there is no fourth thing to sell.
+    crossSell: ["treatment", "diet"],
   },
   {
     key: "treatment",
@@ -503,10 +511,7 @@ const FEE_TABS = [
     paid: (l) => Number(l.treatment_fee_paid) || 0,
     item: (l) => l.session_package_name || "",
     mode: (l) => l.treatment_fee_payment_mode || "",
-    // Treatment and Diet are the two a patient chooses whether to buy, so "who didn't" is
-    // a real list — the branch's upsell queue. Consultation carries no such flag because
-    // paying for it is what puts a patient in this stage at all: everyone here has one.
-    purchase: true,
+    crossSell: ["diet"],
   },
   {
     key: "diet",
@@ -515,7 +520,7 @@ const FEE_TABS = [
     paid: (l) => Number(l.diet_fee_paid) || 0,
     item: (l) => l.diet_package_name || "",
     mode: (l) => l.diet_fee_payment_mode || "",
-    purchase: true,
+    crossSell: [],
   },
 ];
 
@@ -822,26 +827,44 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   const [feeTab, setFeeTab] = useState("consultation");
   const activeFee = FEE_TABS.find((t) => t.key === feeTab) || FEE_TABS[0];
 
-  // Inside Treatment and Diet, whether the list is the patients who bought it or the ones
-  // who did not. Both are questions the branch asks of the same stage: the first is what
-  // came in, the second is who to go back to — a patient who paid to be seen and left
-  // without a package is the branch's most obvious next sale, and until now there was no
-  // screen that would name them.
+  // What the people on this tab went on to buy — see `crossSell` on FEE_TABS. Consultation
+  // asks it of treatment and of diet; Treatment asks it of diet; Diet, being the last thing
+  // sold, asks it of nothing and shows no picker.
   //
-  // Defaults to "purchased" every time the tab changes, so the tab still opens on the money
-  // view its own count and total describe, and the other list is always a deliberate ask.
-  const [purchaseFilter, setPurchaseFilter] = useState("purchased");
-  const showPurchaseFilter = showDiscountColumn && !!activeFee.purchase;
-  useEffect(() => { setPurchaseFilter("purchased"); }, [feeTab]);
+  // "" is everyone on the tab, which is the list its own count and total describe, so the
+  // tab always opens on the money view and a narrower one is a deliberate ask. Cleared
+  // whenever the tab changes for the same reason.
+  const [crossFilter, setCrossFilter] = useState(""); // "" | "<feeKey>:yes" | "<feeKey>:no"
+  // Memoised for its identity, not its cost: the `|| []` fallback is a fresh array on every
+  // render, which would re-run the counts below on every keystroke in the search box.
+  const crossSell = useMemo(
+    () => (showDiscountColumn ? activeFee.crossSell || [] : []),
+    [showDiscountColumn, activeFee],
+  );
+  const showCrossFilter = crossSell.length > 0;
+  useEffect(() => { setCrossFilter(""); }, [feeTab]);
 
-  // Carried on the options themselves rather than on the tab: the tab's badge is the money
-  // view — how many paid, and how much — and making it flip to a non-payer count would
-  // leave a number that no longer matches the total printed underneath it.
-  const purchaseCounts = useMemo(() => {
-    if (!showPurchaseFilter) return { purchased: 0, not_purchased: 0 };
-    const bought = inStage.filter((l) => activeFee.paid(l) > 0).length;
-    return { purchased: bought, not_purchased: inStage.length - bought };
-  }, [inStage, showPurchaseFilter, activeFee]);
+  // Everyone who paid this tab's own fee — the list before the picker narrows it, and the
+  // denominator every option's count is taken from.
+  const feeBase = useMemo(
+    () => (showDiscountColumn ? inStage.filter((l) => activeFee.paid(l) > 0) : inStage),
+    [inStage, showDiscountColumn, activeFee],
+  );
+
+  // Counts sit on the options rather than on the tab: the tab's badge is the money view —
+  // how many paid, and how much — and a badge that flipped to a non-payer count would no
+  // longer match the total printed underneath it.
+  const crossCounts = useMemo(() => {
+    const out = { "": feeBase.length };
+    for (const key of crossSell) {
+      const other = FEE_TABS.find((t) => t.key === key);
+      if (!other) continue;
+      const bought = feeBase.filter((l) => other.paid(l) > 0).length;
+      out[`${key}:yes`] = bought;
+      out[`${key}:no`] = feeBase.length - bought;
+    }
+    return out;
+  }, [feeBase, crossSell]);
 
   // Counted off the stage's own rows so each tab says how many are behind it before it is
   // opened — an empty Diet tab should read as empty from the outside, not on arrival.
@@ -859,14 +882,28 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     return out;
   }, [inStage, showDiscountColumn]);
 
+  // Both halves of the picker can legitimately come back empty, and they mean opposite
+  // things — "nobody upgraded" versus "everybody did" — so the empty row says which.
+  const crossEmptyMessage = useMemo(() => {
+    if (!crossFilter) return "";
+    const [key, want] = crossFilter.split(":");
+    const other = FEE_TABS.find((t) => t.key === key);
+    if (!other) return "";
+    const noun = other.label.toLowerCase();
+    const base = activeFee.label.toLowerCase();
+    return want === "yes"
+      ? `Nobody who paid for ${base} has bought ${noun} yet.`
+      : `Everyone who paid for ${base} has also bought ${noun}.`;
+  }, [crossFilter, activeFee]);
+
   // Outside Fee Collected the tabs do not exist, so the stage's rows pass through whole.
   const filtered = useMemo(() => {
-    if (!showDiscountColumn) return inStage;
-    if (showPurchaseFilter && purchaseFilter === "not_purchased") {
-      return inStage.filter((l) => activeFee.paid(l) === 0);
-    }
-    return inStage.filter((l) => activeFee.paid(l) > 0);
-  }, [inStage, showDiscountColumn, showPurchaseFilter, purchaseFilter, activeFee]);
+    if (!showDiscountColumn || !crossFilter) return feeBase;
+    const [key, want] = crossFilter.split(":");
+    const other = FEE_TABS.find((t) => t.key === key);
+    if (!other) return feeBase;
+    return feeBase.filter((l) => (want === "yes" ? other.paid(l) > 0 : other.paid(l) === 0));
+  }, [feeBase, showDiscountColumn, crossFilter]);
 
   // Stage counts for the head bar — derived client-side from the Date Filter/search-only
   // list so they always match whichever pipeline (branch vs. head physio) is active for
@@ -2197,22 +2234,32 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
           })}
           </div>
 
-          {/* Which half of the tab: the patients who bought it, or the ones who did not.
-              Only on Treatment and Diet — see `purchase` on FEE_TABS. Each option carries
-              its own count, so the size of the answer is visible before choosing it and
-              there is no number here that contradicts the tab's own badge. */}
-          {showPurchaseFilter && (
-            <label className="flex shrink-0 items-center gap-1.5 pr-1" data-testid="cons-purchase-filter">
+          {/* What the people on this tab went on to buy — see `crossSell` on FEE_TABS.
+              Each option carries its own count, so the size of the answer is visible
+              before choosing it and no number here contradicts the tab's own badge. */}
+          {showCrossFilter && (
+            <label className="flex shrink-0 items-center gap-1.5 pr-1" data-testid="cons-cross-filter">
               <ClipboardList className="h-3.5 w-3.5 shrink-0 text-slate-400" />
               <select
-                value={purchaseFilter}
-                onChange={(e) => setPurchaseFilter(e.target.value)}
-                className="max-w-[16rem] rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold text-slate-700"
-                style={{ color: purchaseFilter === "purchased" ? activeFee.tone : undefined }}
-                data-testid="cons-purchase-select"
+                value={crossFilter}
+                onChange={(e) => setCrossFilter(e.target.value)}
+                className="max-w-[17rem] rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold text-slate-700"
+                style={{ color: crossFilter ? undefined : activeFee.tone }}
+                data-testid="cons-cross-select"
               >
-                <option value="purchased">{activeFee.label} Purchased ({purchaseCounts.purchased})</option>
-                <option value="not_purchased">Non {activeFee.label} Purchased ({purchaseCounts.not_purchased})</option>
+                <option value="">All {activeFee.label} ({crossCounts[""] ?? 0})</option>
+                {crossSell.map((key) => {
+                  const other = FEE_TABS.find((t) => t.key === key);
+                  if (!other) return null;
+                  return [
+                    <option key={`${key}:yes`} value={`${key}:yes`}>
+                      {other.label} Purchased ({crossCounts[`${key}:yes`] ?? 0})
+                    </option>,
+                    <option key={`${key}:no`} value={`${key}:no`}>
+                      Non {other.label} Purchased ({crossCounts[`${key}:no`] ?? 0})
+                    </option>,
+                  ];
+                })}
               </select>
             </label>
           )}
@@ -2361,14 +2408,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       // bought under it — a column of figures with no idea what was sold
                       // is a number nobody can check.
                       <td className="whitespace-nowrap px-3 py-3 align-middle text-xs" data-testid={`cons-fee-${activeFee.key}-${l.id}`}>
-                        {/* A dash, not Rs.0, on the not-purchased list: nothing was
-                            collected, and a column of zeroes reads as money that failed
-                            to record rather than a sale that never happened. */}
-                        {activeFee.paid(l) > 0 ? (
-                          <span className="font-semibold" style={{ color: activeFee.tone }}>{rupees(activeFee.paid(l))}</span>
-                        ) : (
-                          <span className="font-semibold text-slate-300">—</span>
-                        )}
+                        <span className="font-semibold" style={{ color: activeFee.tone }}>{rupees(activeFee.paid(l))}</span>
                         {activeFee.item(l) && (
                           <span className="block max-w-full truncate text-[10px] text-slate-400" title={activeFee.item(l)}>
                             {activeFee.item(l)}
@@ -2434,11 +2474,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     // An empty tab is not an empty stage: saying "no leads in consultations"
                     // under a Diet tab reads as the board being broken rather than as nobody
                     // having bought a diet plan.
-                    : showPurchaseFilter && purchaseFilter === "not_purchased"
-                      // The good outcome, so it is not reported as an absence: an empty
-                      // upsell queue means everyone took the package, not that a filter
-                      // came back broken.
-                      ? `Everyone here has bought ${activeFee.label.toLowerCase()}.`
+                    : crossFilter
+                      // Said as the answer to the question that was asked. An empty upsell
+                      // queue is the good outcome — everyone took the package — and must not
+                      // read as a filter that came back broken.
+                      ? crossEmptyMessage
                       : showDiscountColumn
                         ? `No ${activeFee.label.toLowerCase()} fee collected${stageFilter ? "" : " yet"}.`
                         : "No leads in consultations yet. Book an appointment with a CONSULTANT to populate this list."}
