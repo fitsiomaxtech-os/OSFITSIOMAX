@@ -6,6 +6,7 @@ import uuid
 from database import v3_col
 from utils import now_iso, derive_branch_code
 from deps import v3_require_roles, is_branch_admin_role, is_physio_role, PHYSIO_ROLES
+from security import verify_password
 import lead_control
 from schemas.v3 import V3UserOut
 
@@ -38,9 +39,14 @@ class AssignHeadPhysio(BaseModel):
     doctor_id: str
 
 
+class BranchArchiveInput(BaseModel):
+    password: str = Field(..., description="Acting Super Admin's own login password")
+
+
 @router.get("")
-async def list_branches_full(_: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev", "marketing_head"))):
-    branches = await v3_col("branches").find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+async def list_branches_full(archived: bool = False, _: V3UserOut = Depends(v3_require_roles("super_admin", "business_dev", "marketing_head"))):
+    q = {"archived": True} if archived else {"archived": {"$ne": True}}
+    branches = await v3_col("branches").find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
     # Enrich each branch with stats
     out = []
     for b in branches:
@@ -59,6 +65,35 @@ async def list_branches_full(_: V3UserOut = Depends(v3_require_roles("super_admi
             "doctors_count": doctors,
         })
     return out
+
+
+@router.post("/{branch_id}/archive")
+async def archive_branch(branch_id: str, payload: BranchArchiveInput, user: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    # Soft-delete: keeps the branch, its admin user, and its leads/appointments intact
+    # (unlike DELETE /branches/{id}, which hard-deletes) — gated by the acting Super
+    # Admin re-entering their own login password so archiving isn't a stray misclick.
+    account = await v3_col("users").find_one({"id": user.id}, {"_id": 0, "password": 1})
+    if not account or not verify_password(payload.password, account.get("password", "")):
+        raise HTTPException(status_code=401, detail="Incorrect password")
+    existing = await v3_col("branches").find_one({"id": branch_id}, {"_id": 0, "id": 1})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Branch not found")
+    await v3_col("branches").update_one(
+        {"id": branch_id},
+        {"$set": {"archived": True, "archived_at": now_iso(), "archived_by": user.full_name}},
+    )
+    return {"message": "Branch archived"}
+
+
+@router.post("/{branch_id}/restore")
+async def restore_branch(branch_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    res = await v3_col("branches").update_one(
+        {"id": branch_id},
+        {"$set": {"archived": False}, "$unset": {"archived_at": "", "archived_by": ""}},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Branch not found")
+    return {"message": "Branch restored"}
 
 
 @router.post("/with-existing-admin")

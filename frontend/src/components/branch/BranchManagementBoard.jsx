@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Plus, Pencil, Trash2, X, Users, MapPin, Phone, Mail, TrendingUp, RefreshCw, Layers, LayoutDashboard, ChevronDown, BadgeIndianRupee, Building2, Stethoscope, BarChart3, CalendarDays } from "lucide-react";
+import { Plus, Pencil, Trash2, Archive, ArchiveRestore, X, Users, MapPin, Phone, Mail, TrendingUp, RefreshCw, Layers, LayoutDashboard, ChevronDown, BadgeIndianRupee, Building2, Stethoscope, BarChart3, CalendarDays } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import {
   bmList, bmCreateWithExistingAdmin, bmReassignAdmin,
-  updateBranch, deleteBranch, hrBranchAdminCandidates,
+  updateBranch, hrBranchAdminCandidates,
   getVerticals, createVertical, deleteVertical, getDoctors,
-  getDashboardOverview,
+  getDashboardOverview, bmListArchived, bmArchiveBranch, bmRestoreBranch,
 } from "@/lib/api";
 import { StatTile } from "@/components/ui/stat-tile";
 import { MilkDateInput } from "@/components/ui/milk-calendar";
@@ -429,6 +429,8 @@ const CreationTab = ({ onDrillIn, actionSlot }) => {
   const [physioCount, setPhysioCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [modeFilter, setModeFilter] = useState("all"); // "all" | "online" | "offline"
+  const [archiveTarget, setArchiveTarget] = useState(null);
+  const [showArchives, setShowArchives] = useState(false);
 
   /** `notify` is set only by the Refresh button. The same loader runs on mount and after
    *  every save, and none of those should announce themselves. */
@@ -456,12 +458,6 @@ const CreationTab = ({ onDrillIn, actionSlot }) => {
   }, []);
 
   useEffect(() => { load(); }, [load]);
-
-  const remove = async (b) => {
-    if (!window.confirm(`Delete branch "${b.branch_name}"? This also removes its admin user.`)) return;
-    try { await deleteBranch(b.id); toast.success("Branch deleted"); load(); }
-    catch (e) { toast.error(e?.response?.data?.detail || "Delete failed"); }
-  };
 
   const filteredBranches = modeFilter === "all"
     ? branches
@@ -494,6 +490,15 @@ const CreationTab = ({ onDrillIn, actionSlot }) => {
         data-testid="bm-service-type-btn"
       >
         <Layers className="h-4 w-4" />
+      </Button>
+      <Button
+        className="h-9 w-9 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
+        onClick={() => setShowArchives(true)}
+        title="All Archives"
+        aria-label="All Archives"
+        data-testid="bm-all-archives-btn"
+      >
+        <ArchiveRestore className="h-4 w-4" />
       </Button>
       <Button
         className="h-9 w-9 shrink-0 bg-sky-600 p-0 hover:bg-sky-700"
@@ -563,7 +568,7 @@ const CreationTab = ({ onDrillIn, actionSlot }) => {
               </div>
               <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
                 <button onClick={(e) => { e.stopPropagation(); setEditing(b); setShowAdd(true); }} className="text-blue-500 hover:text-blue-700" data-testid={`bm-branch-edit-${b.id}`}><Pencil className="h-4 w-4" /></button>
-                <button onClick={(e) => { e.stopPropagation(); remove(b); }} className="text-red-500 hover:text-red-700" data-testid={`bm-branch-delete-${b.id}`}><Trash2 className="h-4 w-4" /></button>
+                <button onClick={(e) => { e.stopPropagation(); setArchiveTarget(b); }} className="text-red-500 hover:text-red-700" title="Archive" data-testid={`bm-branch-archive-${b.id}`}><Archive className="h-4 w-4" /></button>
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -609,6 +614,137 @@ const CreationTab = ({ onDrillIn, actionSlot }) => {
       {showAdd && <BranchFormDialogV2 branch={editing} onClose={() => { setShowAdd(false); setEditing(null); }} onSaved={() => { setShowAdd(false); setEditing(null); load(); }} />}
 
       {reassigning && <ReassignAdminDialog branch={reassigning} candidates={candidates.filter((c) => !c.assigned_branch || c.id === reassigning.admin_user_id)} onClose={() => setReassigning(null)} onSaved={() => { setReassigning(null); load(); }} />}
+
+      {archiveTarget && (
+        <ArchiveBranchModal
+          branch={archiveTarget}
+          onClose={() => setArchiveTarget(null)}
+          onArchived={() => { setArchiveTarget(null); load(); }}
+        />
+      )}
+
+      {showArchives && (
+        <ArchivedBranchesModal
+          onClose={() => setShowArchives(false)}
+          onRestored={load}
+        />
+      )}
+    </div>
+  );
+};
+
+// Re-enters the branch's own login password (not a generic "type DELETE to confirm") — an
+// archive still just soft-hides the branch, but the same Super Admin session that can open
+// this card can also click through it in one misplaced tap, so the check has to cost more
+// than a click.
+const ArchiveBranchModal = ({ branch, onClose, onArchived }) => {
+  const [password, setPassword] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const submit = async () => {
+    if (!password) { toast.error("Enter your password"); return; }
+    setSaving(true);
+    try {
+      await bmArchiveBranch(branch.id, password);
+      toast.success(`"${branch.branch_name}" archived`);
+      onArchived();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Archive failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" data-testid="bm-archive-dialog">
+      <div className="w-full max-w-sm rounded-lg bg-white shadow-xl">
+        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
+          <h3 className="inline-flex items-center gap-2 text-base font-semibold"><Archive className="h-4 w-4 text-red-500" />Archive Branch</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600" data-testid="bm-archive-close"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="space-y-3 p-5">
+          <p className="text-sm text-slate-600">
+            Archiving <span className="font-semibold text-slate-800">"{branch.branch_name}"</span> hides it from the live list. Its admin, leads, and history stay intact — restore it any time from "All Archives".
+          </p>
+          <Field label="Confirm your Super Admin password">
+            <Input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+              placeholder="Password"
+              autoFocus
+              data-testid="bm-archive-password"
+            />
+          </Field>
+        </div>
+        <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-3">
+          <Button variant="outline" onClick={onClose} data-testid="bm-archive-cancel">Cancel</Button>
+          <Button className="bg-red-600 hover:bg-red-700" onClick={submit} disabled={saving} data-testid="bm-archive-confirm">
+            {saving ? "Archiving…" : "Archive"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const ArchivedBranchesModal = ({ onClose, onRestored }) => {
+  const [archived, setArchived] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [restoringId, setRestoringId] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { setArchived(await bmListArchived()); }
+    catch (e) { toast.error(e?.response?.data?.detail || "Couldn't load archives"); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const restore = async (b) => {
+    setRestoringId(b.id);
+    try {
+      await bmRestoreBranch(b.id);
+      toast.success(`"${b.branch_name}" restored`);
+      await load();
+      onRestored();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Restore failed");
+    } finally {
+      setRestoringId(null);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" data-testid="bm-archives-dialog">
+      <div className="w-full max-w-lg rounded-lg bg-white shadow-xl">
+        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
+          <h3 className="inline-flex items-center gap-2 text-base font-semibold"><ArchiveRestore className="h-4 w-4 text-slate-600" />All Archives</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600" data-testid="bm-archives-close"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="max-h-[70vh] space-y-2 overflow-y-auto p-5">
+          {loading && <p className="text-center text-sm text-slate-400">Loading…</p>}
+          {!loading && archived.length === 0 && <p className="text-center text-sm text-slate-400">No archived branches.</p>}
+          {archived.map((b) => (
+            <div key={b.id} className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 p-3" data-testid={`bm-archived-row-${b.id}`}>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-slate-800">{b.branch_name}</p>
+                <p className="truncate text-xs text-slate-500">{b.admin_name || "—"}{b.archived_at ? ` · archived ${b.archived_at.slice(0, 10)}` : ""}</p>
+              </div>
+              <Button
+                className="h-8 shrink-0 bg-emerald-600 px-3 text-xs hover:bg-emerald-700"
+                onClick={() => restore(b)}
+                disabled={restoringId === b.id}
+                data-testid={`bm-archived-restore-${b.id}`}
+              >
+                {restoringId === b.id ? "Restoring…" : "Restore"}
+              </Button>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 };
