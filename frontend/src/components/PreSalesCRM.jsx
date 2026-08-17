@@ -290,6 +290,35 @@ const branchStatusInfo = (lead, branches) => {
 // the branch record itself can never disagree with how those two screens group branches.
 const isOnlineVertical = (v) => String(v || "").startsWith("online_");
 
+// Marketing Head's KPI row — a fixed funnel rather than the live Pre-Sales stage list,
+// since two of these span more than one field. "Appointment Booked by Branch Admin" counts
+// a branch board's own appointment stage regardless of how the lead got there: "New
+// Appointment" is where a Pre-Sales-controlled branch's board opens (the lead arrives
+// already booked), "Appointment Date & Time" is the stage a Branch-Admin-controlled
+// branch's own leads reach once *it* books one directly — both mean "there's a booked
+// appointment sitting on a branch's board" (see backend/stage_utils.py). "Lost" folds in
+// each sub-pipeline's own didn't-convert stage, since a lead can end up not converting from
+// any of the three.
+const MARKETING_HEAD_FUNNEL = [
+  { key: "new_leads", label: "New Leads", color: "#3b82f6", match: (l) => l.stage === "New Leads" },
+  { key: "rnr", label: "RNR", color: "#f59e0b", match: (l) => l.stage === "RNR" },
+  { key: "follow_up", label: "Follow Up", color: "#8b5cf6", match: (l) => l.stage === "Follow Up" },
+  { key: "appointment_pre_sales", label: "Appointment Booked by Pre-Sales", color: "#6366f1", match: (l) => l.stage === "Appointment" },
+  {
+    key: "appointment_branch_admin",
+    label: "Appointment Booked by Branch Admin",
+    color: "#14b8a6",
+    match: (l) => l.branch_stage === "New Appointment" || l.branch_stage === "Appointment Date & Time",
+  },
+  { key: "consultation_done", label: "Consultation Done", color: "#10b981", match: (l) => l.consultation_stage === "Consultation Completed" },
+  {
+    key: "lost",
+    label: "Lost",
+    color: "#ef4444",
+    match: (l) => l.stage === "Lost" || l.branch_stage === "Cancelled" || l.consultation_stage === "Cancel",
+  },
+];
+
 // Super Admin only: All | Offline | Online, then one pill per branch in that group —
 // the same split Branches & Verticals uses, so a branch's grouping reads the same way
 // everywhere. Picking a pill sets sourceFilter, the board's existing branch scope.
@@ -507,8 +536,9 @@ export const PreSalesCRM = ({
   const [branches, setBranches] = useState([]);
   const [search, setSearch] = useState("");
   // Opens on New Leads, not All — that's the stage that needs action; a rep shouldn't
-  // have to dig through everything already worked on just to see what's new.
-  const [stageFilter, setStageFilter] = useState("New Leads");
+  // have to dig through everything already worked on just to see what's new. Marketing
+  // Head has no leads to action, so its funnel opens on the whole picture instead.
+  const [stageFilter, setStageFilter] = useState(role === "marketing_head" ? "all" : "New Leads");
   const [sourceFilter, setSourceFilter] = useState("");
   const [dateFilter, setDateFilter] = useState(null);
   const [editing, setEditing] = useState(null);
@@ -517,13 +547,18 @@ export const PreSalesCRM = ({
   const [loading, setLoading] = useState(false);
   const [visibleCount, setVisibleCount] = useState(50);
   const [activeTab, setActiveTab] = useState("leads"); // mobile bottom-nav only; desktop always shows Leads
-  // Super Admin and Sales Head only, from here down: which branches count as one group
-  // (All/Offline/Online, same split Branches & Verticals uses), and which top-level pane
-  // is showing. Sales Head is Pre-Sales' own manager, so it gets the same org-wide
-  // picture as Super Admin's Pre Sales tab rather than one rep's own filtered book.
+  // Super Admin, Sales Head and Marketing Head only, from here down: which branches count
+  // as one group (All/Offline/Online, same split Branches & Verticals uses), and which
+  // top-level pane is showing. Sales Head is Pre-Sales' own manager, and Marketing Head
+  // reads the same funnel from the marketing side — both get the same org-wide picture
+  // Super Admin's Pre Sales tab has, rather than one rep's own filtered book.
   const [branchGroup, setBranchGroup] = useState("all");
   const [masterView, setMasterView] = useState("leads"); // "leads" | "analytics"
-  const isSuperAdminMasterView = role === "super_admin" || role === "sales_head";
+  const isSuperAdminMasterView = role === "super_admin" || role === "sales_head" || role === "marketing_head";
+  // Marketing Head's KPI row is a fixed funnel rather than the live, admin-configurable
+  // Pre-Sales stage list everyone else's cards come from (see MARKETING_HEAD_FUNNEL) —
+  // two of its buckets aren't a single stage-field equality.
+  const isMarketingHeadFunnel = role === "marketing_head";
 
   const selectBranchGroup = (g) => { setBranchGroup(g); setSourceFilter(""); };
 
@@ -602,6 +637,14 @@ export const PreSalesCRM = ({
     return map;
   }, [dateSourceFiltered, stages]);
 
+  // Marketing Head's own bucket counts — same idea as stageCounts, against
+  // MARKETING_HEAD_FUNNEL's match functions instead of a live stage-name equality.
+  const funnelCounts = useMemo(() => {
+    const map = { all: dateSourceFiltered.length };
+    MARKETING_HEAD_FUNNEL.forEach((b) => { map[b.key] = dateSourceFiltered.filter(b.match).length; });
+    return map;
+  }, [dateSourceFiltered]);
+
   // The toolbar filter and the per-row assign dropdown take the same {value,label} shape,
   // so they share one list. The source list that used to sit here went with the filter it
   // fed — the SOURCE column still shows where each lead came from, it is just no longer
@@ -610,13 +653,20 @@ export const PreSalesCRM = ({
 
   const filtered = useMemo(() => {
     let rows = dateSourceFiltered;
-    if (stageFilter !== "All") rows = rows.filter((l) => l.stage === stageFilter);
+    if (isMarketingHeadFunnel) {
+      if (stageFilter !== "all") {
+        const bucket = MARKETING_HEAD_FUNNEL.find((b) => b.key === stageFilter);
+        if (bucket) rows = rows.filter(bucket.match);
+      }
+    } else if (stageFilter !== "All") {
+      rows = rows.filter((l) => l.stage === stageFilter);
+    }
     if (search) {
       const q = search.toLowerCase();
       rows = rows.filter((l) => (l.name || "").toLowerCase().includes(q) || (l.phone || "").includes(q) || (l.email || "").toLowerCase().includes(q));
     }
     return rows.slice().sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
-  }, [dateSourceFiltered, stageFilter, search]);
+  }, [dateSourceFiltered, stageFilter, search, isMarketingHeadFunnel]);
 
   // Rendering thousands of rows at once is fine on desktop but chokes mobile
   // devices, so re-page back to 50 whenever the filtered set changes.
@@ -712,10 +762,21 @@ export const PreSalesCRM = ({
           "Tota…", "Follo…" — a row of counts with no way to tell which count is which.
           Desktop still lays them out on the single line it has room for. */}
       <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-nowrap sm:gap-3" data-testid="presales-kpi-row">
-        <KpiCard label="Total Leads" value={stageCounts.All} active={stageFilter === "All"} color="#22c55e" onClick={() => setStageFilter("All")} testid="presales-kpi-all" />
-        {kpiStages.map((s) => (
-          <KpiCard key={s.id} label={s.name} value={stageCounts[s.name] || 0} active={stageFilter === s.name} color={s.color} onClick={() => setStageFilter(s.name)} testid={`presales-kpi-${s.name}`} />
-        ))}
+        {isMarketingHeadFunnel ? (
+          <>
+            <KpiCard label="All" value={funnelCounts.all} active={stageFilter === "all"} color="#22c55e" onClick={() => setStageFilter("all")} testid="presales-kpi-all" />
+            {MARKETING_HEAD_FUNNEL.map((b) => (
+              <KpiCard key={b.key} label={b.label} value={funnelCounts[b.key] || 0} active={stageFilter === b.key} color={b.color} onClick={() => setStageFilter(b.key)} testid={`presales-kpi-${b.key}`} />
+            ))}
+          </>
+        ) : (
+          <>
+            <KpiCard label="Total Leads" value={stageCounts.All} active={stageFilter === "All"} color="#22c55e" onClick={() => setStageFilter("All")} testid="presales-kpi-all" />
+            {kpiStages.map((s) => (
+              <KpiCard key={s.id} label={s.name} value={stageCounts[s.name] || 0} active={stageFilter === s.name} color={s.color} onClick={() => setStageFilter(s.name)} testid={`presales-kpi-${s.name}`} />
+            ))}
+          </>
+        )}
       </div>
 
       {masterView === "analytics" && isSuperAdminMasterView ? (

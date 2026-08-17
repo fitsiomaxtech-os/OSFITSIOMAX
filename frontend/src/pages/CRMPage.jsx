@@ -69,6 +69,7 @@ const ROLE_META = {
   business_dev: { label: "Business Development", icon: Briefcase },
   pre_sales: { label: "Pre Sales", icon: Headphones },
   sales_head: { label: "Sales Head", icon: Headphones },
+  marketing_head: { label: "Marketing Head", icon: Megaphone },
   branch_admin: { label: "Branch Admin", icon: Building2 },
   branch_admin_physio: { label: "Branch Admin (Physio)", icon: Building2 },
   branch_admin_fitness: { label: "Branch Admin (Fitness)", icon: Building2 },
@@ -667,6 +668,10 @@ export const CRMPage = ({ auth, onLogout }) => {
   const showSuperAdminBoard = role === "super_admin";
   const showBusinessDevBoard = role === "business_dev";
   const showPreSalesBoard = isPreSalesRole(role);
+  // Its own flag rather than folded into isPreSalesRole/PRE_SALES_ROLES — it mounts the
+  // same PreSalesCRM board (Master View, same as Sales Head), but the header should read
+  // "Marketing Head", not "Pre Sales".
+  const showMarketingHeadBoard = role === "marketing_head";
   const showBranchBoard = isBranchAdminRole(role);
   const showHeadPhysioBoard = role === "head_physio";
   const showPhysioBoard = isPhysioRole(role);
@@ -726,7 +731,7 @@ export const CRMPage = ({ auth, onLogout }) => {
                       the desktop shows that in the corner, and a phone has no corner to
                       spare. Pre-Sales joins Head Physio and HR in trading one for the
                       other below sm. */}
-                  {showHeadPhysioBoard || showHumanResourceBoard || showPreSalesBoard ? (
+                  {showHeadPhysioBoard || showHumanResourceBoard || showPreSalesBoard || showMarketingHeadBoard ? (
                     <>
                       <span className="sm:hidden">{auth.user.full_name}</span>
                       <span className="hidden sm:inline">{boardTitle}</span>
@@ -972,6 +977,10 @@ export const CRMPage = ({ auth, onLogout }) => {
         )}
 
         {showPreSalesBoard && (
+          <PreSalesCRM role={role} currentUser={auth.user} onLogout={logout} />
+        )}
+
+        {showMarketingHeadBoard && (
           <PreSalesCRM role={role} currentUser={auth.user} onLogout={logout} />
         )}
 
