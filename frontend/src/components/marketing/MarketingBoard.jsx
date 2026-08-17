@@ -26,6 +26,24 @@ const prettyVertical = (v) => String(v || "")
   .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
   .join(" ");
 
+// Every default vertical is named "online_.../offline_..." — same helper as
+// Branches & Verticals' own mode tag, read off that prefix.
+const isOnlineVertical = (v) => String(v || "").startsWith("online_");
+
+// A source with no branch/vertical tag applies everywhere (its leads go to the general
+// Pre-Sales pool), so it counts as both Online and Offline rather than neither — a filter
+// that hid it from both would make an untagged source look archived. A tagged one is
+// classified off whichever mode(s) its own tags actually touch: its own verticals list,
+// plus the vertical of each branch it's pinned to.
+const sourceModes = (source, branches) => {
+  const verticals = [
+    ...(source.verticals || []),
+    ...(source.branch_ids || []).map((bid) => branches.find((b) => b.id === bid)?.vertical).filter(Boolean),
+  ];
+  if (verticals.length === 0) return { online: true, offline: true };
+  return { online: verticals.some(isOnlineVertical), offline: verticals.some((v) => !isOnlineVertical(v)) };
+};
+
 const SUB_TABS = [
   { key: "all_leads", label: "All Leads", icon: Layers },
   { key: "team", label: "Team & Distribution", icon: Users },
@@ -57,6 +75,9 @@ const SourcesTab = ({ branches: branchesProp = [] }) => {
   // Which of them are shown — archiving hides a source without losing its config or the
   // leads it already brought in, so there has to be somewhere to see it again.
   const [sourceView, setSourceView] = useState("active");
+  // Same Online/Offline split as Branches & Verticals and Branch Wise — a source is
+  // grouped by whichever branch(es)/vertical(s) it's actually tagged to.
+  const [sourceModeFilter, setSourceModeFilter] = useState("all"); // "all" | "offline" | "online"
   const [gs, setGs] = useState({ connected: false });
   const [showAdd, setShowAdd] = useState(false);
   const [showSync, setShowSync] = useState(null);
@@ -75,6 +96,11 @@ const SourcesTab = ({ branches: branchesProp = [] }) => {
   const load = useCallback(() => mkGetSources().then(setSources).catch((e) => console.warn("[load failed]", e?.message || e)), []);
   const loadGs = useCallback(() => gsStatus().then(setGs).catch((e) => console.warn("[gs status]", e?.message || e)), []);
   useEffect(() => { load(); loadGs(); }, [load, loadGs]);
+
+  const visibleSources = useMemo(() => sources
+    .filter((s) => (sourceView === "archived" ? s.is_archived : !s.is_archived))
+    .filter((s) => sourceModeFilter === "all" || sourceModes(s, branches)[sourceModeFilter]),
+  [sources, sourceView, sourceModeFilter, branches]);
 
   // OAuth result detection (?sheets_connect=success)
   useEffect(() => {
@@ -237,15 +263,33 @@ const SourcesTab = ({ branches: branchesProp = [] }) => {
 
       <div className="flex flex-wrap items-center gap-2">
         <button onClick={() => setSourceView("active")} className={`rounded-md px-3 py-2 text-sm font-medium ${sourceView === "active" ? "bg-sky-600 text-white" : "bg-slate-100 text-slate-600"}`} data-testid="mk-source-tab-active">
-          Active ({sources.filter((s) => !s.is_archived).length})
+          Active ({sources.filter((s) => !s.is_archived && (sourceModeFilter === "all" || sourceModes(s, branches)[sourceModeFilter])).length})
         </button>
         <button onClick={() => setSourceView("archived")} className={`rounded-md px-3 py-2 text-sm font-medium ${sourceView === "archived" ? "bg-slate-700 text-white" : "bg-slate-100 text-slate-600"}`} data-testid="mk-source-tab-archived">
-          Archived ({sources.filter((s) => s.is_archived).length})
+          Archived ({sources.filter((s) => s.is_archived && (sourceModeFilter === "all" || sourceModes(s, branches)[sourceModeFilter])).length})
         </button>
       </div>
 
+      {/* Pills, not a dropdown — same pattern as Branches & Verticals' own mode filter.
+          An untagged ("All Branches") source counts as both, so it never disappears here. */}
+      <div className="flex flex-wrap items-center gap-2" data-testid="mk-source-mode-filter">
+        {[["all", "All"], ["offline", "Offline"], ["online", "Online"]].map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setSourceModeFilter(key)}
+            className={`shrink-0 rounded-full border px-3.5 py-1.5 text-sm font-medium transition ${
+              sourceModeFilter === key ? "border-sky-600 bg-sky-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"
+            }`}
+            data-testid={`mk-source-mode-filter-${key}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       <div className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {sources.filter((s) => (sourceView === "archived" ? s.is_archived : !s.is_archived)).map((s) => (
+        {visibleSources.map((s) => (
           <Card key={s.id} data-testid={`mk-source-card-${s.id}`} className="min-w-0 border-slate-200">
             <CardHeader className="flex flex-row items-start justify-between gap-2">
               <div>
@@ -306,9 +350,11 @@ const SourcesTab = ({ branches: branchesProp = [] }) => {
             </CardContent>
           </Card>
         ))}
-        {sources.filter((s) => (sourceView === "archived" ? s.is_archived : !s.is_archived)).length === 0 && (
+        {visibleSources.length === 0 && (
           <p className="col-span-full text-sm text-slate-400">
-            {sourceView === "archived" ? "No archived sources." : <>No sources yet. Click <span className="font-semibold">Add Source</span> to begin.</>}
+            {sourceModeFilter !== "all"
+              ? "No sources match this filter."
+              : sourceView === "archived" ? "No archived sources." : <>No sources yet. Click <span className="font-semibold">Add Source</span> to begin.</>}
           </p>
         )}
       </div>
