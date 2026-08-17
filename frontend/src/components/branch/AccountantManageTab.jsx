@@ -1,64 +1,69 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Eye, Wallet, Stethoscope, Activity, ShoppingBag, Salad, RefreshCw } from "lucide-react";
+import { Eye, Wallet, Stethoscope, Activity, ShoppingBag, Salad, RefreshCw, CalendarDays } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { StatTile } from "@/components/ui/stat-tile";
+import { MilkDateInput } from "@/components/ui/milk-calendar";
 import { getBranches, getRevenueOverview } from "@/lib/api";
 import { ClientHistoryModal } from "@/components/branch/ClientHistoryModal";
 import { OutstandingAmountBoard } from "@/components/branch/OutstandingAmountBoard";
-import { PaymentSchedulesBoard } from "@/components/branch/PaymentSchedulesBoard";
-import { ConsultationCollectionsBoard } from "@/components/branch/ConsultationCollectionsBoard";
-import { SessionCollectionsBoard } from "@/components/branch/SessionCollectionsBoard";
-import { PaymentPaidBoard } from "@/components/branch/PaymentPaidBoard";
-import { PaymentUnpaidBoard } from "@/components/branch/PaymentUnpaidBoard";
-import { StorePaymentBoard } from "@/components/branch/StorePaymentBoard";
 
-// `tone` is carried only by the settled/unsettled pair and by Store Payment — green for
-// money fully in, rose for none of it in, violet for the Fitsiomax Store, the same colours
-// the OS uses for those things elsewhere. Every other tab keeps the shared sky styling.
-//
-// Store Payment sits last rather than between Payment Paid and Payment Unpaid: those two
-// are a pair and read as one, and an unrelated tab dropped between them breaks that.
-const SUB_TABS = [
-  { key: "total_revenue", label: "Total Revenue" },
-  { key: "consultation", label: "Consultation Collections" },
-  { key: "session", label: "Session Collections" },
-  { key: "diet", label: "Diet Collections" },
-  { key: "outstanding", label: "Outstanding Amount" },
-  { key: "schedules", label: "Payment Schedules" },
-  { key: "paid", label: "Payment Paid", tone: "paid" },
-  { key: "unpaid", label: "Payment Unpaid", tone: "unpaid" },
-  { key: "store", label: "Store Payment", tone: "store" },
-  // Last, so the settled/unsettled/store trio above stays intact — and amber, because
-  // this is the one tab reporting money given away rather than money taken.
+// Three tabs, not the ten this page used to carry: Consultation/Session/Diet/Store
+// Collections were each a copy of Summary's own card-click-to-filter table scoped to one
+// source, which Summary's revenue cards already do; Payment Paid/Unpaid were the same
+// transactions again split by settled/unsettled, readable off Payment Schedule's own
+// balance column; and the old Payment Schedule tab (Partial Payment installments) is
+// superseded here by Outstanding Amount under the same name — the balance a client still
+// owes, not the schedule that produced it.
+const MAIN_TABS = [
+  { key: "summary", label: "Summary" },
+  { key: "schedule", label: "Payment Schedule" },
   { key: "discount", label: "Discount Applied", tone: "discount" },
 ];
 
-const subTabClasses = (tab, active) => {
-  if (tab.tone === "paid") {
-    return active ? "bg-emerald-600 text-white shadow-sm" : "text-emerald-700 hover:bg-emerald-50";
-  }
-  if (tab.tone === "unpaid") {
-    return active ? "bg-rose-600 text-white shadow-sm" : "text-rose-700 hover:bg-rose-50";
-  }
-  if (tab.tone === "store") {
-    return active ? "bg-violet-600 text-white shadow-sm" : "text-violet-700 hover:bg-violet-50";
-  }
+const mainTabClasses = (tab, active) => {
   if (tab.tone === "discount") {
     return active ? "bg-amber-600 text-white shadow-sm" : "text-amber-700 hover:bg-amber-50";
   }
   return active ? "bg-sky-50 text-sky-700" : "text-slate-600 hover:bg-slate-50";
 };
 
+// Collected is every payment in the current filter regardless of sign-off; Approved and
+// Pending are the two ways it splits under the Accountant's own Approvals review. Picking
+// one narrows the revenue cards and the table below it the same way a revenue card does —
+// two independent cuts of the same transaction list, not a second data source.
+const APPROVAL_VIEWS = [
+  { key: "collected", label: "Collected" },
+  { key: "approved", label: "Approved" },
+  { key: "pending", label: "Pending" },
+];
+
 // The card, the table it filters to, and the label above that table are one thing, so they
 // are one list rather than three that have to be kept in step.
 const REVENUE_VIEWS = [
-  { key: "collected", label: "Total Collected", color: "#059669", icon: Wallet },
+  { key: "collected", label: "Total Revenue", color: "#059669", icon: Wallet },
   { key: "consultation", label: "Consultation Revenue", color: "#0284c7", icon: Stethoscope },
   { key: "session", label: "Session Revenue", color: "#7c3aed", icon: Activity },
-  { key: "store", label: "Store Revenue", color: "#d97706", icon: ShoppingBag },
   { key: "diet", label: "Diet Revenue", color: "#ea580c", icon: Salad },
+  { key: "store", label: "Store Revenue", color: "#d97706", icon: ShoppingBag },
 ];
+
+// "All" first and the default — this page had no date filter before, so opening it
+// scoped to Today would silently hide every collection older than that. Today/This
+// Week/This Month/Custom are the same presets Branches & Verticals' own Overview and AC
+// Overview already use.
+const DATE_PRESETS = [
+  { key: "all", label: "All" },
+  { key: "today", label: "Today" },
+  { key: "this_week", label: "This Week" },
+  { key: "this_month", label: "This Month" },
+  { key: "custom", label: "Custom" },
+];
+
+const startOfDay = (d) => { const n = new Date(d); n.setHours(0, 0, 0, 0); return n; };
+const startOfWeek = (d) => { const x = startOfDay(d); x.setDate(x.getDate() - x.getDay()); return x; };
+const startOfMonth = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
+const toIso = (d) => d.toISOString().slice(0, 10);
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 const countLabel = (n, noun) => `${n} ${noun}${n === 1 ? "" : "s"}`;
@@ -87,10 +92,10 @@ const PaymentModeBadge = ({ mode }) => (
  * Accountant Manage — Super Admin's Branch Management > Accountant Management >
  * Accountant Manage, the same view reused read-only-by-nature (it's all reporting,
  * nothing editable) as Branch Admin's own "Accountant Manage" tab, and again as the
- * Accountant's own Summary tab. Ten sub-tabs: Total Revenue, Consultation Collections,
- * Session Collections, Diet Collections, Outstanding Amount, Payment Schedules, Payment
- * Paid, Payment Unpaid, Store Payment and Discount Applied — all sourced from the same
- * finance/revenue-overview payload.
+ * Accountant's own Summary tab. Three tabs — Summary, Payment Schedule, Discount
+ * Applied — all sourced from the same finance/revenue-overview payload, scoped by the
+ * date filter above them (Payment Schedule excepted: a client's outstanding balance is a
+ * right-now figure, not one a collection-date range narrows).
  *
  * @param mode  "online" | "offline", an optional vertical filter only the Accountant's
  *              Summary tab passes (and owns the pills for) — left unset everywhere else.
@@ -98,8 +103,12 @@ const PaymentModeBadge = ({ mode }) => (
 export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
   const [branches, setBranches] = useState([]);
   const [branchId, setBranchId] = useState(fixedBranchId || "");
-  const [subTab, setSubTab] = useState("total_revenue");
+  const [tab, setTab] = useState("summary");
+  const [approvalView, setApprovalView] = useState("collected");
   const [revenueView, setRevenueView] = useState("collected");
+  const [preset, setPreset] = useState("all");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [viewingLeadId, setViewingLeadId] = useState(null);
@@ -109,93 +118,75 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
     getBranches().then(setBranches).catch(() => setBranches([]));
   }, [fixedBranchId]);
 
+  const { startDate, endDate } = useMemo(() => {
+    const today = new Date();
+    if (preset === "today") return { startDate: toIso(today), endDate: toIso(today) };
+    if (preset === "this_week") return { startDate: toIso(startOfWeek(today)), endDate: toIso(today) };
+    if (preset === "this_month") return { startDate: toIso(startOfMonth(today)), endDate: toIso(today) };
+    if (preset === "custom") return { startDate: customFrom, endDate: customTo };
+    return { startDate: "", endDate: "" }; // "all" — no range, every collection ever made
+  }, [preset, customFrom, customTo]);
+
   // "online" | "offline", owned by whichever caller wants the filter (Accountant's own
   // Summary tab) — undefined everywhere else, which getRevenueOverview reads as no filter
   // at all, so Branch Admin's own tab and Branch Management's Analytics are unaffected.
   const load = useCallback(() => {
+    if (preset === "custom" && (!customFrom || !customTo)) return;
     setLoading(true);
-    getRevenueOverview({ branch_id: branchId || undefined, vertical_mode: mode || undefined })
+    getRevenueOverview({
+      branch_id: branchId || undefined,
+      vertical_mode: mode || undefined,
+      start_date: startDate || undefined,
+      end_date: endDate || undefined,
+    })
       .then(setData)
       .catch(() => setData(null))
       .finally(() => setLoading(false));
-  }, [branchId, mode]);
+  }, [branchId, mode, startDate, endDate, preset, customFrom, customTo]);
 
   useEffect(() => { load(); }, [load]);
 
   const k = data?.kpis || {};
-  const b = data?.breakdown || {};
   // `data?.x || []` builds a fresh array on every render, so every memo keyed on one was
-  // re-running each time and memoising nothing. Held steady here instead, which is what
-  // the exhaustive-deps warnings on this file were pointing at.
+  // re-running each time and memoising nothing. Held steady here instead.
   const transactions = useMemo(() => data?.transactions || [], [data]);
   const outstanding = useMemo(() => data?.outstanding_clients || [], [data]);
-  const schedule = data?.payment_schedule || [];
 
-  // How many transactions sit behind each figure — the line under it, and the count of
-  // rows clicking it will leave in the table below.
-  const txnCounts = useMemo(() => {
-    const acc = { collected: transactions.length, consultation: 0, session: 0, diet: 0, store: 0 };
-    transactions.forEach((t) => { if (acc[t.source] !== undefined) acc[t.source] += 1; });
-    return acc;
-  }, [transactions]);
+  // Collected/Approved/Pending narrows which transactions the revenue cards and table
+  // below are built from — "Collected" is every one of them, the other two split on the
+  // same `approved` flag the Approvals tab signs off on.
+  const approvalFilteredTxns = useMemo(() => {
+    if (approvalView === "approved") return transactions.filter((t) => t.approved);
+    if (approvalView === "pending") return transactions.filter((t) => !t.approved);
+    return transactions;
+  }, [transactions, approvalView]);
 
-  // Payment Paid — clients with nothing left owing, rolled up from their own
-  // transactions. Anyone still carrying a balance belongs to Outstanding Amount, so they
-  // are excluded outright; what remains is every client whose money is fully in,
-  // including those who paid the whole package up front and so never had a schedule.
-  const paidClients = useMemo(() => {
-    const owing = new Set(outstanding.map((o) => o.lead_id));
-    const map = {};
-    transactions.forEach((t) => {
-      // Store sales are excluded outright, not merely by carrying no lead: this rolls a
-      // transaction into consultation_paid or session_paid with nothing in between, so a
-      // counter sale that ever gained a lead would silently land in session_paid.
-      if (t.source === "store") return;
-      if (!t.lead_id || owing.has(t.lead_id)) return;
-      const r = map[t.lead_id] || (map[t.lead_id] = {
-        lead_id: t.lead_id,
-        client_name: t.client_name || "Unknown",
-        phone: t.phone || "",
-        branch_name: t.branch_name || "",
-        consultation_paid: 0, session_paid: 0, total_paid: 0,
-        last_date: "", modes: [], txns: [],
-      });
-      const amount = Number(t.gross) || 0;
-      r.total_paid += amount;
-      // Written as an explicit three-way, not "consultation else session". This board has
-      // two columns and a total that must equal them; an else-branch put every Diet
-      // Consultation Fee under Session, which is the one place it certainly does not
-      // belong. Diet joins Consultation here — it is a consultation of another kind — so
-      // the two columns still add up to Total Paid.
-      if (t.source === "session") r.session_paid += amount;
-      else r.consultation_paid += amount;
-      const day = (t.date || "").slice(0, 10);
-      if (day > r.last_date) r.last_date = day;
-      if (t.payment_mode && !r.modes.includes(t.payment_mode)) r.modes.push(t.payment_mode);
-      r.txns.push(t);
+  // Every card's figure and the count under it, from one pass over whichever set the
+  // Collected/Approved/Pending filter above left standing.
+  const sums = useMemo(() => {
+    const totals = { collected: 0, consultation: 0, session: 0, diet: 0, store: 0 };
+    const counts = { collected: 0, consultation: 0, session: 0, diet: 0, store: 0 };
+    approvalFilteredTxns.forEach((t) => {
+      const amt = Number(t.gross) || 0;
+      totals.collected += amt;
+      counts.collected += 1;
+      if (totals[t.source] !== undefined) {
+        totals[t.source] += amt;
+        counts[t.source] += 1;
+      }
     });
-    return Object.values(map).sort((a, b) => b.total_paid - a.total_paid);
-  }, [transactions, outstanding]);
+    return { totals, counts };
+  }, [approvalFilteredTxns]);
 
-  // Payment Unpaid — the other end of the same ledger: billed clients with nothing
-  // collected at all. They already come through in outstanding_clients carrying their
-  // bill, balance and due date; the only cut needed is paid_amount still at zero, which
-  // is what separates this from Outstanding Amount's part-payers.
-  const unpaidClients = useMemo(
-    () => outstanding.filter((o) => (Number(o.paid_amount) || 0) <= 0 && (Number(o.balance) || 0) > 0),
-    [outstanding],
-  );
-
-  // Every collection taken below its listed price, biggest concession first. A negative
-  // discount means more than the listed fee was collected, which is the opposite of this
-  // tab, so only positives qualify.
+  // Every collection taken below its listed price, biggest concession first — not run
+  // through the Collected/Approved/Pending filter above, since a discount is a fact about
+  // the collection itself, independent of whether it's since been signed off.
   const discountedTxns = useMemo(
     () => transactions
       .filter((t) => (Number(t.discount) || 0) > 0)
       .sort((a, b) => (Number(b.discount) || 0) - (Number(a.discount) || 0)),
     [transactions],
   );
-
 
   return (
     <div className="space-y-4" data-testid="accountant-manage-tab">
@@ -214,39 +205,46 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
         </div>
       )}
 
-      {/* A dropdown on a phone. Ten tabs three-across cost four rows of the screen before
-          the figures they select had anywhere to appear — and the labels had to shrink to
-          10px to fit, which is the point at which "Consultation Collections" and "Session
-          Collections" stop being tellable apart at a glance. One control, full names, one
-          row. The desktop bar is unchanged. */}
-      <div className="flex items-center gap-2 md:hidden">
-        <select
-          value={subTab}
-          onChange={(e) => setSubTab(e.target.value)}
-          className="h-11 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700"
-          data-testid="accountant-manage-subtab-select"
-        >
-          {SUB_TABS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
-        </select>
+      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white p-3" data-testid="accountant-manage-date-filter">
+        <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-0.5">
+          {DATE_PRESETS.map((p) => (
+            <button
+              key={p.key}
+              onClick={() => setPreset(p.key)}
+              className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${preset === p.key ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100"}`}
+              data-testid={`accountant-manage-preset-${p.key}`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+        {preset === "custom" && (
+          <div className="flex items-center gap-1.5 text-xs text-slate-500">
+            <CalendarDays className="h-3.5 w-3.5" />
+            <MilkDateInput value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className="h-8 rounded-md border border-slate-200 px-2 text-xs" data-testid="accountant-manage-custom-from" />
+            <span>to</span>
+            <MilkDateInput value={customTo} onChange={(e) => setCustomTo(e.target.value)} className="h-8 rounded-md border border-slate-200 px-2 text-xs" data-testid="accountant-manage-custom-to" />
+          </div>
+        )}
         <Button
           onClick={load}
           disabled={loading}
           title="Refresh"
           aria-label="Refresh"
-          className="h-11 w-11 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
+          className="ml-auto h-9 w-9 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
           data-testid="accountant-manage-refresh"
         >
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
         </Button>
       </div>
 
-      <div className="hidden flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1 md:flex" data-testid="accountant-manage-subtabs">
-        {SUB_TABS.map((t) => (
+      <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="accountant-manage-maintabs">
+        {MAIN_TABS.map((t) => (
           <button
             key={t.key}
-            onClick={() => setSubTab(t.key)}
-            className={`min-w-0 rounded-md px-3 py-2 text-center text-sm font-medium transition ${subTabClasses(t, subTab === t.key)}`}
-            data-testid={`accountant-manage-subtab-${t.key}`}
+            onClick={() => setTab(t.key)}
+            className={`min-w-0 rounded-md px-3.5 py-2 text-center text-sm font-medium transition ${mainTabClasses(t, tab === t.key)}`}
+            data-testid={`accountant-manage-maintab-${t.key}`}
           >
             {t.label}
           </button>
@@ -255,16 +253,19 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
 
       {loading && !data ? (
         <p className="py-10 text-center text-sm text-slate-400">Loading...</p>
-      ) : subTab === "total_revenue" ? (
-        <div className="space-y-4" data-testid="accountant-manage-total-revenue">
-          {/* Collected is every payment taken; Approved is the slice of it the
-              Accountant's own Approvals tab has signed off on — a review step, not a
-              second total, so the two are shown side by side rather than as competing
-              headline figures. */}
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-1 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-xs" data-testid="accountant-manage-approval-summary">
-            <span className="text-slate-500">Collected: <span className="font-semibold text-slate-800">{fmt(k.total_collected)}</span></span>
-            <span className="text-slate-500">Approved: <span className="font-semibold text-emerald-600">{fmt(k.total_approved)}</span></span>
-            <span className="text-slate-500">Pending Approval: <span className="font-semibold text-amber-600">{fmt(k.total_pending_approval)}</span></span>
+      ) : tab === "summary" ? (
+        <div className="space-y-4" data-testid="accountant-manage-summary">
+          <div className="flex w-fit items-center gap-1 rounded-lg border border-slate-200 bg-white p-0.5" data-testid="accountant-manage-approval-filter">
+            {APPROVAL_VIEWS.map((v) => (
+              <button
+                key={v.key}
+                onClick={() => setApprovalView(v.key)}
+                className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${approvalView === v.key ? "bg-sky-500 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50"}`}
+                data-testid={`accountant-manage-approval-${v.key}`}
+              >
+                {v.label} · {fmt(v.key === "collected" ? k.total_collected : v.key === "approved" ? k.total_approved : k.total_pending_approval)}
+              </button>
+            ))}
           </div>
 
           {/* Five across from lg, so the whole split reads on one line. Two-up on a phone
@@ -274,8 +275,8 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
               <StatTile
                 key={v.key}
                 label={v.label}
-                value={fmt(v.key === "collected" ? k.total_collected : b[`${v.key}_revenue`])}
-                sub={countLabel(txnCounts[v.key], v.key === "store" ? "sale" : "payment")}
+                value={fmt(sums.totals[v.key])}
+                sub={countLabel(sums.counts[v.key], v.key === "store" ? "sale" : "payment")}
                 icon={v.icon}
                 color={v.color}
                 active={revenueView === v.key}
@@ -287,35 +288,14 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
 
           <RevenueDetailTable
             title={REVENUE_VIEWS.find((v) => v.key === revenueView)?.label}
-            rows={revenueView === "collected" ? transactions : transactions.filter((t) => t.source === revenueView)}
+            rows={revenueView === "collected" ? approvalFilteredTxns : approvalFilteredTxns.filter((t) => t.source === revenueView)}
             onView={setViewingLeadId}
           />
         </div>
-      ) : subTab === "consultation" ? (
-        <ConsultationCollectionsBoard rows={transactions.filter((t) => t.source === "consultation")} onView={setViewingLeadId} />
-      ) : subTab === "session" ? (
-        <SessionCollectionsBoard rows={transactions.filter((t) => t.source === "session")} onView={setViewingLeadId} />
-      ) : subTab === "diet" ? (
-        // The consultation board over the diet slice: every card, filter and column means
-        // the same thing for a Diet Consultation Fee as for a Consultation Fee.
-        <ConsultationCollectionsBoard
-          rows={transactions.filter((t) => t.source === "diet")}
-          onView={setViewingLeadId}
-          title="Diet Collections"
-          testid="diet-collections-board"
-        />
-      ) : subTab === "outstanding" ? (
+      ) : tab === "schedule" ? (
         <OutstandingAmountBoard rows={outstanding} onView={setViewingLeadId} onChanged={load} />
-      ) : subTab === "paid" ? (
-        <PaymentPaidBoard rows={paidClients} onView={setViewingLeadId} />
-      ) : subTab === "unpaid" ? (
-        <PaymentUnpaidBoard rows={unpaidClients} onView={setViewingLeadId} />
-      ) : subTab === "store" ? (
-        <StorePaymentBoard rows={transactions.filter((t) => t.source === "store")} />
-      ) : subTab === "discount" ? (
-        <DiscountAppliedBoard rows={discountedTxns} onView={setViewingLeadId} />
       ) : (
-        <PaymentSchedulesBoard rows={schedule} onView={setViewingLeadId} onChanged={load} />
+        <DiscountAppliedBoard rows={discountedTxns} onView={setViewingLeadId} />
       )}
 
       {viewingLeadId && <ClientHistoryModal leadId={viewingLeadId} onClose={() => setViewingLeadId(null)} onChanged={load} />}
@@ -323,11 +303,11 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
   );
 };
 
-// One card per fee type, mirroring Total Revenue's row. The first four figures this tab
-// carried — total, listed value, average % and count — could not filter anything between
-// them: all four described the same set of rows, so three of the cards would have been the
-// same filter as the first. Splitting by source is the cut that actually partitions the
-// list, and every one of those figures survives on the cards below.
+// One card per fee type, mirroring Summary's row. The first four figures this tab carried
+// — total, listed value, average % and count — could not filter anything between them: all
+// four described the same set of rows, so three of the cards would have been the same
+// filter as the first. Splitting by source is the cut that actually partitions the list,
+// and every one of those figures survives on the cards below.
 //
 // No Store card. A counter sale is rung at the shelf price and carries no discount, so it
 // could only ever read Rs.0.
@@ -342,8 +322,8 @@ const DISCOUNT_VIEWS = [
  * Discount Applied — every collection settled below its listed price.
  *
  * The money here was never owed and never will be: the OS treats a negotiated fee as
- * settled in full the moment it is confirmed, so none of it appears under Outstanding
- * Amount. Which means this is the only place the concessions a branch has granted are
+ * settled in full the moment it is confirmed, so none of it appears under Payment
+ * Schedule. Which means this is the only place the concessions a branch has granted are
  * countable at all.
  *
  * Each row is one confirmed collection, not one client, because the discount was a
