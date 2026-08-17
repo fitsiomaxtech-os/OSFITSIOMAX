@@ -2,13 +2,13 @@ import { useCallback, useEffect, useState } from "react";
 import {
   ArrowLeft, MapPin, Clock, Calendar as CalendarIcon, Mail, Phone, User, RefreshCw, Pencil,
   Users, BarChart3, Stethoscope, Activity, ListChecks, FileText, Wallet, UserCog, X,
-  ArrowLeftRight,
+  ArrowLeftRight, Plus,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
-import { bmDetail, updateBranch, bmReassignAdmin, hrBranchAdminCandidates, bmHeadPhysioCandidates, bmAssignHeadPhysio, bmLeadControlHistory, bmPreSalesMembers } from "@/lib/api";
+import { bmDetail, updateBranch, bmReassignAdmin, hrBranchAdminCandidates, bmHeadPhysioCandidates, bmAssignHeadPhysio, bmLeadControlHistory, bmPreSalesMembers, hrCreateUser, hrUpdateUser } from "@/lib/api";
 import { BranchFormDialogV2 } from "@/components/branch/BranchFormDialogV2";
 import { LeadControlSwitch, normalizeLeadControl } from "@/components/branch/LeadControlSwitch";
 import { slotTo12h } from "@/lib/time";
@@ -75,7 +75,7 @@ export const BranchDetailPage = ({ branchId, onBack, readOnly = false }) => {
       </div>
 
       {tab === "summary" && <SummaryTab data={data} branchId={branchId} onChanged={load} readOnly={readOnly} />}
-      {tab === "staff" && <TeamTab staff={data.staff} branchId={branchId} />}
+      {tab === "staff" && <TeamTab staff={data.staff} branchId={branchId} onChanged={load} readOnly={readOnly} />}
       {tab === "performance" && <PerformanceTab perf={data.performance} />}
       {tab === "head_physio" && <HeadPhysioTab hp={data.head_physio_section} branchId={branchId} onChanged={load} readOnly={readOnly} />}
       {tab === "lead_management" && <LeadManagementTab branch={b} branchId={branchId} onChanged={load} readOnly={readOnly} />}
@@ -304,56 +304,291 @@ const HeaderLeadControl = ({ branch, onChanged, readOnly = false, preSalesMember
 
 // ---------- Team tab ----------
 
+const initials = (name) => (name || "?").split(" ").filter(Boolean).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+
 /**
- * Everyone working this branch, laid out the way the Experts tab lays out its
- * calendars — a card per group, always open, rather than a row of counters you have
- * to click through one at a time. Pre Sales is its own card here (fetched separately,
- * same call the Lead Management tab's assignee picker uses) since a branch's leads
- * often start on that desk before ever reaching anyone else in this list.
+ * The desks a branch is staffed by, and the role a new account gets when added from each.
+ *
+ * `role` is what Add writes. Only the plain slug is created — a branch admin variant like
+ * branch_admin_physio is a deliberate choice about which practice someone runs, and this
+ * form has no business guessing it; it can be changed afterwards in Roles & Credentials.
+ *
+ * Pre Sales comes from its own endpoint rather than the branch's staff list, because a
+ * Pre-Sales rep works a branch's leads without being posted to the branch.
  */
-const TeamTab = ({ staff, branchId }) => {
+const TEAM_DESKS = [
+  { key: "pre_sales", label: "Pre Sales", role: "pre_sales", from: "preSales" },
+  { key: "branch_admins", label: "Branch Admin", role: "branch_admin", from: "branch_admins" },
+  { key: "head_physios", label: "Consultants", role: "head_physio", from: "head_physios" },
+  { key: "physios", label: "Physio", role: "physio", from: "physios" },
+  { key: "diet", label: "Diet", role: "nutrition_coach", from: "diet" },
+];
+
+/**
+ * Everyone working this branch.
+ *
+ * "All" keeps the card-per-desk overview this tab has always been. The per-desk tabs are
+ * for working on one: the same people with their contact details spelled out, an Edit on
+ * each and an Add for the desk, so staffing a branch does not mean leaving for HR Admin
+ * and finding your way back.
+ *
+ * Read-only for a Branch Admin looking at their own branch through the Manager view —
+ * creating and editing logins is Super Admin's, and the endpoints refuse anyone else, so
+ * the buttons are not offered rather than offered and refused.
+ */
+const TeamTab = ({ staff, branchId, onChanged, readOnly = false }) => {
   const [preSalesMembers, setPreSalesMembers] = useState([]);
-  useEffect(() => {
+  const [desk, setDesk] = useState("all");
+  const [editing, setEditing] = useState(null);   // a user row
+  const [adding, setAdding] = useState(null);     // a TEAM_DESKS entry
+
+  const loadPreSales = useCallback(() => {
     bmPreSalesMembers(branchId).then(setPreSalesMembers).catch(() => setPreSalesMembers([]));
   }, [branchId]);
+  useEffect(() => { loadPreSales(); }, [loadPreSales]);
 
-  const groups = [
-    { key: "pre_sales", label: "Pre Sales", items: preSalesMembers },
-    { key: "branch_admins", label: "Branch Admin", items: staff.branch_admins },
-    { key: "head_physios", label: "Consultants", items: staff.head_physios },
-    { key: "physios", label: "Physio", items: staff.physios },
-  ];
+  const groups = TEAM_DESKS.map((d) => ({
+    ...d,
+    items: (d.from === "preSales" ? preSalesMembers : staff[d.from]) || [],
+  }));
+  const active = groups.find((g) => g.key === desk) || null;
+
+  // Both lists reload: a new Physio changes the branch's staff, and a new Pre-Sales rep
+  // changes only the separately-fetched list, so refreshing one of the two would leave
+  // whichever desk was used looking like the save had not worked.
+  const afterSave = () => { setEditing(null); setAdding(null); loadPreSales(); onChanged && onChanged(); };
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2" data-testid="branch-team-tab">
-      {groups.map((g) => (
-        <Card key={g.key} data-testid={`branch-team-${g.key}`}>
+    <div className="space-y-3" data-testid="branch-team-tab">
+      <div className="flex flex-wrap gap-1.5 rounded-lg border border-slate-200 bg-white p-1" data-testid="branch-team-desks">
+        {[{ key: "all", label: "All", items: groups.flatMap((g) => g.items) }, ...groups].map((g) => (
+          <button
+            key={g.key}
+            type="button"
+            onClick={() => setDesk(g.key)}
+            className={`inline-flex shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition ${
+              desk === g.key ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-50"
+            }`}
+            data-testid={`branch-team-desk-${g.key}`}
+          >
+            {g.label}
+            <span className={`rounded px-1.5 py-px text-[10px] font-bold ${desk === g.key ? "bg-white/25" : "bg-slate-100 text-slate-500"}`}>
+              {g.items.length}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      {desk === "all" ? (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {groups.map((g) => (
+            <Card key={g.key} data-testid={`branch-team-${g.key}`}>
+              <CardHeader className="flex flex-row items-center justify-between gap-2">
+                <CardTitle className="text-base">{g.label}</CardTitle>
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">{g.items.length}</span>
+              </CardHeader>
+              <CardContent>
+                {g.items.length === 0 ? (
+                  <p className="text-sm text-slate-400">No {g.label.toLowerCase()} yet.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {g.items.map((u) => (
+                      <div key={u.id} className="flex items-center gap-3 rounded-md border border-slate-200 p-3" data-testid={`branch-team-${g.key}-${u.id}`}>
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-600">{initials(u.full_name)}</div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-semibold text-slate-800">{u.full_name}</p>
+                          <p className="truncate text-xs text-slate-500">{u.specialization || u.email || ""}</p>
+                        </div>
+                        {u.profile_type && <span className="shrink-0 rounded bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-600">{u.profile_type}</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      ) : (
+        <Card data-testid={`branch-team-desk-panel-${active.key}`}>
           <CardHeader className="flex flex-row items-center justify-between gap-2">
-            <CardTitle className="text-base">{g.label}</CardTitle>
-            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">{g.items.length}</span>
+            <div>
+              <CardTitle className="text-base">{active.label}</CardTitle>
+              <p className="text-xs text-slate-500">{active.items.length} at this branch</p>
+            </div>
+            {!readOnly && (
+              <Button size="sm" className="bg-sky-600 text-white hover:bg-sky-700" onClick={() => setAdding(active)} data-testid={`branch-team-add-${active.key}`}>
+                <Plus className="mr-1 h-3.5 w-3.5" /> Add {active.label}
+              </Button>
+            )}
           </CardHeader>
           <CardContent>
-            {g.items.length === 0 ? (
-              <p className="text-sm text-slate-400">No {g.label.toLowerCase()} yet.</p>
+            {active.items.length === 0 ? (
+              <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">
+                No {active.label.toLowerCase()} at this branch yet.
+              </p>
             ) : (
-              <div className="space-y-2">
-                {g.items.map((u) => (
-                  <div key={u.id} className="flex items-center gap-3 rounded-md border border-slate-200 p-3" data-testid={`branch-team-${g.key}-${u.id}`}>
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-600">
-                      {(u.full_name || "?").split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase()}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold text-slate-800">{u.full_name}</p>
-                      <p className="truncate text-xs text-slate-500">{u.specialization || u.email || ""}</p>
-                    </div>
-                    {u.profile_type && <span className="shrink-0 rounded bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-600">{u.profile_type}</span>}
-                  </div>
-                ))}
+              <div className="overflow-x-auto">
+                <table className="w-full table-fixed text-left text-sm">
+                  <thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                    <tr>
+                      <th className="w-[6%] px-3 py-2.5">S.No</th>
+                      <th className="w-[26%] px-3 py-2.5">Name</th>
+                      <th className="w-[26%] px-3 py-2.5">Email</th>
+                      <th className="w-[16%] px-3 py-2.5">Phone</th>
+                      <th className="w-[14%] px-3 py-2.5">Role</th>
+                      <th className="w-[12%] px-3 py-2.5 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {active.items.map((u, i) => (
+                      <tr key={u.id} className="align-middle hover:bg-slate-50/60" data-testid={`branch-team-row-${u.id}`}>
+                        <td className="px-3 py-3 text-xs text-slate-400">{i + 1}</td>
+                        <td className="px-3 py-3">
+                          <div className="flex items-center gap-2">
+                            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-600">{initials(u.full_name)}</span>
+                            <span className="truncate font-semibold text-slate-800" title={u.full_name}>{u.full_name || "—"}</span>
+                          </div>
+                        </td>
+                        <td className="truncate px-3 py-3 text-xs text-slate-600" title={u.email}>{u.email || "—"}</td>
+                        <td className="truncate px-3 py-3 text-xs text-slate-600">{u.mobile_number || u.phone || "—"}</td>
+                        <td className="px-3 py-3">
+                          {/* The stored slug, prettied. A Branch Admin (Physio) reads as
+                              what they are rather than as a bare "Branch Admin". */}
+                          <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
+                            {String(u.role || u.profile_type || "—").replace(/_/g, " ")}
+                          </span>
+                        </td>
+                        <td className="px-3 py-3 text-right">
+                          {readOnly ? (
+                            <span className="text-xs text-slate-300">—</span>
+                          ) : (
+                            <Button size="sm" variant="outline" className="text-xs" onClick={() => setEditing(u)} data-testid={`branch-team-edit-${u.id}`}>
+                              <Pencil className="mr-1 h-3 w-3" /> Edit
+                            </Button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </CardContent>
         </Card>
-      ))}
+      )}
+
+      {(editing || adding) && (
+        <TeamMemberDialog
+          user={editing}
+          desk={adding}
+          branchId={branchId}
+          onClose={() => { setEditing(null); setAdding(null); }}
+          onSaved={afterSave}
+        />
+      )}
+    </div>
+  );
+};
+
+/**
+ * Add a login to this branch, or correct an existing one.
+ *
+ * Both halves go through HR's own user endpoints, so an account made here is the same
+ * account Roles & Credentials manages — not a second kind of user that only this page
+ * understands. branch_id is fixed to the branch being viewed: adding someone from a
+ * branch's own Team page and having to pick the branch again invites picking the wrong one.
+ *
+ * The role is fixed by the desk on add and is not editable here at all. Changing what
+ * somebody is is a different act from correcting their phone number, it runs through its
+ * own endpoint, and it belongs where the whole role list is on screen.
+ */
+const TeamMemberDialog = ({ user, desk, branchId, onClose, onSaved }) => {
+  const isEdit = !!user;
+  const [form, setForm] = useState({
+    full_name: user?.full_name || "",
+    email: user?.email || "",
+    mobile_number: user?.mobile_number || user?.phone || "",
+    password: "",
+  });
+  const [saving, setSaving] = useState(false);
+  const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+
+  const submit = async () => {
+    if (!form.full_name.trim()) { toast.error("Name is required"); return; }
+    if (!form.email.trim()) { toast.error("Email is required"); return; }
+    if (!isEdit && form.password.trim().length < 6) { toast.error("Password must be at least 6 characters"); return; }
+    setSaving(true);
+    try {
+      if (isEdit) {
+        await hrUpdateUser(user.id, {
+          full_name: form.full_name.trim(),
+          email: form.email.trim(),
+          mobile_number: form.mobile_number.trim() || undefined,
+        });
+        toast.success(`${form.full_name.trim()} updated`);
+      } else {
+        await hrCreateUser({
+          full_name: form.full_name.trim(),
+          email: form.email.trim(),
+          password: form.password.trim(),
+          role: desk.role,
+          branch_id: branchId,
+          mobile_number: form.mobile_number.trim() || undefined,
+        });
+        toast.success(`${form.full_name.trim()} added to ${desk.label}`);
+      }
+      onSaved();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || (isEdit ? "Could not update" : "Could not add"));
+    }
+    setSaving(false);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="w-full max-w-md rounded-xl bg-white shadow-2xl" data-testid="branch-team-member-dialog">
+        <div className="border-b p-5">
+          <h3 className="text-base font-semibold text-slate-800">
+            {isEdit ? `Edit ${user.full_name || "member"}` : `Add ${desk.label}`}
+          </h3>
+          <p className="mt-0.5 text-[11px] text-slate-500">
+            {isEdit
+              ? "Name, email and phone. Role and branch are changed in HR Admin → Roles & Credentials."
+              : `Creates a login for this branch as ${String(desk.role).replace(/_/g, " ")}.`}
+          </p>
+        </div>
+
+        <div className="space-y-3 p-5">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-600">Full Name *</label>
+            <Input value={form.full_name} onChange={(e) => set("full_name", e.target.value)} autoFocus data-testid="branch-team-name" />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-600">Email *</label>
+            <Input type="email" value={form.email} onChange={(e) => set("email", e.target.value)} data-testid="branch-team-email" />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-600">Phone</label>
+            <Input value={form.mobile_number} onChange={(e) => set("mobile_number", e.target.value)} placeholder="+91 ..." data-testid="branch-team-phone" />
+          </div>
+          {!isEdit && (
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">Password *</label>
+              <Input type="text" value={form.password} onChange={(e) => set("password", e.target.value)} placeholder="At least 6 characters" data-testid="branch-team-password" />
+              {/* Shown rather than masked: whoever creates the account has to pass it on,
+                  and a password they cannot read is one they will reset immediately. */}
+              <p className="mt-1 text-[10px] text-slate-400">They can change it after their first sign-in.</p>
+            </div>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-2 border-t p-4">
+          <Button variant="outline" size="sm" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button size="sm" onClick={submit} disabled={saving} className="bg-sky-600 text-white hover:bg-sky-700" data-testid="branch-team-save">
+            {saving ? "Saving..." : isEdit ? "Save Changes" : `Add ${desk.label}`}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 };

@@ -5,7 +5,7 @@ import uuid
 
 from database import v3_col
 from utils import now_iso, derive_branch_code, active_doctor_query
-from deps import v3_require_roles, is_branch_admin_role, is_physio_role, PHYSIO_ROLES
+from deps import v3_require_roles, is_branch_admin_role, is_physio_role, is_diet_role, PHYSIO_ROLES
 from security import verify_password
 import lead_control
 from schemas.v3 import V3UserOut
@@ -299,7 +299,13 @@ async def branch_detail(branch_id: str, user: V3UserOut = Depends(v3_require_rol
     staff_rows = await v3_col("users").find({"branch_id": branch_id, "is_active": True}, {"_id": 0, "password": 0}).to_list(500)
     head_physios = [u for u in staff_rows if u.get("role") == "head_physio"]
     physios = [u for u in staff_rows if is_physio_role(u.get("role"))]
-    branch_admins = [u for u in staff_rows if u.get("role") == "branch_admin"]
+    # Off the predicate, not the literal: a Branch Admin (Physio), (Fitness) or an Online
+    # Physio Admin runs this branch too, and matching "branch_admin" exactly left them out
+    # of their own branch's Team list.
+    branch_admins = [u for u in staff_rows if is_branch_admin_role(u.get("role"))]
+    # The Diet desk had no group at all, so a branch's Nutritionist appeared nowhere on
+    # Team even though they hold a calendar here like a Physio does.
+    diet = [u for u in staff_rows if is_diet_role(u.get("role"))]
 
     doctors = await v3_col("doctors").find(active_doctor_query({"branch_id": branch_id}), {"_id": 0}).to_list(500)
 
@@ -336,6 +342,7 @@ async def branch_detail(branch_id: str, user: V3UserOut = Depends(v3_require_rol
             "branch_admins": branch_admins,
             "head_physios": head_physios,
             "physios": physios,
+            "diet": diet,
             "doctors": doctors,
         },
         "performance": {
