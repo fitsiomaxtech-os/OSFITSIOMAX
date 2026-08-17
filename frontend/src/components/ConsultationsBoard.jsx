@@ -203,31 +203,34 @@ const weekOf = (d, firstDay) => Math.floor((new Date(`${d}T00:00:00`) - new Date
 const FALLBACK_SESSION_MINUTES = 30;
 
 /**
- * What the Head Physio is sending the patient away with. Four choices on screen, two
- * independent yes/nos underneath — treatment, and diet.
- *
- * Kept as a pair rather than one four-valued field because diet is orthogonal to
- * treatment: folding them together would give six values once Cancel and the legacy
- * states are counted, and every `consultation_decision === "consultation_treatment"`
- * check already in the codebase would quietly stop matching half the cases it used to.
+ * What the Head Physio is sending the patient away with. Consultation itself needs no
+ * choice — the Head Physio seeing the patient and submitting this form already means a
+ * consultation happened — so the only decision left is which of these four the patient
+ * is also going away with, and the Head Physio can pick any combination of them (none of
+ * them included, one, or all four). Treatment is the one with a package to pick;
+ * diet/rehab/fitness are pure routing flags, each independent for the same reason: a
+ * fifth value of a field (or six, or fourteen) would break every existing
+ * `consultation_decision === "consultation_treatment"` / `== "consultation_only"` check
+ * in the codebase, where four flags read side by side break nothing.
  */
-const CONSULTATION_PLANS = [
-  { key: "only", label: "Only Consultation", decision: "consultation_only", diet: false, tone: "#2a78d6" },
-  { key: "treatment", label: "Consultation + Treatment", decision: "consultation_treatment", diet: false, tone: "#1baf7a" },
-  { key: "treatment_diet", label: "Consultation + Treatment + Diet", decision: "consultation_treatment", diet: true, tone: "#7c3aed" },
-  { key: "diet", label: "Consultation + Diet", decision: "consultation_only", diet: true, tone: "#eb6834" },
-  // Straight to the Head Physio's own Rehab queue: the consultation closes out, no
-  // Treatment Package is picked here, and the patient waits there for one to be
-  // recommended. decision stays consultation_only so the package stays optional — rehab
-  // is a third independent flag for the same reason diet is, not a fifth value of a field
-  // half the codebase already tests against.
-  { key: "rehab", label: "Consultation + Rehab", decision: "consultation_only", diet: false, rehab: true, tone: "#0891b2" },
+const CONSULTATION_ADDONS = [
+  { key: "treatment", label: "Treatment", tone: "#1baf7a" },
+  { key: "diet", label: "Diet", tone: "#eb6834" },
+  { key: "rehab", label: "Rehab", tone: "#0891b2" },
+  { key: "fitness", label: "Fitness", tone: "#7c3aed" },
 ];
-const planOf = (key) => CONSULTATION_PLANS.find((p) => p.key === key) || null;
 
-// The reverse: which plan a saved lead was given. Stored as three flags rather than the
-// key, so Edit has to match on all three or it would reopen the form on the wrong plan
-// and quietly rewrite the decision on save.
+// "Consultation" first always, then whichever add-ons are on — same shape read back from
+// a saved lead (decisionSummaryOf) as from the draft mid-edit, so a label built one way
+// can never say something the other way wouldn't.
+const addonsLabel = ({ treatment, diet, rehab, fitness }) => [
+  "Consultation",
+  treatment ? "Treatment" : null,
+  diet ? "Diet" : null,
+  rehab ? "Rehab" : null,
+  fitness ? "Fitness" : null,
+].filter(Boolean).join(" + ");
+
 // What a confirmed treatment reads as, on screen and in a WhatsApp message. One shape
 // for both, so the message cannot say something the popup does not.
 const decisionText = (d) => [
@@ -248,12 +251,6 @@ const shareDecision = (d) => {
   if (isHandheld()) { window.location.href = url; return; }
   window.open(url, "_blank");
 };
-
-const planFromLead = (lead) => CONSULTATION_PLANS.find((p) => (
-  p.decision === lead.consultation_decision
-  && p.diet === !!lead.diet_recommended
-  && !!p.rehab === !!lead.rehab_referred
-)) || null;
 
 // The Treatment Package options used to cycle through five colours. They are one list of
 // one kind of thing — durations of the same package — so the colour was decorative, and it
@@ -725,14 +722,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   const [dietPickerDate, setDietPickerDate] = useState(null); // "YYYY-MM-DD"
   const [dietMinutes, setDietMinutes] = useState(FALLBACK_SESSION_MINUTES);
 
-  // Treatment (Head Physio only) — "Save & Move": every patient goes on to treatment
-  // sessions once Diagnosis Report + Treatment Summary are written; only the Treatment
-  // Package (names only, no prices shown here) is chosen. "consultation_only" is a legacy
-  // decision value some existing leads already carry — no longer offered as a choice.
-  // `plan` starts empty on purpose: the Head Physio has to pick one. Defaulting to
-  // Consultation + Treatment is how a patient ends up on a treatment package nobody
-  // consciously chose, which is the thing this control exists to prevent.
-  const [decisionDraft, setDecisionDraft] = useState({ plan: "", decision: "consultation_treatment", item_id: "", mode: "offline", sessionsPerWeek: "" });
+  // Treatment (Head Physio only) — "Save & Move": Diagnosis Report + Treatment Summary
+  // have to be written first, but no add-on has to be picked — every toggle starts off,
+  // which submits as a plain Consultation, the same as a patient who needs nothing else.
+  // Picking Treatment reveals the Treatment Package (names only, no prices shown here).
+  const [decisionDraft, setDecisionDraft] = useState({ treatment: false, diet: false, rehab: false, fitness: false, item_id: "", mode: "offline", sessionsPerWeek: "" });
   const [savingDecision, setSavingDecision] = useState(false);
   // The confirmation shown after a decision saves, and the flag that reopens the form
   // behind it. Both clear when the popup moves to another lead.
@@ -1009,7 +1003,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     setRescheduleDraft(null);
     setCollectFeeDraft(null);
     setTreatmentFeeDraft(null);
-    setDecisionDraft({ decision: "consultation_treatment", item_id: "", mode: "offline", sessionsPerWeek: "" });
+    setDecisionDraft({ treatment: false, diet: false, rehab: false, fitness: false, item_id: "", mode: "offline", sessionsPerWeek: "" });
     setDecisionReceipt(null);
     setEditingDecision(false);
   }, [selectedLead?.id]);
@@ -1044,13 +1038,19 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   const submitConsultationDecision = async () => {
     if (!(selectedLead.physio_diagnosis_report || "").trim()) { toast.error("Write the Diagnosis Report first"); return; }
     if (!(selectedLead.treatment_summary || "").trim()) { toast.error("Write the Treatment Summary first"); return; }
-    const plan = planOf(decisionDraft.plan);
-    if (!plan) { toast.error("Choose what this patient is going away with"); return; }
 
-    // The package only exists for the two plans that include treatment. Demanding one for
-    // "Only Consultation" would make that choice unpickable.
-    let payload = { decision: plan.decision, diet_recommended: plan.diet, rehab_referred: !!plan.rehab, mode: decisionDraft.mode };
-    if (plan.decision === "consultation_treatment") {
+    // No add-on picked submits as a plain Consultation — that's a valid, common outcome
+    // (the patient needs nothing further today), not an incomplete form. Only Treatment
+    // demands anything more: its package.
+    const decision = decisionDraft.treatment ? "consultation_treatment" : "consultation_only";
+    let payload = {
+      decision,
+      diet_recommended: decisionDraft.diet,
+      rehab_referred: decisionDraft.rehab,
+      fitness_recommended: decisionDraft.fitness,
+      mode: decisionDraft.mode,
+    };
+    if (decisionDraft.treatment) {
       if (!decisionDraft.item_id) { toast.error("Select a Treatment Package"); return; }
       const item = treatmentPackageItems.find((i) => i.id === decisionDraft.item_id);
       const weeks = weeksFromPackageName(item?.name);
@@ -1062,7 +1062,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     setSavingDecision(true);
     try {
       const res = await saveConsultationDecision(selectedLead.id, payload);
-      toast.success(plan.rehab ? "Saved — patient moved to Rehab" : "Saved & moved to Branch Admin");
+      toast.success(decisionDraft.rehab ? "Saved — patient moved to Rehab" : "Saved & moved to Branch Admin");
       // The lead stays open behind the confirmation rather than the board closing it. The
       // popup's three actions all act on this patient, and two of them — Edit and Share —
       // have nothing to work with once the record underneath has gone.
@@ -1075,11 +1075,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
         name: res.lead.name || "Unknown",
         patientNo: res.lead.patient_number || "",
         phone: res.lead.phone || "",
-        planLabel: plan.label,
-        packageName: plan.decision === "consultation_treatment" ? (pkg?.name || res.lead.session_package_name || "") : "",
+        planLabel: addonsLabel(decisionDraft),
+        packageName: decisionDraft.treatment ? (pkg?.name || res.lead.session_package_name || "") : "",
         perWeek: parseInt(decisionDraft.sessionsPerWeek, 10) || 0,
         weeks: weeksFromPackageName(pkg?.name) || 0,
-        rehab: !!plan.rehab,
+        rehab: decisionDraft.rehab,
       });
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed to save");
@@ -1089,7 +1089,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
 
   // The saved decision in the shape the receipt and the share text both read.
   const decisionSummaryOf = (lead) => {
-    const plan = planFromLead(lead);
     const weeks = weeksFromPackageName(lead.session_package_name);
     const total = lead.session_package_sessions || 0;
     return {
@@ -1097,7 +1096,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       name: lead.name || "Unknown",
       patientNo: lead.patient_number || "",
       phone: lead.phone || "",
-      planLabel: plan?.label || (lead.consultation_decision === "consultation_treatment" ? "Consultation + Treatment" : "Only Consultation"),
+      planLabel: addonsLabel({
+        treatment: lead.consultation_decision === "consultation_treatment",
+        diet: !!lead.diet_recommended,
+        rehab: !!lead.rehab_referred,
+        fitness: !!lead.fitness_recommended,
+      }),
       packageName: lead.session_package_name || "",
       weeks: weeks || 0,
       perWeek: weeks && total ? Math.round(total / weeks) : 0,
@@ -1106,15 +1110,16 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   };
 
   // Edit reopens the form on what was saved. Seeded from the lead rather than left on the
-  // draft's defaults, or the first save would rewrite the plan to whatever the form
+  // draft's defaults, or the first save would rewrite the choice to whatever the form
   // happened to be showing.
   const beginEditDecision = (lead) => {
-    const plan = planFromLead(lead);
     const weeks = weeksFromPackageName(lead.session_package_name);
     const total = lead.session_package_sessions || 0;
     setDecisionDraft({
-      plan: plan?.key || "",
-      decision: lead.consultation_decision || "consultation_treatment",
+      treatment: lead.consultation_decision === "consultation_treatment",
+      diet: !!lead.diet_recommended,
+      rehab: !!lead.rehab_referred,
+      fitness: !!lead.fitness_recommended,
       item_id: lead.session_package_id || "",
       mode: lead.consultation_mode || "offline",
       sessionsPerWeek: weeks && total ? String(Math.round(total / weeks)) : "",
@@ -2630,11 +2635,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               const summaryReady = !!(selectedLead.treatment_summary || "").trim();
               const selectedPackage = treatmentPackageItems.find((i) => i.id === decisionDraft.item_id);
               const selectedPackageWeeks = selectedPackage ? weeksFromPackageName(selectedPackage.name) : null;
-              const plan = planOf(decisionDraft.plan);
-              const needsPackage = plan?.decision === "consultation_treatment";
+              const needsPackage = decisionDraft.treatment;
               const packageReady = !needsPackage
                 || (!!decisionDraft.item_id && !!selectedPackageWeeks && !!parseInt(decisionDraft.sessionsPerWeek, 10));
-              const canSave = diagnosisReady && summaryReady && !!plan && packageReady;
+              // No add-on is a valid, completed choice on its own — a plain Consultation —
+              // so nothing here requires at least one to be picked.
+              const canSave = diagnosisReady && summaryReady && packageReady;
 
               if (alreadyMoved) {
                 return (
@@ -2642,13 +2648,15 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-emerald-700">
                       <ClipboardCheck className="h-3.5 w-3.5" /> Treatment
                     </p>
-                    {/* Read back as the plan that was chosen, rather than as the two
-                        flags it is stored as. */}
+                    {/* Read back as the choice that was made, rather than as the flags it
+                        is stored as. */}
                     <p className="text-sm font-semibold text-slate-800">
-                      {[
-                        selectedLead.consultation_decision === "consultation_treatment" ? "Consultation + Treatment" : "Only Consultation",
-                        selectedLead.diet_recommended ? "Diet" : null,
-                      ].filter(Boolean).join(" + ")}
+                      {addonsLabel({
+                        treatment: selectedLead.consultation_decision === "consultation_treatment",
+                        diet: !!selectedLead.diet_recommended,
+                        rehab: !!selectedLead.rehab_referred,
+                        fitness: !!selectedLead.fitness_recommended,
+                      })}
                     </p>
                     {selectedLead.consultation_decision === "consultation_treatment" && selectedLead.session_package_name && (
                       <p className="mt-0.5 text-xs text-slate-600">
@@ -2656,8 +2664,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       </p>
                     )}
                     <p className="mt-1.5 text-[11px] text-slate-500">Sent to Branch Admin — Consultation Visit.</p>
-                    {/* Reopens the form on the plan and package already saved, rather than
-                        on a blank one — see planFromLead. */}
+                    {/* Reopens the form on the choice and package already saved, rather
+                        than on a blank one — see beginEditDecision. */}
                     <div className="mt-2.5 flex flex-wrap gap-2">
                       <Button
                         size="sm"
@@ -2692,29 +2700,27 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       Write the Diagnosis Report and Treatment Summary above before Save & Move.
                     </p>
                   )}
-                  {/* The plan comes first because it decides whether the rest of this
-                      panel applies at all. One row, scrolled sideways on a narrow screen
-                      rather than wrapped — these four read as one choice, and a wrapped
-                      row reads as two groups. */}
+                  {/* Consultation itself needs no toggle — writing this form up is the
+                      consultation. These four are what else the patient is going away
+                      with, and any combination is valid, including none of them. One row,
+                      scrolled sideways on a narrow screen rather than wrapped — they read
+                      as one group of choices, and a wrapped row reads as two groups. */}
                   <div className="mb-3">
-                    <label className="mb-1 block text-[11px] font-medium text-slate-500">
-                      Treatment Plan <span className="text-rose-500">*</span>
-                    </label>
+                    <label className="mb-1 block text-[11px] font-medium text-slate-500">Also Going Away With</label>
                     <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1" data-testid="cons-decision-plan-options">
-                      {CONSULTATION_PLANS.map((p) => {
-                        const selected = decisionDraft.plan === p.key;
+                      {CONSULTATION_ADDONS.map((p) => {
+                        const selected = !!decisionDraft[p.key];
                         return (
                           <button
                             key={p.key}
                             type="button"
-                            // Switching away from a treatment plan clears the package with
-                            // it, so an abandoned choice can't be submitted by a later plan
-                            // that never showed the picker.
+                            // Turning Treatment off clears the package with it, so an
+                            // abandoned choice can't be submitted once the picker showing
+                            // it is gone.
                             onClick={() => setDecisionDraft((d) => ({
                               ...d,
-                              plan: p.key,
-                              decision: p.decision,
-                              ...(p.decision === "consultation_treatment" ? {} : { item_id: "", sessionsPerWeek: "" }),
+                              [p.key]: !d[p.key],
+                              ...(p.key === "treatment" && d.treatment ? { item_id: "", sessionsPerWeek: "" } : {}),
                             }))}
                             className="shrink-0 whitespace-nowrap rounded-md border px-3 py-1.5 text-xs font-semibold transition hover:brightness-95"
                             style={selected
@@ -2727,11 +2733,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         );
                       })}
                     </div>
-                    {!decisionDraft.plan && (
-                      <p className="mt-1 text-[11px] font-medium text-amber-600" data-testid="cons-decision-plan-hint">
-                        Choose one to continue.
-                      </p>
-                    )}
                   </div>
 
                   {/* Only the two plans that include treatment need a package. Showing it
@@ -2816,11 +2817,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                   >
                     {savingDecision
                       ? "Saving..."
-                      // The label names what the button will actually do. Rehab picks no
-                      // package, so promising one was the wrong instruction on the only
-                      // control that finishes the consultation.
-                      : plan?.rehab ? "Confirm & Move to Rehab"
+                      // The label names what the button will actually do. Treatment needs
+                      // a package still to review, so it says only "Confirm"; Rehab with
+                      // no Treatment names where the patient is headed; anything else is
+                      // simply done.
                       : needsPackage ? "Confirm"
+                      : decisionDraft.rehab ? "Confirm & Move to Rehab"
                       : "Confirm & Save"}
                   </Button>
                 </div>

@@ -262,6 +262,7 @@ class V3LeadOut(BaseModel):
     # to consultation_decision — see V3ConsultationDecisionInput.
     diet_recommended: Optional[bool] = False
     rehab_referred: Optional[bool] = False
+    fitness_recommended: Optional[bool] = False
     # Who is actually delivering that diet plan, set by branch/assign-diet. This model
     # ignores extras, so without these three the Consultations board could never tell an
     # already-assigned patient from a new one and its Reassign control would never appear.
@@ -475,9 +476,9 @@ class V3TestimonialInput(BaseModel):
 class V3ConsultationDecisionInput(BaseModel):
     decision: Literal["consultation_only", "consultation_treatment"]
     # Diet is orthogonal to treatment, not another value of it: a patient can be sent to a
-    # Nutrition Coach with or without physio. Kept as its own flag so the four choices the
-    # Head Physio actually picks from stay two independent yes/nos underneath — folding
-    # them into one enum would make six values, and every existing `== "consultation_
+    # Nutrition Coach with or without physio. Kept as its own flag so the choices the
+    # Head Physio actually picks from stay independent yes/nos underneath — folding them
+    # into one enum would multiply the values, and every existing `== "consultation_
     # treatment"` check in the codebase would silently stop matching half the cases it
     # used to.
     diet_recommended: bool = False
@@ -486,6 +487,8 @@ class V3ConsultationDecisionInput(BaseModel):
     # choice, not another value of `decision`, and folding it in would break every
     # existing `== "consultation_only"` check.
     rehab_referred: bool = False
+    # Same idea as rehab_referred, its own routing flag rather than a value of `decision`.
+    fitness_recommended: bool = False
     # Required only when decision == "consultation_treatment" — the Treatment/Session
     # package (FITSIO STORE > Sessions) the Head Physio is choosing on the patient's behalf.
     item_id: Optional[str] = None

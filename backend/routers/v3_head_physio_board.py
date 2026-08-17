@@ -345,17 +345,20 @@ async def hp_consultation_decision(
         # patient too — without this flag there is no way to tell a patient deliberately
         # sent to rehab from one who simply has not been given a package.
         "rehab_referred": bool(payload.rehab_referred),
+        "fitness_recommended": bool(payload.fitness_recommended),
         "head_consultation_stage": await _head_closing_stage(),
         "consultation_stage": await _branch_consultation_visit_stage(),
         "updated_at": now_iso(),
     }
     # Named the way the Head Physio picked it, so the activity log reads back as the
-    # choice that was made rather than as two flags to recombine.
+    # choice that was made rather than as flags to recombine.
     chosen = "Consultation" if payload.decision == "consultation_only" else "Consultation + Treatment"
     if payload.rehab_referred:
         chosen += " + Rehab"
     if payload.diet_recommended:
         chosen += " + Diet"
+    if payload.fitness_recommended:
+        chosen += " + Fitness"
     detail = f"Consultation decision: {chosen}"
 
     # Consultation Fee has a single fixed price (FITSIO STORE > Consultation) — there's
