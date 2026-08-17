@@ -8,7 +8,7 @@ import logging
 import uuid
 
 from database import v3_col
-from utils import now_iso
+from utils import now_iso, active_doctor_query
 from deps import v3_require_roles
 import lead_control
 from constants import V3_BRANCH_STAGES, V3_CONSULTATION_STAGES, V3_HEAD_CONSULTATION_STAGES
@@ -639,7 +639,7 @@ async def v3_available_experts(
         raise HTTPException(status_code=400, detail="date is required")
     # Head Physios are org-wide: they take consultations for every branch, so this
     # never narrows by branch_id.
-    branch_experts = await v3_col("doctors").find({"profile_type": "head_physio"}, {"_id": 0}).to_list(500)
+    branch_experts = await v3_col("doctors").find(active_doctor_query({"profile_type": "head_physio"}), {"_id": 0}).to_list(500)
 
     # Availability is decided per slot, not per day: an expert with a 9:30 booking is
     # still free at 10:00. So a same-day booking no longer hides them — only being
@@ -740,7 +740,7 @@ async def v3_available_dates(
     # Head Physios are org-wide: they take consultations for every branch, so this
     # never narrows by branch_id.
     branch_experts = await v3_col("doctors").find(
-        {"profile_type": "head_physio"}, {"_id": 0, "id": 1, "slots": 1}
+        active_doctor_query({"profile_type": "head_physio"}), {"_id": 0, "id": 1, "slots": 1}
     ).to_list(500)
 
     booked_rows = await v3_col("appointments").find(
@@ -1078,8 +1078,8 @@ DEFAULT_SLOTS = [f"{h:02d}:{m:02d}" for h in range(9, 18) for m in (0, 30)]  # 0
 
 
 async def _branch_experts(branch_id: str):
-    rows = await v3_col("doctors").find({"branch_id": branch_id}, {"_id": 0}).to_list(500)
-    return rows or await v3_col("doctors").find({}, {"_id": 0}).to_list(500)
+    rows = await v3_col("doctors").find(active_doctor_query({"branch_id": branch_id}), {"_id": 0}).to_list(500)
+    return rows or await v3_col("doctors").find(active_doctor_query(), {"_id": 0}).to_list(500)
 
 
 def _expert_slots(expert: dict):

@@ -22,7 +22,7 @@ from datetime import date, datetime, timedelta
 import uuid
 
 from database import v3_col
-from utils import now_iso
+from utils import now_iso, active_doctor_query
 from deps import v3_require_roles
 from schemas.v3 import V3UserOut
 
@@ -266,7 +266,7 @@ async def branch_reviews(
     # Head Physios are org-wide: they take consultations for every branch, so this
     # never narrows by branch_id.
     head_physios = await v3_col("doctors").find(
-        {"profile_type": "head_physio"}, {"_id": 0, "id": 1, "full_name": 1}
+        active_doctor_query({"profile_type": "head_physio"}), {"_id": 0, "id": 1, "full_name": 1}
     ).to_list(200)
 
     return {

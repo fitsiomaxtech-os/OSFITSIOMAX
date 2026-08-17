@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 import uuid
 
 from database import v3_col
-from utils import now_iso, normalize_slot_time, slot_capacity_of
+from utils import now_iso, normalize_slot_time, slot_capacity_of, active_doctor_query
 from security import hash_password
 from deps import v3_require_roles, v3_require_diet, is_diet_role
 from schemas.v3 import V3UserOut
@@ -146,7 +146,7 @@ async def list_nutrition_coaches(user: V3UserOut = Depends(v3_require_roles("bra
     query = {"profile_type": COACH}
     if user.branch_id:
         query["branch_id"] = user.branch_id
-    coaches = await v3_col("doctors").find(query, {"_id": 0}).sort("full_name", 1).to_list(200)
+    coaches = await v3_col("doctors").find(active_doctor_query(query), {"_id": 0}).sort("full_name", 1).to_list(200)
     return {"coaches": coaches}
 
 

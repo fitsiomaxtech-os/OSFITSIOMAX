@@ -5,7 +5,7 @@ import re
 import uuid
 
 from database import v3_col
-from utils import now_iso, normalize_slot_time, derive_branch_code
+from utils import now_iso, normalize_slot_time, derive_branch_code, active_doctor_query
 from security import hash_password
 from deps import v3_current_user, v3_require_roles, is_branch_admin_role
 from stage_utils import get_first_stage_name, realign_branch_stage_leads
@@ -339,7 +339,7 @@ async def v3_get_doctors(
         # organisation — so branch scoping must not filter them out, or a branch's own
         # HEAD PHYSIO CALENDAR comes back empty. Physios stay scoped to their branch.
         query["$or"] = [{"branch_id": scope_branch}, {"profile_type": "head_physio"}]
-    rows = await v3_col("doctors").find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    rows = await v3_col("doctors").find(active_doctor_query(query), {"_id": 0}).sort("created_at", -1).to_list(1000)
     out = []
     for row in rows:
         try:
@@ -383,8 +383,15 @@ async def v3_delete_doctor(doctor_id: str, user: V3UserOut = Depends(v3_require_
         raise HTTPException(status_code=404, detail="Expert not found")
     if is_branch_admin_role(user.role) and doctor.get("branch_id") != user.branch_id:
         raise HTTPException(status_code=404, detail="Expert not found")
+    # Refused only while that login still exists. It used to be refused on the presence of
+    # the field alone, which trapped anyone whose login had already been deleted: the record
+    # was left pointing at nothing, the advice was to remove a login that was already gone,
+    # and there was no way to clear it. A user_id that resolves to nobody is a dead
+    # reference, not a live account to protect.
     if doctor.get("user_id"):
-        raise HTTPException(status_code=400, detail="This expert is linked to a login account — remove the login in Roles & Credentials instead")
+        owner = await v3_col("users").find_one({"id": doctor["user_id"]}, {"_id": 0, "id": 1})
+        if owner:
+            raise HTTPException(status_code=400, detail="This expert is linked to a login account — remove the login in Roles & Credentials instead")
     if await v3_col("appointments").find_one({"doctor_id": doctor_id}, {"_id": 0, "id": 1}):
         raise HTTPException(status_code=400, detail="This expert has appointment history and can't be deleted")
     if await v3_col("sessions").find_one({"physio_id": doctor_id}, {"_id": 0, "id": 1}):
@@ -408,7 +415,7 @@ async def v3_add_slots(doctor_id: str, payload: V3DoctorSlotsInput, _: V3UserOut
 @router.get("/doctors/available")
 async def v3_available_doctors(branch_id: str, slot_time: str, _: V3UserOut = Depends(v3_current_user)):
     slot_key = normalize_slot_time(slot_time)
-    doctors = await v3_col("doctors").find({"branch_id": branch_id}, {"_id": 0}).to_list(1000)
+    doctors = await v3_col("doctors").find(active_doctor_query({"branch_id": branch_id}), {"_id": 0}).to_list(1000)
     booked = await v3_col("appointments").find({"branch_id": branch_id, "slot_time": slot_key, "status": "new_appointment"}, {"_id": 0, "doctor_id": 1}).to_list(200)
     booked_ids = {item["doctor_id"] for item in booked}
     available = [d for d in doctors if slot_key in d.get("slots", []) and d["id"] not in booked_ids]

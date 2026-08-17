@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 import uuid
 
 from database import v3_col
-from utils import now_iso, derive_branch_code
+from utils import now_iso, derive_branch_code, active_doctor_query
 from deps import v3_require_roles, is_branch_admin_role, is_physio_role, PHYSIO_ROLES
 from security import verify_password
 import lead_control
@@ -175,7 +175,7 @@ async def reassign_branch_admin(branch_id: str, payload: AssignAdmin, _: V3UserO
 
 @router.get("/head-physio-candidates")
 async def head_physio_candidates(_: V3UserOut = Depends(v3_require_roles("super_admin"))):
-    rows = await v3_col("doctors").find({"profile_type": "head_physio"}, {"_id": 0}).to_list(500)
+    rows = await v3_col("doctors").find(active_doctor_query({"profile_type": "head_physio"}), {"_id": 0}).to_list(500)
     branches = {b["id"]: b.get("branch_name") for b in await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1}).to_list(500)}
     return [{**d, "assigned_branch": branches.get(d.get("branch_id")) if d.get("branch_id") else None} for d in rows]
 
@@ -301,7 +301,7 @@ async def branch_detail(branch_id: str, user: V3UserOut = Depends(v3_require_rol
     physios = [u for u in staff_rows if is_physio_role(u.get("role"))]
     branch_admins = [u for u in staff_rows if u.get("role") == "branch_admin"]
 
-    doctors = await v3_col("doctors").find({"branch_id": branch_id}, {"_id": 0}).to_list(500)
+    doctors = await v3_col("doctors").find(active_doctor_query({"branch_id": branch_id}), {"_id": 0}).to_list(500)
 
     appointments = await v3_col("appointments").find({"branch_id": branch_id}, {"_id": 0}).sort("appointment_time", -1).to_list(500)
     appt_completed = len([a for a in appointments if a.get("status") == "completed"])

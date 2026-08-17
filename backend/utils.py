@@ -99,6 +99,27 @@ def normalize_slot_time(value: str) -> str:
         return value.strip()[:16]
 
 
+# An expert who has left is hidden rather than deleted. Their `doctors` row is what a
+# patient's appointments and treatment sessions point at, so removing it would orphan real
+# history; is_active: False takes them out of every list they could be picked from while
+# leaving what they did intact.
+#
+# Written as "not False" rather than "is True" because every record created before this
+# existed has no such field at all, and those people are still working here. A filter of
+# {"is_active": True} would empty the Experts list on the deploy that introduced it.
+ACTIVE_DOCTOR = {"is_active": {"$ne": False}}
+
+
+def active_doctor_query(query: dict = None) -> dict:
+    """Add the still-with-us condition to a `doctors` query.
+
+    A helper rather than a spelled-out clause at each call site because there are a dozen
+    of those — the consultant calendars, the assign pickers, the review dispatcher, the
+    diet coach list — and a list that forgets it offers someone who cannot log in.
+    """
+    return {**(query or {}), **ACTIVE_DOCTOR}
+
+
 # How many patients one physio takes in a single slot. A physio runs a floor: two or
 # three people on adjacent beds inside the same hour is how the treatment room actually
 # works, so one-per-slot was blocking bookings that happen in real life.

@@ -560,12 +560,30 @@ async def reset_password(user_id: str, password: str, caller: V3UserOut = Depend
     return {"message": "Password reset"}
 
 
+async def _set_expert_active(user_id: str, active: bool) -> int:
+    """Follow a login's active state through to the expert profile behind it.
+
+    A Head Physio, Physio or Nutrition Coach is two records: the login in `users` and the
+    bookable profile in `doctors`. Only the login was being switched off, so someone who
+    could no longer sign in stayed in every consultant list and stayed bookable — patients
+    could be given appointments with a person who had left.
+
+    The profile is marked, never deleted: a patient's appointments and treatment sessions
+    point at that row, and removing it would orphan their history.
+    """
+    res = await v3_col("doctors").update_many(
+        {"user_id": user_id}, {"$set": {"is_active": active, "updated_at": now_iso()}}
+    )
+    return res.modified_count
+
+
 @router.delete("/users/{user_id}")
 async def deactivate_user(user_id: str, caller: V3UserOut = Depends(v3_require_roles("super_admin"))):
     await _guard_super_admin_target(user_id, caller)
     res = await v3_col("users").update_one({"id": user_id}, {"$set": {"is_active": False}})
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="User not found")
+    await _set_expert_active(user_id, False)
     return {"message": "User deactivated"}
 
 
@@ -575,6 +593,9 @@ async def activate_user(user_id: str, caller: V3UserOut = Depends(v3_require_rol
     res = await v3_col("users").update_one({"id": user_id}, {"$set": {"is_active": True}})
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="User not found")
+    # Reactivating puts them back in the lists they were taken out of, so switching someone
+    # off by mistake is undone by switching them back on rather than by rebuilding them.
+    await _set_expert_active(user_id, True)
     return {"message": "User activated"}
 
 
@@ -586,6 +607,12 @@ async def delete_user_permanent(user_id: str, current: V3UserOut = Depends(v3_re
     res = await v3_col("users").delete_one({"id": user_id})
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="User not found")
+    # Their expert profile has to go with them. Deleting the login used to leave it behind
+    # with a user_id pointing at nothing — still listed, still bookable, and no longer
+    # removable, because deleting an expert is refused for anything holding a user_id.
+    # That was a loop with no way out: the only advice was to delete the login, which is
+    # what had already been done.
+    await _set_expert_active(user_id, False)
     return {"message": "User permanently deleted"}
 
 

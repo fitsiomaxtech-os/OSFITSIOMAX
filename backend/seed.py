@@ -644,6 +644,51 @@ async def consolidate_head_physio_doctors() -> None:
     )
 
 
+async def retire_experts_without_a_login() -> None:
+    """Mark expert profiles whose login is deactivated or gone as inactive.
+
+    Deactivating or deleting a login used to leave the `doctors` record behind untouched,
+    so the person stayed in every consultant list and stayed bookable after they had left.
+    That is now followed through at the point of deactivation, but nobody retired before
+    then carries the flag — including anyone whose login was permanently deleted, whose
+    record was left pointing at a user that no longer exists and could not be removed by
+    hand either, since deleting an expert is refused for anything holding a user_id.
+
+    This is the sweep that catches them. Only profiles that carry a user_id are considered:
+    an expert added under HR > Fitsiomax Experts never had a login and is not missing one.
+
+    Idempotent, and it only ever sets the flag it finds wrong, so a record already correct
+    is left alone and someone reactivated is not retired again on the next restart.
+    """
+    linked = await v3_col("doctors").find(
+        {"user_id": {"$nin": [None, ""]}}, {"_id": 0, "id": 1, "user_id": 1, "is_active": 1}
+    ).to_list(5000)
+    if not linked:
+        return
+
+    user_ids = list({d["user_id"] for d in linked})
+    users = await v3_col("users").find(
+        {"id": {"$in": user_ids}}, {"_id": 0, "id": 1, "is_active": 1}
+    ).to_list(5000)
+    # A login that is missing entirely and one that is switched off mean the same thing to
+    # a booking list: not someone to offer.
+    alive = {u["id"] for u in users if u.get("is_active", True)}
+
+    retire = [d["id"] for d in linked if d["user_id"] not in alive and d.get("is_active") is not False]
+    if retire:
+        await v3_col("doctors").update_many(
+            {"id": {"$in": retire}}, {"$set": {"is_active": False, "updated_at": now_iso()}}
+        )
+
+    # The other direction, so a login switched back on before this existed is not left
+    # retired by a sweep that only ever removes people.
+    restore = [d["id"] for d in linked if d["user_id"] in alive and d.get("is_active") is False]
+    if restore:
+        await v3_col("doctors").update_many(
+            {"id": {"$in": restore}}, {"$set": {"is_active": True, "updated_at": now_iso()}}
+        )
+
+
 async def backfill_login_history_from_sessions() -> None:
     """login_history only started recording on /auth/login once that tracking was added,
     so anyone already logged in at that point shows zero entries in the Super Admin

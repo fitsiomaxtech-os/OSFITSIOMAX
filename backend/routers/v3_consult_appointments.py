@@ -15,7 +15,7 @@ from datetime import datetime
 import uuid
 
 from database import v3_col
-from utils import now_iso, normalize_slot_time
+from utils import now_iso, normalize_slot_time, active_doctor_query
 from deps import v3_require_roles
 from schemas.v3 import V3UserOut
 
@@ -150,7 +150,7 @@ async def consult_day(branch_id: str, date: str, _: V3UserOut = Depends(v3_requi
 
     # Head Physios are org-wide: they take consultations for every branch, so this
     # never narrows by branch_id.
-    hps = await v3_col("doctors").find({"profile_type": "head_physio"}, {"_id": 0}).to_list(200)
+    hps = await v3_col("doctors").find(active_doctor_query({"profile_type": "head_physio"}), {"_id": 0}).to_list(200)
     doctor_ids = [d["id"] for d in hps]
 
     booked_by_doc: dict = {}
