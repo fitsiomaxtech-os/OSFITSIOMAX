@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
-import { bmDetail, updateBranch, bmReassignAdmin, hrBranchAdminCandidates, bmHeadPhysioCandidates, bmAssignHeadPhysio, bmLeadControlHistory, bmPreSalesMembers, hrCreateUser, hrUpdateUser } from "@/lib/api";
+import { bmDetail, updateBranch, bmReassignAdmin, hrBranchAdminCandidates, bmHeadPhysioCandidates, bmAssignHeadPhysio, bmLeadControlHistory, bmPreSalesMembers, hrUpdateUser, bmTeamCandidates, bmTeamAdd, bmTeamRemove } from "@/lib/api";
 import { BranchFormDialogV2 } from "@/components/branch/BranchFormDialogV2";
 import { LeadControlSwitch, normalizeLeadControl } from "@/components/branch/LeadControlSwitch";
 import { slotTo12h } from "@/lib/time";
@@ -307,21 +307,22 @@ const HeaderLeadControl = ({ branch, onChanged, readOnly = false, preSalesMember
 const initials = (name) => (name || "?").split(" ").filter(Boolean).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
 
 /**
- * The desks a branch is staffed by, and the role a new account gets when added from each.
+ * The desks a branch is staffed by.
  *
- * `role` is what Add writes. Only the plain slug is created — a branch admin variant like
- * branch_admin_physio is a deliberate choice about which practice someone runs, and this
- * form has no business guessing it; it can be changed afterwards in Roles & Credentials.
+ * `key` is what the posting endpoints take: which roles count as this desk is decided
+ * server-side, in _desk_holds, so the two sides cannot disagree about whether an Online
+ * Physio Admin belongs on Branch Admin or a diet_manage on Diet.
  *
- * Pre Sales comes from its own endpoint rather than the branch's staff list, because a
- * Pre-Sales rep works a branch's leads without being posted to the branch.
+ * `from` is which list on the branch's payload holds them. Pre Sales comes from its own
+ * endpoint rather than the branch's staff, because a Pre-Sales rep works a branch's leads
+ * without being posted to the branch.
  */
 const TEAM_DESKS = [
-  { key: "pre_sales", label: "Pre Sales", role: "pre_sales", from: "preSales" },
-  { key: "branch_admins", label: "Branch Admin", role: "branch_admin", from: "branch_admins" },
-  { key: "head_physios", label: "Consultants", role: "head_physio", from: "head_physios" },
-  { key: "physios", label: "Physio", role: "physio", from: "physios" },
-  { key: "diet", label: "Diet", role: "nutrition_coach", from: "diet" },
+  { key: "pre_sales", label: "Pre Sales", from: "preSales" },
+  { key: "branch_admins", label: "Branch Admin", from: "branch_admins" },
+  { key: "head_physios", label: "Consultants", from: "head_physios" },
+  { key: "physios", label: "Physio", from: "physios" },
+  { key: "diet", label: "Diet", from: "diet" },
 ];
 
 /**
@@ -341,6 +342,8 @@ const TeamTab = ({ staff, branchId, onChanged, readOnly = false }) => {
   const [desk, setDesk] = useState("all");
   const [editing, setEditing] = useState(null);   // a user row
   const [adding, setAdding] = useState(null);     // a TEAM_DESKS entry
+  const [removing, setRemoving] = useState(null); // a user row
+  const [removeBusy, setRemoveBusy] = useState(false);
 
   const loadPreSales = useCallback(() => {
     bmPreSalesMembers(branchId).then(setPreSalesMembers).catch(() => setPreSalesMembers([]));
@@ -356,7 +359,19 @@ const TeamTab = ({ staff, branchId, onChanged, readOnly = false }) => {
   // Both lists reload: a new Physio changes the branch's staff, and a new Pre-Sales rep
   // changes only the separately-fetched list, so refreshing one of the two would leave
   // whichever desk was used looking like the save had not worked.
-  const afterSave = () => { setEditing(null); setAdding(null); loadPreSales(); onChanged && onChanged(); };
+  const afterSave = () => { setEditing(null); setAdding(null); setRemoving(null); loadPreSales(); onChanged && onChanged(); };
+
+  const doRemove = async () => {
+    setRemoveBusy(true);
+    try {
+      const res = await bmTeamRemove(branchId, removing.id, desk);
+      toast.success(res?.message || "Removed from this branch");
+      afterSave();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not remove");
+    }
+    setRemoveBusy(false);
+  };
 
   return (
     <div className="space-y-3" data-testid="branch-team-tab">
@@ -462,9 +477,22 @@ const TeamTab = ({ staff, branchId, onChanged, readOnly = false }) => {
                           {readOnly ? (
                             <span className="text-xs text-slate-300">—</span>
                           ) : (
-                            <Button size="sm" variant="outline" className="text-xs" onClick={() => setEditing(u)} data-testid={`branch-team-edit-${u.id}`}>
-                              <Pencil className="mr-1 h-3 w-3" /> Edit
-                            </Button>
+                            <div className="flex items-center justify-end gap-1.5">
+                              <Button size="sm" variant="outline" className="text-xs" onClick={() => setEditing(u)} data-testid={`branch-team-edit-${u.id}`}>
+                                <Pencil className="mr-1 h-3 w-3" /> Edit
+                              </Button>
+                              {/* Takes them off this branch. Not a delete — said on the
+                                  button so it is not mistaken for one. */}
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="border-rose-200 text-xs text-rose-700 hover:bg-rose-50"
+                                onClick={() => setRemoving(u)}
+                                data-testid={`branch-team-remove-${u.id}`}
+                              >
+                                <X className="mr-1 h-3 w-3" /> Remove
+                              </Button>
+                            </div>
                           )}
                         </td>
                       </tr>
@@ -477,38 +505,186 @@ const TeamTab = ({ staff, branchId, onChanged, readOnly = false }) => {
         </Card>
       )}
 
-      {(editing || adding) && (
+      {editing && (
         <TeamMemberDialog
           user={editing}
-          desk={adding}
           branchId={branchId}
-          onClose={() => { setEditing(null); setAdding(null); }}
+          onClose={() => setEditing(null)}
           onSaved={afterSave}
         />
+      )}
+
+      {adding && (
+        <TeamAddDialog
+          desk={adding}
+          branchId={branchId}
+          onClose={() => setAdding(null)}
+          onSaved={afterSave}
+        />
+      )}
+
+      {removing && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) setRemoving(null); }}>
+          <div className="w-full max-w-sm rounded-xl bg-white shadow-2xl" data-testid="branch-team-remove-dialog">
+            <div className="border-b p-5">
+              <h3 className="text-base font-semibold text-slate-800">Remove {removing.full_name}?</h3>
+              {/* Says what it does not do. "Remove" beside a person reads as deletion, and
+                  this only ends a posting — the login and its role are untouched. */}
+              <p className="mt-1 text-[11px] text-slate-500">
+                They come off this branch's {active?.label} desk. Their login and role stay as they are —
+                switch an account off in HR Admin → Roles &amp; Credentials.
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 border-t p-4">
+              <Button variant="outline" size="sm" onClick={() => setRemoving(null)} disabled={removeBusy}>Cancel</Button>
+              <Button size="sm" onClick={doRemove} disabled={removeBusy} className="bg-rose-600 text-white hover:bg-rose-700" data-testid="branch-team-remove-confirm">
+                {removeBusy ? "Removing..." : "Remove from branch"}
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
 };
 
 /**
- * Add a login to this branch, or correct an existing one.
+ * Pick somebody who already has the role and post them to this branch.
  *
- * Both halves go through HR's own user endpoints, so an account made here is the same
- * account Roles & Credentials manages — not a second kind of user that only this page
- * understands. branch_id is fixed to the branch being viewed: adding someone from a
- * branch's own Team page and having to pick the branch again invites picking the wrong one.
+ * Deliberately a picker, not a create form. An account is made once, in HR Admin → Roles &
+ * Credentials, where the whole role list and every field is on screen; what a branch needs
+ * from this page is to say who works here. Making logins in two places is how you end up
+ * with the same person twice.
  *
- * The role is fixed by the desk on add and is not editable here at all. Changing what
- * somebody is is a different act from correcting their phone number, it runs through its
- * own endpoint, and it belongs where the whole role list is on screen.
+ * The list is org-wide, because the point is to bring in somebody who is elsewhere. Where
+ * each one currently sits is shown, since for a single-branch role picking them moves them
+ * off it — that should be read before clicking, not discovered afterwards.
  */
-const TeamMemberDialog = ({ user, desk, branchId, onClose, onSaved }) => {
-  const isEdit = !!user;
+const TeamAddDialog = ({ desk, branchId, onClose, onSaved }) => {
+  const [state, setState] = useState({ loading: true, failed: false, candidates: [] });
+  const [query, setQuery] = useState("");
+  const [busyId, setBusyId] = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+    bmTeamCandidates(branchId, desk.key)
+      .then((d) => { if (alive) setState({ loading: false, failed: false, candidates: d.candidates || [] }); })
+      .catch((e) => {
+        if (!alive) return;
+        setState({ loading: false, failed: true, candidates: [] });
+        // The Consultants desk answers 400 here with the reason, which is worth reading
+        // rather than showing as a generic failure.
+        const msg = e?.response?.data?.detail;
+        if (msg) toast.error(msg, { duration: 7000 });
+      });
+    return () => { alive = false; };
+  }, [branchId, desk.key]);
+
+  const shown = state.candidates.filter((c) => {
+    if (!query.trim()) return true;
+    const q = query.trim().toLowerCase();
+    return (c.full_name || "").toLowerCase().includes(q) || (c.email || "").toLowerCase().includes(q);
+  });
+
+  const pick = async (c) => {
+    setBusyId(c.id);
+    try {
+      const res = await bmTeamAdd(branchId, c.id, desk.key);
+      toast.success(res?.message || "Added to this branch");
+      // Said plainly when a single-branch account was taken off somewhere to come here.
+      if (res?.moved_from_branch_id && c.current_branches?.length) {
+        toast.info(`${c.full_name} no longer works at ${c.current_branches.join(", ")}`, { duration: 7000 });
+      }
+      onSaved();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not add");
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="flex max-h-[85vh] w-full max-w-lg flex-col rounded-xl bg-white shadow-2xl" data-testid="branch-team-add-dialog">
+        <div className="border-b p-5">
+          <h3 className="text-base font-semibold text-slate-800">Add {desk.label}</h3>
+          <p className="mt-0.5 text-[11px] text-slate-500">
+            Everyone with this role who isn't already at this branch. Click one to post them here.
+          </p>
+        </div>
+
+        <div className="border-b px-5 py-3">
+          <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search name or email..." data-testid="branch-team-add-search" />
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5">
+          {state.loading ? (
+            <p className="py-10 text-center text-sm text-slate-400">Loading...</p>
+          ) : state.failed ? (
+            <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">
+              Couldn't load the list.
+            </p>
+          ) : shown.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">
+              {state.candidates.length === 0
+                // Two different empties: nobody holds the role anywhere, versus the search
+                // matching nothing. The first one needs HR, the second needs a backspace.
+                ? <>No other {desk.label.toLowerCase()} accounts exist. Create one in HR Admin → Roles &amp; Credentials, then add them here.</>
+                : "Nobody matches that search."}
+            </p>
+          ) : (
+            <div className="space-y-2" data-testid="branch-team-add-list">
+              {shown.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  disabled={!!busyId}
+                  onClick={() => pick(c)}
+                  className="flex w-full items-center gap-3 rounded-lg border border-slate-200 p-3 text-left transition hover:border-sky-400 hover:bg-sky-50/40 disabled:opacity-50"
+                  data-testid={`branch-team-add-pick-${c.id}`}
+                >
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-600">{initials(c.full_name)}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-semibold text-slate-800">{c.full_name}</span>
+                    <span className="block truncate text-[11px] text-slate-500">{c.email}</span>
+                    <span className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                      <span className="rounded bg-slate-100 px-1.5 py-px text-[10px] font-semibold text-slate-600">{String(c.role || "").replace(/_/g, " ")}</span>
+                      {c.current_branches?.length > 0 && (
+                        <span className={`rounded px-1.5 py-px text-[10px] font-semibold ${c.multi_branch ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
+                          {c.multi_branch ? "also at" : "moves from"} {c.current_branches.join(", ")}
+                        </span>
+                      )}
+                    </span>
+                  </span>
+                  {busyId === c.id && <span className="shrink-0 text-[11px] text-slate-400">Adding...</span>}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="flex justify-end border-t p-4">
+          <Button variant="outline" size="sm" onClick={onClose}>Close</Button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/**
+ * Correct a member's own details — name, email, phone.
+ *
+ * Goes through HR's user endpoint, so this is the same account Roles & Credentials manages
+ * rather than a second kind of user only this page understands.
+ *
+ * Role and branch are not here. Which branch somebody works at is what Add and Remove on
+ * the desk do, and changing what somebody *is* runs through its own endpoint and belongs
+ * where the whole role list is on screen.
+ */
+const TeamMemberDialog = ({ user, onClose, onSaved }) => {
   const [form, setForm] = useState({
-    full_name: user?.full_name || "",
-    email: user?.email || "",
-    mobile_number: user?.mobile_number || user?.phone || "",
-    password: "",
+    full_name: user.full_name || "",
+    email: user.email || "",
+    mobile_number: user.mobile_number || user.phone || "",
   });
   const [saving, setSaving] = useState(false);
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
@@ -516,30 +692,17 @@ const TeamMemberDialog = ({ user, desk, branchId, onClose, onSaved }) => {
   const submit = async () => {
     if (!form.full_name.trim()) { toast.error("Name is required"); return; }
     if (!form.email.trim()) { toast.error("Email is required"); return; }
-    if (!isEdit && form.password.trim().length < 6) { toast.error("Password must be at least 6 characters"); return; }
     setSaving(true);
     try {
-      if (isEdit) {
-        await hrUpdateUser(user.id, {
-          full_name: form.full_name.trim(),
-          email: form.email.trim(),
-          mobile_number: form.mobile_number.trim() || undefined,
-        });
-        toast.success(`${form.full_name.trim()} updated`);
-      } else {
-        await hrCreateUser({
-          full_name: form.full_name.trim(),
-          email: form.email.trim(),
-          password: form.password.trim(),
-          role: desk.role,
-          branch_id: branchId,
-          mobile_number: form.mobile_number.trim() || undefined,
-        });
-        toast.success(`${form.full_name.trim()} added to ${desk.label}`);
-      }
+      await hrUpdateUser(user.id, {
+        full_name: form.full_name.trim(),
+        email: form.email.trim(),
+        mobile_number: form.mobile_number.trim() || undefined,
+      });
+      toast.success(`${form.full_name.trim()} updated`);
       onSaved();
     } catch (e) {
-      toast.error(e?.response?.data?.detail || (isEdit ? "Could not update" : "Could not add"));
+      toast.error(e?.response?.data?.detail || "Could not update");
     }
     setSaving(false);
   };
@@ -548,13 +711,9 @@ const TeamMemberDialog = ({ user, desk, branchId, onClose, onSaved }) => {
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="w-full max-w-md rounded-xl bg-white shadow-2xl" data-testid="branch-team-member-dialog">
         <div className="border-b p-5">
-          <h3 className="text-base font-semibold text-slate-800">
-            {isEdit ? `Edit ${user.full_name || "member"}` : `Add ${desk.label}`}
-          </h3>
+          <h3 className="text-base font-semibold text-slate-800">Edit {user.full_name || "member"}</h3>
           <p className="mt-0.5 text-[11px] text-slate-500">
-            {isEdit
-              ? "Name, email and phone. Role and branch are changed in HR Admin → Roles & Credentials."
-              : `Creates a login for this branch as ${String(desk.role).replace(/_/g, " ")}.`}
+            Name, email and phone. Their role is changed in HR Admin → Roles &amp; Credentials.
           </p>
         </div>
 
@@ -571,21 +730,12 @@ const TeamMemberDialog = ({ user, desk, branchId, onClose, onSaved }) => {
             <label className="mb-1 block text-xs font-medium text-slate-600">Phone</label>
             <Input value={form.mobile_number} onChange={(e) => set("mobile_number", e.target.value)} placeholder="+91 ..." data-testid="branch-team-phone" />
           </div>
-          {!isEdit && (
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Password *</label>
-              <Input type="text" value={form.password} onChange={(e) => set("password", e.target.value)} placeholder="At least 6 characters" data-testid="branch-team-password" />
-              {/* Shown rather than masked: whoever creates the account has to pass it on,
-                  and a password they cannot read is one they will reset immediately. */}
-              <p className="mt-1 text-[10px] text-slate-400">They can change it after their first sign-in.</p>
-            </div>
-          )}
         </div>
 
         <div className="flex justify-end gap-2 border-t p-4">
           <Button variant="outline" size="sm" onClick={onClose} disabled={saving}>Cancel</Button>
           <Button size="sm" onClick={submit} disabled={saving} className="bg-sky-600 text-white hover:bg-sky-700" data-testid="branch-team-save">
-            {saving ? "Saving..." : isEdit ? "Save Changes" : `Add ${desk.label}`}
+            {saving ? "Saving..." : "Save Changes"}
           </Button>
         </div>
       </div>

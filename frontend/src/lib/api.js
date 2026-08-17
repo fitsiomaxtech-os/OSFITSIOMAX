@@ -381,6 +381,11 @@ export const bmPerformanceSummary = async () => (await api.get("/branch-mgmt/per
 export const bmDetail = async (branchId) => (await api.get(`/branch-mgmt/${branchId}/detail`)).data;
 export const bmLeadControlHistory = async (branchId) => (await api.get(`/branches/${branchId}/lead-control-history`)).data;
 export const bmPreSalesMembers = async (branchId) => (await api.get(`/branches/${branchId}/pre-sales-members`)).data;
+// Who is posted to a branch, desk by desk. A posting, not a role — the account keeps the
+// role it holds and only the branch it works at changes.
+export const bmTeamCandidates = async (branchId, desk) => (await api.get(`/branch-mgmt/${branchId}/team-candidates`, { params: { desk } })).data;
+export const bmTeamAdd = async (branchId, userId, desk) => (await api.post(`/branch-mgmt/${branchId}/team/${userId}`, null, { params: { desk } })).data;
+export const bmTeamRemove = async (branchId, userId, desk) => (await api.delete(`/branch-mgmt/${branchId}/team/${userId}`, { params: { desk } })).data;
 
 // Google Sheets OAuth
 export const gsStatus = async () => (await api.get("/marketing/google-sheets/status")).data;

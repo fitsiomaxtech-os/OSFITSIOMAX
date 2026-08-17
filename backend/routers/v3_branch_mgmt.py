@@ -5,7 +5,11 @@ import uuid
 
 from database import v3_col
 from utils import now_iso, derive_branch_code, active_doctor_query
-from deps import v3_require_roles, is_branch_admin_role, is_physio_role, is_diet_role, PHYSIO_ROLES
+from deps import v3_require_roles, is_branch_admin_role, is_physio_role, is_diet_role, is_pre_sales_role, PHYSIO_ROLES
+# The desks a Physio or Nutritionist can hold several of, and the doctors profile_type
+# each role keeps its calendar under. Imported from HR rather than restated so posting
+# somebody to a branch here builds the same record HR's own assign builds.
+from routers.v3_hr import MULTI_BRANCH_ROLES, expert_profile_type
 from security import verify_password
 import lead_control
 from schemas.v3 import V3UserOut
@@ -380,4 +384,180 @@ async def branch_detail(branch_id: str, user: V3UserOut = Depends(v3_require_rol
             "physio_calendars": physio_calendars,
             "post_treatment_reviews": weekly_assessments[:100],
         },
+    }
+
+
+# --------------------------------------------------- Team: who is posted to this branch
+#
+# The Team tab lists a branch's staff desk by desk and can now move people on and off it.
+# That is a change of posting, not of role: the person keeps the role they hold and only
+# the branch they work at changes. Roles are changed in HR Admin, which is why nothing
+# here writes one.
+
+
+def _desk_holds(desk: str):
+    """Which roles belong to a Team desk, as a predicate.
+
+    A predicate rather than a set because Diet's slug is typed by hand -- this install has
+    both nutrition_coach and diet_manage -- so the Diet desk has to match the way the Diet
+    board itself matches, on the shape of the slug.
+
+    super_admin is excluded explicitly: is_diet_role answers True for it so a Super Admin
+    can reach every board, which would otherwise put them on the Diet desk of every branch.
+    """
+    if desk == "pre_sales":
+        return lambda r: is_pre_sales_role(r)
+    if desk == "branch_admins":
+        return lambda r: is_branch_admin_role(r)
+    if desk == "physios":
+        return lambda r: is_physio_role(r)
+    if desk == "diet":
+        return lambda r: r != "super_admin" and is_diet_role(r)
+    return None
+
+
+async def _team_desk_or_400(branch_id: str, desk: str):
+    branch = await v3_col("branches").find_one(
+        {"id": branch_id}, {"_id": 0, "id": 1, "branch_name": 1, "admin_user_id": 1}
+    )
+    if not branch:
+        raise HTTPException(status_code=404, detail="Branch not found")
+    # Consultants are org-wide by design: consolidate_head_physio_doctors clears their
+    # branch on every startup, so posting one to a branch here would be undone by the next
+    # restart. Refused rather than accepted and then quietly reverted.
+    if desk == "head_physios":
+        raise HTTPException(
+            status_code=400,
+            detail="A Consultant works across every branch. Use the Experts tab to give them a calendar here.",
+        )
+    holds = _desk_holds(desk)
+    if holds is None:
+        raise HTTPException(status_code=400, detail="Unknown team desk")
+    return branch, holds
+
+
+def _posted_to(user: dict) -> list:
+    """The branches this account is posted to, whichever field carries them."""
+    return user.get("branch_ids") or ([user["branch_id"]] if user.get("branch_id") else [])
+
+
+@router.get("/{branch_id}/team-candidates")
+async def team_candidates(branch_id: str, desk: str, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    """Everyone holding this desk's role who is not already at this branch.
+
+    Org-wide rather than branch-scoped on purpose: the point of the picker is to bring in
+    somebody who is elsewhere, so a list of only this branch's own people would be empty
+    exactly when it is wanted. Where each one currently sits comes back with them, because
+    for a single-branch role picking them moves them, and that is worth seeing beforehand.
+    """
+    branch, holds = await _team_desk_or_400(branch_id, desk)
+
+    rows = await v3_col("users").find({"is_active": True}, {"_id": 0, "password": 0}).to_list(2000)
+    branch_rows = await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1}).to_list(500)
+    names = {b["id"]: b.get("branch_name", "") for b in branch_rows}
+
+    out = []
+    for u in rows:
+        if not holds(u.get("role")):
+            continue
+        at = _posted_to(u)
+        if branch_id in at:
+            continue  # already on this desk here
+        out.append({
+            "id": u["id"],
+            "full_name": u.get("full_name", ""),
+            "email": u.get("email", ""),
+            "role": u.get("role", ""),
+            "mobile_number": u.get("mobile_number", ""),
+            "multi_branch": u.get("role") in MULTI_BRANCH_ROLES,
+            # Named, not just counted: "currently at T Nagar Branch" is what tells someone
+            # that picking this person takes them off it.
+            "current_branches": [names[b] for b in at if names.get(b)],
+        })
+    out.sort(key=lambda r: (r["full_name"] or "").lower())
+    return {"candidates": out, "desk": desk, "branch_name": branch.get("branch_name", "")}
+
+
+@router.post("/{branch_id}/team/{user_id}")
+async def team_add_member(branch_id: str, user_id: str, desk: str, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    """Post an existing account to this branch."""
+    branch, holds = await _team_desk_or_400(branch_id, desk)
+    user = await v3_col("users").find_one({"id": user_id, "is_active": True}, {"_id": 0, "password": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not holds(user.get("role")):
+        raise HTTPException(status_code=400, detail=f"{user.get('full_name')} does not hold a role for this desk")
+
+    moved_from = None
+    if user.get("role") in MULTI_BRANCH_ROLES:
+        # A Physio or Nutritionist can work several branches, so this branch is added to
+        # the list rather than replacing it. branch_id stays the first of them, which is
+        # what every single-branch filter in the OS still reads.
+        at = list(dict.fromkeys(_posted_to(user) + [branch_id]))
+        await v3_col("users").update_one({"id": user_id}, {"$set": {"branch_ids": at, "branch_id": at[0]}})
+        # The calendar they hold at this branch. Without it they log in to a board with no
+        # calendar behind it and nothing explains why.
+        profile = expert_profile_type(user["role"])
+        if profile:
+            exists = await v3_col("doctors").find_one(
+                {"user_id": user_id, "profile_type": profile, "branch_id": branch_id}, {"_id": 0, "id": 1}
+            )
+            if not exists:
+                await v3_col("doctors").insert_one({
+                    "id": str(uuid.uuid4()), "full_name": user.get("full_name", ""),
+                    "profile_type": profile, "branch_id": branch_id, "specialization": "",
+                    "slots": [], "slot_details": [], "user_id": user_id, "created_at": now_iso(),
+                })
+    else:
+        current = user.get("branch_id")
+        moved_from = current if current and current != branch_id else None
+        await v3_col("users").update_one(
+            {"id": user_id}, {"$set": {"branch_id": branch_id, "branch_ids": [branch_id]}}
+        )
+
+    return {
+        "message": f"{user.get('full_name')} added to {branch.get('branch_name')}",
+        # Set only when a single-branch account was taken off somewhere else to come here,
+        # so the UI can say so rather than leaving it to be noticed later.
+        "moved_from_branch_id": moved_from,
+    }
+
+
+@router.delete("/{branch_id}/team/{user_id}")
+async def team_remove_member(branch_id: str, user_id: str, desk: str, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    """Take an account off this branch. The account itself is untouched.
+
+    Not a deletion and not a deactivation: they keep their login and their role and simply
+    stop being posted here. Switching a person off is a different act, on their own row in
+    Roles & Credentials.
+    """
+    branch, holds = await _team_desk_or_400(branch_id, desk)
+    user = await v3_col("users").find_one({"id": user_id}, {"_id": 0, "password": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # The branch's manager of record is held on the branch as well as on the user, so
+    # clearing one side would leave the branch still naming somebody who no longer works
+    # there. Reassign Manager is the control that changes both together.
+    if branch.get("admin_user_id") == user_id:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{user.get('full_name')} is this branch's manager of record. Use Reassign Manager on the Summary tab first.",
+        )
+
+    at = _posted_to(user)
+    if branch_id not in at:
+        raise HTTPException(status_code=400, detail=f"{user.get('full_name')} is not posted to this branch")
+
+    remaining = [b for b in at if b != branch_id]
+    await v3_col("users").update_one(
+        {"id": user_id},
+        {"$set": {"branch_ids": remaining, "branch_id": remaining[0] if remaining else None}},
+    )
+    # Their calendar at this branch is left alone, the same way HR's own unassign leaves it:
+    # it carries published slots and booked appointments, and dropping it to undo a posting
+    # would take real bookings with it.
+    return {
+        "message": f"{user.get('full_name')} removed from {branch.get('branch_name')}",
+        "still_at": len(remaining),
     }
