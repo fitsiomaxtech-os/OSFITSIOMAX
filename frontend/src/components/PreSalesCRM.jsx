@@ -335,6 +335,8 @@ const HandledByBadge = ({ lead }) => {
 };
 
 const PRESALES_ANALYTICS_DATE_PRESETS = [
+  // First, because it is the widest: every other option here narrows it.
+  { key: "all", label: "All" },
   { key: "today", label: "Today" },
   { key: "this_week", label: "This Week" },
   { key: "this_month", label: "This Month" },
@@ -374,7 +376,7 @@ const presalesAnalyticsValueFor = (bucket, branchId, group) => {
 
 /**
  * Pre-Sales' own analytics board — same data, same math as Branches & Verticals >
- * Overview, just reached from inside the Pre Sales Master View instead. A second call to
+ * Overview, just reached from inside the Sales Master View instead. A second call to
  * the same endpoint rather than lifted state: the two boards' date/branch filters are
  * independent, and sharing one would mean picking a date range on one silently changed
  * what the other was showing.
@@ -388,6 +390,9 @@ const PreSalesAnalyticsPanel = ({ branches, branchGroup, sourceFilter }) => {
 
   const { startDate, endDate } = useMemo(() => {
     const today = new Date();
+    // "All" carries no dates at all — see load(), which then asks for no window rather
+    // than for a very wide one, and lets the endpoint answer over everything it holds.
+    if (preset === "all") return { startDate: "", endDate: "" };
     if (preset === "today") return { startDate: presalesToIso(today), endDate: presalesToIso(today) };
     if (preset === "this_week") return { startDate: presalesToIso(presalesStartOfWeek(today)), endDate: presalesToIso(today) };
     if (preset === "this_month") return { startDate: presalesToIso(presalesStartOfMonth(today)), endDate: presalesToIso(today) };
@@ -397,7 +402,8 @@ const PreSalesAnalyticsPanel = ({ branches, branchGroup, sourceFilter }) => {
   const load = useCallback(() => {
     if (preset === "custom" && (!customFrom || !customTo)) return;
     setLoading(true);
-    getDashboardOverview({ start_date: startDate, end_date: endDate })
+    const params = preset === "all" ? {} : { start_date: startDate, end_date: endDate };
+    getDashboardOverview(params)
       .then(setData)
       .catch(() => setData(null))
       .finally(() => setLoading(false));
@@ -650,21 +656,13 @@ export const PreSalesCRM = ({
         the Pre Sales role got the card list below — the same screen, one of them unusable,
         decided by who was logged in. Both now get the cards. */}
     <div className="hidden space-y-5 md:block" data-testid="presales-leads-tab">
-      {/* KPI Cards */}
-      {/* Three across on a phone rather than all of them jammed into one nowrap row. Six
-          cards sharing 330px gave each about 50px, which truncated every label to
-          "Tota…", "Follo…" — a row of counts with no way to tell which count is which.
-          Desktop still lays them out on the single line it has room for. */}
-      <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-nowrap sm:gap-3" data-testid="presales-kpi-row">
-        <KpiCard label="Total Leads" value={stageCounts.All} active={stageFilter === "All"} color="#22c55e" onClick={() => setStageFilter("All")} testid="presales-kpi-all" />
-        {kpiStages.map((s) => (
-          <KpiCard key={s.id} label={s.name} value={stageCounts[s.name] || 0} active={stageFilter === s.name} color={s.color} onClick={() => setStageFilter(s.name)} testid={`presales-kpi-${s.name}`} />
-        ))}
-      </div>
-
       {/* Master View controls — Super Admin only: which pane (Leads / Analytics), and
           which branches (All/Offline/Online, then the individual branches in that
-          group) both panes are scoped to. */}
+          group) both panes are scoped to.
+
+          Above the KPI cards, because the cards are counted for whatever these select.
+          With the cards on top they read as the page's headline totals, which is not what
+          they are the moment a branch pill is on. */}
       {isSuperAdminMasterView && (
         <div className="space-y-2" data-testid="presales-master-controls">
           <div className="flex items-center gap-2">
@@ -698,6 +696,18 @@ export const PreSalesCRM = ({
           )}
         </div>
       )}
+
+      {/* KPI Cards */}
+      {/* Three across on a phone rather than all of them jammed into one nowrap row. Six
+          cards sharing 330px gave each about 50px, which truncated every label to
+          "Tota…", "Follo…" — a row of counts with no way to tell which count is which.
+          Desktop still lays them out on the single line it has room for. */}
+      <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-nowrap sm:gap-3" data-testid="presales-kpi-row">
+        <KpiCard label="Total Leads" value={stageCounts.All} active={stageFilter === "All"} color="#22c55e" onClick={() => setStageFilter("All")} testid="presales-kpi-all" />
+        {kpiStages.map((s) => (
+          <KpiCard key={s.id} label={s.name} value={stageCounts[s.name] || 0} active={stageFilter === s.name} color={s.color} onClick={() => setStageFilter(s.name)} testid={`presales-kpi-${s.name}`} />
+        ))}
+      </div>
 
       {masterView === "analytics" && isSuperAdminMasterView ? (
         <PreSalesAnalyticsPanel branches={branches} branchGroup={branchGroup} sourceFilter={sourceFilter} />

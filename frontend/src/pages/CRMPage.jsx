@@ -169,7 +169,7 @@ const SUPER_ADMIN_TABS = [
   { key: "branches", label: "Branches & Verticals", icon: Building2 },
   { key: "hr", label: "HR Admin", icon: Users },
   { key: "branch_wise", label: "Branch Wise", icon: Network },
-  { key: "presales", label: "Pre Sales Master View", icon: Headphones },
+  { key: "presales", label: "Sales Master View", icon: Headphones },
   // Treatment moved inside Services and Products (as its own sub-tab, next to Vending
   // Machine) rather than sitting here as a peer of the catalogue that holds it.
   { key: "packages", label: "Services and Products", icon: Store },
@@ -330,9 +330,9 @@ export const CRMPage = ({ auth, onLogout }) => {
   const isClinicianTitle = role === "head_physio" || isDietRole(role);
   const boardTitle = isClinicianTitle
     ? roleLabel.toUpperCase()
-    // Sales Head gets Pre-Sales' own title, not "Sales Head Master View" — it's the same
-    // board (PreSalesCRM, full Master View) under a second role, not a board of its own.
-    : isPreSalesRole(role) ? "Pre Sales Master View" : `${roleLabel} Master View`;
+    // Sales Head gets the same title as Pre-Sales, not "Sales Head Master View" — it's the
+    // same board (PreSalesCRM, full Master View) under a second role, not a board of its own.
+    : isPreSalesRole(role) ? "Sales Master View" : `${roleLabel} Master View`;
   const myBranch = branches.find((b) => b.id === auth.user.branch_id);
   const myBranchName = myBranch?.branch_name || "";
   const VERTICAL_LABELS = { offline_physiotherapy: "Physiotherapy", offline_fitness_gym: "Fitness", offline_fitness: "Fitness" };
