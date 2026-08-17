@@ -12,7 +12,6 @@ import {
   Mail,
   Megaphone,
   MoreHorizontal,
-  Network,
   Salad,
   Search,
   Settings,
@@ -61,8 +60,6 @@ import { DashboardBoard } from "@/components/DashboardBoard";
 import { PipelineStageManagement } from "@/components/PipelineStageManagement";
 import { HRBoard } from "@/components/hr/HRBoard";
 import { HumanResourceBoard } from "@/components/hr/HumanResourceBoard";
-import { BranchManagementBoard } from "@/components/branch/BranchManagementBoard";
-import { BranchWiseBoard } from "@/components/branch/BranchWiseBoard";
 import { FinanceWiseBoard } from "@/components/branch/FinanceWiseBoard";
 import { PackagesBoard } from "@/components/PackagesBoard";
 import { OperationsBoard } from "@/components/OperationsBoard";
@@ -169,21 +166,24 @@ const isPreSalesRole = (role) => PRE_SALES_ROLES.includes(String(role || "").tri
 // array so the two surfaces can't drift out of sync.
 // Dashboard is the default landing view. Master View was retired from here — the
 // Dashboard now carries the same headline counts, per branch and per date range.
+// Branches & Verticals and Branch Wise were retired from the nav — Operations' own
+// Branch tab already reaches the same BranchAdminBoard per branch, its "Branch Manager"
+// dialog already reaches Branches & Verticals' old MANAGER (branch creation / admin
+// credentials), and Dashboard already carries the headline metrics Overview/Analytics
+// used to show. Nothing behind either tab was otherwise unique.
 const SUPER_ADMIN_TABS = [
   { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { key: "branches", label: "Branches & Verticals", icon: Building2 },
-  { key: "hr", label: "HR Admin", icon: Users },
-  { key: "branch_wise", label: "Branch Wise", icon: Network },
   // Every team, one designation at a time — Pre Sales/Branch/Consultant/Physio/
-  // Nutritionist/Client each reached the way Branch Control already reaches a branch's
+  // Nutritionist/Client each reached the way Branch Control used to reach a branch's
   // own board, generalised past just branches and physios.
   { key: "operations", label: "Operations", icon: Workflow },
-  { key: "finance", label: "Finance", icon: BadgeIndianRupee },
-  { key: "presales", label: "Sales Master View", icon: Headphones },
   // Same board Marketing Head's own login sees (role is hardcoded to "marketing_head" on
   // the mount below, not read from the signed-in Super Admin) — a way to look at that
   // funnel without logging in as that role.
   { key: "marketing_master", label: "Marketing Master View", icon: Megaphone },
+  { key: "presales", label: "Sales Master View", icon: Headphones },
+  { key: "finance", label: "Finance", icon: BadgeIndianRupee },
+  { key: "hr", label: "HR Admin", icon: Users },
   // Treatment moved inside Services and Products (as its own sub-tab, next to Vending
   // Machine) rather than sitting here as a peer of the catalogue that holds it.
   { key: "packages", label: "Services and Products", icon: Store },
@@ -203,7 +203,7 @@ const SETTINGS_SUB_TABS = [
 ];
 const isSuperAdminTabActive = (view, key) => (key === "settings" ? SETTINGS_SUB_VIEWS.includes(view) : view === key);
 
-const SUPER_ADMIN_BOTTOM_KEYS = ["dashboard", "hr", "branches"];
+const SUPER_ADMIN_BOTTOM_KEYS = ["dashboard", "operations", "hr"];
 const SUPER_ADMIN_BOTTOM_TABS = SUPER_ADMIN_TABS.filter((t) => SUPER_ADMIN_BOTTOM_KEYS.includes(t.key));
 // Everything not on the bar, with nothing held back. CI/CD ROOTS used to be excluded here
 // because Pre-Sales reaches it through its own Manage Stages button — but it is a peer tab
@@ -368,15 +368,6 @@ export const CRMPage = ({ auth, onLogout }) => {
     }
     return "dashboard";
   });
-  // Which Operations sub-tab to land on. Defaults to Operations' own default (Pre Sales);
-  // MANAGER's "Go to Operations" button below overrides it to "branch" just before the
-  // switch, the same jump Branch Control already makes into that admin's board.
-  const [operationsInitialTab, setOperationsInitialTab] = useState("pre_sales");
-  const goToOperationsBranch = () => {
-    setOperationsInitialTab("branch");
-    setSuperAdminView("operations");
-  };
-
   const safeCall = async (fn, fallback) => {
     try {
       return await fn();
@@ -907,7 +898,7 @@ export const CRMPage = ({ auth, onLogout }) => {
                 key={t.key}
                 onClick={() => setSuperAdminView((v) => (t.key === "settings" ? (SETTINGS_SUB_VIEWS.includes(v) ? v : "marketing") : t.key))}
                 className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${isSuperAdminTabActive(superAdminView, t.key) ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"}`}
-                data-testid={`super-admin-tab-${t.key === "branch_wise" ? "branch-wise" : t.key}`}
+                data-testid={`super-admin-tab-${t.key}`}
               >
                 {t.label}
               </button>
@@ -939,7 +930,7 @@ export const CRMPage = ({ auth, onLogout }) => {
                     aria-current={active ? "page" : undefined}
                     title={t.label}
                     className={`flex flex-1 items-center justify-center py-3.5 ${active ? "text-white" : "text-slate-200"}`}
-                    data-testid={`super-admin-nav-${t.key === "branch_wise" ? "branch-wise" : t.key}`}
+                    data-testid={`super-admin-nav-${t.key}`}
                   >
                     <Icon className="h-6 w-6" />
                   </button>
@@ -1002,16 +993,8 @@ export const CRMPage = ({ auth, onLogout }) => {
           <HRBoard />
         )}
 
-        {showSuperAdminBoard && superAdminView === "branches" && (
-          <BranchManagementBoard actingUser={auth.user} onNavigateToOperations={goToOperationsBranch} />
-        )}
-
-        {showSuperAdminBoard && superAdminView === "branch_wise" && (
-          <BranchWiseBoard branches={branches} />
-        )}
-
         {showSuperAdminBoard && superAdminView === "operations" && (
-          <OperationsBoard actingUser={auth.user} branches={branches} initialTab={operationsInitialTab} />
+          <OperationsBoard actingUser={auth.user} branches={branches} />
         )}
 
         {showSuperAdminBoard && superAdminView === "finance" && (
