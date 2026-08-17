@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 from typing import Optional
 
 from database import v3_col
@@ -665,6 +665,38 @@ async def v3_dashboard_overview(
     }
 
 
+_WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+# Readable names for the vertical slugs stored on a lead. Anything unrecognised keeps its
+# own value rather than being folded into "Other" — a vertical added later should show up
+# named, not disappear.
+_VERTICAL_LABELS = {
+    "offline_physiotherapy": "Physiotherapy",
+    "online_physiotherapy": "Online Physio",
+    "offline_fitness_gym": "Fitness",
+    "offline_fitness": "Fitness",
+    "online_fitness": "Online Fitness",
+}
+
+
+def _vertical_label(vertical: Optional[str]) -> str:
+    slug = str(vertical or "").strip()
+    return _VERTICAL_LABELS.get(slug) or (slug.replace("_", " ").title() if slug else "Unspecified")
+
+
+def _is_online_vertical(vertical: Optional[str]) -> bool:
+    return str(vertical or "").startswith("online_")
+
+
+def _weekday_of(created_at: Optional[str]) -> Optional[str]:
+    """Mon..Sun for a lead's created_at, or None if it has no usable date."""
+    stamp = str(created_at or "")[:10]
+    try:
+        return _WEEKDAYS[date.fromisoformat(stamp).weekday()]
+    except (ValueError, TypeError):
+        return None
+
+
 @router.get("/dashboard/leads-analytics")
 async def v3_dashboard_leads_analytics(
     start_date: Optional[str] = Query(None),
@@ -690,7 +722,9 @@ async def v3_dashboard_leads_analytics(
     if wanted_branches:
         query["branch_id"] = {"$in": wanted_branches}
     leads = await v3_col("leads").find(
-        query, {"_id": 0, "created_at": 1, "stage": 1, "branch_id": 1, "source_tab": 1, "source_type": 1}
+        query,
+        {"_id": 0, "created_at": 1, "stage": 1, "branch_id": 1, "source_tab": 1, "source_type": 1,
+         "vertical": 1, "appointment_date": 1, "assigned_user_name": 1},
     ).to_list(50000)
 
     branch_rows = await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1}).to_list(500)
@@ -698,20 +732,33 @@ async def v3_dashboard_leads_analytics(
 
     # Day buckets for anything up to a quarter, months beyond it. A year plotted by day is
     # 365 points on a card this size; a week plotted by month is one.
+    #
+    # Split offline/online as it goes: the two are different businesses arriving through
+    # different channels, and one line summing both hides a swing in either.
     by_day: dict = {}
     for lead in leads:
         stamp = str(lead.get("created_at") or "")[:10]
-        if stamp:
-            by_day[stamp] = by_day.get(stamp, 0) + 1
-    span_days = len(by_day)
-    if span_days > 92:
+        if not stamp:
+            continue
+        row = by_day.setdefault(stamp, {"offline": 0, "online": 0})
+        row["online" if _is_online_vertical(lead.get("vertical")) else "offline"] += 1
+
+    def _trend_rows(buckets: dict) -> list:
+        return [
+            {"period": k, "leads": v["offline"] + v["online"], "offline": v["offline"], "online": v["online"]}
+            for k, v in sorted(buckets.items())
+        ]
+
+    if len(by_day) > 92:
         rolled: dict = {}
-        for day, n in by_day.items():
-            rolled[day[:7]] = rolled.get(day[:7], 0) + n
-        trend = [{"period": k, "leads": v} for k, v in sorted(rolled.items())]
+        for day, counts in by_day.items():
+            row = rolled.setdefault(day[:7], {"offline": 0, "online": 0})
+            row["offline"] += counts["offline"]
+            row["online"] += counts["online"]
+        trend = _trend_rows(rolled)
         grain = "month"
     else:
-        trend = [{"period": k, "leads": v} for k, v in sorted(by_day.items())]
+        trend = _trend_rows(by_day)
         grain = "day"
 
     # Stage order comes from the pipeline itself, not from counting — a funnel drawn in
@@ -721,34 +768,71 @@ async def v3_dashboard_leads_analytics(
     stage_counts = {name: 0 for name in stage_order}
     by_source: dict = {}
     by_branch: dict = {}
+    by_vertical: dict = {}
+    by_weekday = {name: 0 for name in _WEEKDAYS}
+    by_owner: dict = {}
+    # Leads and the subset that reached a booking, per source. Two counts rather than a
+    # ready-made percentage: a rate on its own hides that it came off four leads, and the
+    # card needs both to say whether a source is good or merely lucky.
+    booked_by_source: dict = {}
     for lead in leads:
         stage = lead.get("stage")
         if stage in stage_counts:
             stage_counts[stage] += 1
-        by_source[_lead_source(lead)] = by_source.get(_lead_source(lead), 0) + 1
+        source = _lead_source(lead)
+        by_source[source] = by_source.get(source, 0) + 1
+        if str(lead.get("appointment_date") or "").strip():
+            booked_by_source[source] = booked_by_source.get(source, 0) + 1
         bid = lead.get("branch_id") or ""
         by_branch[bid] = by_branch.get(bid, 0) + 1
+        by_vertical[_vertical_label(lead.get("vertical"))] = by_vertical.get(_vertical_label(lead.get("vertical")), 0) + 1
+        weekday = _weekday_of(lead.get("created_at"))
+        if weekday:
+            by_weekday[weekday] += 1
+        owner = (lead.get("assigned_user_name") or "").strip() or "Unassigned"
+        by_owner[owner] = by_owner.get(owner, 0) + 1
 
-    # The long tail folds into one row. Past ten bars the labels stop being readable, and a
-    # chart of thirty sources with two leads each says less than "Other".
-    ranked_sources = sorted(by_source.items(), key=lambda kv: -kv[1])
-    top_sources = [{"name": k, "value": v} for k, v in ranked_sources[:10]]
-    tail = sum(v for _k, v in ranked_sources[10:])
-    if tail:
-        top_sources.append({"name": "Other", "value": tail})
+    def _ranked(counts: dict, cap: int) -> list:
+        """Biggest first, with everything past `cap` folded into one Other row. Past that
+        many classes the labels stop being readable and the tail says less than "Other"."""
+        ranked = sorted(counts.items(), key=lambda kv: -kv[1])
+        rows = [{"name": k, "value": v} for k, v in ranked[:cap]]
+        tail = sum(v for _k, v in ranked[cap:])
+        if tail:
+            rows.append({"name": "Other", "value": tail})
+        return rows
 
     return {
         "applied_filters": {"start_date": start_date, "end_date": end_date, "branch_ids": wanted_branches},
         "total": len(leads),
+        "booked": sum(booked_by_source.values()),
         "grain": grain,
         "trend": trend,
         "by_stage": [{"name": name, "value": stage_counts[name]} for name in stage_order],
-        "by_source": top_sources,
-        "by_branch": sorted(
-            ({"name": branch_names.get(bid, "Unassigned") if bid else "Unassigned", "value": v}
-             for bid, v in by_branch.items()),
-            key=lambda r: -r["value"],
-        ),
+        # Six plus Other: a part-to-whole read at a glance stops working past about six
+        # slices, whatever the palette can hold.
+        "by_source": _ranked(by_source, 6),
+        "by_branch": _ranked({branch_names.get(bid, "Unassigned") if bid else "Unassigned": v
+                              for bid, v in by_branch.items()}, 8),
+        "by_vertical": _ranked(by_vertical, 6),
+        # Calendar order, not ranked — the question is which days run hot, and a bar chart
+        # sorted by volume can't be read as a week.
+        "by_weekday": [{"name": name, "value": by_weekday[name]} for name in _WEEKDAYS],
+        "by_owner": _ranked(by_owner, 8),
+        "conversion_by_source": sorted(
+            (
+                {
+                    "name": name,
+                    "leads": total,
+                    "booked": booked_by_source.get(name, 0),
+                    "rate": round(booked_by_source.get(name, 0) / total * 100, 1) if total else 0.0,
+                }
+                # A rate off a handful of leads is noise, and it lands at the top of the
+                # chart looking like the best channel there is.
+                for name, total in by_source.items() if total >= 5
+            ),
+            key=lambda r: -r["rate"],
+        )[:8],
     }
 
 

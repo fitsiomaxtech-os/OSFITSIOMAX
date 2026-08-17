@@ -77,7 +77,7 @@ const ROLE_META = {
   branch_admin_physio_fitness: { label: "Branch Admin (Physio & Fitness)", icon: Building2 },
   online_physio_admin: { label: "Online Physio Admin", icon: Building2 },
   online_fitness_admin: { label: "Online Fitness Admin", icon: Building2 },
-  head_physio: { label: "CONSULTANT", icon: Stethoscope },
+  head_physio: { label: "Consultant", icon: Stethoscope },
   physio: { label: "Physio", icon: Activity },
   online_physio: { label: "Online Physio", icon: Activity },
   accountant: { label: "Accountant", icon: BadgeIndianRupee },
@@ -326,12 +326,15 @@ export const CRMPage = ({ auth, onLogout }) => {
   const roleLabel = ROLE_META[role]?.label
     || (isDietRole(role) ? "Nutritionist" : null)
     || (isHumanResourceRole(role) ? "Human Resource" : role);
-  // CONSULTANT and NUTRITIONIST stand alone, in caps and with no "Master View" after
-  // them. They are named for the clinician rather than for a desk that administers
-  // something, so the suffix was describing a view they do not have.
+  // Consultant and NUTRITIONIST stand alone, with no "Master View" after them. They are
+  // named for the clinician rather than for a desk that administers something, so the
+  // suffix was describing a view they do not have.
+  //
+  // Consultant is printed as it is written — a board title in full caps reads as shouting
+  // where every other board is sentence case. NUTRITIONIST keeps its caps until asked.
   const isClinicianTitle = role === "head_physio" || isDietRole(role);
   const boardTitle = isClinicianTitle
-    ? roleLabel.toUpperCase()
+    ? (role === "head_physio" ? roleLabel : roleLabel.toUpperCase())
     // Sales Head gets the same title as Pre-Sales, not "Sales Head Master View" — it's the
     // same board (PreSalesCRM, full Master View) under a second role, not a board of its own.
     : isPreSalesRole(role) ? "Sales Master View" : `${roleLabel} Master View`;

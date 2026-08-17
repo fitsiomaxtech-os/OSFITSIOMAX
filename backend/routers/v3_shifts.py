@@ -10,7 +10,7 @@ by id rather than by branch.
 """
 
 import uuid
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -19,10 +19,15 @@ from database import v3_col
 from deps import is_branch_admin_role, v3_require_roles
 from schemas.v3 import V3UserOut
 from shift_utils import (
+    DATE_RE,
     attach_shifts,
+    day_windows_of,
     ensure_branch_shifts,
+    overrides_of,
     parse_hhmm,
     public_shift,
+    shift_map,
+    window_of,
 )
 from utils import active_doctor_query, now_iso
 
@@ -174,6 +179,63 @@ async def set_doctor_shift(
     )
     updated = await v3_col("doctors").find_one({"id": doctor_id}, {"_id": 0})
     return (await attach_shifts([updated]))[0]
+
+
+class DayShiftInput(BaseModel):
+    # The days being changed, "YYYY-MM-DD". A list because the calendar lets several days be
+    # selected at once, and "these three Saturdays are evenings" is one decision, not three.
+    dates: List[str]
+    # None puts the days back on the expert's usual shift.
+    shift_id: Optional[str] = None
+
+
+@router.patch("/doctors/{doctor_id}/day-shift")
+async def set_doctor_day_shift(
+    doctor_id: str,
+    payload: DayShiftInput,
+    user: V3UserOut = Depends(v3_require_roles(*MANAGE_ROLES)),
+):
+    """Work a different shift on particular days, without changing the usual one.
+
+    A roster that can only state the usual pattern makes every exception a permanent edit
+    that has to be remembered and undone — so the Morning physio who comes in full-time on
+    Tuesday ends up either published wrong or left off the calendar. The exception is
+    recorded against the date instead, and the expert stays on Morning.
+
+    Only what the day is *opened* across changes. Slots already published on these days are
+    left exactly as they are, booked or not: this decides what the next day opened contains,
+    and nothing else in the OS is allowed to drop a patient's slot as a side effect.
+    """
+    doctor = await v3_col("doctors").find_one({"id": doctor_id}, {"_id": 0})
+    if not doctor:
+        raise HTTPException(status_code=404, detail="Expert not found")
+    dates = [d.strip() for d in (payload.dates or []) if isinstance(d, str) and DATE_RE.match(d.strip())]
+    if not dates:
+        raise HTTPException(status_code=400, detail="Pick at least one date")
+    if payload.shift_id:
+        await _shift_for(user, payload.shift_id)
+
+    # Read-modify-write the whole map rather than $set-ing one dotted key at a time: the
+    # dates come in as a batch and this keeps clearing (removing keys) and setting on the
+    # one code path.
+    overrides = dict(overrides_of(doctor))
+    for date in dates:
+        if payload.shift_id:
+            overrides[date] = payload.shift_id
+        else:
+            overrides.pop(date, None)
+    await v3_col("doctors").update_one(
+        {"id": doctor_id},
+        {"$set": {"shift_overrides": overrides, "updated_at": now_iso()}},
+    )
+
+    shifts = await shift_map([doctor.get("shift_id"), *overrides.values()])
+    return {
+        "doctor_id": doctor_id,
+        "dates": dates,
+        "shift": window_of(shifts.get(payload.shift_id)) if payload.shift_id else None,
+        "day_shifts": day_windows_of({"shift_overrides": overrides}, shifts),
+    }
 
 
 @router.get("/branches/{branch_id}/shift-roster")
