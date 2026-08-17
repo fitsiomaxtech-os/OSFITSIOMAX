@@ -180,6 +180,10 @@ const SUPER_ADMIN_TABS = [
   { key: "operations", label: "Operations", icon: Workflow },
   { key: "finance", label: "Finance", icon: BadgeIndianRupee },
   { key: "presales", label: "Sales Master View", icon: Headphones },
+  // Same board Marketing Head's own login sees (role is hardcoded to "marketing_head" on
+  // the mount below, not read from the signed-in Super Admin) — a way to look at that
+  // funnel without logging in as that role.
+  { key: "marketing_master", label: "Marketing Master View", icon: Megaphone },
   // Treatment moved inside Services and Products (as its own sub-tab, next to Vending
   // Machine) rather than sitting here as a peer of the catalogue that holds it.
   { key: "packages", label: "Services and Products", icon: Store },
@@ -364,6 +368,14 @@ export const CRMPage = ({ auth, onLogout }) => {
     }
     return "dashboard";
   });
+  // Which Operations sub-tab to land on. Defaults to Operations' own default (Pre Sales);
+  // MANAGER's "Go to Operations" button below overrides it to "branch" just before the
+  // switch, the same jump Branch Control already makes into that admin's board.
+  const [operationsInitialTab, setOperationsInitialTab] = useState("pre_sales");
+  const goToOperationsBranch = () => {
+    setOperationsInitialTab("branch");
+    setSuperAdminView("operations");
+  };
 
   const safeCall = async (fn, fallback) => {
     try {
@@ -991,7 +1003,7 @@ export const CRMPage = ({ auth, onLogout }) => {
         )}
 
         {showSuperAdminBoard && superAdminView === "branches" && (
-          <BranchManagementBoard actingUser={auth.user} />
+          <BranchManagementBoard actingUser={auth.user} onNavigateToOperations={goToOperationsBranch} />
         )}
 
         {showSuperAdminBoard && superAdminView === "branch_wise" && (
@@ -999,7 +1011,7 @@ export const CRMPage = ({ auth, onLogout }) => {
         )}
 
         {showSuperAdminBoard && superAdminView === "operations" && (
-          <OperationsBoard actingUser={auth.user} branches={branches} />
+          <OperationsBoard actingUser={auth.user} branches={branches} initialTab={operationsInitialTab} />
         )}
 
         {showSuperAdminBoard && superAdminView === "finance" && (
@@ -1033,6 +1045,10 @@ export const CRMPage = ({ auth, onLogout }) => {
 
         {showSuperAdminBoard && superAdminView === "presales" && (
           <PreSalesCRM onManageStages={() => setSuperAdminView("stages")} role={role} currentUser={auth.user} />
+        )}
+
+        {showSuperAdminBoard && superAdminView === "marketing_master" && (
+          <PreSalesCRM role="marketing_head" currentUser={auth.user} />
         )}
 
         {showPreSalesBoard && (
