@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Building2, Headphones, Stethoscope, Activity, Salad, UserRound, ChevronDown, ChevronUp } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Building2, Headphones, Stethoscope, Activity, Salad, UserRound, ChevronDown, ChevronUp, Search } from "lucide-react";
 import { getDoctors, bmPreSalesMembers, getLeads } from "@/lib/api";
 import { BranchAdminBoard } from "@/components/BranchAdminBoard";
 import { HeadPhysioBoard } from "@/components/HeadPhysioBoard";
@@ -242,6 +242,79 @@ const OperationsPreSalesTab = ({ branches, actingUser }) => {
   );
 };
 
+// A branch's client list can run into the hundreds, unlike the Physio/Nutritionist/Pre
+// Sales dropdowns above (a handful of staff each) — so this one gets its own search box
+// rather than the plain <select> those use, matching the searchable employee picker
+// HR Admin's Create User already has.
+const SearchableClientSelect = ({ clients, selectedId, onSelect, testid }) => {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const onDocClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, []);
+
+  useEffect(() => { if (!open) setQuery(""); }, [open]);
+
+  const selected = clients.find((c) => c.id === selectedId);
+  const currentLabel = selected ? `${selected.name}${selected.phone ? ` — ${selected.phone}` : ""}` : "— Select a client —";
+
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? clients.filter((c) => `${c.name || ""} ${c.phone || ""}`.toLowerCase().includes(q))
+    : clients;
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex h-10 min-w-[220px] items-center justify-between gap-2 rounded-md border border-slate-200 bg-white px-3 text-left text-sm"
+        data-testid={testid}
+      >
+        <span className="truncate">{currentLabel}</span>
+        <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
+      </button>
+      {open && (
+        <div className="absolute left-0 right-0 z-20 mt-1 max-h-72 min-w-[260px] overflow-hidden rounded-md border border-slate-200 bg-white shadow-lg" data-testid={`${testid}-list`}>
+          <div className="relative border-b border-slate-100 p-1.5">
+            <Search className="pointer-events-none absolute left-4 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+            <input
+              autoFocus
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search client..."
+              className="h-8 w-full rounded-md border border-slate-200 pl-8 pr-2 text-xs outline-none focus:border-sky-400"
+              data-testid={`${testid}-search`}
+            />
+          </div>
+          <div className="max-h-60 space-y-1 overflow-y-auto p-1.5">
+            {filtered.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => { onSelect(c.id); setOpen(false); }}
+                className={`block w-full rounded-md px-3 py-1.5 text-left text-xs font-medium ${selectedId === c.id ? "bg-sky-50 text-sky-700" : "text-slate-700 hover:bg-slate-50"}`}
+                data-testid={`${testid}-option-${c.id}`}
+              >
+                {c.name}{c.phone ? ` — ${c.phone}` : ""}
+              </button>
+            ))}
+            {filtered.length === 0 && (
+              <p className="px-2 py-3 text-center text-xs text-slate-400">
+                {clients.length === 0 ? "No clients for this branch yet" : "No clients match."}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ---------- Client tab: branch -> client list -> their history ----------
 
 const OperationsClientTab = ({ branches }) => {
@@ -269,19 +342,7 @@ const OperationsClientTab = ({ branches }) => {
       <div className="flex flex-wrap items-center gap-3">
         <OperationsBranchPicker branches={branches} selectedId={selectedBranchId} onSelect={setSelectedBranchId} testid="ops-client-branch-picker" />
         {selectedBranchId && (
-          <div className="relative">
-            <select
-              value={selectedClientId}
-              onChange={(e) => setSelectedClientId(e.target.value)}
-              className="h-10 min-w-[220px] appearance-none rounded-md border border-slate-200 bg-white px-3 pr-8 text-sm"
-              data-testid="ops-client-select"
-            >
-              <option value="">— Select a client —</option>
-              {clients.map((c) => <option key={c.id} value={c.id}>{c.name}{c.phone ? ` — ${c.phone}` : ""}</option>)}
-              {clients.length === 0 && <option value="" disabled>No clients for this branch yet</option>}
-            </select>
-            <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          </div>
+          <SearchableClientSelect clients={clients} selectedId={selectedClientId} onSelect={setSelectedClientId} testid="ops-client-select" />
         )}
       </div>
 
