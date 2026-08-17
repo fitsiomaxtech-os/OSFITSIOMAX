@@ -13,7 +13,7 @@ import {
   mkGetTeam, mkCreateTeamMember, mkAllLeads, mkAssignLead, mkDeleteLead, mkBulkDelete,
   mkGetSources, mkCreateSource, mkUpdateSource, mkSyncSource,
   gsStatus, gsAuthUrl, gsDisconnect, gsPull, gsListTabs,
-  getBranches, getVerticals,
+  getBranches,
 } from "@/lib/api";
 import { MaskedContact } from "@/components/MaskedContact";
 import { SourcePill } from "@/components/marketing/SourcePill";
@@ -68,9 +68,6 @@ const SourcesTab = ({ branches: branchesProp = [] }) => {
   const loadBranches = useCallback(() => getBranches().then(setBranches).catch((e) => console.warn("[branches]", e?.message || e)), []);
   useEffect(() => { loadBranches(); }, [loadBranches]);
 
-  const [verticals, setVerticals] = useState([]);
-  useEffect(() => { getVerticals().then(setVerticals).catch((e) => console.warn("[verticals]", e?.message || e)); }, []);
-
   const [sources, setSources] = useState([]);
   // Which of them are shown — archiving hides a source without losing its config or the
   // leads it already brought in, so there has to be somewhere to see it again.
@@ -83,7 +80,7 @@ const SourcesTab = ({ branches: branchesProp = [] }) => {
   const [showSync, setShowSync] = useState(null);
   const [showMap, setShowMap] = useState(null);
   const [showEdit, setShowEdit] = useState(null);
-  const [form, setForm] = useState({ name: "", sheet_url: "", spreadsheet_id: "", sheet_names: ["Sheet1"], source_type: "google_sheets", headers: "", branchIds: [], verticals: [] });
+  const [form, setForm] = useState({ name: "", sheet_url: "", spreadsheet_id: "", sheet_names: ["Sheet1"], source_type: "google_sheets", headers: "", branchIds: [] });
   const [syncRows, setSyncRows] = useState(`[\n  {"name":"Aarav Sharma","phone":"9000000001","email":"aarav@example.com","city":"Chennai","condition":"Lower back pain","age":34}\n]`);
   const [syncResult, setSyncResult] = useState(null);
   const [pullResult, setPullResult] = useState(null);
@@ -175,9 +172,9 @@ const SourcesTab = ({ branches: branchesProp = [] }) => {
     }
     const headers = form.headers.split(",").map((h) => h.trim()).filter(Boolean);
     try {
-      await mkCreateSource({ name: form.name, sheet_url: form.sheet_url, source_type: form.source_type, headers, spreadsheet_id: sheetId, sheet_names: form.sheet_names.length ? form.sheet_names : ["Sheet1"], branch_ids: form.branchIds, verticals: form.verticals });
+      await mkCreateSource({ name: form.name, sheet_url: form.sheet_url, source_type: form.source_type, headers, spreadsheet_id: sheetId, sheet_names: form.sheet_names.length ? form.sheet_names : ["Sheet1"], branch_ids: form.branchIds, verticals: [] });
       toast.success("Source added");
-      setForm({ name: "", sheet_url: "", spreadsheet_id: "", sheet_names: ["Sheet1"], source_type: "google_sheets", headers: "", branchIds: [], verticals: [] });
+      setForm({ name: "", sheet_url: "", spreadsheet_id: "", sheet_names: ["Sheet1"], source_type: "google_sheets", headers: "", branchIds: [] });
       setShowAdd(false);
       load();
     } catch (e) { toast.error(e?.response?.data?.detail || "Create failed"); }
@@ -384,15 +381,12 @@ const SourcesTab = ({ branches: branchesProp = [] }) => {
           <p className="text-xs text-slate-400">Headers auto-map to: name, phone, email, vertical, condition, age, preferred_branch, budget, notes.</p>
           <TargetPicker
             branches={branches}
-            verticals={verticals}
             branchIds={form.branchIds}
             onBranchIdsChange={(v) => setForm({ ...form, branchIds: v })}
-            sourceVerticals={form.verticals}
-            onVerticalsChange={(v) => setForm({ ...form, verticals: v })}
             testid="mk-add-source-target"
           />
           <p className="text-xs text-slate-400">
-            Leave both empty for All Branches (leads go to Pre-Sales as usual). Pick exactly ONE branch to auto-assign every lead pulled from it straight there. Picking several branches and/or verticals just tags this source for filtering — leads still land in the general Pre-Sales pool.
+            Leave empty for All Branches (leads go to Pre-Sales as usual). Pick exactly ONE branch to auto-assign every lead pulled from it straight there. Picking several just tags this source for filtering — leads still land in the general Pre-Sales pool.
           </p>
           <Button onClick={submit} className="w-full" data-testid="mk-add-source-submit">Create Source</Button>
         </DialogShell>
@@ -430,7 +424,7 @@ const SourcesTab = ({ branches: branchesProp = [] }) => {
       )}
 
       {showEdit && (
-        <EditSourceDialog source={showEdit} branches={branches} verticals={verticals} onClose={() => setShowEdit(null)} onSaved={() => { setShowEdit(null); load(); }} />
+        <EditSourceDialog source={showEdit} branches={branches} onClose={() => setShowEdit(null)} onSaved={() => { setShowEdit(null); load(); }} />
       )}
 
       {showManage && (
@@ -525,57 +519,39 @@ const SheetTabPicker = ({ spreadsheetId, values, onChange, testid }) => {
 };
 
 /**
- * Which branches/verticals a source is tagged to. Several of either can be picked on one
- * card — with more than one branch there's no single branch a row obviously belongs to, so
- * beyond exactly one selected branch this is a tag for organizing/filtering only (see the
- * backend's _internal_pull_source for the one-branch-still-auto-assigns rule).
+ * Which branches a source is tagged to. Several can be picked on one card — with more
+ * than one branch there's no single branch a row obviously belongs to, so beyond exactly
+ * one selected branch this is a tag for organizing/filtering only (see the backend's
+ * _internal_pull_source for the one-branch-still-auto-assigns rule).
+ *
+ * No separate Verticals picker: sourceModes() already reads each picked branch's own
+ * vertical (Physiotherapy branches are offline, Online Physio/Fitness are online), so
+ * picking T Nagar here already sorts this source under Offline without asking twice.
  */
-const TargetPicker = ({ branches, verticals, branchIds, onBranchIdsChange, sourceVerticals, onVerticalsChange, testid }) => (
-  <div className="grid gap-3 sm:grid-cols-2">
-    <div>
-      <label className="text-xs font-medium text-slate-600">Branches</label>
-      <div className="mt-1 max-h-36 space-y-1 overflow-y-auto rounded-md border border-slate-200 p-2" data-testid={`${testid}-branches`}>
-        {branches.map((b) => {
-          const checked = branchIds.includes(b.id);
-          return (
-            <label key={b.id} className="flex items-center gap-2 rounded px-1.5 py-1 text-xs hover:bg-slate-50">
-              <input
-                type="checkbox"
-                checked={checked}
-                onChange={(e) => onBranchIdsChange(e.target.checked ? [...branchIds, b.id] : branchIds.filter((id) => id !== b.id))}
-                data-testid={`${testid}-branch-${b.id}`}
-              />
-              {b.branch_name}
-            </label>
-          );
-        })}
-        {branches.length === 0 && <p className="px-1.5 py-1 text-[11px] text-slate-400">No branches yet</p>}
-      </div>
-    </div>
-    <div>
-      <label className="text-xs font-medium text-slate-600">Verticals</label>
-      <div className="mt-1 max-h-36 space-y-1 overflow-y-auto rounded-md border border-slate-200 p-2" data-testid={`${testid}-verticals`}>
-        {verticals.map((v) => {
-          const checked = sourceVerticals.includes(v.name);
-          return (
-            <label key={v.id} className="flex items-center gap-2 rounded px-1.5 py-1 text-xs hover:bg-slate-50">
-              <input
-                type="checkbox"
-                checked={checked}
-                onChange={(e) => onVerticalsChange(e.target.checked ? [...sourceVerticals, v.name] : sourceVerticals.filter((n) => n !== v.name))}
-                data-testid={`${testid}-vertical-${v.id}`}
-              />
-              {prettyVertical(v.name)}
-            </label>
-          );
-        })}
-        {verticals.length === 0 && <p className="px-1.5 py-1 text-[11px] text-slate-400">No verticals yet</p>}
-      </div>
+const TargetPicker = ({ branches, branchIds, onBranchIdsChange, testid }) => (
+  <div>
+    <label className="text-xs font-medium text-slate-600">Branches</label>
+    <div className="mt-1 max-h-36 space-y-1 overflow-y-auto rounded-md border border-slate-200 p-2" data-testid={`${testid}-branches`}>
+      {branches.map((b) => {
+        const checked = branchIds.includes(b.id);
+        return (
+          <label key={b.id} className="flex items-center gap-2 rounded px-1.5 py-1 text-xs hover:bg-slate-50">
+            <input
+              type="checkbox"
+              checked={checked}
+              onChange={(e) => onBranchIdsChange(e.target.checked ? [...branchIds, b.id] : branchIds.filter((id) => id !== b.id))}
+              data-testid={`${testid}-branch-${b.id}`}
+            />
+            {b.branch_name}
+          </label>
+        );
+      })}
+      {branches.length === 0 && <p className="px-1.5 py-1 text-[11px] text-slate-400">No branches yet</p>}
     </div>
   </div>
 );
 
-const EditSourceDialog = ({ source, branches = [], verticals = [], onClose, onSaved }) => {
+const EditSourceDialog = ({ source, branches = [], onClose, onSaved }) => {
   const initialHeaders = (source.headers_detected || []).join(", ");
   const [name, setName] = useState(source.name || "");
   const [sourceType, setSourceType] = useState(source.source_type || "google_sheets");
@@ -584,7 +560,9 @@ const EditSourceDialog = ({ source, branches = [], verticals = [], onClose, onSa
   const [sheetNames, setSheetNames] = useState(source.sheet_names || (source.sheet_name ? [source.sheet_name] : ["Sheet1"]));
   const [headers, setHeaders] = useState(initialHeaders);
   const [branchIds, setBranchIds] = useState(source.branch_ids || (source.branch_id ? [source.branch_id] : []));
-  const [sourceVerticals, setSourceVerticals] = useState(source.verticals || []);
+  // No longer editable here — carried through unchanged so a save doesn't wipe whatever
+  // a source already had tagged from before this picker was removed.
+  const sourceVerticals = source.verticals || [];
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(!!source.auto_sync_enabled);
   const [autoSyncInterval, setAutoSyncInterval] = useState(String(source.auto_sync_interval_minutes || 60));
 
@@ -661,15 +639,12 @@ const EditSourceDialog = ({ source, branches = [], verticals = [], onClose, onSa
       <p className="text-xs text-slate-400">Changing headers re-detects the column mapping. Leave as-is to keep your current mapping.</p>
       <TargetPicker
         branches={branches}
-        verticals={verticals}
         branchIds={branchIds}
         onBranchIdsChange={setBranchIds}
-        sourceVerticals={sourceVerticals}
-        onVerticalsChange={setSourceVerticals}
         testid="mk-edit-source-target"
       />
       <p className="text-xs text-slate-400">
-        Leave both empty for All Branches (leads go to Pre-Sales as usual). Pick exactly ONE branch to auto-assign every lead pulled from it straight there. Picking several branches and/or verticals just tags this source for filtering — leads still land in the general Pre-Sales pool.
+        Leave empty for All Branches (leads go to Pre-Sales as usual). Pick exactly ONE branch to auto-assign every lead pulled from it straight there. Picking several just tags this source for filtering — leads still land in the general Pre-Sales pool.
       </p>
       <Button onClick={save} className="w-full" data-testid="mk-edit-source-save">Save Changes</Button>
     </DialogShell>
