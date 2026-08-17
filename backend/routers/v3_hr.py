@@ -47,19 +47,51 @@ DEFAULT_ROLES = [
 # no calendar behind it and nothing explains why.
 MULTI_BRANCH_ROLES = {"physio", "online_physio", "nutrition_coach"}
 ORG_WIDE_ROLES = {"head_physio"}
-EXPERT_ROLES = MULTI_BRANCH_ROLES | ORG_WIDE_ROLES
+
+
+def is_multi_branch_role(role: str) -> bool:
+    """Whether a role holds a calendar at each of several branches.
+
+    A Nutritionist is one, exactly like a Physio: they work a branch and may cover more.
+    Matched through is_diet_role rather than against the set above, because the slug is
+    typed by hand in Roles & Credentials — this install has `diet_manage`, not the
+    `nutrition_coach` literal, so the set never caught it and editing that user's branches
+    created no calendar at the new one.
+
+    Super Admin is excluded: is_diet_role answers "may this account reach the Diet board",
+    which Super Admin may, not "is this person a coach who holds calendars", which they
+    are not — hiring already draws that same line.
+
+    Kept in step with multiBranchLabel in frontend/src/components/hr/HRBoard.jsx.
+    """
+    r = (role or "").strip().lower()
+    if r in MULTI_BRANCH_ROLES:
+        return True
+    return r != "super_admin" and is_diet_role(r)
+
+
+def is_expert_role(role: str) -> bool:
+    """Whether a role holds a `doctors` record at all — per branch, or one org-wide."""
+    return is_multi_branch_role(role) or (role or "").strip().lower() in ORG_WIDE_ROLES
 
 
 def expert_profile_type(role: str) -> str:
     """The `doctors.profile_type` an expert record gets for a role.
 
-    Usually the role slug itself. Online Physio is the exception and has to be: every
-    physio query in the OS — the board's own _resolve_doctor, session assignment, the
-    finance scoping check — looks for profile_type "physio". Stamping "online_physio"
-    on the record instead would create an expert nothing can find, and the role would
-    log in to an empty board with no error to explain it.
+    Usually the role slug itself, with two exceptions that both have to be. Every physio
+    query in the OS — the board's own _resolve_doctor, session assignment, the finance
+    scoping check — looks for profile_type "physio", and every diet query looks for
+    "nutrition_coach" (COACH in routers/v3_diet.py). Stamping the role's own slug on the
+    record instead would create an expert nothing can find, and the role would log in to
+    an empty board with no error to explain it — which is what a differently-worded slug
+    like `diet_manage` would otherwise get. Hiring writes "nutrition_coach" outright, so
+    this keeps the records written on an edit and on a role change identical to those.
     """
-    return "physio" if is_physio_role(role) else role
+    if is_physio_role(role):
+        return "physio"
+    if (role or "").strip().lower() != "super_admin" and is_diet_role(role):
+        return "nutrition_coach"
+    return role
 
 
 def _slugify_role(label: str) -> str:
@@ -509,7 +541,7 @@ async def update_user_account(user_id: str, payload: UserAccountUpdate, caller: 
         if user and user.get("employee_id"):
             await v3_col("employees").update_one({"id": user["employee_id"]}, {"$set": {"full_name": updates["full_name"], "updated_at": now_iso()}})
 
-    if branch_ids is not None and user and user.get("role") in MULTI_BRANCH_ROLES:
+    if branch_ids is not None and user and is_multi_branch_role(user.get("role")):
         # Add a doctors record for any newly-assigned branch that doesn't already have
         # one. Branches removed from the list are left as-is so their existing calendar
         # slots/appointments aren't destroyed by an accidental unassign.
@@ -543,7 +575,7 @@ async def update_user_role(user_id: str, role: str, caller: V3UserOut = Depends(
     res = await v3_col("users").update_one({"id": user_id}, {"$set": {"role": role}})
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="User not found")
-    if role in EXPERT_ROLES:
+    if is_expert_role(role):
         user = await v3_col("users").find_one({"id": user_id}, {"_id": 0})
         existing_docs = await v3_col("doctors").find(
             {"user_id": user_id, "profile_type": expert_profile_type(role)}, {"_id": 0, "branch_id": 1}

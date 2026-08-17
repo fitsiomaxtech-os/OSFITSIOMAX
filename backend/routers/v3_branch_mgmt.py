@@ -9,7 +9,7 @@ from deps import v3_require_roles, is_branch_admin_role, is_physio_role, is_diet
 # The desks a Physio or Nutritionist can hold several of, and the doctors profile_type
 # each role keeps its calendar under. Imported from HR rather than restated so posting
 # somebody to a branch here builds the same record HR's own assign builds.
-from routers.v3_hr import MULTI_BRANCH_ROLES, expert_profile_type
+from routers.v3_hr import is_multi_branch_role, expert_profile_type
 from security import verify_password
 import lead_control
 from schemas.v3 import V3UserOut
@@ -469,7 +469,7 @@ async def team_candidates(branch_id: str, desk: str, _: V3UserOut = Depends(v3_r
             "email": u.get("email", ""),
             "role": u.get("role", ""),
             "mobile_number": u.get("mobile_number", ""),
-            "multi_branch": u.get("role") in MULTI_BRANCH_ROLES,
+            "multi_branch": is_multi_branch_role(u.get("role")),
             # Named, not just counted: "currently at T Nagar Branch" is what tells someone
             # that picking this person takes them off it.
             "current_branches": [names[b] for b in at if names.get(b)],
@@ -489,7 +489,7 @@ async def team_add_member(branch_id: str, user_id: str, desk: str, _: V3UserOut 
         raise HTTPException(status_code=400, detail=f"{user.get('full_name')} does not hold a role for this desk")
 
     moved_from = None
-    if user.get("role") in MULTI_BRANCH_ROLES:
+    if is_multi_branch_role(user.get("role")):
         # A Physio or Nutritionist can work several branches, so this branch is added to
         # the list rather than replacing it. branch_id stays the first of them, which is
         # what every single-branch filter in the OS still reads.

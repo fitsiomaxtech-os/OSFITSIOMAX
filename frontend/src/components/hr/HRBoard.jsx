@@ -40,6 +40,26 @@ const isOnlineVertical = (v) => String(v || "").startsWith("online_");
 // Empty still means every branch, which is what an existing CONSULTANT carries today.
 // Requiring one would have made every one of them unsaveable until a branch was ticked.
 const MULTI_BRANCH_ROLE_LABELS = { head_physio: "CONSULTANT", physio: "Physio", online_physio: "Online Physio" };
+// A Nutritionist picks branches the same way, and for the same reason: they hold a
+// calendar at each branch they work and may work more than one. The backend has accepted
+// a list from them all along — only this form refused to collect it, leaving one Branch
+// dropdown that could say nothing about a coach who covers two.
+//
+// Read off the shape of the slug rather than one literal, because a diet role is typed by
+// hand in Roles & Credentials: this install's is "diet_manage", not "nutrition_coach", so
+// a map keyed by the literal never matched it. Matched on whole underscore-separated
+// tokens so an unrelated role can't slip through on a substring — "audit_manage" shares
+// no token with the set. Super Admin reaches the Diet board but is not a coach, and is
+// excluded here as it is on the backend. Kept in step with is_multi_branch_role in
+// backend/routers/v3_hr.py.
+const DIET_ROLE_TOKENS = ["diet", "nutrition", "nutritionist", "dietician", "dietitian"];
+const multiBranchLabel = (role) => {
+  const r = String(role || "").trim().toLowerCase();
+  if (MULTI_BRANCH_ROLE_LABELS[r]) return MULTI_BRANCH_ROLE_LABELS[r];
+  if (r === "super_admin") return null;
+  if (r.includes("nutrition_coach") || r.split("_").some((t) => DIET_ROLE_TOKENS.includes(t))) return "Nutritionist";
+  return null;
+};
 // Roles allowed to cover everything by leaving the selection empty.
 const BRANCHLESS_OK_ROLES = new Set(["head_physio"]);
 
@@ -1933,7 +1953,7 @@ const UserActionsModal = ({ user, onClose, onDone }) => {
   const [busy, setBusy] = useState(false);
   const [branches, setBranches] = useState([]);
   const [employees, setEmployees] = useState([]);
-  const roleLabelForMulti = MULTI_BRANCH_ROLE_LABELS[user.role];
+  const roleLabelForMulti = multiBranchLabel(user.role);
   const isMultiBranchRole = Boolean(roleLabelForMulti);
   const [editForm, setEditForm] = useState({
     full_name: user.full_name || "",
@@ -2366,7 +2386,7 @@ const CreateUserModal = ({ meta, reloadMeta, onClose, onSaved }) => {
   const [employees, setEmployees] = useState([]);
   const [branches, setBranches] = useState([]);
   const [form, setForm] = useState({ employee_id: "", full_name: "", email: "", role: "", branch_id: "", branch_ids: [], password: "", confirm: "" });
-  const roleLabelForMulti = MULTI_BRANCH_ROLE_LABELS[form.role];
+  const roleLabelForMulti = multiBranchLabel(form.role);
   const isMultiBranchRole = Boolean(roleLabelForMulti);
   // What was actually clicked in the dropdown — kept separate from form.role (which always
   // ends up holding a real access-role slug) purely so the dropdown can show and highlight
