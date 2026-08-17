@@ -217,7 +217,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
           disabled={loading}
           title="Refresh"
           aria-label="Refresh"
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-orange-500 text-white transition hover:bg-orange-600 disabled:opacity-50"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-slate-500 text-white transition hover:bg-slate-600 disabled:opacity-50"
           data-testid="hp-refresh-btn"
         >
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />

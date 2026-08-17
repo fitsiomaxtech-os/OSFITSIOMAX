@@ -5269,6 +5269,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               </p>
             </div>
 
+            {/* Submit finishes: it closes the patient as well as this popup and puts the
+                board back. Cancel only dismisses the popup, leaving the patient open —
+                the difference being whether there is anything else to do here. Edit and
+                Share both keep the record on screen because they act on it. */}
             <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/60 px-4 py-3">
               <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => setDecisionReceipt(null)} data-testid="cons-decision-receipt-cancel">
                 Cancel
@@ -5276,8 +5280,16 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => shareDecision(decisionReceipt)} data-testid="cons-decision-receipt-share">
                 <Share2 className="mr-1 h-3 w-3" />Share
               </Button>
-              <Button size="sm" className="h-8 bg-sky-600 text-xs hover:bg-sky-700" onClick={() => beginEditDecision(selectedLead)} data-testid="cons-decision-receipt-edit">
+              <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => beginEditDecision(selectedLead)} data-testid="cons-decision-receipt-edit">
                 <Pencil className="mr-1 h-3 w-3" />Edit
+              </Button>
+              <Button
+                size="sm"
+                className="h-8 bg-emerald-600 text-xs hover:bg-emerald-700"
+                onClick={() => { setDecisionReceipt(null); setSelectedLead(null); }}
+                data-testid="cons-decision-receipt-submit"
+              >
+                <CheckCircle2 className="mr-1 h-3 w-3" />Submit
               </Button>
             </div>
           </div>
