@@ -29,6 +29,7 @@ import {
   UserX,
   Clock,
   MoreHorizontal,
+  PhoneOff,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -50,8 +51,9 @@ import {
   scheduleBranchFollowUp,
   rescheduleBranchFollowUp,
   bulkDeleteLeads,
+  rnrAttempt,
 } from "@/lib/api";
-import { to12h, endTime12h } from "@/lib/time";
+import { to12h, endTime12h, callTimeStamp, callDateStamp } from "@/lib/time";
 import { HeadPhysioCalendar } from "@/components/HeadPhysioCalendar";
 import { ConsultationsBoard } from "@/components/ConsultationsBoard";
 import { FitsiomaxStorePanel } from "@/components/BranchStoreBoard";
@@ -1447,6 +1449,19 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
     }
   };
 
+  // Same endpoint and counter Pre-Sales' own RNR tracker uses — logging an attempt here
+  // doesn't move the lead off RNR, so the modal stays open and just refreshes in place,
+  // same as scheduling or rescheduling a follow-up does.
+  const logRnrAttempt = async () => {
+    try {
+      const updated = await rnrAttempt(lead.id);
+      toast.success(`Attempt logged (#${updated.rnr_attempts})`);
+      await onUpdate();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to log attempt");
+    }
+  };
+
   const submitFollowUp = async () => {
     if (!followUpForm.date || !followUpForm.time) { toast.error("Date and time are required"); return; }
     try {
@@ -1677,6 +1692,38 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                   })}
                 </div>
               </div>
+
+              {lead.branch_stage === "RNR" && (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2" data-testid="branch-lead-rnr-tracker">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-rose-100 text-rose-600">
+                      <PhoneOff className="h-3.5 w-3.5" />
+                    </span>
+                    <div>
+                      <p className="text-xs font-semibold text-rose-700">Client Not Answered</p>
+                      <p className="text-[11px] text-rose-500">
+                        Attempts so far: <span className="font-bold">{lead.rnr_attempts || 0}</span>
+                      </p>
+                      {lead.rnr_last_attempt_at && (
+                        <p className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px] text-rose-600" data-testid="branch-lead-rnr-lastcall">
+                          <Clock className="h-3 w-3" />
+                          Last call
+                          <span className="font-bold">{callTimeStamp(lead.rnr_last_attempt_at)}</span>
+                          <span className="text-rose-400">· {callDateStamp(lead.rnr_last_attempt_at)}</span>
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    onClick={logRnrAttempt}
+                    className="h-8 bg-rose-600 text-white hover:bg-rose-700"
+                    data-testid="branch-lead-rnr-attempt"
+                  >
+                    <PhoneOff className="mr-1 h-3.5 w-3.5" /> +1 No Answer
+                  </Button>
+                </div>
+              )}
             </div>
           )}
 
