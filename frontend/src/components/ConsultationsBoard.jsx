@@ -225,8 +225,39 @@ const CONSULTATION_PLANS = [
 ];
 const planOf = (key) => CONSULTATION_PLANS.find((p) => p.key === key) || null;
 
-// One distinct color per Treatment Package option (cycles if there are ever more than 5).
-const TREATMENT_PACKAGE_COLORS = ["#2563eb", "#059669", "#d97706", "#7c3aed", "#e11d48"];
+// The reverse: which plan a saved lead was given. Stored as three flags rather than the
+// key, so Edit has to match on all three or it would reopen the form on the wrong plan
+// and quietly rewrite the decision on save.
+// What a confirmed treatment reads as, on screen and in a WhatsApp message. One shape
+// for both, so the message cannot say something the popup does not.
+const decisionText = (d) => [
+  `*Treatment confirmed*`,
+  `${d.name}${d.patientNo ? ` (${d.patientNo})` : ""}`,
+  ``,
+  `Plan: ${d.planLabel}`,
+  d.packageName ? `Package: ${d.packageName}` : null,
+  d.perWeek && d.weeks ? `${d.perWeek} sessions weekly x ${d.weeks} weeks = ${d.perWeek * d.weeks} total sessions` : null,
+  ``,
+  `- FITSIOMAX`,
+].filter((l) => l !== null).join("\n");
+
+const shareDecision = (d) => {
+  const num = waNumber(d.phone);
+  if (!num) { toast.error("This patient has no phone number on file"); return; }
+  const url = `https://wa.me/${num}?text=${encodeURIComponent(decisionText(d))}`;
+  if (isHandheld()) { window.location.href = url; return; }
+  window.open(url, "_blank");
+};
+
+const planFromLead = (lead) => CONSULTATION_PLANS.find((p) => (
+  p.decision === lead.consultation_decision
+  && p.diet === !!lead.diet_recommended
+  && !!p.rehab === !!lead.rehab_referred
+)) || null;
+
+// The Treatment Package options used to cycle through five colours. They are one list of
+// one kind of thing — durations of the same package — so the colour was decorative, and it
+// read as a category each pill belonged to. Plain now, with only the selected one filled.
 
 // FITSIO STORE session packages are named like "02 Weeks" / "03 Week" — there's no
 // separate structured weeks field, so the duration is read off the leading number in
@@ -693,6 +724,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // consciously chose, which is the thing this control exists to prevent.
   const [decisionDraft, setDecisionDraft] = useState({ plan: "", decision: "consultation_treatment", item_id: "", mode: "offline", sessionsPerWeek: "" });
   const [savingDecision, setSavingDecision] = useState(false);
+  // The confirmation shown after a decision saves, and the flag that reopens the form
+  // behind it. Both clear when the popup moves to another lead.
+  const [decisionReceipt, setDecisionReceipt] = useState(null);
+  const [editingDecision, setEditingDecision] = useState(false);
 
   // Mark Consultation Completed (Branch Admin only) — "Consultation Only" patients, at
   // the Fee Collected stage.
@@ -909,6 +944,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     setCollectFeeDraft(null);
     setTreatmentFeeDraft(null);
     setDecisionDraft({ decision: "consultation_treatment", item_id: "", mode: "offline", sessionsPerWeek: "" });
+    setDecisionReceipt(null);
+    setEditingDecision(false);
   }, [selectedLead?.id]);
 
   useEffect(() => {
@@ -960,12 +997,64 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     try {
       const res = await saveConsultationDecision(selectedLead.id, payload);
       toast.success(plan.rehab ? "Saved — patient moved to Rehab" : "Saved & moved to Branch Admin");
-      setSelectedLead(null);
+      // The lead stays open behind the confirmation rather than the board closing it. The
+      // popup's three actions all act on this patient, and two of them — Edit and Share —
+      // have nothing to work with once the record underneath has gone.
+      setEditingDecision(false);
       setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === res.lead.id ? res.lead : l) }));
+      setSelectedLead(res.lead);
+      const pkg = treatmentPackageItems.find((i) => i.id === decisionDraft.item_id);
+      setDecisionReceipt({
+        leadId: res.lead.id,
+        name: res.lead.name || "Unknown",
+        patientNo: res.lead.patient_number || "",
+        phone: res.lead.phone || "",
+        planLabel: plan.label,
+        packageName: plan.decision === "consultation_treatment" ? (pkg?.name || res.lead.session_package_name || "") : "",
+        perWeek: parseInt(decisionDraft.sessionsPerWeek, 10) || 0,
+        weeks: weeksFromPackageName(pkg?.name) || 0,
+        rehab: !!plan.rehab,
+      });
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed to save");
     }
     setSavingDecision(false);
+  };
+
+  // The saved decision in the shape the receipt and the share text both read.
+  const decisionSummaryOf = (lead) => {
+    const plan = planFromLead(lead);
+    const weeks = weeksFromPackageName(lead.session_package_name);
+    const total = lead.session_package_sessions || 0;
+    return {
+      leadId: lead.id,
+      name: lead.name || "Unknown",
+      patientNo: lead.patient_number || "",
+      phone: lead.phone || "",
+      planLabel: plan?.label || (lead.consultation_decision === "consultation_treatment" ? "Consultation + Treatment" : "Only Consultation"),
+      packageName: lead.session_package_name || "",
+      weeks: weeks || 0,
+      perWeek: weeks && total ? Math.round(total / weeks) : 0,
+      rehab: !!lead.rehab_referred,
+    };
+  };
+
+  // Edit reopens the form on what was saved. Seeded from the lead rather than left on the
+  // draft's defaults, or the first save would rewrite the plan to whatever the form
+  // happened to be showing.
+  const beginEditDecision = (lead) => {
+    const plan = planFromLead(lead);
+    const weeks = weeksFromPackageName(lead.session_package_name);
+    const total = lead.session_package_sessions || 0;
+    setDecisionDraft({
+      plan: plan?.key || "",
+      decision: lead.consultation_decision || "consultation_treatment",
+      item_id: lead.session_package_id || "",
+      mode: lead.consultation_mode || "offline",
+      sessionsPerWeek: weeks && total ? String(Math.round(total / weeks)) : "",
+    });
+    setDecisionReceipt(null);
+    setEditingDecision(true);
   };
 
   // ---- Mark Consultation Completed (Branch Admin) — "Consultation Only" patients ----
@@ -2420,7 +2509,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 offered as a choice. Physio assignment lives entirely on Branch Admin's own
                 board, after both fees are collected. */}
             {isConsultant && (() => {
-              const alreadyMoved = selectedLead.head_consultation_stage === "Consultation Visit";
+              // Read off the decision the lead carries rather than the name of the stage
+              // it landed on. The backend writes whatever the head_consultation pipeline's
+              // closing stage is currently called, which Pipeline Stage Management can
+              // rename — and a literal compared against that goes quietly false, putting
+              // the whole form back in front of a consultation already finished.
+              const alreadyMoved = !!selectedLead.consultation_decision && !editingDecision;
               const diagnosisReady = !!(selectedLead.physio_diagnosis_report || "").trim();
               const summaryReady = !!(selectedLead.treatment_summary || "").trim();
               const selectedPackage = treatmentPackageItems.find((i) => i.id === decisionDraft.item_id);
@@ -2451,6 +2545,28 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       </p>
                     )}
                     <p className="mt-1.5 text-[11px] text-slate-500">Sent to Branch Admin — Consultation Visit.</p>
+                    {/* Reopens the form on the plan and package already saved, rather than
+                        on a blank one — see planFromLead. */}
+                    <div className="mt-2.5 flex flex-wrap gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 text-xs"
+                        onClick={() => beginEditDecision(selectedLead)}
+                        data-testid="cons-decision-edit"
+                      >
+                        <Pencil className="mr-1 h-3 w-3" />Edit
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 text-xs"
+                        onClick={() => shareDecision(decisionSummaryOf(selectedLead))}
+                        data-testid="cons-decision-share"
+                      >
+                        <Share2 className="mr-1 h-3 w-3" />Share
+                      </Button>
+                    </div>
                   </div>
                 );
               }
@@ -2512,18 +2628,18 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                   <div className={needsPackage ? "" : "hidden"}>
                     <label className="mb-1 block text-[11px] font-medium text-slate-500">Treatment Package</label>
                     <div className="flex flex-wrap gap-2" data-testid="cons-decision-package-options">
-                      {treatmentPackageItems.map((i, idx) => {
-                        const color = TREATMENT_PACKAGE_COLORS[idx % TREATMENT_PACKAGE_COLORS.length];
+                      {treatmentPackageItems.map((i) => {
                         const selected = decisionDraft.item_id === i.id;
                         return (
                           <button
                             key={i.id}
                             type="button"
                             onClick={() => setDecisionDraft((p) => ({ ...p, item_id: i.id, sessionsPerWeek: "" }))}
-                            className="rounded-md border px-3 py-1.5 text-xs font-semibold transition hover:brightness-95"
-                            style={selected
-                              ? { background: `${color}22`, color, borderColor: color, boxShadow: `inset 0 0 0 1px ${color}` }
-                              : { background: `${color}14`, color, borderColor: `${color}33` }}
+                            className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition ${
+                              selected
+                                ? "border-slate-900 bg-slate-900 text-white"
+                                : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                            }`}
                             data-testid={`cons-decision-package-option-${i.id}`}
                           >
                             {i.name}
@@ -2593,7 +2709,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       // package, so promising one was the wrong instruction on the only
                       // control that finishes the consultation.
                       : plan?.rehab ? "Confirm & Move to Rehab"
-                      : needsPackage ? "Choose and Confirm & Select the Package"
+                      : needsPackage ? "Confirm"
                       : "Confirm & Save"}
                   </Button>
                 </div>
@@ -4994,6 +5110,69 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       {/* Payment receipt — the acknowledgement the client is handed. Rendered here rather
           than inside the lead dialog because collecting the last outstanding fee closes
           that dialog, and the receipt has to outlive it. */}
+      {/* The confirmation, over the patient it belongs to. Same shape as the payment
+          receipt below — a status header, the facts, then the actions — because it does
+          the same job: says what was just recorded and offers the few things anyone wants
+          next. z-[70] to clear the lead popup it opens above. */}
+      {decisionReceipt && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/50 p-4" onClick={(e) => { if (e.target === e.currentTarget) setDecisionReceipt(null); }} data-testid="cons-decision-receipt">
+          <div className="w-full max-w-sm overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between gap-3 bg-emerald-600 px-4 py-3 text-white">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <CheckCircle2 className="h-7 w-7 shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-base font-bold leading-tight">
+                    {decisionReceipt.rehab ? "Moved to Rehab" : "Treatment Confirmed"}
+                  </p>
+                  <p className="truncate text-xs text-white/80">
+                    {decisionReceipt.name}{decisionReceipt.patientNo ? ` · ${decisionReceipt.patientNo}` : ""}
+                  </p>
+                </div>
+              </div>
+              <button onClick={() => setDecisionReceipt(null)} className="shrink-0 rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="cons-decision-receipt-close">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="space-y-2 p-5">
+              <div className="flex items-start justify-between gap-3">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Plan</span>
+                <span className="text-right text-xs font-bold text-slate-800">{decisionReceipt.planLabel}</span>
+              </div>
+              {decisionReceipt.packageName && (
+                <div className="flex items-start justify-between gap-3">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Package</span>
+                  <span className="text-right text-xs font-bold text-slate-800">{decisionReceipt.packageName}</span>
+                </div>
+              )}
+              {decisionReceipt.perWeek > 0 && decisionReceipt.weeks > 0 && (
+                <div className="flex items-start justify-between gap-3">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Sessions</span>
+                  <span className="text-right text-xs font-bold text-slate-800">
+                    {decisionReceipt.perWeek} weekly × {decisionReceipt.weeks} weeks = {decisionReceipt.perWeek * decisionReceipt.weeks}
+                  </span>
+                </div>
+              )}
+              <p className="pt-1 text-[11px] text-slate-500">
+                {decisionReceipt.rehab ? "Waiting on a package in Rehab." : "Sent to Branch Admin — Consultation Visit."}
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/60 px-4 py-3">
+              <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => setDecisionReceipt(null)} data-testid="cons-decision-receipt-cancel">
+                Cancel
+              </Button>
+              <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => shareDecision(decisionReceipt)} data-testid="cons-decision-receipt-share">
+                <Share2 className="mr-1 h-3 w-3" />Share
+              </Button>
+              <Button size="sm" className="h-8 bg-sky-600 text-xs hover:bg-sky-700" onClick={() => beginEditDecision(selectedLead)} data-testid="cons-decision-receipt-edit">
+                <Pencil className="mr-1 h-3 w-3" />Edit
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {receipt && (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-3" data-testid="cons-receipt-modal">
           {/* 88%, this dialog only. zoom rather than transform: scale — zoom shrinks the
