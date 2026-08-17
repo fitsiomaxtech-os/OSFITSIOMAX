@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Users, CalendarCheck, Activity, IndianRupee, X, TrendingUp, TrendingDown, Minus, RefreshCw, Megaphone, Headphones, BarChart3 } from "lucide-react";
+import {
+  Users, CalendarCheck, Activity, IndianRupee, X, TrendingUp, TrendingDown, Minus, RefreshCw,
+  Megaphone, Headphones, BarChart3, Wallet, Stethoscope, ShoppingBag, Salad, Clock,
+  AlertCircle, CalendarClock, CheckCircle2, XCircle,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { StatTile } from "@/components/ui/stat-tile";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { SegmentedTabs } from "@/components/ui/segmented-tabs";
 import { toast } from "@/components/ui/sonner";
@@ -154,15 +159,10 @@ const ModeBranchFilter = ({ branches, group, onGroup, branchId, onBranch, testid
   );
 };
 
-/** One count, in the app's blue — Marketing and Sales are both plain summaries of
- *  /dashboard/leads-analytics, so both read off the same card rather than each styling
- *  its own. */
-const BlueCard = ({ label, value, testid }) => (
-  <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3.5" data-testid={testid}>
-    <span className="block truncate text-[11px] font-bold uppercase tracking-wider text-sky-600">{label}</span>
-    <span className="mt-1 block text-2xl font-extrabold text-sky-800 sm:text-3xl">{(value || 0).toLocaleString("en-IN")}</span>
-  </div>
-);
+// The app's blue — Marketing and Sales are both plain summaries of the same
+// /dashboard/leads-analytics call, so both read off the same colour rather than each
+// styling its own.
+const MARKETING_BLUE = "#0284c7";
 
 const slugify = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 
@@ -197,10 +197,10 @@ const MarketingTab = ({ branches, dateFilter }) => {
         <p className="py-16 text-center text-sm text-slate-400">{loading ? "Loading..." : "No data."}</p>
       ) : (
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" data-testid="dashboard-marketing-cards">
-          <BlueCard label="Total Leads" value={data.total} testid="dashboard-marketing-total" />
-          <BlueCard label="Booked" value={data.booked} testid="dashboard-marketing-booked" />
+          <StatTile label="Total Leads" value={(data.total || 0).toLocaleString("en-IN")} icon={Users} color={MARKETING_BLUE} testid="dashboard-marketing-total" />
+          <StatTile label="Booked" value={(data.booked || 0).toLocaleString("en-IN")} icon={CalendarCheck} color={MARKETING_BLUE} testid="dashboard-marketing-booked" />
           {(data.by_source || []).map((s) => (
-            <BlueCard key={s.name} label={s.name} value={s.value} testid={`dashboard-marketing-source-${slugify(s.name)}`} />
+            <StatTile key={s.name} label={s.name} value={(s.value || 0).toLocaleString("en-IN")} icon={Megaphone} color={MARKETING_BLUE} testid={`dashboard-marketing-source-${slugify(s.name)}`} />
           ))}
         </div>
       )}
@@ -238,10 +238,10 @@ const SalesTab = ({ branches, dateFilter }) => {
         <p className="py-16 text-center text-sm text-slate-400">{loading ? "Loading..." : "No data."}</p>
       ) : (
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" data-testid="dashboard-sales-cards">
-          <BlueCard label="Total Leads" value={data.total} testid="dashboard-sales-total" />
-          <BlueCard label="Booked" value={data.booked} testid="dashboard-sales-booked" />
+          <StatTile label="Total Leads" value={(data.total || 0).toLocaleString("en-IN")} icon={Users} color={MARKETING_BLUE} testid="dashboard-sales-total" />
+          <StatTile label="Booked" value={(data.booked || 0).toLocaleString("en-IN")} icon={CalendarCheck} color={MARKETING_BLUE} testid="dashboard-sales-booked" />
           {(data.by_stage || []).map((s) => (
-            <BlueCard key={s.name} label={s.name} value={s.value} testid={`dashboard-sales-stage-${slugify(s.name)}`} />
+            <StatTile key={s.name} label={s.name} value={(s.value || 0).toLocaleString("en-IN")} icon={Headphones} color={MARKETING_BLUE} testid={`dashboard-sales-stage-${slugify(s.name)}`} />
           ))}
         </div>
       )}
@@ -266,10 +266,10 @@ const RevenueTab = ({ data, loading, dateFilter }) => {
   }
 
   const cards = [
-    { key: "total", label: "Total Revenue", value: scopedBucketValue(data.revenue, group, branchId), tone: "border-emerald-200 bg-emerald-50/60 text-emerald-700" },
-    { key: "consultation", label: "Consultations Revenue", value: scopedBucketValue(data.consultation_revenue, group, branchId), tone: "border-sky-200 bg-sky-50/60 text-sky-700" },
-    { key: "session", label: "Session Amount Collected", value: scopedBucketValue(data.session_revenue, group, branchId), tone: "border-violet-200 bg-violet-50/60 text-violet-700" },
-    { key: "pending", label: "Pending Session Amount", value: scopedBucketValue(data.pending_session_amount, group, branchId), tone: "border-amber-200 bg-amber-50/60 text-amber-700" },
+    { key: "total", label: "Total Revenue", value: scopedBucketValue(data.revenue, group, branchId), color: "#059669", icon: Wallet },
+    { key: "consultation", label: "Consultations Revenue", value: scopedBucketValue(data.consultation_revenue, group, branchId), color: "#0284c7", icon: Stethoscope },
+    { key: "session", label: "Session Amount Collected", value: scopedBucketValue(data.session_revenue, group, branchId), color: "#7c3aed", icon: Activity },
+    { key: "pending", label: "Pending Session Amount", value: scopedBucketValue(data.pending_session_amount, group, branchId), color: "#d97706", icon: Clock },
   ];
 
   return (
@@ -277,10 +277,7 @@ const RevenueTab = ({ data, loading, dateFilter }) => {
       <ModeBranchFilter branches={branches} group={group} onGroup={setGroup} branchId={branchId} onBranch={setBranchId} testid="dashboard-revenue-filter" />
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" data-testid="dashboard-revenue-cards">
         {cards.map((c) => (
-          <div key={c.key} className={`rounded-xl border p-3 sm:p-4 ${c.tone}`} data-testid={`dashboard-revenue-${c.key}`}>
-            <p className="min-h-[2.6em] text-xs font-semibold uppercase tracking-wider sm:min-h-0">{c.label}</p>
-            <p className="mt-1 text-lg font-bold sm:text-3xl">{fmtValue("revenue", c.value)}</p>
-          </div>
+          <StatTile key={c.key} label={c.label} value={fmtValue("revenue", c.value)} icon={c.icon} color={c.color} testid={`dashboard-revenue-${c.key}`} />
         ))}
       </div>
       {selectedBranch && (
@@ -539,10 +536,10 @@ const AnalyticsTab = ({ data, loading, dateFilter }) => {
   };
 
   const metrics = [
-    { key: "leads", label: "Total Leads", icon: Users, value: scoped(data.leads) },
-    { key: "appointments", label: "Appointments", icon: CalendarCheck, value: scoped(data.appointments) },
-    { key: "treatments", label: "Treatments", icon: Activity, value: scoped(data.treatments) },
-    { key: "revenue", label: "Revenue", icon: IndianRupee, value: scoped(data.revenue), currency: true },
+    { key: "leads", label: "Total Leads", icon: Users, color: "#0284c7", value: scoped(data.leads) },
+    { key: "appointments", label: "Appointments", icon: CalendarCheck, color: "#7c3aed", value: scoped(data.appointments) },
+    { key: "treatments", label: "Treatments", icon: Activity, color: "#059669", value: scoped(data.treatments) },
+    { key: "revenue", label: "Revenue", icon: IndianRupee, color: "#d97706", value: scoped(data.revenue), currency: true },
   ];
   // `key` is also the key inside each branch's `series` on /dashboard/leads-trend, so the
   // selected card and the lines drawn from it cannot drift apart.
@@ -567,31 +564,25 @@ const AnalyticsTab = ({ data, loading, dateFilter }) => {
           Each card is also the trend's selector — clicking one draws that metric in the
           chart below. The card already names the figure and prints its total, so
           putting the choice on it costs nothing and saves a second control repeating the
-          same four words. The selected one inverts to solid slate. */}
+          same four words. The selected one gets the shared StatTile's ring highlight; the
+          Delta sits in its footer slot rather than the plain `sub` line, since it's its
+          own coloured, iconed line rather than plain text. */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {metrics.map((m) => {
           const before = scopedPrev(m.key);
           const on = m.key === trendMetric;
           return (
-            <button
+            <StatTile
               key={m.key}
-              type="button"
+              label={m.label}
+              value={m.currency ? fmtValue("revenue", m.value) : (m.value || 0).toLocaleString("en-IN")}
+              icon={m.icon}
+              color={m.color}
+              active={on}
               onClick={() => setTrendMetric(m.key)}
-              aria-pressed={on}
-              className={`rounded-xl border p-3 text-left shadow-sm transition sm:p-4 ${
-                on ? "border-slate-800 bg-slate-800" : "border-slate-200 bg-white hover:border-slate-300"
-              }`}
-              data-testid={`dashboard-analytics-${m.key}`}
-            >
-              <div className="flex items-start justify-between gap-2">
-                <p className={`min-w-0 truncate text-[10px] font-bold uppercase tracking-wider sm:text-[11px] ${on ? "text-white/80" : "text-slate-500"}`}>{m.label}</p>
-                <m.icon className={`h-4 w-4 shrink-0 ${on ? "text-white/60" : "text-slate-300"}`} />
-              </div>
-              <p className={`mt-1 truncate text-2xl font-extrabold sm:text-3xl ${on ? "text-white" : "text-slate-800"}`}>
-                {m.currency ? fmtValue("revenue", m.value) : (m.value || 0).toLocaleString("en-IN")}
-              </p>
-              <Delta now={m.value} before={before} loading={prevLoading} available={!!from && !!to} inverted={on} />
-            </button>
+              footer={<Delta now={m.value} before={before} loading={prevLoading} available={!!from && !!to} />}
+              testid={`dashboard-analytics-${m.key}`}
+            />
           );
         })}
       </div>
@@ -973,15 +964,15 @@ const BranchRevenueCards = ({ branch, dateFilter, onClose }) => {
   const unpaidTotal = unpaidClients.reduce((s, c) => s + amt(c.balance), 0);
 
   const cards = [
-    { key: "total", label: "Total Revenue", value: money(data?.kpis?.total_collected), sub: `${transactions.length} transactions`, tone: "border-emerald-200 bg-emerald-50/60 text-emerald-700" },
-    { key: "consultation", label: "Consultations Revenue", value: money(b.consultation_revenue), sub: `${b.consultation_pct || 0}% of total`, tone: "border-sky-200 bg-sky-50/60 text-sky-700" },
-    { key: "session", label: "Sessions Revenue", value: money(b.session_revenue), sub: `${b.session_pct || 0}% of total`, tone: "border-violet-200 bg-violet-50/60 text-violet-700" },
-    { key: "diet", label: "Diet Collections", value: money(b.diet_revenue), sub: `${b.diet_pct || 0}% of total`, tone: "border-orange-200 bg-orange-50/60 text-orange-700" },
-    { key: "store", label: "Store Payment", value: money(b.store_revenue), sub: `${transactions.filter((t) => t.source === "store").length} sales`, tone: "border-teal-200 bg-teal-50/60 text-teal-700" },
-    { key: "outstanding", label: "Outstanding Amount", value: money(outstandingTotal), sub: `${outstanding.length} ${outstanding.length === 1 ? "client" : "clients"}`, tone: "border-amber-200 bg-amber-50/60 text-amber-700" },
-    { key: "schedules", label: "Payment Schedules", value: money(scheduleTotal), sub: `${scheduleUnpaid.length} still due`, tone: "border-indigo-200 bg-indigo-50/60 text-indigo-700" },
-    { key: "paid", label: "Payment Paid", value: money(paidTotal), sub: `${Object.keys(paid).length} settled`, tone: "border-emerald-200 bg-emerald-50/60 text-emerald-700" },
-    { key: "unpaid", label: "Payment Unpaid", value: money(unpaidTotal), sub: `${unpaidClients.length} ${unpaidClients.length === 1 ? "client" : "clients"}`, tone: "border-rose-200 bg-rose-50/60 text-rose-700" },
+    { key: "total", label: "Total Revenue", value: money(data?.kpis?.total_collected), sub: `${transactions.length} transactions`, color: "#059669", icon: Wallet },
+    { key: "consultation", label: "Consultations Revenue", value: money(b.consultation_revenue), sub: `${b.consultation_pct || 0}% of total`, color: "#0284c7", icon: Stethoscope },
+    { key: "session", label: "Sessions Revenue", value: money(b.session_revenue), sub: `${b.session_pct || 0}% of total`, color: "#7c3aed", icon: Activity },
+    { key: "diet", label: "Diet Collections", value: money(b.diet_revenue), sub: `${b.diet_pct || 0}% of total`, color: "#ea580c", icon: Salad },
+    { key: "store", label: "Store Payment", value: money(b.store_revenue), sub: `${transactions.filter((t) => t.source === "store").length} sales`, color: "#0d9488", icon: ShoppingBag },
+    { key: "outstanding", label: "Outstanding Amount", value: money(outstandingTotal), sub: `${outstanding.length} ${outstanding.length === 1 ? "client" : "clients"}`, color: "#d97706", icon: AlertCircle },
+    { key: "schedules", label: "Payment Schedules", value: money(scheduleTotal), sub: `${scheduleUnpaid.length} still due`, color: "#4f46e5", icon: CalendarClock },
+    { key: "paid", label: "Payment Paid", value: money(paidTotal), sub: `${Object.keys(paid).length} settled`, color: "#059669", icon: CheckCircle2 },
+    { key: "unpaid", label: "Payment Unpaid", value: money(unpaidTotal), sub: `${unpaidClients.length} ${unpaidClients.length === 1 ? "client" : "clients"}`, color: "#e11d48", icon: XCircle },
   ];
 
   return (
@@ -1005,14 +996,8 @@ const BranchRevenueCards = ({ branch, dateFilter, onClose }) => {
         // whatever the screen does with the row.
         <div className="flex flex-wrap gap-3">
           {cards.map((c) => (
-            <div
-              key={c.key}
-              className={`min-w-[150px] flex-1 rounded-xl border p-3 sm:min-w-[170px] sm:max-w-[220px] ${c.tone}`}
-              data-testid={`branch-revenue-${c.key}`}
-            >
-              <p className="truncate text-[10px] font-bold uppercase tracking-wider opacity-80">{c.label}</p>
-              <p className="mt-1 truncate text-xl font-bold">{c.value}</p>
-              <p className="mt-0.5 truncate text-[10px] opacity-60">{c.sub}</p>
+            <div key={c.key} className="min-w-[150px] flex-1 sm:min-w-[170px] sm:max-w-[220px]">
+              <StatTile label={c.label} value={c.value} sub={c.sub} icon={c.icon} color={c.color} testid={`branch-revenue-${c.key}`} />
             </div>
           ))}
         </div>
