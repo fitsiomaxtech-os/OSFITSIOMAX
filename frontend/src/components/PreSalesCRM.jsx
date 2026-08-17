@@ -398,6 +398,85 @@ const presalesStartOfDay = (d) => { const n = new Date(d); n.setHours(0, 0, 0, 0
 const presalesStartOfWeek = (d) => { const x = presalesStartOfDay(d); x.setDate(x.getDate() - x.getDay()); return x; };
 const presalesStartOfMonth = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
 const presalesToIso = (d) => d.toISOString().slice(0, 10);
+const presalesEndOfDay = (d) => { const n = new Date(d); n.setHours(23, 59, 59, 999); return n; };
+
+/** The from/to a preset key covers. Every range ends today rather than at the end of the
+ *  period — "This Month" means the month so far, not a window running into the future. */
+const presalesRangeFor = (key) => {
+  const today = new Date();
+  if (key === "today") return { from: presalesStartOfDay(today), to: presalesEndOfDay(today) };
+  if (key === "this_week") return { from: presalesStartOfWeek(today), to: presalesEndOfDay(today) };
+  if (key === "this_month") return { from: presalesStartOfMonth(today), to: presalesEndOfDay(today) };
+  return { from: null, to: null };
+};
+
+/**
+ * The range row from the Analytics pane, driving the Leads table's own date filter.
+ *
+ * Same presets, same order, same look — the two panes of one board asking the same
+ * question should not be answered by two different controls. It emits the
+ * { key, label, from, to } shape the Leads filter already reads, so nothing downstream of
+ * dateFilter had to change.
+ */
+const PreSalesRangePills = ({ value, onChange, testid = "presales-range" }) => {
+  const activeKey = value?.key || "all";
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+
+  const pick = (key) => {
+    if (key === "all") { onChange(null); return; }
+    const label = PRESALES_ANALYTICS_DATE_PRESETS.find((p) => p.key === key)?.label || key;
+    // Custom lands with no dates yet, which reads as unfiltered until both are given —
+    // the alternative is guessing a range on the user's behalf the moment they click it.
+    if (key === "custom") { onChange({ key, label, from: null, to: null }); return; }
+    onChange({ key, label, ...presalesRangeFor(key) });
+  };
+
+  const applyCustom = (fromStr, toStr) => {
+    if (!fromStr || !toStr) return;
+    onChange({
+      key: "custom",
+      label: "Custom",
+      from: new Date(`${fromStr}T00:00:00`),
+      to: new Date(`${toStr}T23:59:59`),
+    });
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white p-3" data-testid={`${testid}-row`}>
+      <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-0.5">
+        {PRESALES_ANALYTICS_DATE_PRESETS.map((p) => (
+          <button
+            key={p.key}
+            onClick={() => pick(p.key)}
+            className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${activeKey === p.key ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100"}`}
+            data-testid={`${testid}-${p.key}`}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+      {activeKey === "custom" && (
+        <div className="flex items-center gap-1.5 text-xs text-slate-500">
+          <CalendarDays className="h-3.5 w-3.5" />
+          <MilkDateInput
+            value={customFrom}
+            onChange={(e) => { setCustomFrom(e.target.value); applyCustom(e.target.value, customTo); }}
+            className="h-8 rounded-md border border-slate-200 px-2 text-xs"
+            data-testid={`${testid}-custom-from`}
+          />
+          <span>to</span>
+          <MilkDateInput
+            value={customTo}
+            onChange={(e) => { setCustomTo(e.target.value); applyCustom(customFrom, e.target.value); }}
+            className="h-8 rounded-md border border-slate-200 px-2 text-xs"
+            data-testid={`${testid}-custom-to`}
+          />
+        </div>
+      )}
+    </div>
+  );
+};
 
 /** A specific branch wins outright; otherwise the group's own branches summed (Offline/
  *  Online), or the bucket's grand total for All. Same shape as Overview's own helper. */
@@ -778,6 +857,13 @@ export const PreSalesCRM = ({
         </div>
       )}
 
+      {/* The Leads pane's own range row. Above the KPI cards because it narrows them as
+          well as the table — both read the same date-filtered set. Analytics draws its
+          own inside the panel, so this is skipped there rather than stacking two. */}
+      {!(masterView === "analytics" && isSuperAdminMasterView) && (
+        <PreSalesRangePills value={dateFilter} onChange={setDateFilter} testid="presales-leads-range" />
+      )}
+
       {/* KPI Cards — the Leads pane only. They are that table's stage filter, not a
           summary: each one selects a stage and the list below narrows to it. Analytics
           has no such table to narrow, and its own cards already open with All Leads, so
@@ -1144,6 +1230,8 @@ export const PreSalesCRM = ({
             <PreSalesAnalyticsPanel branches={branches} branchGroup={branchGroup} sourceFilter={sourceFilter} />
           ) : (
           <>
+          {/* Same range row the desk gets, above the stage bar it narrows. */}
+          <PreSalesRangePills value={dateFilter} onChange={setDateFilter} testid="presales-mobile-leads-range" />
           <StageTabBar
             stages={stages}
             stageFilter={stageFilter === "All" ? null : stageFilter}
