@@ -52,7 +52,7 @@ const StageBadge = ({ stage }) => (
  * an overdue review that fell out of Today would sit in a list nobody opens, which is
  * exactly how a patient's week-one review gets missed.
  */
-export const HeadPhysioReviewTab = ({ selectedDate, compact = false, onCountChange, onRowsChange, autoOpenReviewId, onAutoOpened, reloadToken }) => {
+export const HeadPhysioReviewTab = ({ selectedDate, dateRange = null, compact = false, onCountChange, onRowsChange, autoOpenReviewId, onAutoOpened, reloadToken }) => {
   const [data, setData] = useState({ today: [], upcoming: [], overdue: [], completed: [], today_date: "" });
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
@@ -81,15 +81,27 @@ export const HeadPhysioReviewTab = ({ selectedDate, compact = false, onCountChan
 
   // With a day picked upstream, "due" means that day's reviews rather than everything
   // outstanding — the week strip is the filter, so the list has to answer to it.
+  // A range takes over from the single day when one is set upstream — the board offers
+  // one scope at a time, so this answers to whichever is active rather than both.
+  const inScope = useMemo(() => {
+    if (dateRange?.from && dateRange?.to) {
+      const from = new Date(dateRange.from).toISOString().slice(0, 10);
+      const to = new Date(dateRange.to).toISOString().slice(0, 10);
+      return (d) => !!d && d >= from && d <= to;
+    }
+    if (selectedDate) return (d) => d === selectedDate;
+    return () => true;
+  }, [dateRange, selectedDate]);
+
   const dueList = useMemo(() => {
     const all = [...(data.overdue || []), ...(data.today || []), ...(data.upcoming || [])];
-    return selectedDate ? all.filter((r) => (r.review_date || "") === selectedDate) : all;
-  }, [data, selectedDate]);
+    return all.filter((r) => inScope(r.review_date || ""));
+  }, [data, inScope]);
 
   const completedList = useMemo(() => {
     const all = data.completed || [];
-    return selectedDate ? all.filter((r) => (r.review_date || "") === selectedDate) : all;
-  }, [data.completed, selectedDate]);
+    return all.filter((r) => inScope(r.review_date || ""));
+  }, [data.completed, inScope]);
 
   // Outstanding first, then what's already written — the day's reviews are one list, not
   // two tabs to check. Each row already reads differently by status, so splitting them

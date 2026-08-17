@@ -24,6 +24,7 @@ import { toast } from "@/components/ui/sonner";
 import { ConsultationsBoard } from "@/components/ConsultationsBoard";
 import { HeadPhysioReviewTab } from "@/components/HeadPhysioReviewTab";
 import { WeekStrip, todayIso } from "@/components/WeekStrip";
+import { DateFilterPopover } from "@/components/DateFilterPopover";
 import {
   getHPMyCalendar,
   getHPMyPatients,
@@ -61,6 +62,15 @@ const WORK_TABS = [
   { key: "all", label: "All", icon: LayoutList, color: "#0d9488" },
 ];
 
+// The three queues All merges, and the labels its own filter offers. Kept beside
+// WORK_TABS because the keys have to match the `kind` each row is flattened to.
+const ALL_KINDS = [
+  { key: "all", label: "All" },
+  { key: "consult", label: "Consult" },
+  { key: "review", label: "Review" },
+  { key: "rehab", label: "Rehab" },
+];
+
 // A stage counts as finished when it says so. Read from the name rather than matched
 // against a list of them, because these are renamed in Pipeline Stage Management and a
 // hardcoded "Consultation Completed" would quietly stop matching the day someone edits it.
@@ -70,6 +80,12 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
   const [workTab, setWorkTab] = useState("consultations");
   // The day every list under Consultations answers to. Starts on today.
   const [workDate, setWorkDate] = useState(todayIso());
+  // A range covering several days, from the filter beside Refresh. While one is set it
+  // replaces the single day rather than narrowing it further: the board offers one scope
+  // at a time, or the counts on the cards would describe a different set from the list.
+  const [dateRange, setDateRange] = useState(null);
+  // Which of the three queues All is showing. Lives on the All card itself.
+  const [allKind, setAllKind] = useState("all");
   // Reported up by each list so the cards can be labelled without fetching twice.
   // `consultStages` is the per-stage breakdown — the cards took over the board's own
   // stage bar, so they need to know what sits behind each stage.
@@ -145,6 +161,14 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
     })),
   ], [consultRows, reviewRows, visiblePatients]);
 
+  // What All actually renders. Narrowed by the filter on the All card itself; the
+  // count on that card stays the full total, because it is the card's own figure and
+  // a number that moved when you filtered under it would be reporting the filter.
+  const visibleAllRows = useMemo(
+    () => (allKind === "all" ? allRows : allRows.filter((r) => r.kind === allKind)),
+    [allRows, allKind],
+  );
+
   /**
    * View on an All row. The three queues merged into that list keep their own detail
    * popups, so this routes to the right one rather than building a fourth that would
@@ -208,7 +232,13 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
             data-testid="hp-search-input"
           />
         </div>
-        <div className="shrink-0 lg:border-l lg:border-slate-100 lg:pl-4" data-testid="hp-header-day-filter">
+        {/* Dimmed and inert while a range is set — two live scopes on one row invite the
+            reader to combine them, and the board answers to one. */}
+        <div
+          className={`shrink-0 lg:border-l lg:border-slate-100 lg:pl-4 ${dateRange ? "pointer-events-none opacity-40" : ""}`}
+          aria-disabled={dateRange ? "true" : undefined}
+          data-testid="hp-header-day-filter"
+        >
           <WeekStrip value={workDate} onChange={setWorkDate} testid="hp-week-strip" bare />
         </div>
         <button
@@ -222,6 +252,11 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
         >
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
         </button>
+        {/* After Refresh, with its own presets and a custom range. Clearing it hands the
+            board back to the week strip. */}
+        <div className="shrink-0" data-testid="hp-header-range-filter">
+          <DateFilterPopover value={dateRange} onChange={setDateRange} testid="hp-date-filter" centered />
+        </div>
       </div>
 
       <div className="space-y-4" data-testid="hp-work-view">
@@ -243,7 +278,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
               // The wrapper keeps the phone's side-scrolling row of fixed-width cards; the
               // tile itself fills whatever it is given.
               return (
-                <div key={t.key} className="w-[10.5rem] shrink-0 sm:w-auto">
+                <div key={t.key} className={`${t.key === "all" ? "w-[15rem]" : "w-[10.5rem]"} shrink-0 sm:w-auto`}>
                   <StatTile
                     label={t.label}
                     value={n}
@@ -253,6 +288,26 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
                     active={workTab === t.key}
                     onClick={() => setWorkTab(t.key)}
                     testid={`hp-work-tab-${t.key}`}
+                    // Inside the All card rather than above the list: All is the only tab
+                    // that merges three queues, so the control that picks between them
+                    // belongs to that card and to no other.
+                    footer={t.key === "all" ? (
+                      <div className="flex flex-wrap gap-1" data-testid="hp-all-kind-filter">
+                        {ALL_KINDS.map((k) => (
+                          <button
+                            key={k.key}
+                            type="button"
+                            onClick={() => { setWorkTab("all"); setAllKind(k.key); }}
+                            className={`rounded px-1.5 py-0.5 text-[10px] font-bold transition ${
+                              allKind === k.key ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-100"
+                            }`}
+                            data-testid={`hp-all-kind-${k.key}`}
+                          >
+                            {k.label}
+                          </button>
+                        ))}
+                      </div>
+                    ) : undefined}
                   />
                 </div>
               );
@@ -265,7 +320,8 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
             <ConsultationsBoard
               branchId={effectiveBranchId}
               viewerRole="head_physio"
-              externalDate={workDate}
+              externalDate={dateRange ? undefined : workDate}
+              externalDateFilter={dateRange || undefined}
               hideDateFilter
               externalSearch={search}
               mobileCards
@@ -284,7 +340,8 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
 
           <div className={workTab === "review" ? "" : "hidden"} data-testid="hp-work-review">
             <HeadPhysioReviewTab
-              selectedDate={workDate}
+              selectedDate={dateRange ? null : workDate}
+              dateRange={dateRange}
               compact={workTab === "all"}
               onCountChange={setReviewCount}
               onRowsChange={setReviewRows}
@@ -304,9 +361,9 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
               {/* Six columns can't reflow onto a phone, so the same rows render as cards
                   there rather than scrolling sideways past the ones that matter. */}
               <div className="space-y-2 sm:hidden">
-                {allRows.length === 0 ? (
+                {visibleAllRows.length === 0 ? (
                   <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">Nothing on this day.</p>
-                ) : allRows.map((r, i) => (
+                ) : visibleAllRows.map((r, i) => (
                   // The whole card opens it on a phone — a View link in a corner is a
                   // small target next to a row that is already the thing being tapped.
                   <button
@@ -355,9 +412,9 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {allRows.length === 0 ? (
+                    {visibleAllRows.length === 0 ? (
                       <tr><td colSpan={8} className="px-4 py-10 text-center text-sm text-slate-400">Nothing on this day.</td></tr>
-                    ) : allRows.map((r, i) => (
+                    ) : visibleAllRows.map((r, i) => (
                       <tr key={r.key} className="hover:bg-slate-50" data-testid={`hp-all-row-${r.key}`}>
                         {/* Numbers what is on screen — the merged list reorders as the
                             three queues change, so this is a position, never an id. */}

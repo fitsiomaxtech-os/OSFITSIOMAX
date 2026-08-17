@@ -17,17 +17,23 @@
  * to a screen reader as something to press.
  */
 export const StatTile = ({
-  label, value, sub, icon: Icon, color = "#0284c7", active = false, onClick, testid,
+  label, value, sub, icon: Icon, color = "#0284c7", active = false, onClick, testid, footer,
 }) => {
+  // With a footer the card cannot be one big button: the footer holds its own controls,
+  // and a button inside a button is invalid markup the browser unnests, which loses the
+  // inner clicks. So the chrome moves to a wrapper and only the figure stays pressable.
   const Tag = onClick ? "button" : "div";
   const tagProps = onClick ? { type: "button", onClick } : {};
-  return (
+  const chrome = `relative w-full overflow-hidden rounded-xl border bg-white text-left shadow-sm transition ${
+    active ? "border-transparent" : `border-slate-200 ${onClick ? "hover:shadow-md" : ""}`
+  }`;
+  const body = (
     <Tag
       {...tagProps}
-      className={`relative w-full overflow-hidden rounded-xl border bg-white p-3 text-left shadow-sm transition sm:p-4 ${
-        active ? "border-transparent" : `border-slate-200 ${onClick ? "hover:shadow-md" : ""}`
-      }`}
-      style={active ? { boxShadow: `0 0 0 2px ${color}` } : undefined}
+      className={footer
+        ? "relative block w-full p-3 text-left sm:p-4"
+        : `${chrome} p-3 sm:p-4`}
+      style={!footer && active ? { boxShadow: `0 0 0 2px ${color}` } : undefined}
       data-testid={testid}
     >
       <span
@@ -48,6 +54,14 @@ export const StatTile = ({
       <p className="mt-1 text-xl font-extrabold sm:text-2xl" style={{ color }}>{value}</p>
       {sub && <p className="mt-0.5 text-[10px] leading-tight text-slate-400">{sub}</p>}
     </Tag>
+  );
+
+  if (!footer) return body;
+  return (
+    <div className={chrome} style={active ? { boxShadow: `0 0 0 2px ${color}` } : undefined}>
+      {body}
+      <div className="border-t border-slate-100 px-3 pb-2.5 pt-2 sm:px-4">{footer}</div>
+    </div>
   );
 };
 
