@@ -257,6 +257,10 @@ async def finance_approvals(
     branch_id: Optional[str] = None,
     mode: Optional[str] = None,  # "online" | "offline", off each lead's/branch's own vertical
     category: Optional[str] = None,  # "consultation" | "session" | "diet" | "store" | "other"
+    # "cash" | "upi" | "card" | "account_transfer" | "cheque" — same set a Branch Admin
+    # picks from when collecting a fee (V3MarkInstallmentPaidInput.payment_mode and its
+    # siblings across v3_packages.py).
+    payment_mode: Optional[str] = None,
     approved: Optional[bool] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
@@ -317,6 +321,9 @@ async def finance_approvals(
             if approved is not None and is_approved != approved:
                 continue
             details = act.get("details", "")
+            pm = _parse_payment_mode(details)
+            if payment_mode and payment_mode not in ("all", "") and pm != payment_mode:
+                continue
             rows.append({
                 "id": act.get("id", ""),
                 "lead_id": act.get("lead_id", ""),
@@ -326,7 +333,7 @@ async def finance_approvals(
                 "branch_name": branch_map.get(lead.get("branch_id"), {}).get("branch_name", ""),
                 "category": cat,
                 "amount": _parse_rs_amount(details),
-                "payment_mode": _parse_payment_mode(details),
+                "payment_mode": pm,
                 "collected_by": act.get("created_by", ""),
                 "collected_at": act.get("created_at", ""),
                 "approved": is_approved,
@@ -348,6 +355,9 @@ async def finance_approvals(
             is_approved = bool(sale.get("approved"))
             if approved is not None and is_approved != approved:
                 continue
+            pm = sale.get("payment_mode") or "unknown"
+            if payment_mode and payment_mode not in ("all", "") and pm != payment_mode:
+                continue
             rows.append({
                 "id": sale.get("id", ""),
                 "lead_id": "",
@@ -357,7 +367,7 @@ async def finance_approvals(
                 "branch_name": branch_map.get(bid, {}).get("branch_name", ""),
                 "category": "store",
                 "amount": float(sale.get("amount") or 0),
-                "payment_mode": sale.get("payment_mode") or "unknown",
+                "payment_mode": pm,
                 "collected_by": sale.get("by_user_name", ""),
                 "collected_at": sale.get("created_at", ""),
                 "approved": is_approved,

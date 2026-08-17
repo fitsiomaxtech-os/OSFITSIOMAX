@@ -19,6 +19,17 @@ const CATEGORIES = [
 const MODE_LABELS = { upi: "UPI", account_transfer: "Bank Transfer", cheque: "Cheque", cash: "Cash", card: "Card", partial: "Partial" };
 const modeLabel = (m) => MODE_LABELS[m] || (m && m !== "unknown" ? m.charAt(0).toUpperCase() + m.slice(1) : "—");
 
+// Same set a Branch Admin picks from when collecting a fee (V3MarkInstallmentPaidInput
+// and its siblings across v3_packages.py) — not a separate list invented for this filter.
+const PAYMENT_MODES = [
+  ["all", "All Modes"],
+  ["cash", "Cash"],
+  ["upi", "UPI"],
+  ["card", "Card"],
+  ["account_transfer", "Bank Transfer"],
+  ["cheque", "Cheque"],
+];
+
 /**
  * Approve popup — what it asks for depends on the row's own payment mode: Cash gets a
  * re-entered amount (the one figure a cash drawer can't otherwise be checked against);
@@ -108,6 +119,7 @@ export const ApprovalsBoard = () => {
   const [branchId, setBranchId] = useState("");
   const [mode, setMode] = useState("all"); // "all" | "online" | "offline"
   const [category, setCategory] = useState("all");
+  const [paymentMode, setPaymentMode] = useState("all"); // "all" | "cash" | "upi" | "card" | "account_transfer" | "cheque"
   const [view, setView] = useState("pending"); // "pending" | "approved"
   const [data, setData] = useState({ transactions: [], summary: {} });
   const [loading, setLoading] = useState(false);
@@ -123,10 +135,11 @@ export const ApprovalsBoard = () => {
       if (branchId) params.branch_id = branchId;
       if (mode !== "all") params.mode = mode;
       if (category !== "all") params.category = category;
+      if (paymentMode !== "all") params.payment_mode = paymentMode;
       setData(await getFinanceApprovals(params));
     } catch { /* silent */ }
     setLoading(false);
-  }, [branchId, mode, category, view]);
+  }, [branchId, mode, category, paymentMode, view]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -208,6 +221,25 @@ export const ApprovalsBoard = () => {
               category === key ? "border-sky-600 bg-sky-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"
             }`}
             data-testid={`finance-approvals-category-${key}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* Same set Branch Admin picks from when collecting the fee in the first place —
+          not a category (what was paid for) but how, so it gets its own row rather than
+          folding into the one above. */}
+      <div className="flex flex-wrap items-center gap-2" data-testid="finance-approvals-payment-mode-filter">
+        {PAYMENT_MODES.map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setPaymentMode(key)}
+            className={`shrink-0 rounded-full border px-3.5 py-1.5 text-sm font-medium transition ${
+              paymentMode === key ? "border-indigo-600 bg-indigo-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-indigo-300 hover:text-indigo-600"
+            }`}
+            data-testid={`finance-approvals-payment-mode-${key}`}
           >
             {label}
           </button>
