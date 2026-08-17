@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Users, CalendarCheck, Activity, IndianRupee, X, TrendingUp, TrendingDown, Minus, RefreshCw,
+  Users, CalendarCheck, Activity, IndianRupee, X, RefreshCw,
   Megaphone, Headphones, BarChart3, Wallet, Stethoscope, ShoppingBag, Salad, Clock,
   AlertCircle, CalendarClock, CheckCircle2, XCircle,
 } from "lucide-react";
@@ -12,6 +12,7 @@ import { SegmentedTabs } from "@/components/ui/segmented-tabs";
 import { toast } from "@/components/ui/sonner";
 import { getDashboardOverview, getDashboardLeadsTrend, getLeadsAnalytics, getRevenueOverview, mkGetTeam } from "@/lib/api";
 import { TeamCard } from "@/components/marketing/TeamCard";
+import { LeadsAnalyticsDashboard } from "@/components/marketing/LeadsAnalyticsDashboard";
 
 // Five sub-tabs, each scoped by the same date range and the same All/Offline/Online +
 // branch filter (see ModeBranchFilter below) — the split the rest of the OS already
@@ -471,150 +472,73 @@ export const DashboardBoard = () => {
       ) : activeTab === "team" ? (
         <TeamTab team={team} loading={teamLoading} branches={branches} />
       ) : (
-        <AnalyticsTab data={data} loading={loading} dateFilter={dateFilter} />
+        <AnalyticsTab data={data} dateFilter={dateFilter} />
       )}
     </div>
   );
 };
 
+// Drives BranchGrowthTrend below — not a StatTile row, since it's a plain switch between
+// four lines on one chart rather than four counts worth their own cards.
+const GROWTH_METRICS = [
+  { key: "leads", label: "Leads" },
+  { key: "appointments", label: "Appointments" },
+  { key: "treatments", label: "Treatments" },
+  { key: "revenue", label: "Revenue", currency: true },
+];
+
 /**
- * Dashboard > Analytics — the six-month growth trend, and the four headline figures that
- * pick which metric it draws. This used to be Executive Overview, the board's landing
- * tab; it's its own destination now that Marketing/Sales/Revenue/Team split out what used
- * to sit beside it.
- *
- * The four headline figures come from the same payload every other tab reads, so this
- * can't disagree with them. Each carries a change against the immediately preceding
- * window of the same length — last 30 days against the 30 before it — fetched separately
- * because the endpoint answers for one range at a time.
- *
- * `All` has no preceding window, so it shows no deltas rather than inventing a baseline.
+ * Dashboard > Analytics — the "Power BI" view: charts, not cards. LeadsAnalyticsDashboard
+ * is the same one Marketing Master View's own Analytics tab already gives (funnel, source/
+ * vertical donuts, booking rate by source, leads by branch and by weekday, and — the "team
+ * wise pre sales" ask — leads per owner), scoped by the same All/Offline/Online + branch
+ * filter every other tab uses. Underneath it, the six-month branch-by-branch growth trend
+ * this board has always drawn, for the one thing the donuts/bars above don't show: a
+ * branch's line over time against the others'.
  */
-const AnalyticsTab = ({ data, loading, dateFilter }) => {
-  const [prev, setPrev] = useState(null);
-  const [prevLoading, setPrevLoading] = useState(false);
-  // Which of the four headline figures the charts below are drawing. Held here rather
-  // than inside either chart, so both plot the same metric and one selection drives them.
+const AnalyticsTab = ({ data, dateFilter }) => {
+  const [group, setGroup] = useState("all");
+  const [branchId, setBranchId] = useState("");
   const [trendMetric, setTrendMetric] = useState("leads");
-  // null is every branch. Scopes the four cards and the total chart; the per-branch chart
-  // keeps drawing all of them and highlights this one instead — see BranchGrowthTrend.
-  const [branchFilter, setBranchFilter] = useState(null);
 
-  const from = dateFilter?.from;
-  const to = dateFilter?.to;
+  const branches = data?.leads?.branches || [];
+  const scopedBranchIds = branchId
+    ? [branchId]
+    : group === "all"
+      ? undefined
+      : branches.filter((b) => isOnlineVertical(b.vertical) === (group === "online")).map((b) => b.branch_id);
 
-  useEffect(() => {
-    if (!from || !to) { setPrev(null); return undefined; }
-    // The window immediately before this one, the same number of days long, ending the
-    // day before it starts. Anything else ("last month" for a 7-day range) would compare
-    // spans of different lengths and call the difference performance.
-    const days = Math.max(1, Math.round((startOfDay(to) - startOfDay(from)) / 86400000) + 1);
-    const prevTo = new Date(startOfDay(from).getTime() - 86400000);
-    const prevFrom = new Date(prevTo.getTime() - (days - 1) * 86400000);
-    let cancelled = false;
-    setPrevLoading(true);
-    getDashboardOverview({ start_date: toIso(prevFrom), end_date: toIso(prevTo) })
-      .then((r) => { if (!cancelled) setPrev(r); })
-      .catch(() => { if (!cancelled) setPrev(null); })
-      .finally(() => { if (!cancelled) setPrevLoading(false); });
-    return () => { cancelled = true; };
-  }, [from, to]);
-
-  if (loading || !data) {
-    return <p className="py-16 text-center text-sm text-slate-400">{loading ? "Loading..." : "No data."}</p>;
-  }
-
-  // Every branch, offline or online, whether or not it took a lead in range — so a quiet
-  // branch still offers its card rather than disappearing from the filter for the period
-  // it was quiet.
-  const branchCards = data.leads?.branches || [];
-
-  /** One metric's figure, scoped to the selected branch or the whole org. */
-  const scoped = (bucket) => {
-    if (!bucket) return 0;
-    if (!branchFilter) return bucket.total ?? 0;
-    return (bucket.branches || []).find((b) => b.branch_id === branchFilter)?.value ?? 0;
-  };
-
-  const metrics = [
-    { key: "leads", label: "Total Leads", icon: Users, color: "#0284c7", value: scoped(data.leads) },
-    { key: "appointments", label: "Appointments", icon: CalendarCheck, color: "#7c3aed", value: scoped(data.appointments) },
-    { key: "treatments", label: "Treatments", icon: Activity, color: "#059669", value: scoped(data.treatments) },
-    { key: "revenue", label: "Revenue", icon: IndianRupee, color: "#d97706", value: scoped(data.revenue), currency: true },
-  ];
-  // `key` is also the key inside each branch's `series` on /dashboard/leads-trend, so the
-  // selected card and the lines drawn from it cannot drift apart.
-
-  /** The same figure for the preceding window, scoped the same way — otherwise a branch's
-   *  figure would be compared against the whole org's prior total. */
-  const scopedPrev = (key) => {
-    const bucket = prev?.[key];
-    if (!bucket) return undefined;
-    if (!branchFilter) return bucket.total;
-    return (bucket.branches || []).find((b) => b.branch_id === branchFilter)?.value;
-  };
-
-  const activeMetric = metrics.find((m) => m.key === trendMetric) || metrics[0];
+  const activeMetric = GROWTH_METRICS.find((m) => m.key === trendMetric) || GROWTH_METRICS[0];
 
   return (
     <div className="space-y-4" data-testid="dashboard-analytics-tab">
-      {/* Two up on a phone rather than one. Four full-width cards stacked pushed the
-          branch table two screens down, and these figures are short enough to share a
-          row.
+      <ModeBranchFilter branches={branches} group={group} onGroup={setGroup} branchId={branchId} onBranch={setBranchId} testid="dashboard-analytics-filter" />
 
-          Each card is also the trend's selector — clicking one draws that metric in the
-          chart below. The card already names the figure and prints its total, so
-          putting the choice on it costs nothing and saves a second control repeating the
-          same four words. The selected one gets the shared StatTile's ring highlight; the
-          Delta sits in its footer slot rather than the plain `sub` line, since it's its
-          own coloured, iconed line rather than plain text. */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {metrics.map((m) => {
-          const before = scopedPrev(m.key);
-          const on = m.key === trendMetric;
-          return (
-            <StatTile
+      <LeadsAnalyticsDashboard
+        startDate={dateFilter?.from ? toIso(dateFilter.from) : undefined}
+        endDate={dateFilter?.to ? toIso(dateFilter.to) : undefined}
+        branchIds={scopedBranchIds}
+      />
+
+      <div>
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Branch-wise growth</p>
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          {GROWTH_METRICS.map((m) => (
+            <button
               key={m.key}
-              label={m.label}
-              value={m.currency ? fmtValue("revenue", m.value) : (m.value || 0).toLocaleString("en-IN")}
-              icon={m.icon}
-              color={m.color}
-              active={on}
+              type="button"
               onClick={() => setTrendMetric(m.key)}
-              footer={<Delta now={m.value} before={before} loading={prevLoading} available={!!from && !!to} />}
-              testid={`dashboard-analytics-${m.key}`}
-            />
-          );
-        })}
-      </div>
-
-      {/* Branch scope, under the figures it scopes and directly above the charts it also
-          drives — so it sits between the two things it changes rather than opening the
-          board with a control. Clicking the selected one clears back to every branch,
-          which is why there is no fifth "All" card competing for the row. */}
-      {branchCards.length > 0 && (
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" data-testid="dashboard-branch-filter">
-          {branchCards.map((b) => {
-            const on = branchFilter === b.branch_id;
-            return (
-              <button
-                key={b.branch_id}
-                type="button"
-                onClick={() => setBranchFilter(on ? null : b.branch_id)}
-                aria-pressed={on}
-                className={`rounded-xl border px-4 py-5 text-left text-sm font-bold uppercase tracking-wide transition sm:py-6 ${
-                  on ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
-                }`}
-                data-testid={`dashboard-branch-filter-${b.branch_id}`}
-              >
-                <span className="block truncate">{b.branch_name}</span>
-              </button>
-            );
-          })}
+              className={`rounded-full border px-3.5 py-1.5 text-sm font-medium transition ${
+                trendMetric === m.key ? "border-sky-600 bg-sky-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"
+              }`}
+              data-testid={`dashboard-growth-metric-${m.key}`}
+            >
+              {m.label}
+            </button>
+          ))}
         </div>
-      )}
-
-      <BranchGrowthTrend metric={activeMetric} highlightBranch={branchFilter} />
+        <BranchGrowthTrend metric={activeMetric} highlightBranch={branchId || null} />
+      </div>
     </div>
   );
 };
@@ -714,35 +638,6 @@ const axisFor = (peakValue) => {
 };
 
 const monthLabel = (k) => new Date(`${k}-01T00:00:00`).toLocaleDateString("en-US", { month: "short" });
-
-/** Change against the preceding window. Silent rather than "0%" when there is nothing to
- *  compare against — an unknown and a flat period are different things, and printing 0%
- *  for the first is the kind of number people act on. */
-const Delta = ({ now, before, loading, available, inverted = false }) => {
-  // On the selected card the ground is solid slate, where the muted greys this normally
-  // uses fall below readable contrast. `inverted` lifts them onto the dark instead.
-  const muted = inverted ? "text-white/70" : "text-slate-400";
-  if (!available) return <p className={`mt-1 text-[11px] ${muted}`}>All time · no prior period</p>;
-  if (loading) return <p className={`mt-1 text-[11px] ${inverted ? "text-white/50" : "text-slate-300"}`}>Comparing…</p>;
-  if (before == null) return <p className={`mt-1 text-[11px] ${muted}`}>No prior period</p>;
-  if (!before) {
-    // Growth from zero has no percentage — any increase is infinite. Say what happened.
-    return <p className={`mt-1 text-[11px] ${muted}`}>{now ? "New this period" : "None either period"}</p>;
-  }
-  const pct = ((now - before) / before) * 100;
-  const flat = Math.abs(pct) < 0.05;
-  const Icon = flat ? Minus : pct > 0 ? TrendingUp : TrendingDown;
-  const tone = inverted
-    ? (flat ? "text-white/70" : pct > 0 ? "text-emerald-300" : "text-rose-300")
-    : (flat ? "text-slate-400" : pct > 0 ? "text-emerald-600" : "text-rose-600");
-  return (
-    <p className={`mt-1 flex items-center gap-1 text-[11px] font-semibold ${tone}`}>
-      <Icon className="h-3 w-3 shrink-0" />
-      {flat ? "0%" : `${pct > 0 ? "+" : ""}${pct.toFixed(1)}%`}
-      <span className={`font-normal ${muted}`}>vs prior period</span>
-    </p>
-  );
-};
 
 // Greyscale, darkest first — the reference design's own scheme. Branch identity rests on
 // the legend and the hover readout rather than on hue, which is what makes a monochrome
