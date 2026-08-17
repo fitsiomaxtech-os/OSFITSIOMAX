@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Building2, Headphones, Stethoscope, Activity, Salad, UserRound, ChevronDown, ChevronUp, Search, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { getDoctors, bmPreSalesMembers, getLeads } from "@/lib/api";
+import { getDoctors, bmPreSalesMembers, getLeads, hrUsers } from "@/lib/api";
 import { BranchAdminBoard } from "@/components/BranchAdminBoard";
 import { HeadPhysioBoard } from "@/components/HeadPhysioBoard";
 import { PhysioBoard } from "@/components/PhysioBoard";
@@ -137,28 +137,40 @@ const OperationsBranchTab = ({ branches, actingUser }) => {
 // the combined queue for.
 const OperationsConsultantTab = ({ branches, actingUser }) => {
   const [selectedId, setSelectedId] = useState("");
-  const [consultants, setConsultants] = useState([]);
+  // Every CONSULTANT login, org-wide — filtered to the picked branch below rather than
+  // fetched per-branch. The `doctors` collection's branch_id doesn't track this (a Head
+  // Physio doctor profile isn't branch-scoped there), so the source of truth is the same
+  // users.branch_ids Roles & Credentials now assigns a CONSULTANT from.
+  const [allConsultants, setAllConsultants] = useState([]);
+  const [selectedConsultantId, setSelectedConsultantId] = useState("");
   useEffect(() => {
     if (!selectedId && branches && branches.length) setSelectedId(findDefaultBranchId(branches));
   }, [branches, selectedId]);
 
   useEffect(() => {
-    if (!selectedId) { setConsultants([]); return; }
-    getDoctors({ branch_id: selectedId })
-      .then((rows) => setConsultants((rows || []).filter((d) => d.profile_type === "head_physio")))
-      .catch(() => setConsultants([]));
-  }, [selectedId]);
+    hrUsers({ role: "head_physio" }).then(setAllConsultants).catch(() => setAllConsultants([]));
+  }, []);
+
+  // Relevant to the picked branch: given specific branches that include it, or given none
+  // at all (org-wide, covers every branch by default).
+  const consultants = selectedId
+    ? allConsultants.filter((u) => u.org_wide || (u.branches || []).some((b) => b.id === selectedId))
+    : [];
+  useEffect(() => {
+    setSelectedConsultantId(consultants[0]?.id || "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, allConsultants.length]);
 
   return (
     <div className="space-y-4" data-testid="ops-consultant-tab">
       <div className="flex flex-wrap items-center gap-3">
         <OperationsBranchPicker branches={branches} selectedId={selectedId} onSelect={setSelectedId} testid="ops-consultant-picker" />
         {selectedId && (
-          <div className="relative" title="Assigned via Branches & Verticals — the board below always shows the whole branch queue">
+          <div className="relative" title="The board below always shows this branch's whole Consultant queue, whichever name is picked here">
             <select
-              disabled
-              value={consultants[0]?.id || ""}
-              className="h-10 min-w-[220px] cursor-not-allowed appearance-none rounded-md border border-slate-200 bg-slate-50 px-3 pr-8 text-sm text-slate-600"
+              value={selectedConsultantId}
+              onChange={(e) => setSelectedConsultantId(e.target.value)}
+              className="h-10 min-w-[220px] appearance-none rounded-md border border-slate-200 bg-white px-3 pr-8 text-sm"
               data-testid="ops-consultant-person-select"
             >
               {consultants.length === 0 ? (
