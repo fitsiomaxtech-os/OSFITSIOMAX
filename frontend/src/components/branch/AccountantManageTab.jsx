@@ -38,6 +38,18 @@ const APPROVAL_VIEWS = [
   { key: "pending", label: "Pending" },
 ];
 
+// Same set a Branch Admin picks from when collecting a fee (V3MarkInstallmentPaidInput
+// and its siblings across v3_packages.py) — not a separate list invented for this filter,
+// same as Finance > Approvals' own payment-mode row.
+const PAYMENT_MODES = [
+  ["all", "All Modes"],
+  ["cash", "Cash"],
+  ["upi", "UPI"],
+  ["card", "Card"],
+  ["account_transfer", "Bank Transfer"],
+  ["cheque", "Cheque"],
+];
+
 // The card, the table it filters to, and the label above that table are one thing, so they
 // are one list rather than three that have to be kept in step.
 const REVENUE_VIEWS = [
@@ -105,6 +117,7 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
   const [branchId, setBranchId] = useState(fixedBranchId || "");
   const [tab, setTab] = useState("summary");
   const [approvalView, setApprovalView] = useState("collected");
+  const [paymentModeFilter, setPaymentModeFilter] = useState("all");
   const [revenueView, setRevenueView] = useState("collected");
   const [preset, setPreset] = useState("all");
   const [customFrom, setCustomFrom] = useState("");
@@ -161,12 +174,19 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
     return transactions;
   }, [transactions, approvalView]);
 
+  // A second, independent cut on top of the first — how it was paid, not whether it's
+  // been signed off. Same combinable-filters shape as Finance > Approvals.
+  const filteredTxns = useMemo(() => {
+    if (paymentModeFilter === "all") return approvalFilteredTxns;
+    return approvalFilteredTxns.filter((t) => t.payment_mode === paymentModeFilter);
+  }, [approvalFilteredTxns, paymentModeFilter]);
+
   // Every card's figure and the count under it, from one pass over whichever set the
-  // Collected/Approved/Pending filter above left standing.
+  // filters above left standing.
   const sums = useMemo(() => {
     const totals = { collected: 0, consultation: 0, session: 0, diet: 0, store: 0 };
     const counts = { collected: 0, consultation: 0, session: 0, diet: 0, store: 0 };
-    approvalFilteredTxns.forEach((t) => {
+    filteredTxns.forEach((t) => {
       const amt = Number(t.gross) || 0;
       totals.collected += amt;
       counts.collected += 1;
@@ -176,7 +196,7 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
       }
     });
     return { totals, counts };
-  }, [approvalFilteredTxns]);
+  }, [filteredTxns]);
 
   // Every collection taken below its listed price, biggest concession first — not run
   // through the Collected/Approved/Pending filter above, since a discount is a fact about
@@ -268,6 +288,25 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
             ))}
           </div>
 
+          {/* Same set Branch Admin picks from when collecting the fee in the first place —
+              not approval status but how it was paid, so it gets its own row rather than
+              folding into the one above. */}
+          <div className="flex flex-wrap items-center gap-2" data-testid="accountant-manage-payment-mode-filter">
+            {PAYMENT_MODES.map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setPaymentModeFilter(key)}
+                className={`shrink-0 rounded-full border px-3.5 py-1.5 text-sm font-medium transition ${
+                  paymentModeFilter === key ? "border-indigo-600 bg-indigo-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-indigo-300 hover:text-indigo-600"
+                }`}
+                data-testid={`accountant-manage-payment-mode-${key}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
           {/* Five across from lg, so the whole split reads on one line. Two-up on a phone
               leaves the odd one centred rather than stranded in a column of its own. */}
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
@@ -288,7 +327,7 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
 
           <RevenueDetailTable
             title={REVENUE_VIEWS.find((v) => v.key === revenueView)?.label}
-            rows={revenueView === "collected" ? approvalFilteredTxns : approvalFilteredTxns.filter((t) => t.source === revenueView)}
+            rows={revenueView === "collected" ? filteredTxns : filteredTxns.filter((t) => t.source === revenueView)}
             onView={setViewingLeadId}
           />
         </div>
