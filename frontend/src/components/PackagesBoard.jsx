@@ -26,11 +26,10 @@ export const TABS = [
 export const CONSULTATIONS_SUBTABS = [
   { key: "physiotherapy", label: "Physiotherapy", icon: Activity },
   { key: "fitness", label: "Fitness", icon: Dumbbell },
-  // Reuses the "diet" item_type the top-level Diet Package tab already catalogs under —
-  // v3_store.py calls it "the Diet Consultation package" priced and timed exactly like a
-  // physio consultation, so this is the same catalog surfaced a second way, not a new
-  // empty one. Its bookings/prices already read off item_type "diet"; a category of its
-  // own (rather than physiotherapy/fitness) would be a bucket nothing downstream queries.
+  // item_type "diet" — the bookable Diet Consultation, priced and timed exactly like a
+  // physio consultation (v3_store.py validates it against the same duration rules). Split
+  // from item_type "diet_package" (the top-level Diet Package tab's plain product
+  // catalogue, no duration) once this booking flow moved here.
   { key: "diet", label: "Diet Consultations", icon: Salad },
 ];
 
@@ -90,15 +89,28 @@ const PACKAGE_KINDS = {
   },
   diet: {
     itemType: "diet",
-    noun: "Diet Package",
+    noun: "Diet Consultation",
     header: "from-emerald-500 to-teal-600",
     durationLabel: "Diet Consultation Duration",
-    emptyText: "No diet packages yet. Click Create to add one.",
-    // A diet package costs the same wherever it is delivered — the consultation is the
-    // same conversation on a screen or in a room. One field instead of two, written to
+    emptyText: "No diet consultations yet. Click Create to add one.",
+    // A diet consultation costs the same wherever it is delivered — the consultation is
+    // the same conversation on a screen or in a room. One field instead of two, written to
     // both stored prices so the booking path, which still picks price_online or
     // price_offline off the chosen mode, gets the same number either way.
     singlePrice: true,
+  },
+  // The Diet Chart-style product the top-level Diet Package tab now catalogs — a plain
+  // priced item (name, description, image, price), no booking slot. Split out from "diet"
+  // once the actual Diet Consultation booking moved to the Consultations tab; sharing one
+  // item_type between "a diet chart for sale" and "a bookable consultation slot" was the
+  // thing forcing a Duration field onto a product that has no duration.
+  diet_package: {
+    itemType: "diet_package",
+    noun: "Diet Package",
+    header: "from-emerald-500 to-teal-600",
+    emptyText: "No diet packages yet. Click Create to add one.",
+    singlePrice: true,
+    noDuration: true,
   },
 };
 
@@ -215,22 +227,24 @@ const CreateConsultationModal = ({ item, onClose, onSaved, kind = "consultation"
               className="hidden"
             />
           </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600">{cfg.durationLabel}</label>
-            <div className="flex flex-wrap gap-2" data-testid="consultation-create-duration">
-              {DURATION_OPTIONS.map((d) => (
-                <button
-                  key={d.minutes}
-                  type="button"
-                  onClick={() => setDuration(d.minutes)}
-                  className={`rounded-md border px-3 py-1.5 text-sm font-medium ${duration === d.minutes ? "border-sky-500 bg-sky-50 text-sky-700" : "border-slate-200 text-slate-600"}`}
-                  data-testid={`consultation-create-duration-${d.minutes}`}
-                >
-                  {d.label}
-                </button>
-              ))}
+          {!cfg.noDuration && (
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-slate-600">{cfg.durationLabel}</label>
+              <div className="flex flex-wrap gap-2" data-testid="consultation-create-duration">
+                {DURATION_OPTIONS.map((d) => (
+                  <button
+                    key={d.minutes}
+                    type="button"
+                    onClick={() => setDuration(d.minutes)}
+                    className={`rounded-md border px-3 py-1.5 text-sm font-medium ${duration === d.minutes ? "border-sky-500 bg-sky-50 text-sky-700" : "border-slate-200 text-slate-600"}`}
+                    data-testid={`consultation-create-duration-${d.minutes}`}
+                  >
+                    {d.label}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600">Price</label>
             {cfg.singlePrice ? (
@@ -443,7 +457,7 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
 // Offline Branch Admin only ever needs this item's offline price and an Online one only
 // the online price.
 export const PriceModeBadges = ({ item, isSession, mode = "all" }) => (
-  item.item_type === "diet" ? (
+  item.item_type === "diet" || item.item_type === "diet_package" ? (
     <div className="mt-2">
       <div className="flex items-center justify-between rounded-lg bg-emerald-50 px-2.5 py-1.5">
         <span className="text-xs font-bold text-emerald-800">Price</span>
@@ -540,7 +554,7 @@ export const ViewItemModal = ({ item, kind, onClose, onEdit, canEdit = true }) =
           ) : (
             <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-3">
               <PriceModeBadges item={item} isSession={false} />
-              {item.duration_minutes && (
+              {!viewCfg.noDuration && item.duration_minutes && (
                 <div className="mt-1.5 flex items-center justify-between rounded-lg bg-sky-50 px-2.5 py-1.5">
                   <span className="inline-flex items-center gap-1.5 text-xs font-bold text-sky-800">
                     <Clock className="h-3.5 w-3.5" />{viewCfg.durationLabel}
@@ -777,7 +791,7 @@ const PhysiotherapyPanel = ({ kind = "consultation", category = "physiotherapy",
 
                 <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-3" data-testid={`consultation-item-${it.id}-highlights`}>
                   <PriceModeBadges item={it} isSession={false} mode={modeFilter} />
-                  {it.duration_minutes && (
+                  {!cfg.noDuration && it.duration_minutes && (
                     <div className="mt-1.5 flex items-center justify-between rounded-lg bg-sky-50 px-2.5 py-1.5">
                       <span className="inline-flex items-center gap-1.5 text-xs font-bold text-sky-800">
                         <Clock className="h-3.5 w-3.5" />{cfg.durationLabel}
@@ -831,9 +845,8 @@ const ConsultationsPanel = ({ reloadToken, toolbarSlot, modeFilter = "all" }) =>
 
       {sub === "physiotherapy" && <PhysiotherapyPanel reloadToken={reloadToken} toolbarSlot={toolbarSlot} modeFilter={modeFilter} />}
       {sub === "fitness" && <PhysiotherapyPanel category="fitness" reloadToken={reloadToken} toolbarSlot={toolbarSlot} modeFilter={modeFilter} />}
-      {/* kind="diet", category left at its "physiotherapy" default — the same combination
-          the top-level Diet Package tab already writes and reads, so this shows the exact
-          same items rather than a second, disconnected catalog. */}
+      {/* kind="diet" — the bookable Diet Consultation catalogue, separate from the
+          top-level Diet Package tab's kind="diet_package" (a plain product, no duration). */}
       {sub === "diet" && <PhysiotherapyPanel kind="diet" reloadToken={reloadToken} toolbarSlot={toolbarSlot} modeFilter={modeFilter} />}
     </div>
   );
@@ -1267,7 +1280,7 @@ export const PackagesBoard = () => {
 
       {view === "catalog" && tab === "consultations" && <ConsultationsPanel reloadToken={reloadTick} toolbarSlot={createSlot} modeFilter={modeFilter} />}
       {view === "catalog" && tab === "sessions" && <SessionsPanel reloadToken={reloadTick} toolbarSlot={createSlot} modeFilter={modeFilter} />}
-      {view === "catalog" && tab === "diet" && <PhysiotherapyPanel kind="diet" reloadToken={reloadTick} toolbarSlot={createSlot} />}
+      {view === "catalog" && tab === "diet" && <PhysiotherapyPanel kind="diet_package" reloadToken={reloadTick} toolbarSlot={createSlot} />}
       {view === "history" && <HistoryPanel reloadToken={reloadTick} />}
       {view === "catalog" && tab === "treatment" && <TreatmentTypesBoard />}
       {view === "catalog" && INVENTORY_TABS.has(tab) && <SuperAdminInventoryPanel key={tab} category={tab} reloadToken={reloadTick} />}

@@ -43,7 +43,12 @@ VALID_DURATIONS_MINUTES = {15, 30, 45, 60, 120}
 # "diet" is the Diet Consultation package — priced and timed exactly like a physio
 # consultation, which is why it validates against the same rules rather than getting its
 # own. Sessions are the odd one out: they carry a session count instead of a duration.
-ITEM_TYPES = ("consultation", "session", "diet")
+#
+# "diet_package" is the Diet Chart-style product Super Admin's top-level Diet Package tab
+# now catalogs — a flat-priced item with no booking slot, split out from "diet" once the
+# actual Diet Consultation booking moved to the Consultations tab. Not timed, same as
+# "session": no duration to validate.
+ITEM_TYPES = ("consultation", "session", "diet", "diet_package")
 TIMED_ITEM_TYPES = ("consultation", "diet")
 
 

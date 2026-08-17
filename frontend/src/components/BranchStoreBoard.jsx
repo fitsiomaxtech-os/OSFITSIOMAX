@@ -71,7 +71,7 @@ const BranchItemsPanel = ({ category, itemType, emptyLabel, testidPrefix, durati
                 ) : (
                   <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-3" data-testid={`${testidPrefix}-item-${it.id}-highlights`}>
                     <PriceModeBadges item={it} isSession={false} mode={modeFilter} />
-                    {it.duration_minutes && (
+                    {itemType !== "diet_package" && it.duration_minutes && (
                       <div className="mt-1.5 flex items-center justify-between rounded-lg bg-sky-50 px-2.5 py-1.5">
                         <span className="inline-flex items-center gap-1.5 text-xs font-bold text-sky-800">
                           <Clock className="h-3.5 w-3.5" />{durationLabel}
@@ -141,9 +141,10 @@ export const BranchConsultationsPanel = ({ reloadToken, modeFilter = "all" }) =>
         />
       )}
       {sub === "fitness" && <PlaceholderPanel label="Fitness" testid="branch-consultations-subpanel-fitness" />}
-      {/* Real data, not a placeholder like Fitness above — item_type "diet" is the same
-          catalog the Super Admin side's Diet Package tab already writes to, so it's
-          already there to show rather than needing its own booking flow built first. */}
+      {/* Real data, not a placeholder like Fitness above — item_type "diet", the bookable
+          Diet Consultation catalogue Super Admin prices under Services and Products >
+          Consultations > Diet Consultations. Separate from item_type "diet_package"
+          (BranchDietPanel below), a plain product with no booking slot. */}
       {sub === "diet" && (
         <BranchItemsPanel
           category="physiotherapy"
@@ -202,15 +203,15 @@ export const BranchSessionsPanel = ({ reloadToken, modeFilter = "all" }) => {
  * package is not split by department the way a consultation is, so a sub-tab bar with one
  * live entry would be a control that never does anything.
  *
- * Otherwise it is the consultation panel exactly — a Diet Consultation is priced and timed
- * the same way, which is why the backend validates it against the same rules.
+ * item_type "diet_package" — a plain priced product (a diet chart, say), not a booking
+ * slot, so it carries no duration. The actual bookable Diet Consultation is item_type
+ * "diet", shown separately under Consultations > Diet Consultations above.
  */
 export const BranchDietPanel = ({ reloadToken, modeFilter = "all" }) => (
   <div className="space-y-4" data-testid="branch-store-panel-diet">
     <BranchItemsPanel
       category="physiotherapy"
-      itemType="diet"
-      durationLabel="Diet Consultation Duration"
+      itemType="diet_package"
       emptyLabel="No diet packages available yet. Super Admin adds them in Services and Products > Diet Package."
       testidPrefix="branch-diet"
       reloadToken={reloadToken}
