@@ -2004,10 +2004,12 @@ const UserActionsModal = ({ user, onClose, onDone }) => {
   );
 };
 
-// Same idea as RoleFilterDropdown — a native <select>'s open list can't be
-// reliably colored per-item, so this renders each role as its own colored,
-// rounded row, plus a distinct trailing "+ Add New Role..." row.
-const RoleSelectDropdown = ({ value, options, onChange, onAddNew }) => {
+// Picks a designation (from Departments & Designation), not a raw role slug — the caller
+// resolves that pick to an actual access role. Plain, not colored per-row: the closed box
+// and every row in the open list share one neutral style, and the one row matching the
+// current value is the only thing highlighted, so "which one is picked" reads from the
+// highlight rather than from memorizing a palette.
+const RoleSelectDropdown = ({ value, options, onChange }) => {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -2017,41 +2019,33 @@ const RoleSelectDropdown = ({ value, options, onChange, onAddNew }) => {
     return () => document.removeEventListener("mousedown", onDocClick);
   }, []);
 
-  const currentClasses = value ? roleClasses(value) : "border-slate-200 bg-white text-slate-700";
-  const currentLabel = value ? roleLabel(value) : "Select role";
-
   return (
     <div className="relative" ref={ref}>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className={`flex h-10 w-full items-center justify-between gap-2 rounded-md border px-3 text-sm font-semibold ${currentClasses}`}
+        className={`flex h-10 w-full items-center justify-between gap-2 rounded-md border px-3 text-sm font-semibold ${value ? "border-sky-300 bg-sky-50 text-sky-700" : "border-slate-200 bg-white text-slate-700"}`}
         data-testid="hr-create-user-role"
       >
-        {currentLabel}
+        {value || "Select role"}
         <ChevronDown className="h-3.5 w-3.5 opacity-60" />
       </button>
       {open && (
         <div className="absolute left-0 right-0 z-20 mt-1 max-h-64 space-y-1 overflow-y-auto rounded-md border border-slate-200 bg-white p-1.5 shadow-lg" data-testid="hr-create-user-role-list">
-          {options.map((r) => (
+          {options.map((label) => (
             <button
-              key={r}
+              key={label}
               type="button"
-              onClick={() => { onChange(r); setOpen(false); }}
-              className={`block w-full rounded-md border px-3 py-1.5 text-left text-xs font-semibold ${roleClasses(r)}`}
-              data-testid={`hr-create-user-role-option-${r}`}
+              onClick={() => { onChange(label); setOpen(false); }}
+              className={`block w-full rounded-md border px-3 py-1.5 text-left text-xs font-semibold ${
+                label === value ? "border-sky-300 bg-sky-50 text-sky-700" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+              }`}
+              data-testid={`hr-create-user-role-option-${label}`}
             >
-              {roleLabel(r)}
+              {label}
             </button>
           ))}
-          <button
-            type="button"
-            onClick={() => { onAddNew(); setOpen(false); }}
-            className="block w-full rounded-md border border-dashed border-sky-300 bg-sky-50 px-3 py-1.5 text-left text-xs font-semibold text-sky-700"
-            data-testid="hr-create-user-role-option-add-new"
-          >
-            + Add New Role...
-          </button>
+          {options.length === 0 && <p className="px-3 py-2 text-xs text-slate-400">No designations yet — add one on the Designation tab first.</p>}
         </div>
       )}
     </div>
@@ -2187,9 +2181,11 @@ const CreateUserModal = ({ meta, reloadMeta, onClose, onSaved }) => {
   const roleLabelForMulti = MULTI_BRANCH_ROLE_LABELS[form.role];
   const isMultiBranchRole = Boolean(roleLabelForMulti);
   const isOrgWideRole = ORG_WIDE_ROLES.has(form.role);
-  const [addingRole, setAddingRole] = useState(false);
-  const [newRoleLabel, setNewRoleLabel] = useState("");
-  const [savingRole, setSavingRole] = useState(false);
+  // What was actually clicked in the dropdown — kept separate from form.role (which always
+  // ends up holding a real access-role slug) purely so the dropdown can show and highlight
+  // the designation text the account was set up from.
+  const [selectedDesignation, setSelectedDesignation] = useState("");
+  const [resolvingRole, setResolvingRole] = useState(false);
   useEffect(() => { hrEmployees({ status: "active" }).then(setEmployees).catch((e) => console.warn("[load failed]", e?.message || e)); }, []);
   useEffect(() => { getBranches().then(setBranches).catch((e) => console.warn("[load failed]", e?.message || e)); }, []);
 
@@ -2198,24 +2194,49 @@ const CreateUserModal = ({ meta, reloadMeta, onClose, onSaved }) => {
     setForm((p) => ({ ...p, employee_id: id, full_name: emp?.full_name || p.full_name, email: emp?.email || p.email }));
   };
 
-  const createRole = async () => {
-    if (!newRoleLabel.trim()) { toast.error("Enter a role name"); return; }
-    setSavingRole(true);
+  // Letters only, so "Branch Admin ( Physio )" and "branch_admin_physio"'s own label both
+  // normalize the same way — matching a Departments & Designation title back to whichever
+  // real access role (built-in or already-created custom) it stands for.
+  const key = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
+  const roleLabelToSlug = useMemo(() => {
+    const map = {};
+    Object.entries(ROLE_META).forEach(([slug, m]) => { map[key(m.label)] = slug; });
+    (meta.custom_roles || []).forEach((r) => { if (r.name && r.label) map[key(r.label)] = r.name; });
+    return map;
+  }, [meta.custom_roles]);
+
+  // Every designation across every department, deduped. Super Admin never shows here —
+  // that account can only be created via the OTP-approved Super Admin creation page, same
+  // restriction the role list enforced before designations replaced it.
+  const designationOptions = useMemo(() => {
+    const set = new Set();
+    Object.values(meta.department_designations || {}).forEach((list) => (list || []).forEach((d) => set.add(d)));
+    return [...set].filter((d) => roleLabelToSlug[key(d)] !== "super_admin").sort((a, b) => a.localeCompare(b));
+  }, [meta.department_designations, roleLabelToSlug]);
+
+  // A designation that already matches a real access role (built-in or previously created)
+  // is used as-is. One that doesn't is created as a new role from that exact title — the
+  // same thing "+ Add New Role" used to do by typing, just always sourced from a job title
+  // that already exists in HR. Either way the field a moment later holds a real role slug.
+  const pickDesignation = async (label) => {
+    setSelectedDesignation(label);
+    const existingSlug = roleLabelToSlug[key(label)];
+    if (existingSlug) { setForm((p) => ({ ...p, role: existingSlug })); return; }
+    setResolvingRole(true);
     try {
-      const created = await hrAddCustomRole(newRoleLabel.trim());
-      toast.success(`Role "${created.label}" added`);
+      const created = await hrAddCustomRole(label);
       await reloadMeta?.();
       setForm((p) => ({ ...p, role: created.name }));
-      setAddingRole(false);
-      setNewRoleLabel("");
     } catch (e) {
-      toast.error(e?.response?.data?.detail || "Failed to add role");
-    } finally {
-      setSavingRole(false);
+      toast.error(e?.response?.data?.detail || "Failed to set role");
+      setSelectedDesignation("");
     }
+    setResolvingRole(false);
   };
 
   const submit = async () => {
+    if (resolvingRole) { toast.error("Still setting up that role — one moment"); return; }
     if (!form.email || !form.password || !form.role) { toast.error("Email, role, password required"); return; }
     if (form.password.length < 6) { toast.error("Min 6 characters"); return; }
     if (form.password !== form.confirm) { toast.error("Passwords do not match"); return; }
@@ -2257,33 +2278,15 @@ const CreateUserModal = ({ meta, reloadMeta, onClose, onSaved }) => {
         <Field label="Username (Email) *"><Input placeholder="user@company.com" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} data-testid="hr-create-user-email" /></Field>
         <Field label="Role *">
           <RoleSelectDropdown
-            value={form.role}
-            options={meta.roles.filter((r) => r !== "super_admin")}
-            onChange={(r) => setForm({ ...form, role: r })}
-            onAddNew={() => setAddingRole(true)}
+            value={selectedDesignation}
+            options={designationOptions}
+            onChange={pickDesignation}
           />
-          {addingRole && (
-            <div className="mt-2 flex items-center gap-2 rounded-md border border-sky-200 bg-sky-50 p-2" data-testid="hr-create-user-new-role">
-              <Input
-                autoFocus
-                placeholder="e.g. Tech Manager"
-                value={newRoleLabel}
-                onChange={(e) => setNewRoleLabel(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); createRole(); } }}
-                className="h-8 flex-1 bg-white text-sm"
-                data-testid="hr-create-user-new-role-input"
-              />
-              <Button size="sm" onClick={createRole} disabled={savingRole} className="h-8 bg-sky-600 hover:bg-sky-700" data-testid="hr-create-user-new-role-add">
-                {savingRole ? "Adding..." : "Add"}
-              </Button>
-              <button type="button" onClick={() => { setAddingRole(false); setNewRoleLabel(""); }} className="p-1 text-slate-400 hover:text-slate-600" data-testid="hr-create-user-new-role-cancel">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-          )}
-          {!addingRole && (
-            <p className="mt-1 text-[10px] text-slate-400">A new role only adds a selectable name — page access still needs to be built for it separately.</p>
-          )}
+          <p className="mt-1 text-[10px] text-slate-400">
+            {resolvingRole
+              ? "Setting up that role..."
+              : "Designations come from Departments & Designation. One that isn't already a system role gets created as one automatically — page access for it still needs to be built separately."}
+          </p>
         </Field>
         {isOrgWideRole ? (
           <Field label="Branches">
