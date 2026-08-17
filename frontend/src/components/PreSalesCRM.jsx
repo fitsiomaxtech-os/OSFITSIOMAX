@@ -428,6 +428,10 @@ const PreSalesAnalyticsPanel = ({ branches, branchGroup, sourceFilter }) => {
   const [customTo, setCustomTo] = useState("");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
+  // Held apart from `data` so a failed load can say so. Swallowing the error left every
+  // card reading 0, which is indistinguishable from a branch that genuinely has none —
+  // and that is exactly how a 403 on this endpoint passed for real figures.
+  const [failed, setFailed] = useState(false);
 
   const { startDate, endDate } = useMemo(() => {
     const today = new Date();
@@ -445,8 +449,8 @@ const PreSalesAnalyticsPanel = ({ branches, branchGroup, sourceFilter }) => {
     setLoading(true);
     const params = preset === "all" ? {} : { start_date: startDate, end_date: endDate };
     getDashboardOverview(params)
-      .then(setData)
-      .catch(() => setData(null))
+      .then((rows) => { setData(rows); setFailed(false); })
+      .catch(() => { setData(null); setFailed(true); })
       .finally(() => setLoading(false));
   }, [startDate, endDate, preset, customFrom, customTo]);
 
@@ -481,6 +485,10 @@ const PreSalesAnalyticsPanel = ({ branches, branchGroup, sourceFilter }) => {
 
       {loading && !data ? (
         <p className="py-10 text-center text-sm text-slate-400">Loading...</p>
+      ) : failed ? (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-6 text-center text-sm text-amber-800" data-testid="presales-analytics-failed">
+          These figures could not be loaded. Refresh to try again — if it keeps happening, this account may not have access to the org-wide numbers.
+        </p>
       ) : (
         // All seven across one row on a wide screen — they are one funnel read
         // left to right, and wrapping the last three onto a second line broke that

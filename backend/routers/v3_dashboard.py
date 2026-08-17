@@ -441,7 +441,11 @@ def _date_range_query(field: str, start_date: Optional[str], end_date: Optional[
 async def v3_dashboard_overview(
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
-    _: V3UserOut = Depends(v3_require_roles("super_admin")),
+    # Sales Head and Marketing Head read the same org-wide funnel from the Sales Master
+    # View's Analytics pane — that board offers it to all three (isSuperAdminMasterView),
+    # and while this admitted only Super Admin the other two were served a 403 that the
+    # panel rendered as a row of zeros.
+    _: V3UserOut = Depends(v3_require_roles("super_admin", "sales_head", "marketing_head")),
 ):
     """Super Admin's new Dashboard (the default landing view), and the Branches &
     Verticals Overview tab — Leads / Appointments / Consultations / Treatments /
