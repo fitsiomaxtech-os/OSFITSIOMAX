@@ -460,7 +460,17 @@ async def v3_dashboard_overview(
         return (branch_by_id.get(branch_id) or {}).get("vertical")
 
     def new_bucket():
-        return {"total": 0.0, "physio_branches": {b["id"]: 0.0 for b in physio_branches}, "verticals": {v: 0.0 for v in other_verticals}}
+        return {
+            "total": 0.0,
+            "physio_branches": {b["id"]: 0.0 for b in physio_branches},
+            "verticals": {v: 0.0 for v in other_verticals},
+            # Every branch, offline or online — physio_branches/verticals above stay
+            # exactly as they were (the main Dashboard's 2x2 layout depends on that split),
+            # this is additive for callers (the Branches & Verticals Overview tab) that
+            # need each branch on its own regardless of vertical, including an online
+            # branch sharing a vertical with another online branch.
+            "branches": {b["id"]: 0.0 for b in branches},
+        }
 
     def add_to_bucket(bucket, branch_id, vertical, amount=1.0):
         bucket["total"] += amount
@@ -468,6 +478,8 @@ async def v3_dashboard_overview(
             bucket["physio_branches"][branch_id] += amount
         elif vertical in bucket["verticals"]:
             bucket["verticals"][vertical] += amount
+        if branch_id in bucket["branches"]:
+            bucket["branches"][branch_id] += amount
 
     def format_bucket(bucket, currency=False):
         rnd = (lambda v: round(v, 2)) if currency else int
@@ -480,6 +492,10 @@ async def v3_dashboard_overview(
             "verticals": [
                 {"vertical": v, "label": DASHBOARD_VERTICAL_LABELS[v], "value": rnd(bucket["verticals"][v])}
                 for v in other_verticals
+            ],
+            "branches": [
+                {"branch_id": b["id"], "branch_name": b["branch_name"], "vertical": b.get("vertical"), "value": rnd(bucket["branches"][b["id"]])}
+                for b in branches
             ],
         }
 

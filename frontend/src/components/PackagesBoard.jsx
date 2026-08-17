@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Stethoscope, CalendarRange, Pill, Dumbbell, ShoppingCart, Activity, Plus, X, FlaskConical, Pencil, Trash2, ImagePlus, Wifi, MapPin, Clock, Eye, History, Salad, ChevronDown, RefreshCw } from "lucide-react";
+import { Stethoscope, CalendarRange, Pill, Dumbbell, ShoppingCart, Activity, Plus, X, FlaskConical, Pencil, Trash2, ImagePlus, Wifi, MapPin, Clock, Eye, History, Salad, ChevronDown, RefreshCw, ClipboardList } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { uploadStoreImage, createStoreItem, updateStoreItem, deleteStoreItem, listStoreItems, getPaymentHistory, getFollowUpHistory, getLoginHistory, getBranches } from "@/lib/api";
 import { StoreInventoryPanel } from "@/components/branch/StoreInventoryPanel";
+import { TreatmentTypesBoard } from "@/components/TreatmentTypesBoard";
 
 export const TABS = [
   { key: "consultations", label: "Consultations", icon: Stethoscope },
@@ -16,6 +17,9 @@ export const TABS = [
   { key: "supplementary", label: "Supplementary", icon: FlaskConical },
   { key: "equipment", label: "Equipment", icon: Dumbbell },
   { key: "vending_machine", label: "Vending Machine", icon: ShoppingCart },
+  // Moved in from its own top-level nav tab — the treatment catalogue belongs beside the
+  // other things Super Admin catalogues here, not among Dashboard/HR/Branches.
+  { key: "treatment", label: "Treatments", icon: ClipboardList },
   { key: "history", label: "History", icon: History },
 ];
 
@@ -956,7 +960,7 @@ const INVENTORY_TABS = new Set(["tablet", "supplementary", "equipment"]);
 
 // Which tabs have a panel. Everything else falls through to the placeholder; Vending
 // Machine is the only one left, and it has no backend at all yet.
-const BUILT_TABS = new Set(["consultations", "sessions", "diet", "history", ...INVENTORY_TABS]);
+const BUILT_TABS = new Set(["consultations", "sessions", "diet", "history", "treatment", ...INVENTORY_TABS]);
 
 /**
  * The stock shelves as Super Admin sees them.
@@ -1134,6 +1138,7 @@ export const PackagesBoard = () => {
       {tab === "sessions" && <SessionsPanel reloadToken={reloadTick} toolbarSlot={createSlot} />}
       {tab === "diet" && <PhysiotherapyPanel kind="diet" reloadToken={reloadTick} toolbarSlot={createSlot} />}
       {tab === "history" && <HistoryPanel reloadToken={reloadTick} />}
+      {tab === "treatment" && <TreatmentTypesBoard />}
       {INVENTORY_TABS.has(tab) && <SuperAdminInventoryPanel key={tab} category={tab} reloadToken={reloadTick} />}
       {/* Whatever has no panel yet. A tab graduates by being handled above rather than by
           another branch being added here. */}

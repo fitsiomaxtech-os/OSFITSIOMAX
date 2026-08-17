@@ -116,19 +116,32 @@ const overviewStartOfWeek = (d) => { const x = overviewStartOfDay(d); x.setDate(
 const overviewStartOfMonth = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
 const overviewToIso = (d) => d.toISOString().slice(0, 10);
 
-/** total for "All", otherwise whichever physio branch or vertical the card row picked. */
-const overviewValueFor = (bucket, key) => {
+// Same top-level split as MANAGER's own filter (All Branches / Offline / Online).
+// Under it, a second row of one pill per branch in that group — same branches MANAGER
+// lists, so a branch added there shows up here without anything else changing.
+const OVERVIEW_GROUPS = [
+  { key: "all", label: "All" },
+  { key: "offline", label: "Offline" },
+  { key: "online", label: "Online" },
+];
+
+/** A specific branch picked from the second row wins outright. Otherwise: the group's
+ *  total (all branches in it summed) for Offline/Online, or the bucket's grand total for
+ *  All. */
+const overviewValueFor = (bucket, branchId, group) => {
   if (!bucket) return 0;
-  if (!key || key === "all") return bucket.total;
-  const branchHit = (bucket.physio_branches || []).find((b) => b.branch_id === key);
-  if (branchHit) return branchHit.value;
-  const vertHit = (bucket.verticals || []).find((v) => v.vertical === key);
-  return vertHit ? vertHit.value : 0;
+  const branches = bucket.branches || [];
+  if (branchId) {
+    const hit = branches.find((b) => b.branch_id === branchId);
+    return hit ? hit.value : 0;
+  }
+  if (!group || group === "all") return bucket.total;
+  return branches.filter((b) => isOnlineVertical(b.vertical) === (group === "online")).reduce((s, b) => s + b.value, 0);
 };
 
 /**
  * The landing tab for Branches & Verticals — leads through pending balance, for whichever
- * branch or vertical the row of cards below the date filter picks, all fed by the one
+ * group or individual branch the two rows below the date filter pick, all fed by the one
  * /dashboard/overview call the main Dashboard already uses (same figures, same math, so
  * this tab and that one can never disagree about what a number means).
  */
@@ -138,7 +151,8 @@ const OverviewTab = () => {
   const [customTo, setCustomTo] = useState("");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [selected, setSelected] = useState("all");
+  const [group, setGroup] = useState("all");
+  const [branchId, setBranchId] = useState(""); // "" = the whole group, not one branch
 
   const { startDate, endDate } = useMemo(() => {
     const today = new Date();
@@ -159,16 +173,13 @@ const OverviewTab = () => {
 
   useEffect(() => { load(); }, [load]);
 
-  // "All" plus one card per Physiotherapy branch plus one per other vertical (Offline
-  // Fitness, Online Physiotherapy, Online Fitness) — read off the leads bucket, but any
-  // bucket would do, since /dashboard/overview seeds every one with the same branch/
-  // vertical set regardless of whether it has data yet.
-  const cards = useMemo(() => {
-    if (!data) return [{ key: "all", label: "All" }];
-    const branchCards = (data.leads.physio_branches || []).map((b) => ({ key: b.branch_id, label: b.branch_name }));
-    const verticalCards = (data.leads.verticals || []).map((v) => ({ key: v.vertical, label: v.label }));
-    return [{ key: "all", label: "All" }, ...branchCards, ...verticalCards];
-  }, [data]);
+  const selectGroup = (g) => { setGroup(g); setBranchId(""); };
+
+  // Every branch under the selected group — all 7 under All, the 5 offline ones under
+  // Offline, the 2 online ones under Online. Read off the leads bucket, but any bucket
+  // would do; they all carry the same branch list.
+  const branchList = data?.leads?.branches || [];
+  const visibleBranches = group === "all" ? branchList : branchList.filter((b) => isOnlineVertical(b.vertical) === (group === "online"));
 
   const fmt = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 
@@ -198,30 +209,50 @@ const OverviewTab = () => {
         )}
       </div>
 
-      {/* Branch / vertical cards */}
-      <div className="flex flex-wrap items-center gap-2" data-testid="bm-overview-cards">
-        {cards.map((c) => (
+      {/* All / Offline / Online — same split as MANAGER's own filter */}
+      <div className="flex flex-wrap items-center gap-2" data-testid="bm-overview-groups">
+        {OVERVIEW_GROUPS.map((g) => (
           <button
-            key={c.key}
+            key={g.key}
             type="button"
-            onClick={() => setSelected(c.key)}
+            onClick={() => selectGroup(g.key)}
             className={`shrink-0 rounded-full border px-3.5 py-1.5 text-sm font-medium transition ${
-              selected === c.key ? "border-sky-600 bg-sky-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"
+              group === g.key ? "border-sky-600 bg-sky-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"
             }`}
-            data-testid={`bm-overview-card-${c.key}`}
+            data-testid={`bm-overview-group-${g.key}`}
           >
-            {c.label}
+            {g.label}
           </button>
         ))}
       </div>
 
-      {/* Summary metrics, for whichever card above is selected */}
+      {/* One pill per branch in the selected group — picking one drills into just that
+          branch; the group pill above still stands for "all of them" when none is picked. */}
+      {visibleBranches.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5" data-testid="bm-overview-branches">
+          {visibleBranches.map((b) => (
+            <button
+              key={b.branch_id}
+              type="button"
+              onClick={() => setBranchId((id) => (id === b.branch_id ? "" : b.branch_id))}
+              className={`shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition ${
+                branchId === b.branch_id ? "border-sky-600 bg-sky-600 text-white" : "border-slate-200 bg-white text-slate-500 hover:border-sky-300 hover:text-sky-600"
+              }`}
+              data-testid={`bm-overview-branch-${b.branch_id}`}
+            >
+              {b.branch_name}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Summary metrics, for whichever branch (or the whole group) is selected */}
       {loading && !data ? (
         <p className="py-10 text-center text-sm text-slate-400">Loading...</p>
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4" data-testid="bm-overview-metrics">
           {OVERVIEW_METRICS.map((m) => {
-            const value = overviewValueFor(data?.[m.key], selected);
+            const value = overviewValueFor(data?.[m.key], branchId, group);
             return (
               <div key={m.key} className="rounded-xl border-2 border-slate-200 bg-white px-4 py-3.5" data-testid={`bm-overview-metric-${m.key}`}>
                 <span className="block truncate text-[11px] font-bold uppercase tracking-wider text-slate-500">{m.label}</span>

@@ -8,7 +8,7 @@ import {
   hrDashboard, hrEmployees, hrCreateEmployee, hrUpdateEmployee, hrDeleteEmployee,
   hrUsers, hrCreateUser, hrUpdateUser, hrResetPassword, hrDeactivateUser, hrActivateUser, hrDeleteUserPermanent, hrUpdateUserRole, hrMeta, hrAddCustomRole,
   hrDepartments, hrCreateDepartment, hrRenameDepartment, hrDeleteDepartment, hrAddDesignation, hrRenameDesignation, hrReorderDesignations,
-  getBranches,
+  getBranches, getVerticals,
 } from "@/lib/api";
 import { MilkDateInput } from "@/components/ui/milk-calendar";
 import { SegmentedTabs } from "@/components/ui/segmented-tabs";
@@ -1294,9 +1294,6 @@ const DesignationsTab = ({ meta, reloadMeta }) => {
   const [newLabel, setNewLabel] = useState("");
   const [creating, setCreating] = useState(false);
 
-  const [claimDeptId, setClaimDeptId] = useState({}); // label -> department picked to claim it into
-  const [claiming, setClaiming] = useState(null);
-
   // Which row a drag started on — only meaningful within the same department's list, since
   // "first row" only means something inside one department's own order.
   const [dragDeptId, setDragDeptId] = useState(null);
@@ -1378,19 +1375,6 @@ const DesignationsTab = ({ meta, reloadMeta }) => {
     setCreating(false);
   };
 
-  const claim = async (label) => {
-    const deptId = claimDeptId[label];
-    if (!deptId) { toast.error("Pick a department first"); return; }
-    setClaiming(label);
-    try {
-      await hrAddDesignation(deptId, label);
-      toast.success(`${label} added to ${depts.find((d) => d.id === deptId)?.name || "department"}`);
-      load();
-      reloadMeta();
-    } catch (e) { toast.error(e?.response?.data?.detail || "Failed to add"); }
-    setClaiming(null);
-  };
-
   // Applied optimistically — the drag (or arrow click) already showed the new order, so it
   // shouldn't visibly snap back while the request is in flight — then reconciled with the
   // server, or rolled back with a fresh load if the save itself failed.
@@ -1411,7 +1395,6 @@ const DesignationsTab = ({ meta, reloadMeta }) => {
   };
 
   const visibleDepts = depts.filter((d) => (d.designations || []).some(matches));
-  const visibleUnclaimed = unclaimed.filter(matches);
 
   if (loading && depts.length === 0) return <p className="text-sm text-slate-500">Loading...</p>;
 
@@ -1541,38 +1524,6 @@ const DesignationsTab = ({ meta, reloadMeta }) => {
         {visibleDepts.length === 0 && depts.length > 0 && <p className="text-sm text-slate-400">No designations match "{search}".</p>}
         {depts.length === 0 && <p className="text-sm text-slate-400">No departments yet — add one on the Departments tab first.</p>}
       </div>
-
-      {visibleUnclaimed.length > 0 && (
-        <Card data-testid="hr-designation-unclaimed">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Not yet in a department</CardTitle>
-            <p className="text-xs text-slate-500">These exist as roles or on an employee record, but aren't grouped under a department yet.</p>
-          </CardHeader>
-          <CardContent className="space-y-1">
-            {visibleUnclaimed.map((label) => {
-              const count = designationCounts[label] || 0;
-              return (
-                <div key={label} className="flex flex-wrap items-center gap-2 rounded-md px-2 py-2 hover:bg-slate-50" data-testid={`hr-designation-unclaimed-row-${label}`}>
-                  <span className="min-w-0 flex-1 truncate text-sm text-slate-800">{label}</span>
-                  <span className="shrink-0 text-xs text-slate-500">{count} employee{count === 1 ? "" : "s"}</span>
-                  <select
-                    value={claimDeptId[label] || ""}
-                    onChange={(e) => setClaimDeptId({ ...claimDeptId, [label]: e.target.value })}
-                    className="h-8 shrink-0 rounded-md border border-slate-200 px-2 text-xs"
-                    data-testid={`hr-designation-unclaimed-dept-${label}`}
-                  >
-                    <option value="">Department...</option>
-                    {depts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-                  </select>
-                  <Button size="sm" variant="outline" onClick={() => claim(label)} disabled={claiming === label || !claimDeptId[label]} data-testid={`hr-designation-unclaimed-add-${label}`}>
-                    {claiming === label ? "Adding..." : "Add"}
-                  </Button>
-                </div>
-              );
-            })}
-          </CardContent>
-        </Card>
-      )}
 
       {viewingDesignation && (
         <DesignationEmployeesModal
