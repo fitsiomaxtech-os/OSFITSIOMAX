@@ -520,7 +520,13 @@ async def v3_dashboard_overview(
     # second round trip to re-ask the same collection with one field's filter removed.
     treat_bucket = new_bucket()
     sessions_booked_bucket = new_bucket()
-    sess_query = _date_range_query("slot_time", start_date, end_date)
+    # Treatment sessions only. Login tokens live in this same collection (see v3_auth), and
+    # they are told apart by carrying no lead_id. Without this the unfiltered range — which
+    # is what "All" asks for, and which makes the date clause an empty query — matched every
+    # token ever issued and reported them as booked sessions. Any dated range hid the
+    # problem, since a token has no slot_time to fall inside it.
+    sess_query = {"lead_id": {"$exists": True}}
+    sess_query.update(_date_range_query("slot_time", start_date, end_date))
     sess_rows = await v3_col("sessions").find(sess_query, {"_id": 0, "branch_id": 1, "status": 1}).to_list(50000)
     for s in sess_rows:
         bid = s.get("branch_id")
