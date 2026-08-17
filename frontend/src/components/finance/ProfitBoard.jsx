@@ -12,6 +12,7 @@ const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN")}`;
 export const ProfitBoard = () => {
   const [branches, setBranches] = useState([]);
   const [branchId, setBranchId] = useState("");
+  const [mode, setMode] = useState("all"); // "all" | "online" | "offline"
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [data, setData] = useState({ revenue: 0, expense: 0, profit: 0, expense_by_category: [] });
@@ -24,12 +25,13 @@ export const ProfitBoard = () => {
     try {
       const params = {};
       if (branchId) params.branch_id = branchId;
+      if (mode !== "all") params.mode = mode;
       if (startDate) params.start_date = startDate;
       if (endDate) params.end_date = endDate;
       setData(await getFinanceProfit(params));
     } catch { /* silent */ }
     setLoading(false);
-  }, [branchId, startDate, endDate]);
+  }, [branchId, mode, startDate, endDate]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -38,6 +40,19 @@ export const ProfitBoard = () => {
   return (
     <div className="space-y-4" data-testid="finance-profit-root">
       <div className="flex flex-wrap items-center gap-3">
+        {[["all", "All"], ["offline", "Offline"], ["online", "Online"]].map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setMode(key)}
+            className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+              mode === key ? "border-sky-600 bg-sky-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"
+            }`}
+            data-testid={`finance-profit-mode-${key}`}
+          >
+            {label}
+          </button>
+        ))}
         <select
           value={branchId}
           onChange={(e) => setBranchId(e.target.value)}

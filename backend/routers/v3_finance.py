@@ -107,7 +107,11 @@ async def get_branch_finance(
         "by_branch": by_branch,
     }
 
-    activity_query = {"action": {"$in": ["consultation_paid", "package_payment_collected"]}}
+    # package_sold (sell_package's own action, set the moment a package is assigned at a
+    # negotiated price — no transaction_id or payment_mode, unlike package_payment_collected)
+    # belongs in this list too: leads whose package_paid only ever came from that flow would
+    # otherwise count in the cards above and never appear as a row below.
+    activity_query = {"action": {"$in": ["consultation_paid", "package_payment_collected", "package_sold"]}}
     lead_ids = [l["id"] for l in all_branch_leads]
     if lead_ids:
         activity_query["lead_id"] = {"$in": lead_ids}
@@ -124,14 +128,8 @@ async def get_branch_finance(
         is_consultation = "consultation" in details.lower()
         is_package = "package" in details.lower()
 
-        amount = 0.0
+        amount = _parse_rs_amount(details)
         weeks = None
-        try:
-            amt_part = details.split("Rs.")[1] if "Rs." in details else ""
-            amt_str = amt_part.split(" ")[0].split("(")[0].strip()
-            amount = float(amt_str)
-        except (IndexError, ValueError):
-            pass
 
         if "weeks" in details.lower():
             try:
@@ -194,22 +192,44 @@ async def get_branch_finance(
     return {"summary": summary, "transactions": transactions}
 
 
+class ApproveTransactionInput(BaseModel):
+    # What the Approve popup asks for is chosen by the row's own payment mode: Cash asks
+    # to re-enter the amount, Bank Transfer/UPI ask for the transaction/UTR reference,
+    # Cheque asks for the cheque number. Stored as typed — an independent, manual
+    # re-check by whoever approves, not a re-parse of what the collector already
+    # recorded. All optional: a row with no recognised payment mode (package_sold,
+    # store sales with no mode) can still be approved with nothing to confirm against.
+    confirmed_amount: Optional[float] = None
+    transaction_ref: Optional[str] = None
+    cheque_number: Optional[str] = None
+
+
 @router.post("/finance/transactions/{activity_id}/approve")
 async def approve_transaction(
     activity_id: str,
+    payload: ApproveTransactionInput = ApproveTransactionInput(),
     user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant")),
 ):
     """Accountant's Approvals tab: marks one collected payment reviewed. Written onto
-    the lead_activity record itself (approved/approved_by/approved_at) rather than a
-    separate collection, since every reader of that collection — branch/finance
-    (get_branch_finance), revenue_overview, this endpoint — already keys off its id and
-    needs no second lookup to know a row's approval state. Branch Admin cannot approve:
+    the record itself (approved/approved_by/approved_at, plus whatever confirmation the
+    popup collected) rather than a separate collection, since every reader — Summary
+    (get_branch_finance), revenue_overview, /finance/approvals, this endpoint — already
+    keys off its id and needs no second lookup to know a row's approval state. Tried
+    against lead_activity first, then inventory_movements (Store sales carry no lead),
+    since /finance/approvals lists rows from both. Branch Admin cannot approve:
     approval exists to have someone other than whoever collected it sign off.
     """
-    res = await v3_col("lead_activity").update_one(
-        {"id": activity_id},
-        {"$set": {"approved": True, "approved_by": user.full_name, "approved_at": _now()}},
-    )
+    update = {"approved": True, "approved_by": user.full_name, "approved_at": _now()}
+    if payload.confirmed_amount is not None:
+        update["approval_confirmed_amount"] = payload.confirmed_amount
+    if payload.transaction_ref:
+        update["approval_transaction_ref"] = payload.transaction_ref.strip()
+    if payload.cheque_number:
+        update["approval_cheque_number"] = payload.cheque_number.strip()
+
+    res = await v3_col("lead_activity").update_one({"id": activity_id}, {"$set": update})
+    if res.matched_count == 0:
+        res = await v3_col("inventory_movements").update_one({"id": activity_id}, {"$set": update})
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Transaction not found")
     return {"message": "Approved"}
@@ -220,15 +240,143 @@ async def unapprove_transaction(
     activity_id: str,
     user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant")),
 ):
-    """Undoes an approval taken by mistake. Clears who/when rather than leaving the
-    previous approver's name on a row that is, again, unreviewed."""
-    res = await v3_col("lead_activity").update_one(
-        {"id": activity_id},
-        {"$set": {"approved": False}, "$unset": {"approved_by": "", "approved_at": ""}},
-    )
+    """Undoes an approval taken by mistake. Clears who/when/confirmation rather than
+    leaving them on a row that is, again, unreviewed. Same two-collection try as approve."""
+    unset = {"approved_by": "", "approved_at": "", "approval_confirmed_amount": "", "approval_transaction_ref": "", "approval_cheque_number": ""}
+    update = {"$set": {"approved": False}, "$unset": unset}
+    res = await v3_col("lead_activity").update_one({"id": activity_id}, update)
+    if res.matched_count == 0:
+        res = await v3_col("inventory_movements").update_one({"id": activity_id}, update)
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Transaction not found")
     return {"message": "Approval removed"}
+
+
+@router.get("/finance/approvals")
+async def finance_approvals(
+    branch_id: Optional[str] = None,
+    mode: Optional[str] = None,  # "online" | "offline", off each lead's/branch's own vertical
+    category: Optional[str] = None,  # "consultation" | "session" | "diet" | "store" | "other"
+    approved: Optional[bool] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "accountant")),
+):
+    """Accountant's Approvals tab. Every kind of collection revenue_overview counts
+    (REVENUE_ACTIONS, plus Store sales) rather than just get_branch_finance's narrower
+    consultation/package set — "new income collected" means all of it, not only two of
+    its five sources. A dedicated query rather than reusing revenue_overview's own
+    transactions: that endpoint's list feeds Payment Paid/Unpaid and Outstanding too,
+    and filtering it here by approval state would silently drop rows out of those.
+    """
+    if is_branch_admin_role(user.role):
+        branch_id = user.branch_id
+
+    branch_docs = await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1, "vertical": 1}).to_list(500)
+    branch_map = {b["id"]: b for b in branch_docs}
+    mode_branch_ids = None
+    if mode in ("online", "offline"):
+        mode_branch_ids = {bid for bid, b in branch_map.items() if _is_online_vertical(b.get("vertical")) == (mode == "online")}
+        if branch_id and branch_id not in mode_branch_ids:
+            return {"transactions": [], "summary": {"pending_count": 0, "pending_total": 0.0, "approved_count": 0, "approved_total": 0.0}}
+
+    lead_query = {"branch_id": branch_id} if branch_id else {}
+    leads = await v3_col("leads").find(lead_query, {"_id": 0, "id": 1, "name": 1, "phone": 1, "branch_id": 1}).to_list(20000)
+    if mode_branch_ids is not None:
+        leads = [l for l in leads if l.get("branch_id") in mode_branch_ids]
+    lead_ids = [l["id"] for l in leads]
+    lead_map = {l["id"]: l for l in leads}
+
+    date_query = {}
+    if start_date:
+        date_query["$gte"] = start_date
+    if end_date:
+        date_query["$lte"] = end_date + "T23:59:59"
+
+    rows = []
+    # Whether the caller narrowed to particular leads at all (a branch and/or a
+    # vertical). Unscoped, activity_query has no lead_id clause and reads every lead's
+    # activity. Scoped with zero matching leads, nothing can match either — skipped
+    # rather than querying with an empty $in, which Mongo would (correctly) also match
+    # nothing on, but only after the round trip.
+    scoped = bool(branch_id) or mode_branch_ids is not None
+    if not (scoped and not lead_ids):
+        activity_query = {"action": {"$in": REVENUE_ACTIONS}}
+        if scoped:
+            activity_query["lead_id"] = {"$in": lead_ids}
+        if date_query:
+            activity_query["created_at"] = date_query
+        activities = await v3_col("lead_activity").find(activity_query, {"_id": 0}).sort("created_at", -1).to_list(5000)
+
+        for act in activities:
+            lead = lead_map.get(act.get("lead_id"), {})
+            cat = _revenue_category(act.get("action", ""))
+            if category and category not in ("all", "") and cat != category:
+                continue
+            is_approved = bool(act.get("approved"))
+            if approved is not None and is_approved != approved:
+                continue
+            details = act.get("details", "")
+            rows.append({
+                "id": act.get("id", ""),
+                "lead_id": act.get("lead_id", ""),
+                "patient_name": lead.get("name", "Unknown"),
+                "patient_phone": lead.get("phone", ""),
+                "branch_id": lead.get("branch_id"),
+                "branch_name": branch_map.get(lead.get("branch_id"), {}).get("branch_name", ""),
+                "category": cat,
+                "amount": _parse_rs_amount(details),
+                "payment_mode": _parse_payment_mode(details),
+                "collected_by": act.get("created_by", ""),
+                "collected_at": act.get("created_at", ""),
+                "approved": is_approved,
+                "approved_by": act.get("approved_by") or "",
+                "approved_at": act.get("approved_at") or "",
+            })
+
+    if category in (None, "", "all", "store"):
+        store_query = {"kind": "sale"}
+        if branch_id:
+            store_query["branch_id"] = branch_id
+        if date_query:
+            store_query["created_at"] = date_query
+        store_sales = await v3_col("inventory_movements").find(store_query, {"_id": 0}).to_list(5000)
+        for sale in store_sales:
+            bid = sale.get("branch_id")
+            if mode_branch_ids is not None and bid not in mode_branch_ids:
+                continue
+            is_approved = bool(sale.get("approved"))
+            if approved is not None and is_approved != approved:
+                continue
+            rows.append({
+                "id": sale.get("id", ""),
+                "lead_id": "",
+                "patient_name": (sale.get("customer_name") or "").strip() or "Counter sale",
+                "patient_phone": "",
+                "branch_id": bid,
+                "branch_name": branch_map.get(bid, {}).get("branch_name", ""),
+                "category": "store",
+                "amount": float(sale.get("amount") or 0),
+                "payment_mode": sale.get("payment_mode") or "unknown",
+                "collected_by": sale.get("by_user_name", ""),
+                "collected_at": sale.get("created_at", ""),
+                "approved": is_approved,
+                "approved_by": sale.get("approved_by") or "",
+                "approved_at": sale.get("approved_at") or "",
+            })
+
+    rows.sort(key=lambda r: r["collected_at"], reverse=True)
+    pending = [r for r in rows if not r["approved"]]
+    approved_rows = [r for r in rows if r["approved"]]
+    return {
+        "transactions": rows[:1000],
+        "summary": {
+            "pending_count": len(pending),
+            "pending_total": sum(r["amount"] for r in pending),
+            "approved_count": len(approved_rows),
+            "approved_total": sum(r["amount"] for r in approved_rows),
+        },
+    }
 
 
 # ---------- Expenses (Accountant) ----------
@@ -246,6 +394,7 @@ async def list_expenses(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     branch_id: Optional[str] = None,
+    mode: Optional[str] = None,  # "online" | "offline"
     user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "accountant")),
 ):
     if is_branch_admin_role(user.role):
@@ -261,8 +410,13 @@ async def list_expenses(
     if date_query:
         query["expense_date"] = date_query
     rows = await v3_col("expenses").find(query, {"_id": 0}).sort("expense_date", -1).to_list(2000)
-    branch_docs = await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1}).to_list(500)
+    branch_docs = await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1, "vertical": 1}).to_list(500)
     branch_name_map = {b["id"]: b.get("branch_name", "") for b in branch_docs}
+    if mode in ("online", "offline"):
+        online_ids = {b["id"] for b in branch_docs if _is_online_vertical(b.get("vertical"))}
+        # An org-wide expense (no branch_id) isn't exclusively either — it counts under
+        # both, the same way an untagged Lead Source shows under both Online and Offline.
+        rows = [r for r in rows if not r.get("branch_id") or (r["branch_id"] in online_ids) == (mode == "online")]
     for r in rows:
         r["branch_name"] = branch_name_map.get(r.get("branch_id"), "") if r.get("branch_id") else "All Branches"
     return {"expenses": rows, "total": sum(r.get("amount", 0) for r in rows)}
@@ -303,6 +457,7 @@ async def finance_profit(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     branch_id: Optional[str] = None,
+    mode: Optional[str] = None,  # "online" | "offline"
     user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "accountant")),
 ):
     """Revenue for the window (every collection — same total Accountant Manage's own
@@ -312,7 +467,14 @@ async def finance_profit(
     if is_branch_admin_role(user.role):
         branch_id = user.branch_id
 
+    online_ids = set()
+    if mode in ("online", "offline"):
+        branch_docs = await v3_col("branches").find({}, {"_id": 0, "id": 1, "vertical": 1}).to_list(500)
+        online_ids = {b["id"] for b in branch_docs if _is_online_vertical(b.get("vertical"))}
+
     lead_query = {"branch_id": branch_id} if branch_id else {}
+    if mode in ("online", "offline"):
+        lead_query["vertical"] = {"$regex": f"^{mode}_"}
     leads = await v3_col("leads").find(lead_query, {"_id": 0, "id": 1}).to_list(20000)
     lead_ids = [l["id"] for l in leads]
 
@@ -334,7 +496,9 @@ async def finance_profit(
         store_query["branch_id"] = branch_id
     if date_query:
         store_query["created_at"] = date_query
-    store_sales = await v3_col("inventory_movements").find(store_query, {"_id": 0, "amount": 1}).to_list(5000)
+    store_sales = await v3_col("inventory_movements").find(store_query, {"_id": 0, "amount": 1, "branch_id": 1}).to_list(5000)
+    if mode in ("online", "offline"):
+        store_sales = [s for s in store_sales if (s.get("branch_id") in online_ids) == (mode == "online")]
     revenue += sum(float(s.get("amount") or 0) for s in store_sales)
 
     expense_query = {"branch_id": branch_id} if branch_id else {}
@@ -345,7 +509,11 @@ async def finance_profit(
         expense_date_query["$lte"] = end_date
     if expense_date_query:
         expense_query["expense_date"] = expense_date_query
-    expenses = await v3_col("expenses").find(expense_query, {"_id": 0, "amount": 1, "category": 1}).to_list(2000)
+    expenses = await v3_col("expenses").find(expense_query, {"_id": 0, "amount": 1, "category": 1, "branch_id": 1}).to_list(2000)
+    if mode in ("online", "offline"):
+        # Org-wide (no branch_id) counts under both — same as the Expense tab's own
+        # mode filter, so the two stay in step for the same window.
+        expenses = [e for e in expenses if not e.get("branch_id") or (e["branch_id"] in online_ids) == (mode == "online")]
     total_expense = sum(e.get("amount", 0) for e in expenses)
 
     by_category = {}
@@ -392,8 +560,17 @@ def _revenue_category(action: str) -> str:
 
 
 def _parse_rs_amount(details: str) -> float:
+    """Most collection flows write "Rs.1200" into details; sell_package (action
+    "package_sold") writes "₹1200" instead. Rs. is tried first since it's the far
+    more common case; ₹ is a fallback, not a replacement, so nothing that already
+    parsed correctly changes."""
     try:
-        amt_part = details.split("Rs.")[1] if "Rs." in details else ""
+        if "Rs." in details:
+            amt_part = details.split("Rs.")[1]
+        elif "₹" in details:
+            amt_part = details.split("₹")[1]
+        else:
+            return 0.0
         amt_str = amt_part.split(" ")[0].split("(")[0].strip()
         return float(amt_str)
     except (IndexError, ValueError):
@@ -564,6 +741,9 @@ async def revenue_overview(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     branch_id: Optional[str] = None,
+    # "online" | "offline", off each lead's own vertical — named apart from the loop's
+    # own `mode` (payment mode: cash/upi/card/...) below so the two can never collide.
+    vertical_mode: Optional[str] = None,
     user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant", "branch_admin")),
 ):
     """AC Overview > Total Revenue, and Accountant Manage (Super Admin's per-branch
@@ -574,6 +754,8 @@ async def revenue_overview(
         branch_id = user.branch_id
     today = datetime.now(timezone.utc).date().isoformat()
     lead_query = {"branch_id": branch_id} if branch_id else {}
+    if vertical_mode in ("online", "offline"):
+        lead_query["vertical"] = {"$regex": f"^{vertical_mode}_"}
     leads = await v3_col("leads").find(lead_query, {"_id": 0}).to_list(20000)
     lead_ids = [l["id"] for l in leads]
     lead_branch_map = {l["id"]: l.get("branch_id") for l in leads}
@@ -587,8 +769,11 @@ async def revenue_overview(
         for l in leads if l.get("treatment_fee_payment_mode") == "partial"
     }
 
-    branch_docs = await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1}).to_list(500)
+    branch_docs = await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1, "vertical": 1}).to_list(500)
     branch_name_map = {b["id"]: b.get("branch_name", "") for b in branch_docs}
+    # Store sales carry no lead, so they can't be filtered by vertical_mode through the
+    # lead_query above — resolved off their own branch's vertical instead, further down.
+    online_branch_ids = {b["id"] for b in branch_docs if _is_online_vertical(b.get("vertical"))}
 
     activity_query = {"action": {"$in": REVENUE_ACTIONS}}
     if lead_ids:
@@ -703,6 +888,8 @@ async def revenue_overview(
     if date_query:
         store_query["created_at"] = date_query
     store_sales = await v3_col("inventory_movements").find(store_query, {"_id": 0}).sort("created_at", -1).to_list(5000)
+    if vertical_mode in ("online", "offline"):
+        store_sales = [s for s in store_sales if (s.get("branch_id") in online_branch_ids) == (vertical_mode == "online")]
 
     store_total = 0.0
     for sale in store_sales:

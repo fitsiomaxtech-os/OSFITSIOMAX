@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { BadgeIndianRupee, CheckSquare, Receipt, TrendingUp } from "lucide-react";
-import { FinanceBoard } from "@/components/FinanceBoard";
+import { AccountantManageTab } from "@/components/branch/AccountantManageTab";
 import { ApprovalsBoard } from "@/components/finance/ApprovalsBoard";
 import { ExpenseBoard } from "@/components/finance/ExpenseBoard";
 import { ProfitBoard } from "@/components/finance/ProfitBoard";
@@ -13,7 +13,8 @@ const TABS = [
 ];
 
 // Same Online/Offline split every other mode filter in the OS uses, layered on top of
-// the existing Finance board rather than a copy of it.
+// Accountant Manage's own board (Branches & Verticals > Analytics > Accountant Manage)
+// rather than a copy of it — Summary is that exact page, branch select and all.
 const SummaryTab = () => {
   const [mode, setMode] = useState("all"); // "all" | "online" | "offline"
   return (
@@ -33,19 +34,16 @@ const SummaryTab = () => {
           </button>
         ))}
       </div>
-      {/* Keyed on mode so switching remounts the board — its own fee-type/search/date
-          filters belong to whichever slice is showing and must not survive the switch. */}
-      <FinanceBoard key={mode} mode={mode === "all" ? undefined : mode} />
+      <AccountantManageTab mode={mode === "all" ? undefined : mode} />
     </div>
   );
 };
 
 /**
- * Accountant's own login board. Four tabs: Summary (the existing Finance revenue view,
- * now filterable by vertical), Approvals (newly collected payments waiting on sign-off),
- * Expense (what went out, logged by hand) and Profit (Revenue less Expense for a picked
- * window). Approvals/Expense/Profit are new — Summary is the pre-existing FinanceBoard,
- * unchanged apart from the mode filter wrapped around it here.
+ * Accountant's own login board. Four tabs: Summary (Branches & Verticals > Analytics >
+ * Accountant Manage's own board, now filterable by vertical), Approvals (newly collected
+ * payments waiting on sign-off), Expense (what went out, logged by hand) and Profit
+ * (Revenue less Expense for a picked window). Approvals/Expense/Profit are new.
  */
 export const AccountantBoard = () => {
   const [tab, setTab] = useState("summary");

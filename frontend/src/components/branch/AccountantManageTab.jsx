@@ -85,14 +85,17 @@ const PaymentModeBadge = ({ mode }) => (
 
 /**
  * Accountant Manage — Super Admin's Branch Management > Accountant Management >
- * Accountant Manage, and the same view reused read-only-by-nature (it's all
- * reporting, nothing editable) as Branch Admin's own "Accountant Manage" tab.
- * Ten sub-tabs: Total Revenue, Consultation Collections, Session Collections, Diet
- * Collections, Outstanding Amount, Payment Schedules, Payment Paid, Payment Unpaid,
- * Store Payment and Discount Applied — all sourced from the same
+ * Accountant Manage, the same view reused read-only-by-nature (it's all reporting,
+ * nothing editable) as Branch Admin's own "Accountant Manage" tab, and again as the
+ * Accountant's own Summary tab. Ten sub-tabs: Total Revenue, Consultation Collections,
+ * Session Collections, Diet Collections, Outstanding Amount, Payment Schedules, Payment
+ * Paid, Payment Unpaid, Store Payment and Discount Applied — all sourced from the same
  * finance/revenue-overview payload.
+ *
+ * @param mode  "online" | "offline", an optional vertical filter only the Accountant's
+ *              Summary tab passes (and owns the pills for) — left unset everywhere else.
  */
-export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
+export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
   const [branches, setBranches] = useState([]);
   const [branchId, setBranchId] = useState(fixedBranchId || "");
   const [subTab, setSubTab] = useState("total_revenue");
@@ -106,13 +109,16 @@ export const AccountantManageTab = ({ branchId: fixedBranchId }) => {
     getBranches().then(setBranches).catch(() => setBranches([]));
   }, [fixedBranchId]);
 
+  // "online" | "offline", owned by whichever caller wants the filter (Accountant's own
+  // Summary tab) — undefined everywhere else, which getRevenueOverview reads as no filter
+  // at all, so Branch Admin's own tab and Branch Management's Analytics are unaffected.
   const load = useCallback(() => {
     setLoading(true);
-    getRevenueOverview({ branch_id: branchId || undefined })
+    getRevenueOverview({ branch_id: branchId || undefined, vertical_mode: mode || undefined })
       .then(setData)
       .catch(() => setData(null))
       .finally(() => setLoading(false));
-  }, [branchId]);
+  }, [branchId, mode]);
 
   useEffect(() => { load(); }, [load]);
 
