@@ -536,6 +536,11 @@ async def v3_dashboard_overview(
     # or "Session Amount Collected" for one branch rather than the whole business.
     consultation_revenue_bucket = new_bucket()
     session_revenue_bucket = new_bucket()
+    # How many patients bought a treatment package, against session_revenue_bucket's how
+    # much they paid for them. Counted off the same payments, so the pair can never
+    # disagree about what a purchase was — and a count nothing reported until now: the
+    # session figures were all money and slots, with no "how many signed up".
+    treatment_purchase_bucket = new_bucket()
     # The same Consultation / Session split Accountant Manage reports, so the Dashboard's
     # headline figures and the Collections boards can't disagree about what a payment was
     # for. `action` and `created_at` have to be projected for this — the branch buckets
@@ -582,6 +587,7 @@ async def v3_dashboard_overview(
             add_to_bucket(consultation_revenue_bucket, bid, vertical, amount)
         elif category == "session":
             add_to_bucket(session_revenue_bucket, bid, vertical, amount)
+            add_to_bucket(treatment_purchase_bucket, bid, vertical)
         if category == "session" and str(a.get("created_at", ""))[:10] in consult_days.get(a.get("lead_id"), ()):
             revenue_split["spot_joining"] += amount
         # A consultation held, not just booked — counted off the same Consultation Fee
@@ -619,6 +625,7 @@ async def v3_dashboard_overview(
         "consultations": format_bucket(consultations_bucket),
         "treatments": format_bucket(treat_bucket),
         "sessions_booked": format_bucket(sessions_booked_bucket),
+        "treatment_purchases": format_bucket(treatment_purchase_bucket),
         "consultation_revenue": format_bucket(consultation_revenue_bucket, currency=True),
         "session_revenue": format_bucket(session_revenue_bucket, currency=True),
         "pending_session_amount": format_bucket(pending_bucket, currency=True),
