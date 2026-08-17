@@ -338,6 +338,7 @@ export const resetAllLeads = async () => (await api.post("/admin/reset-all-leads
 export const hrDashboard = async () => (await api.get("/hr/dashboard")).data;
 export const hrMeta = async () => (await api.get("/hr/meta")).data;
 export const hrAddCustomRole = async (label, color) => (await api.post("/hr/roles", { label, color })).data;
+export const hrDeleteCustomRole = async (name) => (await api.delete(`/hr/roles/${name}`)).data;
 export const hrDepartments = async () => (await api.get("/hr/departments")).data;
 export const hrCreateDepartment = async (name) => (await api.post("/hr/departments", { name })).data;
 export const hrRenameDepartment = async (id, name) => (await api.patch(`/hr/departments/${id}`, { name })).data;

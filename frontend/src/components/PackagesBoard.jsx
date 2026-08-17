@@ -431,7 +431,12 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
  * twice under two different labels invites the reader to look for a difference that is
  * not there and contradicts a form that offered one box.
  */
-export const PriceModeBadges = ({ item, isSession }) => (
+// mode: "all" | "offline" | "online" — defaults to "all" so BranchStoreBoard.jsx's own
+// call (which never passes it) keeps showing both, exactly as before. Super Admin's
+// Services page passes its own All/Offline/Online pill selection through here, since an
+// Offline Branch Admin only ever needs this item's offline price and an Online one only
+// the online price.
+export const PriceModeBadges = ({ item, isSession, mode = "all" }) => (
   item.item_type === "diet" ? (
     <div className="mt-2">
       <div className="flex items-center justify-between rounded-lg bg-emerald-50 px-2.5 py-1.5">
@@ -441,50 +446,61 @@ export const PriceModeBadges = ({ item, isSession }) => (
     </div>
   ) : (
   <div className="mt-2 space-y-1.5">
-    <div className="flex items-center justify-between rounded-lg bg-emerald-50 px-2.5 py-1.5">
-      <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-800">
-        <Wifi className="h-3.5 w-3.5" />Online
-      </span>
-      <span className="text-sm font-extrabold text-emerald-900">
-        ₹{isSession ? (item.price_online ?? 0) * (item.sessions_online ?? 0) : (item.price_online ?? 0)}
-      </span>
-    </div>
-    <div className="flex items-center justify-between rounded-lg bg-amber-50 px-2.5 py-1.5">
-      <span className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-800">
-        <MapPin className="h-3.5 w-3.5" />Offline
-      </span>
-      <span className="text-sm font-extrabold text-amber-900">
-        ₹{isSession ? (item.price_offline ?? 0) * (item.sessions_offline ?? 0) : (item.price_offline ?? 0)}
-      </span>
-    </div>
+    {mode !== "offline" && (
+      <div className="flex items-center justify-between rounded-lg bg-emerald-50 px-2.5 py-1.5">
+        <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-800">
+          <Wifi className="h-3.5 w-3.5" />Online
+        </span>
+        <span className="text-sm font-extrabold text-emerald-900">
+          ₹{isSession ? (item.price_online ?? 0) * (item.sessions_online ?? 0) : (item.price_online ?? 0)}
+        </span>
+      </div>
+    )}
+    {mode !== "online" && (
+      <div className="flex items-center justify-between rounded-lg bg-amber-50 px-2.5 py-1.5">
+        <span className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-800">
+          <MapPin className="h-3.5 w-3.5" />Offline
+        </span>
+        <span className="text-sm font-extrabold text-amber-900">
+          ₹{isSession ? (item.price_offline ?? 0) * (item.sessions_offline ?? 0) : (item.price_offline ?? 0)}
+        </span>
+      </div>
+    )}
   </div>
   )
 );
 
-export const SessionPriceBoxes = ({ item, testid }) => (
-  <div className="grid grid-cols-2 gap-2" data-testid={testid}>
-    <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 p-3">
-      <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-emerald-800"><Wifi className="h-3.5 w-3.5" />Online Mode</p>
-      <div className="space-y-1.5 text-xs text-emerald-800">
-        <div className="flex items-center justify-between"><span>Per Session</span><span className="font-bold">₹{item.price_online ?? 0}</span></div>
-        <div className="flex items-center justify-between"><span>Total Sessions</span><span className="font-bold">{item.sessions_online ?? 0} Sessions</span></div>
-        <div className="mt-1 flex items-center justify-between border-t border-emerald-200 pt-1.5">
-          <span className="font-semibold">Total Amount</span>
-          <span className="text-sm font-extrabold text-emerald-900">₹{(item.price_online ?? 0) * (item.sessions_online ?? 0)}</span>
+// Same mode convention as PriceModeBadges — "all" (default) keeps both boxes, exactly
+// what every existing caller (ViewItemModal, BranchStoreBoard) still gets since neither
+// passes it.
+export const SessionPriceBoxes = ({ item, testid, mode = "all" }) => (
+  <div className={`grid gap-2 ${mode === "all" ? "grid-cols-2" : "grid-cols-1"}`} data-testid={testid}>
+    {mode !== "offline" && (
+      <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 p-3">
+        <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-emerald-800"><Wifi className="h-3.5 w-3.5" />Online Mode</p>
+        <div className="space-y-1.5 text-xs text-emerald-800">
+          <div className="flex items-center justify-between"><span>Per Session</span><span className="font-bold">₹{item.price_online ?? 0}</span></div>
+          <div className="flex items-center justify-between"><span>Total Sessions</span><span className="font-bold">{item.sessions_online ?? 0} Sessions</span></div>
+          <div className="mt-1 flex items-center justify-between border-t border-emerald-200 pt-1.5">
+            <span className="font-semibold">Total Amount</span>
+            <span className="text-sm font-extrabold text-emerald-900">₹{(item.price_online ?? 0) * (item.sessions_online ?? 0)}</span>
+          </div>
         </div>
       </div>
-    </div>
-    <div className="rounded-xl border border-amber-100 bg-amber-50/60 p-3">
-      <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-amber-800"><MapPin className="h-3.5 w-3.5" />Offline Mode</p>
-      <div className="space-y-1.5 text-xs text-amber-800">
-        <div className="flex items-center justify-between"><span>Per Session</span><span className="font-bold">₹{item.price_offline ?? 0}</span></div>
-        <div className="flex items-center justify-between"><span>Total Sessions</span><span className="font-bold">{item.sessions_offline ?? 0} Sessions</span></div>
-        <div className="mt-1 flex items-center justify-between border-t border-amber-200 pt-1.5">
-          <span className="font-semibold">Total Amount</span>
-          <span className="text-sm font-extrabold text-amber-900">₹{(item.price_offline ?? 0) * (item.sessions_offline ?? 0)}</span>
+    )}
+    {mode !== "online" && (
+      <div className="rounded-xl border border-amber-100 bg-amber-50/60 p-3">
+        <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-amber-800"><MapPin className="h-3.5 w-3.5" />Offline Mode</p>
+        <div className="space-y-1.5 text-xs text-amber-800">
+          <div className="flex items-center justify-between"><span>Per Session</span><span className="font-bold">₹{item.price_offline ?? 0}</span></div>
+          <div className="flex items-center justify-between"><span>Total Sessions</span><span className="font-bold">{item.sessions_offline ?? 0} Sessions</span></div>
+          <div className="mt-1 flex items-center justify-between border-t border-amber-200 pt-1.5">
+            <span className="font-semibold">Total Amount</span>
+            <span className="text-sm font-extrabold text-amber-900">₹{(item.price_offline ?? 0) * (item.sessions_offline ?? 0)}</span>
+          </div>
         </div>
       </div>
-    </div>
+    )}
   </div>
 );
 
@@ -538,7 +554,7 @@ export const ViewItemModal = ({ item, kind, onClose, onEdit, canEdit = true }) =
 
 // Backs both Sessions sub-tabs; see PhysiotherapyPanel for why this is one component
 // with a category rather than two copies.
-const SessionsPhysiotherapyPanel = ({ category = "physiotherapy", reloadToken, toolbarSlot }) => {
+const SessionsPhysiotherapyPanel = ({ category = "physiotherapy", reloadToken, toolbarSlot, modeFilter = "all" }) => {
   const [items, setItems] = useState([]);
   const [showCreate, setShowCreate] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
@@ -614,7 +630,7 @@ const SessionsPhysiotherapyPanel = ({ category = "physiotherapy", reloadToken, t
                 {it.image_url && <img src={it.image_url} alt={it.name} className="h-[200px] w-full rounded-lg object-cover" />}
                 {it.description && <p className="line-clamp-2 text-xs text-slate-500">{it.description}</p>}
 
-                <SessionPriceBoxes item={it} testid={`session-item-${it.id}-highlights`} />
+                <SessionPriceBoxes item={it} mode={modeFilter} testid={`session-item-${it.id}-highlights`} />
               </CardContent>
             </Card>
           ))}
@@ -635,7 +651,7 @@ const SessionsPhysiotherapyPanel = ({ category = "physiotherapy", reloadToken, t
   );
 };
 
-const SessionsPanel = ({ reloadToken, toolbarSlot }) => {
+const SessionsPanel = ({ reloadToken, toolbarSlot, modeFilter = "all" }) => {
   const [sub, setSub] = useState("physiotherapy");
   return (
     <div className="space-y-4" data-testid="packages-panel-sessions">
@@ -656,8 +672,8 @@ const SessionsPanel = ({ reloadToken, toolbarSlot }) => {
         })}
       </div>
 
-      {sub === "physiotherapy" && <SessionsPhysiotherapyPanel reloadToken={reloadToken} toolbarSlot={toolbarSlot} />}
-      {sub === "fitness" && <SessionsPhysiotherapyPanel category="fitness" reloadToken={reloadToken} toolbarSlot={toolbarSlot} />}
+      {sub === "physiotherapy" && <SessionsPhysiotherapyPanel reloadToken={reloadToken} toolbarSlot={toolbarSlot} modeFilter={modeFilter} />}
+      {sub === "fitness" && <SessionsPhysiotherapyPanel category="fitness" reloadToken={reloadToken} toolbarSlot={toolbarSlot} modeFilter={modeFilter} />}
     </div>
   );
 };
@@ -670,7 +686,7 @@ const SessionsPanel = ({ reloadToken, toolbarSlot }) => {
  * rather than copied — two hundred lines duplicated would drift the first time either
  * was edited, and the ask was explicitly for the same create option, not a new one.
  */
-const PhysiotherapyPanel = ({ kind = "consultation", category = "physiotherapy", reloadToken, toolbarSlot }) => {
+const PhysiotherapyPanel = ({ kind = "consultation", category = "physiotherapy", reloadToken, toolbarSlot, modeFilter = "all" }) => {
   const cfg = PACKAGE_KINDS[kind] || PACKAGE_KINDS.consultation;
   const [items, setItems] = useState([]);
   const [showCreate, setShowCreate] = useState(false);
@@ -754,7 +770,7 @@ const PhysiotherapyPanel = ({ kind = "consultation", category = "physiotherapy",
                 {it.description && <p className="line-clamp-2 text-xs text-slate-500">{it.description}</p>}
 
                 <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-3" data-testid={`consultation-item-${it.id}-highlights`}>
-                  <PriceModeBadges item={it} isSession={false} />
+                  <PriceModeBadges item={it} isSession={false} mode={modeFilter} />
                   {it.duration_minutes && (
                     <div className="mt-1.5 flex items-center justify-between rounded-lg bg-sky-50 px-2.5 py-1.5">
                       <span className="inline-flex items-center gap-1.5 text-xs font-bold text-sky-800">
@@ -786,7 +802,7 @@ const PhysiotherapyPanel = ({ kind = "consultation", category = "physiotherapy",
   );
 };
 
-const ConsultationsPanel = ({ reloadToken, toolbarSlot }) => {
+const ConsultationsPanel = ({ reloadToken, toolbarSlot, modeFilter = "all" }) => {
   const [sub, setSub] = useState("physiotherapy");
   return (
     <div className="space-y-4" data-testid="packages-panel-consultations">
@@ -807,8 +823,8 @@ const ConsultationsPanel = ({ reloadToken, toolbarSlot }) => {
         })}
       </div>
 
-      {sub === "physiotherapy" && <PhysiotherapyPanel reloadToken={reloadToken} toolbarSlot={toolbarSlot} />}
-      {sub === "fitness" && <PhysiotherapyPanel category="fitness" reloadToken={reloadToken} toolbarSlot={toolbarSlot} />}
+      {sub === "physiotherapy" && <PhysiotherapyPanel reloadToken={reloadToken} toolbarSlot={toolbarSlot} modeFilter={modeFilter} />}
+      {sub === "fitness" && <PhysiotherapyPanel category="fitness" reloadToken={reloadToken} toolbarSlot={toolbarSlot} modeFilter={modeFilter} />}
     </div>
   );
 };
@@ -997,6 +1013,27 @@ const INVENTORY_TABS = new Set(["tablet", "supplementary", "equipment"]);
 // Machine is the only one left, and it has no backend at all yet.
 const BUILT_TABS = new Set(["consultations", "sessions", "diet", "history", "treatment", ...INVENTORY_TABS]);
 
+// TABS above stays a flat, unbroken export — BranchStoreBoard.jsx imports and filters it
+// for its own single-row layout, and reshaping it here would reshape that board too. This
+// grouping is Super Admin's own: which of those same keys sit under Services (the two
+// things a branch actually delivers, filterable by Online/Offline) versus Store (the
+// catalogue/retail side, which has no online/offline split of its own). History stands
+// apart from both, same as it always has.
+const SERVICE_TAB_KEYS = new Set(["consultations", "sessions"]);
+const STORE_TAB_KEYS = new Set(["diet", "tablet", "supplementary", "equipment", "vending_machine", "treatment"]);
+
+const SUPER_TABS = [
+  { key: "services", label: "Services" },
+  { key: "store", label: "Store" },
+  { key: "history", label: "History" },
+];
+
+const MODE_FILTERS = [
+  { key: "all", label: "All" },
+  { key: "offline", label: "Offline" },
+  { key: "online", label: "Online" },
+];
+
 /**
  * The stock shelves as Super Admin sees them.
  *
@@ -1113,6 +1150,14 @@ const SuperAdminInventoryPanel = ({ category, reloadToken }) => {
 };
 
 export const PackagesBoard = () => {
+  // Services (Consultations/Sessions) | Store (the catalogue tabs) | History — Super
+  // Admin's own grouping of the same items BranchStoreBoard.jsx still shows as one flat
+  // row; TABS itself is untouched so that board doesn't change shape.
+  const [superTab, setSuperTab] = useState("services");
+  // Which price Consultations/Sessions cards show — both (default), or just the one an
+  // Offline or Online Branch Admin actually needs. Store items carry no online/offline
+  // split of their own, so this only applies, and only shows, under Services.
+  const [modeFilter, setModeFilter] = useState("all");
   const [tab, setTab] = useState("consultations");
   // Bumped by Refresh and handed to whichever panel is open, so it refetches in place.
   const [reloadTick, setReloadTick] = useState(0);
@@ -1120,26 +1165,75 @@ export const PackagesBoard = () => {
   // ref object mutating in place never triggers that.
   const [createSlot, setCreateSlot] = useState(null);
 
+  const visibleTabs = TABS.filter((t) => (superTab === "services" ? SERVICE_TAB_KEYS.has(t.key) : STORE_TAB_KEYS.has(t.key)));
+
+  // Lands on the group's first tab rather than leaving `tab` pointed at a key the new
+  // group doesn't have — Store showing a blank sub-tab bar because `tab` was still
+  // "consultations" from before.
+  const selectSuperTab = (key) => {
+    setSuperTab(key);
+    if (key === "services") setTab("consultations");
+    else if (key === "store") setTab("diet");
+  };
+
   return (
     <div className="space-y-4" data-testid="packages-board">
       {/* No heading. The nav tab above already reads Services and Products, and the line
           under it only listed the tabs that follow it. */}
+      <div className="flex flex-wrap items-center gap-2" data-testid="packages-super-tabs">
+        {SUPER_TABS.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            onClick={() => selectSuperTab(t.key)}
+            className={`shrink-0 rounded-full border px-3.5 py-1.5 text-sm font-medium transition ${
+              superTab === t.key ? "border-sky-600 bg-sky-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"
+            }`}
+            data-testid={`packages-super-tab-${t.key}`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {superTab === "services" && (
+        <div className="flex flex-wrap items-center gap-2" data-testid="packages-mode-filter">
+          {MODE_FILTERS.map((m) => (
+            <button
+              key={m.key}
+              type="button"
+              onClick={() => setModeFilter(m.key)}
+              className={`shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition ${
+                modeFilter === m.key ? "border-sky-600 bg-sky-600 text-white" : "border-slate-200 bg-white text-slate-500 hover:border-sky-300 hover:text-sky-600"
+              }`}
+              data-testid={`packages-mode-filter-${m.key}`}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* A dropdown on a phone, the same control the Branch Admin store uses. Eight tabs
           wrapped to three rows there, which pushed the shelf being edited below the fold
-          before any of its items showed. Desktop keeps the bar.
+          before any of its items showed. Desktop keeps the bar. Neither one has anything
+          to pick under History — it has no sub-tabs of its own — so both drop out there;
+          Refresh and the Create slot stay put regardless, since History still refreshes.
 
           Refresh and Create ride alongside it. Create is not this component's to render —
           each panel owns its own, against its own item type — so the panel portals an
           icon-only copy into the slot at the end of this row. */}
       <div className="flex items-center gap-2 md:hidden">
-        <select
-          value={tab}
-          onChange={(e) => setTab(e.target.value)}
-          className="h-11 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700"
-          data-testid="packages-subtab-select"
-        >
-          {TABS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
-        </select>
+        {superTab !== "history" && (
+          <select
+            value={tab}
+            onChange={(e) => setTab(e.target.value)}
+            className="h-11 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700"
+            data-testid="packages-subtab-select"
+          >
+            {visibleTabs.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+          </select>
+        )}
         <Button
           onClick={() => setReloadTick((n) => n + 1)}
           title="Refresh"
@@ -1152,32 +1246,34 @@ export const PackagesBoard = () => {
         <div ref={setCreateSlot} className="flex shrink-0 items-center" data-testid="packages-create-slot" />
       </div>
 
-      <div className="hidden flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1 md:flex" data-testid="packages-subtabs">
-        {TABS.map((t) => {
-          const Icon = t.icon;
-          const active = tab === t.key;
-          return (
-            <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
-              data-testid={`packages-subtab-${t.key}`}
-              className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${active ? "bg-violet-50 text-violet-600" : "text-slate-600 hover:bg-slate-50"}`}
-            >
-              <Icon className="h-4 w-4" />{t.label}
-            </button>
-          );
-        })}
-      </div>
+      {superTab !== "history" && (
+        <div className="hidden flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1 md:flex" data-testid="packages-subtabs">
+          {visibleTabs.map((t) => {
+            const Icon = t.icon;
+            const active = tab === t.key;
+            return (
+              <button
+                key={t.key}
+                onClick={() => setTab(t.key)}
+                data-testid={`packages-subtab-${t.key}`}
+                className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${active ? "bg-violet-50 text-violet-600" : "text-slate-600 hover:bg-slate-50"}`}
+              >
+                <Icon className="h-4 w-4" />{t.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
-      {tab === "consultations" && <ConsultationsPanel reloadToken={reloadTick} toolbarSlot={createSlot} />}
-      {tab === "sessions" && <SessionsPanel reloadToken={reloadTick} toolbarSlot={createSlot} />}
-      {tab === "diet" && <PhysiotherapyPanel kind="diet" reloadToken={reloadTick} toolbarSlot={createSlot} />}
-      {tab === "history" && <HistoryPanel reloadToken={reloadTick} />}
-      {tab === "treatment" && <TreatmentTypesBoard />}
-      {INVENTORY_TABS.has(tab) && <SuperAdminInventoryPanel key={tab} category={tab} reloadToken={reloadTick} />}
+      {superTab !== "history" && tab === "consultations" && <ConsultationsPanel reloadToken={reloadTick} toolbarSlot={createSlot} modeFilter={modeFilter} />}
+      {superTab !== "history" && tab === "sessions" && <SessionsPanel reloadToken={reloadTick} toolbarSlot={createSlot} modeFilter={modeFilter} />}
+      {superTab !== "history" && tab === "diet" && <PhysiotherapyPanel kind="diet" reloadToken={reloadTick} toolbarSlot={createSlot} />}
+      {superTab === "history" && <HistoryPanel reloadToken={reloadTick} />}
+      {superTab !== "history" && tab === "treatment" && <TreatmentTypesBoard />}
+      {superTab !== "history" && INVENTORY_TABS.has(tab) && <SuperAdminInventoryPanel key={tab} category={tab} reloadToken={reloadTick} />}
       {/* Whatever has no panel yet. A tab graduates by being handled above rather than by
           another branch being added here. */}
-      {!BUILT_TABS.has(tab) && TABS.map((t) => tab === t.key && (
+      {superTab !== "history" && !BUILT_TABS.has(tab) && visibleTabs.map((t) => tab === t.key && (
         <PlaceholderPanel key={t.key} label={t.label} testid={`packages-panel-${t.key}`} />
       ))}
     </div>

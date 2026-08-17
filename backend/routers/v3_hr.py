@@ -684,6 +684,21 @@ async def add_custom_role(payload: CustomRoleCreate, _: V3UserOut = Depends(v3_r
     return role
 
 
+@router.delete("/roles/{name}")
+async def delete_custom_role(name: str, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    """Removes a custom role from the picker. Built-in roles (DEFAULT_ROLES) aren't
+    stored in custom_roles and can't be removed this way — deleting one of those would
+    break the exact-slug matching several boards depend on (BRANCH_ADMIN_ROLES,
+    PHYSIO_ROLES, etc. in deps.py). A user still holding this role keeps it on their own
+    account; they just won't see it as a pickable option going forward until reassigned."""
+    if name in DEFAULT_ROLES:
+        raise HTTPException(status_code=400, detail="Built-in roles can't be deleted")
+    result = await v3_col("custom_roles").delete_one({"name": name})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Role not found")
+    return {"message": "Role deleted"}
+
+
 @router.get("/departments")
 async def list_departments(_: V3UserOut = Depends(v3_require_roles("super_admin", "marketing_head"))):
     depts = await _seeded_departments()

@@ -16,7 +16,7 @@ import { MilkDateInput } from "@/components/ui/milk-calendar";
 
 const TABS = [
   { key: "summary", label: "Summary", icon: BarChart3 },
-  { key: "staff", label: "Staff", icon: Users },
+  { key: "staff", label: "Team", icon: Users },
   { key: "performance", label: "Performance", icon: Activity },
   { key: "head_physio", label: "Experts", icon: Stethoscope },
   { key: "lead_management", label: "Lead Management", icon: ArrowLeftRight },
@@ -75,7 +75,7 @@ export const BranchDetailPage = ({ branchId, onBack, readOnly = false }) => {
       </div>
 
       {tab === "summary" && <SummaryTab data={data} branchId={branchId} onChanged={load} readOnly={readOnly} />}
-      {tab === "staff" && <StaffTab staff={data.staff} />}
+      {tab === "staff" && <TeamTab staff={data.staff} branchId={branchId} />}
       {tab === "performance" && <PerformanceTab perf={data.performance} />}
       {tab === "head_physio" && <HeadPhysioTab hp={data.head_physio_section} branchId={branchId} onChanged={load} readOnly={readOnly} />}
       {tab === "lead_management" && <LeadManagementTab branch={b} branchId={branchId} onChanged={load} readOnly={readOnly} />}
@@ -302,50 +302,58 @@ const HeaderLeadControl = ({ branch, onChanged, readOnly = false, preSalesMember
   );
 };
 
-// ---------- Staff tab ----------
+// ---------- Team tab ----------
 
-const StaffTab = ({ staff }) => {
-  const [section, setSection] = useState("branch_admins");
+/**
+ * Everyone working this branch, laid out the way the Experts tab lays out its
+ * calendars — a card per group, always open, rather than a row of counters you have
+ * to click through one at a time. Pre Sales is its own card here (fetched separately,
+ * same call the Lead Management tab's assignee picker uses) since a branch's leads
+ * often start on that desk before ever reaching anyone else in this list.
+ */
+const TeamTab = ({ staff, branchId }) => {
+  const [preSalesMembers, setPreSalesMembers] = useState([]);
+  useEffect(() => {
+    bmPreSalesMembers(branchId).then(setPreSalesMembers).catch(() => setPreSalesMembers([]));
+  }, [branchId]);
+
   const groups = [
-    { key: "branch_admins", label: "Branch Admins", items: staff.branch_admins, color: "#0ea5e9" },
-    { key: "head_physios", label: "CONSULTANTS", items: staff.head_physios, color: "#a855f7" },
-    { key: "physios", label: "Physios", items: staff.physios, color: "#22c55e" },
-    { key: "doctors", label: "Doctors (Calendar)", items: staff.doctors, color: "#f59e0b" },
+    { key: "pre_sales", label: "Pre Sales", items: preSalesMembers },
+    { key: "branch_admins", label: "Branch Admin", items: staff.branch_admins },
+    { key: "head_physios", label: "Consultants", items: staff.head_physios },
+    { key: "physios", label: "Physio", items: staff.physios },
   ];
-  const current = groups.find((g) => g.key === section);
+
   return (
-    <div className="space-y-4" data-testid="branch-staff-tab">
-      <div className="grid gap-2 sm:grid-cols-4">
-        {groups.map((g) => (
-          <button key={g.key} onClick={() => setSection(g.key)} className={`rounded-xl border p-4 text-left transition ${section === g.key ? "border-slate-900 shadow" : "border-slate-200 hover:border-slate-300"}`} data-testid={`branch-staff-${g.key}-card`}>
-            <p className="text-xs text-slate-500">{g.label}</p>
-            <p className="mt-1 text-2xl font-bold" style={{ color: g.color }}>{g.items.length}</p>
-          </button>
-        ))}
-      </div>
-      <Card>
-        <CardHeader><CardTitle className="text-base">{current.label}</CardTitle></CardHeader>
-        <CardContent>
-          {current.items.length === 0 ? <p className="text-sm text-slate-400">No {current.label.toLowerCase()} yet.</p> : (
-            <div className="grid gap-2 md:grid-cols-2">
-              {current.items.map((u) => (
-                <div key={u.id} className="rounded-md border border-slate-200 p-3" data-testid={`branch-staff-row-${u.id}`}>
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-600">
+    <div className="grid gap-3 sm:grid-cols-2" data-testid="branch-team-tab">
+      {groups.map((g) => (
+        <Card key={g.key} data-testid={`branch-team-${g.key}`}>
+          <CardHeader className="flex flex-row items-center justify-between gap-2">
+            <CardTitle className="text-base">{g.label}</CardTitle>
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">{g.items.length}</span>
+          </CardHeader>
+          <CardContent>
+            {g.items.length === 0 ? (
+              <p className="text-sm text-slate-400">No {g.label.toLowerCase()} yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {g.items.map((u) => (
+                  <div key={u.id} className="flex items-center gap-3 rounded-md border border-slate-200 p-3" data-testid={`branch-team-${g.key}-${u.id}`}>
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-600">
                       {(u.full_name || "?").split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase()}
                     </div>
-                    <div className="flex-1">
-                      <p className="text-sm font-semibold text-slate-800">{u.full_name}</p>
-                      <p className="text-xs text-slate-500">{u.email || u.specialization || ""}</p>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-slate-800">{u.full_name}</p>
+                      <p className="truncate text-xs text-slate-500">{u.specialization || u.email || ""}</p>
                     </div>
-                    {u.profile_type && <span className="rounded bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-600">{u.profile_type}</span>}
+                    {u.profile_type && <span className="shrink-0 rounded bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-600">{u.profile_type}</span>}
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      ))}
     </div>
   );
 };

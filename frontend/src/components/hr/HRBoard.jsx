@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import {
   hrDashboard, hrEmployees, hrCreateEmployee, hrUpdateEmployee, hrDeleteEmployee,
-  hrUsers, hrCreateUser, hrUpdateUser, hrResetPassword, hrDeactivateUser, hrActivateUser, hrDeleteUserPermanent, hrUpdateUserRole, hrMeta, hrAddCustomRole,
+  hrUsers, hrCreateUser, hrUpdateUser, hrResetPassword, hrDeactivateUser, hrActivateUser, hrDeleteUserPermanent, hrUpdateUserRole, hrMeta, hrAddCustomRole, hrDeleteCustomRole,
   hrDepartments, hrCreateDepartment, hrRenameDepartment, hrDeleteDepartment, hrAddDesignation, hrRenameDesignation, hrReorderDesignations,
   getBranches, getVerticals,
 } from "@/lib/api";
@@ -977,6 +977,25 @@ const CreateRoleModal = ({ meta, reloadMeta, onClose }) => {
   const [label, setLabel] = useState("");
   const [color, setColor] = useState("sky");
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(null); // role name currently being removed
+  // Only a custom role can be removed here — a built-in (super_admin, branch_admin, ...)
+  // is matched by exact slug all over the backend (BRANCH_ADMIN_ROLES, PHYSIO_ROLES), and
+  // deleting one of those out from under that matching would break every board keyed on it.
+  const customRoleNames = useMemo(() => new Set((meta.custom_roles || []).map((r) => r.name)), [meta.custom_roles]);
+
+  const removeRole = async (name, roleLbl) => {
+    if (!window.confirm(`Delete the "${roleLbl}" role? Anyone still holding it keeps it on their account, but it won't be pickable going forward until reassigned.`)) return;
+    setDeleting(name);
+    try {
+      await hrDeleteCustomRole(name);
+      toast.success(`"${roleLbl}" deleted`);
+      await reloadMeta?.();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Failed to delete role");
+    }
+    setDeleting(null);
+  };
+
   // Which hues are already spoken for, across built-ins and custom roles alike. Shown
   // rather than blocked: two roles may reasonably share a colour, but picking one that
   // clashes with an existing role by accident is the thing worth warning about.
@@ -1077,9 +1096,24 @@ const CreateRoleModal = ({ meta, reloadMeta, onClose }) => {
             <div className="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto">
               {existing.map((r) => {
                 const name = typeof r === "string" ? r : (r.name || "");
+                const lbl = roleLabel(name);
+                const removable = customRoleNames.has(name);
                 return (
-                  <span key={name} className={`rounded-md border px-2 py-0.5 text-[10px] font-semibold ${roleClasses(name)}`}>
-                    {roleLabel(name)}
+                  <span key={name} className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] font-semibold ${roleClasses(name)}`} data-testid={`hr-create-role-existing-${name}`}>
+                    {lbl}
+                    {removable && (
+                      <button
+                        type="button"
+                        onClick={() => removeRole(name, lbl)}
+                        disabled={deleting === name}
+                        className="rounded-full p-0.5 hover:bg-black/10 disabled:opacity-50"
+                        title={`Delete "${lbl}"`}
+                        aria-label={`Delete "${lbl}"`}
+                        data-testid={`hr-create-role-delete-${name}`}
+                      >
+                        <X className="h-2.5 w-2.5" />
+                      </button>
+                    )}
                   </span>
                 );
               })}
