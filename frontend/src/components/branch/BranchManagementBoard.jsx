@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Plus, Pencil, Trash2, Archive, ArchiveRestore, X, Users, MapPin, Phone, Mail, TrendingUp, RefreshCw, Layers, LayoutDashboard, ChevronDown, ChevronUp, BadgeIndianRupee, Building2, Stethoscope, BarChart3, CalendarDays } from "lucide-react";
+import { Plus, Pencil, Trash2, Archive, ArchiveRestore, X, Users, MapPin, Phone, Mail, RefreshCw, Layers, LayoutDashboard, ChevronDown, ChevronUp, BadgeIndianRupee, BarChart3, CalendarDays } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,7 +11,6 @@ import {
   getVerticals, createVertical, deleteVertical, getDoctors,
   getDashboardOverview, bmListArchived, bmArchiveBranch, bmRestoreBranch,
 } from "@/lib/api";
-import { StatTile } from "@/components/ui/stat-tile";
 import { MilkDateInput } from "@/components/ui/milk-calendar";
 import { BranchDetailPage } from "@/components/branch/BranchDetailPage";
 import { BranchFormDialogV2 } from "@/components/branch/BranchFormDialogV2";
@@ -436,7 +435,6 @@ const CreationTab = ({ onDrillIn, actionSlot }) => {
   const [editing, setEditing] = useState(null);
   const [reassigning, setReassigning] = useState(null);
   const [showServiceTypes, setShowServiceTypes] = useState(false);
-  const [physioCount, setPhysioCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [modeFilter, setModeFilter] = useState("all"); // "all" | "online" | "offline"
   const [archiveTarget, setArchiveTarget] = useState(null);
@@ -447,15 +445,15 @@ const CreationTab = ({ onDrillIn, actionSlot }) => {
   const load = useCallback(async ({ notify = false } = {}) => {
     setLoading(true);
     try {
-      const [bs, cs, ds] = await Promise.all([
+      // The unscoped getDoctors that used to run here went with the Total Physio tile it
+      // counted for. It pulled every doctor in the organisation on each load and refresh
+      // to produce one number, and nothing else on this tab read it.
+      const [bs, cs] = await Promise.all([
         bmList(),
         hrBranchAdminCandidates().catch(() => []),
-        // Unscoped, so as super_admin this is every doctor in the org.
-        getDoctors().catch(() => []),
       ]);
       setBranches(bs);
       setCandidates(cs);
-      setPhysioCount((ds || []).filter((d) => d.profile_type === "physio").length);
       if (notify) toast.success("Refreshed");
     } catch (e) {
       // bmList had no catch of its own, so a failure rejected this whole function
@@ -526,19 +524,17 @@ const CreationTab = ({ onDrillIn, actionSlot }) => {
     <div className="space-y-4" data-testid="bm-creation-tab">
       {actionSlot ? createPortal(actions, actionSlot) : <div className="flex items-center justify-end gap-2">{actions}</div>}
 
-      {/* The shared money-board tile: corner icon over a colour disc, the figure in the
-          card's own colour. It was a bordered box with a coloured left edge, the last card
-          style on the OS still doing it that way. */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <StatTile label="Total Branches" value={branches.length} icon={Building2} color="#0ea5e9" testid="bm-kpi-total" />
-        <StatTile label="Total Physio" value={physioCount} icon={Users} color="#22c55e" testid="bm-kpi-available" />
-        <StatTile label="Active Leads" value={branches.reduce((a, b) => a + (b.leads_open || 0), 0)} icon={TrendingUp} color="#f59e0b" testid="bm-kpi-leads" />
-        <StatTile label="Total Doctors" value={branches.reduce((a, b) => a + (b.doctors_count || 0), 0)} icon={Stethoscope} color="#a855f7" testid="bm-kpi-doctors" />
-      </div>
+      {/* The four totals that sat here are gone. MANAGER is the list of branches and who
+          runs each one, and every figure they carried is already on the cards below —
+          branch count is the number of cards, and leads and doctors are on each card and
+          add up in the eye. A row of tiles that only restates the list under it costs a
+          screenful before the list starts. */}
 
       {/* Pills, not a dropdown — the online/offline split used to be a hidden option inside
-          "All Branches" that nothing on screen hinted at. */}
-      <div className="flex flex-wrap items-center justify-end gap-2" data-testid="bm-mode-filter">
+          "All Branches" that nothing on screen hinted at.
+          Left, so it starts on the same edge as the cards it filters; right-aligned it read
+          as belonging to the toolbar above rather than to the list below. */}
+      <div className="flex flex-wrap items-center justify-start gap-2" data-testid="bm-mode-filter">
         {[["all", "All Branches"], ["offline", "Offline"], ["online", "Online"]].map(([key, label]) => (
           <button
             key={key}

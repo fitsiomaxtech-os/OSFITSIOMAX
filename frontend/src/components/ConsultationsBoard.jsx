@@ -495,6 +495,14 @@ const FEE_TABS = [
     paid: (l) => Number(l.package_paid) || 0,
     item: (l) => l.package_name || l.consultation_item_name || "",
     mode: (l) => l.package_payment_mode || "",
+    // What a patient on this tab may go on to buy. A branch sells in one order —
+    // consultation, then treatment, then diet — so each tab's useful question is about the
+    // rung after it: of the people who paid to be seen, who bought a package and who did
+    // not. Asking it the other way round (of the treatment buyers, who paid a consultation)
+    // answers nothing, because paying for the consultation is how they got here.
+    //
+    // Diet is the last rung and so offers nothing: there is no fourth thing to sell.
+    crossSell: ["treatment", "diet"],
   },
   {
     key: "treatment",
@@ -503,6 +511,7 @@ const FEE_TABS = [
     paid: (l) => Number(l.treatment_fee_paid) || 0,
     item: (l) => l.session_package_name || "",
     mode: (l) => l.treatment_fee_payment_mode || "",
+    crossSell: ["diet"],
   },
   {
     key: "diet",
@@ -511,6 +520,7 @@ const FEE_TABS = [
     paid: (l) => Number(l.diet_fee_paid) || 0,
     item: (l) => l.diet_package_name || "",
     mode: (l) => l.diet_fee_payment_mode || "",
+    crossSell: [],
   },
 ];
 
@@ -817,6 +827,45 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   const [feeTab, setFeeTab] = useState("consultation");
   const activeFee = FEE_TABS.find((t) => t.key === feeTab) || FEE_TABS[0];
 
+  // What the people on this tab went on to buy — see `crossSell` on FEE_TABS. Consultation
+  // asks it of treatment and of diet; Treatment asks it of diet; Diet, being the last thing
+  // sold, asks it of nothing and shows no picker.
+  //
+  // "" is everyone on the tab, which is the list its own count and total describe, so the
+  // tab always opens on the money view and a narrower one is a deliberate ask. Cleared
+  // whenever the tab changes for the same reason.
+  const [crossFilter, setCrossFilter] = useState(""); // "" | "<feeKey>:yes" | "<feeKey>:no"
+  // Memoised for its identity, not its cost: the `|| []` fallback is a fresh array on every
+  // render, which would re-run the counts below on every keystroke in the search box.
+  const crossSell = useMemo(
+    () => (showDiscountColumn ? activeFee.crossSell || [] : []),
+    [showDiscountColumn, activeFee],
+  );
+  const showCrossFilter = crossSell.length > 0;
+  useEffect(() => { setCrossFilter(""); }, [feeTab]);
+
+  // Everyone who paid this tab's own fee — the list before the picker narrows it, and the
+  // denominator every option's count is taken from.
+  const feeBase = useMemo(
+    () => (showDiscountColumn ? inStage.filter((l) => activeFee.paid(l) > 0) : inStage),
+    [inStage, showDiscountColumn, activeFee],
+  );
+
+  // Counts sit on the options rather than on the tab: the tab's badge is the money view —
+  // how many paid, and how much — and a badge that flipped to a non-payer count would no
+  // longer match the total printed underneath it.
+  const crossCounts = useMemo(() => {
+    const out = { "": feeBase.length };
+    for (const key of crossSell) {
+      const other = FEE_TABS.find((t) => t.key === key);
+      if (!other) continue;
+      const bought = feeBase.filter((l) => other.paid(l) > 0).length;
+      out[`${key}:yes`] = bought;
+      out[`${key}:no`] = feeBase.length - bought;
+    }
+    return out;
+  }, [feeBase, crossSell]);
+
   // Counted off the stage's own rows so each tab says how many are behind it before it is
   // opened — an empty Diet tab should read as empty from the outside, not on arrival.
   const feeCounts = useMemo(() => {
@@ -833,11 +882,28 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     return out;
   }, [inStage, showDiscountColumn]);
 
+  // Both halves of the picker can legitimately come back empty, and they mean opposite
+  // things — "nobody upgraded" versus "everybody did" — so the empty row says which.
+  const crossEmptyMessage = useMemo(() => {
+    if (!crossFilter) return "";
+    const [key, want] = crossFilter.split(":");
+    const other = FEE_TABS.find((t) => t.key === key);
+    if (!other) return "";
+    const noun = other.label.toLowerCase();
+    const base = activeFee.label.toLowerCase();
+    return want === "yes"
+      ? `Nobody who paid for ${base} has bought ${noun} yet.`
+      : `Everyone who paid for ${base} has also bought ${noun}.`;
+  }, [crossFilter, activeFee]);
+
   // Outside Fee Collected the tabs do not exist, so the stage's rows pass through whole.
-  const filtered = useMemo(
-    () => (showDiscountColumn ? inStage.filter((l) => activeFee.paid(l) > 0) : inStage),
-    [inStage, showDiscountColumn, activeFee],
-  );
+  const filtered = useMemo(() => {
+    if (!showDiscountColumn || !crossFilter) return feeBase;
+    const [key, want] = crossFilter.split(":");
+    const other = FEE_TABS.find((t) => t.key === key);
+    if (!other) return feeBase;
+    return feeBase.filter((l) => (want === "yes" ? other.paid(l) > 0 : other.paid(l) === 0));
+  }, [feeBase, showDiscountColumn, crossFilter]);
 
   // Stage counts for the head bar — derived client-side from the Date Filter/search-only
   // list so they always match whichever pipeline (branch vs. head physio) is active for
@@ -2138,7 +2204,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
           Above both the phone cards and the desk table, because it governs both: it filters
           `filtered`, which each of them renders. */}
       {showDiscountColumn && (
-        <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-slate-200 bg-white p-1" data-testid="cons-fee-tabs">
+        // The row was three pills against a wide empty white band. The purchased / not
+        // purchased picker takes that space at the far end, which both fills it and puts
+        // the two controls in reading order: pick the fee, then pick which half of it.
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="cons-fee-tabs">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
           {FEE_TABS.map((t) => {
             const on = t.key === activeFee.key;
             return (
@@ -2162,6 +2232,37 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               </button>
             );
           })}
+          </div>
+
+          {/* What the people on this tab went on to buy — see `crossSell` on FEE_TABS.
+              Each option carries its own count, so the size of the answer is visible
+              before choosing it and no number here contradicts the tab's own badge. */}
+          {showCrossFilter && (
+            <label className="flex shrink-0 items-center gap-1.5 pr-1" data-testid="cons-cross-filter">
+              <ClipboardList className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+              <select
+                value={crossFilter}
+                onChange={(e) => setCrossFilter(e.target.value)}
+                className="max-w-[17rem] rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold text-slate-700"
+                style={{ color: crossFilter ? undefined : activeFee.tone }}
+                data-testid="cons-cross-select"
+              >
+                <option value="">All {activeFee.label} ({crossCounts[""] ?? 0})</option>
+                {crossSell.map((key) => {
+                  const other = FEE_TABS.find((t) => t.key === key);
+                  if (!other) return null;
+                  return [
+                    <option key={`${key}:yes`} value={`${key}:yes`}>
+                      {other.label} Purchased ({crossCounts[`${key}:yes`] ?? 0})
+                    </option>,
+                    <option key={`${key}:no`} value={`${key}:no`}>
+                      Non {other.label} Purchased ({crossCounts[`${key}:no`] ?? 0})
+                    </option>,
+                  ];
+                })}
+              </select>
+            </label>
+          )}
         </div>
       )}
 
@@ -2373,9 +2474,14 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     // An empty tab is not an empty stage: saying "no leads in consultations"
                     // under a Diet tab reads as the board being broken rather than as nobody
                     // having bought a diet plan.
-                    : showDiscountColumn
-                      ? `No ${activeFee.label.toLowerCase()} fee collected${stageFilter ? "" : " yet"}.`
-                      : "No leads in consultations yet. Book an appointment with a CONSULTANT to populate this list."}
+                    : crossFilter
+                      // Said as the answer to the question that was asked. An empty upsell
+                      // queue is the good outcome — everyone took the package — and must not
+                      // read as a filter that came back broken.
+                      ? crossEmptyMessage
+                      : showDiscountColumn
+                        ? `No ${activeFee.label.toLowerCase()} fee collected${stageFilter ? "" : " yet"}.`
+                        : "No leads in consultations yet. Book an appointment with a CONSULTANT to populate this list."}
                 </td></tr>
               )}
             </tbody>
