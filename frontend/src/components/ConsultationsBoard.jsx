@@ -2850,34 +2850,93 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 </Button>
               ) : null;
 
-              // "Diet Appointment" sits beside Assign Physio, but it is the other kind of
-              // act: it books a consultation, the way a Head Physio consultation is booked,
-              // rather than handing the patient to someone who will deliver a course.
+              // Diet, one button, one strict sequence: the Diet Fee first, then the
+              // Nutrition Coach + their appointment — can't reach assignment until the fee
+              // is in. Routes to the same two flows as before (openDietFeeDraft /
+              // openDietModal), just gated behind one entry point instead of two sitting
+              // side by side, where either could be done first or skipped.
               //
               // Offered from the moment the Consultation Fee is in, and on every path.
               // Diet normally follows treatment, but a patient can come for a diet
               // consultation and nothing else, so it never waits on a physio or a package.
-              //
-              // Deliberately NOT gated on diet_recommended. Diet is never compulsory; that
-              // flag records what the Head Physio advised on the day, and a patient who
-              // asks for a plan a week later would otherwise have no way in. Booking sets
-              // the flag itself, so the coach's queue agrees with the booking either way.
+              const dietFeePaid = selectedLead.diet_fee_paid != null;
+              const dietAssigned = !!selectedLead.diet_coach_id;
               const dietBooked = !!selectedLead.diet_appointment_at;
               const DietButton = selectedLead.package_paid != null ? (
                 <Button
                   size="sm"
-                  variant={dietBooked ? "outline" : undefined}
-                  className={`${dietBooked
+                  variant={dietFeePaid && dietBooked ? "outline" : undefined}
+                  className={`${dietFeePaid && dietBooked
                     ? "border-orange-200 text-orange-700 hover:bg-orange-50"
                     : "bg-orange-500 text-white hover:bg-orange-600"} ${ACT_BTN}`}
-                  onClick={openDietModal}
+                  onClick={!dietFeePaid ? openDietFeeDraft : openDietModal}
                   data-testid="cons-open-diet-assign"
                 >
                   <Salad className="mr-1 h-3.5 w-3.5" />{" "}
-                  {dietBooked
-                    ? <Lbl full="Reschedule Diet" short="Diet" />
-                    : <Lbl full="Diet Appointment" short="Diet Appt" />}
+                  {!dietFeePaid
+                    ? <Lbl full="Collect Diet Fee" short="Diet Fee" />
+                    : !dietBooked
+                    ? <Lbl full="Assign Nutritionist" short="Assign" />
+                    : <Lbl full="Reschedule Diet" short="Diet" />}
                 </Button>
+              ) : null;
+
+              // The pipeline the lead already carries (diet_stage, diet_consultation_report
+              // written by the coach) made visible here — where Branch/Super Admin already
+              // are — instead of only on the Nutrition Coach's own board.
+              const DietStatus = (dietFeePaid || dietAssigned) ? (
+                <div className="mt-3 border-t border-indigo-100 pt-3" data-testid="cons-diet-status">
+                  <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-orange-600">
+                    <Salad className="h-3.5 w-3.5" /> Diet
+                  </p>
+                  <div className="space-y-1.5 text-sm">
+                    {dietFeePaid && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-slate-500">Diet Package</span>
+                        <span className="font-semibold text-slate-800">
+                          {selectedLead.diet_package_name || "—"}{selectedLead.diet_package_mode ? ` · ${selectedLead.diet_package_mode}` : ""}
+                        </span>
+                      </div>
+                    )}
+                    {dietFeePaid && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-slate-500">Diet Fee</span>
+                        <span className="font-semibold text-slate-800">
+                          Rs.{selectedLead.diet_fee_paid}
+                          <span className="ml-1 capitalize text-emerald-600">({selectedLead.diet_fee_payment_mode})</span>
+                        </span>
+                      </div>
+                    )}
+                    {selectedLead.diet_coach_name && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-slate-500">Nutritionist</span>
+                        <span className="font-semibold text-slate-800">{selectedLead.diet_coach_name}</span>
+                      </div>
+                    )}
+                    {selectedLead.diet_appointment_at && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-slate-500">Appointment</span>
+                        <span className="font-semibold text-slate-800">
+                          {dayLabel(selectedLead.diet_appointment_at.split("T")[0])} at {to12h(selectedLead.diet_appointment_at.split("T")[1])}
+                        </span>
+                      </div>
+                    )}
+                    {selectedLead.diet_stage && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-slate-500">Stage</span>
+                        <span className="font-semibold text-slate-800">{selectedLead.diet_stage}</span>
+                      </div>
+                    )}
+                  </div>
+                  {selectedLead.diet_consultation_report ? (
+                    <div className="mt-2 rounded-md border border-orange-100 bg-orange-50/60 p-2" data-testid="cons-diet-chart">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-orange-700">Diet Chart</p>
+                      <p className="mt-1 whitespace-pre-wrap text-xs text-slate-700">{selectedLead.diet_consultation_report}</p>
+                    </div>
+                  ) : dietAssigned && (
+                    <p className="mt-2 text-[11px] text-slate-500">Diet Chart — the Nutrition Coach hasn't written it up yet.</p>
+                  )}
+                </div>
               ) : null;
 
               const panel = (() => {
@@ -2995,62 +3054,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     </div>
                   );
 
-                  // The third fee, below the Treatment Fee it normally follows. Rendered on
-                  // both paths — a "Consultation Only" patient can still want a diet plan,
-                  // and diet is optional for everyone, so this never waits on a treatment.
-                  const dietFeePaid = selectedLead.diet_fee_paid != null;
-                  const DietFeeSection = (
-                    <div className="mt-3 border-t border-indigo-100 pt-3" data-testid="cons-diet-fee-section">
-                      <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-orange-600">
-                        <Salad className="h-3.5 w-3.5" /> Diet Consultation Fee
-                      </p>
-                      {dietFeePaid ? (
-                        <>
-                          <div className="space-y-1.5 text-sm">
-                            <div className="flex items-center justify-between">
-                              <span className="text-xs text-slate-500">Diet Package</span>
-                              <span className="font-semibold text-slate-800">
-                                {selectedLead.diet_package_name || "—"}
-                                {selectedLead.diet_package_mode ? ` · ${selectedLead.diet_package_mode}` : ""}
-                              </span>
-                            </div>
-                            <div className="flex items-center justify-between">
-                              <span className="text-xs text-slate-500">Diet Fee</span>
-                              <span className="font-semibold text-slate-800">
-                                Rs.{selectedLead.diet_fee_paid}
-                                <span className="ml-1 capitalize text-emerald-600">({selectedLead.diet_fee_payment_mode})</span>
-                              </span>
-                            </div>
-                          </div>
-                          <p className="mt-1 flex items-center gap-1 text-[11px] font-medium text-emerald-600" data-testid="cons-diet-fee-already-collected">
-                            <CheckCircle2 className="h-3 w-3" /> Already Collected
-                          </p>
-                        </>
-                      ) : (
-                        <p className="text-[11px] text-slate-500" data-testid="cons-diet-fee-not-collected">
-                          Not collected. Optional — only if this patient is taking a diet plan.
-                        </p>
-                      )}
-                    </div>
-                  );
-
-                  // Sits with the money it collects, in the panel's one action row.
-                  const DietFeeButton = (
-                    <Button
-                      size="sm"
-                      variant={dietFeePaid ? "outline" : undefined}
-                      className={`${dietFeePaid
-                        ? "border-orange-200 text-orange-700 hover:bg-orange-50"
-                        : "bg-orange-600 text-white hover:bg-orange-700"} ${ACT_BTN}`}
-                      onClick={openDietFeeDraft}
-                      data-testid="cons-open-diet-fee"
-                    >
-                      {dietFeePaid
-                        ? <Lbl full="Update Diet Fee" short="Diet Fee" />
-                        : <Lbl full="Collect Diet Fee" short="Diet Fee" />}
-                    </Button>
-                  );
-
                   if (decision === "consultation_only") {
                     return (
                       <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3" data-testid="cons-stage-panel-fee-collected">
@@ -3058,13 +3061,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           <ClipboardCheck className="h-3.5 w-3.5" /> Fee Collected
                         </p>
                         {ConsultationFeeSummary}
-                        {DietFeeSection}
+                        {DietStatus}
                         <p className="mb-2 mt-3 text-xs text-slate-600">Consultation Only — no treatment sessions. Mark this consultation as completed to close it out.</p>
                         <div className="flex items-center gap-1.5 [justify-content:safe_center] [&>*]:shrink-0">
                           <Button size="sm" className="bg-emerald-600 text-xs hover:bg-emerald-700" onClick={submitMarkCompleted} disabled={completingConsultation} data-testid="cons-mark-completed">
                             {completingConsultation ? "Saving..." : "Mark Consultation Completed"}
                           </Button>
-                          {DietFeeButton}
                           {DietButton}
                           {CancelButton}
                         </div>
@@ -3163,7 +3165,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           </p>
                         )}
                       </div>
-                      {DietFeeSection}
+                      {DietStatus}
                       {treatmentPaid && (
                         <p className="mt-3 border-t border-indigo-100 pt-3 text-xs text-slate-600">
                           {/* A Partial Payment plan reaches here with money in but a balance
@@ -3186,7 +3188,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             <Lbl full="Assign Physio" short="Physio" />
                           </Button>
                         )}
-                        {DietFeeButton}
                         {DietButton}
                         {CancelButton}
                       </div>
