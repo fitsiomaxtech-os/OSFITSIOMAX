@@ -747,14 +747,13 @@ export const CRMPage = ({ auth, onLogout }) => {
                   ) : boardTitle}
                 </h1>
               </div>
-            </div>
-            <div className="flex items-center gap-2 sm:gap-3">
               {/* Leads / Analytics, for the boards that are nothing but PreSalesCRM. They
-                  are the two pages of this view, so they belong beside the title rather
-                  than in the body among the filters that narrow whichever one is open.
-                  The board hides its own copy while these are here. */}
+                  are the two pages of this view, so they sit next to the title they belong
+                  to rather than in the body among the filters that narrow whichever one is
+                  open — and on this side, away from the account block, which is a control
+                  of a different kind. The board hides its own copy while these are here. */}
               {(showPreSalesBoard || showMarketingHeadBoard) && (
-                <div className="flex items-center gap-1" data-testid="header-presales-view-tabs">
+                <div className="flex shrink-0 items-center gap-1 sm:ml-4" data-testid="header-presales-view-tabs">
                   {[
                     { key: "leads", label: "Leads", icon: Users },
                     { key: "analytics", label: "Analytics", icon: BarChart3 },
@@ -780,6 +779,8 @@ export const CRMPage = ({ auth, onLogout }) => {
                   })}
                 </div>
               )}
+            </div>
+            <div className="flex items-center gap-2 sm:gap-3">
               {/* Phone only. On a desktop the board already carries its own search box
                   above the list, so a second one in the header was the same job twice —
                   it's only on a phone, where that box is a scroll away, that reaching it
