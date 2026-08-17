@@ -26,6 +26,12 @@ export const TABS = [
 export const CONSULTATIONS_SUBTABS = [
   { key: "physiotherapy", label: "Physiotherapy", icon: Activity },
   { key: "fitness", label: "Fitness", icon: Dumbbell },
+  // Reuses the "diet" item_type the top-level Diet Package tab already catalogs under —
+  // v3_store.py calls it "the Diet Consultation package" priced and timed exactly like a
+  // physio consultation, so this is the same catalog surfaced a second way, not a new
+  // empty one. Its bookings/prices already read off item_type "diet"; a category of its
+  // own (rather than physiotherapy/fitness) would be a bucket nothing downstream queries.
+  { key: "diet", label: "Diet Consultations", icon: Salad },
 ];
 
 export const SESSIONS_SUBTABS = [
@@ -825,6 +831,10 @@ const ConsultationsPanel = ({ reloadToken, toolbarSlot, modeFilter = "all" }) =>
 
       {sub === "physiotherapy" && <PhysiotherapyPanel reloadToken={reloadToken} toolbarSlot={toolbarSlot} modeFilter={modeFilter} />}
       {sub === "fitness" && <PhysiotherapyPanel category="fitness" reloadToken={reloadToken} toolbarSlot={toolbarSlot} modeFilter={modeFilter} />}
+      {/* kind="diet", category left at its "physiotherapy" default — the same combination
+          the top-level Diet Package tab already writes and reads, so this shows the exact
+          same items rather than a second, disconnected catalog. */}
+      {sub === "diet" && <PhysiotherapyPanel kind="diet" reloadToken={reloadToken} toolbarSlot={toolbarSlot} modeFilter={modeFilter} />}
     </div>
   );
 };

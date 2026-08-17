@@ -141,6 +141,20 @@ export const BranchConsultationsPanel = ({ reloadToken, modeFilter = "all" }) =>
         />
       )}
       {sub === "fitness" && <PlaceholderPanel label="Fitness" testid="branch-consultations-subpanel-fitness" />}
+      {/* Real data, not a placeholder like Fitness above — item_type "diet" is the same
+          catalog the Super Admin side's Diet Package tab already writes to, so it's
+          already there to show rather than needing its own booking flow built first. */}
+      {sub === "diet" && (
+        <BranchItemsPanel
+          category="physiotherapy"
+          itemType="diet"
+          durationLabel="Diet Consultation Duration"
+          emptyLabel="No diet consultations available yet."
+          testidPrefix="branch-diet-consultation"
+          reloadToken={reloadToken}
+          modeFilter={modeFilter}
+        />
+      )}
     </div>
   );
 };
