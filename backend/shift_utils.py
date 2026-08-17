@@ -21,6 +21,7 @@ narrowing a shift changes what the *next* day opened will contain, and never sil
 deletes a slot a patient may already be booked into — see remove-slots for that.
 """
 
+import re
 import uuid
 from typing import Dict, Iterable, List, Optional
 
@@ -32,6 +33,9 @@ from utils import now_iso
 # behaves exactly as they did.
 FALLBACK_START = "08:00"
 FALLBACK_END = "22:00"
+
+# A calendar day, as the frontend sends it. Used to keep the free-form override map honest.
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 # Seeded per branch on first read. `key` marks a row as one of these four so the seeding
 # stays idempotent after a rename — a branch that renames "Online" to "Tele-consult" must
@@ -133,6 +137,37 @@ def window_of(shift: Optional[dict]) -> dict:
         "start_time": start,
         "end_time": end,
     }
+
+
+def overrides_of(doctor: dict) -> Dict[str, str]:
+    """The one-off day shifts stored on an expert: {"2026-08-18": "<shift_id>"}.
+
+    A shift is the usual pattern, not a contract. Akshya is on Morning and still comes in
+    full-time some days, and a roster that cannot say that forces the exception to be
+    entered as a permanent change and then remembered back — which nobody does.
+
+    Filtered to well-formed dates on the way out: this is a free-form map on a document, so
+    a stray key must not reach the calendar as a date it will then fail to render.
+    """
+    raw = (doctor or {}).get("shift_overrides") or {}
+    if not isinstance(raw, dict):
+        return {}
+    return {d: s for d, s in raw.items() if isinstance(d, str) and DATE_RE.match(d) and s}
+
+
+def day_windows_of(doctor: dict, shifts: Dict[str, dict]) -> Dict[str, dict]:
+    """Resolve those overrides to real windows, dropping any whose shift has been deleted.
+
+    Dropped rather than kept as a dangling name: a deleted shift leaves the day falling back
+    to the expert's usual window, which is the same thing that happens to their other days
+    and is therefore the answer that needs no explaining.
+    """
+    out = {}
+    for date, shift_id in overrides_of(doctor).items():
+        shift = shifts.get(shift_id)
+        if shift:
+            out[date] = window_of(shift)
+    return out
 
 
 async def attach_shifts(doctors: List[dict]) -> List[dict]:

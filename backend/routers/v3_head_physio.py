@@ -4,7 +4,7 @@ from typing import List, Optional
 
 from database import v3_col
 from utils import now_iso, normalize_slot_time, slot_capacity_of, MAX_PHYSIO_SLOT_CAPACITY
-from shift_utils import shift_map, window_of
+from shift_utils import day_windows_of, overrides_of, shift_map, window_of
 from deps import v3_require_roles
 from schemas.v3 import (
     V3UserOut, V3DoctorOut,
@@ -60,8 +60,14 @@ async def get_doctor_calendar(doctor_id: str, _: V3UserOut = Depends(v3_require_
     # The hours this expert is rostered on (MANAGEMENT → TIME MANAGEMENT). The calendar cuts
     # its day across exactly this window, so an evening physio's day is offered 3 PM to 7 PM
     # rather than the whole clock. Unassigned falls back to the old fixed working day.
-    shifts = await shift_map([doctor.get("shift_id")])
+    #
+    # `day_shifts` is the exceptions to it — the dates this expert worked something other
+    # than their usual shift. Resolved in the same lookup because a month's overrides and
+    # the default all point into the same small set of shifts.
+    overrides = overrides_of(doctor)
+    shifts = await shift_map([doctor.get("shift_id"), *overrides.values()])
     window = window_of(shifts.get(doctor.get("shift_id")))
+    day_shifts = day_windows_of(doctor, shifts)
 
     return {
         "doctor_id": doctor["id"],
@@ -74,6 +80,7 @@ async def get_doctor_calendar(doctor_id: str, _: V3UserOut = Depends(v3_require_
         "occupancy": occupancy,
         "occupants": occupants,
         "shift": window,
+        "day_shifts": day_shifts,
     }
 
 

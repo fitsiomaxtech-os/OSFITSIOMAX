@@ -206,6 +206,9 @@ export const updateShift = async (shiftId, payload) => (await api.patch(`/shifts
 export const deleteShift = async (shiftId) => (await api.delete(`/shifts/${shiftId}`)).data;
 export const getShiftRoster = async (branchId, profileType) => (await api.get(`/branches/${branchId}/shift-roster`, { params: { profile_type: profileType } })).data;
 export const setDoctorShift = async (doctorId, shiftId) => (await api.patch(`/doctors/${doctorId}/shift`, { shift_id: shiftId || null })).data;
+// A one-off: these particular days run on a different shift, without moving the expert off
+// their usual one. Passing shift_id null puts the days back on it.
+export const setDoctorDayShift = async (doctorId, dates, shiftId) => (await api.patch(`/doctors/${doctorId}/day-shift`, { dates, shift_id: shiftId || null })).data;
 
 // ---- Diet Consultation (Nutrition Coach) ----
 export const dietToday = async (params = {}) => (await api.get("/diet/today", { params })).data;

@@ -17,6 +17,7 @@ import {
   listShifts,
   listStoreItems,
   removeCalendarSlots,
+  setDoctorDayShift,
   setDoctorShift,
   setDoctorSlotCapacity,
 } from "@/lib/api";
@@ -36,6 +37,12 @@ const SESSION_TYPES = [
 // item for the Head Physio calendar, and on the session item for the Physio calendar.
 // Only used if the store hasn't been configured yet.
 const FALLBACK_SLOT_MINUTES = 30;
+
+/** "2026-08-18" -> "18 Aug", for naming a day in a toast without the year taking the line. */
+const shortDate = (iso) => {
+  const d = new Date(`${iso}T00:00:00`);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+};
 
 /** "07:30" -> 450 minutes past midnight. null for anything that isn't a 24-hour HH:MM. */
 const minutesOf = (hhmm) => {
@@ -164,6 +171,7 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
   // closer. Silent on failure: the picker just doesn't appear.
   const [shifts, setShifts] = useState([]);
   const [savingShift, setSavingShift] = useState(false);
+  const [savingDayShift, setSavingDayShift] = useState(false);
 
   const loadShifts = useCallback(async () => {
     if (!branchId) return;
@@ -216,6 +224,39 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
     setSavingShift(false);
   };
 
+  // The exception to the usual shift: these particular days run on a different one. The
+  // expert stays on their own shift — this is "Akshya is on Morning and came in full-time
+  // on the 18th", not a change of roster, so nothing on the left panel moves.
+  //
+  // Applies to every day currently selected, because picking three Saturdays and calling
+  // them evenings is one decision rather than three.
+  const saveDayShift = async (shiftId) => {
+    const dates = selectedDates.length > 0 ? selectedDates : selectedDate ? [selectedDate] : [];
+    if (!selectedDoctor || dates.length === 0) return;
+    setSavingDayShift(true);
+    try {
+      const res = await setDoctorDayShift(selectedDoctor.id, dates, shiftId);
+      const nextDayShifts = res?.day_shifts || {};
+      // Merged in rather than waiting on a reload, so the grid re-cuts on the same click.
+      setCalendarData((prev) => (prev ? { ...prev, day_shifts: nextDayShifts } : prev));
+      // Restage the affected days across their new window. Anything staged under the old
+      // one is dropped: half a morning plus half an evening is not a day anyone meant.
+      setPendingSlots((prev) => [
+        ...prev.filter((s) => !dates.some((d) => s.slot_time.startsWith(`${d}T`))),
+        ...dates.flatMap((d) => stagedSlotsForDay(d, nextDayShifts[d] || shift)),
+      ]);
+      const dayLabel = dates.length === 1 ? shortDate(dates[0]) : `${dates.length} days`;
+      toast.success(
+        shiftId
+          ? `${dayLabel}: ${labelOf(nextDayShifts[dates[0]]) || "shift set"}`
+          : `${dayLabel} back on ${shift?.shift_name || "the usual day"}`,
+      );
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not change the day's shift");
+    }
+    setSavingDayShift(false);
+  };
+
   const selectDoctor = (doc) => {
     setSelectedDoctor(doc);
     setSelectedDate(null);
@@ -234,9 +275,12 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
 
   // Every free slot of a day, staged as an addition. Anything already published for that
   // date, and anything booked, is skipped so this never duplicates or disturbs a booking.
-  const stagedSlotsForDay = (d) => {
+  // `windowOverride` is for the moment a day's shift is changed: the new window is known
+  // from the response before calendarData has been reloaded, so the day re-cuts straight
+  // away instead of one render behind.
+  const stagedSlotsForDay = (d, windowOverride) => {
     const alreadyOpen = new Set((calendarData?.slots || []).filter((s) => s.startsWith(`${d}T`)));
-    return generateTimeGrid()
+    return gridTimes(windowOverride || windowFor(d))
       .filter((time) => {
         const full = `${d}T${time}`;
         return !alreadyOpen.has(full) && !calendarData?.booked?.[full];
@@ -295,27 +339,40 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
   // Every generated slot finishes inside the window — a 45-minute slot is not offered at
   // 1:30 PM on a day that ends at 2:00.
   const shift = calendarData?.shift || null;
-  const DAY_START_MIN = minutesOf(shift?.start_time) ?? 8 * 60;
-  const DAY_END_MIN = minutesOf(shift?.end_time) ?? 22 * 60;
-  const shiftLabel = shift?.shift_name
-    ? `${shift.shift_name} · ${to12h(shift.start_time)} – ${to12h(shift.end_time)}`
-    : "";
+  // Days this expert worked something other than their usual shift, keyed by date. A shift
+  // is a pattern, not a contract — a Morning physio who comes in full-time on Tuesday is
+  // normal, and the roster has to be able to say so without moving them off Morning.
+  const dayShifts = calendarData?.day_shifts || {};
 
-  const generateTimeGrid = () => {
+  /** The window one date is opened across: its own one-off, else the usual, else the default. */
+  const windowFor = (date) => (date && dayShifts[date]) || shift || null;
+  const labelOf = (w) => (w?.shift_name ? `${w.shift_name} · ${to12h(w.start_time)} – ${to12h(w.end_time)}` : "");
+
+  const shiftLabel = labelOf(shift);
+  // What the focused day actually runs, and whether that differs from the usual.
+  const dayWindow = windowFor(selectedDate);
+  const dayShiftLabel = labelOf(dayWindow);
+  const isOverridden = !!(selectedDate && dayShifts[selectedDate]);
+
+  const gridTimes = (w) => {
     const slots = [];
     const step = slotDuration || 30;
-    for (let m = DAY_START_MIN; m + step <= DAY_END_MIN; m += step) {
+    const from = minutesOf(w?.start_time) ?? 8 * 60;
+    const to = minutesOf(w?.end_time) ?? 22 * 60;
+    for (let m = from; m + step <= to; m += step) {
       slots.push(`${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`);
     }
     return slots;
   };
+
+  const generateTimeGrid = (date) => gridTimes(windowFor(date));
 
   // What the day actually renders: the shift's grid, plus any time already published or
   // booked outside it. A shift narrowed after slots were published would otherwise hide
   // them — still on the calendar, still bookable, but with no way left to see or remove
   // them. Shown means Unsave can reach them.
   const displayTimeGrid = () => {
-    const grid = generateTimeGrid();
+    const grid = generateTimeGrid(selectedDate);
     if (!selectedDate) return grid;
     const outside = new Set();
     const collect = (slotTime) => {
@@ -665,13 +722,23 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
                             : "text-slate-600 hover:bg-slate-100"
                         }`}
                         title={
-                          isPicked ? "Click again to deselect"
+                          dayShifts[d] ? `Works ${labelOf(dayShifts[d])} on this day`
+                            : isPicked ? "Click again to deselect"
                             : slotCount > 0 ? `${slotCount} slot${slotCount === 1 ? "" : "s"} open`
                             : undefined
                         }
                         data-testid={`cal-day-${day}`}
                       >
                         {day}
+                        {/* A day running something other than the usual shift. Amber, and
+                            a corner dot rather than a fill, because the fill already means
+                            "published" / "picked" and both remain true of this day. */}
+                        {dayShifts[d] && (
+                          <span
+                            className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-amber-400 ring-1 ring-white"
+                            data-testid={`cal-day-override-${day}`}
+                          />
+                        )}
                       </button>
                     );
                   })}
@@ -679,8 +746,8 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
 
                 {selectedDate && (
                   <p className="mt-4 border-t border-slate-100 pt-3 text-[11px] text-slate-400" data-testid="calendar-day-hint">
-                    {shiftLabel
-                      ? <>Opened across their <b>{shiftLabel}</b> shift at {slotDuration}-minute slots, per FITSIO STORE. </>
+                    {dayShiftLabel
+                      ? <>Opened across <b>{dayShiftLabel}</b>{isOverridden ? " — set for this day only" : ""} at {slotDuration}-minute slots, per FITSIO STORE. </>
                       : <>Whole day opened at {slotDuration}-minute slots, per FITSIO STORE. Put them on a shift in <b>TIME MANAGEMENT</b> to cut the day to their working hours. </>}
                     Pick more dates to open several at once, or click a date again to deselect it.
                     {" "}<b>Save Changes</b> publishes them; <b>Unsave</b> closes the selected days back down.
@@ -702,7 +769,11 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
                     <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
                       <h4 className="text-sm font-semibold text-slate-700" data-testid="selected-date-title">
                         {new Date(selectedDate + "T00:00:00").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}
-                        {shiftLabel && <span className="ml-2 text-[11px] font-medium text-violet-500">{shiftLabel}</span>}
+                        {dayShiftLabel && (
+                          <span className={`ml-2 text-[11px] font-medium ${isOverridden ? "text-amber-600" : "text-violet-500"}`}>
+                            {dayShiftLabel}{isOverridden ? " · just this day" : ""}
+                          </span>
+                        )}
                       </h4>
                       <div className="flex flex-wrap items-center gap-3 text-[10px] text-slate-400">
                         <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-emerald-400 inline-block" /> Available</span>
@@ -711,13 +782,44 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
                         <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-amber-400 inline-block" /> Booked</span>
                       </div>
                     </div>
+                    {/* Working a different shift on this day only. The expert stays on their
+                        usual one — this is where "she's on Morning but comes in full-time
+                        some days" gets said, and it has to be sayable at the moment the day
+                        is being opened, not as a trip to a settings tab and back. */}
+                    {shifts.length > 0 && (
+                      <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50/70 p-2.5" data-testid="day-shift-row">
+                        <CalendarIcon className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                        <span className="text-[11px] font-medium text-slate-500">
+                          {selectedDates.length > 1 ? `These ${selectedDates.length} days work` : "This day works"}
+                        </span>
+                        <select
+                          value={(selectedDate && dayShifts[selectedDate]?.shift_id) || ""}
+                          onChange={(e) => saveDayShift(e.target.value)}
+                          disabled={savingDayShift}
+                          className="min-w-0 max-w-full rounded border border-slate-200 bg-white px-1.5 py-1 text-xs font-semibold text-slate-700"
+                          data-testid="day-shift-select"
+                        >
+                          <option value="">
+                            {shift?.shift_name ? `${shift.shift_name} — as usual` : "The usual working day"}
+                          </option>
+                          {shifts.map((s) => (
+                            <option key={s.id} value={s.id}>{s.name} · {to12h(s.start_time)} – {to12h(s.end_time)}</option>
+                          ))}
+                        </select>
+                        <span className="text-[10px] text-slate-400">
+                          {isOverridden
+                            ? `One-off — ${selectedDoctor.full_name} stays on ${shift?.shift_name || "their usual day"}.`
+                            : "Changes this day only, not their shift."}
+                        </span>
+                      </div>
+                    )}
                     {/* A shift can be edited down to less than one slot — 7:00 to 7:20 with
                         45-minute consultations fits nothing. Said plainly, because an empty
                         grid on its own reads as the calendar being broken. */}
                     {dayTimes.length === 0 && (
                       <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-center" data-testid="shift-too-short">
                         <p className="text-xs font-medium text-amber-800">
-                          {shiftLabel || "This working window"} is shorter than one {slotDuration}-minute {isRecurring ? "session" : "consultation"}.
+                          {dayShiftLabel || "This working window"} is shorter than one {slotDuration}-minute {isRecurring ? "session" : "consultation"}.
                         </p>
                         <p className="mt-1 text-[11px] text-amber-600">
                           Widen the shift in MANAGEMENT → TIME MANAGEMENT, or shorten the duration in FITSIO STORE.
