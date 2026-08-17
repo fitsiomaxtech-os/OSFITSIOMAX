@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Eye, Plus, Search, Settings as Cog, Calendar as CalendarIcon, Phone, FileText, StickyNote, ArrowRight, CheckCircle2, X, Pencil, PhoneOff, Clock, Bell, Building2, Trash2, Lock, Users, CalendarCheck, UserRound, LogOut, Mail, Youtube, ChevronDown, ChevronUp, RefreshCw } from "lucide-react";
+import { Eye, Plus, Search, Settings as Cog, Calendar as CalendarIcon, Phone, FileText, StickyNote, ArrowRight, CheckCircle2, X, Pencil, PhoneOff, Clock, Bell, Building2, Trash2, Lock, Users, CalendarCheck, UserRound, LogOut, Mail, Youtube, ChevronDown, ChevronUp, RefreshCw, BarChart3, CalendarDays } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import {
   getLeads, createManualLead, stagesList, updateLead, rnrAttempt, scheduleFollowUp, rescheduleFollowUp, scheduleAppointment, getBranches, leadActivity, deleteLead,
-  listTestimonials, addTestimonial, deleteTestimonial,
+  listTestimonials, addTestimonial, deleteTestimonial, getDashboardOverview,
 } from "@/lib/api";
 import { LeadEditModal } from "@/components/LeadEditModal";
 import { CreateLeadModal } from "@/components/CreateLeadModal";
@@ -285,6 +285,172 @@ const branchStatusInfo = (lead, branches) => {
   return { branchName, status, statusColor };
 };
 
+// Same helper BranchManagementBoard.jsx and BranchFormDialogV2.jsx already carry —
+// every default vertical is named "online_.../offline_...", so reading the prefix off
+// the branch record itself can never disagree with how those two screens group branches.
+const isOnlineVertical = (v) => String(v || "").startsWith("online_");
+
+// Super Admin only: All | Offline | Online, then one pill per branch in that group —
+// the same split Branches & Verticals uses, so a branch's grouping reads the same way
+// everywhere. Picking a pill sets sourceFilter, the board's existing branch scope.
+const PreSalesGroupPill = ({ active, onClick, children, testid }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className={`shrink-0 rounded-full border px-3.5 py-1.5 text-sm font-medium transition ${
+      active ? "border-sky-600 bg-sky-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"
+    }`}
+    data-testid={testid}
+  >
+    {children}
+  </button>
+);
+
+const PreSalesBranchPill = ({ active, onClick, children, testid }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className={`shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition ${
+      active ? "border-sky-600 bg-sky-600 text-white" : "border-slate-200 bg-white text-slate-500 hover:border-sky-300 hover:text-sky-600"
+    }`}
+    data-testid={testid}
+  >
+    {children}
+  </button>
+);
+
+// Which desk is holding a lead right now — the one fact the merged Super Admin view adds
+// that neither of the two split boards needed, since each of them only ever shows one.
+const HandledByBadge = ({ lead }) => {
+  const isBranchAdmin = lead.lead_control === "branch_admin";
+  return (
+    <span
+      className={`inline-flex w-fit items-center rounded border px-1.5 py-0.5 text-[10px] font-semibold ${
+        isBranchAdmin ? "border-violet-200 bg-violet-50 text-violet-700" : "border-sky-200 bg-sky-50 text-sky-700"
+      }`}
+    >
+      {isBranchAdmin ? "Branch Admin" : "Pre-Sales"}
+    </span>
+  );
+};
+
+const PRESALES_ANALYTICS_DATE_PRESETS = [
+  { key: "today", label: "Today" },
+  { key: "this_week", label: "This Week" },
+  { key: "this_month", label: "This Month" },
+  { key: "custom", label: "Custom" },
+];
+
+// Same 7 cards Branches & Verticals > Overview shows, same /dashboard/overview call —
+// the funnel Pre-Sales feeds (leads, appointments) through what it hands off to a branch
+// (consultations, sessions, revenue, pending balance), read the same way in both places.
+const PRESALES_ANALYTICS_METRICS = [
+  { key: "leads", label: "All Leads" },
+  { key: "appointments", label: "Appointment Booked" },
+  { key: "consultations", label: "Consultations" },
+  { key: "consultation_revenue", label: "Consultations Revenue", currency: true },
+  { key: "sessions_booked", label: "Sessions Total Booked" },
+  { key: "session_revenue", label: "Session Amount Collected", currency: true },
+  { key: "pending_session_amount", label: "Pending Session Amount", currency: true },
+];
+
+const presalesStartOfDay = (d) => { const n = new Date(d); n.setHours(0, 0, 0, 0); return n; };
+const presalesStartOfWeek = (d) => { const x = presalesStartOfDay(d); x.setDate(x.getDate() - x.getDay()); return x; };
+const presalesStartOfMonth = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
+const presalesToIso = (d) => d.toISOString().slice(0, 10);
+
+/** A specific branch wins outright; otherwise the group's own branches summed (Offline/
+ *  Online), or the bucket's grand total for All. Same shape as Overview's own helper. */
+const presalesAnalyticsValueFor = (bucket, branchId, group) => {
+  if (!bucket) return 0;
+  const branches = bucket.branches || [];
+  if (branchId) {
+    const hit = branches.find((b) => b.branch_id === branchId);
+    return hit ? hit.value : 0;
+  }
+  if (!group || group === "all") return bucket.total;
+  return branches.filter((b) => isOnlineVertical(b.vertical) === (group === "online")).reduce((s, b) => s + b.value, 0);
+};
+
+/**
+ * Pre-Sales' own analytics board — same data, same math as Branches & Verticals >
+ * Overview, just reached from inside the Pre Sales Master View instead. A second call to
+ * the same endpoint rather than lifted state: the two boards' date/branch filters are
+ * independent, and sharing one would mean picking a date range on one silently changed
+ * what the other was showing.
+ */
+const PreSalesAnalyticsPanel = ({ branches, branchGroup, sourceFilter }) => {
+  const [preset, setPreset] = useState("this_month");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const { startDate, endDate } = useMemo(() => {
+    const today = new Date();
+    if (preset === "today") return { startDate: presalesToIso(today), endDate: presalesToIso(today) };
+    if (preset === "this_week") return { startDate: presalesToIso(presalesStartOfWeek(today)), endDate: presalesToIso(today) };
+    if (preset === "this_month") return { startDate: presalesToIso(presalesStartOfMonth(today)), endDate: presalesToIso(today) };
+    return { startDate: customFrom, endDate: customTo };
+  }, [preset, customFrom, customTo]);
+
+  const load = useCallback(() => {
+    if (preset === "custom" && (!customFrom || !customTo)) return;
+    setLoading(true);
+    getDashboardOverview({ start_date: startDate, end_date: endDate })
+      .then(setData)
+      .catch(() => setData(null))
+      .finally(() => setLoading(false));
+  }, [startDate, endDate, preset, customFrom, customTo]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const fmt = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
+
+  return (
+    <div className="space-y-4" data-testid="presales-analytics-panel">
+      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white p-3" data-testid="presales-analytics-date-filter">
+        <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-0.5">
+          {PRESALES_ANALYTICS_DATE_PRESETS.map((p) => (
+            <button
+              key={p.key}
+              onClick={() => setPreset(p.key)}
+              className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${preset === p.key ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100"}`}
+              data-testid={`presales-analytics-preset-${p.key}`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+        {preset === "custom" && (
+          <div className="flex items-center gap-1.5 text-xs text-slate-500">
+            <CalendarDays className="h-3.5 w-3.5" />
+            <MilkDateInput value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className="h-8 rounded-md border border-slate-200 px-2 text-xs" data-testid="presales-analytics-custom-from" />
+            <span>to</span>
+            <MilkDateInput value={customTo} onChange={(e) => setCustomTo(e.target.value)} className="h-8 rounded-md border border-slate-200 px-2 text-xs" data-testid="presales-analytics-custom-to" />
+          </div>
+        )}
+      </div>
+
+      {loading && !data ? (
+        <p className="py-10 text-center text-sm text-slate-400">Loading...</p>
+      ) : (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4" data-testid="presales-analytics-metrics">
+          {PRESALES_ANALYTICS_METRICS.map((m) => {
+            const value = presalesAnalyticsValueFor(data?.[m.key], sourceFilter, branchGroup);
+            return (
+              <div key={m.key} className="rounded-xl border-2 border-slate-200 bg-white px-4 py-3.5" data-testid={`presales-analytics-metric-${m.key}`}>
+                <span className="block truncate text-[11px] font-bold uppercase tracking-wider text-slate-500">{m.label}</span>
+                <span className="mt-1 block text-3xl font-extrabold text-slate-800">{m.currency ? fmt(value) : value}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const PRESALES_TABS = [
   { key: "leads", label: "Leads", icon: Users },
   { key: "consultations", label: "Consultations", icon: CalendarCheck },
@@ -336,6 +502,13 @@ export const PreSalesCRM = ({
   const [loading, setLoading] = useState(false);
   const [visibleCount, setVisibleCount] = useState(50);
   const [activeTab, setActiveTab] = useState("leads"); // mobile bottom-nav only; desktop always shows Leads
+  // Super Admin only, from here down: which branches count as one group (All/Offline/
+  // Online, same split Branches & Verticals uses), and which top-level pane is showing.
+  const [branchGroup, setBranchGroup] = useState("all");
+  const [masterView, setMasterView] = useState("leads"); // "leads" | "analytics"
+  const isSuperAdminMasterView = role === "super_admin";
+
+  const selectBranchGroup = (g) => { setBranchGroup(g); setSourceFilter(""); };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -356,13 +529,18 @@ export const PreSalesCRM = ({
       // three of the four would be worse than showing it everywhere. The backend resolves
       // the flag from each lead's branch on every fetch, so flipping the switch moves
       // leads between the two boards on the next refresh.
-      setLeads(ldList.filter((l) => (l.lead_control === "branch_admin") === branchControlled));
+      //
+      // Super Admin's Master View is the one exception: it is meant to be the whole
+      // picture across every branch, so it shows both halves at once (each row tagged
+      // Branch Admin or Pre-Sales) instead of picking one side the way the Pre-Sales
+      // role's own board and a branch's embedded board still do.
+      setLeads(isSuperAdminMasterView ? ldList : ldList.filter((l) => (l.lead_control === "branch_admin") === branchControlled));
       // If a lead is currently open in the detail dialog, refresh its reference
       // so saved edits show up immediately.
       setEditing((prev) => prev ? (ldList.find((l) => l.id === prev.id) || prev) : prev);
     } catch (e) { toast.error("Failed to load"); }
     setLoading(false);
-  }, [branchControlled, branchId]);
+  }, [branchControlled, branchId, isSuperAdminMasterView]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { getBranches().then(setBranches).catch(() => {}); }, []);
@@ -375,7 +553,17 @@ export const PreSalesCRM = ({
     // Empty is every branch, which is why the control opens on "All Branches" and its
     // reset returns here. Leads with no branch yet are the unassigned ones and belong in
     // the all-branches view, so they only drop out once a specific branch is picked.
-    if (sourceFilter) rows = rows.filter((l) => (l.branch_id || "") === sourceFilter);
+    if (sourceFilter) {
+      rows = rows.filter((l) => (l.branch_id || "") === sourceFilter);
+    } else if (isSuperAdminMasterView && branchGroup !== "all") {
+      // No specific branch picked, but a group is — every branch in that group summed,
+      // same as leaving Offline/Online selected with no branch pill drilled into does on
+      // Overview.
+      const groupBranchIds = new Set(
+        branches.filter((b) => isOnlineVertical(b.vertical) === (branchGroup === "online")).map((b) => b.id)
+      );
+      rows = rows.filter((l) => groupBranchIds.has(l.branch_id || ""));
+    }
     if (dateFilter) {
       const from = dateFilter.from?.getTime();
       const to = dateFilter.to?.getTime();
@@ -388,7 +576,7 @@ export const PreSalesCRM = ({
       });
     }
     return rows;
-  }, [leads, sourceFilter, dateFilter]);
+  }, [leads, sourceFilter, dateFilter, isSuperAdminMasterView, branchGroup, branches]);
 
   const stageCounts = useMemo(() => {
     const map = { All: dateSourceFiltered.length };
@@ -433,6 +621,10 @@ export const PreSalesCRM = ({
   // Pick KPI cards: total + up to 8 stage cards
   const kpiStages = stages.slice(0, 8);
 
+  // Branches under the selected group — every one under All, just the offline ones under
+  // Offline, just the online ones under Online. Super Admin only.
+  const visibleGroupBranches = branchGroup === "all" ? branches : branches.filter((b) => isOnlineVertical(b.vertical) === (branchGroup === "online"));
+
   if (PRESALES_CRM_LOCKED) {
     return (
       <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-slate-200 bg-white py-24 text-center" data-testid="presales-crm-locked">
@@ -468,6 +660,47 @@ export const PreSalesCRM = ({
         ))}
       </div>
 
+      {/* Master View controls — Super Admin only: which pane (Leads / Analytics), and
+          which branches (All/Offline/Online, then the individual branches in that
+          group) both panes are scoped to. */}
+      {isSuperAdminMasterView && (
+        <div className="space-y-2" data-testid="presales-master-controls">
+          <div className="flex items-center gap-2">
+            <PreSalesGroupPill active={masterView === "leads"} onClick={() => setMasterView("leads")} testid="presales-view-leads">
+              <span className="inline-flex items-center gap-1.5"><Users className="h-3.5 w-3.5" />Leads</span>
+            </PreSalesGroupPill>
+            <PreSalesGroupPill active={masterView === "analytics"} onClick={() => setMasterView("analytics")} testid="presales-view-analytics">
+              <span className="inline-flex items-center gap-1.5"><BarChart3 className="h-3.5 w-3.5" />Analytics</span>
+            </PreSalesGroupPill>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2" data-testid="presales-branch-groups">
+            <PreSalesGroupPill active={branchGroup === "all"} onClick={() => selectBranchGroup("all")} testid="presales-branch-group-all">All</PreSalesGroupPill>
+            <PreSalesGroupPill active={branchGroup === "offline"} onClick={() => selectBranchGroup("offline")} testid="presales-branch-group-offline">Offline</PreSalesGroupPill>
+            <PreSalesGroupPill active={branchGroup === "online"} onClick={() => selectBranchGroup("online")} testid="presales-branch-group-online">Online</PreSalesGroupPill>
+          </div>
+
+          {visibleGroupBranches.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5" data-testid="presales-branch-pills">
+              {visibleGroupBranches.map((b) => (
+                <PreSalesBranchPill
+                  key={b.id}
+                  active={sourceFilter === b.id}
+                  onClick={() => setSourceFilter((id) => (id === b.id ? "" : b.id))}
+                  testid={`presales-branch-pill-${b.id}`}
+                >
+                  {branchLabel(b)}
+                </PreSalesBranchPill>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {masterView === "analytics" && isSuperAdminMasterView ? (
+        <PreSalesAnalyticsPanel branches={branches} branchGroup={branchGroup} sourceFilter={sourceFilter} />
+      ) : (
+      <>
       {/* Toolbar */}
       {/* Seven controls, which a phone cannot hold on one line — so it takes two, split
           where the meaning splits: what you are looking at on top, what you can do to it
@@ -559,7 +792,7 @@ export const PreSalesCRM = ({
           <div className="overflow-auto">
             <table className="min-w-full border-separate border-spacing-x-0 border-spacing-y-2 text-sm">
               <thead className="text-center text-xs text-slate-500">
-                <tr><th className="px-3 py-2 text-left">LEAD</th><th className="px-3 py-2">PHONE</th><th className="px-3 py-2">EMAIL</th><th className="px-3 py-2">SOURCE</th><th className="px-3 py-2">STAGE</th>{stageFilter === "Appointment" && <th className="px-3 py-2">BRANCH ADMIN STATUS</th>}{stageFilter === "RNR" && <th className="px-3 py-2">LAST CALL</th>}<th className="px-3 py-2">CREATED</th><th className="px-3 py-2">ASSIGNED TO</th><th className="px-3 py-2">ACTIONS</th></tr>
+                <tr><th className="px-3 py-2 text-left">LEAD</th><th className="px-3 py-2">PHONE</th><th className="px-3 py-2">EMAIL</th><th className="px-3 py-2">SOURCE</th><th className="px-3 py-2">STAGE</th>{isSuperAdminMasterView && <th className="px-3 py-2">HANDLED BY</th>}{stageFilter === "Appointment" && <th className="px-3 py-2">BRANCH ADMIN STATUS</th>}{stageFilter === "RNR" && <th className="px-3 py-2">LAST CALL</th>}<th className="px-3 py-2">CREATED</th><th className="px-3 py-2">ASSIGNED TO</th><th className="px-3 py-2">ACTIONS</th></tr>
               </thead>
               <tbody>
                 {visibleLeads.map((l) => {
@@ -611,6 +844,14 @@ export const PreSalesCRM = ({
                           })()}
                         </div>
                       </td>
+                      {isSuperAdminMasterView && (
+                        <td className="border-y border-slate-200 bg-white px-3 py-3 text-center transition-colors group-hover:bg-slate-50" data-testid={`presales-handled-by-${l.id}`}>
+                          <div className="flex justify-center"><HandledByBadge lead={l} /></div>
+                          {l.lead_control === "branch_admin" && l.branch_stage && (
+                            <span className="mt-1 block text-[10px] text-slate-400">{l.branch_stage}</span>
+                          )}
+                        </td>
+                      )}
                       {stageFilter === "Appointment" && (() => {
                         const { branchName, status, statusColor } = branchStatusInfo(l, branches);
                         return (
@@ -677,7 +918,7 @@ export const PreSalesCRM = ({
                     </tr>
                   );
                 })}
-                {filtered.length === 0 && <tr><td colSpan={stageFilter === "Appointment" ? 9 : 8} className="px-3 py-8 text-center text-slate-400">{loading ? "Loading..." : "No leads match."}</td></tr>}
+                {filtered.length === 0 && <tr><td colSpan={(stageFilter === "Appointment" ? 9 : 8) + (isSuperAdminMasterView ? 1 : 0)} className="px-3 py-8 text-center text-slate-400">{loading ? "Loading..." : "No leads match."}</td></tr>}
               </tbody>
             </table>
           </div>
@@ -690,6 +931,8 @@ export const PreSalesCRM = ({
           )}
         </CardContent>
       </Card>
+      </>
+      )}
     </div>
 
       {activeTab === "leads" && (
