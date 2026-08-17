@@ -964,13 +964,15 @@ export const PreSalesCRM = ({
           summary: each one selects a stage and the list below narrows to it. Analytics
           has no such table to narrow, and its own cards already open with All Leads, so
           on that pane these were a second row of counts answering nothing. */}
-      {/* This block is md-and-up, so the row only ever has a tablet's width or more to
-          work with — but nine cards in one nowrap row at 768px gave each about 50px, which
-          truncated every label to "Tota…", "Follo…": a row of counts with no way to tell
-          which count is which. It grids until there is genuinely room for one line, and
-          only goes single-row at xl, where the funnel reads left to right as intended. */}
+      {/* Columns sized to the label rather than counted out per breakpoint: auto-fit packs
+          in as many as fit, and the 13.5rem floor is what holds the longest of these names
+          — "Branch Admin Appointment" — on one line inside the card's padding. Fixed column
+          counts were what broke it: six across a 1200px window left each card about 190px,
+          eight characters short of that label, so it wrapped to two lines.
+          On a full-width desktop all eight still land in a single row; narrower windows
+          take fewer per row instead of squeezing the words. */}
       {!(masterView === "analytics" && isSuperAdminMasterView) && (
-        <div className="grid grid-cols-3 gap-2 md:grid-cols-5 lg:grid-cols-6 xl:flex xl:flex-nowrap xl:gap-3" data-testid="presales-kpi-row">
+        <div className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(13.5rem,1fr))] lg:gap-3" data-testid="presales-kpi-row">
           {isMarketingHeadFunnel ? (
             <>
               <KpiCard label="All" value={funnelCounts.all} active={stageFilter === "all"} color="#22c55e" onClick={() => setStageFilter("all")} testid="presales-kpi-all" />
@@ -1733,18 +1735,38 @@ const ProfileTab = ({ currentUser, branches, onLogout }) => {
   );
 };
 
+/**
+ * One stage's count, and the control that filters the table to it.
+ *
+ * Laid out to match the Analytics pane's metric cards on this same board — small uppercase
+ * label over a large figure — because the two are the same kind of object and reading as
+ * one system is most of what makes a row of them look considered.
+ *
+ * The type is deliberately small: the label is a caption for the number, not a heading
+ * competing with it. Bigger label type is what forced "Branch Admin Appointment" onto two
+ * lines, and two lines of near-identical words made the appointment pair hard to tell apart.
+ */
 const KpiCard = ({ label, value, color, active, onClick, testid }) => (
-  <button onClick={onClick} data-testid={testid} className={`min-w-0 rounded-2xl p-3 text-left transition lg:p-4 xl:flex-1 ${active ? "ring-2 ring-inset" : ""}`} style={{ background: `${color}14`, border: `1px solid ${color}33`, ...(active ? { "--tw-ring-color": color } : {}) }}>
-    {/* Wraps at every width instead of truncating — a stage name is only useful whole, and
-        these differ at the end ("Consultation Visit" against "Consultation Fee"), so a
-        truncated one names nothing. It used to truncate from sm up, which is where the row
-        is at its most crowded: nine cards on one line left about 50px of label each.
-        Two lines' height whether or not it needs them, so the figures sit on one baseline
-        across the row; cards in a row stretch to match the tallest. */}
-    {/* 2px up on each of the three: 11→13, 12→14, 11→13. The min-height is in em, so the
-        two-line floor grows with the type and the figures stay on one baseline. */}
-    <p className="min-h-[2.4em] break-words text-[13px] font-medium leading-snug lg:text-sm xl:text-[13px]" style={{ color }}>{label}</p>
-    <p className="mt-0.5 text-2xl font-bold lg:mt-1 lg:text-3xl xl:text-2xl" style={{ color }}>{value}</p>
+  <button
+    onClick={onClick}
+    data-testid={testid}
+    className={`min-w-0 rounded-xl px-3.5 py-3 text-left transition hover:shadow-sm ${active ? "ring-2 ring-inset" : ""}`}
+    style={{ background: `${color}14`, border: `1px solid ${color}33`, ...(active ? { "--tw-ring-color": color } : {}) }}
+  >
+    {/* truncate, not bare nowrap: the row's columns are sized to hold every label this
+        board has whole, so the ellipsis is only a backstop for a custom stage name longer
+        than any of them — which then ends in "…" inside its own card rather than spilling
+        across the next. */}
+    {/* 10px, and tracking-wide rather than wider: uppercase runs about a third wider than
+        sentence case, and at 11px with looser tracking "BRANCH ADMIN APPOINTMENT" came to
+        the full width of the card's text column with nothing to spare. At this size it
+        clears it by a comfortable margin and the row still fits eight across. */}
+    {/* Full colour, no opacity knocked off it — 10px is already the smallest type on the
+        card, and fading small text is where contrast goes from tight to failing. */}
+    <p className="truncate text-[10px] font-bold uppercase leading-tight tracking-wide" style={{ color }}>{label}</p>
+    {/* leading-none so the figure sits as a number rather than as a line of text — it is
+        what closed the loose gap under each label and the dead band at the card's foot. */}
+    <p className="mt-1.5 text-2xl font-bold leading-none" style={{ color }}>{value}</p>
   </button>
 );
 
