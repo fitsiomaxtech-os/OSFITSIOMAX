@@ -1,32 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Users, CalendarCheck, Activity, IndianRupee, X, Building2, LayoutDashboard, TrendingUp, TrendingDown, Minus, RefreshCw, ChevronUp } from "lucide-react";
+import { Users, CalendarCheck, Activity, IndianRupee, X, TrendingUp, TrendingDown, Minus, RefreshCw, Megaphone, Headphones, BarChart3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { SegmentedTabs } from "@/components/ui/segmented-tabs";
 import { toast } from "@/components/ui/sonner";
-import { getDashboardOverview, getDashboardLeadsTrend, getRevenueOverview, mkGetTeam } from "@/lib/api";
+import { getDashboardOverview, getDashboardLeadsTrend, getLeadsAnalytics, getRevenueOverview, mkGetTeam } from "@/lib/api";
 import { TeamCard } from "@/components/marketing/TeamCard";
 
-// The four count tabs read the same branch/vertical payload; the two people tabs are a
-// different shape entirely and come from their own endpoint. They sit between Leads and
-// Appointments because that is the order the work happens in: a lead arrives, Pre-Sales
-// qualifies it, the branch converts it, and only then is there an appointment to count.
-//
-// `panel` names which TeamCard tier to render, and is not the same as the API key the
-// rows come back under — Branch reads the endpoint's `sales` list but presents it as
-// branches, which is what those accounts actually are.
+// Five sub-tabs, each scoped by the same date range and the same All/Offline/Online +
+// branch filter (see ModeBranchFilter below) — the split the rest of the OS already
+// filters branches by. Marketing and Sales read the same /dashboard/leads-analytics
+// payload (source breakdown vs stage breakdown); Revenue and Team read the two payloads
+// every other tab already fetches (getDashboardOverview, mkGetTeam); Analytics is the
+// six-month growth trend, on its own now that Executive Overview no longer exists.
 const DASH_TABS = [
-  // Overview first, and the landing tab: it answers "how are we doing" in one screen,
-  // which is the question a Super Admin opens this board with. The four tabs after it
-  // answer "how are we doing at X", which is the follow-up.
-  { key: "overview", label: "Executive Overview", short: "Overview", icon: LayoutDashboard },
-  // Named for the team whose work it reports, not for the records it counts. Every figure
-  // on it — enquiries in, calls due, slots fixed, who owns the follow-up — is Pre-Sales
-  // work, and the per-agent panel that used to sit under BRANCHS belongs with them.
-  { key: "leads", label: "Pre Sales", short: "Pre Sales", icon: Users },
-  { key: "branch", label: "BRANCHS", short: "Branch", icon: Building2, team: "sales", panel: "branch" },
+  { key: "marketing", label: "Marketing", icon: Megaphone },
+  { key: "sales", label: "Sales", icon: Headphones },
   { key: "revenue", label: "Revenue", icon: IndianRupee },
+  { key: "team", label: "Team", icon: Users },
+  { key: "analytics", label: "Analytics", icon: BarChart3 },
 ];
 
 const TEAM_PANELS = {
@@ -81,19 +74,285 @@ const defaultFilter = () => presetFilter(DASH_PRESETS[0]);
 
 const fmtValue = (tabKey, value) => (tabKey === "revenue" ? `₹${(value || 0).toLocaleString("en-IN")}` : value);
 
-// Super Admin's default landing page — Leads / Appointments / Treatments / Revenue split
-// per Physiotherapy branch, plus the two sales-team tabs, each scoped to a date range.
-export const DashboardBoard = () => {
-  const [dateFilter, setDateFilter] = useState(defaultFilter);
-  const [activeTab, setActiveTab] = useState("overview");
+// Same helper BranchManagementBoard.jsx, PreSalesCRM.jsx, OperationsBoard.jsx and
+// BranchStoreBoard.jsx each already carry their own copy of.
+const isOnlineVertical = (v) => String(v || "").startsWith("online_");
+
+const MODE_GROUPS = [
+  { key: "all", label: "All" },
+  { key: "offline", label: "Offline" },
+  { key: "online", label: "Online" },
+];
+
+/** Comma-separated branch ids for /dashboard/leads-analytics' own `branch_ids` param — a
+ *  specific branch wins outright, otherwise every branch in the selected group. `undefined`
+ *  for All, which the endpoint reads as unfiltered rather than needing every id spelled
+ *  out. A group that resolves to zero branches (Online, before any exist) is asked for by
+ *  an id nothing can match, so it returns nothing rather than silently falling back to
+ *  every branch the way an empty string would. */
+const resolveBranchIds = (branches, group, branchId) => {
+  if (branchId) return branchId;
+  if (group === "all") return undefined;
+  const ids = branches.filter((b) => isOnlineVertical(b.vertical) === (group === "online")).map((b) => b.branch_id);
+  return ids.length ? ids.join(",") : "__none__";
+};
+
+/** Same read for buckets that already carry every branch's own value (getDashboardOverview
+ *  buckets) rather than needing a fresh request per filter — a specific branch wins
+ *  outright, otherwise the group's branches summed, or the bucket's own total for All. */
+const scopedBucketValue = (bucket, group, branchId) => {
+  if (!bucket) return 0;
+  const rows = bucket.branches || [];
+  if (branchId) return rows.find((b) => b.branch_id === branchId)?.value ?? 0;
+  if (group === "all") return bucket.total || 0;
+  return rows.filter((b) => isOnlineVertical(b.vertical) === (group === "online")).reduce((s, b) => s + (b.value || 0), 0);
+};
+
+/**
+ * The filter every sub-tab below Marketing/Sales/Revenue/Team opens with: All / Offline /
+ * Online, and under it one pill per branch in whichever group is picked. Picking a group
+ * clears any branch already chosen — the two rows read as one filter, not two independent
+ * ones — and picking the already-selected branch clears back to the group.
+ */
+const ModeBranchFilter = ({ branches, group, onGroup, branchId, onBranch, testid }) => {
+  const visible = group === "all" ? branches : branches.filter((b) => isOnlineVertical(b.vertical) === (group === "online"));
+  return (
+    <div className="space-y-2" data-testid={testid}>
+      <div className="flex flex-wrap items-center gap-2">
+        {MODE_GROUPS.map((g) => (
+          <button
+            key={g.key}
+            type="button"
+            onClick={() => { onGroup(g.key); onBranch(""); }}
+            className={`shrink-0 rounded-full border px-3.5 py-1.5 text-sm font-medium transition ${
+              group === g.key ? "border-sky-600 bg-sky-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"
+            }`}
+            data-testid={`${testid}-group-${g.key}`}
+          >
+            {g.label}
+          </button>
+        ))}
+      </div>
+      {visible.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {visible.map((b) => (
+            <button
+              key={b.branch_id}
+              type="button"
+              onClick={() => onBranch(branchId === b.branch_id ? "" : b.branch_id)}
+              className={`shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition ${
+                branchId === b.branch_id ? "border-sky-600 bg-sky-600 text-white" : "border-slate-200 bg-white text-slate-500 hover:border-sky-300 hover:text-sky-600"
+              }`}
+              data-testid={`${testid}-branch-${b.branch_id}`}
+            >
+              {b.branch_name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+/** One count, in the app's blue — Marketing and Sales are both plain summaries of
+ *  /dashboard/leads-analytics, so both read off the same card rather than each styling
+ *  its own. */
+const BlueCard = ({ label, value, testid }) => (
+  <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3.5" data-testid={testid}>
+    <span className="block truncate text-[11px] font-bold uppercase tracking-wider text-sky-600">{label}</span>
+    <span className="mt-1 block text-2xl font-extrabold text-sky-800 sm:text-3xl">{(value || 0).toLocaleString("en-IN")}</span>
+  </div>
+);
+
+const slugify = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+
+/**
+ * Dashboard > Marketing — leads by channel: Instagram, Meta, and the rest, for whichever
+ * branch/vertical group is picked. "Deliberately no money and no session/treatment
+ * counts" per the endpoint's own docstring — this answers where a lead came from, and
+ * Revenue is where what it turned into lives.
+ */
+const MarketingTab = ({ branches, dateFilter }) => {
+  const [group, setGroup] = useState("all");
+  const [branchId, setBranchId] = useState("");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [drillBranch, setDrillBranch] = useState(null); // the branch card being opened
+
+  useEffect(() => {
+    setLoading(true);
+    const params = {};
+    if (dateFilter.from && dateFilter.to) { params.start_date = toIso(dateFilter.from); params.end_date = toIso(dateFilter.to); }
+    const branchIds = resolveBranchIds(branches, group, branchId);
+    if (branchIds) params.branch_ids = branchIds;
+    getLeadsAnalytics(params)
+      .then(setData)
+      .catch(() => { toast.error("Failed to load Marketing"); setData(null); })
+      .finally(() => setLoading(false));
+  }, [branches, group, branchId, dateFilter]);
+
+  return (
+    <div className="space-y-4" data-testid="dashboard-marketing-tab">
+      <ModeBranchFilter branches={branches} group={group} onGroup={setGroup} branchId={branchId} onBranch={setBranchId} testid="dashboard-marketing-filter" />
+      {loading || !data ? (
+        <p className="py-16 text-center text-sm text-slate-400">{loading ? "Loading..." : "No data."}</p>
+      ) : (
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" data-testid="dashboard-marketing-cards">
+          <BlueCard label="Total Leads" value={data.total} testid="dashboard-marketing-total" />
+          <BlueCard label="Booked" value={data.booked} testid="dashboard-marketing-booked" />
+          {(data.by_source || []).map((s) => (
+            <BlueCard key={s.name} label={s.name} value={s.value} testid={`dashboard-marketing-source-${slugify(s.name)}`} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+/**
+ * Dashboard > Sales — the same call as Marketing, read as a funnel instead of a channel
+ * list: how many leads sit in each Pre-Sales stage right now, for whichever branch/vertical
+ * group is picked.
+ */
+const SalesTab = ({ branches, dateFilter }) => {
+  const [group, setGroup] = useState("all");
+  const [branchId, setBranchId] = useState("");
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    const params = {};
+    if (dateFilter.from && dateFilter.to) { params.start_date = toIso(dateFilter.from); params.end_date = toIso(dateFilter.to); }
+    const branchIds = resolveBranchIds(branches, group, branchId);
+    if (branchIds) params.branch_ids = branchIds;
+    getLeadsAnalytics(params)
+      .then(setData)
+      .catch(() => { toast.error("Failed to load Sales"); setData(null); })
+      .finally(() => setLoading(false));
+  }, [branches, group, branchId, dateFilter]);
+
+  return (
+    <div className="space-y-4" data-testid="dashboard-sales-tab">
+      <ModeBranchFilter branches={branches} group={group} onGroup={setGroup} branchId={branchId} onBranch={setBranchId} testid="dashboard-sales-filter" />
+      {loading || !data ? (
+        <p className="py-16 text-center text-sm text-slate-400">{loading ? "Loading..." : "No data."}</p>
+      ) : (
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" data-testid="dashboard-sales-cards">
+          <BlueCard label="Total Leads" value={data.total} testid="dashboard-sales-total" />
+          <BlueCard label="Booked" value={data.booked} testid="dashboard-sales-booked" />
+          {(data.by_stage || []).map((s) => (
+            <BlueCard key={s.name} label={s.name} value={s.value} testid={`dashboard-sales-stage-${slugify(s.name)}`} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+/**
+ * Dashboard > Revenue — the money buckets getDashboardOverview already carries, summed
+ * per branch, scoped the same All/Offline/Online way. Picking a specific branch also opens
+ * its full breakdown underneath (BranchRevenueCards) — the same drill /finance/
+ * revenue-overview has always given this board, kept rather than dropped in the redesign.
+ */
+const RevenueTab = ({ data, loading, dateFilter }) => {
+  const [group, setGroup] = useState("all");
+  const [branchId, setBranchId] = useState("");
+  const branches = data?.leads?.branches || [];
+  const selectedBranch = branches.find((b) => b.branch_id === branchId);
+
+  if (loading || !data) {
+    return <p className="py-16 text-center text-sm text-slate-400">{loading ? "Loading..." : "No data."}</p>;
+  }
+
+  const cards = [
+    { key: "total", label: "Total Revenue", value: scopedBucketValue(data.revenue, group, branchId), tone: "border-emerald-200 bg-emerald-50/60 text-emerald-700" },
+    { key: "consultation", label: "Consultations Revenue", value: scopedBucketValue(data.consultation_revenue, group, branchId), tone: "border-sky-200 bg-sky-50/60 text-sky-700" },
+    { key: "session", label: "Session Amount Collected", value: scopedBucketValue(data.session_revenue, group, branchId), tone: "border-violet-200 bg-violet-50/60 text-violet-700" },
+    { key: "pending", label: "Pending Session Amount", value: scopedBucketValue(data.pending_session_amount, group, branchId), tone: "border-amber-200 bg-amber-50/60 text-amber-700" },
+  ];
+
+  return (
+    <div className="space-y-4" data-testid="dashboard-revenue-tab">
+      <ModeBranchFilter branches={branches} group={group} onGroup={setGroup} branchId={branchId} onBranch={setBranchId} testid="dashboard-revenue-filter" />
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" data-testid="dashboard-revenue-cards">
+        {cards.map((c) => (
+          <div key={c.key} className={`rounded-xl border p-3 sm:p-4 ${c.tone}`} data-testid={`dashboard-revenue-${c.key}`}>
+            <p className="min-h-[2.6em] text-xs font-semibold uppercase tracking-wider sm:min-h-0">{c.label}</p>
+            <p className="mt-1 text-lg font-bold sm:text-3xl">{fmtValue("revenue", c.value)}</p>
+          </div>
+        ))}
+      </div>
+      {selectedBranch && (
+        <BranchRevenueCards branch={selectedBranch} dateFilter={dateFilter} onClose={() => setBranchId("")} />
+      )}
+    </div>
+  );
+};
+
+/**
+ * Dashboard > Team — both rosters (Pre-Sales, and the branch accounts themselves), scoped
+ * by the same All/Offline/Online filter rather than one branch at a time — "the teams
+ * across all online offline" in one screen instead of picked one branch at a time.
+ */
+const TeamTab = ({ team, loading, branches }) => {
+  const [group, setGroup] = useState("all");
+  const [branchId, setBranchId] = useState("");
+
+  if (loading || !team) {
+    return <p className="py-16 text-center text-sm text-slate-400">{loading ? "Loading..." : "No data."}</p>;
+  }
+
+  const scopedMembers = (members) => {
+    if (branchId) return members.filter((m) => m.branch_id === branchId);
+    if (group === "all") return members;
+    const ids = new Set(branches.filter((b) => isOnlineVertical(b.vertical) === (group === "online")).map((b) => b.branch_id));
+    return members.filter((m) => ids.has(m.branch_id));
+  };
+
+  const preSalesMembers = team.pre_sales || [];
+  const branchMembers = team.sales || [];
+  const scopeLabel = branchId
+    ? branches.find((b) => b.branch_id === branchId)?.branch_name
+    : group === "all" ? null : (group === "online" ? "Online" : "Offline");
+
+  return (
+    <div className="space-y-4" data-testid="dashboard-team-tab">
+      <ModeBranchFilter branches={branches} group={group} onGroup={setGroup} branchId={branchId} onBranch={setBranchId} testid="dashboard-team-filter" />
+
+      {/* No benchmarkFrom, so the average follows the filter — narrowed to one branch or
+          one mode, its agents are measured against each other, the peers actually doing
+          the same job in the same place. */}
+      <TeamCard
+        title={TEAM_PANELS.pre_sales.title}
+        subtitle={scopeLabel ? `${scopeLabel} · ${TEAM_PANELS.pre_sales.subtitle}` : TEAM_PANELS.pre_sales.subtitle}
+        members={scopedMembers(preSalesMembers)}
+        kind="pre_sales"
+      />
+
+      {/* benchmarkFrom is every branch account, even when the filter narrows the list — a
+          branch's peers are the other branches, so measuring it against only itself or its
+          own mode would hand it a delta of zero the moment the filter was applied. */}
+      <TeamCard
+        title={TEAM_PANELS.branch.title}
+        subtitle={scopeLabel ? `${scopeLabel} · ${TEAM_PANELS.branch.subtitle}` : TEAM_PANELS.branch.subtitle}
+        members={scopedMembers(branchMembers)}
+        benchmarkFrom={branchMembers}
+        kind="branch"
+      />
+    </div>
+  );
+};
+
+// Super Admin's default landing page — Marketing / Sales / Revenue / Team / Analytics,
+// each scoped to a date range and, below that, an All/Offline/Online + branch filter.
+export const DashboardBoard = () => {
+  const [dateFilter, setDateFilter] = useState(defaultFilter);
+  const [activeTab, setActiveTab] = useState("marketing");
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
   const [team, setTeam] = useState(null);
   const [teamLoading, setTeamLoading] = useState(false);
-
-  const activeTabDef = DASH_TABS.find((t) => t.key === activeTab);
-  const activeTeam = activeTabDef?.team || null;   // which list on the payload
 
   // A named loader rather than the fetch inline in the effect, so Refresh has something to
   // call — the effect still owns when it runs on a date change.
@@ -111,26 +370,27 @@ export const DashboardBoard = () => {
 
   useEffect(() => { loadOverview(); }, [loadOverview]);
 
-  // Fetched once, on the first visit to either team tab, and not refetched when the date
-  // range changes — /marketing/team-members counts a person's whole book and takes no
-  // dates. Refetching on every range change would burn a request to return the same
-  // numbers, and would imply the figures answer to the filter when they don't.
+  // Fetched once, on the first visit to Team, and not refetched when the date range
+  // changes — /marketing/team-members counts a person's whole book and takes no dates.
+  // Refetching on every range change would burn a request to return the same numbers, and
+  // would imply the figures answer to the filter when they don't.
   useEffect(() => {
-    // Pre Sales needs the roster too, and carries no `team` key of its own — its rows
-    // come back under `pre_sales`, which every tab that needs people already reads.
-    if (!(activeTeam || activeTab === "leads") || team || teamLoading) return;
+    if (activeTab !== "team" || team || teamLoading) return;
     setTeamLoading(true);
     mkGetTeam()
       .then(setTeam)
       .catch(() => { toast.error("Failed to load the team"); setTeam({ pre_sales: [], sales: [] }); })
       .finally(() => setTeamLoading(false));
-  }, [activeTeam, activeTab, team, teamLoading]);
+  }, [activeTab, team, teamLoading]);
 
-  const activeData = data?.[activeTab];
+  // Every branch, offline or online — the roster Marketing/Sales/Revenue/Team's filter
+  // picks from. Read off the leads bucket, but any bucket would do; they all carry the
+  // same branch list.
+  const branches = data?.leads?.branches || [];
 
   return (
     // No title block. The tab above already reads Dashboard, and the strapline named the
-    // four tabs sitting right below it.
+    // five tabs sitting right below it.
     <div className="space-y-4" data-testid="dashboard-board">
       {/* Five one-tap ranges, then Custom for everything else — the OS's shared date
           filter, which also carries Yesterday, Last Month and an exact day.
@@ -198,216 +458,32 @@ export const DashboardBoard = () => {
         </Button>
       </div>
 
-      {/* Two rows of three on a phone. Six tabs in one row leaves each about a sixth of
-          the width, which even the short labels can't survive — and one of them is
-          "Executive Overview". Desktop keeps the single row. */}
-      {/* Four columns, not three: at three the fourth tab dropped to a second row on its
-          own, which read as a separate control rather than the last of a set. */}
-      <SegmentedTabs tabs={DASH_TABS} value={activeTab} onChange={setActiveTab} testid="dashboard-tab" mobileCols={4} />
+      {/* Two rows of three on a phone. Five tabs in one row leaves each about a fifth of
+          the width, which even short single-word labels can't survive comfortably —
+          three columns keeps every label readable, at the cost of the last row holding
+          only two. Desktop keeps the single row. */}
+      <SegmentedTabs tabs={DASH_TABS} value={activeTab} onChange={setActiveTab} testid="dashboard-tab" mobileCols={3} />
 
-      {activeTab === "overview" ? (
-        <ExecutiveOverview data={data} loading={loading} dateFilter={dateFilter} />
-      ) : activeTab === "leads" ? (
-        <PreSalesTab team={team} loading={teamLoading} branches={data?.leads?.physio_branches || []} />
-      ) : activeTeam ? (
-        <BranchesTab team={team} loading={teamLoading} branches={data?.leads?.physio_branches || []} />
-      ) : loading || !activeData ? (
-        <p className="py-16 text-center text-sm text-slate-400">{loading ? "Loading..." : "No data."}</p>
+      {activeTab === "marketing" ? (
+        <MarketingTab branches={branches} dateFilter={dateFilter} />
+      ) : activeTab === "sales" ? (
+        <SalesTab branches={branches} dateFilter={dateFilter} />
+      ) : activeTab === "revenue" ? (
+        <RevenueTab data={data} loading={loading} dateFilter={dateFilter} />
+      ) : activeTab === "team" ? (
+        <TeamTab team={team} loading={teamLoading} branches={branches} />
       ) : (
-        <div className="space-y-4">
-          {/* The headline split, on the same Consultation / Session line Accountant
-              Manage draws, so the two boards can't disagree about what a payment was
-              for. Total stays alongside them — it is the pair added up, and dropping it
-              would mean reading two figures to answer "how much came in".
-
-              Spot Joining is a slice of Session, not money on top: a treatment fee
-              collected on the same day as the consultation, i.e. the patient signed up
-              on the spot. So the four don't sum — hence the note under it, which is
-              there to stop someone adding all four and finding it over.
-
-              Two across on a phone rather than a column of four, so the whole split is on
-              screen at once instead of scrolled past one figure at a time. The figure
-              drops to text-lg below sm: half a phone is about 130px of inner width, and a
-              rupee total like ₹7,00,015.99 at text-3xl needs roughly 200. The labels take
-              two lines' height whether they need it or not — "Total Revenue" fits one line
-              where the other three wrap, and without it its figure would sit a line above
-              its neighbours' across the 2x2. */}
-          {activeTab === "revenue" && (
-            <div className="grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4" data-testid="dashboard-revenue-totals">
-              <Card className="border-emerald-200 bg-emerald-50/60" data-testid="dashboard-total-revenue">
-                <CardContent className="p-3 sm:p-4">
-                  <p className="min-h-[2.6em] text-xs font-semibold uppercase tracking-wider text-emerald-700 sm:min-h-0">Total Revenue</p>
-                  <p className="mt-1 text-lg font-bold text-emerald-700 sm:text-3xl">{fmtValue("revenue", activeData.total)}</p>
-                </CardContent>
-              </Card>
-              <Card data-testid="dashboard-consultation-revenue">
-                <CardContent className="p-3 sm:p-4">
-                  <p className="min-h-[2.6em] text-xs font-semibold uppercase tracking-wider text-sky-700 sm:min-h-0">Total Consultation Revenue</p>
-                  <p className="mt-1 text-lg font-bold text-sky-700 sm:text-3xl">{fmtValue("revenue", activeData.consultation)}</p>
-                </CardContent>
-              </Card>
-              <Card data-testid="dashboard-session-revenue">
-                <CardContent className="p-3 sm:p-4">
-                  <p className="min-h-[2.6em] text-xs font-semibold uppercase tracking-wider text-violet-700 sm:min-h-0">Total Session Revenue</p>
-                  <p className="mt-1 text-lg font-bold text-violet-700 sm:text-3xl">{fmtValue("revenue", activeData.session)}</p>
-                </CardContent>
-              </Card>
-              <Card data-testid="dashboard-spot-joining-revenue">
-                <CardContent className="p-3 sm:p-4">
-                  <p className="min-h-[2.6em] text-xs font-semibold uppercase tracking-wider text-amber-700 sm:min-h-0">Total Spot Joining Revenue</p>
-                  <p className="mt-1 text-lg font-bold text-amber-700 sm:text-3xl">{fmtValue("revenue", activeData.spot_joining)}</p>
-                </CardContent>
-              </Card>
-            </div>
-          )}
-
-          {/* One row, always — branches read as a comparison, and 2x2 made the two on
-              the bottom row look like a second, lesser group. Columns counted off the
-              data rather than hardcoded, so opening a fifth branch re-divides the row
-              instead of dropping one underneath.
-
-              A phone gets one dropdown instead of a card each. Five branches stacked ate
-              the whole screen before the breakdown they open had anywhere to appear, so
-              picking a branch meant scrolling past every other branch to see it. Each
-              option carries its own figure, so the numbers are still all readable in one
-              gesture — they just don't hold the screen open. */}
-          <div>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Physiotherapy Branches</p>
-            {activeData.physio_branches.length === 0 ? (
-              <p className="rounded-xl border border-dashed border-slate-200 py-6 text-center text-sm text-slate-400">
-                No Physiotherapy branches yet.
-              </p>
-            ) : (
-              <>
-              {/* Refresh beside the picker, where the figures it reloads are being read.
-                  The dashboard had none anywhere — every number on it is a snapshot taken
-                  when the tab opened, and short of changing the date range and changing it
-                  back there was no way to ask for a fresh one. */}
-              <div className="flex items-center gap-2 sm:hidden">
-                <select
-                  className="h-11 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700"
-                  value={drillBranch?.branch_id || ""}
-                  onChange={(e) => {
-                    const next = activeData.physio_branches.find((b) => b.branch_id === e.target.value);
-                    setDrillBranch(next || null);
-                  }}
-                  data-testid="dashboard-physio-select"
-                >
-                  <option value="">Pick a branch…</option>
-                  {activeData.physio_branches.map((b) => (
-                    <option key={b.branch_id} value={b.branch_id}>
-                      {b.branch_name} · {fmtValue(activeTab, b.value)}
-                    </option>
-                  ))}
-                </select>
-                <Button
-                  onClick={() => loadOverview()}
-                  disabled={loading}
-                  title="Refresh"
-                  aria-label="Refresh"
-                  className="h-11 w-11 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
-                  data-testid="dashboard-refresh"
-                >
-                  <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-                </Button>
-              </div>
-
-              {/* The phone's empty state. Until a branch is picked the whole screen below
-                  the dropdown was blank, which reads as a page that failed to load rather
-                  than one waiting on a choice.
-
-                  A chevron bounces up at the control that needs using, and beneath it sits
-                  a ghost of the breakdown that will land here — pulsing in sequence, so the
-                  space says "content goes here" rather than "nothing here". Both are
-                  motion-safe, so a reader who has asked for reduced motion gets the same
-                  message standing still. */}
-              {!drillBranch && (
-                <div className="rounded-xl border border-dashed border-slate-300 bg-white/60 px-4 py-8 text-center sm:hidden" data-testid="dashboard-physio-empty">
-                  <ChevronUp className="mx-auto h-5 w-5 text-sky-500 motion-safe:animate-bounce" />
-                  <p className="mt-1 text-sm font-semibold text-slate-600">Pick a branch to see its breakdown</p>
-                  <p className="mt-0.5 text-xs text-slate-400">
-                    {activeData.physio_branches.length} {activeData.physio_branches.length === 1 ? "branch" : "branches"} · each with its own split
-                  </p>
-                  <div className="mt-5 space-y-2" aria-hidden="true">
-                    {[0, 1, 2].map((i) => (
-                      <div
-                        key={i}
-                        className="flex items-center gap-3 rounded-lg bg-slate-100/80 p-3 motion-safe:animate-pulse"
-                        style={{ animationDelay: `${i * 150}ms` }}
-                      >
-                        <div className="h-8 w-8 shrink-0 rounded-full bg-slate-200" />
-                        <div className="flex-1 space-y-1.5">
-                          <div className="h-2.5 w-1/2 rounded bg-slate-200" />
-                          <div className="h-2 w-1/3 rounded bg-slate-200/80" />
-                        </div>
-                        <div className="h-3 w-12 shrink-0 rounded bg-slate-200" />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div
-                className="hidden sm:grid sm:gap-3"
-                style={{ gridTemplateColumns: `repeat(${activeData.physio_branches.length}, minmax(0, 1fr))` }}
-              >
-                {activeData.physio_branches.map((b) => {
-                  const open = drillBranch?.branch_id === b.branch_id;
-                  return (
-                    <Card
-                      key={b.branch_id}
-                      role="button"
-                      aria-expanded={open}
-                      tabIndex={0}
-                      // Clicking the open branch closes it — the card is the toggle, so
-                      // there's no separate control to hunt for.
-                      onClick={() => setDrillBranch(open ? null : b)}
-                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDrillBranch(open ? null : b); } }}
-                      // min-w-0 because a grid item defaults to min-width:auto, which lets
-                      // a long branch name push its own column wider than its 1fr track.
-                      className={`min-w-0 cursor-pointer transition ${
-                        open ? "border-sky-500 bg-sky-50/60 shadow-sm" : "hover:border-sky-300 hover:shadow-md"
-                      }`}
-                      data-testid={`dashboard-physio-${b.branch_id}`}
-                    >
-                      <CardContent className="p-4">
-                        <p className="min-w-0 truncate text-sm font-semibold text-slate-700">{b.branch_name}</p>
-                        <p className="mt-1 truncate text-2xl font-bold text-sky-600">{fmtValue(activeTab, b.value)}</p>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-              </div>
-              </>
-            )}
-
-            {/* Opens in place, under the row it belongs to, rather than over the board
-                in a modal. A branch's breakdown is something to read against the other
-                branches' numbers, and a dialog hides exactly what you'd compare it to. */}
-            {drillBranch && (
-              <BranchRevenueCards
-                branch={drillBranch}
-                dateFilter={dateFilter}
-                onClose={() => setDrillBranch(null)}
-              />
-            )}
-          </div>
-          {/* Other Verticals removed from the board. The endpoint still returns them —
-              other callers read the same payload — they just aren't drawn here. */}
-
-          {/* The share breakdown and Quick Actions used to sit here. The share is on
-              Executive Overview, beside a table that says more than the donut's legend
-              did; the branch cards above are the same numbers again. What's left is the
-              one thing this tab had that nothing else showed: the trend. */}
-        </div>
+        <AnalyticsTab data={data} loading={loading} dateFilter={dateFilter} />
       )}
     </div>
   );
 };
 
 /**
- * Executive Overview — the whole business on one screen, before any of the per-metric
- * tabs narrow it down.
+ * Dashboard > Analytics — the six-month growth trend, and the four headline figures that
+ * pick which metric it draws. This used to be Executive Overview, the board's landing
+ * tab; it's its own destination now that Marketing/Sales/Revenue/Team split out what used
+ * to sit beside it.
  *
  * The four headline figures come from the same payload every other tab reads, so this
  * can't disagree with them. Each carries a change against the immediately preceding
@@ -416,155 +492,7 @@ export const DashboardBoard = () => {
  *
  * `All` has no preceding window, so it shows no deltas rather than inventing a baseline.
  */
-const inBranch = (m, bid) => (bid === "none" ? !m.branch_id : m.branch_id === bid);
-
-/**
- * The branch row that heads both people tabs: one card per branch, clicking one narrows
- * the panel beneath it.
- *
- * The branch list comes from the dashboard payload rather than from the people, so a
- * branch with nobody on it still gets a card at zero. "This branch has no cover" is a
- * finding, and a card that quietly fails to exist cannot report it.
- *
- * Anyone whose login carries no branch would vanish the moment a branch is picked, so
- * they get a bucket of their own — shown only when somebody is actually in it.
- */
-const BranchFilterCards = ({ branches, members, value, onChange, noun, testid }) => {
-  const leadsIn = (bid) => members.filter((m) => inBranch(m, bid)).reduce((s, m) => s + (Number(m.total_assigned) || 0), 0);
-  const countIn = (bid) => members.filter((m) => inBranch(m, bid)).length;
-  const hasUnassigned = members.some((m) => !m.branch_id);
-
-  const Card_ = ({ id, name }) => {
-    const active = value === id;
-    const n = countIn(id);
-    return (
-      <button
-        type="button"
-        onClick={() => onChange(active ? "" : id)}
-        className={`rounded-xl border p-4 text-left transition ${
-          active ? "border-sky-400 bg-sky-50 shadow-sm" : "border-slate-200 bg-white hover:border-sky-300 hover:shadow-sm"
-        }`}
-        data-testid={`${testid}-${id}`}
-      >
-        <p className="truncate text-xs font-semibold uppercase tracking-wider text-slate-500">{name}</p>
-        <p className={`mt-1 text-2xl font-bold ${active ? "text-sky-700" : "text-slate-800"}`}>{leadsIn(id)}</p>
-        <p className="mt-0.5 text-[11px] text-slate-400">
-          {n} {n === 1 ? noun : `${noun}s`} · leads held
-        </p>
-      </button>
-    );
-  };
-
-  return (
-    <div>
-      <div className="mb-2 flex items-center justify-between">
-        <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Physiotherapy Branches</p>
-        {value && (
-          <button
-            type="button"
-            onClick={() => onChange("")}
-            className="text-[11px] font-semibold text-sky-600 hover:text-sky-800"
-            data-testid={`${testid}-clear`}
-          >
-            Show all branches
-          </button>
-        )}
-      </div>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-        {branches.map((b) => <Card_ key={b.branch_id} id={b.branch_id} name={b.branch_name} />)}
-        {hasUnassigned && <Card_ id="none" name="No branch" />}
-      </div>
-    </div>
-  );
-};
-
-/**
- * Dashboard > Pre Sales — the branches, and the agents behind whichever is picked.
- *
- * Each branch runs its own Pre-Sales team, so the roster is only readable a branch at a
- * time; all of them at once is a list of people from different places measured against an
- * average that spans all of them.
- */
-const PreSalesTab = ({ team, loading, branches }) => {
-  const [branchId, setBranchId] = useState("");
-  const members = team?.pre_sales || [];
-  const shown = branchId ? members.filter((m) => inBranch(m, branchId)) : members;
-
-  if (loading || !team) {
-    return <p className="py-16 text-center text-sm text-slate-400">{loading ? "Loading..." : "No data."}</p>;
-  }
-
-  return (
-    <div className="space-y-4" data-testid="dashboard-pre-sales-tab">
-      <BranchFilterCards
-        branches={branches}
-        members={members}
-        value={branchId}
-        onChange={setBranchId}
-        noun="agent"
-        testid="pre-sales-branch"
-      />
-
-      {/* No benchmarkFrom, so the average follows the filter. Narrowing to one branch
-          measures its agents against each other — they are peers doing the same job in
-          the same place, and that is the comparison worth making. */}
-      <TeamCard
-        title={TEAM_PANELS.pre_sales.title}
-        subtitle={
-          branchId
-            ? `${branches.find((b) => b.branch_id === branchId)?.branch_name || "No branch"} · ${TEAM_PANELS.pre_sales.subtitle}`
-            : TEAM_PANELS.pre_sales.subtitle
-        }
-        members={shown}
-        kind="pre_sales"
-      />
-    </div>
-  );
-};
-
-/**
- * Dashboard > BRANCHS — the same branch row, over the branch accounts themselves.
- */
-const BranchesTab = ({ team, loading, branches }) => {
-  const [branchId, setBranchId] = useState("");
-  const members = team?.sales || [];
-  const shown = branchId ? members.filter((m) => inBranch(m, branchId)) : members;
-
-  if (loading || !team) {
-    return <p className="py-16 text-center text-sm text-slate-400">{loading ? "Loading..." : "No data."}</p>;
-  }
-
-  return (
-    <div className="space-y-4" data-testid="dashboard-branches-tab">
-      <BranchFilterCards
-        branches={branches}
-        members={members}
-        value={branchId}
-        onChange={setBranchId}
-        noun="branch"
-        testid="branches-branch"
-      />
-
-      {/* benchmarkFrom is EVERY branch, even when one is selected. A branch's peers are
-          the other branches, so measuring it against itself would hand every branch a
-          delta of zero the moment it was opened — the filter would destroy the only
-          number on the panel worth reading. */}
-      <TeamCard
-        title={TEAM_PANELS.branch.title}
-        subtitle={
-          branchId
-            ? `${branches.find((b) => b.branch_id === branchId)?.branch_name || "No branch"} · ${TEAM_PANELS.branch.subtitle}`
-            : TEAM_PANELS.branch.subtitle
-        }
-        members={shown}
-        benchmarkFrom={members}
-        kind="branch"
-      />
-    </div>
-  );
-};
-
-const ExecutiveOverview = ({ data, loading, dateFilter }) => {
+const AnalyticsTab = ({ data, loading, dateFilter }) => {
   const [prev, setPrev] = useState(null);
   const [prevLoading, setPrevLoading] = useState(false);
   // Which of the four headline figures the charts below are drawing. Held here rather
@@ -598,16 +526,16 @@ const ExecutiveOverview = ({ data, loading, dateFilter }) => {
     return <p className="py-16 text-center text-sm text-slate-400">{loading ? "Loading..." : "No data."}</p>;
   }
 
-  // The branch list comes off the leads bucket, which carries every Physiotherapy branch
-  // whether or not it took a lead in range — so a quiet branch still offers its card
-  // rather than disappearing from the filter for the period it was quiet.
-  const branchCards = data.leads?.physio_branches || [];
+  // Every branch, offline or online, whether or not it took a lead in range — so a quiet
+  // branch still offers its card rather than disappearing from the filter for the period
+  // it was quiet.
+  const branchCards = data.leads?.branches || [];
 
   /** One metric's figure, scoped to the selected branch or the whole org. */
   const scoped = (bucket) => {
     if (!bucket) return 0;
     if (!branchFilter) return bucket.total ?? 0;
-    return (bucket.physio_branches || []).find((b) => b.branch_id === branchFilter)?.value ?? 0;
+    return (bucket.branches || []).find((b) => b.branch_id === branchFilter)?.value ?? 0;
   };
 
   const metrics = [
@@ -625,13 +553,13 @@ const ExecutiveOverview = ({ data, loading, dateFilter }) => {
     const bucket = prev?.[key];
     if (!bucket) return undefined;
     if (!branchFilter) return bucket.total;
-    return (bucket.physio_branches || []).find((b) => b.branch_id === branchFilter)?.value;
+    return (bucket.branches || []).find((b) => b.branch_id === branchFilter)?.value;
   };
 
   const activeMetric = metrics.find((m) => m.key === trendMetric) || metrics[0];
 
   return (
-    <div className="space-y-4" data-testid="dashboard-overview">
+    <div className="space-y-4" data-testid="dashboard-analytics-tab">
       {/* Two up on a phone rather than one. Four full-width cards stacked pushed the
           branch table two screens down, and these figures are short enough to share a
           row.
@@ -653,7 +581,7 @@ const ExecutiveOverview = ({ data, loading, dateFilter }) => {
               className={`rounded-xl border p-3 text-left shadow-sm transition sm:p-4 ${
                 on ? "border-slate-800 bg-slate-800" : "border-slate-200 bg-white hover:border-slate-300"
               }`}
-              data-testid={`dashboard-overview-${m.key}`}
+              data-testid={`dashboard-analytics-${m.key}`}
             >
               <div className="flex items-start justify-between gap-2">
                 <p className={`min-w-0 truncate text-[10px] font-bold uppercase tracking-wider sm:text-[11px] ${on ? "text-white/80" : "text-slate-500"}`}>{m.label}</p>
