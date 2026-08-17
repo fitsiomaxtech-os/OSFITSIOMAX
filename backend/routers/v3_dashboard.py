@@ -665,6 +665,93 @@ async def v3_dashboard_overview(
     }
 
 
+@router.get("/dashboard/leads-analytics")
+async def v3_dashboard_leads_analytics(
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    branch_ids: Optional[str] = Query(None, description="Comma-separated; omit for every branch"),
+    _: V3UserOut = Depends(v3_require_roles("super_admin", "sales_head", "marketing_head")),
+):
+    """Leads, four ways: over time, by pipeline stage, by source, by branch.
+
+    Deliberately no money and no session/treatment counts. This answers the marketing
+    question — how many leads arrived, where from, and how far they got — and mixing
+    revenue into it invites reading a source's worth off a chart that never priced
+    anything. /dashboard/overview is where the financial picture lives.
+
+    Every figure counts the same leads over the same window, so the four charts are four
+    readings of one set rather than four queries that can disagree. Branch scoping is a
+    list rather than a single id because the board's filters are a group (Offline/Online)
+    as often as one branch, and resolving that to ids is the client's job — it owns the
+    pills that define it.
+    """
+    query: dict = _date_range_query("created_at", start_date, end_date)
+    wanted_branches = [b for b in (branch_ids or "").split(",") if b.strip()]
+    if wanted_branches:
+        query["branch_id"] = {"$in": wanted_branches}
+    leads = await v3_col("leads").find(
+        query, {"_id": 0, "created_at": 1, "stage": 1, "branch_id": 1, "source_tab": 1, "source_type": 1}
+    ).to_list(50000)
+
+    branch_rows = await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1}).to_list(500)
+    branch_names = {b["id"]: b.get("branch_name") or "—" for b in branch_rows}
+
+    # Day buckets for anything up to a quarter, months beyond it. A year plotted by day is
+    # 365 points on a card this size; a week plotted by month is one.
+    by_day: dict = {}
+    for lead in leads:
+        stamp = str(lead.get("created_at") or "")[:10]
+        if stamp:
+            by_day[stamp] = by_day.get(stamp, 0) + 1
+    span_days = len(by_day)
+    if span_days > 92:
+        rolled: dict = {}
+        for day, n in by_day.items():
+            rolled[day[:7]] = rolled.get(day[:7], 0) + n
+        trend = [{"period": k, "leads": v} for k, v in sorted(rolled.items())]
+        grain = "month"
+    else:
+        trend = [{"period": k, "leads": v} for k, v in sorted(by_day.items())]
+        grain = "day"
+
+    # Stage order comes from the pipeline itself, not from counting — a funnel drawn in
+    # descending order stops being a funnel, and an empty stage still has to hold its place
+    # or the shape lies about where leads are dropping.
+    stage_order = await _stage_names("pre_sales", V3_STAGES)
+    stage_counts = {name: 0 for name in stage_order}
+    by_source: dict = {}
+    by_branch: dict = {}
+    for lead in leads:
+        stage = lead.get("stage")
+        if stage in stage_counts:
+            stage_counts[stage] += 1
+        by_source[_lead_source(lead)] = by_source.get(_lead_source(lead), 0) + 1
+        bid = lead.get("branch_id") or ""
+        by_branch[bid] = by_branch.get(bid, 0) + 1
+
+    # The long tail folds into one row. Past ten bars the labels stop being readable, and a
+    # chart of thirty sources with two leads each says less than "Other".
+    ranked_sources = sorted(by_source.items(), key=lambda kv: -kv[1])
+    top_sources = [{"name": k, "value": v} for k, v in ranked_sources[:10]]
+    tail = sum(v for _k, v in ranked_sources[10:])
+    if tail:
+        top_sources.append({"name": "Other", "value": tail})
+
+    return {
+        "applied_filters": {"start_date": start_date, "end_date": end_date, "branch_ids": wanted_branches},
+        "total": len(leads),
+        "grain": grain,
+        "trend": trend,
+        "by_stage": [{"name": name, "value": stage_counts[name]} for name in stage_order],
+        "by_source": top_sources,
+        "by_branch": sorted(
+            ({"name": branch_names.get(bid, "Unassigned") if bid else "Unassigned", "value": v}
+             for bid, v in by_branch.items()),
+            key=lambda r: -r["value"],
+        ),
+    }
+
+
 @router.get("/dashboard/leads-trend")
 async def v3_dashboard_leads_trend(
     months: int = Query(6, ge=2, le=24),

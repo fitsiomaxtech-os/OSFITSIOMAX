@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Eye, Plus, Search, Settings as Cog, Calendar as CalendarIcon, Phone, FileText, StickyNote, ArrowRight, CheckCircle2, X, Pencil, PhoneOff, Clock, Bell, Building2, Trash2, Lock, Users, CalendarCheck, UserRound, LogOut, Mail, Youtube, ChevronDown, ChevronUp, RefreshCw, BarChart3, CalendarDays } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import {
 import { LeadEditModal } from "@/components/LeadEditModal";
 import { CreateLeadModal } from "@/components/CreateLeadModal";
 import { SourcePill } from "@/components/marketing/SourcePill";
+import { LeadsAnalyticsDashboard } from "@/components/marketing/LeadsAnalyticsDashboard";
 import { PullFromSheetButton } from "@/components/PullFromSheetButton";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { StageTabBar } from "@/components/ui/stage-tab";
@@ -19,7 +20,7 @@ import { callTimeStamp, callDateStamp } from "@/lib/time";
 
 const initials = (name) => (name || "?").split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
 
-// Deterministic avatar color per first letter so A→one hue, B→another, etc.
+// Deterministic avatar color per first letter so Aâ†’one hue, Bâ†’another, etc.
 // Tailwind 26-letter palette (bg + text pair) chosen for legibility on white rows.
 const AVATAR_PALETTE = [
   { bg: "bg-red-100",     fg: "text-red-700" },     // A
@@ -57,7 +58,7 @@ const avatarColor = (name) => {
   return AVATAR_PALETTE[idx];
 };
 
-// 10-digit → prepend 91; 11-digit leading 0 → drop the 0 and prepend 91 — same
+// 10-digit â†’ prepend 91; 11-digit leading 0 â†’ drop the 0 and prepend 91 â€” same
 // sanitizer used for WhatsApp links elsewhere in this app (PhysioBoard, Client Portal).
 const waNumber = (raw) => {
   const digits = (raw || "").replace(/\D/g, "");
@@ -75,7 +76,7 @@ const WhatsAppIcon = ({ className }) => (
 );
 
 // Each branch or source keeps one colour wherever it appears, picked from its name
-// rather than its position in the list — so one added or reordered later doesn't
+// rather than its position in the list â€” so one added or reordered later doesn't
 // recolour every row that already reads as "the green branch".
 const BRANCH_TONES = [
   { chip: "border-emerald-300 bg-emerald-50 text-emerald-700", dot: "bg-emerald-500", hover: "hover:bg-emerald-100" },
@@ -101,7 +102,7 @@ const branchLabel = (b) => b?.branch_name || b?.name || "";
  * The board's coloured dropdown, shared by the Assigned To column and the Sources
  * filter.
  *
- * A native <select> can only be coloured on its closed box — the option list is drawn
+ * A native <select> can only be coloured on its closed box â€” the option list is drawn
  * by the OS and ignores CSS, which is why both of these looked like plain system
  * dropdowns next to the rest of the board. This draws its own list instead, giving
  * every entry its own colour in the trigger and the list alike.
@@ -112,7 +113,7 @@ const branchLabel = (b) => b?.branch_name || b?.name || "";
  * closes it rather than leaving it stranded beside a different row.
  *
  * `options` is [{ value, label }]. `resetLabel`, when given, adds a neutral first row
- * that clears the selection — that's the filter's "All Sources"; the assign column has
+ * that clears the selection â€” that's the filter's "All Sources"; the assign column has
  * no such row because unassigning a lead isn't a thing you can do here.
  */
 const ColorSelect = ({
@@ -219,7 +220,7 @@ const ColorSelect = ({
 
 const testimonialsUrl = () => `${window.location.origin}/testimonials`;
 
-// Call → native dialer (tel:); WhatsApp → a template message pointing the lead at the
+// Call â†’ native dialer (tel:); WhatsApp â†’ a template message pointing the lead at the
 // patient testimonial videos before the rep even gets them on the phone. Same-tab
 // navigation (window.location.href, not window.open), matching the fix applied
 // elsewhere for the mobile "blank screen on return from WhatsApp" bug.
@@ -239,7 +240,7 @@ const LeadContactIcons = ({ lead }) => {
   };
   // 40px targets with a tinted disc behind each. These now render only on the phone
   // cards, and at 3.5 icons inside 1.5 padding they were 26px of tappable area with
-  // nothing marking them as buttons — under the 44px a thumb is generally reckoned to
+  // nothing marking them as buttons â€” under the 44px a thumb is generally reckoned to
   // need, and sitting next to a card that opens the lead on tap, so a near miss opened
   // the wrong thing entirely.
   return (
@@ -268,7 +269,7 @@ const LeadContactIcons = ({ lead }) => {
   );
 };
 
-// Shared between the desktop Appointment column and the mobile Consultations tab —
+// Shared between the desktop Appointment column and the mobile Consultations tab â€”
 // same branch_stage vocabulary the Branch Admin's own pipeline already uses.
 const branchStatusInfo = (lead, branches) => {
   const branchName = lead.branch_id
@@ -285,17 +286,17 @@ const branchStatusInfo = (lead, branches) => {
   return { branchName, status, statusColor };
 };
 
-// Same helper BranchManagementBoard.jsx and BranchFormDialogV2.jsx already carry —
+// Same helper BranchManagementBoard.jsx and BranchFormDialogV2.jsx already carry â€”
 // every default vertical is named "online_.../offline_...", so reading the prefix off
 // the branch record itself can never disagree with how those two screens group branches.
 const isOnlineVertical = (v) => String(v || "").startsWith("online_");
 
-// Marketing Head's KPI row — a fixed funnel rather than the live Pre-Sales stage list,
+// Marketing Head's KPI row â€” a fixed funnel rather than the live Pre-Sales stage list,
 // since two of these span more than one field. "Branch Admin Appointment" counts
 // a branch board's own appointment stage regardless of how the lead got there: "New
 // Appointment" is where a Pre-Sales-controlled branch's board opens (the lead arrives
 // already booked), "Appointment Date & Time" is the stage a Branch-Admin-controlled
-// branch's own leads reach once *it* books one directly — both mean "there's a booked
+// branch's own leads reach once *it* books one directly â€” both mean "there's a booked
 // appointment sitting on a branch's board" (see backend/stage_utils.py). "Lost" folds in
 // each sub-pipeline's own didn't-convert stage, since a lead can end up not converting from
 // any of the three.
@@ -319,7 +320,7 @@ const MARKETING_HEAD_FUNNEL = [
   },
 ];
 
-// Super Admin only: All | Offline | Online, then one pill per branch in that group —
+// Super Admin only: All | Offline | Online, then one pill per branch in that group â€”
 // the same split Branches & Verticals uses, so a branch's grouping reads the same way
 // everywhere. Picking a pill sets sourceFilter, the board's existing branch scope.
 const PreSalesGroupPill = ({ active, onClick, children, testid }) => (
@@ -336,7 +337,7 @@ const PreSalesGroupPill = ({ active, onClick, children, testid }) => (
 );
 
 /**
- * Leads / Analytics — the board's two pages, not two of its filters.
+ * Leads / Analytics â€” the board's two pages, not two of its filters.
  *
  * Wears the top nav strip's tab rather than the rounded pill everything under it wears.
  * These switch which page you are on; All/Offline/Online and the branch pills narrow
@@ -369,7 +370,7 @@ const PreSalesBranchPill = ({ active, onClick, children, testid }) => (
   </button>
 );
 
-// Which desk is holding a lead right now — the one fact the merged Super Admin view adds
+// Which desk is holding a lead right now â€” the one fact the merged Super Admin view adds
 // that neither of the two split boards needed, since each of them only ever shows one.
 const HandledByBadge = ({ lead }) => {
   const isBranchAdmin = lead.lead_control === "branch_admin";
@@ -394,16 +395,16 @@ const PRESALES_ANALYTICS_DATE_PRESETS = [
 ];
 
 // The funnel this board feeds, off one /dashboard/overview call: leads and appointments
-// through to what a branch makes of them — consultations, sessions, and the treatment
+// through to what a branch makes of them â€” consultations, sessions, and the treatment
 // packages patients end up buying.
 //
 // The last two are a pair, both counted off the Treatment Fee: how many patients bought a
 // package, and what those came to. "Treatment Purchase Revenue" is the figure that used to
-// be labelled "Session Amount Collected" — the same money, named for the thing being sold
+// be labelled "Session Amount Collected" â€” the same money, named for the thing being sold
 // rather than for the visits it pays for, so it reads with the count beside it.
 //
 // Pending Session Amount is gone from here. It is an outstanding balance rather than
-// anything this board's date range describes — every other card counts what happened in
+// anything this board's date range describes â€” every other card counts what happened in
 // the window, that one reported what was owed right now regardless of it.
 const PRESALES_ANALYTICS_METRICS = [
   { key: "leads", label: "All Leads" },
@@ -426,13 +427,13 @@ const HANDLED_BY_FILTERS = [
 ];
 
 /**
- * A row of pills acting as one segmented control — the date presets on the Analytics pane
+ * A row of pills acting as one segmented control â€” the date presets on the Analytics pane
  * and the Leads range row, and the Handled By filter that sits beside the latter. One
  * component so that three controls reading as the same thing cannot drift into three that
  * behave differently at the same width.
  *
  * It wraps rather than holding one line. The five range labels come to roughly 340px, and
- * a phone's content column is 336px inside the page's own px-3 — as a nowrap row it pushed
+ * a phone's content column is 336px inside the page's own px-3 â€” as a nowrap row it pushed
  * the whole board sideways, so every screen using it scrolled horizontally.
  *
  * `options` is [{ key, label }]. `testid` is the prefix each button's own testid is built
@@ -462,7 +463,7 @@ const presalesToIso = (d) => d.toISOString().slice(0, 10);
 const presalesEndOfDay = (d) => { const n = new Date(d); n.setHours(23, 59, 59, 999); return n; };
 
 /** The from/to a preset key covers. Every range ends today rather than at the end of the
- *  period — "This Month" means the month so far, not a window running into the future. */
+ *  period â€” "This Month" means the month so far, not a window running into the future. */
 const presalesRangeFor = (key) => {
   const today = new Date();
   if (key === "today") return { from: presalesStartOfDay(today), to: presalesEndOfDay(today) };
@@ -474,7 +475,7 @@ const presalesRangeFor = (key) => {
 /**
  * The range row from the Analytics pane, driving the Leads table's own date filter.
  *
- * Same presets, same order, same look — the two panes of one board asking the same
+ * Same presets, same order, same look â€” the two panes of one board asking the same
  * question should not be answered by two different controls. It emits the
  * { key, label, from, to } shape the Leads filter already reads, so nothing downstream of
  * dateFilter had to change.
@@ -492,7 +493,7 @@ const PreSalesRangePills = ({ value, onChange, testid = "presales-range", handle
   const pick = (key) => {
     if (key === "all") { onChange(null); return; }
     const label = PRESALES_ANALYTICS_DATE_PRESETS.find((p) => p.key === key)?.label || key;
-    // Custom lands with no dates yet, which reads as unfiltered until both are given —
+    // Custom lands with no dates yet, which reads as unfiltered until both are given â€”
     // the alternative is guessing a range on the user's behalf the moment they click it.
     if (key === "custom") { onChange({ key, label, from: null, to: null }); return; }
     onChange({ key, label, ...presalesRangeFor(key) });
@@ -562,14 +563,19 @@ const presalesAnalyticsValueFor = (bucket, branchId, group) => {
 };
 
 /**
- * Pre-Sales' own analytics board — same data, same math as Branches & Verticals >
+ * Pre-Sales' own analytics board â€” same data, same math as Branches & Verticals >
  * Overview, just reached from inside the Sales Master View instead. A second call to
  * the same endpoint rather than lifted state: the two boards' date/branch filters are
  * independent, and sharing one would mean picking a date range on one silently changed
  * what the other was showing.
  */
-const PreSalesAnalyticsPanel = ({ branches, branchGroup, sourceFilter }) => {
-  // Opens on today, the same as the Leads pane beside it — the board is read to see where
+const PreSalesAnalyticsPanel = ({ branches, branchGroup, sourceFilter, role }) => {
+  // Marketing Head reads a leads dashboard here instead of the seven figures: charts of
+  // where leads came from and how far they got, and no money anywhere. A marketing desk
+  // does not answer for revenue, and putting it on the same screen invites reading a
+  // source's worth off charts that never priced anything.
+  const leadsOnly = role === "marketing_head";
+  // Opens on today, the same as the Leads pane beside it â€” the board is read to see where
   // the day stands, and every wider range is a step back from that.
   const [preset, setPreset] = useState("today");
   const [customFrom, setCustomFrom] = useState("");
@@ -577,13 +583,13 @@ const PreSalesAnalyticsPanel = ({ branches, branchGroup, sourceFilter }) => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   // Held apart from `data` so a failed load can say so. Swallowing the error left every
-  // card reading 0, which is indistinguishable from a branch that genuinely has none —
+  // card reading 0, which is indistinguishable from a branch that genuinely has none â€”
   // and that is exactly how a 403 on this endpoint passed for real figures.
   const [failed, setFailed] = useState(false);
 
   const { startDate, endDate } = useMemo(() => {
     const today = new Date();
-    // "All" carries no dates at all — see load(), which then asks for no window rather
+    // "All" carries no dates at all â€” see load(), which then asks for no window rather
     // than for a very wide one, and lets the endpoint answer over everything it holds.
     if (preset === "all") return { startDate: "", endDate: "" };
     if (preset === "today") return { startDate: presalesToIso(today), endDate: presalesToIso(today) };
@@ -593,6 +599,9 @@ const PreSalesAnalyticsPanel = ({ branches, branchGroup, sourceFilter }) => {
   }, [preset, customFrom, customTo]);
 
   const load = useCallback(() => {
+    // The leads dashboard fetches its own, leaner data â€” this call carries revenue and
+    // session figures it has no cards for.
+    if (leadsOnly) return;
     if (preset === "custom" && (!customFrom || !customTo)) return;
     setLoading(true);
     const params = preset === "all" ? {} : { start_date: startDate, end_date: endDate };
@@ -600,11 +609,21 @@ const PreSalesAnalyticsPanel = ({ branches, branchGroup, sourceFilter }) => {
       .then((rows) => { setData(rows); setFailed(false); })
       .catch(() => { setData(null); setFailed(true); })
       .finally(() => setLoading(false));
-  }, [startDate, endDate, preset, customFrom, customTo]);
+  }, [startDate, endDate, preset, customFrom, customTo, leadsOnly]);
 
   useEffect(() => { load(); }, [load]);
 
-  const fmt = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
+  // The branch pills, resolved to the ids the leads dashboard filters on. Done here rather
+  // than server-side because the pills are what define a group, and this board owns them.
+  const branchIds = useMemo(() => {
+    if (sourceFilter) return [sourceFilter];
+    if (branchGroup !== "all") {
+      return branches.filter((b) => isOnlineVertical(b.vertical) === (branchGroup === "online")).map((b) => b.id);
+    }
+    return [];
+  }, [sourceFilter, branchGroup, branches]);
+
+  const fmt = (n) => `â‚¹${Number(n || 0).toLocaleString("en-IN")}`;
 
   return (
     <div className="space-y-4" data-testid="presales-analytics-panel">
@@ -620,14 +639,22 @@ const PreSalesAnalyticsPanel = ({ branches, branchGroup, sourceFilter }) => {
         )}
       </div>
 
-      {loading && !data ? (
+      {leadsOnly ? (
+        // Under the same range row above, which is the only filter row on this pane â€” the
+        // dashboard's charts all read the slice it selects.
+        <LeadsAnalyticsDashboard
+          startDate={preset === "all" ? "" : startDate}
+          endDate={preset === "all" ? "" : endDate}
+          branchIds={branchIds}
+        />
+      ) : loading && !data ? (
         <p className="py-10 text-center text-sm text-slate-400">Loading...</p>
       ) : failed ? (
         <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-6 text-center text-sm text-amber-800" data-testid="presales-analytics-failed">
-          These figures could not be loaded. Refresh to try again — if it keeps happening, this account may not have access to the org-wide numbers.
+          These figures could not be loaded. Refresh to try again â€” if it keeps happening, this account may not have access to the org-wide numbers.
         </p>
       ) : (
-        // All seven across one row on a wide screen — they are one funnel read
+        // All seven across one row on a wide screen â€” they are one funnel read
         // left to right, and wrapping the last three onto a second line broke that
         // into two groups it does not actually have. Narrower widths still wrap:
         // seven cards on a laptop would leave no room for the figures themselves.
@@ -637,14 +664,14 @@ const PreSalesAnalyticsPanel = ({ branches, branchGroup, sourceFilter }) => {
             return (
               <div key={m.key} className="rounded-xl border-2 border-slate-200 bg-white px-3 py-3 sm:px-4 sm:py-3.5" data-testid={`presales-analytics-metric-${m.key}`}>
                 {/* Wraps rather than truncating. Seven-up leaves a card too narrow for
-                    the longer names, and "TREATMENT PURCHASE …" on two of them gave no
+                    the longer names, and "TREATMENT PURCHASE â€¦" on two of them gave no
                     way to tell the count from the revenue. The two-line floor keeps the
                     figures on one baseline across the row whether a label takes one line
                     or two. */}
                 <span className="block min-h-[2.5em] text-[11px] font-bold uppercase leading-tight tracking-wider text-slate-500">{m.label}</span>
                 {/* Steps down wherever the card is narrow: two-up on a phone and seven-up
-                    at xl both leave about 170px, and "₹5,54,752" at the larger size runs
-                    straight out of it — as a truncated figure, which reads as a smaller
+                    at xl both leave about 170px, and "â‚¹5,54,752" at the larger size runs
+                    straight out of it â€” as a truncated figure, which reads as a smaller
                     number rather than as a clipped one. */}
                 <span className="mt-1 block truncate text-2xl font-extrabold text-slate-800 sm:text-3xl xl:text-2xl">{m.currency ? fmt(value) : value}</span>
               </div>
@@ -667,8 +694,8 @@ const PRESALES_CRM_LOCKED = false;
 /**
  * The Pre-Sales pipeline.
  *
- * Mounted in three places: the Pre Sales role's own view, Super Admin > PRE SALES, and —
- * when a branch runs on Branch Admin Lead Control — as the first tab of that branch's
+ * Mounted in three places: the Pre Sales role's own view, Super Admin > PRE SALES, and â€”
+ * when a branch runs on Branch Admin Lead Control â€” as the first tab of that branch's
  * Branch Admin Master View. The third is why `branchControlled` exists: the same board,
  * pointed at the other half of the leads.
  *
@@ -701,7 +728,7 @@ export const PreSalesCRM = ({
   const [leads, setLeads] = useState([]);
   const [branches, setBranches] = useState([]);
   const [search, setSearch] = useState("");
-  // Opens on New Leads, not All — that's the stage that needs action; a rep shouldn't
+  // Opens on New Leads, not All â€” that's the stage that needs action; a rep shouldn't
   // have to dig through everything already worked on just to see what's new. Marketing
   // Head has no leads to action, so its funnel opens on the whole picture instead.
   const [stageFilter, setStageFilter] = useState(role === "marketing_head" ? "all" : "New Leads");
@@ -719,7 +746,7 @@ export const PreSalesCRM = ({
   // Super Admin, Sales Head and Marketing Head only, from here down: which branches count
   // as one group (All/Offline/Online, same split Branches & Verticals uses), and which
   // top-level pane is showing. Sales Head is Pre-Sales' own manager, and Marketing Head
-  // reads the same funnel from the marketing side — both get the same org-wide picture
+  // reads the same funnel from the marketing side â€” both get the same org-wide picture
   // Super Admin's Pre Sales tab has, rather than one rep's own filtered book.
   const [branchGroup, setBranchGroup] = useState("all");
   const [masterViewOwn, setMasterViewOwn] = useState("leads"); // "leads" | "analytics"
@@ -728,16 +755,16 @@ export const PreSalesCRM = ({
   const masterView = headerOwnsViewTabs ? masterViewProp : masterViewOwn;
   const setMasterView = headerOwnsViewTabs ? onMasterViewChange : setMasterViewOwn;
   // Which desk's half of the book to read: "all" | "pre_sales" | "branch_admin". Opens on
-  // All, the whole picture this view exists to give — the other two are a step in from it.
+  // All, the whole picture this view exists to give â€” the other two are a step in from it.
   const [handledByFilter, setHandledByFilter] = useState("all");
   const isSuperAdminMasterView = role === "super_admin" || role === "sales_head" || role === "marketing_head";
   // Marketing Head's KPI row is a fixed funnel rather than the live, admin-configurable
-  // Pre-Sales stage list everyone else's cards come from (see MARKETING_HEAD_FUNNEL) —
+  // Pre-Sales stage list everyone else's cards come from (see MARKETING_HEAD_FUNNEL) â€”
   // two of its buckets aren't a single stage-field equality.
   const isMarketingHeadFunnel = role === "marketing_head";
   // Marketing Head's board only, as asked for. Every master view carries both desks' leads
   // and tags each row HANDLED BY, so this would read the same on Super Admin's and Sales
-  // Head's — flipping this one flag is all it would take to give it to them too.
+  // Head's â€” flipping this one flag is all it would take to give it to them too.
   const showHandledByFilter = role === "marketing_head";
 
   const selectBranchGroup = (g) => { setBranchGroup(g); setSourceFilter(""); };
@@ -747,7 +774,7 @@ export const PreSalesCRM = ({
     try {
       // Scoped to the branch when this board is pinned to one. The API already scopes a
       // Branch Admin to their own branch, but a Super Admin drilled into a branch is not
-      // scoped by anything — without this they would see every branch's taken-over leads
+      // scoped by anything â€” without this they would see every branch's taken-over leads
       // on one branch's tab.
       const [stgs, ldList] = await Promise.all([
         stagesList("pre_sales"),
@@ -756,7 +783,7 @@ export const PreSalesCRM = ({
       setStages(stgs);
       // Lead Control splits the leads between two copies of this board: the Pre-Sales
       // desk's own, and the one a branch gets when it takes its leads over. Filtered here
-      // at the source rather than in each memo below — the KPI cards, the stage tabs, the
+      // at the source rather than in each memo below â€” the KPI cards, the stage tabs, the
       // table and the pipeline view all read from this one list, and a lead hidden from
       // three of the four would be worse than showing it everywhere. The backend resolves
       // the flag from each lead's branch on every fetch, so flipping the switch moves
@@ -777,7 +804,7 @@ export const PreSalesCRM = ({
   useEffect(() => { load(); }, [load]);
   useEffect(() => { getBranches().then(setBranches).catch(() => {}); }, []);
 
-  // Leads narrowed by Date Filter + Branch filter only — feeds both the KPI
+  // Leads narrowed by Date Filter + Branch filter only â€” feeds both the KPI
   // summary cards and the table, so the cards stay dynamic with those two filters
   // without also collapsing to whatever single stage tab is currently selected.
   const dateSourceFiltered = useMemo(() => {
@@ -788,7 +815,7 @@ export const PreSalesCRM = ({
     if (sourceFilter) {
       rows = rows.filter((l) => (l.branch_id || "") === sourceFilter);
     } else if (isSuperAdminMasterView && branchGroup !== "all") {
-      // No specific branch picked, but a group is — every branch in that group summed,
+      // No specific branch picked, but a group is â€” every branch in that group summed,
       // same as leaving Offline/Online selected with no branch pill drilled into does on
       // Overview.
       const groupBranchIds = new Set(
@@ -823,7 +850,7 @@ export const PreSalesCRM = ({
     return map;
   }, [dateSourceFiltered, stages]);
 
-  // Marketing Head's own bucket counts — same idea as stageCounts, against
+  // Marketing Head's own bucket counts â€” same idea as stageCounts, against
   // MARKETING_HEAD_FUNNEL's match functions instead of a live stage-name equality.
   const funnelCounts = useMemo(() => {
     const map = { all: dateSourceFiltered.length };
@@ -833,7 +860,7 @@ export const PreSalesCRM = ({
 
   // The toolbar filter and the per-row assign dropdown take the same {value,label} shape,
   // so they share one list. The source list that used to sit here went with the filter it
-  // fed — the SOURCE column still shows where each lead came from, it is just no longer
+  // fed â€” the SOURCE column still shows where each lead came from, it is just no longer
   // something you can narrow the board by.
   const branchOptions = useMemo(() => branches.map((b) => ({ value: b.id, label: branchLabel(b) })), [branches]);
 
@@ -859,8 +886,8 @@ export const PreSalesCRM = ({
   useEffect(() => { setVisibleCount(50); }, [stageFilter, sourceFilter, search, dateFilter, handledByFilter]);
   const visibleLeads = filtered.slice(0, visibleCount);
 
-  // Mobile Consultations tab — this rep's leads currently booked for a consultation.
-  // Not narrowed by the Leads tab's own date filter — ConsultationsTab applies its own.
+  // Mobile Consultations tab â€” this rep's leads currently booked for a consultation.
+  // Not narrowed by the Leads tab's own date filter â€” ConsultationsTab applies its own.
   const appointmentLeads = useMemo(
     () => leads.filter((l) => l.stage === "Appointment").sort((a, b) => (b.created_at || "").localeCompare(a.created_at || "")),
     [leads],
@@ -874,7 +901,7 @@ export const PreSalesCRM = ({
   // Pick KPI cards: total + up to 8 stage cards
   const kpiStages = stages.slice(0, 8);
 
-  // Branches under the selected group — every one under All, just the offline ones under
+  // Branches under the selected group â€” every one under All, just the offline ones under
   // Offline, just the online ones under Online. Super Admin only.
   const visibleGroupBranches = branchGroup === "all" ? branches : branches.filter((b) => isOnlineVertical(b.vertical) === (branchGroup === "online"));
 
@@ -888,7 +915,7 @@ export const PreSalesCRM = ({
     );
   }
 
-  // flex+gap, not space-y — space-y's sibling selector keys off the `hidden` HTML
+  // flex+gap, not space-y â€” space-y's sibling selector keys off the `hidden` HTML
   // attribute, not the `hidden` class, so the desktop leads block (hidden by class
   // on mobile, not attribute) would still count as a sibling and hand the next
   // block phantom top margin for content a phone never draws.
@@ -898,10 +925,10 @@ export const PreSalesCRM = ({
   return (
     <div className={`flex flex-col gap-5 ${embedded ? "" : "pb-20 md:pb-0"}`} data-testid="presales-crm-page">
     {/* Desk only, whoever is looking. Super Admin used to get this table on a phone while
-        the Pre Sales role got the card list below — the same screen, one of them unusable,
+        the Pre Sales role got the card list below â€” the same screen, one of them unusable,
         decided by who was logged in. Both now get the cards. */}
     <div className="hidden space-y-5 md:block" data-testid="presales-leads-tab">
-      {/* Master View controls — Super Admin only: which pane (Leads / Analytics), and
+      {/* Master View controls â€” Super Admin only: which pane (Leads / Analytics), and
           which branches (All/Offline/Online, then the individual branches in that
           group) both panes are scoped to.
 
@@ -912,7 +939,7 @@ export const PreSalesCRM = ({
         <div className="space-y-2" data-testid="presales-master-controls">
           {/* A rule under it, the same one the branch tabs carry: it separates the two
               pages from the filters that narrow whichever one is open. Skipped when the
-              page header carries them instead — two strips would be two answers. */}
+              page header carries them instead â€” two strips would be two answers. */}
           {!headerOwnsViewTabs && (
             <div className="flex items-center gap-1 border-b border-slate-200 pb-2" data-testid="presales-view-tabs">
               <PreSalesViewTab active={masterView === "leads"} onClick={() => setMasterView("leads")} testid="presales-view-leads">
@@ -948,7 +975,7 @@ export const PreSalesCRM = ({
       )}
 
       {/* The Leads pane's own range row. Above the KPI cards because it narrows them as
-          well as the table — both read the same date-filtered set. Analytics draws its
+          well as the table â€” both read the same date-filtered set. Analytics draws its
           own inside the panel, so this is skipped there rather than stacking two. */}
       {!(masterView === "analytics" && isSuperAdminMasterView) && (
         <PreSalesRangePills
@@ -960,19 +987,21 @@ export const PreSalesCRM = ({
         />
       )}
 
-      {/* KPI Cards — the Leads pane only. They are that table's stage filter, not a
+      {/* KPI Cards â€” the Leads pane only. They are that table's stage filter, not a
           summary: each one selects a stage and the list below narrows to it. Analytics
           has no such table to narrow, and its own cards already open with All Leads, so
           on that pane these were a second row of counts answering nothing. */}
       {/* Columns sized to the label rather than counted out per breakpoint: auto-fit packs
-          in as many as fit, and the 13.5rem floor is what holds the longest of these names
-          — "Branch Admin Appointment" — on one line inside the card's padding. Fixed column
-          counts were what broke it: six across a 1200px window left each card about 190px,
-          eight characters short of that label, so it wrapped to two lines.
-          On a full-width desktop all eight still land in a single row; narrower windows
-          take fewer per row instead of squeezing the words. */}
+          in as many as fit, and the floor is whatever holds the longest of these names —
+          "Branch Admin Appointment" — on one line inside the card's padding.
+          The floor is the whole balancing act. Too low and the label wraps; too high and
+          the eighth card drops to a second row. 10.5rem is what lets all eight sit across
+          a full desktop while still fitting that name whole, and it only works because the
+          label is sentence case: uppercase runs about a third wider and needed 13.5rem,
+          which is what pushed the row onto two lines.
+          Narrower windows take fewer cards per row rather than squeezing the words. */}
       {!(masterView === "analytics" && isSuperAdminMasterView) && (
-        <div className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(13.5rem,1fr))] lg:gap-3" data-testid="presales-kpi-row">
+        <div className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(10.5rem,1fr))]" data-testid="presales-kpi-row">
           {isMarketingHeadFunnel ? (
             <>
               <KpiCard label="All" value={funnelCounts.all} active={stageFilter === "all"} color="#22c55e" onClick={() => setStageFilter("all")} testid="presales-kpi-all" />
@@ -992,11 +1021,11 @@ export const PreSalesCRM = ({
       )}
 
       {masterView === "analytics" && isSuperAdminMasterView ? (
-        <PreSalesAnalyticsPanel branches={branches} branchGroup={branchGroup} sourceFilter={sourceFilter} />
+        <PreSalesAnalyticsPanel branches={branches} branchGroup={branchGroup} sourceFilter={sourceFilter} role={role} />
       ) : (
       <>
       {/* Toolbar */}
-      {/* Seven controls, which a phone cannot hold on one line — so it takes two, split
+      {/* Seven controls, which a phone cannot hold on one line â€” so it takes two, split
           where the meaning splits: what you are looking at on top, what you can do to it
           below. It used to be one flex-wrap row whose min-w-[260px] search forced a break
           wherever it landed, leaving Manage Stages orphaned on a third line.
@@ -1015,7 +1044,7 @@ export const PreSalesCRM = ({
 
             All Sources keeps its text: it is not a button but the current selection, and
             an icon cannot say WHICH source is filtered. Same reason the date filter puts
-            its label back once a range is picked — a filtered screen has to admit it. */}
+            its label back once a range is picked â€” a filtered screen has to admit it. */}
         <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="presales-date-filter" centered iconOnly />
         </div>
 
@@ -1046,7 +1075,7 @@ export const PreSalesCRM = ({
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
         </Button>
         {role === "super_admin" && (
-          // Icon-only on a phone, like the four beside it — the words would take a third
+          // Icon-only on a phone, like the four beside it â€” the words would take a third
           // of the row for a control used once a month. The label stays on title and
           // aria-label, and returns in full from sm up.
           <Button
@@ -1068,7 +1097,7 @@ export const PreSalesCRM = ({
           the KPI cards above already set, so every stage was on screen twice, four
           rows apart, with the pair drifting out of step as you clicked either one.
           The cards win: they carry the counts. The mobile block below keeps its own
-          StageTabBar — it has no KPI row, so that one isn't a duplicate. */}
+          StageTabBar â€” it has no KPI row, so that one isn't a duplicate. */}
 
       {/* Leads table */}
       <Card data-testid="presales-leads-card">
@@ -1090,14 +1119,14 @@ export const PreSalesCRM = ({
                         </div>
                       </td>
                       {/* Number only. Call and WhatsApp both hand off to an app the desk
-                          does not have — tel: and wa.me open a dialer and a phone client,
+                          does not have â€” tel: and wa.me open a dialer and a phone client,
                           so on a desktop they were two icons per row that either did
                           nothing or launched the wrong thing. They stay on the phone
                           cards, where they work. */}
                       <td className="border-y border-slate-200 bg-white px-3 py-3 text-center transition-colors group-hover:bg-slate-50">
-                        <span className="font-mono text-xs text-slate-700">{l.phone || "—"}</span>
+                        <span className="font-mono text-xs text-slate-700">{l.phone || "â€”"}</span>
                       </td>
-                      <td className="border-y border-slate-200 bg-white px-3 py-3 text-center text-xs text-slate-600 transition-colors group-hover:bg-slate-50">{l.email || "—"}</td>
+                      <td className="border-y border-slate-200 bg-white px-3 py-3 text-center text-xs text-slate-600 transition-colors group-hover:bg-slate-50">{l.email || "â€”"}</td>
                       <td className="border-y border-slate-200 bg-white px-3 py-3 text-center transition-colors group-hover:bg-slate-50"><SourcePill source={l.source_tab || l.source_type} /></td>
                       <td className="border-y border-slate-200 bg-white px-3 py-3 transition-colors group-hover:bg-slate-50">
                         <div className="flex flex-col items-center gap-1">
@@ -1105,7 +1134,7 @@ export const PreSalesCRM = ({
                             <span className="inline-flex h-6 items-center rounded border px-2 text-[10px] font-semibold" style={{ borderColor: stg?.color || "#cbd5e1", color: stg?.color || "#64748b" }}>{l.stage}</span>
                             {l.stage === "RNR" && (l.rnr_attempts || 0) > 0 && (
                               <span className="inline-flex items-center gap-0.5 rounded-full bg-rose-100 px-1.5 py-0.5 text-[9px] font-bold text-rose-700" title={`${l.rnr_attempts} unanswered call attempts`} data-testid={`presales-rnr-badge-${l.id}`}>
-                                <PhoneOff className="h-2.5 w-2.5" />×{l.rnr_attempts}
+                                <PhoneOff className="h-2.5 w-2.5" />Ã—{l.rnr_attempts}
                               </span>
                             )}
                           </div>
@@ -1121,7 +1150,7 @@ export const PreSalesCRM = ({
                               <span className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold ${tone}`} data-testid={`presales-followup-badge-${l.id}`}>
                                 <Clock className="h-2.5 w-2.5" />
                                 {isToday ? "Today" : isTomorrow ? "Tomorrow" : dt.toLocaleDateString(undefined, { day: "2-digit", month: "short" })}
-                                {" · "}
+                                {" Â· "}
                                 {dt.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false })}
                               </span>
                             );
@@ -1141,7 +1170,7 @@ export const PreSalesCRM = ({
                         return (
                           <td className="border-y border-slate-200 bg-white px-3 py-3 text-center text-xs transition-colors group-hover:bg-slate-50">
                             <div className="flex flex-col items-center gap-1" data-testid={`presales-branch-status-${l.id}`}>
-                              <span className="font-semibold text-slate-700">{branchName || "—"}</span>
+                              <span className="font-semibold text-slate-700">{branchName || "â€”"}</span>
                               <span className={`inline-flex w-fit items-center rounded border px-1.5 text-[10px] font-semibold ${statusColor}`}>{status}</span>
                               {l.assigned_physio_name ? (
                                 <span className="text-[10px] text-emerald-600">Expert: {l.assigned_physio_name}</span>
@@ -1162,7 +1191,7 @@ export const PreSalesCRM = ({
                               <span className="text-[10px] text-slate-400">{callDateStamp(l.rnr_last_attempt_at)}</span>
                             </div>
                           ) : (
-                            <span className="text-xs text-slate-400">—</span>
+                            <span className="text-xs text-slate-400">â€”</span>
                           )}
                         </td>
                       )}
@@ -1171,9 +1200,9 @@ export const PreSalesCRM = ({
                         <ColorSelect
                           value={l.branch_id || ""}
                           options={branchOptions}
-                          placeholder="— Assign —"
+                          placeholder="â€” Assign â€”"
                           emptyText="No branches available."
-                          // pickedBranchId, not branchId — the component now takes a
+                          // pickedBranchId, not branchId â€” the component now takes a
                           // branchId prop, and a parameter shadowing it here would read
                           // like the board's own branch rather than the row's choice.
                           onChange={async (pickedBranchId) => {
@@ -1249,7 +1278,7 @@ export const PreSalesCRM = ({
             </Button>
           </div>
 
-          {/* Same controls as the desk toolbar, stacked instead of inline — a phone has no
+          {/* Same controls as the desk toolbar, stacked instead of inline â€” a phone has no
               room for a row of pills beside search and refresh, so this gets its own
               block rather than squeezing into the row above. The dropdown that used to
               sit here for branch selection is gone; the pills below replace it. */}
@@ -1288,11 +1317,11 @@ export const PreSalesCRM = ({
           )}
 
           {/* Right-aligned for Pre Sales. Manage Stages being Super Admin's alone makes
-              this row one icon for them — and one control at the left edge with the rest
+              this row one icon for them â€” and one control at the left edge with the rest
               of the line empty reads as something that failed to load rather than as a
               toolbar. */}
           <div className={`flex items-center gap-2 ${role === "super_admin" ? "" : "justify-end"}`}>
-            {/* Super Admin's alone — the Pre Sales role can work the pipeline but not
+            {/* Super Admin's alone â€” the Pre Sales role can work the pipeline but not
                 reshape it, and the button 403s for them anyway. */}
             {role === "super_admin" && (
               <Button
@@ -1320,7 +1349,7 @@ export const PreSalesCRM = ({
           </div>
 
           {masterView === "analytics" && isSuperAdminMasterView ? (
-            <PreSalesAnalyticsPanel branches={branches} branchGroup={branchGroup} sourceFilter={sourceFilter} />
+            <PreSalesAnalyticsPanel branches={branches} branchGroup={branchGroup} sourceFilter={sourceFilter} role={role} />
           ) : (
           <>
           {/* Same range row the desk gets, above the stage bar it narrows. */}
@@ -1358,7 +1387,7 @@ export const PreSalesCRM = ({
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex min-w-0 items-center gap-2">
                       <span className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-xs font-bold ${avatarColor(l.name).bg} ${avatarColor(l.name).fg}`}>{initials(l.name)}</span>
-                      <p className="min-w-0 truncate text-sm font-bold text-slate-800">{l.name || "—"}</p>
+                      <p className="min-w-0 truncate text-sm font-bold text-slate-800">{l.name || "â€”"}</p>
                     </div>
                     <span className="shrink-0 rounded-[5px] px-2 py-0.5 text-[10px] font-bold" style={{ background: `${hex}14`, color: hex, border: `1px solid ${hex}33` }}>
                       {l.stage}
@@ -1368,7 +1397,7 @@ export const PreSalesCRM = ({
                     <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500">
                       {l.stage === "RNR" && (l.rnr_attempts || 0) > 0 && (
                         <span className="inline-flex items-center gap-0.5 font-semibold text-rose-600">
-                          <PhoneOff className="h-2.5 w-2.5" />×{l.rnr_attempts}
+                          <PhoneOff className="h-2.5 w-2.5" />Ã—{l.rnr_attempts}
                         </span>
                       )}
                       {l.stage === "RNR" && l.rnr_last_attempt_at && (
@@ -1428,7 +1457,7 @@ export const PreSalesCRM = ({
       {showCreate && (
         // Pinned to this board's branch when it has one. A lead created on a Branch
         // Admin's Pre Sales tab with no branch would be an unbranched lead, which always
-        // belongs to Pre-Sales — it would vanish from the board that created it.
+        // belongs to Pre-Sales â€” it would vanish from the board that created it.
         <CreateLeadModal onClose={() => setShowCreate(false)} onSaved={load} branchId={branchId} isSuperAdmin={isSuperAdminMasterView} />
       )}
 
@@ -1499,8 +1528,8 @@ export const PreSalesCRM = ({
 // branch: branch_stage carries the first two ("New Appointment" is set the instant a
 // branch is assigned; "Appointment Date & Time" is set once a specific date/time is
 // booked, and branch_stage never advances past it). The doctor finishing the visit
-// and suggesting a treatment plan is a *different* field — consultation_stage (or
-// head_consultation_stage) hits "Consultation Visit" — so it's tracked separately and
+// and suggesting a treatment plan is a *different* field â€” consultation_stage (or
+// head_consultation_stage) hits "Consultation Visit" â€” so it's tracked separately and
 // can be true at the same time branch_stage is still "Appointment Date & Time".
 const CONSULT_MILESTONES = [
   { key: "new", label: "New Branch Assign", color: "#0ea5e9" },
@@ -1525,7 +1554,7 @@ const ConsultationsTab = ({ leads, branches, loading, onOpen }) => {
     completed: leads.filter((l) => consultMilestoneMatch(l, "completed")).length,
   }), [leads]);
 
-  // Filters by appointment_date (when the consultation is booked), not created_at —
+  // Filters by appointment_date (when the consultation is booked), not created_at â€”
   // same field ConsultationsBoard's own date filter uses for this stage of leads.
   const filtered = useMemo(() => {
     let rows = leads;
@@ -1596,7 +1625,7 @@ const ConsultationsTab = ({ leads, branches, loading, onOpen }) => {
                 <LeadContactIcons lead={l} />
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                <span className="text-xs font-medium text-slate-600">{branchName || "—"}</span>
+                <span className="text-xs font-medium text-slate-600">{branchName || "â€”"}</span>
                 <span className={`inline-flex items-center rounded border px-1.5 text-[10px] font-semibold ${statusColor}`}>{status}</span>
                 {l.assigned_physio_name ? (
                   <span className="text-[10px] text-emerald-600">Expert: {l.assigned_physio_name}</span>
@@ -1640,7 +1669,7 @@ const ProfileTab = ({ currentUser, branches, onLogout }) => {
     : null;
   const joinedOn = currentUser?.created_at
     ? new Date(currentUser.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })
-    : "—";
+    : "â€”";
 
   const handleAdd = async (e) => {
     e.preventDefault();
@@ -1652,7 +1681,7 @@ const ProfileTab = ({ currentUser, branches, onLogout }) => {
       toast.success("Testimonial added");
       loadVideos();
     } catch (err) {
-      toast.error(err?.response?.data?.detail || "Could not add — check the YouTube link");
+      toast.error(err?.response?.data?.detail || "Could not add â€” check the YouTube link");
     }
     setSaving(false);
   };
@@ -1738,8 +1767,8 @@ const ProfileTab = ({ currentUser, branches, onLogout }) => {
 /**
  * One stage's count, and the control that filters the table to it.
  *
- * Laid out to match the Analytics pane's metric cards on this same board — small uppercase
- * label over a large figure — because the two are the same kind of object and reading as
+ * Laid out to match the Analytics pane's metric cards on this same board â€” small uppercase
+ * label over a large figure â€” because the two are the same kind of object and reading as
  * one system is most of what makes a row of them look considered.
  *
  * The type is deliberately small: the label is a caption for the number, not a heading
@@ -1750,21 +1779,23 @@ const KpiCard = ({ label, value, color, active, onClick, testid }) => (
   <button
     onClick={onClick}
     data-testid={testid}
-    className={`min-w-0 rounded-xl px-3.5 py-3 text-left transition hover:shadow-sm ${active ? "ring-2 ring-inset" : ""}`}
+    className={`min-w-0 rounded-xl px-2.5 py-3 text-left transition hover:shadow-sm ${active ? "ring-2 ring-inset" : ""}`}
     style={{ background: `${color}14`, border: `1px solid ${color}33`, ...(active ? { "--tw-ring-color": color } : {}) }}
   >
-    {/* truncate, not bare nowrap: the row's columns are sized to hold every label this
-        board has whole, so the ellipsis is only a backstop for a custom stage name longer
-        than any of them — which then ends in "…" inside its own card rather than spilling
-        across the next. */}
-    {/* 10px, and tracking-wide rather than wider: uppercase runs about a third wider than
-        sentence case, and at 11px with looser tracking "BRANCH ADMIN APPOINTMENT" came to
-        the full width of the card's text column with nothing to spare. At this size it
-        clears it by a comfortable margin and the row still fits eight across. */}
-    {/* Full colour, no opacity knocked off it — 10px is already the smallest type on the
-        card, and fading small text is where contrast goes from tight to failing. */}
-    <p className="truncate text-[10px] font-bold uppercase leading-tight tracking-wide" style={{ color }}>{label}</p>
-    {/* leading-none so the figure sits as a number rather than as a line of text — it is
+    {/* Sentence case, not uppercase. Uppercase reads as the tidier dashboard caption, but
+        it sets about a third wider, and that width is the reason the row could not hold
+        eight cards without either wrapping the label or dropping a card to a second line.
+        Sentence case at 10px puts "Branch Admin Appointment" around 125px against the
+        ~148px this card gives it — clear by a real margin rather than by arithmetic I
+        cannot measure from here.
+        truncate is the backstop, not the plan: the column floor already fits every label
+        this board carries, so the ellipsis only appears for a custom stage name longer
+        than any of them, which then ends in "…" inside its own card rather than spilling
+        across the next.
+        Full colour, no opacity knocked off it — this is the smallest type on the card, and
+        fading small text is where contrast goes from tight to failing. */}
+    <p className="truncate text-[10px] font-semibold leading-tight" style={{ color }}>{label}</p>
+    {/* leading-none so the figure sits as a number rather than as a line of text â€” it is
         what closed the loose gap under each label and the dead band at the card's foot. */}
     <p className="mt-1.5 text-2xl font-bold leading-none" style={{ color }}>{value}</p>
   </button>
@@ -1780,25 +1811,25 @@ const ChipTab = ({ label, active, onClick, color, testid }) => (
 // ============ Lead Detail Dialog (Overview + Move-to-Stage + Edit) ============
 
 /**
- * The activity line without its "Call attempt #4 — " prefix.
+ * The activity line without its "Call attempt #4 â€” " prefix.
  *
  * The backend writes that prefix so the entry reads on its own in the History tab and in
  * Transaction History, where nothing else says which call it was. In RNR History the badge
  * beside it already says ATTEMPT 4, so the prefix printed the number twice on one row.
  *
  * Stripped here rather than dropped at the source, because those other screens still need
- * it. Anything that doesn't match the pattern is passed through untouched — an activity
+ * it. Anything that doesn't match the pattern is passed through untouched â€” an activity
  * line written some other way should still be readable, not silently blanked.
  */
 const rnrDetail = (details) => {
   const text = (details || "").trim();
-  const stripped = text.replace(/^call attempt\s*#?\d+\s*[—–-]\s*/i, "");
+  const stripped = text.replace(/^call attempt\s*#?\d+\s*[â€”â€“-]\s*/i, "");
   if (!stripped) return text;
   return stripped.charAt(0).toUpperCase() + stripped.slice(1);
 };
 
 // pinnedBranchId: set when the board is a single branch's, which is how a Super Admin
-// drilled into a branch gets a branch for the appointment flow — they have none of their
+// drilled into a branch gets a branch for the appointment flow â€” they have none of their
 // own, and without it every appointment asks them to pick one they already chose.
 const LeadDetailDialog = ({ lead, stages, currentUser, pinnedBranchId = null, onClose, onSaved, onMoveStage }) => {
   const [tab, setTab] = useState("overview");
@@ -1816,7 +1847,7 @@ const LeadDetailDialog = ({ lead, stages, currentUser, pinnedBranchId = null, on
     getBranches().then(setBranches).catch(() => {});
   }, []);
 
-  // Both History and RNR History read the same activity trail — RNR History is that trail
+  // Both History and RNR History read the same activity trail â€” RNR History is that trail
   // filtered to the call attempts, not a second source. One fetch serves both, so the two
   // tabs can never show a different number of calls for the same lead.
   useEffect(() => {
@@ -1841,11 +1872,11 @@ const LeadDetailDialog = ({ lead, stages, currentUser, pinnedBranchId = null, on
       // A column that is never taller than the screen, with only the middle section
       // scrolling. It used to be an auto-height box whose body was capped at 55vh and
       // nothing else: header, tabs, the wrapping Move to Stage row and the RNR panel came
-      // to more than the remaining 45vh on a phone or a short laptop, so the footer — the
-      // half of the dialog you act from — was pushed off the bottom with no way to reach it.
+      // to more than the remaining 45vh on a phone or a short laptop, so the footer â€” the
+      // half of the dialog you act from â€” was pushed off the bottom with no way to reach it.
       <div className="flex max-h-[95vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-slate-200">
         {/* Plain header. The gradient was the loudest thing on the dialog and it carried
-            no meaning — the two chips beneath it are what actually say where this lead
+            no meaning â€” the two chips beneath it are what actually say where this lead
             came from and what stage it is at, and they read better against white. */}
         <div className="relative shrink-0 border-b border-slate-200 bg-white px-4 py-4 sm:px-6 sm:py-5">
           <div className="flex items-start justify-between gap-3">
@@ -1855,7 +1886,7 @@ const LeadDetailDialog = ({ lead, stages, currentUser, pinnedBranchId = null, on
                 <p className="truncate text-base font-semibold leading-tight text-slate-900 sm:text-lg" data-testid="presales-detail-name">{currentLead.name}</p>
                 <div className="mt-1 flex flex-wrap items-center gap-2">
                   <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-600">
-                    {currentLead.source_tab || currentLead.source_type || "—"}
+                    {currentLead.source_tab || currentLead.source_type || "â€”"}
                   </span>
                   <span className="rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-[11px] font-semibold text-slate-700">
                     {currentLead.stage}
@@ -1902,16 +1933,16 @@ const LeadDetailDialog = ({ lead, stages, currentUser, pinnedBranchId = null, on
             <div className="space-y-3">
               <ColorSection title="Contact Information" tone="sky" icon={<Phone className="h-4 w-4" />} collapsible defaultOpen={false}>
                 <ColorRow k="Phone" v={currentLead.phone} />
-                <ColorRow k="Email" v={currentLead.email || "—"} />
-                <ColorRow k="Location" v={currentLead.location || "—"} />
+                <ColorRow k="Email" v={currentLead.email || "â€”"} />
+                <ColorRow k="Location" v={currentLead.location || "â€”"} />
               </ColorSection>
               <ColorSection title="Additional Details" tone="violet" icon={<FileText className="h-4 w-4" />} collapsible defaultOpen={false}>
-                <ColorRow k="Expected Consultation" v={currentLead.expected_consultation_date || "—"} />
-                <ColorRow k="Months of Pain" v={currentLead.months_of_pain ?? "—"} />
-                <ColorRow k="Age" v={currentLead.age ?? "—"} />
-                <ColorRow k="Gender" v={currentLead.gender || "—"} />
-                <ColorRow k="Occupation" v={currentLead.occupation || "—"} />
-                <ColorRow k="Department" v={currentLead.department || "—"} />
+                <ColorRow k="Expected Consultation" v={currentLead.expected_consultation_date || "â€”"} />
+                <ColorRow k="Months of Pain" v={currentLead.months_of_pain ?? "â€”"} />
+                <ColorRow k="Age" v={currentLead.age ?? "â€”"} />
+                <ColorRow k="Gender" v={currentLead.gender || "â€”"} />
+                <ColorRow k="Occupation" v={currentLead.occupation || "â€”"} />
+                <ColorRow k="Department" v={currentLead.department || "â€”"} />
                 <ColorRow k="Vertical" v={currentLead.vertical} />
               </ColorSection>
               {currentLead.notes && (
@@ -1930,10 +1961,10 @@ const LeadDetailDialog = ({ lead, stages, currentUser, pinnedBranchId = null, on
                           <Clock className={`mt-0.5 h-4 w-4 ${isUpcoming ? "text-emerald-600" : "text-slate-400"}`} />
                           <div>
                             <p className="text-sm font-semibold text-slate-800">
-                              {dt.toLocaleDateString(undefined, { weekday: "short", day: "2-digit", month: "short", year: "numeric" })} · {f.time}
+                              {dt.toLocaleDateString(undefined, { weekday: "short", day: "2-digit", month: "short", year: "numeric" })} Â· {f.time}
                             </p>
                             {f.remarks && <p className="mt-0.5 text-xs text-slate-600">{f.remarks}</p>}
-                            <p className="mt-0.5 text-[10px] text-slate-400">Set by {f.created_by || "—"}</p>
+                            <p className="mt-0.5 text-[10px] text-slate-400">Set by {f.created_by || "â€”"}</p>
                           </div>
                         </div>
                         {isUpcoming && <span className="rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-bold text-white">UPCOMING</span>}
@@ -1946,7 +1977,7 @@ const LeadDetailDialog = ({ lead, stages, currentUser, pinnedBranchId = null, on
           )}
           {tab === "rnr" && (
             <div className="space-y-3" data-testid="presales-detail-rnr">
-              {/* The standing count first — it is what decides whether this lead is still
+              {/* The standing count first â€” it is what decides whether this lead is still
                   worth ringing, and it comes off the lead itself rather than the length of
                   the list below, so a trail that predates the counter still reports right. */}
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 p-4">
@@ -1978,7 +2009,7 @@ const LeadDetailDialog = ({ lead, stages, currentUser, pinnedBranchId = null, on
                     // The counter can be ahead of the trail for leads that were rung before
                     // the activity log recorded it. Saying so beats showing an empty list
                     // under a figure that insists calls were made.
-                    ? "No individual calls are logged for this lead — only the running total above."
+                    ? "No individual calls are logged for this lead â€” only the running total above."
                     : "No calls attempted yet. Use +1 No Answer on the Overview tab when a client doesn't pick up."}
                 </div>
               )}
@@ -1995,15 +2026,15 @@ const LeadDetailDialog = ({ lead, stages, currentUser, pinnedBranchId = null, on
                         Attempt {rnrRows.length - i}
                       </span>
                       {/* callTimeStamp, not toLocaleString: it reads the clock in IST and
-                          names the band — "01:02 pm Afternoon" — the same way the panel on
+                          names the band â€” "01:02 pm Afternoon" â€” the same way the panel on
                           Overview already reports the last call. Two formatters would
                           eventually disagree about where Afternoon ends. */}
                       <span className="text-[11px] font-medium text-slate-600">{callTimeStamp(a.created_at)}</span>
-                      <span className="text-[11px] text-slate-400">· {callDateStamp(a.created_at)}</span>
+                      <span className="text-[11px] text-slate-400">Â· {callDateStamp(a.created_at)}</span>
                     </div>
                     {a.details && <p className="mt-1 text-sm text-slate-700">{rnrDetail(a.details)}</p>}
                     <p className="mt-1 text-[11px] text-slate-400">
-                      by {a.created_by || "system"}{a.created_by_role ? ` · ${a.created_by_role}` : ""}
+                      by {a.created_by || "system"}{a.created_by_role ? ` Â· ${a.created_by_role}` : ""}
                     </p>
                   </div>
                 </div>
@@ -2031,7 +2062,7 @@ const LeadDetailDialog = ({ lead, stages, currentUser, pinnedBranchId = null, on
                     </div>
                     {a.details && <p className="mt-1 text-sm text-slate-700">{a.details}</p>}
                     <p className="mt-1 text-[11px] text-slate-400">
-                      by {a.created_by || "system"}{a.created_by_role ? ` · ${a.created_by_role}` : ""}
+                      by {a.created_by || "system"}{a.created_by_role ? ` Â· ${a.created_by_role}` : ""}
                     </p>
                   </div>
                 </div>
@@ -2043,7 +2074,7 @@ const LeadDetailDialog = ({ lead, stages, currentUser, pinnedBranchId = null, on
             <div className="space-y-2" data-testid="presales-detail-followups">
               {(currentLead.follow_ups || []).length === 0 && (
                 <div className="rounded-lg border border-dashed border-slate-200 bg-white p-6 text-center text-sm text-slate-400" data-testid="presales-followups-empty">
-                  No follow-ups scheduled yet. Use <span className="font-semibold">Move to Stage → Follow Up</span> to schedule one.
+                  No follow-ups scheduled yet. Use <span className="font-semibold">Move to Stage â†’ Follow Up</span> to schedule one.
                 </div>
               )}
               {(currentLead.follow_ups || []).slice().reverse().map((f, idx) => {
@@ -2065,7 +2096,7 @@ const LeadDetailDialog = ({ lead, stages, currentUser, pinnedBranchId = null, on
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className={`text-sm font-semibold ${isRescheduled ? "text-slate-500 line-through decoration-slate-300" : "text-slate-800"}`}>
-                          {dt.toLocaleDateString(undefined, { weekday: "short", day: "2-digit", month: "short", year: "numeric" })} · {f.time}
+                          {dt.toLocaleDateString(undefined, { weekday: "short", day: "2-digit", month: "short", year: "numeric" })} Â· {f.time}
                         </p>
                         {isRescheduled && <span className="rounded-full bg-slate-300 px-2 py-0.5 text-[10px] font-bold text-white">RESCHEDULED</span>}
                         {!isRescheduled && isUpcoming && <span className="rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-bold text-white">UPCOMING</span>}
@@ -2080,7 +2111,7 @@ const LeadDetailDialog = ({ lead, stages, currentUser, pinnedBranchId = null, on
                           <span className="font-semibold">Reschedule reason:</span> {f.reschedule_reason}
                         </div>
                       )}
-                      <p className="mt-1.5 text-[11px] text-slate-400">Set by {f.created_by || "—"} · {new Date(f.created_at).toLocaleString()}</p>
+                      <p className="mt-1.5 text-[11px] text-slate-400">Set by {f.created_by || "â€”"} Â· {new Date(f.created_at).toLocaleString()}</p>
                     </div>
                     {isActive && (
                       <Button
@@ -2167,7 +2198,7 @@ const LeadDetailDialog = ({ lead, stages, currentUser, pinnedBranchId = null, on
                       <Clock className="h-3 w-3" />
                       Last call
                       <span className="font-bold">{callTimeStamp(currentLead.rnr_last_attempt_at)}</span>
-                      <span className="text-rose-400">· {callDateStamp(currentLead.rnr_last_attempt_at)}</span>
+                      <span className="text-rose-400">Â· {callDateStamp(currentLead.rnr_last_attempt_at)}</span>
                     </p>
                   )}
                 </div>
@@ -2199,7 +2230,7 @@ const LeadDetailDialog = ({ lead, stages, currentUser, pinnedBranchId = null, on
 
       {followUpDraft && !showEdit && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-3 sm:p-4" data-testid="presales-followup-modal">
-          {/* Scrolls itself rather than overflowing the viewport — date, time, a textarea
+          {/* Scrolls itself rather than overflowing the viewport â€” date, time, a textarea
               and the footer come to more than a phone in landscape has to give. */}
           <div className="max-h-[95vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white shadow-2xl">
             <div className="flex items-center justify-between bg-gradient-to-r from-amber-500 to-orange-500 px-5 py-4 text-white">
@@ -2482,7 +2513,7 @@ const LeadDetailDialog = ({ lead, stages, currentUser, pinnedBranchId = null, on
                     // Sent explicitly when the board is pinned to a branch. Leaving it out
                     // lets the API infer the branch from whoever is logged in, which is
                     // right for a Branch Admin and wrong for a Super Admin drilled into a
-                    // branch — they have none, and the appointment would land nowhere.
+                    // branch â€” they have none, and the appointment would land nowhere.
                     if (pinnedBranchId) payload.branch_id = pinnedBranchId;
                     else if (!myBranchName) payload.branch_id = appointmentDraft.branch_id;
                     const updated = await scheduleAppointment(currentLead.id, payload);
@@ -2534,7 +2565,7 @@ const TONE_MAP = {
 };
 
 // `collapsible` opts a section into an FAQ-style accordion (starts at `defaultOpen`,
-// toggled by tapping the header) — plain ColorSection callers keep the original
+// toggled by tapping the header) â€” plain ColorSection callers keep the original
 // always-expanded card unchanged.
 const ColorSection = ({ title, tone = "sky", icon, children, collapsible = false, defaultOpen = true }) => {
   const t = TONE_MAP[tone] || TONE_MAP.sky;
