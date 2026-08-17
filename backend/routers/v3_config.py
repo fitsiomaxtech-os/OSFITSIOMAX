@@ -9,6 +9,7 @@ from utils import now_iso, normalize_slot_time, derive_branch_code, active_docto
 from security import hash_password
 from deps import v3_current_user, v3_require_roles, is_branch_admin_role
 from stage_utils import get_first_stage_name, realign_branch_stage_leads
+from shift_utils import attach_shifts
 import lead_control
 from schemas.v3 import (
     V3UserOut, V3VerticalCreate, V3VerticalOut,
@@ -340,6 +341,10 @@ async def v3_get_doctors(
         # HEAD PHYSIO CALENDAR comes back empty. Physios stay scoped to their branch.
         query["$or"] = [{"branch_id": scope_branch}, {"profile_type": "head_physio"}]
     rows = await v3_col("doctors").find(active_doctor_query(query), {"_id": 0}).sort("created_at", -1).to_list(1000)
+    # Their rostered working window, so a list that offers an expert also says which hours
+    # that expert actually works. Resolved here rather than by each caller because every
+    # calendar and picker reads this one endpoint.
+    rows = await attach_shifts(rows)
     out = []
     for row in rows:
         try:

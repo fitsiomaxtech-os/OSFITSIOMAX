@@ -28,6 +28,7 @@ import {
   UserCog,
   User,
   UserX,
+  Clock,
   MoreHorizontal,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -58,6 +59,7 @@ import { FitsiomaxStorePanel } from "@/components/BranchStoreBoard";
 import { PullFromSheetButton } from "@/components/PullFromSheetButton";
 import { AccountantManageTab } from "@/components/branch/AccountantManageTab";
 import { BranchCalendarPanel } from "@/components/branch/BranchCalendarPanel";
+import { TimeManagementPanel } from "@/components/branch/TimeManagementPanel";
 import { BranchDetailPage } from "@/components/branch/BranchDetailPage";
 import MissedClassPanel from "@/components/branch/MissedClassPanel";
 import { BranchReviewPanel } from "@/components/branch/BranchReviewPanel";
@@ -660,6 +662,11 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     { key: "missed", label: "MISSED CLASSES", icon: UserX },
     { key: "manager", label: "MANAGER", icon: UserCog },
     { key: "calendar", label: "CALENDAR", icon: Calendar },
+    // Sits after CALENDAR because it is the setting the three calendars above obey: the
+    // shift an expert is on is the window their day gets opened across. Last in the strip
+    // rather than first for the same reason — it is configured once and then left alone,
+    // while the calendars are worked in daily.
+    { key: "time", label: "TIME MANAGEMENT", icon: Clock },
   ];
 
   return (
@@ -710,12 +717,12 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
         />
       ) : activeView === "consultations" ? (
         <div className="space-y-4" data-testid="branch-consultations-headphysio">
-          {/* Three across on a phone, so the six land as two even rows in the order they
-              are declared. Left to wrap on their own they came out ragged — four rows,
-              one of them holding HEAD PHYSIO CALENDAR alone — because each label is a
-              different width. A grid ignores the widths and the icon moves above the
-              label so a third of the screen is enough to read it. From sm up nothing
-              changes: one flex row of full-size pills. */}
+          {/* Three across on a phone, so they land as even rows in the order they are
+              declared. Left to wrap on their own they came out ragged — four rows, one of
+              them holding HEAD PHYSIO CALENDAR alone — because each label is a different
+              width. A grid ignores the widths and the icon moves above the label so a
+              third of the screen is enough to read it. From sm up nothing changes: one
+              flex row of full-size pills. */}
           <div className="grid auto-rows-fr grid-cols-3 gap-1 rounded-lg border border-slate-200 bg-white p-1 sm:flex sm:flex-wrap sm:gap-2" data-testid="branch-consultations-subtabs">
             {MANAGEMENT_SUB_TABS.map((t) => {
               const Icon = t.icon;
@@ -742,6 +749,8 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
             <BranchDetailPage branchId={branchId} readOnly />
           ) : consultationsSubTab === "calendar" ? (
             <BranchCalendarPanel branchId={branchId} />
+          ) : consultationsSubTab === "time" ? (
+            <TimeManagementPanel branchId={branchId} />
           ) : (
             <HeadPhysioCalendar branchId={branchId} />
           )}

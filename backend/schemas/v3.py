@@ -150,6 +150,13 @@ class V3DoctorOut(BaseModel):
     # once. None means the default; a Head Physio is pinned to 1 whatever is stored.
     # See slot_capacity_of() in utils.py.
     slot_capacity: Optional[int] = None
+    # The working window this expert is rostered on (MANAGEMENT → TIME MANAGEMENT). The
+    # name and both ends are resolved from the shift on read, not stored here, so editing
+    # a shift's hours moves everyone on it — see shift_utils.attach_shifts.
+    shift_id: Optional[str] = None
+    shift_name: Optional[str] = ""
+    shift_start: Optional[str] = None
+    shift_end: Optional[str] = None
     created_at: str
 
 

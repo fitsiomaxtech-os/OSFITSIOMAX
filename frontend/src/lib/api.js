@@ -194,6 +194,18 @@ export const rescheduleConsultationFollowUp = async (leadId, followupId, payload
 export const getDoctorCalendar = async (doctorId) => (await api.get(`/doctors/${doctorId}/calendar`)).data;
 export const setDoctorSlotCapacity = async (doctorId, slotCapacity) => (await api.patch(`/doctors/${doctorId}/slot-capacity`, { slot_capacity: slotCapacity })).data;
 
+// ---- Shifts (MANAGEMENT → TIME MANAGEMENT) ----
+// The working windows a branch runs, and who is on each. An expert's shift is what their
+// CONSULTANT / PHYSIO / DIET calendar is cut across, so an evening physio's day is offered
+// 3 PM – 7 PM rather than the whole clock. The four standard shifts seed themselves on the
+// first read; every one of them is editable.
+export const listShifts = async (branchId) => (await api.get(`/branches/${branchId}/shifts`)).data;
+export const createShift = async (branchId, payload) => (await api.post(`/branches/${branchId}/shifts`, payload)).data;
+export const updateShift = async (shiftId, payload) => (await api.patch(`/shifts/${shiftId}`, payload)).data;
+export const deleteShift = async (shiftId) => (await api.delete(`/shifts/${shiftId}`)).data;
+export const getShiftRoster = async (branchId, profileType) => (await api.get(`/branches/${branchId}/shift-roster`, { params: { profile_type: profileType } })).data;
+export const setDoctorShift = async (doctorId, shiftId) => (await api.patch(`/doctors/${doctorId}/shift`, { shift_id: shiftId || null })).data;
+
 // ---- Diet Consultation (Nutrition Coach) ----
 export const dietToday = async (params = {}) => (await api.get("/diet/today", { params })).data;
 export const dietCalendar = async (month, year, coachId) => (await api.get("/diet/calendar", { params: { month, year, coach_id: coachId } })).data;
