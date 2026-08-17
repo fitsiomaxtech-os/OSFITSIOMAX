@@ -133,6 +133,10 @@ class EmployeeCreate(BaseModel):
     mother_name: Optional[str] = ""
     department: Optional[str] = ""
     designation: Optional[str] = ""
+    # Neither is required — an employee can be tagged Online/Offline with no specific
+    # branch picked yet, or left unset entirely.
+    work_type: Optional[str] = ""  # "online" | "offline" | ""
+    branch_id: Optional[str] = ""  # from Branches & Verticals — filtered client-side by work_type
     joining_date: Optional[str] = ""
     reporting_to: Optional[str] = ""
     employee_code: Optional[str] = ""
@@ -162,6 +166,8 @@ class EmployeeUpdate(BaseModel):
     mother_name: Optional[str] = None
     department: Optional[str] = None
     designation: Optional[str] = None
+    work_type: Optional[str] = None
+    branch_id: Optional[str] = None
     joining_date: Optional[str] = None
     reporting_to: Optional[str] = None
     employee_code: Optional[str] = None
@@ -270,6 +276,13 @@ async def list_employees(status: Optional[str] = None, _: V3UserOut = Depends(v3
     if status:
         q["status"] = status
     rows = await v3_col("employees").find(q, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    # branch_name is denormalized onto the response only — the record itself keeps just
+    # branch_id, same split as list_users' own bmap below, so a branch rename never needs
+    # a matching pass over every employee that points at it.
+    branch_docs = await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1}).to_list(500)
+    bmap = {b["id"]: b.get("branch_name", "") for b in branch_docs}
+    for r in rows:
+        r["branch_name"] = bmap.get(r.get("branch_id"), "") if r.get("branch_id") else ""
     return rows
 
 

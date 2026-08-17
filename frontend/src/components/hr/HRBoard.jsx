@@ -20,6 +20,10 @@ const TABS = [
   { key: "departments", label: "Departments & Designation", short: "Depts", icon: FolderTree },
 ];
 
+// Every default vertical is named "online_.../offline_..." — same helper as
+// Branches & Verticals' own mode tag, read off that prefix.
+const isOnlineVertical = (v) => String(v || "").startsWith("online_");
+
 // Both consultant roles can cover more than one branch — every other role keeps the
 // original single Branch select.
 // Physios belong to branches and may cover several, so they get the checkbox list.
@@ -234,6 +238,22 @@ const DesignationFilterSelect = ({ value, onChange, options, testid }) => (
 /** The mobile card list and desktop table that show a filtered set of employees —
  *  identical markup whether it's reached from the Employees tab or from a department
  *  tab on Departments & Designation, so the two never drift into two different tables. */
+// Blank when work_type was never set — not every employee is tagged to a vertical, and an
+// empty cell says that plainly instead of a badge reading "Offline" for someone nobody
+// actually classified.
+const WorkTypeCell = ({ e }) => {
+  if (!e.work_type) return <span className="text-slate-300">—</span>;
+  const online = e.work_type === "online";
+  return (
+    <div className="leading-tight">
+      <span className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-semibold ${online ? "bg-violet-50 text-violet-600" : "bg-emerald-50 text-emerald-600"}`}>
+        {online ? "Online" : "Offline"}
+      </span>
+      <p className="mt-0.5 text-[11px] text-slate-500">{e.branch_name || "—"}</p>
+    </div>
+  );
+};
+
 const EmployeeDirectory = ({ employees, onView }) => (
   <>
     <div className="space-y-2 md:hidden" data-testid="hr-emp-cards">
@@ -250,6 +270,11 @@ const EmployeeDirectory = ({ employees, onView }) => (
             <span>{e.designation || "—"}{e.department ? ` · ${e.department}` : ""}</span>
             <span className="font-semibold text-emerald-600">₹{Number(e.net_salary || 0).toLocaleString("en-IN")}</span>
           </div>
+          {e.work_type && (
+            <div className="mt-1.5">
+              <WorkTypeCell e={e} />
+            </div>
+          )}
           <div className="mt-1 text-xs text-slate-500">{e.email}{e.phone ? ` · ${e.phone}` : ""}</div>
           <div className="mt-2 flex items-center gap-3 border-t border-slate-100 pt-2">
             <button onClick={() => onView(e)} className="flex items-center gap-1 text-xs font-medium text-sky-600" data-testid={`hr-emp-card-view-${e.id}`}><Eye className="h-3.5 w-3.5" />View</button>
@@ -265,7 +290,7 @@ const EmployeeDirectory = ({ employees, onView }) => (
         <div className="overflow-auto">
           <table className="min-w-full text-sm">
             <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-              <tr><th className="px-3 py-2">S.No</th><th className="px-3 py-2">Employee</th><th className="px-3 py-2">Dept</th><th className="px-3 py-2">Designation</th><th className="px-3 py-2">Contact</th><th className="px-3 py-2">Joining</th><th className="px-3 py-2">Net Salary</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Actions</th></tr>
+              <tr><th className="px-3 py-2">S.No</th><th className="px-3 py-2">Employee</th><th className="px-3 py-2">Dept</th><th className="px-3 py-2">Designation</th><th className="px-3 py-2">Work Type</th><th className="px-3 py-2">Contact</th><th className="px-3 py-2">Joining</th><th className="px-3 py-2">Net Salary</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Actions</th></tr>
             </thead>
             <tbody>
               {employees.map((e, i) => (
@@ -277,6 +302,7 @@ const EmployeeDirectory = ({ employees, onView }) => (
                   </td>
                   <td className="px-3 py-2 text-slate-600">{e.department || "—"}</td>
                   <td className="px-3 py-2 text-slate-600">{e.designation || "—"}</td>
+                  <td className="px-3 py-2"><WorkTypeCell e={e} /></td>
                   <td className="px-3 py-2 text-xs text-slate-600">{e.email}<br />{e.phone}</td>
                   <td className="px-3 py-2 text-slate-500">{e.joining_date || "—"}</td>
                   <td className="px-3 py-2 font-semibold text-emerald-600">₹{Number(e.net_salary || 0).toLocaleString("en-IN")}</td>
@@ -286,7 +312,7 @@ const EmployeeDirectory = ({ employees, onView }) => (
                   </td>
                 </tr>
               ))}
-              {employees.length === 0 && <tr><td colSpan="9" className="px-3 py-6 text-center text-slate-400">No employees.</td></tr>}
+              {employees.length === 0 && <tr><td colSpan="10" className="px-3 py-6 text-center text-slate-400">No employees.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -304,6 +330,9 @@ const EmployeesTab = ({ meta, initialFilter }) => {
   // Arrived at from a Department Strength bar or a Departments & Designation tab.
   const [department, setDepartment] = useState(initialFilter?.department || "");
   const [designation, setDesignation] = useState(initialFilter?.designation || "");
+  // Same Online/Offline split as Branches & Verticals — reads each employee's own
+  // work_type, set (optionally) from the Add/Edit Employee form.
+  const [workType, setWorkType] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
   const [viewing, setViewing] = useState(null);
@@ -334,6 +363,7 @@ const EmployeesTab = ({ meta, initialFilter }) => {
     // to match the empty field here or that bar would open an empty list.
     if (department && (e.department || "Unassigned") !== department) return false;
     if (designation && e.designation !== designation) return false;
+    if (workType && e.work_type !== workType) return false;
     if (!search) return true;
     const q = search.toLowerCase();
     return (e.full_name || "").toLowerCase().includes(q) || (e.email || "").toLowerCase().includes(q) || (e.employee_code || "").toLowerCase().includes(q);
@@ -388,6 +418,19 @@ const EmployeesTab = ({ meta, initialFilter }) => {
             {d}
           </TabPill>
         ))}
+      </div>
+
+      {/* Work Type row — same Online/Offline split as Branches & Verticals. */}
+      <div className="flex flex-wrap items-center gap-2" data-testid="hr-emp-worktype-filter">
+        <TabPill active={workType === ""} onClick={() => setWorkType("")} testid="hr-emp-worktype-filter-all">
+          All
+        </TabPill>
+        <TabPill active={workType === "online"} onClick={() => setWorkType("online")} testid="hr-emp-worktype-filter-online">
+          Online
+        </TabPill>
+        <TabPill active={workType === "offline"} onClick={() => setWorkType("offline")} testid="hr-emp-worktype-filter-offline">
+          Offline
+        </TabPill>
       </div>
 
       {/* Actions row */}
@@ -473,6 +516,8 @@ const EmployeeViewModal = ({ employee: e, onClose, onEdit, onDelete }) => (
             <ViewRow label="Employee Code" value={e.employee_code} />
             <ViewRow label="Department" value={e.department} />
             <ViewRow label="Designation" value={e.designation} />
+            <ViewRow label="Work Type" value={e.work_type ? (e.work_type === "online" ? "Online" : "Offline") : ""} />
+            <ViewRow label="Branch" value={e.branch_name} />
             <ViewRow label="Joining Date" value={e.joining_date} />
             <ViewRow label="Reporting To" value={e.reporting_to} />
             <ViewRow label="Status" value={e.status || "active"} />
@@ -624,7 +669,7 @@ const blankEmployee = {
   pan: "", aadhar: "",
   address: "", emergency_contact_name: "", emergency_contact_phone: "",
   net_salary: 0, gross_salary: 0, bank_name: "", bank_account: "", ifsc: "",
-  status: "active", notes: "",
+  status: "active", notes: "", work_type: "", branch_id: "",
 };
 
 const AddEmployeeModal = ({ employee, meta, initialDepartment, initialDesignation, onClose, onSaved }) => {
@@ -634,6 +679,19 @@ const AddEmployeeModal = ({ employee, meta, initialDepartment, initialDesignatio
   // decide create vs. update, so this never risks turning a create into an update.
   const [form, setForm] = useState(employee ? { ...blankEmployee, ...employee } : { ...blankEmployee, department: initialDepartment || "", designation: initialDesignation || "" });
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+
+  const [branches, setBranches] = useState([]);
+  useEffect(() => { getBranches().then(setBranches).catch(() => {}); }, []);
+  // Whichever branches match the picked Work Type — same filter Branches & Verticals'
+  // own mode pills use.
+  const branchOptions = useMemo(
+    () => branches.filter((b) => isOnlineVertical(b.vertical) === (form.work_type === "online")),
+    [branches, form.work_type],
+  );
+  // Switching Work Type clears any branch already picked — an Offline branch left set
+  // after switching to Online would silently tag the employee to a branch that no longer
+  // matches the mode shown next to it.
+  const changeWorkType = (v) => setForm((p) => ({ ...p, work_type: v, branch_id: "" }));
 
   // Designation options are scoped to whichever Department is selected (grouped from
   // the Departments & Designation tab). Departments not grouped yet fall back to the
@@ -704,6 +762,23 @@ const AddEmployeeModal = ({ employee, meta, initialDepartment, initialDesignatio
               <Field label="Joining Date"><MilkDateInput centered title="Joining Date" value={form.joining_date} onChange={(e) => set("joining_date", e.target.value)} data-testid="hr-emp-joining" /></Field>
               <Field label="Reporting To"><Input value={form.reporting_to} onChange={(e) => set("reporting_to", e.target.value)} data-testid="hr-emp-reporting" /></Field>
               <Field label="Status"><Select value={form.status} onChange={(v) => set("status", v)} options={["active", "left", "on_leave"]} testid="hr-emp-status" /></Field>
+              {/* Neither is required. Branch only appears once a Work Type is picked —
+                  it's meaningless before that — and narrows to the branches that actually
+                  match it, same split Branches & Verticals itself uses. */}
+              <Field label="Work Type"><Select value={form.work_type} onChange={changeWorkType} options={["", "online", "offline"]} testid="hr-emp-worktype" /></Field>
+              {form.work_type && (
+                <Field label="Branch">
+                  <select
+                    value={form.branch_id}
+                    onChange={(e) => set("branch_id", e.target.value)}
+                    className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm"
+                    data-testid="hr-emp-branch"
+                  >
+                    <option value="">— Not picked —</option>
+                    {branchOptions.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
+                  </select>
+                </Field>
+              )}
             </div>
           )}
           {tab === "id_docs" && (
