@@ -962,24 +962,47 @@ export const PreSalesCRM = ({
             </Button>
           </div>
 
-          {/* Right-aligned for Pre Sales. With the branch filter and Manage Stages both
-              being Super Admin's, this row is two icons for them — and two controls
-              bunched at the left edge with the rest of the line empty reads as something
-              that failed to load rather than as a toolbar. */}
+          {/* Same controls as the desk toolbar, stacked instead of inline — a phone has no
+              room for a row of pills beside search and refresh, so this gets its own
+              block rather than squeezing into the row above. The dropdown that used to
+              sit here for branch selection is gone; the pills below replace it. */}
+          {isSuperAdminMasterView && (
+            <div className="space-y-2" data-testid="presales-mobile-master-controls">
+              <div className="flex items-center gap-2">
+                <PreSalesGroupPill active={masterView === "leads"} onClick={() => setMasterView("leads")} testid="presales-mobile-view-leads">
+                  <span className="inline-flex items-center gap-1.5"><Users className="h-3.5 w-3.5" />Leads</span>
+                </PreSalesGroupPill>
+                <PreSalesGroupPill active={masterView === "analytics"} onClick={() => setMasterView("analytics")} testid="presales-mobile-view-analytics">
+                  <span className="inline-flex items-center gap-1.5"><BarChart3 className="h-3.5 w-3.5" />Analytics</span>
+                </PreSalesGroupPill>
+              </div>
+              <div className="flex flex-wrap items-center gap-2" data-testid="presales-mobile-branch-groups">
+                <PreSalesGroupPill active={branchGroup === "all"} onClick={() => selectBranchGroup("all")} testid="presales-mobile-branch-group-all">All</PreSalesGroupPill>
+                <PreSalesGroupPill active={branchGroup === "offline"} onClick={() => selectBranchGroup("offline")} testid="presales-mobile-branch-group-offline">Offline</PreSalesGroupPill>
+                <PreSalesGroupPill active={branchGroup === "online"} onClick={() => selectBranchGroup("online")} testid="presales-mobile-branch-group-online">Online</PreSalesGroupPill>
+              </div>
+              {visibleGroupBranches.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5" data-testid="presales-mobile-branch-pills">
+                  {visibleGroupBranches.map((b) => (
+                    <PreSalesBranchPill
+                      key={b.id}
+                      active={sourceFilter === b.id}
+                      onClick={() => setSourceFilter((id) => (id === b.id ? "" : b.id))}
+                      testid={`presales-mobile-branch-pill-${b.id}`}
+                    >
+                      {branchLabel(b)}
+                    </PreSalesBranchPill>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Right-aligned for Pre Sales. Manage Stages being Super Admin's alone makes
+              this row one icon for them — and one control at the left edge with the rest
+              of the line empty reads as something that failed to load rather than as a
+              toolbar. */}
           <div className={`flex items-center gap-2 ${role === "super_admin" ? "" : "justify-end"}`}>
-            {/* Super Admin's alone, as on the desk toolbar. */}
-            {role === "super_admin" && (
-              <ColorSelect
-                value={sourceFilter}
-                options={branchOptions}
-                placeholder="All Branches"
-                resetLabel="All Branches"
-                emptyText="No branches yet."
-                triggerClass="h-10 min-w-0 flex-1 text-sm"
-                onChange={setSourceFilter}
-                testid="presales-mobile-source-filter"
-              />
-            )}
             {/* Super Admin's alone — the Pre Sales role can work the pipeline but not
                 reshape it, and the button 403s for them anyway. */}
             {role === "super_admin" && (
@@ -1007,6 +1030,10 @@ export const PreSalesCRM = ({
             <PullFromSheetButton onPulled={() => { load(); setStageFilter("New Leads"); }} iconOnly />
           </div>
 
+          {masterView === "analytics" && isSuperAdminMasterView ? (
+            <PreSalesAnalyticsPanel branches={branches} branchGroup={branchGroup} sourceFilter={sourceFilter} />
+          ) : (
+          <>
           <StageTabBar
             stages={stages}
             stageFilter={stageFilter === "All" ? null : stageFilter}
@@ -1073,6 +1100,8 @@ export const PreSalesCRM = ({
                 Load More ({filtered.length - visibleCount} remaining)
               </Button>
             </div>
+          )}
+          </>
           )}
 
           <button
