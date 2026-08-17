@@ -343,17 +343,26 @@ const PRESALES_ANALYTICS_DATE_PRESETS = [
   { key: "custom", label: "Custom" },
 ];
 
-// Same 7 cards Branches & Verticals > Overview shows, same /dashboard/overview call —
-// the funnel Pre-Sales feeds (leads, appointments) through what it hands off to a branch
-// (consultations, sessions, revenue, pending balance), read the same way in both places.
+// The funnel this board feeds, off one /dashboard/overview call: leads and appointments
+// through to what a branch makes of them — consultations, sessions, and the treatment
+// packages patients end up buying.
+//
+// The last two are a pair, both counted off the Treatment Fee: how many patients bought a
+// package, and what those came to. "Treatment Purchase Revenue" is the figure that used to
+// be labelled "Session Amount Collected" — the same money, named for the thing being sold
+// rather than for the visits it pays for, so it reads with the count beside it.
+//
+// Pending Session Amount is gone from here. It is an outstanding balance rather than
+// anything this board's date range describes — every other card counts what happened in
+// the window, that one reported what was owed right now regardless of it.
 const PRESALES_ANALYTICS_METRICS = [
   { key: "leads", label: "All Leads" },
   { key: "appointments", label: "Appointment Booked" },
   { key: "consultations", label: "Consultations" },
   { key: "consultation_revenue", label: "Consultations Revenue", currency: true },
   { key: "sessions_booked", label: "Sessions Total Booked" },
-  { key: "session_revenue", label: "Session Amount Collected", currency: true },
-  { key: "pending_session_amount", label: "Pending Session Amount", currency: true },
+  { key: "treatment_purchases", label: "Treatment Purchase Number" },
+  { key: "session_revenue", label: "Treatment Purchase Revenue", currency: true },
 ];
 
 const presalesStartOfDay = (d) => { const n = new Date(d); n.setHours(0, 0, 0, 0); return n; };
