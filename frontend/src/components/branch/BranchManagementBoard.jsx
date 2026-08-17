@@ -33,7 +33,7 @@ const TABS = [
   { key: "branch_control", label: "Branch Control", icon: LayoutDashboard },
 ];
 
-export const BranchManagementBoard = ({ actingUser, onNavigateToOperations, initialTab = "overview" } = {}) => {
+export const BranchManagementBoard = ({ actingUser, onNavigateToOperations, initialTab = "overview", lockTab = false } = {}) => {
   const [tab, setTab] = useState(initialTab);
   const [drilledBranchId, setDrilledBranchId] = useState(null);
   // A callback ref, not useRef: the portal has to re-render once the node exists, and a
@@ -47,36 +47,39 @@ export const BranchManagementBoard = ({ actingUser, onNavigateToOperations, init
   return (
     <div className="space-y-5" data-testid="branch-mgmt-board">
       {/* No heading. The nav tab above already reads Branches & Verticals. */}
-      {/* The tab row carries the active tab's actions on its right. They used to sit on
-          the KPI row below, where a page action read as part of the figures. A portal
-          rather than lifted state: Refresh and Add Branch act on CreationTab's own data,
-          and hoisting that here to reach the bar would put a tab's state in the router. */}
-      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="bm-subtabs">
-        {/* A dropdown on a phone. Three tabs plus three actions wrapped to two rows, which
-            left Accountant Management sharing a line with the buttons and reading as one
-            of them. One select, and the actions keep the row's right end to themselves.
+      {/* lockTab drops this whole row — Operations' own "Branch Manager" dialog opens
+          straight on MANAGER and has nothing else here worth switching to, so the row
+          would just be three dead tabs beside the one that matters. CreationTab's own
+          fallback (no actionSlot to portal into) puts Refresh/Service Type/Archives/Add
+          Branch inline on its own row instead of losing them along with the tab bar. */}
+      {!lockTab && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="bm-subtabs">
+          {/* A dropdown on a phone. Three tabs plus three actions wrapped to two rows, which
+              left Accountant Management sharing a line with the buttons and reading as one
+              of them. One select, and the actions keep the row's right end to themselves.
 
-            The action slot stays a single node: it is a portal target, and a second copy
-            for desktop would leave the ref pointing at whichever mounted last. */}
-        <select
-          value={tab}
-          onChange={(e) => setTab(e.target.value)}
-          className="h-9 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-2 text-sm font-semibold text-slate-700 md:hidden"
-          data-testid="bm-subtab-select"
-        >
-          {TABS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
-        </select>
-        {TABS.map((t) => {
-          const Icon = t.icon;
-          const active = tab === t.key;
-          return (
-            <button key={t.key} onClick={() => setTab(t.key)} data-testid={`bm-subtab-${t.key}`} className={`hidden shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition md:inline-flex ${active ? "bg-sky-50 text-sky-700" : "text-slate-600 hover:bg-slate-50"}`}>
-              <Icon className="h-4 w-4" />{t.label}
-            </button>
-          );
-        })}
-        <div ref={setActionSlot} className="ml-auto flex shrink-0 items-center gap-2 pr-1" data-testid="bm-subtab-actions" />
-      </div>
+              The action slot stays a single node: it is a portal target, and a second copy
+              for desktop would leave the ref pointing at whichever mounted last. */}
+          <select
+            value={tab}
+            onChange={(e) => setTab(e.target.value)}
+            className="h-9 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-2 text-sm font-semibold text-slate-700 md:hidden"
+            data-testid="bm-subtab-select"
+          >
+            {TABS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+          </select>
+          {TABS.map((t) => {
+            const Icon = t.icon;
+            const active = tab === t.key;
+            return (
+              <button key={t.key} onClick={() => setTab(t.key)} data-testid={`bm-subtab-${t.key}`} className={`hidden shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition md:inline-flex ${active ? "bg-sky-50 text-sky-700" : "text-slate-600 hover:bg-slate-50"}`}>
+                <Icon className="h-4 w-4" />{t.label}
+              </button>
+            );
+          })}
+          <div ref={setActionSlot} className="ml-auto flex shrink-0 items-center gap-2 pr-1" data-testid="bm-subtab-actions" />
+        </div>
+      )}
       {tab === "overview" && <OverviewTab />}
       {tab === "creation" && <CreationTab onDrillIn={setDrilledBranchId} actionSlot={actionSlot} onNavigateToOperations={onNavigateToOperations} />}
       {tab === "branch_control" && <BranchControlTab actingUser={actingUser} />}

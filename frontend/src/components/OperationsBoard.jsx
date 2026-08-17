@@ -117,7 +117,7 @@ const OperationsBranchTab = ({ branches, actingUser }) => {
               <button onClick={() => setShowManager(false)} className="text-slate-400 hover:text-slate-600" data-testid="ops-branch-manager-close"><X className="h-4 w-4" /></button>
             </div>
             <div className="overflow-y-auto p-5">
-              <BranchManagementBoard actingUser={actingUser} initialTab="creation" />
+              <BranchManagementBoard actingUser={actingUser} initialTab="creation" lockTab />
             </div>
           </div>
         </div>
