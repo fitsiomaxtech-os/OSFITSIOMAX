@@ -541,11 +541,25 @@ const SheetTabPicker = ({ spreadsheetId, values, onChange, testid }) => {
  * vertical (Physiotherapy branches are offline, Online Physio/Fitness are online), so
  * picking T Nagar here already sorts this source under Offline without asking twice.
  */
+// Offline branches first (A-Z), online ones grouped last (A-Z among themselves) — same
+// order Branch Wise uses, so a name here sits where the Branch Manager already trained
+// the eye to find it. Sorted here rather than by the caller: all four TargetPicker call
+// sites (Add/Edit x Google Sheets/other) share one branches prop and would otherwise
+// need the same sort repeated at each one.
+const sortedForPicker = (branches) => [...branches].sort((a, b) => {
+  const onlineDiff = Number(isOnlineVertical(a.vertical)) - Number(isOnlineVertical(b.vertical));
+  if (onlineDiff !== 0) return onlineDiff;
+  return (a.branch_name || "").localeCompare(b.branch_name || "");
+});
+
 const TargetPicker = ({ branches, branchIds, onBranchIdsChange, testid }) => (
   <div>
     <label className="text-xs font-medium text-slate-600">Branches</label>
-    <div className="mt-1 max-h-36 space-y-1 overflow-y-auto rounded-md border border-slate-200 p-2" data-testid={`${testid}-branches`}>
-      {branches.map((b) => {
+    {/* Tall enough to hold every branch open today (7) with no scroll — a name sitting
+        one scroll below the fold is what read as "missing" here before. Still capped and
+        scrollable for whenever the list outgrows that. */}
+    <div className="mt-1 max-h-56 space-y-1 overflow-y-auto rounded-md border border-slate-200 p-2" data-testid={`${testid}-branches`}>
+      {sortedForPicker(branches).map((b) => {
         const checked = branchIds.includes(b.id);
         return (
           <label key={b.id} className="flex items-center gap-2 rounded px-1.5 py-1 text-xs hover:bg-slate-50">
