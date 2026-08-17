@@ -357,38 +357,51 @@ const SourcesTab = ({ branches: branchesProp = [] }) => {
       </div>
 
       {showAdd && (
-        <DialogShell title="Add Lead Source" onClose={() => setShowAdd(false)} testid="mk-add-source-dialog">
-          <Input placeholder="Source name (e.g. Meta Ads, Walk-ins)" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} data-testid="mk-add-source-name" />
-          <select className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm" value={form.source_type} onChange={(e) => setForm({ ...form, source_type: e.target.value })} data-testid="mk-add-source-type">
-            {["meta", "seo", "referral", "walk_in", "website", "csv_import", "google_sheets", "other"].map((t) => <option key={t} value={t}>{t}</option>)}
-          </select>
-          {form.source_type === "google_sheets" && (
-            <>
-              <Input placeholder="Paste Google Sheet URL (https://docs.google.com/spreadsheets/d/...)" value={form.sheet_url} onChange={(e) => onSheetUrlChange(e.target.value)} data-testid="mk-add-source-url" />
-              {form.spreadsheet_id && (
-                <p className="text-[10px] text-emerald-600">✓ Sheet ID detected: <code className="rounded bg-emerald-50 px-1">{form.spreadsheet_id.slice(0, 24)}…</code></p>
-              )}
-              <SheetTabPicker spreadsheetId={form.spreadsheet_id} values={form.sheet_names} onChange={(v) => setForm({ ...form, sheet_names: v })} testid="mk-add-source-sheetname" />
-              <p className="text-xs text-amber-700 bg-amber-50 rounded p-2">
-                <strong>Important:</strong> the sheet must be either accessible to the Google account you connected, OR shared as “Anyone with the link can view”.
-              </p>
-            </>
-          )}
-          {form.source_type !== "google_sheets" && (
-            <Input placeholder="Source URL (optional, for reference)" value={form.sheet_url} onChange={(e) => setForm({ ...form, sheet_url: e.target.value })} data-testid="mk-add-source-url" />
-          )}
-          <Input placeholder="Headers (comma separated, e.g. Lead Name, Mobile, Email) — optional" value={form.headers} onChange={(e) => setForm({ ...form, headers: e.target.value })} data-testid="mk-add-source-headers" />
-          <p className="text-xs text-slate-400">Headers auto-map to: name, phone, email, vertical, condition, age, preferred_branch, budget, notes.</p>
-          <TargetPicker
-            branches={branches}
-            branchIds={form.branchIds}
-            onBranchIdsChange={(v) => setForm({ ...form, branchIds: v })}
-            testid="mk-add-source-target"
-          />
-          <p className="text-xs text-slate-400">
-            Leave empty for All Branches (leads go to Pre-Sales as usual). Pick exactly ONE branch to auto-assign every lead pulled from it straight there. Picking several just tags this source for filtering — leads still land in the general Pre-Sales pool.
-          </p>
-          <Button onClick={submit} className="w-full" data-testid="mk-add-source-submit">Create Source</Button>
+        <DialogShell title="Add Lead Source" onClose={() => setShowAdd(false)} testid="mk-add-source-dialog" maxWidth="max-w-2xl">
+          {/* Two columns on a wider dialog rather than one long stack — the tab and branch
+              checklists side by side are what actually saved the height; everything else
+              just rides along in the same grid. Single column again below sm. */}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Input placeholder="Source name (e.g. Meta Ads, Walk-ins)" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} data-testid="mk-add-source-name" />
+            <select className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm" value={form.source_type} onChange={(e) => setForm({ ...form, source_type: e.target.value })} data-testid="mk-add-source-type">
+              {["meta", "seo", "referral", "walk_in", "website", "csv_import", "google_sheets", "other"].map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+            {form.source_type === "google_sheets" ? (
+              <>
+                <Input className="sm:col-span-2" placeholder="Paste Google Sheet URL (https://docs.google.com/spreadsheets/d/...)" value={form.sheet_url} onChange={(e) => onSheetUrlChange(e.target.value)} data-testid="mk-add-source-url" />
+                {form.spreadsheet_id && (
+                  <p className="sm:col-span-2 text-[10px] text-emerald-600">✓ Sheet ID detected: <code className="rounded bg-emerald-50 px-1">{form.spreadsheet_id.slice(0, 24)}…</code></p>
+                )}
+                <SheetTabPicker spreadsheetId={form.spreadsheet_id} values={form.sheet_names} onChange={(v) => setForm({ ...form, sheet_names: v })} testid="mk-add-source-sheetname" />
+                <TargetPicker
+                  branches={branches}
+                  branchIds={form.branchIds}
+                  onBranchIdsChange={(v) => setForm({ ...form, branchIds: v })}
+                  testid="mk-add-source-target"
+                />
+                <p className="sm:col-span-2 text-xs text-amber-700 bg-amber-50 rounded p-2">
+                  <strong>Important:</strong> the sheet must be either accessible to the Google account you connected, OR shared as “Anyone with the link can view”.
+                </p>
+                <Input placeholder="Headers (comma separated) — optional" value={form.headers} onChange={(e) => setForm({ ...form, headers: e.target.value })} data-testid="mk-add-source-headers" />
+              </>
+            ) : (
+              <>
+                <Input className="sm:col-span-2" placeholder="Source URL (optional, for reference)" value={form.sheet_url} onChange={(e) => setForm({ ...form, sheet_url: e.target.value })} data-testid="mk-add-source-url" />
+                <TargetPicker
+                  branches={branches}
+                  branchIds={form.branchIds}
+                  onBranchIdsChange={(v) => setForm({ ...form, branchIds: v })}
+                  testid="mk-add-source-target"
+                />
+                <Input placeholder="Headers (comma separated) — optional" value={form.headers} onChange={(e) => setForm({ ...form, headers: e.target.value })} data-testid="mk-add-source-headers" />
+              </>
+            )}
+            <p className="sm:col-span-2 text-xs text-slate-400">Headers auto-map to: name, phone, email, vertical, condition, age, preferred_branch, budget, notes.</p>
+            <p className="sm:col-span-2 text-xs text-slate-400">
+              Leave empty for All Branches (leads go to Pre-Sales as usual). Pick exactly ONE branch to auto-assign every lead pulled from it straight there. Picking several just tags this source for filtering — leads still land in the general Pre-Sales pool.
+            </p>
+            <Button onClick={submit} className="sm:col-span-2 w-full" data-testid="mk-add-source-submit">Create Source</Button>
+          </div>
         </DialogShell>
       )}
 
@@ -605,48 +618,62 @@ const EditSourceDialog = ({ source, branches = [], onClose, onSaved }) => {
   };
 
   return (
-    <DialogShell title="Edit Source" onClose={onClose} testid="mk-edit-source-dialog">
-      <Input placeholder="Source name (e.g. Meta Ads, Walk-ins)" value={name} onChange={(e) => setName(e.target.value)} data-testid="mk-edit-source-name" />
-      <select className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm" value={sourceType} onChange={(e) => setSourceType(e.target.value)} data-testid="mk-edit-source-type">
-        {["meta", "seo", "referral", "walk_in", "website", "csv_import", "google_sheets", "other"].map((t) => <option key={t} value={t}>{t}</option>)}
-      </select>
-      {sourceType === "google_sheets" ? (
-        <>
-          <Input placeholder="Paste Google Sheet URL (https://docs.google.com/spreadsheets/d/...)" value={sheetUrl} onChange={(e) => onUrlChange(e.target.value)} data-testid="mk-edit-source-url" />
-          {spreadsheetId && (
-            <p className="text-[10px] text-emerald-600">✓ Sheet ID detected: <code className="rounded bg-emerald-50 px-1">{spreadsheetId.slice(0, 24)}…</code></p>
-          )}
-          <SheetTabPicker spreadsheetId={spreadsheetId} values={sheetNames} onChange={setSheetNames} testid="mk-edit-source-sheetname" />
-          <p className="text-xs text-amber-700 bg-amber-50 rounded p-2">
-            <strong>Important:</strong> the sheet must be either accessible to the Google account you connected, OR shared as “Anyone with the link can view”.
-          </p>
-          <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
-            <input type="checkbox" checked={autoSyncEnabled} onChange={(e) => setAutoSyncEnabled(e.target.checked)} data-testid="mk-edit-source-autosync" />
-            Auto-sync this sheet
-          </label>
-          {autoSyncEnabled && (
-            <div className="flex items-center gap-2">
-              <label className="text-xs font-medium text-slate-600">Every</label>
-              <Input type="number" min="5" className="w-24" value={autoSyncInterval} onChange={(e) => setAutoSyncInterval(e.target.value)} data-testid="mk-edit-source-interval" />
-              <span className="text-xs text-slate-500">minutes</span>
-            </div>
-          )}
-        </>
-      ) : (
-        <Input placeholder="Source URL (optional, for reference)" value={sheetUrl} onChange={(e) => setSheetUrl(e.target.value)} data-testid="mk-edit-source-url" />
-      )}
-      <Input placeholder="Headers (comma separated, e.g. Lead Name, Mobile, Email) — optional" value={headers} onChange={(e) => setHeaders(e.target.value)} data-testid="mk-edit-source-headers" />
-      <p className="text-xs text-slate-400">Changing headers re-detects the column mapping. Leave as-is to keep your current mapping.</p>
-      <TargetPicker
-        branches={branches}
-        branchIds={branchIds}
-        onBranchIdsChange={setBranchIds}
-        testid="mk-edit-source-target"
-      />
-      <p className="text-xs text-slate-400">
-        Leave empty for All Branches (leads go to Pre-Sales as usual). Pick exactly ONE branch to auto-assign every lead pulled from it straight there. Picking several just tags this source for filtering — leads still land in the general Pre-Sales pool.
-      </p>
-      <Button onClick={save} className="w-full" data-testid="mk-edit-source-save">Save Changes</Button>
+    <DialogShell title="Edit Source" onClose={onClose} testid="mk-edit-source-dialog" maxWidth="max-w-2xl">
+      {/* Two columns on a wider dialog rather than one long stack — the tab and branch
+          checklists side by side are what actually saved the height; everything else
+          just rides along in the same grid. Single column again below sm. */}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Input placeholder="Source name (e.g. Meta Ads, Walk-ins)" value={name} onChange={(e) => setName(e.target.value)} data-testid="mk-edit-source-name" />
+        <select className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm" value={sourceType} onChange={(e) => setSourceType(e.target.value)} data-testid="mk-edit-source-type">
+          {["meta", "seo", "referral", "walk_in", "website", "csv_import", "google_sheets", "other"].map((t) => <option key={t} value={t}>{t}</option>)}
+        </select>
+        {sourceType === "google_sheets" ? (
+          <>
+            <Input className="sm:col-span-2" placeholder="Paste Google Sheet URL (https://docs.google.com/spreadsheets/d/...)" value={sheetUrl} onChange={(e) => onUrlChange(e.target.value)} data-testid="mk-edit-source-url" />
+            {spreadsheetId && (
+              <p className="sm:col-span-2 text-[10px] text-emerald-600">✓ Sheet ID detected: <code className="rounded bg-emerald-50 px-1">{spreadsheetId.slice(0, 24)}…</code></p>
+            )}
+            <SheetTabPicker spreadsheetId={spreadsheetId} values={sheetNames} onChange={setSheetNames} testid="mk-edit-source-sheetname" />
+            <TargetPicker
+              branches={branches}
+              branchIds={branchIds}
+              onBranchIdsChange={setBranchIds}
+              testid="mk-edit-source-target"
+            />
+            <p className="sm:col-span-2 text-xs text-amber-700 bg-amber-50 rounded p-2">
+              <strong>Important:</strong> the sheet must be either accessible to the Google account you connected, OR shared as “Anyone with the link can view”.
+            </p>
+            <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
+              <input type="checkbox" checked={autoSyncEnabled} onChange={(e) => setAutoSyncEnabled(e.target.checked)} data-testid="mk-edit-source-autosync" />
+              Auto-sync this sheet
+            </label>
+            <Input placeholder="Headers (comma separated) — optional" value={headers} onChange={(e) => setHeaders(e.target.value)} data-testid="mk-edit-source-headers" />
+            {autoSyncEnabled && (
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-medium text-slate-600">Every</label>
+                <Input type="number" min="5" className="w-24" value={autoSyncInterval} onChange={(e) => setAutoSyncInterval(e.target.value)} data-testid="mk-edit-source-interval" />
+                <span className="text-xs text-slate-500">minutes</span>
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <Input className="sm:col-span-2" placeholder="Source URL (optional, for reference)" value={sheetUrl} onChange={(e) => setSheetUrl(e.target.value)} data-testid="mk-edit-source-url" />
+            <TargetPicker
+              branches={branches}
+              branchIds={branchIds}
+              onBranchIdsChange={setBranchIds}
+              testid="mk-edit-source-target"
+            />
+            <Input placeholder="Headers (comma separated) — optional" value={headers} onChange={(e) => setHeaders(e.target.value)} data-testid="mk-edit-source-headers" />
+          </>
+        )}
+        <p className="sm:col-span-2 text-xs text-slate-400">Changing headers re-detects the column mapping. Leave as-is to keep your current mapping.</p>
+        <p className="sm:col-span-2 text-xs text-slate-400">
+          Leave empty for All Branches (leads go to Pre-Sales as usual). Pick exactly ONE branch to auto-assign every lead pulled from it straight there. Picking several just tags this source for filtering — leads still land in the general Pre-Sales pool.
+        </p>
+        <Button onClick={save} className="sm:col-span-2 w-full" data-testid="mk-edit-source-save">Save Changes</Button>
+      </div>
     </DialogShell>
   );
 };
@@ -1073,14 +1100,20 @@ const TeamTab = ({ team, reloadTeam, branches }) => {
 
 // ============ Dialog shell ============
 
-const DialogShell = ({ title, onClose, children, testid }) => (
+// Header stays outside the scrolling body (own row, shrink-0) rather than scrolling with
+// the content — a tall form (Add/Edit Source, with its branch and tab checklists) used to
+// push the close button off the top of the screen with no way to scroll back up to it,
+// since the old shell had no height cap at all.
+const DialogShell = ({ title, onClose, children, testid, maxWidth = "max-w-md" }) => (
   <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4" data-testid={testid}>
-    <div className="w-full max-w-md space-y-3 rounded-lg bg-white p-5 shadow-xl">
-      <div className="flex items-center justify-between">
+    <div className={`flex max-h-[85vh] w-full ${maxWidth} flex-col rounded-lg bg-white shadow-xl`}>
+      <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-5 py-3">
         <h3 className="text-base font-semibold text-slate-900">{title}</h3>
         <button onClick={onClose} className="text-slate-400 hover:text-slate-600" data-testid="mk-dialog-close"><X className="h-4 w-4" /></button>
       </div>
-      {children}
+      <div className="space-y-3 overflow-y-auto p-5">
+        {children}
+      </div>
     </div>
   </div>
 );
