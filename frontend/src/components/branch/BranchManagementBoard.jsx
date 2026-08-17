@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Plus, Pencil, Trash2, Archive, ArchiveRestore, X, Users, MapPin, Phone, Mail, TrendingUp, RefreshCw, Layers, LayoutDashboard, ChevronDown, BadgeIndianRupee, Building2, Stethoscope, BarChart3, CalendarDays } from "lucide-react";
+import { Plus, Pencil, Trash2, Archive, ArchiveRestore, X, Users, MapPin, Phone, Mail, TrendingUp, RefreshCw, Layers, LayoutDashboard, ChevronDown, ChevronUp, BadgeIndianRupee, Building2, Stethoscope, BarChart3, CalendarDays } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -397,8 +397,18 @@ const BranchControlTab = ({ actingUser }) => {
       </div>
 
       {!selectedId ? (
-        <div className="rounded-lg border border-dashed border-slate-200 p-10 text-center text-sm text-slate-400" data-testid="bm-branch-control-empty">
-          Pick a branch above to open its full dashboard — Branch Admin view (Branch Leads, Consultations, Treatment Sessions, Rehab, Finance, Fitsiomax Store), CONSULTANT view (their own Consultations pipeline, Review, Rehab, Calendar), or Physio view (Consultations, Today, Full Calendar, Patients History for one physio) — with full control, same as they'd see it.
+        // A chevron bounces up at the control that needs using, the same prompt the
+        // Dashboard's Revenue breakdown uses while its own branch picker is untouched.
+        // The paragraph alone said "Pick a branch above" in the same grey as the rest of
+        // it, which reads as a page with nothing on it rather than one waiting on a
+        // choice. motion-safe, so a reader who has asked for reduced motion still gets
+        // the arrow — it just holds still.
+        <div className="rounded-lg border border-dashed border-slate-200 p-10 text-center" data-testid="bm-branch-control-empty">
+          <ChevronUp className="mx-auto h-5 w-5 text-sky-500 motion-safe:animate-bounce" />
+          <p className="mt-1 text-sm font-semibold text-slate-600">Pick a branch above to open its full dashboard</p>
+          <p className="mx-auto mt-1.5 max-w-3xl text-sm text-slate-400">
+            Branch Admin view (Branch Leads, Consultations, Treatment Sessions, Rehab, Finance, Fitsiomax Store), CONSULTANT view (their own Consultations pipeline, Review, Rehab, Calendar), or Physio view (Consultations, Today, Full Calendar, Patients History for one physio) — with full control, same as they'd see it.
+          </p>
         </div>
       ) : viewAs === "head_physio" ? (
         <HeadPhysioBoard key={`${selectedId}-hp`} branchId={selectedId} user={actingUser} />
