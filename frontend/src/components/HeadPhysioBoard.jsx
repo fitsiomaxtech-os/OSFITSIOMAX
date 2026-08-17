@@ -4,6 +4,7 @@ import {
   Calendar,
   CalendarClock,
   Check,
+  ChevronLeft,
   ChevronRight,
   ClipboardCheck,
   ClipboardList,
@@ -481,7 +482,9 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
 export const HeadPhysioCalendarModal = ({ branchId, onClose }) => (
   <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-3" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} data-testid="hp-calendar-modal">
     <div className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-      <div className="flex items-center justify-between bg-slate-500 px-6 py-4 text-white">
+      {/* Black, not slate. The grey read as a disabled bar rather than a header, and it
+          is the same grey the phone nav uses two levels down. */}
+      <div className="flex items-center justify-between bg-slate-900 px-6 py-4 text-white">
         <div className="flex items-center gap-2.5">
           <CalendarClock className="h-5 w-5" />
           <p className="text-lg font-bold">My Calendar</p>
@@ -522,9 +525,36 @@ const SLOT_KINDS = {
   },
 };
 
+const WEEKDAY_HEADS = ["S", "M", "T", "W", "T", "F", "S"];
+
+// "all" first: the filter opens showing everything, and the three after it are the same
+// three the legend used to tally, so a reader picks the row they just read a count off.
+const CALENDAR_FILTERS = [
+  { key: "all", label: "All" },
+  { key: "consultation", label: "Consultation" },
+  { key: "review", label: "Review" },
+  { key: "free", label: "Available" },
+];
+
+const isoOfParts = (y, m, d) => `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+
+/**
+ * The CONSULTANT's own calendar: a month first, one day at a time after that.
+ *
+ * It used to print every day it had slots for as one wall of chips — a hundred and forty
+ * of them in a single scroll, which answers "what am I doing on the 12th" only by
+ * scrolling to the 12th. A month grid answers that at a glance and the day view answers
+ * it exactly, so the two together replace the one list that did neither well.
+ */
 function MyCalendarTab({ branchId }) {
   const [data, setData] = useState({ slots: [], booked: {} });
   const [loading, setLoading] = useState(false);
+  const [kindFilter, setKindFilter] = useState("all");
+  const [selectedDate, setSelectedDate] = useState(null);
+  const [month, setMonth] = useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() }; });
+  // Set once, so the one-time jump to where the slots actually are cannot fight a reader
+  // who has since paged to an empty month on purpose.
+  const [jumped, setJumped] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -534,14 +564,57 @@ function MyCalendarTab({ branchId }) {
 
   useEffect(() => { load(); }, [load]);
 
-  const grouped = [...(data.slots || [])].sort().reduce((acc, slot) => {
-    const date = slot.split("T")[0];
-    (acc[date] = acc[date] || []).push(slot);
-    return acc;
-  }, {});
-  const dates = Object.keys(grouped).sort();
+  const kindOf = useCallback((slot) => data.booked?.[slot]?.kind || "free", [data.booked]);
 
-  if (dates.length === 0 && !loading) {
+  // Every slot the filter admits, grouped by date. Both the grid and the day view read
+  // this, so a day showing "3" and then listing three is guaranteed rather than intended.
+  const byDate = useMemo(() => {
+    const acc = {};
+    (data.slots || []).forEach((slot) => {
+      if (kindFilter !== "all" && kindOf(slot) !== kindFilter) return;
+      const date = slot.split("T")[0];
+      (acc[date] = acc[date] || []).push(slot);
+    });
+    Object.values(acc).forEach((list) => list.sort());
+    return acc;
+  }, [data.slots, kindFilter, kindOf]);
+
+  // Open on the month the calendar actually holds, when today's has nothing in it.
+  useEffect(() => {
+    if (jumped || !(data.slots || []).length) return;
+    const dates = (data.slots || []).map((s) => s.split("T")[0]).sort();
+    const prefix = `${month.y}-${String(month.m + 1).padStart(2, "0")}`;
+    if (!dates.some((d) => d.startsWith(prefix))) {
+      const [y, m] = dates[0].split("-");
+      setMonth({ y: Number(y), m: Number(m) - 1 });
+    }
+    setJumped(true);
+  }, [data.slots, jumped, month.y, month.m]);
+
+  const tally = useMemo(() => (data.slots || []).reduce((acc, s) => {
+    const kind = kindOf(s);
+    acc[kind] = (acc[kind] || 0) + 1;
+    return acc;
+  }, {}), [data.slots, kindOf]);
+
+  const shiftMonth = (delta) => {
+    setSelectedDate(null);
+    setMonth(({ y, m }) => {
+      const next = m + delta;
+      if (next < 0) return { y: y - 1, m: 11 };
+      if (next > 11) return { y: y + 1, m: 0 };
+      return { y, m: next };
+    });
+  };
+
+  // Leading blanks so the 1st lands under its weekday, then the month's days.
+  const cells = useMemo(() => {
+    const first = new Date(month.y, month.m, 1).getDay();
+    const days = new Date(month.y, month.m + 1, 0).getDate();
+    return [...Array(first).fill(null), ...Array.from({ length: days }, (_, i) => i + 1)];
+  }, [month]);
+
+  if ((data.slots || []).length === 0 && !loading) {
     return (
       <div className="text-center py-16" data-testid="hp-calendar-empty">
         <Calendar className="h-10 w-10 text-slate-200 mx-auto mb-3" />
@@ -550,58 +623,139 @@ function MyCalendarTab({ branchId }) {
     );
   }
 
-  // Counted off the slots on screen rather than stated, so the legend is also the day's
-  // tally and cannot disagree with the grid under it.
-  const tally = (data.slots || []).reduce((acc, s) => {
-    const kind = data.booked?.[s]?.kind || "free";
-    acc[kind] = (acc[kind] || 0) + 1;
-    return acc;
-  }, {});
+  const todayStr = todayIso();
 
   return (
     <div className="space-y-4" data-testid="hp-calendar-tab">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2" data-testid="hp-calendar-legend">
-        {["consultation", "review", "free"].map((kind) => (
-          <span key={kind} className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
-            <span className={`h-2 w-2 rounded-full ${SLOT_KINDS[kind].dot}`} aria-hidden />
-            {SLOT_KINDS[kind].label}
-            <span className="font-bold text-slate-700">{tally[kind] || 0}</span>
-          </span>
-        ))}
+      {/* The filter decides what the grid under it is counting, so it sits above: read
+          top-down it says "show me X", then "here is where X falls". */}
+      <div className="flex flex-wrap gap-1 rounded-lg border border-slate-200 bg-white p-1" data-testid="hp-calendar-filter">
+        {CALENDAR_FILTERS.map((f) => {
+          const active = kindFilter === f.key;
+          return (
+            <button
+              key={f.key}
+              type="button"
+              onClick={() => { setKindFilter(f.key); setSelectedDate(null); }}
+              className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition ${active ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}
+              data-testid={`hp-calendar-filter-${f.key}`}
+            >
+              {f.key !== "all" && <span className={`h-2 w-2 rounded-full ${SLOT_KINDS[f.key].dot}`} aria-hidden />}
+              {f.label}
+              <span className={active ? "text-white/70" : "text-slate-400"}>
+                {f.key === "all" ? (data.slots || []).length : (tally[f.key] || 0)}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
-      {dates.map((date) => (
-        <div key={date} className="rounded-xl border border-slate-200 bg-white p-4" data-testid={`hp-calendar-day-${date}`}>
-          <h4 className="text-sm font-semibold text-slate-700 mb-2">
-            {new Date(date + "T00:00").toLocaleDateString("en-IN", { weekday: "long", month: "short", day: "numeric" })}
-          </h4>
-          <div className="flex flex-wrap gap-2">
-            {grouped[date].map((slot) => {
-              const booking = data.booked?.[slot];
-              const time = to12h(slot.split("T")[1]);
-              const meta = SLOT_KINDS[booking?.kind] || SLOT_KINDS.free;
+      {selectedDate ? (
+        <DaySlots
+          date={selectedDate}
+          slots={byDate[selectedDate] || []}
+          booked={data.booked}
+          onBack={() => setSelectedDate(null)}
+        />
+      ) : (
+        <div className="rounded-xl border border-slate-200 bg-white p-4" data-testid="hp-calendar-month">
+          <div className="mb-3 flex items-center justify-between">
+            <button type="button" onClick={() => shiftMonth(-1)} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600" aria-label="Previous month" data-testid="hp-calendar-prev-month">
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <p className="text-sm font-bold text-slate-800">
+              {new Date(month.y, month.m, 1).toLocaleDateString("en-IN", { month: "long", year: "numeric" })}
+            </p>
+            <button type="button" onClick={() => shiftMonth(1)} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600" aria-label="Next month" data-testid="hp-calendar-next-month">
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-7 gap-1">
+            {WEEKDAY_HEADS.map((d, i) => (
+              <div key={i} className="pb-1 text-center text-[10px] font-bold uppercase tracking-wide text-slate-400">{d}</div>
+            ))}
+            {cells.map((day, i) => {
+              if (day === null) return <div key={`blank-${i}`} />;
+              const iso = isoOfParts(month.y, month.m, day);
+              const slots = byDate[iso] || [];
+              const isToday = iso === todayStr;
+              // A day holding nothing the filter admits is not a destination — showing it
+              // as pressable and opening an empty panel is a click that answers nothing.
+              const has = slots.length > 0;
               return (
-                <div
-                  key={slot}
-                  className={`rounded-lg border px-3 py-2 text-xs ${meta.box}`}
-                  data-testid={`hp-calendar-slot-${slot}`}
-                  title={booking ? `${meta.label} · ${booking.lead_name}` : "Available"}
+                <button
+                  key={iso}
+                  type="button"
+                  disabled={!has}
+                  onClick={() => setSelectedDate(iso)}
+                  className={`flex min-h-[3.25rem] flex-col items-center justify-center rounded-lg border p-1 transition ${
+                    has ? "border-slate-200 bg-white hover:border-teal-300 hover:bg-teal-50" : "border-transparent bg-slate-50/60"
+                  } ${isToday ? "ring-1 ring-teal-400" : ""}`}
+                  data-testid={`hp-calendar-day-${iso}`}
                 >
-                  {/* The dot is what makes a day readable at a glance: the times are all
-                      the same length and the names carry no colour, so the kind of work
-                      has to be something other than more text to be seen at speed. */}
-                  <p className="flex items-center gap-1.5 font-semibold">
-                    <span className={`h-2 w-2 shrink-0 rounded-full ${meta.dot}`} aria-hidden />
-                    {time}
-                  </p>
-                  <p className="text-[10px]">{booking ? booking.lead_name : "Available"}</p>
-                  {booking && <p className="text-[9px] font-bold uppercase tracking-wider opacity-70">{meta.label}</p>}
-                </div>
+                  <span className={`text-xs font-bold ${has ? "text-slate-700" : "text-slate-300"}`}>{day}</span>
+                  {has && (
+                    <span className="mt-0.5 flex items-center gap-0.5" aria-hidden>
+                      {["consultation", "review", "free"]
+                        .filter((k) => slots.some((sl) => kindOf(sl) === k))
+                        .map((k) => <span key={k} className={`h-1.5 w-1.5 rounded-full ${SLOT_KINDS[k].dot}`} />)}
+                    </span>
+                  )}
+                  {has && <span className="text-[9px] font-semibold text-slate-400">{slots.length}</span>}
+                </button>
               );
             })}
           </div>
         </div>
-      ))}
+      )}
+    </div>
+  );
+}
+
+/** One day's slots, reached by picking that day out of the month. */
+function DaySlots({ date, slots, booked, onBack }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4" data-testid={`hp-calendar-dayview-${date}`}>
+      <div className="mb-3 flex items-center gap-2">
+        <button type="button" onClick={onBack} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600" aria-label="Back to the month" data-testid="hp-calendar-back">
+          <ChevronLeft className="h-4 w-4" />
+        </button>
+        <h4 className="text-sm font-semibold text-slate-700">
+          {new Date(date + "T00:00").toLocaleDateString("en-IN", { weekday: "long", month: "short", day: "numeric" })}
+        </h4>
+        <span className="ml-auto text-[11px] font-semibold text-slate-400">{slots.length} slot{slots.length === 1 ? "" : "s"}</span>
+      </div>
+
+      {slots.length === 0 ? (
+        <p className="py-8 text-center text-xs text-slate-400">Nothing on this day for the filter above.</p>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          {slots.map((slot) => {
+            const booking = booked?.[slot];
+            const time = to12h(slot.split("T")[1]);
+            const meta = SLOT_KINDS[booking?.kind] || SLOT_KINDS.free;
+            return (
+              <div
+                key={slot}
+                className={`rounded-lg border px-3 py-2 text-xs ${meta.box}`}
+                data-testid={`hp-calendar-slot-${slot}`}
+                title={booking ? `${meta.label} · ${booking.lead_name}` : "Available"}
+              >
+                {/* The dot is what makes a day readable at a glance: the times are all
+                    the same length and the names carry no colour, so the kind of work
+                    has to be something other than more text to be seen at speed. */}
+                <p className="flex items-center gap-1.5 font-semibold">
+                  <span className={`h-2 w-2 shrink-0 rounded-full ${meta.dot}`} aria-hidden />
+                  {time}
+                </p>
+                <p className="text-[10px]">{booking ? booking.lead_name : "Available"}</p>
+                {booking && <p className="text-[9px] font-bold uppercase tracking-wider opacity-70">{meta.label}</p>}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
