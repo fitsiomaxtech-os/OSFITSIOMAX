@@ -14,6 +14,7 @@ import {
   Network,
   Salad,
   Search,
+  Settings,
   ShieldCheck,
   Store,
   Stethoscope,
@@ -156,13 +157,25 @@ const SUPER_ADMIN_TABS = [
   { key: "branches", label: "Branches & Verticals", icon: Building2 },
   { key: "hr", label: "HR Admin", icon: Users },
   { key: "branch_wise", label: "Branch Wise", icon: Network },
-  { key: "marketing", label: "Marketing Source", icon: Megaphone },
-  { key: "stages", label: "CI/CD ROOTS", icon: Activity },
-  { key: "presales", label: "PRE SALES", icon: Headphones },
+  { key: "presales", label: "Pre Sales Master View", icon: Headphones },
   // Treatment moved inside Services and Products (as its own sub-tab, next to Vending
   // Machine) rather than sitting here as a peer of the catalogue that holds it.
   { key: "packages", label: "Services and Products", icon: Store },
+  // Marketing Source and CI/CD ROOTS live inside here now, as its own sub-tab pair — two
+  // configuration screens, not two peers of Dashboard/HR/Pre-Sales on the main strip.
+  { key: "settings", label: "Settings", icon: Settings },
 ];
+
+// Marketing Source and CI/CD ROOTS still resolve through the same superAdminView values
+// they always did ("marketing"/"stages") — Settings is a second name for that pair of
+// states, not a third state of its own, so PreSalesCRM's "Manage Stages" jump
+// (setSuperAdminView("stages")) keeps working without knowing Settings exists.
+const SETTINGS_SUB_VIEWS = ["marketing", "stages"];
+const SETTINGS_SUB_TABS = [
+  { key: "marketing", label: "Marketing Source", icon: Megaphone },
+  { key: "stages", label: "CI/CD ROOTS", icon: Activity },
+];
+const isSuperAdminTabActive = (view, key) => (key === "settings" ? SETTINGS_SUB_VIEWS.includes(view) : view === key);
 
 const SUPER_ADMIN_BOTTOM_KEYS = ["dashboard", "hr", "branches"];
 const SUPER_ADMIN_BOTTOM_TABS = SUPER_ADMIN_TABS.filter((t) => SUPER_ADMIN_BOTTOM_KEYS.includes(t.key));
@@ -810,8 +823,8 @@ export const CRMPage = ({ auth, onLogout }) => {
             {SUPER_ADMIN_TABS.map((t) => (
               <button
                 key={t.key}
-                onClick={() => setSuperAdminView(t.key)}
-                className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${superAdminView === t.key ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"}`}
+                onClick={() => setSuperAdminView((v) => (t.key === "settings" ? (SETTINGS_SUB_VIEWS.includes(v) ? v : "marketing") : t.key))}
+                className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${isSuperAdminTabActive(superAdminView, t.key) ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"}`}
                 data-testid={`super-admin-tab-${t.key === "branch_wise" ? "branch-wise" : t.key}`}
               >
                 {t.label}
@@ -857,7 +870,7 @@ export const CRMPage = ({ auth, onLogout }) => {
                 aria-expanded={showSuperAdminMenu}
                 title="More"
                 className={`flex flex-1 items-center justify-center py-3.5 ${
-                  SUPER_ADMIN_MORE_TABS.some((t) => t.key === superAdminView) || showSuperAdminMenu ? "text-white" : "text-slate-200"
+                  SUPER_ADMIN_MORE_TABS.some((t) => isSuperAdminTabActive(superAdminView, t.key)) || showSuperAdminMenu ? "text-white" : "text-slate-200"
                 }`}
                 data-testid="super-admin-nav-more"
               >
@@ -882,12 +895,15 @@ export const CRMPage = ({ auth, onLogout }) => {
               </div>
               {SUPER_ADMIN_MORE_TABS.map((t) => {
                 const Icon = t.icon;
-                const active = superAdminView === t.key;
+                const active = isSuperAdminTabActive(superAdminView, t.key);
                 return (
                   <button
                     key={t.key}
                     type="button"
-                    onClick={() => { setSuperAdminView(t.key); setShowSuperAdminMenu(false); }}
+                    onClick={() => {
+                      setSuperAdminView((v) => (t.key === "settings" ? (SETTINGS_SUB_VIEWS.includes(v) ? v : "marketing") : t.key));
+                      setShowSuperAdminMenu(false);
+                    }}
                     className={`flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left text-sm font-medium ${active ? "bg-sky-50 text-sky-700" : "text-slate-700 hover:bg-slate-50"}`}
                     data-testid={`super-admin-menu-${t.key}`}
                   >
@@ -916,16 +932,29 @@ export const CRMPage = ({ auth, onLogout }) => {
           <PackagesBoard />
         )}
 
-        {showSuperAdminBoard && superAdminView === "marketing" && (
-          <MarketingBoard branches={branches} />
+        {showSuperAdminBoard && SETTINGS_SUB_VIEWS.includes(superAdminView) && (
+          <div className="space-y-4" data-testid="super-admin-settings">
+            <div className="flex flex-wrap gap-2" data-testid="settings-subtabs">
+              {SETTINGS_SUB_TABS.map((t) => (
+                <button
+                  key={t.key}
+                  type="button"
+                  onClick={() => setSuperAdminView(t.key)}
+                  data-testid={`settings-subtab-${t.key}`}
+                  className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${superAdminView === t.key ? "bg-sky-600 text-white shadow" : "text-slate-600 hover:bg-slate-100"}`}
+                >
+                  <t.icon className="h-4 w-4" />
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            {superAdminView === "marketing" && <MarketingBoard branches={branches} />}
+            {superAdminView === "stages" && <PipelineStageManagement onBack={() => setSuperAdminView("presales")} />}
+          </div>
         )}
 
         {showSuperAdminBoard && superAdminView === "presales" && (
           <PreSalesCRM onManageStages={() => setSuperAdminView("stages")} role={role} currentUser={auth.user} />
-        )}
-
-        {showSuperAdminBoard && superAdminView === "stages" && (
-          <PipelineStageManagement onBack={() => setSuperAdminView("presales")} />
         )}
 
         {showPreSalesBoard && (
