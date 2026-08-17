@@ -12,6 +12,22 @@ import { ClientHistoryModal } from "@/components/branch/ClientHistoryModal";
 // BranchStoreBoard.jsx each already carry their own copy of.
 const isOnlineVertical = (v) => String(v || "").startsWith("online_");
 
+// Anna Nagar is the flagship branch every Super Admin lands on first, so every
+// Operations tab opens there instead of an empty "pick a branch" prompt. Falls back to
+// the first offline branch (same sort order the picker itself uses) if Anna Nagar isn't
+// in the list yet.
+const findDefaultBranchId = (branches) => {
+  const list = branches || [];
+  const annaNagar = list.find((b) => /anna\s*nagar/i.test(b.branch_name || ""));
+  if (annaNagar) return annaNagar.id;
+  const sorted = [...list].sort((a, b) => {
+    const onlineDiff = Number(isOnlineVertical(a.vertical)) - Number(isOnlineVertical(b.vertical));
+    if (onlineDiff !== 0) return onlineDiff;
+    return (a.branch_name || "").localeCompare(b.branch_name || "");
+  });
+  return sorted[0]?.id || "";
+};
+
 const OPERATIONS_TABS = [
   { key: "pre_sales", label: "Pre Sales", icon: Headphones },
   { key: "branch", label: "Branch", icon: Building2 },
@@ -64,6 +80,9 @@ const EmptyPrompt = ({ text, testid }) => (
 
 const OperationsBranchTab = ({ branches }) => {
   const [selectedId, setSelectedId] = useState("");
+  useEffect(() => {
+    if (!selectedId && branches && branches.length) setSelectedId(findDefaultBranchId(branches));
+  }, [branches, selectedId]);
   return (
     <div className="space-y-4" data-testid="ops-branch-tab">
       <OperationsBranchPicker branches={branches} selectedId={selectedId} onSelect={setSelectedId} testid="ops-branch-picker" />
@@ -85,6 +104,9 @@ const OperationsBranchTab = ({ branches }) => {
 
 const OperationsConsultantTab = ({ branches, actingUser }) => {
   const [selectedId, setSelectedId] = useState("");
+  useEffect(() => {
+    if (!selectedId && branches && branches.length) setSelectedId(findDefaultBranchId(branches));
+  }, [branches, selectedId]);
   return (
     <div className="space-y-4" data-testid="ops-consultant-tab">
       <OperationsBranchPicker branches={branches} selectedId={selectedId} onSelect={setSelectedId} testid="ops-consultant-picker" />
@@ -109,10 +131,18 @@ const OperationsPersonTab = ({ branches, profileType, personLabel, boardTestid, 
   const [selectedPersonId, setSelectedPersonId] = useState("");
 
   useEffect(() => {
+    if (!selectedBranchId && branches && branches.length) setSelectedBranchId(findDefaultBranchId(branches));
+  }, [branches, selectedBranchId]);
+
+  useEffect(() => {
     setSelectedPersonId("");
     if (!selectedBranchId) { setPeople([]); return; }
     getDoctors({ branch_id: selectedBranchId })
-      .then((rows) => setPeople((rows || []).filter((d) => d.profile_type === profileType)))
+      .then((rows) => {
+        const filtered = (rows || []).filter((d) => d.profile_type === profileType);
+        setPeople(filtered);
+        setSelectedPersonId(filtered[0]?.id || "");
+      })
       .catch(() => setPeople([]));
   }, [selectedBranchId, profileType]);
 
@@ -156,9 +186,18 @@ const OperationsPreSalesTab = ({ branches, actingUser }) => {
   const [selectedRepId, setSelectedRepId] = useState("");
 
   useEffect(() => {
+    if (!selectedBranchId && branches && branches.length) setSelectedBranchId(findDefaultBranchId(branches));
+  }, [branches, selectedBranchId]);
+
+  useEffect(() => {
     setSelectedRepId("");
     if (!selectedBranchId) { setReps([]); return; }
-    bmPreSalesMembers(selectedBranchId).then(setReps).catch(() => setReps([]));
+    bmPreSalesMembers(selectedBranchId)
+      .then((rows) => {
+        setReps(rows);
+        setSelectedRepId(rows?.[0]?.id || "");
+      })
+      .catch(() => setReps([]));
   }, [selectedBranchId]);
 
   return (
@@ -211,9 +250,18 @@ const OperationsClientTab = ({ branches }) => {
   const [selectedClientId, setSelectedClientId] = useState("");
 
   useEffect(() => {
+    if (!selectedBranchId && branches && branches.length) setSelectedBranchId(findDefaultBranchId(branches));
+  }, [branches, selectedBranchId]);
+
+  useEffect(() => {
     setSelectedClientId("");
     if (!selectedBranchId) { setClients([]); return; }
-    getLeads({ branch_id: selectedBranchId }).then(setClients).catch(() => setClients([]));
+    getLeads({ branch_id: selectedBranchId })
+      .then((rows) => {
+        setClients(rows);
+        setSelectedClientId(rows?.[0]?.id || "");
+      })
+      .catch(() => setClients([]));
   }, [selectedBranchId]);
 
   return (
