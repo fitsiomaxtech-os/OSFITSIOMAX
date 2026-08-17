@@ -68,6 +68,7 @@ const ROLE_META = {
   super_admin: { label: "Super Admin", icon: ShieldCheck },
   business_dev: { label: "Business Development", icon: Briefcase },
   pre_sales: { label: "Pre Sales", icon: Headphones },
+  sales_head: { label: "Sales Head", icon: Headphones },
   branch_admin: { label: "Branch Admin", icon: Building2 },
   branch_admin_physio: { label: "Branch Admin (Physio)", icon: Building2 },
   branch_admin_fitness: { label: "Branch Admin (Fitness)", icon: Building2 },
@@ -146,6 +147,17 @@ const isBranchAdminRole = (role) => BRANCH_ADMIN_ROLES.includes(String(role || "
  * fails there would render the whole board and 403 every call in it.
  */
 const isPhysioRole = (role) => ["physio", "online_physio"].includes(String(role || "").trim().toLowerCase());
+
+/** Whether a role gets the Pre-Sales board.
+ *
+ * Sales Head is Pre-Sales' own manager — same board, same leads, just the org-wide
+ * Master View instead of one rep's own book (PreSalesCRM itself decides which, off the
+ * same role prop). Matched exactly, like isBranchAdminRole and isPhysioRole above. Kept
+ * in step with PRE_SALES_ROLES in backend/deps.py — a role that passes here and fails
+ * there would render the board and 403 every call in it.
+ */
+const PRE_SALES_ROLES = ["pre_sales", "sales_head"];
+const isPreSalesRole = (role) => PRE_SALES_ROLES.includes(String(role || "").trim().toLowerCase());
 
 // Same destinations as the desktop tab strip below. On a phone, three get a direct
 // bottom-nav slot each; the rest sit behind a "More" sheet — both derived from this one
@@ -318,7 +330,9 @@ export const CRMPage = ({ auth, onLogout }) => {
   const isClinicianTitle = role === "head_physio" || isDietRole(role);
   const boardTitle = isClinicianTitle
     ? roleLabel.toUpperCase()
-    : role === "pre_sales" ? "Pre Sales Master View" : `${roleLabel} Master View`;
+    // Sales Head gets Pre-Sales' own title, not "Sales Head Master View" — it's the same
+    // board (PreSalesCRM, full Master View) under a second role, not a board of its own.
+    : isPreSalesRole(role) ? "Pre Sales Master View" : `${roleLabel} Master View`;
   const myBranch = branches.find((b) => b.id === auth.user.branch_id);
   const myBranchName = myBranch?.branch_name || "";
   const VERTICAL_LABELS = { offline_physiotherapy: "Physiotherapy", offline_fitness_gym: "Fitness", offline_fitness: "Fitness" };
@@ -652,7 +666,7 @@ export const CRMPage = ({ auth, onLogout }) => {
 
   const showSuperAdminBoard = role === "super_admin";
   const showBusinessDevBoard = role === "business_dev";
-  const showPreSalesBoard = role === "pre_sales";
+  const showPreSalesBoard = isPreSalesRole(role);
   const showBranchBoard = isBranchAdminRole(role);
   const showHeadPhysioBoard = role === "head_physio";
   const showPhysioBoard = isPhysioRole(role);

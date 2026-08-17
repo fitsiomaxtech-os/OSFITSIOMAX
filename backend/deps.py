@@ -125,14 +125,34 @@ def is_physio_role(role: str) -> bool:
     return (role or "").strip().lower() in PHYSIO_ROLES
 
 
+# Sales Head is Pre-Sales' own manager, not a separate desk: same pipeline, same leads,
+# same board (PreSalesCRM on the frontend), just the org-wide Master View instead of one
+# rep's own book. So it is Pre-Sales' authority under a second slug, on the same footing
+# as BRANCH_ADMIN_ROLES/PHYSIO_ROLES above, rather than a parallel permission set that
+# would drift from it.
+PRE_SALES_ROLES = frozenset({"pre_sales", "sales_head"})
+
+
+def is_pre_sales_role(role: str) -> bool:
+    """Whether this role holds Pre-Sales' authority over leads.
+
+    Like is_branch_admin_role, this is for the *scoping* checks as well as the gate:
+    anywhere a query or action is opened up to "pre_sales", it has to be opened up to
+    these too, or Sales Head is left able to see the Master View but not act on it.
+    """
+    return (role or "").strip().lower() in PRE_SALES_ROLES
+
+
 def v3_require_roles(*roles: str):
     async def checker(user: V3UserOut = Depends(v3_current_user)) -> V3UserOut:
-        # Anywhere branch_admin or physio is allowed, its aliases are allowed. Done here
-        # rather than at the 80-odd call sites so the next endpoint added is covered by
-        # default instead of being one someone remembered to list the second role on.
+        # Anywhere branch_admin, physio or pre_sales is allowed, its aliases are allowed.
+        # Done here rather than at the 80-odd call sites so the next endpoint added is
+        # covered by default instead of being one someone remembered to list the second
+        # role on.
         allowed = (
             ("branch_admin" in roles and is_branch_admin_role(user.role))
             or ("physio" in roles and is_physio_role(user.role))
+            or ("pre_sales" in roles and is_pre_sales_role(user.role))
         )
         if user.role not in roles and not allowed:
             raise HTTPException(status_code=403, detail="Not allowed")

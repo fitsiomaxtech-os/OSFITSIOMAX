@@ -24,11 +24,14 @@ DEFAULT_DEPARTMENTS = ["Pre-Sales", "Branch", "HR", "Accounts", "Operations", "M
 # "online_physio" is the same idea one rung down: a Physio who treats over video, on the
 # Physio board with the Physio's reach. See PHYSIO_ROLES in deps.py.
 #
+# "sales_head" is Pre-Sales' own manager: the same board and the same leads, just the
+# org-wide Master View instead of one rep's own book. See PRE_SALES_ROLES in deps.py.
+#
 # Ordered next to the role each is an alias of, because this list is what the Designation
 # and Create User dropdowns render, and a reader picking between them wants the family
 # together.
 DEFAULT_ROLES = [
-    "super_admin", "business_dev", "pre_sales",
+    "super_admin", "business_dev", "pre_sales", "sales_head",
     "branch_admin", "branch_admin_physio", "branch_admin_fitness", "branch_admin_physio_fitness",
     "online_physio_admin", "online_fitness_admin",
     "head_physio", "physio", "online_physio", "marketing_head", "accountant",

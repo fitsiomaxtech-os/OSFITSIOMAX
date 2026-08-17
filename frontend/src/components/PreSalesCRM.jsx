@@ -502,11 +502,13 @@ export const PreSalesCRM = ({
   const [loading, setLoading] = useState(false);
   const [visibleCount, setVisibleCount] = useState(50);
   const [activeTab, setActiveTab] = useState("leads"); // mobile bottom-nav only; desktop always shows Leads
-  // Super Admin only, from here down: which branches count as one group (All/Offline/
-  // Online, same split Branches & Verticals uses), and which top-level pane is showing.
+  // Super Admin and Sales Head only, from here down: which branches count as one group
+  // (All/Offline/Online, same split Branches & Verticals uses), and which top-level pane
+  // is showing. Sales Head is Pre-Sales' own manager, so it gets the same org-wide
+  // picture as Super Admin's Pre Sales tab rather than one rep's own filtered book.
   const [branchGroup, setBranchGroup] = useState("all");
   const [masterView, setMasterView] = useState("leads"); // "leads" | "analytics"
-  const isSuperAdminMasterView = role === "super_admin";
+  const isSuperAdminMasterView = role === "super_admin" || role === "sales_head";
 
   const selectBranchGroup = (g) => { setBranchGroup(g); setSourceFilter(""); };
 
@@ -726,9 +728,10 @@ export const PreSalesCRM = ({
         </div>
 
         <div className="flex items-center gap-2 sm:contents">
-        {/* Super Admin's alone. A Pre Sales rep works one branch's book, so a control that
-            narrows the board to a branch either does nothing or hides their own leads. */}
-        {role === "super_admin" && (
+        {/* Master View only (Super Admin / Sales Head). A Pre Sales rep works one branch's
+            book, so a control that narrows the board to a branch either does nothing or
+            hides their own leads. */}
+        {isSuperAdminMasterView && (
           <ColorSelect
             value={sourceFilter}
             options={branchOptions}
@@ -1132,7 +1135,7 @@ export const PreSalesCRM = ({
         // Pinned to this board's branch when it has one. A lead created on a Branch
         // Admin's Pre Sales tab with no branch would be an unbranched lead, which always
         // belongs to Pre-Sales — it would vanish from the board that created it.
-        <CreateLeadModal onClose={() => setShowCreate(false)} onSaved={load} branchId={branchId} isSuperAdmin={role === "super_admin"} />
+        <CreateLeadModal onClose={() => setShowCreate(false)} onSaved={load} branchId={branchId} isSuperAdmin={isSuperAdminMasterView} />
       )}
 
       {confirmDelete && (

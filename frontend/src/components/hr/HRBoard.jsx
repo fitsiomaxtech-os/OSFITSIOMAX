@@ -746,6 +746,9 @@ const ROLE_META = {
   super_admin: { label: "SUPER ADMIN", classes: "border-purple-300 bg-purple-50 text-purple-700" },
   business_dev: { label: "BUSINESS DEV", classes: "border-indigo-300 bg-indigo-50 text-indigo-700" },
   pre_sales: { label: "PRE SALES", classes: "border-sky-300 bg-sky-50 text-sky-700" },
+  // Sales Head shares Pre-Sales' own sky — it's the same desk's manager, not a role of
+  // its own, so it wears the same hue rather than claiming a fresh one.
+  sales_head: { label: "SALES HEAD", classes: "border-sky-300 bg-sky-50 text-sky-700" },
   // The Branch Admin family shares emerald, and the online arm shares teal, on purpose:
   // the hue says which kind of role this is and the label says which practice it runs.
   // Handing each of the six its own colour would spend the whole palette on one job and
