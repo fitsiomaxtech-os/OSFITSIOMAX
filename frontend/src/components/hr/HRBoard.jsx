@@ -2106,6 +2106,7 @@ const designationSlug = (designation) => (designation || "").trim().toLowerCase(
 
 const EmployeeSelectDropdown = ({ value, employees, onChange }) => {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const ref = useRef(null);
 
   useEffect(() => {
@@ -2114,9 +2115,18 @@ const EmployeeSelectDropdown = ({ value, employees, onChange }) => {
     return () => document.removeEventListener("mousedown", onDocClick);
   }, []);
 
+  // Cleared on close, not on every selection — closing (by picking one or clicking away)
+  // is the one moment a stale query would otherwise sit there for the next time this opens.
+  useEffect(() => { if (!open) setQuery(""); }, [open]);
+
   const selected = employees.find((e) => e.id === value);
   const currentClasses = selected ? roleClasses(designationSlug(selected.designation)) : "border-slate-200 bg-white text-slate-700";
   const currentLabel = selected ? `${selected.employee_code} — ${selected.full_name} (${selected.designation || "—"})` : "Select employee...";
+
+  const q = query.trim().toLowerCase();
+  const filteredEmployees = q
+    ? employees.filter((e) => `${e.employee_code || ""} ${e.full_name || ""} ${e.designation || ""}`.toLowerCase().includes(q))
+    : employees;
 
   return (
     <div className="relative" ref={ref}>
@@ -2130,26 +2140,42 @@ const EmployeeSelectDropdown = ({ value, employees, onChange }) => {
         <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
       </button>
       {open && (
-        <div className="absolute left-0 right-0 z-20 mt-1 max-h-64 space-y-1 overflow-y-auto rounded-md border border-slate-200 bg-white p-1.5 shadow-lg" data-testid="hr-create-user-emp-list">
-          <button
-            type="button"
-            onClick={() => { onChange(""); setOpen(false); }}
-            className="block w-full rounded-md border border-slate-200 bg-white px-3 py-1.5 text-left text-xs font-semibold text-slate-700"
-            data-testid="hr-create-user-emp-option-none"
-          >
-            Select employee...
-          </button>
-          {employees.map((e) => (
+        <div className="absolute left-0 right-0 z-20 mt-1 max-h-72 overflow-hidden rounded-md border border-slate-200 bg-white shadow-lg" data-testid="hr-create-user-emp-list">
+          <div className="relative border-b border-slate-100 p-1.5">
+            <Search className="pointer-events-none absolute left-4 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+            <input
+              autoFocus
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search employee..."
+              className="h-8 w-full rounded-md border border-slate-200 pl-8 pr-2 text-xs font-normal text-slate-700 outline-none focus:border-sky-400"
+              data-testid="hr-create-user-emp-search"
+            />
+          </div>
+          <div className="max-h-60 space-y-1 overflow-y-auto p-1.5">
             <button
-              key={e.id}
               type="button"
-              onClick={() => { onChange(e.id); setOpen(false); }}
-              className={`block w-full rounded-md border px-3 py-1.5 text-left text-xs font-semibold ${roleClasses(designationSlug(e.designation))}`}
-              data-testid={`hr-create-user-emp-option-${e.id}`}
+              onClick={() => { onChange(""); setOpen(false); }}
+              className="block w-full rounded-md border border-slate-200 bg-white px-3 py-1.5 text-left text-xs font-semibold text-slate-700"
+              data-testid="hr-create-user-emp-option-none"
             >
-              {e.employee_code} — {e.full_name} ({e.designation || "—"})
+              Select employee...
             </button>
-          ))}
+            {filteredEmployees.map((e) => (
+              <button
+                key={e.id}
+                type="button"
+                onClick={() => { onChange(e.id); setOpen(false); }}
+                className={`block w-full rounded-md border px-3 py-1.5 text-left text-xs font-semibold ${roleClasses(designationSlug(e.designation))}`}
+                data-testid={`hr-create-user-emp-option-${e.id}`}
+              >
+                {e.employee_code} — {e.full_name} ({e.designation || "—"})
+              </button>
+            ))}
+            {filteredEmployees.length === 0 && (
+              <p className="px-2 py-3 text-center text-xs text-slate-400">No employees match.</p>
+            )}
+          </div>
         </div>
       )}
     </div>
