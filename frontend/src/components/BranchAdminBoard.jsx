@@ -11,6 +11,7 @@ import {
   Mail,
   Search,
   Stethoscope,
+  Trash2,
   UserPlus,
   X,
   Activity,
@@ -48,6 +49,7 @@ import {
   stagesList,
   scheduleBranchFollowUp,
   rescheduleBranchFollowUp,
+  bulkDeleteLeads,
 } from "@/lib/api";
 import { to12h, endTime12h } from "@/lib/time";
 import { HeadPhysioCalendar } from "@/components/HeadPhysioCalendar";
@@ -350,6 +352,101 @@ export const matchesBranchStage = (lead, stage) => {
   return lead.stage === stage.mirrors_stage && lead.branch_stage === stage.unmoved_branch_stage;
 };
 
+/**
+ * Confirm a bulk delete by typing the word.
+ *
+ * A count and an OK button is the shape of dialog people learn to dismiss, and this one
+ * cannot be undone. Typing DELETE costs a second and cannot be done by muscle memory, so
+ * the agreement is to this particular delete rather than to dialogs in general.
+ *
+ * The names are listed rather than only counted. "Delete 47 patients" is a number; the
+ * list is what lets someone notice a real patient among the junk before it goes.
+ */
+function BulkDeleteLeadsModal({ leads, onClose, onDeleted }) {
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const armed = typed.trim().toUpperCase() === "DELETE";
+
+  const run = async () => {
+    if (!armed) return;
+    setBusy(true);
+    try {
+      const res = await bulkDeleteLeads(leads.map((l) => l.id), typed.trim().toUpperCase());
+      const blocked = res.blocked || [];
+      if (res.deleted > 0) toast.success(`${res.deleted} patient${res.deleted > 1 ? "s" : ""} deleted`);
+      // Kept apart from the success line: the ones that survived are the point of the
+      // message, and folding both into one toast buries them.
+      if (blocked.length) {
+        const why = [...new Set(blocked.map((b) => b.reason))].join("; ");
+        toast.error(`${blocked.length} kept — ${why}`, { duration: 8000 });
+      }
+      if (!res.deleted && !blocked.length) toast.error("Nothing was deleted");
+      onDeleted(res);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not delete");
+    }
+    setBusy(false);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="flex max-h-[85vh] w-full max-w-md flex-col rounded-xl bg-white shadow-2xl" data-testid="branch-bulk-delete-modal">
+        <div className="border-b p-5">
+          <h3 className="flex items-center gap-2 text-base font-semibold text-rose-700">
+            <Trash2 className="h-4 w-4" /> Delete {leads.length} patient{leads.length > 1 ? "s" : ""}?
+          </h3>
+          <p className="mt-1 text-[11px] text-slate-500">
+            This removes them and their activity, follow-ups and appointments. It cannot be undone.
+          </p>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-5 py-3">
+          <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500">Being deleted</p>
+          <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200" data-testid="branch-bulk-delete-list">
+            {leads.map((l) => (
+              <li key={l.id} className="flex items-center justify-between gap-2 px-3 py-2 text-xs">
+                <span className="truncate font-medium text-slate-700">{l.name || "Unnamed"}</span>
+                <span className="shrink-0 font-mono text-[10px] text-slate-400">{l.patient_number || l.phone || "—"}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-3 text-[11px] text-slate-500">
+            Anyone with treatment sessions or collected payments is kept — they are a patient with a
+            record, not an import to clear. You will be told which.
+          </p>
+        </div>
+
+        <div className="border-t p-4">
+          <label className="mb-1.5 block text-xs font-medium text-slate-600">
+            Type <b className="font-mono text-rose-700">DELETE</b> to confirm
+          </label>
+          <Input
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && armed && !busy) run(); }}
+            placeholder="DELETE"
+            autoFocus
+            className="font-mono"
+            data-testid="branch-bulk-delete-input"
+          />
+          <div className="mt-3 flex justify-end gap-2">
+            <Button variant="outline" size="sm" onClick={onClose} disabled={busy}>Cancel</Button>
+            <Button
+              size="sm"
+              onClick={run}
+              disabled={!armed || busy}
+              className="bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50"
+              data-testid="branch-bulk-delete-confirm"
+            >
+              {busy ? "Deleting..." : `Delete ${leads.length}`}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = null, currentUser = null }) => {
   const [boardData, setBoardData] = useState({ leads: [], stage_counts: {}, stages: [] });
   const [consultationStages, setConsultationStages] = useState([]); // dynamic Consultation Stages, merged into the same stage bar
@@ -368,6 +465,11 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   // the rows on screen come from ConsultationsBoard, which needs telling separately.
   const [refreshTick, setRefreshTick] = useState(0);
   const [showCreateLead, setShowCreateLead] = useState(false);
+  // Ticked rows in the leads table, and the confirm dialog they feed. A Set because this
+  // is asked "is this row ticked" once per row on every render, and 2,000 rows against an
+  // array is 2,000 scans of it.
+  const [picked, setPicked] = useState(() => new Set());
+  const [showBulkDelete, setShowBulkDelete] = useState(false);
   // Set when a lead's own detail popup hands off to a Consultation-only stage — tells the
   // embedded ConsultationsBoard which lead to auto-open once it loads, so the handoff lands
   // straight on that lead's own rich modal instead of just the filtered list.
@@ -462,6 +564,33 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     }
     return list;
   }, [boardData.leads, searchQuery, dateFilter]);
+
+  // The rows the table is actually showing. Hoisted out of the table body because the
+  // select-all box and the delete bar have to agree with it exactly — "select all" that
+  // picks up a row the stage filter is hiding deletes something nobody looked at.
+  const visibleLeads = useMemo(
+    () => (stageFilter ? filteredLeads.filter((l) => matchesBranchStage(l, stages.find((s) => s.name === stageFilter))) : filteredLeads),
+    [filteredLeads, stageFilter, stages],
+  );
+
+  // A tick survives scrolling and reopening a row, but not a change to what is on screen.
+  // Searching, filtering by date or switching stage replaces the list under the selection,
+  // and a delete confirmed against rows the person can no longer see is one they cannot
+  // check before agreeing to it.
+  useEffect(() => { setPicked(new Set()); }, [stageFilter, dateFilter, searchQuery, activeView]);
+
+  const pickedVisible = useMemo(
+    () => visibleLeads.filter((l) => picked.has(l.id)),
+    [visibleLeads, picked],
+  );
+
+  const togglePicked = useCallback((id) => {
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
 
   // Summary card counts follow the Date Filter (and search) too, instead of always
   // reflecting the branch's all-time totals — so the cards actually describe what's in
@@ -866,6 +995,30 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
             })()}
           </div>
 
+          {/* Shown only while something is ticked, so the ordinary view of the list is the
+              one without a delete button in it. Desk only, like the table it belongs to. */}
+          {pickedVisible.length > 0 && (
+            <div className="mb-2 hidden flex-wrap items-center justify-between gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 md:flex" data-testid="branch-bulk-bar">
+              <p className="text-xs font-semibold text-rose-800">
+                {pickedVisible.length} selected
+                <span className="ml-1 font-normal text-rose-700">of {visibleLeads.length} shown</span>
+              </p>
+              <div className="flex shrink-0 items-center gap-2">
+                <Button size="sm" variant="outline" onClick={() => setPicked(new Set())} data-testid="branch-bulk-clear">
+                  Clear
+                </Button>
+                <Button
+                  size="sm"
+                  className="bg-rose-600 text-white hover:bg-rose-700"
+                  onClick={() => setShowBulkDelete(true)}
+                  data-testid="branch-bulk-delete-btn"
+                >
+                  <Trash2 className="mr-1 h-3.5 w-3.5" /> Delete
+                </Button>
+              </div>
+            </div>
+          )}
+
           {/* List View (table) — its own scroll region so the sticky header can use top-0
               instead of guessing the page header's pixel height, which was colliding with
               the stat cards row as it scrolled past. */}
@@ -873,25 +1026,43 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
             <table className="w-full min-w-[640px] table-fixed divide-y divide-slate-200 text-sm">
               <thead className="sticky top-0 z-10 bg-slate-500 text-left text-xs font-semibold uppercase tracking-wide text-white">
                 <tr>
+                  {/* Ticks every row the table is currently showing, and only those. The
+                      percentages below drop by 4 to pay for this column, so they still
+                      total 100 — table-fixed divides by the stated widths, and a set that
+                      overshoots quietly squeezes the last column instead. */}
+                  <th className="w-[4%] px-3 py-3">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 cursor-pointer accent-rose-600 align-middle"
+                      checked={visibleLeads.length > 0 && pickedVisible.length === visibleLeads.length}
+                      // Some but not all: neither ticked nor empty, so it reads as a partial
+                      // selection rather than as "nothing is selected".
+                      ref={(el) => { if (el) el.indeterminate = pickedVisible.length > 0 && pickedVisible.length < visibleLeads.length; }}
+                      onChange={(e) => setPicked(e.target.checked ? new Set(visibleLeads.map((l) => l.id)) : new Set())}
+                      title={`Select all ${visibleLeads.length} shown`}
+                      aria-label="Select all shown"
+                      data-testid="branch-select-all"
+                    />
+                  </th>
                   {/* A lead at either entry stage hasn't had a physio assigned yet, so that
                       column is dropped there — every other view keeps it. */}
                   {entryStageNames.includes(stageFilter) ? (
                     <>
-                      <th className="w-[24%] px-4 py-3">Patient</th>
-                      <th className="w-[14%] px-4 py-3">Phone</th>
-                      <th className="w-[22%] px-4 py-3">Email</th>
-                      <th className="w-[16%] px-4 py-3">Stage</th>
-                      <th className="w-[14%] px-4 py-3">Appointment</th>
+                      <th className="w-[22%] px-4 py-3">Patient</th>
+                      <th className="w-[13%] px-4 py-3">Phone</th>
+                      <th className="w-[21%] px-4 py-3">Email</th>
+                      <th className="w-[15%] px-4 py-3">Stage</th>
+                      <th className="w-[15%] px-4 py-3">Appointment</th>
                       <th className="w-[10%] px-4 py-3 text-right">Updated</th>
                     </>
                   ) : (
                     <>
-                      <th className="w-[20%] px-4 py-3">Patient</th>
-                      <th className="w-[12%] px-4 py-3">Phone</th>
-                      <th className="w-[18%] px-4 py-3">Email</th>
-                      <th className="w-[14%] px-4 py-3">Stage</th>
-                      <th className="w-[14%] px-4 py-3">Assigned Physio</th>
-                      <th className="w-[12%] px-4 py-3">Appointment</th>
+                      <th className="w-[19%] px-4 py-3">Patient</th>
+                      <th className="w-[11%] px-4 py-3">Phone</th>
+                      <th className="w-[17%] px-4 py-3">Email</th>
+                      <th className="w-[13%] px-4 py-3">Stage</th>
+                      <th className="w-[13%] px-4 py-3">Assigned Physio</th>
+                      <th className="w-[13%] px-4 py-3">Appointment</th>
                       <th className="w-[10%] px-4 py-3 text-right">Updated</th>
                     </>
                   )}
@@ -899,12 +1070,12 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {(() => {
-                  const visible = (stageFilter ? filteredLeads.filter((l) => matchesBranchStage(l, stages.find((s) => s.name === stageFilter))) : filteredLeads);
+                  const visible = visibleLeads;
                   const showAssignedPhysio = !entryStageNames.includes(stageFilter);
                   if (visible.length === 0) {
                     return (
                       <tr>
-                        <td colSpan={showAssignedPhysio ? 7 : 6} className="px-4 py-10 text-center text-sm text-slate-400" data-testid="branch-list-empty">
+                        <td colSpan={showAssignedPhysio ? 8 : 7} className="px-4 py-10 text-center text-sm text-slate-400" data-testid="branch-list-empty">
                           No patients {stageFilter ? `in stage "${stageDisplayLabel(stageFilter)}"` : "yet"}.
                         </td>
                       </tr>
@@ -917,9 +1088,22 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                       <tr
                         key={lead.id}
                         onClick={() => setSelectedLead(lead)}
-                        className="cursor-pointer transition-colors hover:bg-slate-50"
+                        className={`cursor-pointer transition-colors ${picked.has(lead.id) ? "bg-rose-50/70 hover:bg-rose-50" : "hover:bg-slate-50"}`}
                         data-testid={`branch-row-${lead.id}`}
                       >
+                        {/* stopPropagation on the cell as well as the box: the whole row
+                            opens the patient, and ticking a box should not also open them. */}
+                        <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 cursor-pointer accent-rose-600 align-middle"
+                            checked={picked.has(lead.id)}
+                            onChange={() => togglePicked(lead.id)}
+                            onClick={(e) => e.stopPropagation()}
+                            aria-label={`Select ${lead.name || "patient"}`}
+                            data-testid={`branch-pick-${lead.id}`}
+                          />
+                        </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-3">
                             <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-violet-100 text-xs font-bold text-violet-700">
@@ -1012,6 +1196,21 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
           branchId={branchId}
           onClose={() => setShowCreateLead(false)}
           onSaved={loadBoard}
+        />
+      )}
+
+      {showBulkDelete && pickedVisible.length > 0 && (
+        <BulkDeleteLeadsModal
+          leads={pickedVisible}
+          onClose={() => setShowBulkDelete(false)}
+          // Whatever the server refused stays ticked, so a second attempt is against the
+          // rows that actually survived rather than against a selection the list has
+          // already moved on from.
+          onDeleted={(res) => {
+            setShowBulkDelete(false);
+            setPicked(new Set((res.blocked || []).map((b) => b.lead_id)));
+            loadBoard();
+          }}
         />
       )}
         </>

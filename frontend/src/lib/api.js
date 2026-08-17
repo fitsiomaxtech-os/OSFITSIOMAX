@@ -95,6 +95,8 @@ export const getLeads = async (params) => (await api.get("/leads", { params })).
 export const createManualLead = async (payload) => (await api.post("/leads/manual", payload)).data;
 export const updateLead = async (leadId, payload) => (await api.put(`/leads/${leadId}`, payload)).data;
 export const deleteLead = async (leadId) => (await api.delete(`/leads/${leadId}`)).data;
+// Clearing several at once. Returns what was deleted and what was refused, with reasons.
+export const bulkDeleteLeads = async (leadIds, confirm) => (await api.post("/branch/leads/bulk-delete", { lead_ids: leadIds, confirm })).data;
 export const getPortalAccountStatus = async (leadId) => (await api.get(`/leads/${leadId}/portal-account`)).data;
 export const createOrResetPortalAccount = async (leadId, payload) => (await api.post(`/leads/${leadId}/portal-account`, payload)).data;
 
@@ -269,6 +271,7 @@ export const physioCompleteSession = async (sessionId, payload) => (await api.po
 // The patient did not turn up: this day takes the next day's slot, and every day after it
 // steps down one. The last day comes off the end and goes to the Branch Admin for a date.
 export const physioMarkAbsent = async (sessionId, payload) => (await api.post(`/physio/sessions/${sessionId}/absent`, payload)).data;
+
 export const physioWeeklyAssessment = async (leadId, week, payload, physioId) => (await api.post(`/physio/weekly-assessment/${leadId}/${week}`, payload, { params: physioId ? { physio_id: physioId } : {} })).data;
 
 export const getBranchRecommendations = async () => (await api.get("/branch/package-recommendations")).data;

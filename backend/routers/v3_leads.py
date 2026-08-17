@@ -116,6 +116,104 @@ async def v3_delete_lead(
 
 
 
+class BulkDeleteLeadsInput(BaseModel):
+    lead_ids: list[str]
+    confirm: str
+
+
+# Paid-for history a lead can be carrying. Kept beside the endpoint that refuses to delete
+# over it so the two cannot drift: these are the actions the finance board counts as
+# revenue, and a lead holding one of them is a line in a figure someone has already
+# reported.
+_PAID_ACTIONS = [
+    "consultation_paid", "package_sold", "package_payment_collected",
+    "treatment_fee_collected", "diet_fee_collected", "fee_collected",
+]
+
+# Enough to clear a bad import in a few passes, small enough that one request cannot walk
+# the whole branch. Refused rather than truncated: silently deleting the first 500 of 2000
+# and reporting success is how someone deletes 1500 rows they never saw.
+MAX_BULK_DELETE = 500
+
+
+@router.post("/branch/leads/bulk-delete")
+async def v3_bulk_delete_leads(
+    payload: BulkDeleteLeadsInput,
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "branch_admin")),
+):
+    """Delete several leads at once — for clearing out a bad import.
+
+    Permanent, and the reason this is not simply the existing per-lead delete in a loop:
+
+    A Branch Admin can only reach leads of their own branch. The list on their screen is
+    already branch-scoped, but a request is not a screen, and an id typed by hand must not
+    reach another branch's patient. Ids that fall outside are reported as such rather than
+    silently ignored, so a wrong selection reads as wrong.
+
+    A lead carrying paid-for history is refused. Treatment sessions and collected payments
+    point back at the lead, so deleting one empties a figure the finance board has already
+    reported and orphans a patient's treatment record. Clearing junk from an import is what
+    this is for, and junk has no history — anything that does is a real patient, whatever
+    stage it is sitting in. Those come back named so the refusal is actionable.
+
+    The typed confirmation is required here too, not just in the dialog. A bulk delete that
+    a stray request can fire is one accident away from a branch's whole lead list.
+    """
+    if (payload.confirm or "").strip().upper() != "DELETE":
+        raise HTTPException(status_code=400, detail="Type DELETE to confirm")
+
+    ids = [i for i in dict.fromkeys(payload.lead_ids or []) if i]
+    if not ids:
+        raise HTTPException(status_code=400, detail="No patients selected")
+    if len(ids) > MAX_BULK_DELETE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Too many at once — select {MAX_BULK_DELETE} or fewer (you picked {len(ids)})",
+        )
+
+    rows = await v3_col("leads").find(
+        {"id": {"$in": ids}}, {"_id": 0, "id": 1, "name": 1, "branch_id": 1}
+    ).to_list(MAX_BULK_DELETE)
+    found = {r["id"]: r for r in rows}
+
+    blocked: list = []
+    deletable: list = []
+
+    for lead_id in ids:
+        lead = found.get(lead_id)
+        if not lead:
+            blocked.append({"lead_id": lead_id, "name": "", "reason": "No longer exists"})
+            continue
+        # Super Admin is org-wide; everyone else is held to their own branch.
+        if not user.role == "super_admin" and lead.get("branch_id") != user.branch_id:
+            blocked.append({"lead_id": lead_id, "name": lead.get("name", ""), "reason": "Belongs to another branch"})
+            continue
+        if await v3_col("sessions").find_one({"lead_id": lead_id}, {"_id": 0, "id": 1}):
+            blocked.append({"lead_id": lead_id, "name": lead.get("name", ""), "reason": "Has treatment sessions"})
+            continue
+        if await v3_col("lead_activity").find_one(
+            {"lead_id": lead_id, "action": {"$in": _PAID_ACTIONS}}, {"_id": 0, "id": 1}
+        ):
+            blocked.append({"lead_id": lead_id, "name": lead.get("name", ""), "reason": "Has collected payments"})
+            continue
+        deletable.append(lead)
+
+    deleted_ids = [l["id"] for l in deletable]
+    if deleted_ids:
+        await v3_col("leads").delete_many({"id": {"$in": deleted_ids}})
+        # The same trail the single delete clears, so nothing is left pointing at a lead
+        # that is gone.
+        for coll in ("lead_activity", "lead_followups", "appointments"):
+            await v3_col(coll).delete_many({"lead_id": {"$in": deleted_ids}})
+
+    return {
+        "deleted": len(deleted_ids),
+        "deleted_ids": deleted_ids,
+        "blocked": blocked,
+        "requested": len(ids),
+    }
+
+
 @router.put("/leads/{lead_id}", response_model=V3LeadOut)
 async def v3_edit_lead(
     lead_id: str,
