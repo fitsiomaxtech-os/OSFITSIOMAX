@@ -415,30 +415,41 @@ const PRESALES_ANALYTICS_METRICS = [
   { key: "session_revenue", label: "Treatment Purchase Revenue", currency: true },
 ];
 
+// Which desk is holding a lead, as something you can filter by rather than only read off
+// each row. A master view carries both halves of the book at once (see load()), and the
+// HANDLED BY column already names them in exactly these words.
+const HANDLED_BY_FILTERS = [
+  // First, because it is the widest: both of the others narrow it.
+  { key: "all", label: "All" },
+  { key: "pre_sales", label: "Pre-Sales" },
+  { key: "branch_admin", label: "Branch Admin" },
+];
+
 /**
- * The five range presets as one segmented control, shared by the Analytics pane and the
- * Leads range row — the same question asked in two places should not drift into two
- * controls that behave differently at the same width.
+ * A row of pills acting as one segmented control — the date presets on the Analytics pane
+ * and the Leads range row, and the Handled By filter that sits beside the latter. One
+ * component so that three controls reading as the same thing cannot drift into three that
+ * behave differently at the same width.
  *
- * It wraps rather than holding one line. The five labels come to roughly 340px, and a
- * phone's content column is 336px inside the page's own px-3 — as a nowrap row it pushed
+ * It wraps rather than holding one line. The five range labels come to roughly 340px, and
+ * a phone's content column is 336px inside the page's own px-3 — as a nowrap row it pushed
  * the whole board sideways, so every screen using it scrolled horizontally.
  *
- * `testid` is the prefix each button's own testid is built from, so both callers keep the
- * ids they already had.
+ * `options` is [{ key, label }]. `testid` is the prefix each button's own testid is built
+ * from, so every caller keeps the ids it already had.
  */
-const PresetPillGroup = ({ active, onPick, testid }) => (
+const SegmentedPillGroup = ({ options, active, onPick, testid }) => (
   <div className="flex flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-0.5">
-    {PRESALES_ANALYTICS_DATE_PRESETS.map((p) => (
+    {options.map((o) => (
       <button
-        key={p.key}
-        onClick={() => onPick(p.key)}
+        key={o.key}
+        onClick={() => onPick(o.key)}
         className={`whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium transition sm:px-3 ${
-          active === p.key ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100"
+          active === o.key ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100"
         }`}
-        data-testid={`${testid}-${p.key}`}
+        data-testid={`${testid}-${o.key}`}
       >
-        {p.label}
+        {o.label}
       </button>
     ))}
   </div>
@@ -467,8 +478,13 @@ const presalesRangeFor = (key) => {
  * question should not be answered by two different controls. It emits the
  * { key, label, from, to } shape the Leads filter already reads, so nothing downstream of
  * dateFilter had to change.
+ *
+ * `onHandledByChange` opts a caller into the Handled By filter sitting beside the presets:
+ * given, the row carries both; left off, it is the range row it always was. It rides in
+ * here rather than in a row of its own because the two narrow the same list, and a second
+ * bordered strip under this one would read as a filter for something else.
  */
-const PreSalesRangePills = ({ value, onChange, testid = "presales-range" }) => {
+const PreSalesRangePills = ({ value, onChange, testid = "presales-range", handledBy, onHandledByChange }) => {
   const activeKey = value?.key || "all";
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
@@ -494,7 +510,15 @@ const PreSalesRangePills = ({ value, onChange, testid = "presales-range" }) => {
 
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-2 sm:gap-3 sm:p-3" data-testid={`${testid}-row`}>
-      <PresetPillGroup active={activeKey} onPick={pick} testid={testid} />
+      <SegmentedPillGroup options={PRESALES_ANALYTICS_DATE_PRESETS} active={activeKey} onPick={pick} testid={testid} />
+      {onHandledByChange && (
+        <SegmentedPillGroup
+          options={HANDLED_BY_FILTERS}
+          active={handledBy}
+          onPick={onHandledByChange}
+          testid={`${testid}-handled-by`}
+        />
+      )}
       {activeKey === "custom" && (
         <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
           <CalendarDays className="h-3.5 w-3.5" />
@@ -578,7 +602,7 @@ const PreSalesAnalyticsPanel = ({ branches, branchGroup, sourceFilter }) => {
   return (
     <div className="space-y-4" data-testid="presales-analytics-panel">
       <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-2 sm:gap-3 sm:p-3" data-testid="presales-analytics-date-filter">
-        <PresetPillGroup active={preset} onPick={setPreset} testid="presales-analytics-preset" />
+        <SegmentedPillGroup options={PRESALES_ANALYTICS_DATE_PRESETS} active={preset} onPick={setPreset} testid="presales-analytics-preset" />
         {preset === "custom" && (
           <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
             <CalendarDays className="h-3.5 w-3.5" />
@@ -660,6 +684,11 @@ export const PreSalesCRM = ({
   branchControlled = false,
   branchId = null,
   embedded = false,
+  // Leads / Analytics, when the page header owns the switch instead of this board. Passed
+  // together or not at all: given both, the in-board tab strip stands down and the header's
+  // is the only one, so the two can never sit on screen disagreeing about the current page.
+  masterView: masterViewProp,
+  onMasterViewChange,
 }) => {
   const [stages, setStages] = useState([]);
   const [leads, setLeads] = useState([]);
@@ -686,12 +715,23 @@ export const PreSalesCRM = ({
   // reads the same funnel from the marketing side — both get the same org-wide picture
   // Super Admin's Pre Sales tab has, rather than one rep's own filtered book.
   const [branchGroup, setBranchGroup] = useState("all");
-  const [masterView, setMasterView] = useState("leads"); // "leads" | "analytics"
+  const [masterViewOwn, setMasterViewOwn] = useState("leads"); // "leads" | "analytics"
+  // The header's copy wins when the page supplies one; otherwise this board keeps its own.
+  const headerOwnsViewTabs = typeof onMasterViewChange === "function";
+  const masterView = headerOwnsViewTabs ? masterViewProp : masterViewOwn;
+  const setMasterView = headerOwnsViewTabs ? onMasterViewChange : setMasterViewOwn;
+  // Which desk's half of the book to read: "all" | "pre_sales" | "branch_admin". Opens on
+  // All, the whole picture this view exists to give — the other two are a step in from it.
+  const [handledByFilter, setHandledByFilter] = useState("all");
   const isSuperAdminMasterView = role === "super_admin" || role === "sales_head" || role === "marketing_head";
   // Marketing Head's KPI row is a fixed funnel rather than the live, admin-configurable
   // Pre-Sales stage list everyone else's cards come from (see MARKETING_HEAD_FUNNEL) —
   // two of its buckets aren't a single stage-field equality.
   const isMarketingHeadFunnel = role === "marketing_head";
+  // Marketing Head's board only, as asked for. Every master view carries both desks' leads
+  // and tags each row HANDLED BY, so this would read the same on Super Admin's and Sales
+  // Head's — flipping this one flag is all it would take to give it to them too.
+  const showHandledByFilter = role === "marketing_head";
 
   const selectBranchGroup = (g) => { setBranchGroup(g); setSourceFilter(""); };
 
@@ -749,6 +789,12 @@ export const PreSalesCRM = ({
       );
       rows = rows.filter((l) => groupBranchIds.has(l.branch_id || ""));
     }
+    // The same complement load() splits the two boards on, applied here as a filter rather
+    // than at the source: this view is meant to hold both halves, and narrowing it is a
+    // question the user asks of it, not the shape of what it fetched.
+    if (showHandledByFilter && handledByFilter !== "all") {
+      rows = rows.filter((l) => (l.lead_control === "branch_admin") === (handledByFilter === "branch_admin"));
+    }
     if (dateFilter) {
       const from = dateFilter.from?.getTime();
       const to = dateFilter.to?.getTime();
@@ -761,7 +807,7 @@ export const PreSalesCRM = ({
       });
     }
     return rows;
-  }, [leads, sourceFilter, dateFilter, isSuperAdminMasterView, branchGroup, branches]);
+  }, [leads, sourceFilter, dateFilter, isSuperAdminMasterView, branchGroup, branches, showHandledByFilter, handledByFilter]);
 
   const stageCounts = useMemo(() => {
     const map = { All: dateSourceFiltered.length };
@@ -803,7 +849,7 @@ export const PreSalesCRM = ({
 
   // Rendering thousands of rows at once is fine on desktop but chokes mobile
   // devices, so re-page back to 50 whenever the filtered set changes.
-  useEffect(() => { setVisibleCount(50); }, [stageFilter, sourceFilter, search, dateFilter]);
+  useEffect(() => { setVisibleCount(50); }, [stageFilter, sourceFilter, search, dateFilter, handledByFilter]);
   const visibleLeads = filtered.slice(0, visibleCount);
 
   // Mobile Consultations tab — this rep's leads currently booked for a consultation.
@@ -858,15 +904,18 @@ export const PreSalesCRM = ({
       {isSuperAdminMasterView && (
         <div className="space-y-2" data-testid="presales-master-controls">
           {/* A rule under it, the same one the branch tabs carry: it separates the two
-              pages from the filters that narrow whichever one is open. */}
-          <div className="flex items-center gap-1 border-b border-slate-200 pb-2" data-testid="presales-view-tabs">
-            <PreSalesViewTab active={masterView === "leads"} onClick={() => setMasterView("leads")} testid="presales-view-leads">
-              <Users className="h-4 w-4" />Leads
-            </PreSalesViewTab>
-            <PreSalesViewTab active={masterView === "analytics"} onClick={() => setMasterView("analytics")} testid="presales-view-analytics">
-              <BarChart3 className="h-4 w-4" />Analytics
-            </PreSalesViewTab>
-          </div>
+              pages from the filters that narrow whichever one is open. Skipped when the
+              page header carries them instead — two strips would be two answers. */}
+          {!headerOwnsViewTabs && (
+            <div className="flex items-center gap-1 border-b border-slate-200 pb-2" data-testid="presales-view-tabs">
+              <PreSalesViewTab active={masterView === "leads"} onClick={() => setMasterView("leads")} testid="presales-view-leads">
+                <Users className="h-4 w-4" />Leads
+              </PreSalesViewTab>
+              <PreSalesViewTab active={masterView === "analytics"} onClick={() => setMasterView("analytics")} testid="presales-view-analytics">
+                <BarChart3 className="h-4 w-4" />Analytics
+              </PreSalesViewTab>
+            </div>
+          )}
 
           <div className="flex flex-wrap items-center gap-2" data-testid="presales-branch-groups">
             <PreSalesGroupPill active={branchGroup === "all"} onClick={() => selectBranchGroup("all")} testid="presales-branch-group-all">All</PreSalesGroupPill>
@@ -895,7 +944,13 @@ export const PreSalesCRM = ({
           well as the table — both read the same date-filtered set. Analytics draws its
           own inside the panel, so this is skipped there rather than stacking two. */}
       {!(masterView === "analytics" && isSuperAdminMasterView) && (
-        <PreSalesRangePills value={dateFilter} onChange={setDateFilter} testid="presales-leads-range" />
+        <PreSalesRangePills
+          value={dateFilter}
+          onChange={setDateFilter}
+          testid="presales-leads-range"
+          handledBy={showHandledByFilter ? handledByFilter : undefined}
+          onHandledByChange={showHandledByFilter ? setHandledByFilter : undefined}
+        />
       )}
 
       {/* KPI Cards — the Leads pane only. They are that table's stage filter, not a
@@ -1202,14 +1257,16 @@ export const PreSalesCRM = ({
               sit here for branch selection is gone; the pills below replace it. */}
           {isSuperAdminMasterView && (
             <div className="space-y-2" data-testid="presales-mobile-master-controls">
-              <div className="flex items-center gap-1 border-b border-slate-200 pb-2" data-testid="presales-mobile-view-tabs">
-                <PreSalesViewTab active={masterView === "leads"} onClick={() => setMasterView("leads")} testid="presales-mobile-view-leads">
-                  <Users className="h-4 w-4" />Leads
-                </PreSalesViewTab>
-                <PreSalesViewTab active={masterView === "analytics"} onClick={() => setMasterView("analytics")} testid="presales-mobile-view-analytics">
-                  <BarChart3 className="h-4 w-4" />Analytics
-                </PreSalesViewTab>
-              </div>
+              {!headerOwnsViewTabs && (
+                <div className="flex items-center gap-1 border-b border-slate-200 pb-2" data-testid="presales-mobile-view-tabs">
+                  <PreSalesViewTab active={masterView === "leads"} onClick={() => setMasterView("leads")} testid="presales-mobile-view-leads">
+                    <Users className="h-4 w-4" />Leads
+                  </PreSalesViewTab>
+                  <PreSalesViewTab active={masterView === "analytics"} onClick={() => setMasterView("analytics")} testid="presales-mobile-view-analytics">
+                    <BarChart3 className="h-4 w-4" />Analytics
+                  </PreSalesViewTab>
+                </div>
+              )}
               <div className="flex flex-wrap items-center gap-2" data-testid="presales-mobile-branch-groups">
                 <PreSalesGroupPill active={branchGroup === "all"} onClick={() => selectBranchGroup("all")} testid="presales-mobile-branch-group-all">All</PreSalesGroupPill>
                 <PreSalesGroupPill active={branchGroup === "offline"} onClick={() => selectBranchGroup("offline")} testid="presales-mobile-branch-group-offline">Offline</PreSalesGroupPill>
@@ -1269,7 +1326,13 @@ export const PreSalesCRM = ({
           ) : (
           <>
           {/* Same range row the desk gets, above the stage bar it narrows. */}
-          <PreSalesRangePills value={dateFilter} onChange={setDateFilter} testid="presales-mobile-leads-range" />
+          <PreSalesRangePills
+            value={dateFilter}
+            onChange={setDateFilter}
+            testid="presales-mobile-leads-range"
+            handledBy={showHandledByFilter ? handledByFilter : undefined}
+            onHandledByChange={showHandledByFilter ? setHandledByFilter : undefined}
+          />
           <StageTabBar
             stages={stages}
             stageFilter={stageFilter === "All" ? null : stageFilter}

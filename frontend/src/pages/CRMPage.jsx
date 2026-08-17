@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
   BadgeIndianRupee,
+  BarChart3,
   Briefcase,
   Building2,
   CalendarDays,
@@ -338,6 +339,13 @@ export const CRMPage = ({ auth, onLogout }) => {
   const myBranchName = myBranch?.branch_name || "";
   const VERTICAL_LABELS = { offline_physiotherapy: "Physiotherapy", offline_fitness_gym: "Fitness", offline_fitness: "Fitness" };
   const myVerticalLabel = VERTICAL_LABELS[myBranch?.vertical] || "";
+
+  // Leads / Analytics for the boards whose whole page is PreSalesCRM (Pre-Sales, Sales
+  // Head, Marketing Head). Held here rather than inside that board so the switch can sit
+  // in the page header beside the title, where the two read as the pages they are.
+  // Super Admin's Pre Sales tab is not one of them — it already has the nav strip above
+  // it, and keeps the switch in the board.
+  const [presalesView, setPresalesView] = useState("leads");
 
   const [superAdminView, setSuperAdminView] = useState(() => {
     if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("sheets_connect")) {
@@ -741,6 +749,37 @@ export const CRMPage = ({ auth, onLogout }) => {
               </div>
             </div>
             <div className="flex items-center gap-2 sm:gap-3">
+              {/* Leads / Analytics, for the boards that are nothing but PreSalesCRM. They
+                  are the two pages of this view, so they belong beside the title rather
+                  than in the body among the filters that narrow whichever one is open.
+                  The board hides its own copy while these are here. */}
+              {(showPreSalesBoard || showMarketingHeadBoard) && (
+                <div className="flex items-center gap-1" data-testid="header-presales-view-tabs">
+                  {[
+                    { key: "leads", label: "Leads", icon: Users },
+                    { key: "analytics", label: "Analytics", icon: BarChart3 },
+                  ].map((t) => {
+                    const Icon = t.icon;
+                    const active = presalesView === t.key;
+                    return (
+                      <button
+                        key={t.key}
+                        type="button"
+                        onClick={() => setPresalesView(t.key)}
+                        className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-medium transition sm:px-3 sm:py-2 ${
+                          active ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"
+                        }`}
+                        data-testid={`header-presales-view-${t.key}`}
+                      >
+                        <Icon className="h-4 w-4 shrink-0" />
+                        {/* The label goes on a phone, where the header is already carrying
+                            a name and a logout — the icons still say which is which. */}
+                        <span className="hidden sm:inline">{t.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
               {/* Phone only. On a desktop the board already carries its own search box
                   above the list, so a second one in the header was the same job twice —
                   it's only on a phone, where that box is a scroll away, that reaching it
@@ -977,11 +1016,11 @@ export const CRMPage = ({ auth, onLogout }) => {
         )}
 
         {showPreSalesBoard && (
-          <PreSalesCRM role={role} currentUser={auth.user} onLogout={logout} />
+          <PreSalesCRM role={role} currentUser={auth.user} onLogout={logout} masterView={presalesView} onMasterViewChange={setPresalesView} />
         )}
 
         {showMarketingHeadBoard && (
-          <PreSalesCRM role={role} currentUser={auth.user} onLogout={logout} />
+          <PreSalesCRM role={role} currentUser={auth.user} onLogout={logout} masterView={presalesView} onMasterViewChange={setPresalesView} />
         )}
 
         {showSuperAdminBoard && superAdminView === "dashboard" && (
