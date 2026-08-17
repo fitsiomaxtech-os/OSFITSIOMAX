@@ -335,6 +335,27 @@ const PreSalesGroupPill = ({ active, onClick, children, testid }) => (
   </button>
 );
 
+/**
+ * Leads / Analytics — the board's two pages, not two of its filters.
+ *
+ * Wears the top nav strip's tab rather than the rounded pill everything under it wears.
+ * These switch which page you are on; All/Offline/Online and the branch pills narrow
+ * whatever page that is. Dressed as a pill, a page switch read as one more thing to
+ * filter by, sitting in a stack of three rows that all looked alike.
+ */
+const PreSalesViewTab = ({ active, onClick, children, testid }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${
+      active ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"
+    }`}
+    data-testid={testid}
+  >
+    {children}
+  </button>
+);
+
 const PreSalesBranchPill = ({ active, onClick, children, testid }) => (
   <button
     type="button"
@@ -394,6 +415,35 @@ const PRESALES_ANALYTICS_METRICS = [
   { key: "session_revenue", label: "Treatment Purchase Revenue", currency: true },
 ];
 
+/**
+ * The five range presets as one segmented control, shared by the Analytics pane and the
+ * Leads range row — the same question asked in two places should not drift into two
+ * controls that behave differently at the same width.
+ *
+ * It wraps rather than holding one line. The five labels come to roughly 340px, and a
+ * phone's content column is 336px inside the page's own px-3 — as a nowrap row it pushed
+ * the whole board sideways, so every screen using it scrolled horizontally.
+ *
+ * `testid` is the prefix each button's own testid is built from, so both callers keep the
+ * ids they already had.
+ */
+const PresetPillGroup = ({ active, onPick, testid }) => (
+  <div className="flex flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-0.5">
+    {PRESALES_ANALYTICS_DATE_PRESETS.map((p) => (
+      <button
+        key={p.key}
+        onClick={() => onPick(p.key)}
+        className={`whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium transition sm:px-3 ${
+          active === p.key ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100"
+        }`}
+        data-testid={`${testid}-${p.key}`}
+      >
+        {p.label}
+      </button>
+    ))}
+  </div>
+);
+
 const presalesStartOfDay = (d) => { const n = new Date(d); n.setHours(0, 0, 0, 0); return n; };
 const presalesStartOfWeek = (d) => { const x = presalesStartOfDay(d); x.setDate(x.getDate() - x.getDay()); return x; };
 const presalesStartOfMonth = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
@@ -443,21 +493,10 @@ const PreSalesRangePills = ({ value, onChange, testid = "presales-range" }) => {
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white p-3" data-testid={`${testid}-row`}>
-      <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-0.5">
-        {PRESALES_ANALYTICS_DATE_PRESETS.map((p) => (
-          <button
-            key={p.key}
-            onClick={() => pick(p.key)}
-            className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${activeKey === p.key ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100"}`}
-            data-testid={`${testid}-${p.key}`}
-          >
-            {p.label}
-          </button>
-        ))}
-      </div>
+    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-2 sm:gap-3 sm:p-3" data-testid={`${testid}-row`}>
+      <PresetPillGroup active={activeKey} onPick={pick} testid={testid} />
       {activeKey === "custom" && (
-        <div className="flex items-center gap-1.5 text-xs text-slate-500">
+        <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
           <CalendarDays className="h-3.5 w-3.5" />
           <MilkDateInput
             value={customFrom}
@@ -538,21 +577,10 @@ const PreSalesAnalyticsPanel = ({ branches, branchGroup, sourceFilter }) => {
 
   return (
     <div className="space-y-4" data-testid="presales-analytics-panel">
-      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white p-3" data-testid="presales-analytics-date-filter">
-        <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-0.5">
-          {PRESALES_ANALYTICS_DATE_PRESETS.map((p) => (
-            <button
-              key={p.key}
-              onClick={() => setPreset(p.key)}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${preset === p.key ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100"}`}
-              data-testid={`presales-analytics-preset-${p.key}`}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-2 sm:gap-3 sm:p-3" data-testid="presales-analytics-date-filter">
+        <PresetPillGroup active={preset} onPick={setPreset} testid="presales-analytics-preset" />
         {preset === "custom" && (
-          <div className="flex items-center gap-1.5 text-xs text-slate-500">
+          <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
             <CalendarDays className="h-3.5 w-3.5" />
             <MilkDateInput value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className="h-8 rounded-md border border-slate-200 px-2 text-xs" data-testid="presales-analytics-custom-from" />
             <span>to</span>
@@ -576,16 +604,18 @@ const PreSalesAnalyticsPanel = ({ branches, branchGroup, sourceFilter }) => {
           {PRESALES_ANALYTICS_METRICS.map((m) => {
             const value = presalesAnalyticsValueFor(data?.[m.key], sourceFilter, branchGroup);
             return (
-              <div key={m.key} className="rounded-xl border-2 border-slate-200 bg-white px-4 py-3.5" data-testid={`presales-analytics-metric-${m.key}`}>
+              <div key={m.key} className="rounded-xl border-2 border-slate-200 bg-white px-3 py-3 sm:px-4 sm:py-3.5" data-testid={`presales-analytics-metric-${m.key}`}>
                 {/* Wraps rather than truncating. Seven-up leaves a card too narrow for
                     the longer names, and "TREATMENT PURCHASE …" on two of them gave no
                     way to tell the count from the revenue. The two-line floor keeps the
                     figures on one baseline across the row whether a label takes one line
                     or two. */}
                 <span className="block min-h-[2.5em] text-[11px] font-bold uppercase leading-tight tracking-wider text-slate-500">{m.label}</span>
-                {/* Steps down at the width the row goes seven-up: a card is ~170px
-                    there, and "₹5,54,752" at the larger size runs straight out of it. */}
-                <span className="mt-1 block truncate text-3xl font-extrabold text-slate-800 xl:text-2xl">{m.currency ? fmt(value) : value}</span>
+                {/* Steps down wherever the card is narrow: two-up on a phone and seven-up
+                    at xl both leave about 170px, and "₹5,54,752" at the larger size runs
+                    straight out of it — as a truncated figure, which reads as a smaller
+                    number rather than as a clipped one. */}
+                <span className="mt-1 block truncate text-2xl font-extrabold text-slate-800 sm:text-3xl xl:text-2xl">{m.currency ? fmt(value) : value}</span>
               </div>
             );
           })}
@@ -827,13 +857,15 @@ export const PreSalesCRM = ({
           they are the moment a branch pill is on. */}
       {isSuperAdminMasterView && (
         <div className="space-y-2" data-testid="presales-master-controls">
-          <div className="flex items-center gap-2">
-            <PreSalesGroupPill active={masterView === "leads"} onClick={() => setMasterView("leads")} testid="presales-view-leads">
-              <span className="inline-flex items-center gap-1.5"><Users className="h-3.5 w-3.5" />Leads</span>
-            </PreSalesGroupPill>
-            <PreSalesGroupPill active={masterView === "analytics"} onClick={() => setMasterView("analytics")} testid="presales-view-analytics">
-              <span className="inline-flex items-center gap-1.5"><BarChart3 className="h-3.5 w-3.5" />Analytics</span>
-            </PreSalesGroupPill>
+          {/* A rule under it, the same one the branch tabs carry: it separates the two
+              pages from the filters that narrow whichever one is open. */}
+          <div className="flex items-center gap-1 border-b border-slate-200 pb-2" data-testid="presales-view-tabs">
+            <PreSalesViewTab active={masterView === "leads"} onClick={() => setMasterView("leads")} testid="presales-view-leads">
+              <Users className="h-4 w-4" />Leads
+            </PreSalesViewTab>
+            <PreSalesViewTab active={masterView === "analytics"} onClick={() => setMasterView("analytics")} testid="presales-view-analytics">
+              <BarChart3 className="h-4 w-4" />Analytics
+            </PreSalesViewTab>
           </div>
 
           <div className="flex flex-wrap items-center gap-2" data-testid="presales-branch-groups">
@@ -870,12 +902,13 @@ export const PreSalesCRM = ({
           summary: each one selects a stage and the list below narrows to it. Analytics
           has no such table to narrow, and its own cards already open with All Leads, so
           on that pane these were a second row of counts answering nothing. */}
-      {/* Three across on a phone rather than all of them jammed into one nowrap row. Six
-          cards sharing 330px gave each about 50px, which truncated every label to
-          "Tota…", "Follo…" — a row of counts with no way to tell which count is which.
-          Desktop still lays them out on the single line it has room for. */}
+      {/* This block is md-and-up, so the row only ever has a tablet's width or more to
+          work with — but nine cards in one nowrap row at 768px gave each about 50px, which
+          truncated every label to "Tota…", "Follo…": a row of counts with no way to tell
+          which count is which. It grids until there is genuinely room for one line, and
+          only goes single-row at xl, where the funnel reads left to right as intended. */}
       {!(masterView === "analytics" && isSuperAdminMasterView) && (
-        <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-nowrap sm:gap-3" data-testid="presales-kpi-row">
+        <div className="grid grid-cols-3 gap-2 md:grid-cols-5 lg:grid-cols-6 xl:flex xl:flex-nowrap xl:gap-3" data-testid="presales-kpi-row">
           {isMarketingHeadFunnel ? (
             <>
               <KpiCard label="All" value={funnelCounts.all} active={stageFilter === "all"} color="#22c55e" onClick={() => setStageFilter("all")} testid="presales-kpi-all" />
@@ -1140,11 +1173,14 @@ export const PreSalesCRM = ({
               a usable size, and this is the seam that reads. */}
           <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2">
             <Search className="h-4 w-4 shrink-0 text-slate-400" />
+            {/* min-w-0 flex-1: an input carries an intrinsic width as its flex floor, so
+                without this it refuses to shrink and pushes the date and refresh buttons
+                off the right edge of a narrow phone. */}
             <Input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search leads..."
-              className="h-8 border-0 p-0 focus-visible:ring-0"
+              className="h-8 min-w-0 flex-1 border-0 p-0 focus-visible:ring-0"
               data-testid="presales-mobile-search"
             />
             <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="presales-mobile-date-filter" centered iconOnly />
@@ -1166,13 +1202,13 @@ export const PreSalesCRM = ({
               sit here for branch selection is gone; the pills below replace it. */}
           {isSuperAdminMasterView && (
             <div className="space-y-2" data-testid="presales-mobile-master-controls">
-              <div className="flex items-center gap-2">
-                <PreSalesGroupPill active={masterView === "leads"} onClick={() => setMasterView("leads")} testid="presales-mobile-view-leads">
-                  <span className="inline-flex items-center gap-1.5"><Users className="h-3.5 w-3.5" />Leads</span>
-                </PreSalesGroupPill>
-                <PreSalesGroupPill active={masterView === "analytics"} onClick={() => setMasterView("analytics")} testid="presales-mobile-view-analytics">
-                  <span className="inline-flex items-center gap-1.5"><BarChart3 className="h-3.5 w-3.5" />Analytics</span>
-                </PreSalesGroupPill>
+              <div className="flex items-center gap-1 border-b border-slate-200 pb-2" data-testid="presales-mobile-view-tabs">
+                <PreSalesViewTab active={masterView === "leads"} onClick={() => setMasterView("leads")} testid="presales-mobile-view-leads">
+                  <Users className="h-4 w-4" />Leads
+                </PreSalesViewTab>
+                <PreSalesViewTab active={masterView === "analytics"} onClick={() => setMasterView("analytics")} testid="presales-mobile-view-analytics">
+                  <BarChart3 className="h-4 w-4" />Analytics
+                </PreSalesViewTab>
               </div>
               <div className="flex flex-wrap items-center gap-2" data-testid="presales-mobile-branch-groups">
                 <PreSalesGroupPill active={branchGroup === "all"} onClick={() => selectBranchGroup("all")} testid="presales-mobile-branch-group-all">All</PreSalesGroupPill>
@@ -1639,13 +1675,15 @@ const ProfileTab = ({ currentUser, branches, onLogout }) => {
 };
 
 const KpiCard = ({ label, value, color, active, onClick, testid }) => (
-  <button onClick={onClick} data-testid={testid} className={`min-w-0 rounded-2xl p-3 text-left transition sm:flex-1 sm:p-4 ${active ? "ring-2 ring-inset" : ""}`} style={{ background: `${color}14`, border: `1px solid ${color}33`, ...(active ? { "--tw-ring-color": color } : {}) }}>
-    {/* Wraps on a phone instead of truncating — a stage name is only useful whole, and
-        these differ at the end ("Consultation Visit" against "Consultation Fee"). Two
-        lines' height whether or not it needs them, so the figures stay on one baseline
-        across the row. Desktop has the width to truncate rarely and stay on one line. */}
-    <p className="min-h-[2.4em] break-words text-[11px] font-medium leading-snug sm:min-h-0 sm:truncate sm:text-xs" style={{ color }}>{label}</p>
-    <p className="mt-0.5 text-2xl font-bold sm:mt-1 sm:text-3xl" style={{ color }}>{value}</p>
+  <button onClick={onClick} data-testid={testid} className={`min-w-0 rounded-2xl p-3 text-left transition lg:p-4 xl:flex-1 ${active ? "ring-2 ring-inset" : ""}`} style={{ background: `${color}14`, border: `1px solid ${color}33`, ...(active ? { "--tw-ring-color": color } : {}) }}>
+    {/* Wraps at every width instead of truncating — a stage name is only useful whole, and
+        these differ at the end ("Consultation Visit" against "Consultation Fee"), so a
+        truncated one names nothing. It used to truncate from sm up, which is where the row
+        is at its most crowded: nine cards on one line left about 50px of label each.
+        Two lines' height whether or not it needs them, so the figures sit on one baseline
+        across the row; cards in a row stretch to match the tallest. */}
+    <p className="min-h-[2.4em] break-words text-[11px] font-medium leading-snug lg:text-xs xl:text-[11px]" style={{ color }}>{label}</p>
+    <p className="mt-0.5 text-2xl font-bold lg:mt-1 lg:text-3xl xl:text-2xl" style={{ color }}>{value}</p>
   </button>
 );
 
@@ -1715,19 +1753,24 @@ const LeadDetailDialog = ({ lead, stages, currentUser, pinnedBranchId = null, on
   const refreshAndKeep = () => { onSaved && onSaved(); };
 
   return (
-    <div className="fixed inset-0 z-30 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" data-testid="presales-detail-dialog">
+    <div className="fixed inset-0 z-30 flex items-center justify-center bg-slate-900/50 p-2 backdrop-blur-sm sm:p-4" data-testid="presales-detail-dialog">
       {!showEdit && (
-      <div className="w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-slate-200">
+      // A column that is never taller than the screen, with only the middle section
+      // scrolling. It used to be an auto-height box whose body was capped at 55vh and
+      // nothing else: header, tabs, the wrapping Move to Stage row and the RNR panel came
+      // to more than the remaining 45vh on a phone or a short laptop, so the footer — the
+      // half of the dialog you act from — was pushed off the bottom with no way to reach it.
+      <div className="flex max-h-[95vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-slate-200">
         {/* Plain header. The gradient was the loudest thing on the dialog and it carried
             no meaning — the two chips beneath it are what actually say where this lead
             came from and what stage it is at, and they read better against white. */}
-        <div className="relative border-b border-slate-200 bg-white px-6 py-5">
+        <div className="relative shrink-0 border-b border-slate-200 bg-white px-4 py-4 sm:px-6 sm:py-5">
           <div className="flex items-start justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <span className={`inline-flex h-12 w-12 items-center justify-center rounded-full text-base font-bold ${avatarColor(currentLead.name).bg} ${avatarColor(currentLead.name).fg}`}>{initials(currentLead.name)}</span>
-              <div>
-                <p className="text-lg font-semibold leading-tight text-slate-900" data-testid="presales-detail-name">{currentLead.name}</p>
-                <div className="mt-1 flex items-center gap-2">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-base font-bold sm:h-12 sm:w-12 ${avatarColor(currentLead.name).bg} ${avatarColor(currentLead.name).fg}`}>{initials(currentLead.name)}</span>
+              <div className="min-w-0">
+                <p className="truncate text-base font-semibold leading-tight text-slate-900 sm:text-lg" data-testid="presales-detail-name">{currentLead.name}</p>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
                   <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-600">
                     {currentLead.source_tab || currentLead.source_type || "—"}
                   </span>
@@ -1737,7 +1780,7 @@ const LeadDetailDialog = ({ lead, stages, currentUser, pinnedBranchId = null, on
                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex shrink-0 items-center gap-2">
               {currentLead.source_type === "manual" && (
                 <Button size="sm" variant="outline" onClick={() => setShowEdit(true)} className="h-8" data-testid="presales-detail-edit-btn">
                   <Pencil className="mr-1 h-3.5 w-3.5" /> Edit
@@ -1751,7 +1794,7 @@ const LeadDetailDialog = ({ lead, stages, currentUser, pinnedBranchId = null, on
         </div>
 
         {/* Pill tabs */}
-        <div className="flex flex-wrap gap-1.5 border-b border-slate-100 bg-slate-50/60 px-5 py-2.5">
+        <div className="flex shrink-0 flex-wrap gap-1.5 border-b border-slate-100 bg-slate-50/60 px-4 py-2.5 sm:px-5">
           {[
             { key: "overview", label: "Overview", color: "bg-sky-500" },
             { key: "rnr", label: "RNR History", color: "bg-rose-500" },
@@ -1769,7 +1812,9 @@ const LeadDetailDialog = ({ lead, stages, currentUser, pinnedBranchId = null, on
           ))}
         </div>
 
-        <div className="max-h-[55vh] overflow-y-auto bg-slate-50/30 p-5">
+        {/* min-h-0 as well as flex-1: without it a flex child refuses to shrink past its
+            content, and the scroll would move to the page instead of staying in here. */}
+        <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50/30 p-4 sm:p-5">
           {tab === "overview" && (
             <div className="space-y-3">
               <ColorSection title="Contact Information" tone="sky" icon={<Phone className="h-4 w-4" />} collapsible defaultOpen={false}>
@@ -1972,7 +2017,10 @@ const LeadDetailDialog = ({ lead, stages, currentUser, pinnedBranchId = null, on
           )}
         </div>
 
-        <div className="border-t border-slate-200 bg-white px-5 py-3">
+        {/* Its own scroll floor: with a long stage list the wrapping pills below can run
+            to several rows, and a footer that grows without limit would squeeze the body
+            it sits under to nothing on a short screen. */}
+        <div className="max-h-[40vh] shrink-0 overflow-y-auto border-t border-slate-200 bg-white px-4 py-3 sm:px-5">
           <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">
             <ArrowRight className="h-3.5 w-3.5 text-slate-400" />
             Move to Stage
@@ -2021,8 +2069,8 @@ const LeadDetailDialog = ({ lead, stages, currentUser, pinnedBranchId = null, on
           </div>
 
           {currentLead.stage === "RNR" && (
-            <div className="mt-3 flex items-center justify-between rounded-lg border border-rose-200 bg-rose-50 px-3 py-2" data-testid="presales-detail-rnr-tracker">
-              <div className="flex items-center gap-2">
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2" data-testid="presales-detail-rnr-tracker">
+              <div className="flex min-w-0 items-center gap-2">
                 <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-rose-100 text-rose-600">
                   <PhoneOff className="h-3.5 w-3.5" />
                 </span>
@@ -2032,7 +2080,7 @@ const LeadDetailDialog = ({ lead, stages, currentUser, pinnedBranchId = null, on
                     Attempts so far: <span className="font-bold">{currentLead.rnr_attempts || 0}</span>
                   </p>
                   {currentLead.rnr_last_attempt_at && (
-                    <p className="mt-0.5 flex items-center gap-1 text-[11px] text-rose-600" data-testid="presales-detail-rnr-lastcall">
+                    <p className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px] text-rose-600" data-testid="presales-detail-rnr-lastcall">
                       <Clock className="h-3 w-3" />
                       Last call
                       <span className="font-bold">{callTimeStamp(currentLead.rnr_last_attempt_at)}</span>
@@ -2067,8 +2115,10 @@ const LeadDetailDialog = ({ lead, stages, currentUser, pinnedBranchId = null, on
       )}
 
       {followUpDraft && !showEdit && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4" data-testid="presales-followup-modal">
-          <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-3 sm:p-4" data-testid="presales-followup-modal">
+          {/* Scrolls itself rather than overflowing the viewport — date, time, a textarea
+              and the footer come to more than a phone in landscape has to give. */}
+          <div className="max-h-[95vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white shadow-2xl">
             <div className="flex items-center justify-between bg-gradient-to-r from-amber-500 to-orange-500 px-5 py-4 text-white">
               <div className="flex items-center gap-2">
                 <Bell className="h-5 w-5" />
@@ -2139,8 +2189,8 @@ const LeadDetailDialog = ({ lead, stages, currentUser, pinnedBranchId = null, on
       )}
 
       {rescheduleDraft && !showEdit && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4" data-testid="presales-reschedule-modal">
-          <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-3 sm:p-4" data-testid="presales-reschedule-modal">
+          <div className="max-h-[95vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white shadow-2xl">
             <div className="flex items-center justify-between bg-gradient-to-r from-amber-500 to-orange-500 px-5 py-4 text-white">
               <div className="flex items-center gap-2">
                 <Bell className="h-5 w-5" />
@@ -2218,8 +2268,8 @@ const LeadDetailDialog = ({ lead, stages, currentUser, pinnedBranchId = null, on
         const resolvedBranchName = () => myBranchName || branches.find((b) => b.id === appointmentDraft.branch_id)?.branch_name || branches.find((b) => b.id === appointmentDraft.branch_id)?.name || "your branch";
         const closeAll = () => { setAppointmentDraft(null); setAppointmentResult(null); };
         return (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4" data-testid="presales-appointment-modal">
-          <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-3 sm:p-4" data-testid="presales-appointment-modal">
+          <div className="max-h-[95vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white shadow-2xl">
             <div className="flex items-center justify-between bg-gradient-to-r from-emerald-500 to-teal-600 px-5 py-4 text-white">
               <div className="flex items-center gap-2">
                 <CalendarIcon className="h-5 w-5" />
