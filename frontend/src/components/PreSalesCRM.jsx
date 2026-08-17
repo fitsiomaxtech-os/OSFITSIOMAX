@@ -300,6 +300,54 @@ const isOnlineVertical = (v) => String(v || "").startsWith("online_");
 // appointment sitting on a branch's board" (see backend/stage_utils.py). "Lost" folds in
 // each sub-pipeline's own didn't-convert stage, since a lead can end up not converting from
 // any of the three.
+/**
+ * Every branch_stage that means "a booked appointment is sitting on a branch's board".
+ *
+ * There are three because the stage has been renamed as the branch pipeline changed, and a
+ * board reads live data written by every version of it: "New Appointment" is where a
+ * Pre-Sales-fed branch's board opened, "Appointment Date & Time" was the seeded name a
+ * branch reached once it booked one itself, and "Appointment" is what that stage is called
+ * now. Matching only the seeded names is how this count silently read low.
+ *
+ * Shared by the two card rows that ask the question, so they cannot drift apart.
+ */
+const BRANCH_APPOINTMENT_STAGES = ["Appointment", "New Appointment", "Appointment Date & Time"];
+const isBranchAppointment = (l) => BRANCH_APPOINTMENT_STAGES.includes(l.branch_stage);
+
+/**
+ * The Sales Master View's cards: five counts, then the two revenue figures.
+ *
+ * Not the live Pre-Sales stage list the individual rep's board uses. A master view is read
+ * to see how far the whole book got — booked by which desk, consulted, treated — and that
+ * spans four different fields, none of which is the pre-sales stage on its own.
+ *
+ * Consultation and Treatment count the fee actually collected rather than a stage reached,
+ * which is what makes each count and the revenue beside it two readings of one event
+ * instead of two numbers that can disagree.
+ *
+ * `amount` marks the revenue cards. Clicking one filters the table to the leads that
+ * contributed to it, so a figure can always be taken apart.
+ */
+const SALES_MASTER_CARDS = [
+  { key: "all", label: "All Leads", color: "#22c55e" },
+  { key: "presales_appointment", label: "Pre-sales Appointment", color: "#6366f1", match: (l) => l.stage === "Appointment" },
+  { key: "branch_appointment", label: "Branch Admin Appointment", color: "#14b8a6", match: isBranchAppointment },
+  { key: "consultation", label: "Consultation", color: "#0ea5e9", match: (l) => Number(l.consultation_fee || 0) > 0 },
+  { key: "treatment", label: "Treatment", color: "#a855f7", match: (l) => Number(l.treatment_fee_paid || 0) > 0 },
+  {
+    key: "consultation_revenue",
+    label: "Consultation Revenue",
+    color: "#f59e0b",
+    amount: (l) => Number(l.consultation_fee || 0),
+  },
+  {
+    key: "treatment_revenue",
+    label: "Treatment Revenue",
+    color: "#ef4444",
+    amount: (l) => Number(l.treatment_fee_paid || 0),
+  },
+];
+
 const MARKETING_HEAD_FUNNEL = [
   { key: "new_leads", label: "New Leads", color: "#3b82f6", match: (l) => l.stage === "New Leads" },
   { key: "rnr", label: "RNR", color: "#f59e0b", match: (l) => l.stage === "RNR" },
@@ -309,7 +357,7 @@ const MARKETING_HEAD_FUNNEL = [
     key: "appointment_branch_admin",
     label: "Branch Admin Appointment",
     color: "#14b8a6",
-    match: (l) => l.branch_stage === "New Appointment" || l.branch_stage === "Appointment Date & Time",
+    match: isBranchAppointment,
   },
   { key: "consultation_done", label: "Consultation Done", color: "#10b981", match: (l) => l.consultation_stage === "Consultation Completed" },
   {
@@ -734,7 +782,12 @@ export const PreSalesCRM = ({
   // Opens on New Leads, not All â€” that's the stage that needs action; a rep shouldn't
   // have to dig through everything already worked on just to see what's new. Marketing
   // Head has no leads to action, so its funnel opens on the whole picture instead.
-  const [stageFilter, setStageFilter] = useState(role === "marketing_head" ? "all" : "New Leads");
+  // A rep opens on New Leads — the stage that needs action, rather than a list of
+  // everything already worked. A master view opens on All: its cards are not a worklist,
+  // and "all" is the key every one of those rows uses for the unfiltered card.
+  const [stageFilter, setStageFilter] = useState(() => (
+    ["marketing_head", "super_admin", "sales_head"].includes(role) ? "all" : "New Leads"
+  ));
   const [sourceFilter, setSourceFilter] = useState("");
   // Opens on today, matching the Analytics pane. Held as the same { key, label, from, to }
   // any pick produces, so the Today pill reads as selected on arrival rather than the board
@@ -765,6 +818,10 @@ export const PreSalesCRM = ({
   // Pre-Sales stage list everyone else's cards come from (see MARKETING_HEAD_FUNNEL) â€”
   // two of its buckets aren't a single stage-field equality.
   const isMarketingHeadFunnel = role === "marketing_head";
+  // Super Admin's and Sales Head's card row: the five counts and two revenue figures, not
+  // the live Pre-Sales stage list. An individual rep keeps that list — New Leads / RNR /
+  // Follow Up is how they work their own book, and these seven answer a different question.
+  const isSalesMasterCards = isSuperAdminMasterView && !isMarketingHeadFunnel;
   // Marketing Head's board only, as asked for. Every master view carries both desks' leads
   // and tags each row HANDLED BY, so this would read the same on Super Admin's and Sales
   // Head's â€” flipping this one flag is all it would take to give it to them too.
@@ -864,6 +921,59 @@ export const PreSalesCRM = ({
     return map;
   }, [dateSourceFiltered]);
 
+  // The master cards' figures — a count for the five, a sum for the two revenue ones. Both
+  // read the same date/branch-filtered set the table does, so a card and the rows it opens
+  // can never describe different populations.
+  const masterCardValues = useMemo(() => {
+    const map = { all: dateSourceFiltered.length };
+    SALES_MASTER_CARDS.forEach((c) => {
+      if (c.key === "all") return;
+      map[c.key] = c.amount
+        ? dateSourceFiltered.reduce((sum, l) => sum + c.amount(l), 0)
+        : dateSourceFiltered.filter(c.match).length;
+    });
+    return map;
+  }, [dateSourceFiltered]);
+
+  /**
+   * One list of cards for whichever row this board is showing, so the desk and the phone
+   * render the same set from the same source. They used to be two pieces of JSX, and the
+   * phone's was a stage bar keyed on stage names — which on a master view meant its pills
+   * set a filter the card logic did not recognise, and clicking one quietly did nothing.
+   *
+   * `key` is what stageFilter holds; `testid` is kept separate so every id these cards
+   * already had survives.
+   */
+  const kpiCardModels = useMemo(() => {
+    if (isMarketingHeadFunnel) {
+      return [
+        { key: "all", testid: "all", label: "All", value: funnelCounts.all, color: "#22c55e" },
+        ...MARKETING_HEAD_FUNNEL.map((b) => ({
+          key: b.key, testid: b.key, label: b.label, value: funnelCounts[b.key] || 0, color: b.color,
+        })),
+      ];
+    }
+    if (isSalesMasterCards) {
+      return SALES_MASTER_CARDS.map((c) => ({
+        key: c.key,
+        testid: c.key,
+        label: c.label,
+        color: c.color,
+        // Rupees on the two revenue cards, a plain count on the rest — a bare number beside
+        // "Consultation Revenue" reads as a count of consultations.
+        value: c.amount
+          ? `₹${Number(masterCardValues[c.key] || 0).toLocaleString("en-IN")}`
+          : Number(masterCardValues[c.key] || 0).toLocaleString("en-IN"),
+      }));
+    }
+    return [
+      { key: "All", testid: "all", label: "Total Leads", value: stageCounts.All, color: "#22c55e" },
+      ...kpiStages.map((s) => ({
+        key: s.name, testid: s.name, label: s.name, value: stageCounts[s.name] || 0, color: s.color,
+      })),
+    ];
+  }, [isMarketingHeadFunnel, isSalesMasterCards, funnelCounts, masterCardValues, stageCounts, kpiStages]);
+
   // The toolbar filter and the per-row assign dropdown take the same {value,label} shape,
   // so they share one list. The source list that used to sit here went with the filter it
   // fed â€” the SOURCE column still shows where each lead came from, it is just no longer
@@ -877,6 +987,14 @@ export const PreSalesCRM = ({
         const bucket = MARKETING_HEAD_FUNNEL.find((b) => b.key === stageFilter);
         if (bucket) rows = rows.filter(bucket.match);
       }
+    } else if (isSalesMasterCards) {
+      if (stageFilter !== "all") {
+        const card = SALES_MASTER_CARDS.find((c) => c.key === stageFilter);
+        // A revenue card narrows to the leads that contributed to it, so the figure can be
+        // taken apart rather than only looked at.
+        if (card?.amount) rows = rows.filter((l) => card.amount(l) > 0);
+        else if (card?.match) rows = rows.filter(card.match);
+      }
     } else if (stageFilter !== "All") {
       rows = rows.filter((l) => l.stage === stageFilter);
     }
@@ -885,7 +1003,7 @@ export const PreSalesCRM = ({
       rows = rows.filter((l) => (l.name || "").toLowerCase().includes(q) || (l.phone || "").includes(q) || (l.email || "").toLowerCase().includes(q));
     }
     return rows.slice().sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
-  }, [dateSourceFiltered, stageFilter, search, isMarketingHeadFunnel]);
+  }, [dateSourceFiltered, stageFilter, search, isMarketingHeadFunnel, isSalesMasterCards]);
 
   // Rendering thousands of rows at once is fine on desktop but chokes mobile
   // devices, so re-page back to 50 whenever the filtered set changes.
@@ -1008,21 +1126,17 @@ export const PreSalesCRM = ({
           Narrower windows take fewer cards per row rather than squeezing the words. */}
       {!(masterView === "analytics" && isSuperAdminMasterView) && (
         <div className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(10.5rem,1fr))]" data-testid="presales-kpi-row">
-          {isMarketingHeadFunnel ? (
-            <>
-              <KpiCard label="All" value={funnelCounts.all} active={stageFilter === "all"} color="#22c55e" onClick={() => setStageFilter("all")} testid="presales-kpi-all" />
-              {MARKETING_HEAD_FUNNEL.map((b) => (
-                <KpiCard key={b.key} label={b.label} value={funnelCounts[b.key] || 0} active={stageFilter === b.key} color={b.color} onClick={() => setStageFilter(b.key)} testid={`presales-kpi-${b.key}`} />
-              ))}
-            </>
-          ) : (
-            <>
-              <KpiCard label="Total Leads" value={stageCounts.All} active={stageFilter === "All"} color="#22c55e" onClick={() => setStageFilter("All")} testid="presales-kpi-all" />
-              {kpiStages.map((s) => (
-                <KpiCard key={s.id} label={s.name} value={stageCounts[s.name] || 0} active={stageFilter === s.name} color={s.color} onClick={() => setStageFilter(s.name)} testid={`presales-kpi-${s.name}`} />
-              ))}
-            </>
-          )}
+          {kpiCardModels.map((c) => (
+            <KpiCard
+              key={c.key}
+              label={c.label}
+              value={c.value}
+              active={stageFilter === c.key}
+              color={c.color}
+              onClick={() => setStageFilter(c.key)}
+              testid={`presales-kpi-${c.testid}`}
+            />
+          ))}
         </div>
       )}
 
@@ -1366,14 +1480,34 @@ export const PreSalesCRM = ({
             handledBy={showHandledByFilter ? handledByFilter : undefined}
             onHandledByChange={showHandledByFilter ? setHandledByFilter : undefined}
           />
-          <StageTabBar
-            stages={stages}
-            stageFilter={stageFilter === "All" ? null : stageFilter}
-            setStageFilter={(v) => setStageFilter(v === null ? "All" : v)}
-            counts={stageCounts}
-            totalCount={stageCounts.All}
-            testid="presales-mobile-stagebar"
-          />
+          {/* A master view's cards are not stages, so the stage bar cannot carry them — its
+              pills would set a filter the card logic does not recognise and quietly do
+              nothing. Those boards get the same card row the desk shows; a rep's board,
+              whose cards really are the live stages, keeps the bar it already had. */}
+          {isMarketingHeadFunnel || isSalesMasterCards ? (
+            <div className="grid grid-cols-2 gap-2" data-testid="presales-mobile-kpi-row">
+              {kpiCardModels.map((c) => (
+                <KpiCard
+                  key={c.key}
+                  label={c.label}
+                  value={c.value}
+                  active={stageFilter === c.key}
+                  color={c.color}
+                  onClick={() => setStageFilter(c.key)}
+                  testid={`presales-mobile-kpi-${c.testid}`}
+                />
+              ))}
+            </div>
+          ) : (
+            <StageTabBar
+              stages={stages}
+              stageFilter={stageFilter === "All" ? null : stageFilter}
+              setStageFilter={(v) => setStageFilter(v === null ? "All" : v)}
+              counts={stageCounts}
+              totalCount={stageCounts.All}
+              testid="presales-mobile-stagebar"
+            />
+          )}
 
           <div className="space-y-2">
             {visibleLeads.length === 0 ? (
