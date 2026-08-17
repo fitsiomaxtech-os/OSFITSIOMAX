@@ -291,7 +291,7 @@ const branchStatusInfo = (lead, branches) => {
 const isOnlineVertical = (v) => String(v || "").startsWith("online_");
 
 // Marketing Head's KPI row — a fixed funnel rather than the live Pre-Sales stage list,
-// since two of these span more than one field. "Appointment Booked by Branch Admin" counts
+// since two of these span more than one field. "Branch Admin Appointment" counts
 // a branch board's own appointment stage regardless of how the lead got there: "New
 // Appointment" is where a Pre-Sales-controlled branch's board opens (the lead arrives
 // already booked), "Appointment Date & Time" is the stage a Branch-Admin-controlled
@@ -303,10 +303,10 @@ const MARKETING_HEAD_FUNNEL = [
   { key: "new_leads", label: "New Leads", color: "#3b82f6", match: (l) => l.stage === "New Leads" },
   { key: "rnr", label: "RNR", color: "#f59e0b", match: (l) => l.stage === "RNR" },
   { key: "follow_up", label: "Follow Up", color: "#8b5cf6", match: (l) => l.stage === "Follow Up" },
-  { key: "appointment_pre_sales", label: "Appointment Booked by Pre-Sales", color: "#6366f1", match: (l) => l.stage === "Appointment" },
+  { key: "appointment_pre_sales", label: "Pre-Sales Appointment", color: "#6366f1", match: (l) => l.stage === "Appointment" },
   {
     key: "appointment_branch_admin",
-    label: "Appointment Booked by Branch Admin",
+    label: "Branch Admin Appointment",
     color: "#14b8a6",
     match: (l) => l.branch_stage === "New Appointment" || l.branch_stage === "Appointment Date & Time",
   },
@@ -511,14 +511,8 @@ const PreSalesRangePills = ({ value, onChange, testid = "presales-range", handle
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-2 sm:gap-3 sm:p-3" data-testid={`${testid}-row`}>
       <SegmentedPillGroup options={PRESALES_ANALYTICS_DATE_PRESETS} active={activeKey} onPick={pick} testid={testid} />
-      {onHandledByChange && (
-        <SegmentedPillGroup
-          options={HANDLED_BY_FILTERS}
-          active={handledBy}
-          onPick={onHandledByChange}
-          testid={`${testid}-handled-by`}
-        />
-      )}
+      {/* Kept next to the presets it belongs to, ahead of the Handled By group, so the
+          range and the dates it resolves to read as one thing. */}
       {activeKey === "custom" && (
         <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
           <CalendarDays className="h-3.5 w-3.5" />
@@ -534,6 +528,19 @@ const PreSalesRangePills = ({ value, onChange, testid = "presales-range", handle
             onChange={(e) => { setCustomTo(e.target.value); applyCustom(customFrom, e.target.value); }}
             className="h-8 rounded-md border border-slate-200 px-2 text-xs"
             data-testid={`${testid}-custom-to`}
+          />
+        </div>
+      )}
+      {/* Flush to the right edge, so the row is justified rather than leaving both filters
+          huddled at the left under a strip of empty white. From sm only: once the row wraps
+          on a phone, ml-auto would strand this group hard right on a line of its own. */}
+      {onHandledByChange && (
+        <div className="sm:ml-auto">
+          <SegmentedPillGroup
+            options={HANDLED_BY_FILTERS}
+            active={handledBy}
+            onPick={onHandledByChange}
+            testid={`${testid}-handled-by`}
           />
         </div>
       )}
@@ -1011,21 +1018,10 @@ export const PreSalesCRM = ({
         </div>
 
         <div className="flex items-center gap-2 sm:contents">
-        {/* Master View only (Super Admin / Sales Head). A Pre Sales rep works one branch's
-            book, so a control that narrows the board to a branch either does nothing or
-            hides their own leads. */}
-        {isSuperAdminMasterView && (
-          <ColorSelect
-            value={sourceFilter}
-            options={branchOptions}
-            placeholder="All Branches"
-            resetLabel="All Branches"
-            emptyText="No branches yet."
-            triggerClass="h-10 min-w-0 flex-1 text-sm sm:w-[200px] sm:flex-none"
-            onChange={setSourceFilter}
-            testid="presales-source-filter"
-          />
-        )}
+        {/* The All Branches dropdown that used to sit here is gone. The branch pills above
+            set the same sourceFilter, and two controls for one value meant a board that
+            could show "All Branches" in the toolbar while a branch pill was lit. The pills
+            say which group a branch belongs to as well, which the list never did. */}
         <PullFromSheetButton onPulled={load} iconOnly />
         <Button
           variant="outline"
@@ -1745,7 +1741,9 @@ const KpiCard = ({ label, value, color, active, onClick, testid }) => (
         is at its most crowded: nine cards on one line left about 50px of label each.
         Two lines' height whether or not it needs them, so the figures sit on one baseline
         across the row; cards in a row stretch to match the tallest. */}
-    <p className="min-h-[2.4em] break-words text-[11px] font-medium leading-snug lg:text-xs xl:text-[11px]" style={{ color }}>{label}</p>
+    {/* 2px up on each of the three: 11→13, 12→14, 11→13. The min-height is in em, so the
+        two-line floor grows with the type and the figures stay on one baseline. */}
+    <p className="min-h-[2.4em] break-words text-[13px] font-medium leading-snug lg:text-sm xl:text-[13px]" style={{ color }}>{label}</p>
     <p className="mt-0.5 text-2xl font-bold lg:mt-1 lg:text-3xl xl:text-2xl" style={{ color }}>{value}</p>
   </button>
 );
