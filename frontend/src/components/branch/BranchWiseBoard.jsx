@@ -2,13 +2,22 @@ import { useState } from "react";
 import { Building2 } from "lucide-react";
 import { BranchAdminBoard } from "@/components/BranchAdminBoard";
 
+// Every default vertical is named "online_.../offline_..." — same helper as
+// BranchManagementBoard's own mode tag, read off that prefix.
+const isOnlineVertical = (v) => String(v || "").startsWith("online_");
+
 // Lets Super Admin browse every branch's own Branch Admin board (Branch Leads,
 // Consultations, Accountant Manage, Calendar, Treatment Sessions, Rehab, Store —
 // all of BranchAdminBoard's own tabs come along for free) without switching login.
 export const BranchWiseBoard = ({ branches }) => {
-  const sortedBranches = [...(branches || [])].sort((a, b) =>
-    (a.branch_name || "").localeCompare(b.branch_name || "")
-  );
+  // Offline branches first (alphabetical), online ones trail at the end (alphabetical
+  // among themselves) — a plain A-Z sort was interleaving "Online Fitness"/"Online
+  // Physiotheraphy" between the physical branches instead of grouping them last.
+  const sortedBranches = [...(branches || [])].sort((a, b) => {
+    const onlineDiff = Number(isOnlineVertical(a.vertical)) - Number(isOnlineVertical(b.vertical));
+    if (onlineDiff !== 0) return onlineDiff;
+    return (a.branch_name || "").localeCompare(b.branch_name || "");
+  });
   const [selectedId, setSelectedId] = useState(sortedBranches[0]?.id || "");
   const activeId = sortedBranches.some((b) => b.id === selectedId) ? selectedId : sortedBranches[0]?.id || "";
 
