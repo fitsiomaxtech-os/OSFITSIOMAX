@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Plus, Pencil, Trash2, Archive, ArchiveRestore, X, Users, MapPin, Phone, Mail, RefreshCw, Layers, LayoutDashboard, ChevronDown, ChevronUp, BadgeIndianRupee, BarChart3, CalendarDays } from "lucide-react";
+import { Plus, Pencil, Trash2, Archive, ArchiveRestore, X, Users, MapPin, Phone, Mail, RefreshCw, Layers, LayoutDashboard, ChevronDown, ChevronUp, BadgeIndianRupee, BarChart3, CalendarDays, Workflow } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,7 +33,7 @@ const TABS = [
   { key: "branch_control", label: "Branch Control", icon: LayoutDashboard },
 ];
 
-export const BranchManagementBoard = ({ actingUser } = {}) => {
+export const BranchManagementBoard = ({ actingUser, onNavigateToOperations } = {}) => {
   const [tab, setTab] = useState("overview");
   const [drilledBranchId, setDrilledBranchId] = useState(null);
   // A callback ref, not useRef: the portal has to re-render once the node exists, and a
@@ -78,7 +78,7 @@ export const BranchManagementBoard = ({ actingUser } = {}) => {
         <div ref={setActionSlot} className="ml-auto flex shrink-0 items-center gap-2 pr-1" data-testid="bm-subtab-actions" />
       </div>
       {tab === "overview" && <OverviewTab />}
-      {tab === "creation" && <CreationTab onDrillIn={setDrilledBranchId} actionSlot={actionSlot} />}
+      {tab === "creation" && <CreationTab onDrillIn={setDrilledBranchId} actionSlot={actionSlot} onNavigateToOperations={onNavigateToOperations} />}
       {tab === "branch_control" && <BranchControlTab actingUser={actingUser} />}
       {tab === "ac_overview" && <AccountantManagementBoard />}
     </div>
@@ -428,7 +428,7 @@ const BranchControlTab = ({ actingUser }) => {
 
 // ---------- Creation & Manager ----------
 
-const CreationTab = ({ onDrillIn, actionSlot }) => {
+const CreationTab = ({ onDrillIn, actionSlot, onNavigateToOperations }) => {
   const [branches, setBranches] = useState([]);
   const [candidates, setCandidates] = useState([]);
   const [showAdd, setShowAdd] = useState(false);
@@ -517,6 +517,20 @@ const CreationTab = ({ onDrillIn, actionSlot }) => {
       >
         <Plus className="h-4 w-4" />
       </Button>
+      {/* Jumps to Operations > Branch, the same board a branch's manager (its admin)
+          already opens from here via Branch Control — a second way into the same place,
+          for when the next step is running that branch rather than editing its record. */}
+      {onNavigateToOperations && (
+        <Button
+          className="h-9 w-9 shrink-0 bg-indigo-600 p-0 hover:bg-indigo-700"
+          onClick={onNavigateToOperations}
+          title="Go to Operations"
+          aria-label="Go to Operations"
+          data-testid="bm-goto-operations-btn"
+        >
+          <Workflow className="h-4 w-4" />
+        </Button>
+      )}
     </>
   );
 
