@@ -159,10 +159,11 @@ const ModeBranchFilter = ({ branches, group, onGroup, branchId, onBranch, testid
   );
 };
 
-// The app's blue — Marketing and Sales are both plain summaries of the same
-// /dashboard/leads-analytics call, so both read off the same colour rather than each
-// styling its own.
-const MARKETING_BLUE = "#0284c7";
+// A different colour per card rather than one hue for the whole tab — Marketing and Sales
+// both arrive as a short list of counts (Total, Booked, then up to seven sources/stages),
+// and every card in the same blue reads as one card split into pieces rather than several
+// distinct things being compared. Cycled by position, same as BRANCH_INKS below.
+const CARD_COLORS = ["#0284c7", "#7c3aed", "#059669", "#d97706", "#e11d48", "#0d9488", "#4f46e5", "#ea580c", "#0891b2", "#db2777"];
 
 const slugify = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 
@@ -197,10 +198,10 @@ const MarketingTab = ({ branches, dateFilter }) => {
         <p className="py-16 text-center text-sm text-slate-400">{loading ? "Loading..." : "No data."}</p>
       ) : (
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" data-testid="dashboard-marketing-cards">
-          <StatTile label="Total Leads" value={(data.total || 0).toLocaleString("en-IN")} icon={Users} color={MARKETING_BLUE} testid="dashboard-marketing-total" />
-          <StatTile label="Booked" value={(data.booked || 0).toLocaleString("en-IN")} icon={CalendarCheck} color={MARKETING_BLUE} testid="dashboard-marketing-booked" />
-          {(data.by_source || []).map((s) => (
-            <StatTile key={s.name} label={s.name} value={(s.value || 0).toLocaleString("en-IN")} icon={Megaphone} color={MARKETING_BLUE} testid={`dashboard-marketing-source-${slugify(s.name)}`} />
+          <StatTile label="Total Leads" value={(data.total || 0).toLocaleString("en-IN")} icon={Users} color={CARD_COLORS[0]} testid="dashboard-marketing-total" />
+          <StatTile label="Booked" value={(data.booked || 0).toLocaleString("en-IN")} icon={CalendarCheck} color={CARD_COLORS[1]} testid="dashboard-marketing-booked" />
+          {(data.by_source || []).map((s, i) => (
+            <StatTile key={s.name} label={s.name} value={(s.value || 0).toLocaleString("en-IN")} icon={Megaphone} color={CARD_COLORS[(i + 2) % CARD_COLORS.length]} testid={`dashboard-marketing-source-${slugify(s.name)}`} />
           ))}
         </div>
       )}
@@ -238,10 +239,10 @@ const SalesTab = ({ branches, dateFilter }) => {
         <p className="py-16 text-center text-sm text-slate-400">{loading ? "Loading..." : "No data."}</p>
       ) : (
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" data-testid="dashboard-sales-cards">
-          <StatTile label="Total Leads" value={(data.total || 0).toLocaleString("en-IN")} icon={Users} color={MARKETING_BLUE} testid="dashboard-sales-total" />
-          <StatTile label="Booked" value={(data.booked || 0).toLocaleString("en-IN")} icon={CalendarCheck} color={MARKETING_BLUE} testid="dashboard-sales-booked" />
-          {(data.by_stage || []).map((s) => (
-            <StatTile key={s.name} label={s.name} value={(s.value || 0).toLocaleString("en-IN")} icon={Headphones} color={MARKETING_BLUE} testid={`dashboard-sales-stage-${slugify(s.name)}`} />
+          <StatTile label="Total Leads" value={(data.total || 0).toLocaleString("en-IN")} icon={Users} color={CARD_COLORS[0]} testid="dashboard-sales-total" />
+          <StatTile label="Booked" value={(data.booked || 0).toLocaleString("en-IN")} icon={CalendarCheck} color={CARD_COLORS[1]} testid="dashboard-sales-booked" />
+          {(data.by_stage || []).map((s, i) => (
+            <StatTile key={s.name} label={s.name} value={(s.value || 0).toLocaleString("en-IN")} icon={Headphones} color={CARD_COLORS[(i + 2) % CARD_COLORS.length]} testid={`dashboard-sales-stage-${slugify(s.name)}`} />
           ))}
         </div>
       )}
