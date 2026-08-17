@@ -342,7 +342,12 @@ async def list_users(search: Optional[str] = None, role: Optional[str] = None, _
     emps = {}
     if emp_ids:
         async for emp in v3_col("employees").find({"id": {"$in": emp_ids}}, {"_id": 0}):
-            emps[emp["id"]] = {"employee_code": emp.get("employee_code"), "designation": emp.get("designation"), "full_name": emp.get("full_name")}
+            emps[emp["id"]] = {
+                "employee_code": emp.get("employee_code"),
+                "designation": emp.get("designation"),
+                "department": emp.get("department"),
+                "full_name": emp.get("full_name"),
+            }
     # Which branch each account belongs to. Three different answers are possible and the
     # column has to tell them apart, so the shape is a list plus a flag rather than one
     # string that would have to mean all of them:

@@ -1615,6 +1615,11 @@ const RolesTab = ({ meta, reloadMeta }) => {
   const [users, setUsers] = useState([]);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
+  // Same pill filters as the Employees tab, reading off each user's linked employee
+  // record — a user with no linked employee (most Branch Admin/Pre-Sales accounts
+  // still without one) simply won't match either filter.
+  const [deptFilter, setDeptFilter] = useState("");
+  const [designationFilter, setDesignationFilter] = useState("");
   const [sortAZ, setSortAZ] = useState(null); // null = as-loaded | "asc" | "desc"
   const [showCreate, setShowCreate] = useState(false);
   const [showCreateRole, setShowCreateRole] = useState(false);
@@ -1623,9 +1628,25 @@ const RolesTab = ({ meta, reloadMeta }) => {
   const load = useCallback(() => hrUsers({ search, role: roleFilter !== "all" ? roleFilter : undefined }).then(setUsers).catch((e) => console.warn("[load failed]", e?.message || e)), [search, roleFilter]);
   useEffect(() => { load(); }, [load]);
 
+  const selectDept = (d) => { setDeptFilter(d); setDesignationFilter(""); };
+
+  // Designations narrow to whichever department is picked, same as the Employees tab —
+  // scoped to users actually linked to an employee, so a pill never offers a combination
+  // that would filter the list to nothing.
+  const designationOptions = useMemo(() => {
+    const pool = deptFilter ? users.filter((u) => u.linked_employee?.department === deptFilter) : users;
+    return [...new Set(pool.map((u) => u.linked_employee?.designation).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  }, [users, deptFilter]);
+
+  const filteredUsers = users.filter((u) => {
+    if (deptFilter && u.linked_employee?.department !== deptFilter) return false;
+    if (designationFilter && u.linked_employee?.designation !== designationFilter) return false;
+    return true;
+  });
+
   const sortedUsers = sortAZ
-    ? [...users].sort((a, b) => (a.full_name || "").localeCompare(b.full_name || "") * (sortAZ === "asc" ? 1 : -1))
-    : users;
+    ? [...filteredUsers].sort((a, b) => (a.full_name || "").localeCompare(b.full_name || "") * (sortAZ === "asc" ? 1 : -1))
+    : filteredUsers;
 
   const changeRole = async (u, role) => {
     try { await hrUpdateUserRole(u.id, role); toast.success("Role updated"); load(); }
@@ -1636,6 +1657,30 @@ const RolesTab = ({ meta, reloadMeta }) => {
   // each hidden by class depending on breakpoint, not the hidden attribute.
   return (
     <div className="flex flex-col gap-4" data-testid="hr-roles-tab">
+      {/* Same department/designation pills as the Employees tab, reading off each row's
+          linked employee — one block rather than one per breakpoint, since TabPill
+          already wraps on a narrow screen and the state behind it is shared either way. */}
+      <div className="flex flex-wrap items-center gap-2" data-testid="hr-roles-dept-filter">
+        <TabPill active={deptFilter === ""} onClick={() => selectDept("")} testid="hr-roles-dept-filter-all">
+          All Departments
+        </TabPill>
+        {meta.departments.map((d) => (
+          <TabPill key={d} active={deptFilter === d} onClick={() => selectDept(d)} testid={`hr-roles-dept-filter-${d}`}>
+            {d}
+          </TabPill>
+        ))}
+      </div>
+      <div className="flex flex-wrap items-center gap-2" data-testid="hr-roles-designation-filter">
+        <TabPill active={designationFilter === ""} onClick={() => setDesignationFilter("")} testid="hr-roles-designation-filter-all">
+          All Designations
+        </TabPill>
+        {designationOptions.map((d) => (
+          <TabPill key={d} active={designationFilter === d} onClick={() => setDesignationFilter(d)} testid={`hr-roles-designation-filter-${d}`}>
+            {d}
+          </TabPill>
+        ))}
+      </div>
+
       <div className="flex flex-wrap items-center gap-2 md:hidden">
         <button
           onClick={() => setSortAZ((s) => (s === "asc" ? "desc" : "asc"))}
