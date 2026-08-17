@@ -7,10 +7,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardCheck,
-  ClipboardList,
-  FileText,
   LayoutList,
-  MessageSquare,
   Package,
   RefreshCw,
   Search,
@@ -31,8 +28,6 @@ import {
   getHPMyCalendar,
   getHPMyPatients,
   hpRecommendPackage,
-  hpGetAssessments,
-  hpWeeklyReview,
   physioSessions,
 } from "@/lib/api";
 import { to12h, slotTo12h } from "@/lib/time";
@@ -173,7 +168,6 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
   // Consultations and Review each own their own fetch, so they are told by token.
   const [refreshTick, setRefreshTick] = useState(0);
   const [showRecommendModal, setShowRecommendModal] = useState(null);
-  const [showReviewModal, setShowReviewModal] = useState(null);
 
   // Head Physios cover every branch and carry none of their own, so "all" is the normal
   // case here — without it the board asked for branch `undefined` and every list came back
@@ -397,6 +391,9 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
             </div>
           )}
 
+          {/* Rehab is the list of patients still waiting on a plan, and nothing else. The
+              Weekly Assessments block that used to sit under it was a second list on the
+              same card doing a different job. */}
           {workTab === "rehab" && (
             <div className="space-y-6" data-testid="hp-work-rehab">
               <PatientsTab
@@ -405,13 +402,6 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
                 onSelect={(p) => setSelectedPatient(p)}
                 loading={loading}
               />
-              <div className="border-t border-slate-200 pt-5">
-                <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-400">Weekly Assessments</p>
-                <AssessmentsTab
-                  patients={patients}
-                  onReview={(p, w) => setShowReviewModal({ patient: p, week: w })}
-                />
-              </div>
             </div>
           )}
       </div>
@@ -421,15 +411,6 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
           patient={showRecommendModal}
           onClose={() => setShowRecommendModal(null)}
           onDone={() => { setShowRecommendModal(null); loadPatients(); }}
-        />
-      )}
-
-      {showReviewModal && (
-        <WeeklyReviewModal
-          patient={showReviewModal.patient}
-          week={showReviewModal.week}
-          onClose={() => setShowReviewModal(null)}
-          onDone={() => { setShowReviewModal(null); loadPatients(); }}
         />
       )}
 
@@ -892,53 +873,6 @@ function PatientsTab({ patients, onRecommend, onSelect, loading }) {
   );
 }
 
-function AssessmentsTab({ patients, onReview }) {
-  const patientsWithSessions = patients.filter((p) => p.recommendation?.status === "assigned");
-
-  if (patientsWithSessions.length === 0) {
-    return (
-      <div className="text-center py-16">
-        <ClipboardList className="h-10 w-10 text-slate-200 mx-auto mb-3" />
-        <p className="text-sm text-slate-400">No active sessions to review yet</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-3" data-testid="hp-assessments-list">
-      {patientsWithSessions.map((p) => {
-        const weeks = p.recommendation?.recommended_weeks || 0;
-        return (
-          <div key={p.lead_id} className="rounded-xl border border-slate-200 bg-white p-4">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-teal-50 text-xs font-bold text-teal-700">
-                {p.lead_name?.charAt(0)?.toUpperCase()}
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-slate-800">{p.lead_name}</p>
-                <p className="text-[10px] text-slate-400">{weeks} weeks program</p>
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {Array.from({ length: weeks }, (_, i) => (
-                <button
-                  key={i}
-                  type="button"
-                  onClick={() => onReview(p, i + 1)}
-                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-[11px] font-medium text-slate-600 hover:bg-teal-50 hover:border-teal-200 hover:text-teal-700 transition-all"
-                  data-testid={`hp-review-week-${i + 1}`}
-                >
-                  Week {i + 1}
-                </button>
-              ))}
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 function RecommendPackageModal({ patient, onClose, onDone }) {
   const [weeks, setWeeks] = useState(8);
   const [sessionsPerWeek, setSessionsPerWeek] = useState(3);
@@ -1000,79 +934,6 @@ function RecommendPackageModal({ patient, onClose, onDone }) {
           <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
           <Button size="sm" onClick={handleSubmit} disabled={submitting} className="bg-teal-600 hover:bg-teal-700 text-white" data-testid="rec-submit">
             {submitting ? "Submitting..." : "Recommend Package"}
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function WeeklyReviewModal({ patient, week, onClose, onDone }) {
-  const [hpNotes, setHpNotes] = useState("");
-  const [suggestions, setSuggestions] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [existingData, setExistingData] = useState(null);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const data = await hpGetAssessments(patient.lead_id);
-        const existing = (data.assessments || []).find((a) => a.week_number === week);
-        if (existing) {
-          setExistingData(existing);
-          setHpNotes(existing.head_physio_notes || "");
-          setSuggestions(existing.head_physio_suggestions || "");
-        }
-      } catch { /* silent */ }
-    })();
-  }, [patient.lead_id, week]);
-
-  const handleSubmit = async () => {
-    setSubmitting(true);
-    try {
-      await hpWeeklyReview(patient.lead_id, week, {
-        head_physio_notes: hpNotes,
-        head_physio_suggestions: suggestions,
-      });
-      toast.success("Review submitted");
-      onDone();
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || "Failed");
-    }
-    setSubmitting(false);
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} data-testid="review-modal-overlay">
-      <div className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white shadow-2xl" data-testid="review-modal">
-        <div className="flex items-center justify-between border-b p-5">
-          <h3 className="text-base font-semibold text-slate-800">{patient.lead_name} — Week {week} Review</h3>
-          <button type="button" onClick={onClose} className="p-1 rounded hover:bg-slate-100"><X className="h-5 w-5 text-slate-400" /></button>
-        </div>
-        <div className="p-5 space-y-4">
-          {existingData?.jr_physio_notes && (
-            <div className="rounded-lg bg-blue-50 border border-blue-100 p-3">
-              <p className="text-[10px] font-semibold text-blue-600 uppercase mb-1">Jr. Physio's Notes</p>
-              <p className="text-xs text-blue-800">{existingData.jr_physio_notes}</p>
-            </div>
-          )}
-          <div>
-            <label className="text-xs font-medium text-slate-600 mb-1 block flex items-center gap-1">
-              <MessageSquare className="h-3 w-3" /> Your Notes <span className="text-[9px] text-red-400">(Private — patient can't see)</span>
-            </label>
-            <textarea value={hpNotes} onChange={(e) => setHpNotes(e.target.value)} rows={3} placeholder="Observations, progress notes..." className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm" data-testid="review-hp-notes" />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-slate-600 mb-1 block flex items-center gap-1">
-              <FileText className="h-3 w-3" /> Suggestions <span className="text-[9px] text-red-400">(Private)</span>
-            </label>
-            <textarea value={suggestions} onChange={(e) => setSuggestions(e.target.value)} rows={2} placeholder="Adjustments for next week..." className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm" data-testid="review-suggestions" />
-          </div>
-        </div>
-        <div className="flex justify-end gap-2 border-t p-4">
-          <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
-          <Button size="sm" onClick={handleSubmit} disabled={submitting} className="bg-teal-600 hover:bg-teal-700 text-white" data-testid="review-submit">
-            {submitting ? "Submitting..." : "Submit Review"}
           </Button>
         </div>
       </div>

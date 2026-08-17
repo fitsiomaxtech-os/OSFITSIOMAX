@@ -2245,7 +2245,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
 
       {/* Table */}
       <Card className={`overflow-hidden border-slate-200 ${mobileCards ? "hidden sm:block" : ""}`}>
-        <CardContent className="overflow-x-auto p-0">
+        {/* The rows scroll, the header does not. Capping the height here is what makes
+            that possible: a sticky header sticks to its nearest scrolling ancestor, and
+            with the old overflow-x-auto alone that ancestor grew with the table, so there
+            was no vertical scroll of its own to stick against and the header rode up the
+            page with the rows. Same shape as the Branch Leads list. */}
+        <CardContent className="max-h-[65vh] overflow-auto p-0">
           {/* These percentages must add up to 100. They used to total 111, and a
               table-fixed layout answers that by scaling every column down by the
               overage — so no column was the width it declared, the ratios drifted,
@@ -2259,7 +2264,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               fact, so the discount column is added there alone — on every earlier stage
               there is no payment yet and the column would be a row of dashes. */}
           <table className={`w-full table-fixed text-sm ${showDiscountColumn ? "min-w-[1130px]" : "min-w-[1040px]"}`}>
-            <thead className="bg-slate-500 text-xs uppercase text-white">
+            <thead className="sticky top-0 z-10 bg-slate-500 text-xs uppercase text-white">
               <tr>
                 <th className={`${cols.sno} px-3 py-2 text-left align-middle`}>S.No</th>
                 <th className={`${cols.patient} px-4 py-2 text-left align-middle`}>Patient</th>
