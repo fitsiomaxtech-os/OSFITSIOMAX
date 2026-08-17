@@ -499,10 +499,9 @@ const presalesAnalyticsValueFor = (bucket, branchId, group) => {
  * what the other was showing.
  */
 const PreSalesAnalyticsPanel = ({ branches, branchGroup, sourceFilter }) => {
-  // Opens on everything rather than the current month. The month is a narrowing to reach
-  // for, not the question the board is first asked — and a card that silently showed one
-  // month's worth read as the total until you noticed the range control above it.
-  const [preset, setPreset] = useState("all");
+  // Opens on today, the same as the Leads pane beside it — the board is read to see where
+  // the day stands, and every wider range is a step back from that.
+  const [preset, setPreset] = useState("today");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const [data, setData] = useState(null);
@@ -641,7 +640,10 @@ export const PreSalesCRM = ({
   // Head has no leads to action, so its funnel opens on the whole picture instead.
   const [stageFilter, setStageFilter] = useState(role === "marketing_head" ? "all" : "New Leads");
   const [sourceFilter, setSourceFilter] = useState("");
-  const [dateFilter, setDateFilter] = useState(null);
+  // Opens on today, matching the Analytics pane. Held as the same { key, label, from, to }
+  // any pick produces, so the Today pill reads as selected on arrival rather than the board
+  // showing a filtered set with nothing on screen saying it is filtered.
+  const [dateFilter, setDateFilter] = useState(() => ({ key: "today", label: "Today", ...presalesRangeFor("today") }));
   const [editing, setEditing] = useState(null);
   const [showCreate, setShowCreate] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
