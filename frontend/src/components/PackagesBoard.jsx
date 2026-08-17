@@ -41,11 +41,8 @@ export const PlaceholderPanel = ({ label, testid }) => (
   </Card>
 );
 
-// Online is the cheaper of the two: no room, no floor time. These only pre-fill a new
-// item's form — editing an existing one seeds from what was saved against it, so nothing
-// already priced moves when these change.
-const DEFAULT_PRICE_ONLINE = 800;
-const DEFAULT_PRICE_OFFLINE = 1200;
+const DEFAULT_PRICE_ONLINE = 1200;
+const DEFAULT_PRICE_OFFLINE = 800;
 
 export const DURATION_OPTIONS = [
   { minutes: 15, label: "15 mins" },
