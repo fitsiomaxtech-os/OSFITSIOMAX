@@ -891,10 +891,11 @@ const roleClasses = (role) =>
  * Three answers are possible and they are not interchangeable, so none of them is
  * flattened into the same text:
  *
- *   All branches   a Head Physio covers every one and holds no branch of their own. Their
- *                  empty branch list means "all", and printing "—" for it would read as
- *                  the opposite of the truth.
- *   several        a Physio or Nutrition Coach can serve more than one. The first is
+ *   All branches   a CONSULTANT given none of them covers all of them. Their empty branch
+ *                  list means "all", and printing "—" for it would read as the opposite
+ *                  of the truth. Given specific branches, they read like anyone else —
+ *                  org_wide is the empty case, not the role.
+ *   several        a CONSULTANT, Physio or Nutrition Coach can serve more than one. The first is
  *                  named and the rest counted, with all of them in the tooltip — a column
  *                  this narrow cannot list four branch names without pushing Actions off.
  *   one, or none   the name, or a dash for an account genuinely not attached to a branch.
