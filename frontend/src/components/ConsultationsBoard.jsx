@@ -503,6 +503,10 @@ const FEE_TABS = [
     paid: (l) => Number(l.treatment_fee_paid) || 0,
     item: (l) => l.session_package_name || "",
     mode: (l) => l.treatment_fee_payment_mode || "",
+    // Treatment and Diet are the two a patient chooses whether to buy, so "who didn't" is
+    // a real list — the branch's upsell queue. Consultation carries no such flag because
+    // paying for it is what puts a patient in this stage at all: everyone here has one.
+    purchase: true,
   },
   {
     key: "diet",
@@ -511,6 +515,7 @@ const FEE_TABS = [
     paid: (l) => Number(l.diet_fee_paid) || 0,
     item: (l) => l.diet_package_name || "",
     mode: (l) => l.diet_fee_payment_mode || "",
+    purchase: true,
   },
 ];
 
@@ -817,6 +822,27 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   const [feeTab, setFeeTab] = useState("consultation");
   const activeFee = FEE_TABS.find((t) => t.key === feeTab) || FEE_TABS[0];
 
+  // Inside Treatment and Diet, whether the list is the patients who bought it or the ones
+  // who did not. Both are questions the branch asks of the same stage: the first is what
+  // came in, the second is who to go back to — a patient who paid to be seen and left
+  // without a package is the branch's most obvious next sale, and until now there was no
+  // screen that would name them.
+  //
+  // Defaults to "purchased" every time the tab changes, so the tab still opens on the money
+  // view its own count and total describe, and the other list is always a deliberate ask.
+  const [purchaseFilter, setPurchaseFilter] = useState("purchased");
+  const showPurchaseFilter = showDiscountColumn && !!activeFee.purchase;
+  useEffect(() => { setPurchaseFilter("purchased"); }, [feeTab]);
+
+  // Carried on the options themselves rather than on the tab: the tab's badge is the money
+  // view — how many paid, and how much — and making it flip to a non-payer count would
+  // leave a number that no longer matches the total printed underneath it.
+  const purchaseCounts = useMemo(() => {
+    if (!showPurchaseFilter) return { purchased: 0, not_purchased: 0 };
+    const bought = inStage.filter((l) => activeFee.paid(l) > 0).length;
+    return { purchased: bought, not_purchased: inStage.length - bought };
+  }, [inStage, showPurchaseFilter, activeFee]);
+
   // Counted off the stage's own rows so each tab says how many are behind it before it is
   // opened — an empty Diet tab should read as empty from the outside, not on arrival.
   const feeCounts = useMemo(() => {
@@ -834,10 +860,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   }, [inStage, showDiscountColumn]);
 
   // Outside Fee Collected the tabs do not exist, so the stage's rows pass through whole.
-  const filtered = useMemo(
-    () => (showDiscountColumn ? inStage.filter((l) => activeFee.paid(l) > 0) : inStage),
-    [inStage, showDiscountColumn, activeFee],
-  );
+  const filtered = useMemo(() => {
+    if (!showDiscountColumn) return inStage;
+    if (showPurchaseFilter && purchaseFilter === "not_purchased") {
+      return inStage.filter((l) => activeFee.paid(l) === 0);
+    }
+    return inStage.filter((l) => activeFee.paid(l) > 0);
+  }, [inStage, showDiscountColumn, showPurchaseFilter, purchaseFilter, activeFee]);
 
   // Stage counts for the head bar — derived client-side from the Date Filter/search-only
   // list so they always match whichever pipeline (branch vs. head physio) is active for
@@ -2138,7 +2167,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
           Above both the phone cards and the desk table, because it governs both: it filters
           `filtered`, which each of them renders. */}
       {showDiscountColumn && (
-        <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-slate-200 bg-white p-1" data-testid="cons-fee-tabs">
+        // The row was three pills against a wide empty white band. The purchased / not
+        // purchased picker takes that space at the far end, which both fills it and puts
+        // the two controls in reading order: pick the fee, then pick which half of it.
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="cons-fee-tabs">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
           {FEE_TABS.map((t) => {
             const on = t.key === activeFee.key;
             return (
@@ -2162,6 +2195,27 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               </button>
             );
           })}
+          </div>
+
+          {/* Which half of the tab: the patients who bought it, or the ones who did not.
+              Only on Treatment and Diet — see `purchase` on FEE_TABS. Each option carries
+              its own count, so the size of the answer is visible before choosing it and
+              there is no number here that contradicts the tab's own badge. */}
+          {showPurchaseFilter && (
+            <label className="flex shrink-0 items-center gap-1.5 pr-1" data-testid="cons-purchase-filter">
+              <ClipboardList className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+              <select
+                value={purchaseFilter}
+                onChange={(e) => setPurchaseFilter(e.target.value)}
+                className="max-w-[16rem] rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold text-slate-700"
+                style={{ color: purchaseFilter === "purchased" ? activeFee.tone : undefined }}
+                data-testid="cons-purchase-select"
+              >
+                <option value="purchased">{activeFee.label} Purchased ({purchaseCounts.purchased})</option>
+                <option value="not_purchased">Non {activeFee.label} Purchased ({purchaseCounts.not_purchased})</option>
+              </select>
+            </label>
+          )}
         </div>
       )}
 
@@ -2307,7 +2361,14 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       // bought under it — a column of figures with no idea what was sold
                       // is a number nobody can check.
                       <td className="whitespace-nowrap px-3 py-3 align-middle text-xs" data-testid={`cons-fee-${activeFee.key}-${l.id}`}>
-                        <span className="font-semibold" style={{ color: activeFee.tone }}>{rupees(activeFee.paid(l))}</span>
+                        {/* A dash, not Rs.0, on the not-purchased list: nothing was
+                            collected, and a column of zeroes reads as money that failed
+                            to record rather than a sale that never happened. */}
+                        {activeFee.paid(l) > 0 ? (
+                          <span className="font-semibold" style={{ color: activeFee.tone }}>{rupees(activeFee.paid(l))}</span>
+                        ) : (
+                          <span className="font-semibold text-slate-300">—</span>
+                        )}
                         {activeFee.item(l) && (
                           <span className="block max-w-full truncate text-[10px] text-slate-400" title={activeFee.item(l)}>
                             {activeFee.item(l)}
@@ -2373,9 +2434,14 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     // An empty tab is not an empty stage: saying "no leads in consultations"
                     // under a Diet tab reads as the board being broken rather than as nobody
                     // having bought a diet plan.
-                    : showDiscountColumn
-                      ? `No ${activeFee.label.toLowerCase()} fee collected${stageFilter ? "" : " yet"}.`
-                      : "No leads in consultations yet. Book an appointment with a CONSULTANT to populate this list."}
+                    : showPurchaseFilter && purchaseFilter === "not_purchased"
+                      // The good outcome, so it is not reported as an absence: an empty
+                      // upsell queue means everyone took the package, not that a filter
+                      // came back broken.
+                      ? `Everyone here has bought ${activeFee.label.toLowerCase()}.`
+                      : showDiscountColumn
+                        ? `No ${activeFee.label.toLowerCase()} fee collected${stageFilter ? "" : " yet"}.`
+                        : "No leads in consultations yet. Book an appointment with a CONSULTANT to populate this list."}
                 </td></tr>
               )}
             </tbody>
