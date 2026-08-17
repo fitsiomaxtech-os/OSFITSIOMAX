@@ -88,10 +88,15 @@ const PACKAGE_KINDS = {
     header: "from-emerald-500 to-teal-600",
     durationLabel: "Diet Consultation Duration",
     emptyText: "No diet packages yet. Click Create to add one.",
+    // A diet package costs the same wherever it is delivered — the consultation is the
+    // same conversation on a screen or in a room. One field instead of two, written to
+    // both stored prices so the booking path, which still picks price_online or
+    // price_offline off the chosen mode, gets the same number either way.
+    singlePrice: true,
   },
 };
 
-const CreateConsultationModal = ({ item, onClose, onSaved, kind = "consultation" }) => {
+const CreateConsultationModal = ({ item, onClose, onSaved, kind = "consultation", category = "physiotherapy" }) => {
   const cfg = PACKAGE_KINDS[kind] || PACKAGE_KINDS.consultation;
   const isEdit = Boolean(item);
   const [name, setName] = useState(item?.name || "");
@@ -120,14 +125,18 @@ const CreateConsultationModal = ({ item, onClose, onSaved, kind = "consultation"
         const uploaded = await uploadStoreImage(imageFile);
         image_url = uploaded.url;
       }
+      // Both prices carry the one figure when the kind is single-priced. Sending only
+      // price_online would leave an offline booking reading zero.
+      const online = Number(priceOnline) || 0;
+      const offline = cfg.singlePrice ? online : (Number(priceOffline) || 0);
       const payload = {
         item_type: cfg.itemType,
-        category: "physiotherapy",
+        category,
         name: name.trim(),
         description,
         image_url,
-        price_online: Number(priceOnline) || 0,
-        price_offline: Number(priceOffline) || 0,
+        price_online: online,
+        price_offline: offline,
         duration_minutes: duration,
       };
       if (isEdit) {
@@ -218,14 +227,27 @@ const CreateConsultationModal = ({ item, onClose, onSaved, kind = "consultation"
           </div>
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600">Price</label>
-            <PriceFields
-              priceOnline={priceOnline}
-              setPriceOnline={setPriceOnline}
-              priceOffline={priceOffline}
-              setPriceOffline={setPriceOffline}
-              onlineTestId="consultation-create-price-online"
-              offlineTestId="consultation-create-price-offline"
-            />
+            {cfg.singlePrice ? (
+              <div className="relative">
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-500">₹</span>
+                <Input
+                  type="number"
+                  value={priceOnline}
+                  onChange={(e) => setPriceOnline(e.target.value)}
+                  className="pl-7"
+                  data-testid="consultation-create-price"
+                />
+              </div>
+            ) : (
+              <PriceFields
+                priceOnline={priceOnline}
+                setPriceOnline={setPriceOnline}
+                priceOffline={priceOffline}
+                setPriceOffline={setPriceOffline}
+                onlineTestId="consultation-create-price-online"
+                offlineTestId="consultation-create-price-offline"
+              />
+            )}
           </div>
         </div>
         <div className="flex shrink-0 items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/40 px-5 py-3">
@@ -243,7 +265,7 @@ const CreateConsultationModal = ({ item, onClose, onSaved, kind = "consultation"
 // price does — no dropdown to configure it, it's fixed for every package.
 const FIXED_SESSIONS = 7;
 
-const CreateSessionPackageModal = ({ item, onClose, onSaved }) => {
+const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiotherapy" }) => {
   const isEdit = Boolean(item);
   const [name, setName] = useState(item?.name || "");
   const [description, setDescription] = useState(item?.description || "");
@@ -276,7 +298,7 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved }) => {
       }
       const payload = {
         item_type: "session",
-        category: "physiotherapy",
+        category,
         name: name.trim(),
         description,
         image_url,
@@ -403,7 +425,21 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved }) => {
   );
 };
 
+/**
+ * Online and Offline prices side by side — unless the item is single-priced, in which
+ * case one figure. A diet package stores the same number in both fields, and showing it
+ * twice under two different labels invites the reader to look for a difference that is
+ * not there and contradicts a form that offered one box.
+ */
 export const PriceModeBadges = ({ item, isSession }) => (
+  item.item_type === "diet" ? (
+    <div className="mt-2">
+      <div className="flex items-center justify-between rounded-lg bg-emerald-50 px-2.5 py-1.5">
+        <span className="text-xs font-bold text-emerald-800">Price</span>
+        <span className="text-sm font-extrabold text-emerald-900">₹{item.price_online ?? 0}</span>
+      </div>
+    </div>
+  ) : (
   <div className="mt-2 space-y-1.5">
     <div className="flex items-center justify-between rounded-lg bg-emerald-50 px-2.5 py-1.5">
       <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-800">
@@ -422,6 +458,7 @@ export const PriceModeBadges = ({ item, isSession }) => (
       </span>
     </div>
   </div>
+  )
 );
 
 export const SessionPriceBoxes = ({ item, testid }) => (
@@ -499,14 +536,17 @@ export const ViewItemModal = ({ item, kind, onClose, onEdit, canEdit = true }) =
   );
 };
 
-const SessionsPhysiotherapyPanel = ({ reloadToken, toolbarSlot }) => {
+// Backs both Sessions sub-tabs; see PhysiotherapyPanel for why this is one component
+// with a category rather than two copies.
+const SessionsPhysiotherapyPanel = ({ category = "physiotherapy", reloadToken, toolbarSlot }) => {
   const [items, setItems] = useState([]);
   const [showCreate, setShowCreate] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
   const [viewingItem, setViewingItem] = useState(null);
 
-  const loadItems = () => listStoreItems("physiotherapy", "session").then(setItems).catch(() => {});
-  useEffect(() => { loadItems(); }, [reloadToken]); // eslint-disable-line react-hooks/exhaustive-deps
+  const loadItems = () => listStoreItems(category, "session").then(setItems).catch(() => {});
+  // category in the deps, or switching sub-tab keeps the other one's list on screen.
+  useEffect(() => { loadItems(); }, [category, reloadToken]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDelete = async (it) => {
     if (!window.confirm(`Permanently delete "${it.name}"? This cannot be undone.`)) return;
@@ -520,21 +560,21 @@ const SessionsPhysiotherapyPanel = ({ reloadToken, toolbarSlot }) => {
   };
 
   return (
-    <div className="space-y-3" data-testid="sessions-subpanel-physiotherapy">
+    <div className="space-y-3" data-testid={`sessions-subpanel-${category}`}>
       {toolbarSlot && createPortal(
         <Button
           onClick={() => setShowCreate(true)}
           title="Create session package"
           aria-label="Create session package"
           className="h-11 w-11 shrink-0 p-0"
-          data-testid="sessions-physiotherapy-create-btn-mobile"
+          data-testid={`sessions-${category}-create-btn-mobile`}
         >
           <Plus className="h-4 w-4" />
         </Button>,
         toolbarSlot,
       )}
       <div className="hidden items-center justify-end sm:flex">
-        <Button size="sm" onClick={() => setShowCreate(true)} data-testid="sessions-physiotherapy-create-btn">
+        <Button size="sm" onClick={() => setShowCreate(true)} data-testid={`sessions-${category}-create-btn`}>
           <Plus className="mr-1 h-4 w-4" />Create
         </Button>
       </div>
@@ -546,7 +586,7 @@ const SessionsPhysiotherapyPanel = ({ reloadToken, toolbarSlot }) => {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" data-testid="sessions-physiotherapy-items-grid">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" data-testid={`sessions-${category}-items-grid`}>
           {items.map((it) => (
             <Card key={it.id} data-testid={`session-item-${it.id}`}>
               <CardContent className="space-y-2 p-4">
@@ -581,8 +621,8 @@ const SessionsPhysiotherapyPanel = ({ reloadToken, toolbarSlot }) => {
         </div>
       )}
 
-      {showCreate && <CreateSessionPackageModal onClose={() => setShowCreate(false)} onSaved={loadItems} />}
-      {editingItem && <CreateSessionPackageModal item={editingItem} onClose={() => setEditingItem(null)} onSaved={loadItems} />}
+      {showCreate && <CreateSessionPackageModal category={category} onClose={() => setShowCreate(false)} onSaved={loadItems} />}
+      {editingItem && <CreateSessionPackageModal category={category} item={editingItem} onClose={() => setEditingItem(null)} onSaved={loadItems} />}
       {viewingItem && (
         <ViewItemModal
           item={viewingItem}
@@ -617,20 +657,30 @@ const SessionsPanel = ({ reloadToken, toolbarSlot }) => {
       </div>
 
       {sub === "physiotherapy" && <SessionsPhysiotherapyPanel reloadToken={reloadToken} toolbarSlot={toolbarSlot} />}
-      {sub === "fitness" && <PlaceholderPanel label="Fitness" testid="sessions-subpanel-fitness" />}
+      {sub === "fitness" && <SessionsPhysiotherapyPanel category="fitness" reloadToken={reloadToken} toolbarSlot={toolbarSlot} />}
     </div>
   );
 };
 
-const PhysiotherapyPanel = ({ kind = "consultation", reloadToken, toolbarSlot }) => {
+/**
+ * The consultation/diet catalogue for one category.
+ *
+ * Named for Physiotherapy because that is all it served at first; it now backs Fitness
+ * too, which needs the identical panel against a different `category`. Parameterised
+ * rather than copied — two hundred lines duplicated would drift the first time either
+ * was edited, and the ask was explicitly for the same create option, not a new one.
+ */
+const PhysiotherapyPanel = ({ kind = "consultation", category = "physiotherapy", reloadToken, toolbarSlot }) => {
   const cfg = PACKAGE_KINDS[kind] || PACKAGE_KINDS.consultation;
   const [items, setItems] = useState([]);
   const [showCreate, setShowCreate] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
   const [viewingItem, setViewingItem] = useState(null);
 
-  const loadItems = () => listStoreItems("physiotherapy", cfg.itemType).then(setItems).catch(() => {});
-  useEffect(() => { loadItems(); }, [cfg.itemType, reloadToken]); // eslint-disable-line react-hooks/exhaustive-deps
+  const loadItems = () => listStoreItems(category, cfg.itemType).then(setItems).catch(() => {});
+  // category in the deps, or switching sub-tab would show the other one's list until
+  // something else happened to trigger a refetch.
+  useEffect(() => { loadItems(); }, [cfg.itemType, category, reloadToken]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDelete = async (it) => {
     if (!window.confirm(`Permanently delete "${it.name}"? This cannot be undone.`)) return;
@@ -644,7 +694,7 @@ const PhysiotherapyPanel = ({ kind = "consultation", reloadToken, toolbarSlot })
   };
 
   return (
-    <div className="space-y-3" data-testid="consultations-subpanel-physiotherapy">
+    <div className="space-y-3" data-testid={`consultations-subpanel-${category}`}>
       {/* Two Create buttons, one visible at a time. On a phone it belongs beside the tab
           dropdown and Refresh, which is a row this panel does not own — so it is portaled
           into a slot up there, and the slot itself is hidden from sm up. The labelled one
@@ -656,14 +706,14 @@ const PhysiotherapyPanel = ({ kind = "consultation", reloadToken, toolbarSlot })
           title={`Create ${cfg.noun}`}
           aria-label={`Create ${cfg.noun}`}
           className="h-11 w-11 shrink-0 p-0"
-          data-testid="physiotherapy-create-btn-mobile"
+          data-testid={`${category}-create-btn-mobile`}
         >
           <Plus className="h-4 w-4" />
         </Button>,
         toolbarSlot,
       )}
       <div className="hidden items-center justify-end sm:flex">
-        <Button size="sm" onClick={() => setShowCreate(true)} data-testid="physiotherapy-create-btn">
+        <Button size="sm" onClick={() => setShowCreate(true)} data-testid={`${category}-create-btn`}>
           <Plus className="mr-1 h-4 w-4" />Create
         </Button>
       </div>
@@ -675,7 +725,7 @@ const PhysiotherapyPanel = ({ kind = "consultation", reloadToken, toolbarSlot })
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" data-testid="physiotherapy-items-grid">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" data-testid={`${category}-items-grid`}>
           {items.map((it) => (
             <Card key={it.id} data-testid={`consultation-item-${it.id}`}>
               <CardContent className="space-y-2 p-4">
@@ -722,8 +772,8 @@ const PhysiotherapyPanel = ({ kind = "consultation", reloadToken, toolbarSlot })
         </div>
       )}
 
-      {showCreate && <CreateConsultationModal kind={kind} onClose={() => setShowCreate(false)} onSaved={loadItems} />}
-      {editingItem && <CreateConsultationModal kind={kind} item={editingItem} onClose={() => setEditingItem(null)} onSaved={loadItems} />}
+      {showCreate && <CreateConsultationModal kind={kind} category={category} onClose={() => setShowCreate(false)} onSaved={loadItems} />}
+      {editingItem && <CreateConsultationModal kind={kind} category={category} item={editingItem} onClose={() => setEditingItem(null)} onSaved={loadItems} />}
       {viewingItem && (
         <ViewItemModal
           item={viewingItem}
@@ -758,7 +808,7 @@ const ConsultationsPanel = ({ reloadToken, toolbarSlot }) => {
       </div>
 
       {sub === "physiotherapy" && <PhysiotherapyPanel reloadToken={reloadToken} toolbarSlot={toolbarSlot} />}
-      {sub === "fitness" && <PlaceholderPanel label="Fitness" testid="consultations-subpanel-fitness" />}
+      {sub === "fitness" && <PhysiotherapyPanel category="fitness" reloadToken={reloadToken} toolbarSlot={toolbarSlot} />}
     </div>
   );
 };
