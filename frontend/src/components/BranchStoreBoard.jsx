@@ -3,10 +3,11 @@ import { Eye, Clock, CalendarCheck, RefreshCw } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
-import { listStoreItems } from "@/lib/api";
+import { listStoreItems, getBranches } from "@/lib/api";
 import { StoreInventoryPanel } from "@/components/branch/StoreInventoryPanel";
 import {
   TABS,
+  MODE_TAB_KEYS,
   CONSULTATIONS_SUBTABS,
   SESSIONS_SUBTABS,
   PlaceholderPanel,
@@ -16,7 +17,13 @@ import {
   ViewItemModal,
 } from "@/components/PackagesBoard";
 
-const BranchItemsPanel = ({ category, itemType, emptyLabel, testidPrefix, durationLabel = "Consultation Duration", reloadToken }) => {
+// Same helper BranchManagementBoard.jsx, PreSalesCRM.jsx and MarketingBoard.jsx each
+// carry their own copy of — every default vertical is named "online_.../offline_...", so
+// reading the prefix off the branch record can never disagree with how those screens
+// group branches.
+const isOnlineVertical = (v) => String(v || "").startsWith("online_");
+
+const BranchItemsPanel = ({ category, itemType, emptyLabel, testidPrefix, durationLabel = "Consultation Duration", reloadToken, modeFilter = "all" }) => {
   const [items, setItems] = useState([]);
   const [viewingItem, setViewingItem] = useState(null);
   const isSession = itemType === "session";
@@ -60,10 +67,10 @@ const BranchItemsPanel = ({ category, itemType, emptyLabel, testidPrefix, durati
                 {it.description && <p className="line-clamp-2 text-xs text-slate-500">{it.description}</p>}
 
                 {isSession ? (
-                  <SessionPriceBoxes item={it} testid={`${testidPrefix}-item-${it.id}-highlights`} />
+                  <SessionPriceBoxes item={it} mode={modeFilter} testid={`${testidPrefix}-item-${it.id}-highlights`} />
                 ) : (
                   <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-3" data-testid={`${testidPrefix}-item-${it.id}-highlights`}>
-                    <PriceModeBadges item={it} isSession={false} />
+                    <PriceModeBadges item={it} isSession={false} mode={modeFilter} />
                     {it.duration_minutes && (
                       <div className="mt-1.5 flex items-center justify-between rounded-lg bg-sky-50 px-2.5 py-1.5">
                         <span className="inline-flex items-center gap-1.5 text-xs font-bold text-sky-800">
@@ -102,7 +109,7 @@ const BranchItemsPanel = ({ category, itemType, emptyLabel, testidPrefix, durati
   );
 };
 
-export const BranchConsultationsPanel = ({ reloadToken }) => {
+export const BranchConsultationsPanel = ({ reloadToken, modeFilter = "all" }) => {
   const [sub, setSub] = useState("physiotherapy");
   return (
     <div className="space-y-4" data-testid="branch-store-panel-consultations">
@@ -130,6 +137,7 @@ export const BranchConsultationsPanel = ({ reloadToken }) => {
           emptyLabel="No consultations available yet."
           testidPrefix="branch-consultation"
           reloadToken={reloadToken}
+          modeFilter={modeFilter}
         />
       )}
       {sub === "fitness" && <PlaceholderPanel label="Fitness" testid="branch-consultations-subpanel-fitness" />}
@@ -137,7 +145,7 @@ export const BranchConsultationsPanel = ({ reloadToken }) => {
   );
 };
 
-export const BranchSessionsPanel = ({ reloadToken }) => {
+export const BranchSessionsPanel = ({ reloadToken, modeFilter = "all" }) => {
   const [sub, setSub] = useState("physiotherapy");
   return (
     <div className="space-y-4" data-testid="branch-store-panel-sessions">
@@ -165,6 +173,7 @@ export const BranchSessionsPanel = ({ reloadToken }) => {
           emptyLabel="No session packages available yet."
           testidPrefix="branch-session"
           reloadToken={reloadToken}
+          modeFilter={modeFilter}
         />
       )}
       {sub === "fitness" && <PlaceholderPanel label="Fitness" testid="branch-sessions-subpanel-fitness" />}
@@ -182,7 +191,7 @@ export const BranchSessionsPanel = ({ reloadToken }) => {
  * Otherwise it is the consultation panel exactly — a Diet Consultation is priced and timed
  * the same way, which is why the backend validates it against the same rules.
  */
-export const BranchDietPanel = ({ reloadToken }) => (
+export const BranchDietPanel = ({ reloadToken, modeFilter = "all" }) => (
   <div className="space-y-4" data-testid="branch-store-panel-diet">
     <BranchItemsPanel
       category="physiotherapy"
@@ -191,11 +200,10 @@ export const BranchDietPanel = ({ reloadToken }) => (
       emptyLabel="No diet packages available yet. Super Admin adds them in Services and Products > Diet Package."
       testidPrefix="branch-diet"
       reloadToken={reloadToken}
+      modeFilter={modeFilter}
     />
   </div>
 );
-
-const BRANCH_STORE_TABS = TABS.filter((t) => t.key !== "history");
 
 // The three shelves that are stock: a catalogue, a count per branch, and the same add,
 // sell and move. One panel serves all of them, told which by its category.
@@ -205,12 +213,42 @@ const INVENTORY_TABS = new Set(["tablet", "supplementary", "equipment"]);
 // tab graduates by being added here rather than by another branch in the JSX below.
 const PANELS_BUILT = new Set(["consultations", "sessions", "diet", ...INVENTORY_TABS]);
 
-export const FitsiomaxStorePanel = () => {
+/**
+ * A branch's own FITSIO STORE — scoped to its own vertical rather than offering every
+ * mode's tabs and letting the branch pick. Super Admin's Services and Products page has
+ * an All/Offline/Online switch because it oversees every branch; one branch only ever
+ * runs one of those two, so here the same MODE_TAB_KEYS split Super Admin's page uses is
+ * read off this branch's own vertical instead of a control.
+ */
+export const FitsiomaxStorePanel = ({ branchId }) => {
   const [tab, setTab] = useState("consultations");
   // Bumped by Refresh and passed to whichever panel is open, so it refetches in place —
   // rather than remounting it by key, which would also throw away the Physiotherapy /
   // Fitness choice inside Consultations and Sessions.
   const [reloadTick, setReloadTick] = useState(0);
+  // null while loading — "all" (unrestricted) is what it falls back to rather than
+  // guessing offline or online, so a slow fetch shows every tab briefly rather than the
+  // wrong scoped set that would then have to swap out from under whoever's looking.
+  const [mode, setMode] = useState(null);
+
+  useEffect(() => {
+    if (!branchId) return;
+    getBranches()
+      .then((rows) => {
+        const branch = rows.find((b) => b.id === branchId);
+        setMode(isOnlineVertical(branch?.vertical) ? "online" : "offline");
+      })
+      .catch(() => setMode("all"));
+  }, [branchId]);
+
+  const modeFilter = mode || "all";
+  const branchStoreTabs = TABS.filter((t) => MODE_TAB_KEYS[modeFilter].has(t.key));
+
+  // Falls back to Consultations rather than leaving `tab` pointed at a key this branch's
+  // own mode doesn't carry, once its vertical is known.
+  useEffect(() => {
+    if (mode && !MODE_TAB_KEYS[mode].has(tab)) setTab("consultations");
+  }, [mode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="space-y-4" data-testid="branch-store-board">
@@ -224,7 +262,7 @@ export const FitsiomaxStorePanel = () => {
           className="h-11 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700"
           data-testid="branch-store-subtab-select"
         >
-          {BRANCH_STORE_TABS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+          {branchStoreTabs.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
         </select>
         <Button
           onClick={() => setReloadTick((n) => n + 1)}
@@ -238,7 +276,7 @@ export const FitsiomaxStorePanel = () => {
       </div>
 
       <div className="hidden flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1 md:flex" data-testid="branch-store-subtabs">
-        {BRANCH_STORE_TABS.map((t) => {
+        {branchStoreTabs.map((t) => {
           const Icon = t.icon;
           const active = tab === t.key;
           return (
@@ -254,13 +292,13 @@ export const FitsiomaxStorePanel = () => {
         })}
       </div>
 
-      {tab === "consultations" && <BranchConsultationsPanel reloadToken={reloadTick} />}
-      {tab === "sessions" && <BranchSessionsPanel reloadToken={reloadTick} />}
-      {tab === "diet" && <BranchDietPanel reloadToken={reloadTick} />}
+      {tab === "consultations" && <BranchConsultationsPanel reloadToken={reloadTick} modeFilter={modeFilter} />}
+      {tab === "sessions" && <BranchSessionsPanel reloadToken={reloadTick} modeFilter={modeFilter} />}
+      {tab === "diet" && <BranchDietPanel reloadToken={reloadTick} modeFilter={modeFilter} />}
       {/* Keyed by category: without it React keeps the same instance across a tab switch
           and the previous shelf's rows sit there until the new ones land. */}
       {INVENTORY_TABS.has(tab) && <StoreInventoryPanel key={tab} category={tab} reloadToken={reloadTick} />}
-      {!PANELS_BUILT.has(tab) && BRANCH_STORE_TABS.map((t) => tab === t.key && (
+      {!PANELS_BUILT.has(tab) && branchStoreTabs.map((t) => tab === t.key && (
         <PlaceholderPanel key={t.key} label={t.label} testid={`branch-store-panel-${t.key}`} />
       ))}
     </div>

@@ -760,7 +760,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
       ) : activeView === "patients" ? (
         <PatientsPortalPanel branchId={branchId} />
       ) : activeView === "store" ? (
-        <FitsiomaxStorePanel />
+        <FitsiomaxStorePanel branchId={branchId} />
       ) : activeView === "accountant_mgmt" ? (
         <AccountantManageTab branchId={branchId} />
       ) : (

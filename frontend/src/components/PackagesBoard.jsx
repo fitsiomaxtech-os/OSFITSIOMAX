@@ -1014,19 +1014,18 @@ const INVENTORY_TABS = new Set(["tablet", "supplementary", "equipment"]);
 const BUILT_TABS = new Set(["consultations", "sessions", "diet", "history", "treatment", ...INVENTORY_TABS]);
 
 // TABS above stays a flat, unbroken export — BranchStoreBoard.jsx imports and filters it
-// for its own single-row layout, and reshaping it here would reshape that board too. This
-// grouping is Super Admin's own: which of those same keys sit under Services (the two
-// things a branch actually delivers, filterable by Online/Offline) versus Store (the
-// catalogue/retail side, which has no online/offline split of its own). History stands
-// apart from both, same as it always has.
-const SERVICE_TAB_KEYS = new Set(["consultations", "sessions"]);
-const STORE_TAB_KEYS = new Set(["diet", "tablet", "supplementary", "equipment", "vending_machine", "treatment"]);
-
-const SUPER_TABS = [
-  { key: "services", label: "Services" },
-  { key: "store", label: "Store" },
-  { key: "history", label: "History" },
-];
+// for its own layout too, and reshaping it here would reshape that board's as well.
+//
+// Which catalogue tabs sit next to Consultations/Sessions depends on the mode picked
+// below — the online/offline split of what a branch actually stocks. All is
+// unrestricted (the full catalogue, Vending Machine included, since it isn't yet sorted
+// into either mode); Offline drops Vending Machine; Online drops everything that only
+// makes sense at a physical location (Tablet, Supplementary, Equipment, Vending Machine).
+export const MODE_TAB_KEYS = {
+  all: new Set(["consultations", "sessions", "diet", "tablet", "supplementary", "equipment", "vending_machine", "treatment"]),
+  offline: new Set(["consultations", "sessions", "diet", "tablet", "supplementary", "equipment", "treatment"]),
+  online: new Set(["consultations", "sessions", "diet", "treatment"]),
+};
 
 const MODE_FILTERS = [
   { key: "all", label: "All" },
@@ -1150,14 +1149,13 @@ const SuperAdminInventoryPanel = ({ category, reloadToken }) => {
 };
 
 export const PackagesBoard = () => {
-  // Services (Consultations/Sessions) | Store (the catalogue tabs) | History — Super
-  // Admin's own grouping of the same items BranchStoreBoard.jsx still shows as one flat
-  // row; TABS itself is untouched so that board doesn't change shape.
-  const [superTab, setSuperTab] = useState("services");
-  // Which price Consultations/Sessions cards show — both (default), or just the one an
-  // Offline or Online Branch Admin actually needs. Store items carry no online/offline
-  // split of their own, so this only applies, and only shows, under Services.
+  // All / Offline / Online — which of the catalogue tabs sit next to Consultations and
+  // Sessions (MODE_TAB_KEYS), and, within Consultations/Sessions themselves, which of a
+  // package's two prices its cards show. History sits outside this split entirely — a
+  // read-only report, not a mode of the catalogue — so it's a second, independent toggle
+  // rather than a fourth option crammed into the same three.
   const [modeFilter, setModeFilter] = useState("all");
+  const [view, setView] = useState("catalog"); // "catalog" | "history"
   const [tab, setTab] = useState("consultations");
   // Bumped by Refresh and handed to whichever panel is open, so it refetches in place.
   const [reloadTick, setReloadTick] = useState(0);
@@ -1165,54 +1163,46 @@ export const PackagesBoard = () => {
   // ref object mutating in place never triggers that.
   const [createSlot, setCreateSlot] = useState(null);
 
-  const visibleTabs = TABS.filter((t) => (superTab === "services" ? SERVICE_TAB_KEYS.has(t.key) : STORE_TAB_KEYS.has(t.key)));
+  const visibleTabs = TABS.filter((t) => MODE_TAB_KEYS[modeFilter].has(t.key));
 
-  // Lands on the group's first tab rather than leaving `tab` pointed at a key the new
-  // group doesn't have — Store showing a blank sub-tab bar because `tab` was still
-  // "consultations" from before.
-  const selectSuperTab = (key) => {
-    setSuperTab(key);
-    if (key === "services") setTab("consultations");
-    else if (key === "store") setTab("diet");
+  // Falls back to Consultations rather than leaving `tab` pointed at a key the new mode
+  // doesn't carry — Equipment picked under Offline, then Online clicked, would otherwise
+  // show a sub-tab bar with nothing selected.
+  const selectMode = (key) => {
+    setModeFilter(key);
+    setView("catalog");
+    if (!MODE_TAB_KEYS[key].has(tab)) setTab("consultations");
   };
 
   return (
     <div className="space-y-4" data-testid="packages-board">
       {/* No heading. The nav tab above already reads Services and Products, and the line
           under it only listed the tabs that follow it. */}
-      <div className="flex flex-wrap items-center gap-2" data-testid="packages-super-tabs">
-        {SUPER_TABS.map((t) => (
+      <div className="flex flex-wrap items-center gap-2" data-testid="packages-mode-filter">
+        {MODE_FILTERS.map((m) => (
           <button
-            key={t.key}
+            key={m.key}
             type="button"
-            onClick={() => selectSuperTab(t.key)}
+            onClick={() => selectMode(m.key)}
             className={`shrink-0 rounded-full border px-3.5 py-1.5 text-sm font-medium transition ${
-              superTab === t.key ? "border-sky-600 bg-sky-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"
+              view === "catalog" && modeFilter === m.key ? "border-sky-600 bg-sky-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"
             }`}
-            data-testid={`packages-super-tab-${t.key}`}
+            data-testid={`packages-mode-filter-${m.key}`}
           >
-            {t.label}
+            {m.label}
           </button>
         ))}
+        <button
+          type="button"
+          onClick={() => setView("history")}
+          className={`shrink-0 rounded-full border px-3.5 py-1.5 text-sm font-medium transition ${
+            view === "history" ? "border-sky-600 bg-sky-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"
+          }`}
+          data-testid="packages-view-history"
+        >
+          History
+        </button>
       </div>
-
-      {superTab === "services" && (
-        <div className="flex flex-wrap items-center gap-2" data-testid="packages-mode-filter">
-          {MODE_FILTERS.map((m) => (
-            <button
-              key={m.key}
-              type="button"
-              onClick={() => setModeFilter(m.key)}
-              className={`shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition ${
-                modeFilter === m.key ? "border-sky-600 bg-sky-600 text-white" : "border-slate-200 bg-white text-slate-500 hover:border-sky-300 hover:text-sky-600"
-              }`}
-              data-testid={`packages-mode-filter-${m.key}`}
-            >
-              {m.label}
-            </button>
-          ))}
-        </div>
-      )}
 
       {/* A dropdown on a phone, the same control the Branch Admin store uses. Eight tabs
           wrapped to three rows there, which pushed the shelf being edited below the fold
@@ -1224,7 +1214,7 @@ export const PackagesBoard = () => {
           each panel owns its own, against its own item type — so the panel portals an
           icon-only copy into the slot at the end of this row. */}
       <div className="flex items-center gap-2 md:hidden">
-        {superTab !== "history" && (
+        {view === "catalog" && (
           <select
             value={tab}
             onChange={(e) => setTab(e.target.value)}
@@ -1246,7 +1236,7 @@ export const PackagesBoard = () => {
         <div ref={setCreateSlot} className="flex shrink-0 items-center" data-testid="packages-create-slot" />
       </div>
 
-      {superTab !== "history" && (
+      {view === "catalog" && (
         <div className="hidden flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1 md:flex" data-testid="packages-subtabs">
           {visibleTabs.map((t) => {
             const Icon = t.icon;
@@ -1265,15 +1255,15 @@ export const PackagesBoard = () => {
         </div>
       )}
 
-      {superTab !== "history" && tab === "consultations" && <ConsultationsPanel reloadToken={reloadTick} toolbarSlot={createSlot} modeFilter={modeFilter} />}
-      {superTab !== "history" && tab === "sessions" && <SessionsPanel reloadToken={reloadTick} toolbarSlot={createSlot} modeFilter={modeFilter} />}
-      {superTab !== "history" && tab === "diet" && <PhysiotherapyPanel kind="diet" reloadToken={reloadTick} toolbarSlot={createSlot} />}
-      {superTab === "history" && <HistoryPanel reloadToken={reloadTick} />}
-      {superTab !== "history" && tab === "treatment" && <TreatmentTypesBoard />}
-      {superTab !== "history" && INVENTORY_TABS.has(tab) && <SuperAdminInventoryPanel key={tab} category={tab} reloadToken={reloadTick} />}
+      {view === "catalog" && tab === "consultations" && <ConsultationsPanel reloadToken={reloadTick} toolbarSlot={createSlot} modeFilter={modeFilter} />}
+      {view === "catalog" && tab === "sessions" && <SessionsPanel reloadToken={reloadTick} toolbarSlot={createSlot} modeFilter={modeFilter} />}
+      {view === "catalog" && tab === "diet" && <PhysiotherapyPanel kind="diet" reloadToken={reloadTick} toolbarSlot={createSlot} />}
+      {view === "history" && <HistoryPanel reloadToken={reloadTick} />}
+      {view === "catalog" && tab === "treatment" && <TreatmentTypesBoard />}
+      {view === "catalog" && INVENTORY_TABS.has(tab) && <SuperAdminInventoryPanel key={tab} category={tab} reloadToken={reloadTick} />}
       {/* Whatever has no panel yet. A tab graduates by being handled above rather than by
           another branch being added here. */}
-      {superTab !== "history" && !BUILT_TABS.has(tab) && visibleTabs.map((t) => tab === t.key && (
+      {view === "catalog" && !BUILT_TABS.has(tab) && visibleTabs.map((t) => tab === t.key && (
         <PlaceholderPanel key={t.key} label={t.label} testid={`packages-panel-${t.key}`} />
       ))}
     </div>
