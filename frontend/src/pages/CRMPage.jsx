@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
   BadgeIndianRupee,
+  BarChart3,
   Briefcase,
   Building2,
   CalendarDays,
@@ -356,11 +357,15 @@ export const CRMPage = ({ auth, onLogout }) => {
   const VERTICAL_LABELS = { offline_physiotherapy: "Physiotherapy", offline_fitness_gym: "Fitness", offline_fitness: "Fitness" };
   const myVerticalLabel = VERTICAL_LABELS[myBranch?.vertical] || "";
 
-  // Leads / Analytics for the boards whose whole page is PreSalesCRM (Pre-Sales, Sales
-  // Head, Marketing Head). Held here rather than inside that board so the switch can sit
-  // in the page header beside the title, where the two read as the pages they are.
-  // Super Admin's Pre Sales tab is not one of them — it already has the nav strip above
-  // it, and keeps the switch in the board.
+  // Leads / Analytics in the page header, for Sales Head and nobody else.
+  //
+  // Super Admin and Marketing Head reach the same two pages from the strip inside the
+  // board — they arrive with a nav bar already above them, and a second row of tabs in
+  // the header would be two strips answering the same question. Pre-Sales never sees the
+  // pages at all: the pane switch lives behind isSuperAdminMasterView, which that role is
+  // not. So the header only carries them where the whole page is this board and there is
+  // no nav above it.
+  const [presalesView, setPresalesView] = useState("leads");
 
   const [superAdminView, setSuperAdminView] = useState(() => {
     if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("sheets_connect")) {
@@ -761,10 +766,36 @@ export const CRMPage = ({ auth, onLogout }) => {
                   ) : boardTitle}
                 </h1>
               </div>
-              {/* No Leads / Analytics here any more. The switch went back to the board,
-                  which owns its own strip whenever the header does not pass the pair of
-                  props below — so the two pages are still reachable, just not from the
-                  title row. */}
+              {/* Sales Head only — see the note on presalesView. The board stands its own
+                  strip down only when it is handed the pair of props below, so the two can
+                  never sit on screen disagreeing about which page is open. */}
+              {role === "sales_head" && (
+                <div className="flex shrink-0 items-center gap-1 sm:ml-4" data-testid="header-presales-view-tabs">
+                  {[
+                    { key: "leads", label: "Leads", icon: Users },
+                    { key: "analytics", label: "Analytics", icon: BarChart3 },
+                  ].map((t) => {
+                    const Icon = t.icon;
+                    const active = presalesView === t.key;
+                    return (
+                      <button
+                        key={t.key}
+                        type="button"
+                        onClick={() => setPresalesView(t.key)}
+                        className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-medium transition sm:px-3 sm:py-2 ${
+                          active ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100"
+                        }`}
+                        data-testid={`header-presales-view-${t.key}`}
+                      >
+                        <Icon className="h-4 w-4 shrink-0" />
+                        {/* The label goes on a phone, where the header is already carrying
+                            a name and a logout — the icons still say which is which. */}
+                        <span className="hidden sm:inline">{t.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
             <div className="flex items-center gap-2 sm:gap-3">
               {/* Phone only. On a desktop the board already carries its own search box
@@ -1007,7 +1038,12 @@ export const CRMPage = ({ auth, onLogout }) => {
         )}
 
         {showPreSalesBoard && (
-          <PreSalesCRM role={role} currentUser={auth.user} onLogout={logout} />
+          <PreSalesCRM
+            role={role}
+            currentUser={auth.user}
+            onLogout={logout}
+            {...(role === "sales_head" ? { masterView: presalesView, onMasterViewChange: setPresalesView } : {})}
+          />
         )}
 
         {showMarketingHeadBoard && (
