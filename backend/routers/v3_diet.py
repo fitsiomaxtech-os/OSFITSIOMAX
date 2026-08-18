@@ -147,7 +147,36 @@ async def list_nutrition_coaches(user: V3UserOut = Depends(v3_require_roles("bra
     if user.branch_id:
         query["branch_id"] = user.branch_id
     coaches = await v3_col("doctors").find(active_doctor_query(query), {"_id": 0}).sort("full_name", 1).to_list(200)
-    return {"coaches": coaches}
+
+    # One row per person, not one per expert record.
+    #
+    # A coach can hold several `doctors` rows — one per branch since they became
+    # multi-branch — and a row created before that link existed carries no user_id, so the
+    # branch sync in HR cannot see it and adds another for the same branch. The picker then
+    # offers the same name twice with no way to tell which is which.
+    #
+    # Collapsed on the name, not on user_id: the pair this exists to merge is exactly one
+    # linked row and one legacy row without a user_id, so keying on that id gives them
+    # different keys and merges nothing. The query above is already scoped to one branch,
+    # which is what makes a name safe to key on here.
+    #
+    # Two genuinely different coaches sharing a name in one branch would merge — but this
+    # picker shows the name and nothing else, so they are already indistinguishable in it;
+    # nothing legible is lost that was not already lost.
+    #
+    # The row kept is the one carrying the most published slots, and a linked row wins a
+    # tie: the other is the empty duplicate, and picking it books a patient onto a calendar
+    # with nothing in it.
+    def rank(c):
+        return (len(c.get("slots") or []), 1 if c.get("user_id") else 0)
+
+    best = {}
+    for c in coaches:
+        key = (c.get("full_name") or "").strip().lower() or c.get("id")
+        seen = best.get(key)
+        if not seen or rank(c) > rank(seen):
+            best[key] = c
+    return {"coaches": sorted(best.values(), key=lambda c: (c.get("full_name") or "").lower())}
 
 
 # ============ Branch Admin: putting a patient on a diet plan ============

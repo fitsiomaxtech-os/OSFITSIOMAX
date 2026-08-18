@@ -24,14 +24,18 @@ export const StatTile = ({
   // inner clicks. So the chrome moves to a wrapper and only the figure stays pressable.
   const Tag = onClick ? "button" : "div";
   const tagProps = onClick ? { type: "button", onClick } : {};
-  const chrome = `relative w-full overflow-hidden rounded-xl border bg-white text-left shadow-sm transition ${
+  // h-full so a row of these comes out level. Their container stretches each cell to the
+  // tallest, but a tile that only claims its content height floats at the top of that
+  // cell — which is what left one card with a footer standing taller than the three
+  // beside it.
+  const chrome = `relative h-full w-full overflow-hidden rounded-xl border bg-white text-left shadow-sm transition ${
     active ? "border-transparent" : `border-slate-200 ${onClick ? "hover:shadow-md" : ""}`
   }`;
   const body = (
     <Tag
       {...tagProps}
       className={footer
-        ? "relative block w-full p-3 text-left sm:p-4"
+        ? "relative block w-full flex-1 p-3 text-left sm:p-4"
         : `${chrome} p-3 sm:p-4`}
       style={!footer && active ? { boxShadow: `0 0 0 2px ${color}` } : undefined}
       data-testid={testid}
@@ -58,7 +62,7 @@ export const StatTile = ({
 
   if (!footer) return body;
   return (
-    <div className={chrome} style={active ? { boxShadow: `0 0 0 2px ${color}` } : undefined}>
+    <div className={`${chrome} flex flex-col`} style={active ? { boxShadow: `0 0 0 2px ${color}` } : undefined}>
       {body}
       <div className="border-t border-slate-100 px-3 pb-2.5 pt-2 sm:px-4">{footer}</div>
     </div>

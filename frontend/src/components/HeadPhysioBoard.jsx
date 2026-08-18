@@ -264,7 +264,10 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
               count behind it, so the day's workload reads without opening anything.
               Two-up on phones, four across from tablet; the bottom bar stays for
               thumb reach. */}
-          <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 sm:mx-0 sm:grid sm:grid-cols-4 sm:gap-3 sm:overflow-visible sm:px-0 sm:pb-0" data-testid="hp-work-tabs">
+          {/* items-stretch on the phone row too, so the four come out level there as well
+              as in the grid — the card carrying a filter is taller than the other three
+              and the row has to answer to the tallest rather than each card to itself. */}
+          <div className="-mx-1 flex items-stretch gap-2 overflow-x-auto px-1 pb-1 sm:mx-0 sm:grid sm:grid-cols-4 sm:gap-3 sm:overflow-visible sm:px-0 sm:pb-0" data-testid="hp-work-tabs">
             {WORK_TABS.map((t) => {
               const n = t.key === "consultations" ? (consultStages[firstStage] || 0)
                 : t.key === "review" ? reviewCount
@@ -278,7 +281,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
               // The wrapper keeps the phone's side-scrolling row of fixed-width cards; the
               // tile itself fills whatever it is given.
               return (
-                <div key={t.key} className={`${t.key === "all" ? "w-[15rem]" : "w-[10.5rem]"} shrink-0 sm:w-auto`}>
+                <div key={t.key} className="h-full w-[10.5rem] shrink-0 sm:w-auto">
                   <StatTile
                     label={t.label}
                     value={n}
