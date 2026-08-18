@@ -12,7 +12,8 @@ export const stageDisplayLabel = (name) => STAGE_DISPLAY_LABELS[name] || name;
 // their own pills out (Physio Review, Branch Review, Pre-Sales) get the scrolling
 // sizing untouched.
 //
-// `plain` drops the per-stage colour for one neutral card, with only the selected one
+// `plain` drops the per-stage colour: each stage is a white card of its own, separated by
+// the grey strip showing through rather than by an outline, with only the selected one
 // picked out. Opt-in rather than the default because this bar is shared: Branch Leads
 // asked for blank cards, while the Consultations and Pre-Sales bars still read by
 // colour, and changing it here would have restyled all three at once.
@@ -30,8 +31,8 @@ export const StageTab = ({ label, count, active, onClick, color, testid, gridded
       } ${
         plain
           ? (active
-            ? "bg-sky-50 text-sky-700"
-            : "bg-white text-slate-600 hover:bg-slate-50")
+            ? "bg-sky-50 text-sky-700 shadow-sm"
+            : "bg-white text-slate-600 shadow-sm hover:bg-slate-50")
           : ""
       }`}
       style={
@@ -65,13 +66,19 @@ export const StageTabBar = ({ stages, stageFilter, setStageFilter, counts, total
     // The offset has to clear the sticky page header, which is two different heights:
     // 61px on a phone (py-3 + a 36px logo + border) and 89px from sm up (py-4 + 56px).
     // A flat 88px left a white band under the header on a phone once scrolled.
-    className="sticky top-[61px] z-10 -mx-1 rounded-xl border border-slate-200 bg-white/95 p-1 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/80 sm:top-[88px]"
+    className={`sticky top-[61px] z-10 -mx-1 rounded-xl border border-slate-200 p-1 shadow-sm backdrop-blur sm:top-[88px] ${
+      // A plain card is white and borderless, so it can only read as its own card if what
+      // lies between the cards is not also white — hence the grey strip under them.
+      plain
+        ? "bg-slate-100/95 supports-[backdrop-filter]:bg-slate-100/80"
+        : "bg-white/95 supports-[backdrop-filter]:bg-white/80"
+    }`}
     data-testid={testid}
   >
     {/* Five to a row on a phone, so nine stages land as 5 + 4 and the whole bar is
         visible at once — it used to be a horizontal scroll, which hid the later stages
         behind a swipe nobody knew to make. Back to a single flex row from sm up. */}
-    <div className="grid grid-cols-5 gap-1 sm:flex sm:flex-nowrap sm:overflow-visible">
+    <div className={`grid grid-cols-5 sm:flex sm:flex-nowrap sm:overflow-visible ${plain ? "gap-2" : "gap-1"}`}>
       {!hideAllStages && (
         <StageTab
           label="All Stages"
