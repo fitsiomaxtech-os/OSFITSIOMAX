@@ -106,8 +106,8 @@ const PaymentModeBadge = ({ mode }) => (
  * nothing editable) as Branch Admin's own "Accountant Manage" tab, and again as the
  * Accountant's own Summary tab. Three tabs — Summary, Payment Schedule, Discount
  * Applied — all sourced from the same finance/revenue-overview payload, scoped by the
- * date filter above them (Payment Schedule excepted: a client's outstanding balance is a
- * right-now figure, not one a collection-date range narrows).
+ * date range sharing their tab bar (Payment Schedule excepted: a client's outstanding
+ * balance is a right-now figure, not one a collection-date range narrows).
  *
  * @param mode  "online" | "offline", an optional vertical filter only the Accountant's
  *              Summary tab passes (and owns the pills for) — left unset everywhere else.
@@ -225,86 +225,96 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white p-3" data-testid="accountant-manage-date-filter">
-        <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-0.5">
-          {DATE_PRESETS.map((p) => (
+      {/* One row: which view on the left, what it is scoped to on the right. The range
+          was a band of its own above this, which spent a whole row on five small buttons
+          and separated the tabs from the thing that narrows them. */}
+      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white p-1.5" data-testid="accountant-manage-maintabs">
+        <div className="flex flex-wrap gap-2">
+          {MAIN_TABS.map((t) => (
             <button
-              key={p.key}
-              onClick={() => setPreset(p.key)}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${preset === p.key ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100"}`}
-              data-testid={`accountant-manage-preset-${p.key}`}
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`min-w-0 rounded-md px-3.5 py-2 text-center text-sm font-medium transition ${mainTabClasses(t, tab === t.key)}`}
+              data-testid={`accountant-manage-maintab-${t.key}`}
             >
-              {p.label}
+              {t.label}
             </button>
           ))}
         </div>
-        {preset === "custom" && (
-          <div className="flex items-center gap-1.5 text-xs text-slate-500">
-            <CalendarDays className="h-3.5 w-3.5" />
-            <MilkDateInput value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className="h-8 rounded-md border border-slate-200 px-2 text-xs" data-testid="accountant-manage-custom-from" />
-            <span>to</span>
-            <MilkDateInput value={customTo} onChange={(e) => setCustomTo(e.target.value)} className="h-8 rounded-md border border-slate-200 px-2 text-xs" data-testid="accountant-manage-custom-to" />
+        {/* ml-auto so the range sits at the far end on a desk and simply wraps to the next
+            line on a phone, where there is no far end to sit at. */}
+        <div className="ml-auto flex flex-wrap items-center gap-3" data-testid="accountant-manage-date-filter">
+          <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-0.5">
+            {DATE_PRESETS.map((p) => (
+              <button
+                key={p.key}
+                onClick={() => setPreset(p.key)}
+                className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${preset === p.key ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100"}`}
+                data-testid={`accountant-manage-preset-${p.key}`}
+              >
+                {p.label}
+              </button>
+            ))}
           </div>
-        )}
-        <Button
-          onClick={load}
-          disabled={loading}
-          title="Refresh"
-          aria-label="Refresh"
-          className="ml-auto h-9 w-9 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
-          data-testid="accountant-manage-refresh"
-        >
-          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-        </Button>
-      </div>
-
-      <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="accountant-manage-maintabs">
-        {MAIN_TABS.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            className={`min-w-0 rounded-md px-3.5 py-2 text-center text-sm font-medium transition ${mainTabClasses(t, tab === t.key)}`}
-            data-testid={`accountant-manage-maintab-${t.key}`}
+          {preset === "custom" && (
+            <div className="flex items-center gap-1.5 text-xs text-slate-500">
+              <CalendarDays className="h-3.5 w-3.5" />
+              <MilkDateInput value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className="h-8 rounded-md border border-slate-200 px-2 text-xs" data-testid="accountant-manage-custom-from" />
+              <span>to</span>
+              <MilkDateInput value={customTo} onChange={(e) => setCustomTo(e.target.value)} className="h-8 rounded-md border border-slate-200 px-2 text-xs" data-testid="accountant-manage-custom-to" />
+            </div>
+          )}
+          <Button
+            onClick={load}
+            disabled={loading}
+            title="Refresh"
+            aria-label="Refresh"
+            className="h-9 w-9 shrink-0 bg-slate-500 p-0 text-white hover:bg-slate-600"
+            data-testid="accountant-manage-refresh"
           >
-            {t.label}
-          </button>
-        ))}
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+          </Button>
+        </div>
       </div>
 
       {loading && !data ? (
         <p className="py-10 text-center text-sm text-slate-400">Loading...</p>
       ) : tab === "summary" ? (
         <div className="space-y-4" data-testid="accountant-manage-summary">
-          <div className="flex w-fit items-center gap-1 rounded-lg border border-slate-200 bg-white p-0.5" data-testid="accountant-manage-approval-filter">
-            {APPROVAL_VIEWS.map((v) => (
-              <button
-                key={v.key}
-                onClick={() => setApprovalView(v.key)}
-                className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${approvalView === v.key ? "bg-sky-500 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50"}`}
-                data-testid={`accountant-manage-approval-${v.key}`}
-              >
-                {v.label} · {fmt(v.key === "collected" ? k.total_collected : v.key === "approved" ? k.total_approved : k.total_pending_approval)}
-              </button>
-            ))}
-          </div>
+          {/* The two cuts side by side: whether it is signed off on the left, how it was
+              paid on the right. They are independent filters and combine, so they read
+              better as two ends of one line than as two rows stacked. */}
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex w-fit items-center gap-1 rounded-lg border border-slate-200 bg-white p-0.5" data-testid="accountant-manage-approval-filter">
+              {APPROVAL_VIEWS.map((v) => (
+                <button
+                  key={v.key}
+                  onClick={() => setApprovalView(v.key)}
+                  className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${approvalView === v.key ? "bg-sky-500 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50"}`}
+                  data-testid={`accountant-manage-approval-${v.key}`}
+                >
+                  {v.label} · {fmt(v.key === "collected" ? k.total_collected : v.key === "approved" ? k.total_approved : k.total_pending_approval)}
+                </button>
+              ))}
+            </div>
 
-          {/* Same set Branch Admin picks from when collecting the fee in the first place —
-              not approval status but how it was paid, so it gets its own row rather than
-              folding into the one above. */}
-          <div className="flex flex-wrap items-center gap-2" data-testid="accountant-manage-payment-mode-filter">
-            {PAYMENT_MODES.map(([key, label]) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => setPaymentModeFilter(key)}
-                className={`shrink-0 rounded-full border px-3.5 py-1.5 text-sm font-medium transition ${
-                  paymentModeFilter === key ? "border-indigo-600 bg-indigo-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-indigo-300 hover:text-indigo-600"
-                }`}
-                data-testid={`accountant-manage-payment-mode-${key}`}
-              >
-                {label}
-              </button>
-            ))}
+            {/* Same set Branch Admin picks from when collecting the fee in the first
+                place — not approval status but how it was paid. */}
+            <div className="ml-auto flex flex-wrap items-center gap-2" data-testid="accountant-manage-payment-mode-filter">
+              {PAYMENT_MODES.map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setPaymentModeFilter(key)}
+                  className={`shrink-0 rounded-full border px-3.5 py-1.5 text-sm font-medium transition ${
+                    paymentModeFilter === key ? "border-indigo-600 bg-indigo-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-indigo-300 hover:text-indigo-600"
+                  }`}
+                  data-testid={`accountant-manage-payment-mode-${key}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Five across from lg, so the whole split reads on one line. Two-up on a phone
