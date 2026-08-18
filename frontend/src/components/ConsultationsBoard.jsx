@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Calendar, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2, Ban, ClipboardCheck, IndianRupee, Printer, Share2, Download, Eye, FileText, Salad } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -527,7 +528,7 @@ const COLS_PLAIN = {
   stage: "w-[13%]", expert: "w-[11%]", discount: "", appt: "w-[9%]", updated: "w-[9%]", action: "w-[6%]",
 };
 
-export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened, externalDate, hideDateFilter = false, onCountChange, onRowsChange, externalSearch, externalDateFilter, reloadToken, mobileCards = false }) => {
+export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened, externalDate, hideDateFilter = false, onCountChange, onRowsChange, externalSearch, externalDateFilter, reloadToken, mobileCards = false, toolbarSlot = null }) => {
   const isConsultant = viewerRole === "head_physio";
   // Head Physio tracks progress on their own independent pipeline (head_consultation_stage),
   // fully separate from Branch's own consultation_stage pipeline.
@@ -2158,61 +2159,18 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     setAssigningDiet(false);
   };
 
-  return (
-    <div className="space-y-3" data-testid="consultations-board">
-      {/* Stage Head Bar — Pre-Sales / Branch Leads style sticky segmented tabs.
-          Suppressed when embedded inside Branch Leads' own unified stage bar. */}
-      {showOwnStageBar && (
-        <StageTabBar
-          stages={stages}
-          stageFilter={stageFilter}
-          setStageFilter={setStageFilter}
-          counts={derivedStageCounts}
-          totalCount={dateAndSearchFiltered.length}
-          hideAllStages
-          testid="cons-metric"
-        />
-      )}
-
-      {/* Search — hidden outright when a parent provides one. It used to reappear at sm:+
-          on the assumption the parent's box was phone-only; Head Physio now carries one
-          above all four of its tabs, and two search boxes on the same screen looking for
-          the same thing is worse than either. */}
-      <div className={`items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 ${externalSearch !== undefined ? "hidden" : "flex"}`}>
-        <Search className="h-4 w-4 text-slate-400" />
-        <Input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search patients in Consultations..."
-          className="h-8 border-0 p-0 focus-visible:ring-0"
-          data-testid="cons-search"
-        />
-        {!hideDateFilter && <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="cons-date-filter" />}
-        <Button
-          onClick={load}
-          disabled={loading}
-          title="Refresh"
-          aria-label="Refresh"
-          className="h-8 w-8 shrink-0 border-emerald-600 bg-emerald-600 p-0 text-white hover:bg-emerald-700"
-          data-testid="cons-refresh"
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-        </Button>
-      </div>
-
-      {/* Which fee the Fee Collected list is showing. Only here: this stage is the one
-          place where a patient may have paid up to three separate things, and everywhere
-          else there is nothing yet to split. Each tab carries its own count and total, so
-          the three questions the branch actually asks of this stage — what came in from
-          consultations, from treatment, from diet — are answered without opening a row.
-
-          Above both the phone cards and the desk table, because it governs both: it filters
-          `filtered`, which each of them renders. */}
-      {showDiscountColumn && (
+  // The fee picker for the Fee Collected stage. Held as a function because it renders in
+  // one of two places: its own row under the toolbar, or — when the parent hands down a
+  // slot — inside that toolbar, ahead of the date filter. `compact` drops the card wrapper
+  // for the second, where the toolbar is already the card.
+  const feeTabsBar = (compact) => (
         // The row was three pills against a wide empty white band. The purchased / not
         // purchased picker takes that space at the far end, which both fills it and puts
         // the two controls in reading order: pick the fee, then pick which half of it.
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="cons-fee-tabs">
+        <div className={compact
+          ? "flex shrink-0 items-center gap-1.5"
+          : "flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white p-1"}
+          data-testid={compact ? "cons-fee-tabs-toolbar" : "cons-fee-tabs"}>
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
           {FEE_TABS.map((t) => {
             const on = t.key === activeFee.key;
@@ -2269,7 +2227,67 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
             </label>
           )}
         </div>
+  );
+
+  return (
+    <div className="space-y-3" data-testid="consultations-board">
+      {/* Stage Head Bar — Pre-Sales / Branch Leads style sticky segmented tabs.
+          Suppressed when embedded inside Branch Leads' own unified stage bar. */}
+      {showOwnStageBar && (
+        <StageTabBar
+          stages={stages}
+          stageFilter={stageFilter}
+          setStageFilter={setStageFilter}
+          counts={derivedStageCounts}
+          totalCount={dateAndSearchFiltered.length}
+          hideAllStages
+          testid="cons-metric"
+        />
       )}
+
+      {/* Search — hidden outright when a parent provides one. It used to reappear at sm:+
+          on the assumption the parent's box was phone-only; Head Physio now carries one
+          above all four of its tabs, and two search boxes on the same screen looking for
+          the same thing is worse than either. */}
+      <div className={`items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 ${externalSearch !== undefined ? "hidden" : "flex"}`}>
+        <Search className="h-4 w-4 text-slate-400" />
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search patients in Consultations..."
+          className="h-8 border-0 p-0 focus-visible:ring-0"
+          data-testid="cons-search"
+        />
+        {!hideDateFilter && <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="cons-date-filter" />}
+        <Button
+          onClick={load}
+          disabled={loading}
+          title="Refresh"
+          aria-label="Refresh"
+          className="h-8 w-8 shrink-0 border-emerald-600 bg-emerald-600 p-0 text-white hover:bg-emerald-700"
+          data-testid="cons-refresh"
+        >
+          <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+        </Button>
+      </div>
+
+      {/* Which fee the Fee Collected list is showing. Only here: this stage is the one
+          place where a patient may have paid up to three separate things, and everywhere
+          else there is nothing yet to split. Each tab carries its own count and total, so
+          the three questions the branch actually asks of this stage — what came in from
+          consultations, from treatment, from diet — are answered without opening a row.
+
+          Above both the phone cards and the desk table, because it governs both: it filters
+          `filtered`, which each of them renders. */}
+      {showDiscountColumn && (toolbarSlot ? (
+        <>
+          {/* Into the toolbar, immediately before the date filter. Desktop only: that
+              row already fights for width on a phone — six controls against 330px — so
+              below sm the picker keeps the line of its own it has always had. */}
+          {createPortal(<div className="hidden shrink-0 sm:flex">{feeTabsBar(true)}</div>, toolbarSlot)}
+          <div className="sm:hidden">{feeTabsBar(false)}</div>
+        </>
+      ) : feeTabsBar(false))}
 
       {mobileCards && (
         <div className="space-y-2 sm:hidden" data-testid="cons-mobile-cards">
