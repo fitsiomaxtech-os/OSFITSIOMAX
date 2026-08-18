@@ -871,27 +871,28 @@ const ROLE_META = {
   marketing_head: { label: "MARKETING HEAD", classes: "border-pink-300 bg-pink-50 text-pink-700" },
   accountant: { label: "ACCOUNTANT", classes: "border-orange-300 bg-orange-50 text-orange-700" },
 };
-// The same hues the built-ins wear, so a role added at runtime looks native rather than
-// like a bolt-on. Written as literal class strings because Tailwind reads the source for
-// class names — a template built from the colour key would compile to nothing.
+// The hues custom roles already carry in the database. Nothing picks one any more — the
+// Create Role form stopped offering a colour, and the backend stores "slate" for a role
+// added without one — so this is here to render the roles that were given a colour back
+// when it was offered. Written as literal class strings because Tailwind reads the source
+// for class names; a template built from the colour key would compile to nothing.
 const ROLE_SWATCHES = {
-  purple: { classes: "border-purple-300 bg-purple-50 text-purple-700", dot: "bg-purple-500" },
-  indigo: { classes: "border-indigo-300 bg-indigo-50 text-indigo-700", dot: "bg-indigo-500" },
-  sky: { classes: "border-sky-300 bg-sky-50 text-sky-700", dot: "bg-sky-500" },
-  emerald: { classes: "border-emerald-300 bg-emerald-50 text-emerald-700", dot: "bg-emerald-500" },
-  amber: { classes: "border-amber-300 bg-amber-50 text-amber-700", dot: "bg-amber-500" },
-  cyan: { classes: "border-cyan-300 bg-cyan-50 text-cyan-700", dot: "bg-cyan-500" },
-  pink: { classes: "border-pink-300 bg-pink-50 text-pink-700", dot: "bg-pink-500" },
-  orange: { classes: "border-orange-300 bg-orange-50 text-orange-700", dot: "bg-orange-500" },
-  rose: { classes: "border-rose-300 bg-rose-50 text-rose-700", dot: "bg-rose-500" },
-  teal: { classes: "border-teal-300 bg-teal-50 text-teal-700", dot: "bg-teal-500" },
-  slate: { classes: "border-slate-300 bg-slate-100 text-slate-700", dot: "bg-slate-500" },
+  purple: { classes: "border-purple-300 bg-purple-50 text-purple-700" },
+  indigo: { classes: "border-indigo-300 bg-indigo-50 text-indigo-700" },
+  sky: { classes: "border-sky-300 bg-sky-50 text-sky-700" },
+  emerald: { classes: "border-emerald-300 bg-emerald-50 text-emerald-700" },
+  amber: { classes: "border-amber-300 bg-amber-50 text-amber-700" },
+  cyan: { classes: "border-cyan-300 bg-cyan-50 text-cyan-700" },
+  pink: { classes: "border-pink-300 bg-pink-50 text-pink-700" },
+  orange: { classes: "border-orange-300 bg-orange-50 text-orange-700" },
+  rose: { classes: "border-rose-300 bg-rose-50 text-rose-700" },
+  teal: { classes: "border-teal-300 bg-teal-50 text-teal-700" },
+  slate: { classes: "border-slate-300 bg-slate-100 text-slate-700" },
 };
 
 // Colours for roles added at runtime. Module-level because roleClasses is called from
 // half a dozen places that have no reason to thread meta through, and there is exactly one
-// role list per install. Refilled whenever meta loads, so a colour set on one screen shows
-// up on the others without a reload.
+// role list per install. Refilled whenever meta loads.
 const CUSTOM_ROLE_CLASSES = new Map();
 const setCustomRoleClasses = (customRoles) => {
   CUSTOM_ROLE_CLASSES.clear();
@@ -1004,7 +1005,6 @@ const RoleFilterDropdown = ({ value, options, onChange }) => {
  */
 const CreateRoleModal = ({ meta, reloadMeta, onClose }) => {
   const [label, setLabel] = useState("");
-  const [color, setColor] = useState("sky");
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(null); // role name currently being removed
   // Only a custom role can be removed here — a built-in (super_admin, branch_admin, ...)
@@ -1025,18 +1025,6 @@ const CreateRoleModal = ({ meta, reloadMeta, onClose }) => {
     setDeleting(null);
   };
 
-  // Which hues are already spoken for, across built-ins and custom roles alike. Shown
-  // rather than blocked: two roles may reasonably share a colour, but picking one that
-  // clashes with an existing role by accident is the thing worth warning about.
-  const usedColors = useMemo(() => {
-    const used = new Set();
-    Object.values(ROLE_META).forEach((m) => {
-      const hit = Object.entries(ROLE_SWATCHES).find(([, s]) => s.classes === m.classes);
-      if (hit) used.add(hit[0]);
-    });
-    (meta.custom_roles || []).forEach((r) => { if (r.color) used.add(r.color); });
-    return used;
-  }, [meta.custom_roles]);
   // meta.roles is a list of slugs ("head_physio"), not objects — the custom_roles list is
   // where the labels and colours live.
   const existing = meta.roles || [];
@@ -1050,7 +1038,7 @@ const CreateRoleModal = ({ meta, reloadMeta, onClose }) => {
     if (duplicate) { toast.error("That role already exists"); return; }
     setSaving(true);
     try {
-      const created = await hrAddCustomRole(label.trim(), color);
+      const created = await hrAddCustomRole(label.trim());
       toast.success(`Role "${created.label || label.trim()}" added`);
       await reloadMeta?.();
       onClose();
@@ -1081,54 +1069,19 @@ const CreateRoleModal = ({ meta, reloadMeta, onClose }) => {
         />
         {duplicate && <p className="mt-1.5 text-xs font-semibold text-red-500" data-testid="hr-create-role-duplicate">That role already exists.</p>}
 
-        <div className="mt-4">
-          <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">Colour</p>
-          <div className="flex flex-wrap gap-1.5" data-testid="hr-create-role-colors">
-            {Object.entries(ROLE_SWATCHES).map(([key, s]) => {
-              const picked = color === key;
-              const taken = usedColors.has(key);
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setColor(key)}
-                  title={taken ? `${key} — already used by another role` : key}
-                  className={`relative h-8 w-8 rounded-full border-2 transition ${s.dot} ${
-                    picked ? "border-slate-800 ring-2 ring-slate-300" : "border-white hover:border-slate-300"
-                  }`}
-                  data-testid={`hr-create-role-color-${key}`}
-                >
-                  {/* A used hue is dimmed, not disabled — two roles sharing a colour is
-                      allowed, walking into the clash unaware is what isn't. */}
-                  {taken && !picked && <span className="absolute inset-0 rounded-full bg-white/45" />}
-                </button>
-              );
-            })}
-          </div>
-          {/* The badge as it will actually appear in the table, so the choice is judged on
-              the thing being made rather than on a swatch. */}
-          <div className="mt-3 flex items-center gap-2">
-            <span className="text-[11px] text-slate-400">Preview</span>
-            <span className={`rounded border px-2 py-1 text-xs font-semibold ${ROLE_SWATCHES[color].classes}`} data-testid="hr-create-role-preview">
-              {(label.trim() || "New Role").toUpperCase()}
-            </span>
-            {usedColors.has(color) && <span className="text-[11px] text-amber-600">Colour already in use</span>}
-          </div>
-        </div>
-
         {existing.length > 0 && (
           <div className="mt-4">
             <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">Roles that already exist</p>
-            {/* In their own colours, so the list doubles as what is already taken — the
-                point of showing it is to be compared against, and grey chips would hide
-                the very clash the picker above is trying to avoid. */}
+            {/* One neutral chip each. They were in their own colours to be compared
+                against the swatch picker that used to sit above — with no colour to
+                choose, the list is only here to say what already exists. */}
             <div className="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto">
               {existing.map((r) => {
                 const name = typeof r === "string" ? r : (r.name || "");
                 const lbl = roleLabel(name);
                 const removable = customRoleNames.has(name);
                 return (
-                  <span key={name} className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] font-semibold ${roleClasses(name)}`} data-testid={`hr-create-role-existing-${name}`}>
+                  <span key={name} className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-700" data-testid={`hr-create-role-existing-${name}`}>
                     {lbl}
                     {removable && (
                       <button
@@ -1854,7 +1807,7 @@ const RolesTab = ({ meta, reloadMeta }) => {
               <select
                 value={u.role}
                 onChange={(e) => changeRole(u, e.target.value)}
-                className={`h-7 rounded border px-2 text-xs font-semibold ${roleClasses(u.role)}`}
+                className="h-7 rounded border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700"
                 data-testid={`hr-user-card-role-${u.id}`}
               >
                 {meta.roles.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
@@ -1904,7 +1857,7 @@ const RolesTab = ({ meta, reloadMeta }) => {
                       <select
                         value={u.role}
                         onChange={(e) => changeRole(u, e.target.value)}
-                        className={`h-7 rounded border px-2 text-xs font-semibold ${roleClasses(u.role)}`}
+                        className="h-7 rounded border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700"
                         data-testid={`hr-user-role-${u.id}`}
                       >
                         {meta.roles.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
