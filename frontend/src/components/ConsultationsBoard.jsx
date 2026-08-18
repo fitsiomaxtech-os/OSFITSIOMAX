@@ -467,9 +467,9 @@ const consultationDiscount = (l) => {
 // amount so nothing is squeezed to make room. Both sets are written out literally because
 // Tailwind reads the source for class names and would compile nothing from a template.
 const COLS_WITH_DISCOUNT = {
-  sno: "w-[4%]", patient: "w-[10%]", pno: "w-[8%]", phone: "w-[10%]", email: "w-[10%]",
-  stage: "w-[11%]", expert: "w-[9%]", collected: "w-[9%]", discount: "w-[7%]",
-  appt: "w-[9%]", updated: "w-[8%]", action: "w-[5%]",
+  sno: "w-[4%]", patient: "w-[9%]", pno: "w-[7%]", phone: "w-[9%]", email: "w-[9%]",
+  stage: "w-[10%]", expert: "w-[8%]", collected: "w-[8%]", discount: "w-[7%]",
+  appt: "w-[8%]", updated: "w-[7%]", total: "w-[8%]", action: "w-[6%]",
 };
 
 /**
@@ -513,6 +513,13 @@ const FEE_TABS = [
 ];
 
 const rupees = (n) => `Rs.${Math.round(Number(n) || 0).toLocaleString("en-IN")}`;
+
+// Everything this patient has paid, all three fees together. The fee column beside it
+// shows only the one the open tab is about, so somebody who paid to be seen and then
+// bought a diet plan reads as two separate figures on two separate tabs and never as
+// what they came to in total. Summed off FEE_TABS so a fee added there is counted here
+// without this needing to know about it.
+const totalPaid = (l) => FEE_TABS.reduce((sum, t) => sum + t.paid(l), 0);
 const COLS_PLAIN = {
   sno: "w-[4%]", patient: "w-[13%]", pno: "w-[10%]", phone: "w-[12%]", email: "w-[13%]",
   stage: "w-[13%]", expert: "w-[11%]", discount: "", appt: "w-[9%]", updated: "w-[9%]", action: "w-[6%]",
@@ -2268,7 +2275,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
           {/* Fee Collected is the stage where a negotiated Consultation Fee has become a
               fact, so the discount column is added there alone — on every earlier stage
               there is no payment yet and the column would be a row of dashes. */}
-          <table className={`w-full table-fixed text-sm ${showDiscountColumn ? "min-w-[1130px]" : "min-w-[1040px]"}`}>
+          <table className={`w-full table-fixed text-sm ${showDiscountColumn ? "min-w-[1240px]" : "min-w-[1040px]"}`}>
             <thead className="sticky top-0 z-10 bg-slate-500 text-xs uppercase text-white">
               <tr>
                 <th className={`${cols.sno} px-3 py-2 text-left align-middle`}>S.No</th>
@@ -2276,14 +2283,23 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 <th className={`${cols.pno} px-4 py-2 text-left align-middle`}>Patient No.</th>
                 <th className={`${cols.phone} px-4 py-2 text-left align-middle`}>Phone</th>
                 <th className={`${cols.email} px-4 py-2 text-left align-middle`}>Email</th>
-                <th className={`${cols.stage} px-4 py-2 text-left align-middle`}>{isConsultant ? "Live Stage" : "Consultation Stage"}</th>
-                <th className={`${cols.expert} px-4 py-2 text-left align-middle`}>Assigned Expert</th>
+                {/* Shortened on Fee Collected alone: that list carries three more columns than any
+                    other stage, and the words the headings lose there — Consultation, Expert,
+                    Applied — are the ones the column below already makes obvious. Every other
+                    stage has the room and keeps the full wording. */}
+                <th className={`${cols.stage} px-4 py-2 text-left align-middle`}>
+                  {isConsultant ? "Live Stage" : showDiscountColumn ? "Stage" : "Consultation Stage"}
+                </th>
+                <th className={`${cols.expert} px-4 py-2 text-left align-middle`}>
+                  {showDiscountColumn ? "Assigned" : "Assigned Expert"}
+                </th>
                 {/* Named for the tab rather than a bare "Collected": three tabs showing a
                     column of the same name is three lists that look identical. */}
                 {showDiscountColumn && <th className={`${cols.collected} px-3 py-2 text-left align-middle`}>{activeFee.label} Fee</th>}
-                {showDiscountColumn && <th className={`${cols.discount} px-3 py-2 text-left align-middle`}>Discount Applied</th>}
+                {showDiscountColumn && <th className={`${cols.discount} px-3 py-2 text-left align-middle`}>Discount</th>}
                 <th className={`${cols.appt} px-3 py-2 text-left align-middle`}>Appointment</th>
                 <th className={`${cols.updated} px-3 py-2 text-left align-middle`}>Updated</th>
+                {showDiscountColumn && <th className={`${cols.total} px-3 py-2 text-left align-middle`}>Total Amount</th>}
                 <th className={`${cols.action} px-3 py-2 text-center align-middle`}>Action</th>
               </tr>
             </thead>
@@ -2353,6 +2369,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       ) : "—"}
                     </td>
                     <td className="whitespace-nowrap px-3 py-3 align-middle text-xs text-slate-400">{(l.updated_at || "").slice(0, 10) || "—"}</td>
+                    {showDiscountColumn && (
+                      <td className="whitespace-nowrap px-3 py-3 align-middle text-xs font-semibold text-slate-700" data-testid={`cons-total-${l.id}`}>
+                        {rupees(totalPaid(l))}
+                      </td>
+                    )}
                     {/* The whole row already opens the detail dialog, but nothing on screen
                         said so. This is the same action made visible — stopPropagation so
                         the row's own handler doesn't fire a second time behind it. */}
@@ -2372,7 +2393,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 );
               })}
               {filtered.length === 0 && (
-                <tr><td colSpan={showDiscountColumn ? 12 : 10} className="px-4 py-8 text-center text-sm text-slate-400">
+                <tr><td colSpan={showDiscountColumn ? 13 : 10} className="px-4 py-8 text-center text-sm text-slate-400">
                   {loading
                     ? "Loading…"
                     // An empty tab is not an empty stage: saying "no leads in consultations"
