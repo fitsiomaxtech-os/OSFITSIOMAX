@@ -11,7 +11,12 @@ export const stageDisplayLabel = (name) => STAGE_DISPLAY_LABELS[name] || name;
 // variant work — dropping it there would collapse the pills to nothing. Bars that lay
 // their own pills out (Physio Review, Branch Review, Pre-Sales) get the scrolling
 // sizing untouched.
-export const StageTab = ({ label, count, active, onClick, color, testid, gridded = false }) => {
+//
+// `plain` drops the per-stage colour for one neutral card, with only the selected one
+// picked out. Opt-in rather than the default because this bar is shared: Branch Leads
+// asked for blank cards, while the Consultations and Pre-Sales bars still read by
+// colour, and changing it here would have restyled all three at once.
+export const StageTab = ({ label, count, active, onClick, color, testid, gridded = false, plain = false }) => {
   const tint = color || "#0ea5e9";
   return (
     <button
@@ -22,11 +27,19 @@ export const StageTab = ({ label, count, active, onClick, color, testid, gridded
         gridded
           ? "w-full min-w-0 px-1 py-2"
           : "min-w-[86px] shrink-0 px-3 py-2.5"
+      } ${
+        plain
+          ? (active
+            ? "border border-sky-500 bg-sky-50 text-sky-700 shadow-sm"
+            : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50")
+          : ""
       }`}
       style={
-        active
-          ? { background: tint, color: "#ffffff", boxShadow: `0 2px 8px ${tint}40` }
-          : { background: `${tint}14`, color: tint, border: `1px solid ${tint}33` }
+        plain
+          ? undefined
+          : active
+            ? { background: tint, color: "#ffffff", boxShadow: `0 2px 8px ${tint}40` }
+            : { background: `${tint}14`, color: tint, border: `1px solid ${tint}33` }
       }
     >
       {/* Title case, as the stage is actually named — "Consultation Completed", not
@@ -47,7 +60,7 @@ export const StageTab = ({ label, count, active, onClick, color, testid, gridded
 
 // `hideAllStages` drops the leading "All Stages" pill (stage pills still toggle
 // off on a second click, so the filter can always be cleared).
-export const StageTabBar = ({ stages, stageFilter, setStageFilter, counts, totalCount, testid, hideAllStages = false }) => (
+export const StageTabBar = ({ stages, stageFilter, setStageFilter, counts, totalCount, testid, hideAllStages = false, plain = false }) => (
   <div
     // The offset has to clear the sticky page header, which is two different heights:
     // 61px on a phone (py-3 + a 36px logo + border) and 89px from sm up (py-4 + 56px).
@@ -68,6 +81,7 @@ export const StageTabBar = ({ stages, stageFilter, setStageFilter, counts, total
           color="#0ea5e9"
           testid={`${testid}-total`}
           gridded
+          plain={plain}
         />
       )}
       {stages.map((s) => (
@@ -80,6 +94,7 @@ export const StageTabBar = ({ stages, stageFilter, setStageFilter, counts, total
           color={s.color || "#64748b"}
           testid={`${testid}-${s.name}`}
           gridded
+          plain={plain}
         />
       ))}
     </div>

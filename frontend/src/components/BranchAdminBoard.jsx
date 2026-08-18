@@ -752,6 +752,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
             counts={combinedCounts}
             totalCount={totalLeads}
             testid="branch-metric"
+            plain
           />
 
           {/* One toolbar for every stage. It used to sit inside the non-consultation
