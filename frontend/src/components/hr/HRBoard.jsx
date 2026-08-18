@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Users, ShieldCheck, BarChart3, Plus, Pencil, Trash2, Eye, EyeOff, KeyRound, X, UserPlus, MoreVertical, CheckCircle2, XCircle, AlertOctagon, CalendarOff, ChevronDown, ChevronUp, GripVertical, FolderTree, Search } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -996,6 +997,102 @@ const RoleFilterDropdown = ({ value, options, onChange }) => {
 };
 
 /**
+ * The ROLE cell's picker, dressed like the ALL filter above it: a coloured button that
+ * opens a list of coloured rows. Built rather than styled, for the reason given on
+ * RoleFilterDropdown — a native <select> can tint its closed box, but the open list is
+ * drawn by the browser and ignores the colour, so the palette disappears at the moment
+ * it is being used to choose.
+ *
+ * The list is portalled to <body> and pinned to the button's own rect. This picker sits
+ * inside the table's overflow-auto scroller, and a list positioned the ordinary way is
+ * clipped at that container's edge for every row far enough down it — which is most of
+ * them once an install has a screenful of users. It opens upward instead when the row is
+ * near the bottom of the window, and closes on any scroll, since a list fixed to the
+ * viewport would otherwise sit on while the button it belongs to slides away.
+ */
+const RoleCellDropdown = ({ value, options, onChange, testid }) => {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState(null);
+  const btnRef = useRef(null);
+  const listRef = useRef(null);
+
+  const place = useCallback(() => {
+    const b = btnRef.current?.getBoundingClientRect();
+    if (!b) return;
+    const MAX = 256;
+    const below = window.innerHeight - b.bottom;
+    const up = below < 200 && b.top > below;
+    setPos({
+      left: b.left,
+      width: Math.max(b.width, 176),
+      top: up ? undefined : b.bottom + 4,
+      bottom: up ? window.innerHeight - b.top + 4 : undefined,
+      maxHeight: Math.max(120, Math.min(MAX, (up ? b.top : below) - 12)),
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    place();
+    const onDown = (e) => {
+      if (btnRef.current?.contains(e.target) || listRef.current?.contains(e.target)) return;
+      setOpen(false);
+    };
+    const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
+    const onMove = () => setOpen(false);
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    // Captured, so the table's own scroller counts and not just the page.
+    window.addEventListener("scroll", onMove, true);
+    window.addEventListener("resize", onMove);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", onMove, true);
+      window.removeEventListener("resize", onMove);
+    };
+  }, [open, place]);
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={`flex h-7 w-full items-center justify-between gap-2 rounded border px-2 text-xs font-semibold ${roleClasses(value)}`}
+        data-testid={testid}
+      >
+        <span className="truncate">{roleLabel(value)}</span>
+        <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
+      </button>
+      {open && pos && createPortal(
+        <div
+          ref={listRef}
+          style={{ position: "fixed", left: pos.left, width: pos.width, top: pos.top, bottom: pos.bottom, maxHeight: pos.maxHeight }}
+          className="z-[80] space-y-1 overflow-y-auto rounded-md border border-slate-200 bg-white p-1.5 shadow-lg"
+          data-testid={`${testid}-list`}
+        >
+          {options.map((r) => (
+            <button
+              key={r}
+              type="button"
+              onClick={() => { onChange(r); setOpen(false); }}
+              className={`block w-full rounded-md border px-3 py-1.5 text-left text-xs font-semibold ${roleClasses(r)} ${
+                r === value ? "ring-2 ring-slate-400" : ""
+              }`}
+              data-testid={`${testid}-option-${r}`}
+            >
+              {roleLabel(r)}
+            </button>
+          ))}
+        </div>,
+        document.body,
+      )}
+    </>
+  );
+};
+
+/**
  * Add a role on its own, without starting a user you may not want.
  *
  * The role list already on screen is shown underneath, because the commonest mistake here
@@ -1804,14 +1901,14 @@ const RolesTab = ({ meta, reloadMeta }) => {
               </button>
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-2">
-              <select
-                value={u.role}
-                onChange={(e) => changeRole(u, e.target.value)}
-                className="h-7 rounded border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700"
-                data-testid={`hr-user-card-role-${u.id}`}
-              >
-                {meta.roles.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
-              </select>
+              <div className="w-40">
+                <RoleCellDropdown
+                  value={u.role}
+                  options={meta.roles}
+                  onChange={(r) => changeRole(u, r)}
+                  testid={`hr-user-card-role-${u.id}`}
+                />
+              </div>
               <span className={`rounded px-2 py-0.5 text-xs ${u.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}`}>{u.is_active ? "Active" : "Inactive"}</span>
             </div>
             {u.linked_employee && (
@@ -1854,14 +1951,14 @@ const RolesTab = ({ meta, reloadMeta }) => {
                     <td className="px-3 py-2 font-medium text-slate-800">{u.full_name}</td>
                     <td className="px-3 py-2 text-slate-600">{u.email}</td>
                     <td className="px-3 py-2">
-                      <select
-                        value={u.role}
-                        onChange={(e) => changeRole(u, e.target.value)}
-                        className="h-7 rounded border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700"
-                        data-testid={`hr-user-role-${u.id}`}
-                      >
-                        {meta.roles.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
-                      </select>
+                      <div className="w-44">
+                        <RoleCellDropdown
+                          value={u.role}
+                          options={meta.roles}
+                          onChange={(r) => changeRole(u, r)}
+                          testid={`hr-user-role-${u.id}`}
+                        />
+                      </div>
                     </td>
                     <td className="px-3 py-2 text-xs text-emerald-600">{u.linked_employee ? `${u.linked_employee.employee_code} - ${u.linked_employee.designation || u.linked_employee.full_name}` : "—"}</td>
                     <td className="px-3 py-2"><span className={`rounded px-2 py-0.5 text-xs ${u.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}`}>{u.is_active ? "Active" : "Inactive"}</span></td>
