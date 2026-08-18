@@ -37,9 +37,9 @@ import { to12h } from "@/lib/time";
 // The three calendars this rosters, in the order MANAGEMENT lists them. `profile_type` is
 // what the backend keys experts on — the same value each calendar tab passes.
 const CALENDAR_KINDS = [
-  { key: "head_physio", label: "CONSULTANT CALENDAR", short: "Consultant", icon: Stethoscope, noun: "CONSULTANT", plural: "CONSULTANTS" },
-  { key: "physio", label: "PHYSIO CALENDAR", short: "Physio", icon: Activity, noun: "Physio", plural: "Physios" },
-  { key: "nutrition_coach", label: "DIET CALENDAR", short: "Diet", icon: Salad, noun: "Nutritionist", plural: "Nutritionists" },
+  { key: "head_physio", label: "Consultant Calendar", short: "Consultant", icon: Stethoscope, noun: "CONSULTANT", plural: "CONSULTANTS" },
+  { key: "physio", label: "Physio Calendar", short: "Physio", icon: Activity, noun: "Physio", plural: "Physios" },
+  { key: "nutrition_coach", label: "Diet Calendar", short: "Diet", icon: Salad, noun: "Nutritionist", plural: "Nutritionists" },
 ];
 
 const NEW_SHIFT = { name: "", start_time: "09:00", end_time: "18:00" };

@@ -338,14 +338,16 @@ export const CRMPage = ({ auth, onLogout }) => {
   const roleLabel = ROLE_META[role]?.label
     || (isDietRole(role) ? "Nutritionist" : null)
     || (isHumanResourceRole(role) ? "Human Resource" : role);
-  // Consultant and Nutritionist stand alone, with no "Master View" after them. They are
-  // named for the clinician rather than for a desk that administers something, so the
-  // suffix was describing a view they do not have.
+  // Consultant, Nutritionist and Branch Admin stand alone, with no "Master View" after
+  // them. The first two are named for the clinician rather than for a desk that
+  // administers something, so the suffix was describing a view they do not have. Branch
+  // Admin does run a desk, but one branch of it — "Master View" claims a reach across the
+  // organisation that the role does not have, and the plain name is what the person is.
   //
-  // Both are printed as they are written — a board title in full caps reads as shouting
-  // where every other board is sentence case.
-  const isClinicianTitle = role === "head_physio" || isDietRole(role);
-  const boardTitle = isClinicianTitle
+  // All three are printed as they are written — a board title in full caps reads as
+  // shouting where every other board is sentence case.
+  const isPlainTitle = role === "head_physio" || isDietRole(role) || isBranchAdminRole(role);
+  const boardTitle = isPlainTitle
     ? roleLabel
     // Sales Head gets the same title as Pre-Sales, not "Sales Head Master View" — it's the
     // same board (PreSalesCRM, full Master View) under a second role, not a board of its own.

@@ -623,7 +623,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   const VIEW_TABS = [
     { key: "pipeline", label: "Branch Leads", short: "Leads", icon: LayoutDashboard },
     { key: "review", label: "Review", short: "Review", icon: ClipboardCheck },
-    { key: "consultations", label: "MANAGEMENT", short: "Manage", icon: Stethoscope },
+    { key: "consultations", label: "Management", short: "Manage", icon: Stethoscope },
     { key: "patients", label: "Patients", short: "Patients", icon: User },
     { key: "accountant_mgmt", label: "Accountant Manage", short: "Accounts", icon: BadgeIndianRupee },
     { key: "store", label: "Fitsiomax Store", short: "Store", icon: ShoppingCart },
@@ -639,22 +639,22 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   // top-level tabs, and Manager used to sit one level deeper inside Calendar;
   // all three now live here alongside the two calendars.
   const MANAGEMENT_SUB_TABS = [
-    { key: "head_physio", label: "CONSULTANT CALENDAR", icon: Calendar },
-    { key: "physio", label: "PHYSIO CALENDAR", icon: Activity },
+    { key: "head_physio", label: "Consultant Calendar", icon: Calendar },
+    { key: "physio", label: "Physio Calendar", icon: Activity },
     // Diet is the third vertical, so its calendar sits beside the other two rather than
     // anywhere new — the Branch Admin publishes a Nutrition Coach's days exactly the way
     // they publish a Physio's.
-    { key: "diet", label: "DIET CALENDAR", icon: Salad },
+    { key: "diet", label: "Diet Calendar", icon: Salad },
     // Sits next to PHYSIO CALENDAR because that is where its slots come from: a day an
     // absence left dateless is re-booked onto exactly the calendar published one tab over.
-    { key: "missed", label: "MISSED CLASSES", icon: UserX },
-    { key: "manager", label: "MANAGER", icon: UserCog },
-    { key: "calendar", label: "CALENDAR", icon: Calendar },
+    { key: "missed", label: "Missed Classes", icon: UserX },
+    { key: "manager", label: "Manager", icon: UserCog },
+    { key: "calendar", label: "Calendar", icon: Calendar },
     // Sits after CALENDAR because it is the setting the three calendars above obey: the
     // shift an expert is on is the window their day gets opened across. Last in the strip
     // rather than first for the same reason — it is configured once and then left alone,
     // while the calendars are worked in daily.
-    { key: "time", label: "TIME MANAGEMENT", icon: Clock },
+    { key: "time", label: "Time Management", icon: Clock },
   ];
 
   return (
