@@ -997,11 +997,13 @@ const RoleFilterDropdown = ({ value, options, onChange }) => {
 };
 
 /**
- * The ROLE cell's picker, dressed like the ALL filter above it: a coloured button that
- * opens a list of coloured rows. Built rather than styled, for the reason given on
- * RoleFilterDropdown — a native <select> can tint its closed box, but the open list is
- * drawn by the browser and ignores the colour, so the palette disappears at the moment
- * it is being used to choose.
+ * The ROLE cell's picker: one neutral style for the closed box and every row, with the
+ * row matching the current value as the only thing highlighted, so which one is picked
+ * reads from the highlight rather than from a palette. Same treatment RoleSelectDropdown
+ * gives the designation picker.
+ *
+ * Still built rather than a native <select>, which cannot style its option list at all —
+ * the browser draws that, so the rounded rows and the highlight would both be lost.
  *
  * The list is portalled to <body> and pinned to the button's own rect. This picker sits
  * inside the table's overflow-auto scroller, and a list positioned the ordinary way is
@@ -1059,7 +1061,7 @@ const RoleCellDropdown = ({ value, options, onChange, testid }) => {
         ref={btnRef}
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className={`flex h-7 w-full items-center justify-between gap-2 rounded border px-2 text-xs font-semibold ${roleClasses(value)}`}
+        className="flex h-7 w-full items-center justify-between gap-2 rounded border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700"
         data-testid={testid}
       >
         <span className="truncate">{roleLabel(value)}</span>
@@ -1077,8 +1079,8 @@ const RoleCellDropdown = ({ value, options, onChange, testid }) => {
               key={r}
               type="button"
               onClick={() => { onChange(r); setOpen(false); }}
-              className={`block w-full rounded-md border px-3 py-1.5 text-left text-xs font-semibold ${roleClasses(r)} ${
-                r === value ? "ring-2 ring-slate-400" : ""
+              className={`block w-full rounded-md border px-3 py-1.5 text-left text-xs font-semibold ${
+                r === value ? "border-sky-300 bg-sky-50 text-sky-700" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
               }`}
               data-testid={`${testid}-option-${r}`}
             >
