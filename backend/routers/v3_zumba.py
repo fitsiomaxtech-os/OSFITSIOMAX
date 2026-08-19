@@ -6,11 +6,11 @@ every row carries a branch_stage and a consultation decision. It gets its own sm
 collection and its own tab.
 
 What the branch actually wants to know is where the registrations came from, so the
-summary is a split by source rather than by stage: someone who walked in (Direct), someone
-the CONSULTANT sent across, someone the branch signed up itself, someone a Zumba master
-brought with them, and someone who arrived through Fitsiomax. Fee's Collected sits among
-them counting the registrations whose money is actually in, which is a different question
-from how many registered.
+summary is a split by source. A referral names the master who made it, which is why the
+masters are listed one by one rather than sitting behind a single "Masters" option: the
+question asked of a referral is always which master, and a name typed once is offered from
+then on. Fee's Collected sits among the source cards counting the registrations whose
+money is actually in, which is a different question from how many registered.
 
 Money is stored on the registration rather than in the finance ledger: a Zumba fee is a
 flat class fee with no package, no installments and no consultation behind it, and putting
@@ -30,15 +30,41 @@ from utils import now_iso
 
 router = APIRouter(prefix="/api/v3")
 
-# The five ways a registration arrives. Stored as these slugs; the tab prints them.
-SOURCES = ("direct", "consultant", "branch", "masters", "fitsiomax")
-DEFAULT_SOURCE = "direct"
+# How a registration arrived. MASTER carries a master_name alongside it — the others are
+# whole answers on their own.
+MASTER = "master"
+SOURCES = (MASTER, "board", "consultations", "branch", "social_media", "personal")
+DEFAULT_SOURCE = "personal"
+
+# The first cut of this tab shipped with a different, shorter vocabulary. Rows written then
+# still say "direct" or "fitsiomax", so they are read forward rather than left to fall
+# through to the default and quietly change which card they count towards.
+LEGACY_SOURCES = {
+    "direct": "personal",
+    "consultant": "consultations",
+    "masters": MASTER,
+    "fitsiomax": "social_media",
+}
+
+# Which summary card a source counts towards. The cards were named before the sources
+# were, so the two vocabularies are not the same size: Board and Social Media are both
+# Fitsiomax reaching somebody the branch never spoke to, and count together.
+CARD_OF_SOURCE = {
+    "personal": "direct",
+    "consultations": "consultant",
+    "branch": "branch",
+    MASTER: "masters",
+    "board": "fitsiomax",
+    "social_media": "fitsiomax",
+}
+CARDS = ("direct", "consultant", "branch", "masters", "fitsiomax")
 
 ROLES = ("branch_admin", "super_admin")
 
 
 def _source(value) -> str:
     slug = str(value or "").strip().lower()
+    slug = LEGACY_SOURCES.get(slug, slug)
     return slug if slug in SOURCES else DEFAULT_SOURCE
 
 
@@ -50,13 +76,27 @@ def _amount(value) -> float:
     return amount if amount > 0 else 0.0
 
 
+def _age(value) -> Optional[int]:
+    """Blank rather than 0 when it is not known — a Zumba class takes anyone, and a 0 in an
+    age column reads as a fact about the person rather than as a gap in the record."""
+    try:
+        age = int(value)
+    except (TypeError, ValueError):
+        return None
+    return age if 0 < age < 120 else None
+
+
 class ZumbaInput(BaseModel):
     name: str
     phone: Optional[str] = ""
+    age: Optional[int] = None
+    address: Optional[str] = ""
     source: Optional[str] = DEFAULT_SOURCE
+    # Only meaningful when source is "master"; dropped otherwise, so moving the source off
+    # a referral cannot leave a stale master's name attached to the row.
+    master_name: Optional[str] = ""
     fee_amount: Optional[float] = 0
     fee_paid: Optional[float] = 0
-    notes: Optional[str] = ""
 
 
 def _scoped_branch(user: V3UserOut, branch_id: Optional[str]) -> Optional[str]:
@@ -67,6 +107,17 @@ def _scoped_branch(user: V3UserOut, branch_id: Optional[str]) -> Optional[str]:
     return branch_id
 
 
+def _shape(row: dict) -> dict:
+    """The stored row plus the card it counts towards, worked out here so the list and the
+    summary can never disagree about where a registration belongs."""
+    source = _source(row.get("source"))
+    return {**row, "source": source, "card": CARD_OF_SOURCE.get(source, "direct")}
+
+
+def _master_of(row: dict) -> str:
+    return (row.get("master_name") or "").strip()
+
+
 @router.get("/branch/zumba")
 async def list_zumba(
     branch_id: Optional[str] = Query(None),
@@ -74,22 +125,53 @@ async def list_zumba(
 ):
     branch_id = _scoped_branch(user, branch_id)
     if is_branch_admin_role(user.role) and not branch_id:
-        return {"summary": {}, "registrations": []}
+        return {"summary": {}, "registrations": [], "masters": []}
 
     query = {"branch_id": branch_id} if branch_id else {}
-    rows = await v3_col("zumba_registrations").find(query, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    raw = await v3_col("zumba_registrations").find(query, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    rows = [_shape(r) for r in raw]
 
     summary = {"all": len(rows), "fee_collected": 0, "fee_total": 0.0}
-    for slug in SOURCES:
-        summary[slug] = 0
+    for card in CARDS:
+        summary[card] = 0
     for r in rows:
-        summary[_source(r.get("source"))] += 1
+        summary[r["card"]] += 1
         paid = _amount(r.get("fee_paid"))
         if paid > 0:
             summary["fee_collected"] += 1
             summary["fee_total"] += paid
 
-    return {"summary": summary, "registrations": rows}
+    # The masters this branch has actually been referred by, gathered off the registrations
+    # themselves. No separate roster to keep in step with reality: a name typed once is
+    # offered from then on, and a master nobody has referred anybody never clutters it.
+    masters = sorted(
+        {_master_of(r) for r in rows if r["source"] == MASTER and _master_of(r)},
+        key=str.lower,
+    )
+
+    return {"summary": summary, "registrations": rows, "masters": masters}
+
+
+def _clean(payload: ZumbaInput) -> dict:
+    name = (payload.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name is required")
+
+    source = _source(payload.source)
+    master_name = (payload.master_name or "").strip()
+    if source == MASTER and not master_name:
+        raise HTTPException(status_code=400, detail="Which master referred them?")
+
+    return {
+        "name": name,
+        "phone": (payload.phone or "").strip(),
+        "age": _age(payload.age),
+        "address": (payload.address or "").strip(),
+        "source": source,
+        "master_name": master_name if source == MASTER else "",
+        "fee_amount": _amount(payload.fee_amount),
+        "fee_paid": _amount(payload.fee_paid),
+    }
 
 
 @router.post("/branch/zumba")
@@ -102,24 +184,15 @@ async def add_zumba(
     if not branch_id:
         raise HTTPException(status_code=400, detail="Pick a branch to register against")
 
-    name = (payload.name or "").strip()
-    if not name:
-        raise HTTPException(status_code=400, detail="Name is required")
-
     row = {
         "id": str(uuid.uuid4()),
         "branch_id": branch_id,
-        "name": name,
-        "phone": (payload.phone or "").strip(),
-        "source": _source(payload.source),
-        "fee_amount": _amount(payload.fee_amount),
-        "fee_paid": _amount(payload.fee_paid),
-        "notes": (payload.notes or "").strip(),
+        **_clean(payload),
         "created_at": now_iso(),
         "created_by": user.full_name or user.email,
     }
     await v3_col("zumba_registrations").insert_one(dict(row))
-    return row
+    return _shape(row)
 
 
 @router.patch("/branch/zumba/{registration_id}")
@@ -135,22 +208,13 @@ async def update_zumba(
     if is_branch_admin_role(user.role) and existing.get("branch_id") != user.branch_id:
         raise HTTPException(status_code=403, detail="Not your branch")
 
-    name = (payload.name or "").strip()
-    if not name:
-        raise HTTPException(status_code=400, detail="Name is required")
-
     changes = {
-        "name": name,
-        "phone": (payload.phone or "").strip(),
-        "source": _source(payload.source),
-        "fee_amount": _amount(payload.fee_amount),
-        "fee_paid": _amount(payload.fee_paid),
-        "notes": (payload.notes or "").strip(),
+        **_clean(payload),
         "updated_at": now_iso(),
         "updated_by": user.full_name or user.email,
     }
     await v3_col("zumba_registrations").update_one({"id": registration_id}, {"$set": changes})
-    return {**existing, **changes}
+    return _shape({**existing, **changes})
 
 
 @router.delete("/branch/zumba/{registration_id}")
