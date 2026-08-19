@@ -220,13 +220,25 @@ export const BranchDietPanel = ({ reloadToken, modeFilter = "all" }) => (
   </div>
 );
 
+/**
+ * Rehab, Zumba Class and Fitness — Super Admin's three session-shaped shelves, read-only
+ * here as every other catalogue is. Same panel, told which category to list; without these
+ * the tabs still appear (they come off the shared TABS list) and land on the "coming soon"
+ * placeholder, which is not what a branch should see for a shelf that has stock on it.
+ */
+const SESSION_LIKE_TABS = {
+  rehab: { category: "rehab", empty: "No rehab packages available yet." },
+  zumba: { category: "zumba", empty: "No Zumba classes available yet." },
+  fitness: { category: "fitness", empty: "No fitness packages available yet." },
+};
+
 // The three shelves that are stock: a catalogue, a count per branch, and the same add,
 // sell and move. One panel serves all of them, told which by its category.
 const INVENTORY_TABS = new Set(["tablet", "supplementary", "equipment"]);
 
 // Which tabs have a panel of their own. The rest fall through to the placeholder, and a
 // tab graduates by being added here rather than by another branch in the JSX below.
-const PANELS_BUILT = new Set(["consultations", "sessions", "diet", ...INVENTORY_TABS]);
+const PANELS_BUILT = new Set(["consultations", "sessions", "diet", ...Object.keys(SESSION_LIKE_TABS), ...INVENTORY_TABS]);
 
 /**
  * A branch's own FITSIO STORE — scoped to its own vertical rather than offering every
@@ -312,6 +324,17 @@ export const FitsiomaxStorePanel = ({ branchId }) => {
       {tab === "diet" && <BranchDietPanel reloadToken={reloadTick} modeFilter={modeFilter} />}
       {/* Keyed by category: without it React keeps the same instance across a tab switch
           and the previous shelf's rows sit there until the new ones land. */}
+      {SESSION_LIKE_TABS[tab] && (
+        <BranchItemsPanel
+          key={tab}
+          category={SESSION_LIKE_TABS[tab].category}
+          itemType="session"
+          emptyLabel={SESSION_LIKE_TABS[tab].empty}
+          testidPrefix={`branch-${tab}`}
+          reloadToken={reloadTick}
+          modeFilter={modeFilter}
+        />
+      )}
       {INVENTORY_TABS.has(tab) && <StoreInventoryPanel key={tab} category={tab} reloadToken={reloadTick} />}
       {!PANELS_BUILT.has(tab) && branchStoreTabs.map((t) => tab === t.key && (
         <PlaceholderPanel key={t.key} label={t.label} testid={`branch-store-panel-${t.key}`} />
