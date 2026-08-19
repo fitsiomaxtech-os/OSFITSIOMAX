@@ -29,20 +29,24 @@ const sourceLabel = (slug) => (SOURCES.find((s) => s.key === slug) || SOURCES[0]
 // row into sevenths rather than into thirds. Written out as literal class names because
 // Tailwind's JIT only compiles what it can read in the source.
 //
-// `border` gives each group its own outline, so the split survives being looked at
-// quickly — the gap says where a group ends and the colour says which one it is. The
-// colour is the whole point of the border here, so it stays put when a card is selected;
-// the selected card is picked out by its fill, as it is on every other bar in the OS.
+// `border` gives each card its own outline and `wrap` puts the group itself in a tinted
+// box, so the split survives being looked at quickly: the gap says where a group ends,
+// the box says the cards inside it belong together, and the colour says which group it
+// is. The colour is the whole point of the outline here, so it stays put when a card is
+// selected; the selected card is picked out by its fill, as on every other bar in the OS.
+//
+// The tints are a step up from the palest ones because the strip they sit on is already
+// grey — a 50 against slate-100 is a difference you have to look for.
 const CARD_GROUPS = [
-  { key: "total", grid: "grid-cols-1", grow: "sm:flex-1", border: "border border-purple-300", cards: [
+  { key: "total", grid: "grid-cols-1", grow: "sm:flex-1", border: "border border-purple-300", wrap: "border border-purple-200 bg-purple-100", cards: [
     { key: "all", label: "All" },
   ] },
-  { key: "sources", grid: "grid-cols-3", grow: "sm:flex-[3]", border: "border border-orange-300", cards: [
+  { key: "sources", grid: "grid-cols-3", grow: "sm:flex-[3]", border: "border border-orange-300", wrap: "border border-orange-200 bg-orange-100", cards: [
     { key: "direct", label: "Direct" },
     { key: "consultant", label: "Consultant" },
     { key: "branch", label: "Branch" },
   ] },
-  { key: "reach", grid: "grid-cols-3", grow: "sm:flex-[3]", border: "border border-emerald-500", cards: [
+  { key: "reach", grid: "grid-cols-3", grow: "sm:flex-[3]", border: "border border-emerald-500", wrap: "border border-emerald-200 bg-emerald-100", cards: [
     { key: "fee_collected", label: "Fee's Collected" },
     { key: "masters", label: "Masters" },
     { key: "fitsiomax", label: "Fitsiomax" },
@@ -143,15 +147,15 @@ export const ZumbaPanel = ({ branchId }) => {
 
   return (
     <div className="flex flex-col gap-4" data-testid="branch-zumba-panel">
-      {/* Same blank-card strip as Branch Leads: white cards on a grey ground, only the
-          selected one picked out — but in three groups, separated by a gap three times the
-          one between cards so the split is read as a split rather than as a stray margin.
-          On a phone the groups stack instead, one line each: All, then the three desks,
+      {/* Same blank-card strip as Branch Leads: white cards, only the selected one picked
+          out — but in three tinted boxes, separated by a gap three times the one between
+          cards, so the split is read as a split rather than as a stray margin.
+          On a phone the boxes stack instead, one line each: All, then the three desks,
           then the three that follow. */}
       <div className="-mx-1 rounded-xl border border-slate-200 bg-slate-100/95 p-1 shadow-sm" data-testid="zumba-summary">
         <div className="flex flex-col gap-3 sm:flex-row sm:flex-nowrap sm:gap-6">
           {CARD_GROUPS.map((g) => (
-            <div key={g.key} className={"grid gap-2 sm:flex sm:flex-nowrap " + g.grid + " " + g.grow} data-testid={"zumba-group-" + g.key}>
+            <div key={g.key} className={"grid gap-2 rounded-lg p-1.5 sm:flex sm:flex-nowrap " + g.grid + " " + g.grow + " " + g.wrap} data-testid={"zumba-group-" + g.key}>
               {g.cards.map((c) => (
                 <StageTab
                   key={c.key}
