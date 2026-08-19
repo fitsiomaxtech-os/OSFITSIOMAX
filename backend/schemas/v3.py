@@ -288,6 +288,11 @@ class V3LeadOut(BaseModel):
     zumba_package_price: Optional[float] = None
     zumba_package_sessions: Optional[int] = None
     zumba_package_mode: Optional[str] = None
+    # What was actually taken for the Rehab course, kept apart from the package fields
+    # above the way every other fee is: the price is what it costs, this is what is in.
+    rehab_fee_paid: Optional[float] = None
+    rehab_fee_payment_mode: Optional[str] = None
+    rehab_fee_payment_details: Optional[dict] = None
     consultation_decision: Optional[str] = None  # "consultation_only" | "consultation_treatment" — set by Head Physio at Save & Move
     # Whether the Head Physio also referred this patient to a Nutrition Coach. Orthogonal
     # to consultation_decision — see V3ConsultationDecisionInput.
@@ -422,6 +427,21 @@ class V3CollectDietFeeInput(V3CollectPackagePaymentInput):
 class V3PartialInstallment(BaseModel):
     amount: float
     due_date: str
+
+
+class V3CollectRehabFeeInput(V3CollectPackagePaymentInput):
+    """The Rehab course fee.
+
+    Inherits every payment field from the Consultation Fee, exactly as the Diet fee does —
+    it is collected the same way, in one go, by the same four modes — and adds nothing.
+    The course itself is locked in by the Consultant's decision the way the Treatment
+    package is, so there is nothing to choose here: Branch Admin collects against what is
+    already on the lead.
+
+    Inherited rather than restated so build_payment_details can reach every field it
+    validates; a hand-written copy that missed ifsc_code would have thrown on the first
+    card payment.
+    """
 
 
 class V3CollectTreatmentFeeInput(BaseModel):

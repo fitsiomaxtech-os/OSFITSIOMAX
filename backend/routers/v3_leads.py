@@ -127,7 +127,7 @@ class BulkDeleteLeadsInput(BaseModel):
 # reported.
 _PAID_ACTIONS = [
     "consultation_paid", "package_sold", "package_payment_collected",
-    "treatment_fee_collected", "diet_fee_collected", "fee_collected",
+    "treatment_fee_collected", "diet_fee_collected", "rehab_fee_collected", "fee_collected",
 ]
 
 # Enough to clear a bad import in a few passes, small enough that one request cannot walk

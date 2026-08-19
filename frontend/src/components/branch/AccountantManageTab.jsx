@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Eye, Wallet, Stethoscope, Activity, ShoppingBag, Salad, RefreshCw, CalendarDays, X, Music2 } from "lucide-react";
+import { Eye, Wallet, Stethoscope, Activity, ShoppingBag, Salad, RefreshCw, CalendarDays, X, Music2, HeartPulse } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { StatTile } from "@/components/ui/stat-tile";
@@ -62,6 +62,9 @@ const REVENUE_VIEWS = [
   // zumba loop in v3_finance.py's revenue-overview. It reaches this row the same way
   // store sales do, as transactions carrying source "zumba".
   { key: "zumba", label: "Zumba Revenue", color: "#db2777", icon: Music2 },
+  // Real now that a rehab fee can be collected: rehab_fee_collected is its own revenue
+  // category, so these transactions arrive carrying source "rehab".
+  { key: "rehab", label: "Rehab Revenue", color: "#0891b2", icon: HeartPulse },
 ];
 
 // "All" first and the default — this page had no date filter before, so opening it
@@ -223,8 +226,8 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
   // Every card's figure and the count under it, from one pass over whichever set the
   // filters above left standing.
   const sums = useMemo(() => {
-    const totals = { collected: 0, consultation: 0, session: 0, diet: 0, store: 0, zumba: 0 };
-    const counts = { collected: 0, consultation: 0, session: 0, diet: 0, store: 0, zumba: 0 };
+    const totals = { collected: 0, consultation: 0, session: 0, diet: 0, store: 0, zumba: 0, rehab: 0 };
+    const counts = { collected: 0, consultation: 0, session: 0, diet: 0, store: 0, zumba: 0, rehab: 0 };
     filteredTxns.forEach((t) => {
       const amt = Number(t.gross) || 0;
       totals.collected += amt;
@@ -365,9 +368,9 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
             </div>
           </div>
 
-          {/* Six across from lg, so the whole split still reads on one line now Zumba
-              has a card. Two-up on a phone, which divides six evenly. */}
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
+          {/* Seven across from lg with Rehab among them. Two-up on a phone, which leaves
+              the odd one centred rather than stranded in a column of its own. */}
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-7">
             {REVENUE_VIEWS.map((v) => (
               <StatTile
                 key={v.key}

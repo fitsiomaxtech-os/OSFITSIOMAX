@@ -229,6 +229,7 @@ export const createNutritionCoach = async (payload) => (await api.post("/branch/
 export const assignDiet = async (payload) => (await api.post("/branch/assign-diet", payload)).data;
 export const bookDietAppointment = async (payload) => (await api.post("/branch/diet-appointment", payload)).data;
 export const collectDietFee = async (leadId, payload) => (await api.post(`/leads/${leadId}/collect-diet-fee`, payload)).data;
+export const collectRehabFee = async (leadId, payload) => (await api.post(`/leads/${leadId}/collect-rehab-fee`, payload)).data;
 export const saveDietConsultationReport = async (leadId, report) => (await api.post(`/diet/consultation-report/${leadId}`, { report })).data;
 export const setDocumentShared = async (leadId, docId, shared) => (await api.patch(`/leads/${leadId}/documents/${docId}/share`, null, { params: { shared } })).data;
 export const branchDietPatients = async () => (await api.get("/branch/diet-patients")).data;

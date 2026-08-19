@@ -11,6 +11,7 @@ from deps import v3_require_roles
 from schemas.v3 import (
     V3UserOut, V3LeadOut, V3DiagnosisInput, V3SellStoreItemInput,
     V3CollectPackagePaymentInput, V3CollectTreatmentFeeInput, V3CollectDietFeeInput,
+    V3CollectRehabFeeInput,
     V3PhysioDiagnosisInput, V3TreatmentSummaryInput,
 )
 from utils import generate_transaction_id
@@ -227,6 +228,9 @@ def build_payment_details(payload) -> tuple:
 
 
 DIET_FEE_PAYMENT_MODES = {"cash", "upi", "card", "account_transfer"}
+# The same four. A rehab course is taken in one payment like a diet consultation, so
+# it has no use for Cheque's clearing dance or Partial Payment's schedule.
+REHAB_FEE_PAYMENT_MODES = DIET_FEE_PAYMENT_MODES
 
 
 @router.post("/leads/{lead_id}/collect-diet-fee", response_model=dict)
@@ -420,6 +424,82 @@ async def collect_package_payment(lead_id: str, payload: V3CollectPackagePayment
         "lead_id": lead_id,
         "action": "package_payment_collected",
         "details": f"{'Updated' if is_update else 'Collected'} Consultation Fee Rs.{amount} for package '{lead.get('package_name')}' via {payload.payment_mode}{detail_suffix}{discount_suffix} · Txn {transaction_id}",
+        "original_amount": original_price,
+        "collected_amount": amount,
+        "discount_amount": discount_amount if discount_amount != 0 else None,
+        "discount_reason": discount_reason,
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": _now(),
+    })
+    updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    return {"message": "Payment collected", "transaction_id": transaction_id, "lead": V3LeadOut(**updated).model_dump()}
+
+
+@router.post("/leads/{lead_id}/collect-rehab-fee", response_model=dict)
+async def collect_rehab_fee(lead_id: str, payload: V3CollectRehabFeeInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
+    """Branch admin collects the Rehab course fee.
+
+    The course was chosen by the Consultant at the consultation decision, so it is read
+    off the lead rather than picked again here — the same way the Treatment Fee reads
+    session_package_id. Collected in one go, like the Diet Consultation Fee.
+
+    Deliberately does not touch consultation_stage. Rehab is a parallel programme, and
+    moving the physio pipeline as a side effect of a rehab payment would misreport
+    where the patient actually is — the same reasoning collect_diet_fee gives.
+    """
+    if payload.payment_mode not in REHAB_FEE_PAYMENT_MODES:
+        raise HTTPException(status_code=400, detail=f"Rehab Fee only accepts: {sorted(REHAB_FEE_PAYMENT_MODES)}")
+    if not payload.confirmed:
+        raise HTTPException(status_code=400, detail="Please confirm the payment before submitting")
+
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    # The Consultation Fee is the only prerequisite, as it is for diet: a patient can be
+    # sent to rehab without ever buying a treatment package.
+    if lead.get("package_paid") is None:
+        raise HTTPException(status_code=400, detail="Collect the Consultation Fee first")
+    if not lead.get("rehab_package_id") or lead.get("rehab_package_price") is None:
+        raise HTTPException(status_code=400, detail="No Rehab course was chosen at the consultation yet")
+
+    original_price = lead["rehab_package_price"]
+    amount = payload.amount if payload.amount is not None else original_price
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be greater than zero")
+
+    # Same discount handling every other fee uses: the gap between what was listed and
+    # what was taken is recorded with a reason, so history says why and not just how much.
+    discount_amount = round(original_price - amount, 2)
+    discount_reason = None
+    discount_suffix = ""
+    if discount_amount > 0:
+        discount_reason = "Discount"
+        discount_suffix = f" · Actual Price Rs.{original_price}, Discount Rs.{discount_amount}"
+    elif discount_amount < 0:
+        discount_reason = "Additional amount collected"
+        discount_suffix = f" · Actual Price Rs.{original_price}, Rs.{abs(discount_amount)} above listed fee"
+
+    payment_details, detail_suffix = build_payment_details(payload)
+    is_update = lead.get("rehab_fee_paid") is not None
+    transaction_id = await generate_transaction_id(lead.get("branch_id"))
+    payment_details["transaction_id"] = transaction_id
+
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": {
+        "rehab_fee_paid": amount,
+        "rehab_fee_payment_mode": payload.payment_mode,
+        "rehab_fee_payment_details": payment_details,
+        # The fee is the referral when nobody ticked one — same reasoning collect_diet_fee
+        # gives, so a paying patient is on the rehab list either way.
+        "rehab_referred": True,
+        "updated_at": _now(),
+    }})
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "transaction_id": transaction_id,
+        "lead_id": lead_id,
+        "action": "rehab_fee_collected",
+        "details": f"{'Updated' if is_update else 'Collected'} Rehab Fee Rs.{amount} for '{lead.get('rehab_package_name', 'Rehab')}' ({lead.get('rehab_package_mode') or 'offline'}) via {payload.payment_mode}{detail_suffix}{discount_suffix} · Txn {transaction_id}",
         "original_amount": original_price,
         "collected_amount": amount,
         "discount_amount": discount_amount if discount_amount != 0 else None,

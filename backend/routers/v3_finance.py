@@ -543,7 +543,7 @@ async def finance_profit(
 
 # "session" = Treatment Fee (the multi-visit Session Package collected after Consultation
 # Fee); everything else collected at/around the consultation itself is "consultation".
-REVENUE_ACTIONS = ["consultation_paid", "package_sold", "package_payment_collected", "treatment_fee_collected", "diet_fee_collected", "fee_collected"]
+REVENUE_ACTIONS = ["consultation_paid", "package_sold", "package_payment_collected", "treatment_fee_collected", "diet_fee_collected", "rehab_fee_collected", "fee_collected"]
 
 # The Consultation Fee itself: the actions that mean "this patient paid to be seen today".
 # Deliberately narrower than _revenue_category(...) == "consultation", which is a reporting
@@ -554,7 +554,7 @@ CONSULTATION_FEE_ACTIONS = {"consultation_paid", "package_sold", "package_paymen
 
 
 def _revenue_category(action: str) -> str:
-    """Which revenue line a payment belongs to: consultation, session, or diet.
+    """Which revenue line a payment belongs to: consultation, session, diet or rehab.
 
     Diet has its own line rather than sitting inside consultation. It is a separate
     service sold at its own price by its own clinician, and a branch reporting on it
@@ -566,6 +566,8 @@ def _revenue_category(action: str) -> str:
         return "session"
     if action == "diet_fee_collected":
         return "diet"
+    if action == "rehab_fee_collected":
+        return "rehab"
     return "consultation"
 
 
@@ -736,14 +738,14 @@ def _lead_session_summary(lead: dict) -> dict:
 def _empty_day(day: str) -> dict:
     """One day's revenue row, with every line seeded. Both loops that build these use it,
     so a row can never be missing the key the other loop is about to add to."""
-    return {"date": day, "consultation": 0.0, "session": 0.0, "diet": 0.0, "store": 0.0, "zumba": 0.0}
+    return {"date": day, "consultation": 0.0, "session": 0.0, "diet": 0.0, "store": 0.0, "zumba": 0.0, "rehab": 0.0}
 
 
 def _empty_branch(bid, bname: str) -> dict:
     return {
         "branch_id": bid, "branch_name": bname,
         "consultation_total": 0.0, "session_total": 0.0, "diet_total": 0.0, "store_total": 0.0,
-        "zumba_total": 0.0,
+        "zumba_total": 0.0, "rehab_total": 0.0,
     }
 
 
@@ -802,6 +804,7 @@ async def revenue_overview(
     consultation_total = 0.0
     session_total = 0.0
     diet_total = 0.0
+    rehab_total = 0.0
     by_day = {}
     by_branch_acc = {}
     payment_modes = {}
@@ -828,6 +831,8 @@ async def revenue_overview(
             session_total += amount
         elif category == "diet":
             diet_total += amount
+        elif category == "rehab":
+            rehab_total += amount
         else:
             consultation_total += amount
 
@@ -1022,12 +1027,12 @@ async def revenue_overview(
             "approved_at": "",
         })
 
-    total_collected = consultation_total + session_total + diet_total + store_total + zumba_total
+    total_collected = consultation_total + session_total + diet_total + store_total + zumba_total + rehab_total
     trend = sorted(by_day.values(), key=lambda r: r["date"])
     for r in trend:
-        r["total"] = r["consultation"] + r["session"] + r["diet"] + r["store"] + r.get("zumba", 0.0)
+        r["total"] = r["consultation"] + r["session"] + r["diet"] + r["store"] + r.get("zumba", 0.0) + r.get("rehab", 0.0)
     for r in by_branch_acc.values():
-        r["total_revenue"] = r["consultation_total"] + r["session_total"] + r["diet_total"] + r["store_total"] + r.get("zumba_total", 0.0)
+        r["total_revenue"] = r["consultation_total"] + r["session_total"] + r["diet_total"] + r["store_total"] + r.get("zumba_total", 0.0) + r.get("rehab_total", 0.0)
     by_branch = sorted(by_branch_acc.values(), key=lambda r: -r["total_revenue"])
 
     untouched_stages = {None} | await entry_branch_stage_names()
@@ -1112,11 +1117,13 @@ async def revenue_overview(
             "diet_revenue": diet_total,
             "store_revenue": store_total,
             "zumba_revenue": zumba_total,
+            "rehab_revenue": rehab_total,
             "consultation_pct": round(consultation_total / total_collected * 100, 1) if total_collected else 0,
             "session_pct": round(session_total / total_collected * 100, 1) if total_collected else 0,
             "diet_pct": round(diet_total / total_collected * 100, 1) if total_collected else 0,
             "store_pct": round(store_total / total_collected * 100, 1) if total_collected else 0,
             "zumba_pct": round(zumba_total / total_collected * 100, 1) if total_collected else 0,
+            "rehab_pct": round(rehab_total / total_collected * 100, 1) if total_collected else 0,
         },
         "trend": trend,
         "by_branch": by_branch,

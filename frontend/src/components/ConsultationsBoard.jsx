@@ -10,7 +10,7 @@ import { WhatsAppIcon } from "@/components/ui/whatsapp-icon";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { LeadDocuments } from "@/components/LeadDocuments";
 import {
-  getConsultationsBoard, moveConsultationStage, listStoreItems,
+  getConsultationsBoard, moveConsultationStage, listStoreItems, collectRehabFee,
   collectPackagePayment, collectTreatmentFee, markInstallmentPaid, savePhysioDiagnosis, unlockPhysioDiagnosis,
   saveTreatmentSummary, unlockTreatmentSummary, stagesList, getDoctors,
   assignPhysioWithSessions, getDoctorCalendar,
@@ -671,6 +671,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // package during their decision but never a diet one, because diet is optional and
   // often decided after treatment is under way.
   const [dietFeeDraft, setDietFeeDraft] = useState(null); // { item_id, mode, payment_mode, amount } | null
+  // The Rehab course fee. One popup rather than the diet fee's two: the course and its
+  // price were settled by the Consultant, so there is nothing to choose before
+  // confirming — only the amount, which a discount can still move.
+  const [rehabFeeDraft, setRehabFeeDraft] = useState(null);
+  const [collectingRehabFee, setCollectingRehabFee] = useState(false);
   const [dietFeeConfirmDraft, setDietFeeConfirmDraft] = useState(null);
   const [collectingDietFee, setCollectingDietFee] = useState(false);
   const [dietItems, setDietItems] = useState([]);
@@ -1878,6 +1883,44 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     return price != null ? Number(price) : null;
   };
 
+  const openRehabFeeDraft = () => {
+    setRehabFeeDraft({
+      payment_mode: selectedLead.rehab_fee_payment_mode || "cash",
+      amount: String(selectedLead.rehab_package_price ?? ""),
+      upi_transaction_id: "",
+      account_number: "",
+      account_holder_name: "",
+      bank_name: "",
+      ifsc_code: "",
+      transfer_reference: "",
+    });
+  };
+
+  const confirmCollectRehabFee = async () => {
+    const amount = parseFloat(rehabFeeDraft.amount);
+    if (!(amount > 0)) { toast.error("Enter the amount collected"); return; }
+    setCollectingRehabFee(true);
+    try {
+      const res = await collectRehabFee(selectedLead.id, {
+        ...rehabFeeDraft,
+        amount,
+        confirmed: true,
+      });
+      toast.success(`Rehab Fee collected · Rs.${amount}`);
+      setRehabFeeDraft(null);
+      // Patch the row and the open card off the server's answer, the way the other fees
+      // do, so the button flips to Update without waiting for a reload.
+      if (res?.lead) {
+        setSelectedLead(res.lead);
+        setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => (l.id === res.lead.id ? res.lead : l)) }));
+      }
+      load();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to collect the Rehab Fee");
+    }
+    setCollectingRehabFee(false);
+  };
+
   const openDietFeeDraft = async () => {
     let items = dietItems;
     if (!items.length) {
@@ -2905,6 +2948,28 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 </Button>
               ) : null;
 
+              // Offered once the Consultation Fee is in and the Consultant actually chose a
+              // course — without one there is no price to collect against, and the backend
+              // refuses for the same reason. Shows on every path a referred patient can be
+              // sitting on, beside the Diet button it is modelled on.
+              const rehabFeePaid = selectedLead.rehab_fee_paid != null;
+              const RehabButton = (selectedLead.package_paid != null && selectedLead.rehab_referred && selectedLead.rehab_package_id) ? (
+                <Button
+                  size="sm"
+                  variant={rehabFeePaid ? "outline" : undefined}
+                  className={`${rehabFeePaid
+                    ? "border-cyan-200 text-cyan-700 hover:bg-cyan-50"
+                    : "bg-cyan-600 text-white hover:bg-cyan-700"} ${ACT_BTN}`}
+                  onClick={openRehabFeeDraft}
+                  data-testid="cons-open-rehab-fee"
+                >
+                  <Activity className="mr-1 h-3.5 w-3.5" />{" "}
+                  {rehabFeePaid
+                    ? <Lbl full="Update Rehab Fee" short="Rehab" />
+                    : <Lbl full="Collect Rehab Fee" short="Rehab Fee" />}
+                </Button>
+              ) : null;
+
               // The pipeline the lead already carries (diet_stage, diet_consultation_report
               // written by the coach) made visible here — where Branch/Super Admin already
               // are — instead of only on the Nutrition Coach's own board.
@@ -3092,6 +3157,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             {completingConsultation ? "Saving..." : "Mark Consultation Completed"}
                           </Button>
                           {DietButton}
+                        {RehabButton}
+                          {RehabButton}
                           {CancelButton}
                         </div>
                       </div>
@@ -3213,6 +3280,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           </Button>
                         )}
                         {DietButton}
+                        {RehabButton}
                         {CancelButton}
                       </div>
                     </div>
@@ -3232,6 +3300,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             Assign Physio
                           </Button>
                           {DietButton}
+                        {RehabButton}
+                          {RehabButton}
                           {CancelButton}
                         </div>
                       </div>
@@ -3250,6 +3320,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           Reassign Physio
                         </Button>
                         {DietButton}
+                        {RehabButton}
                       </div>
                     </div>
                   );
@@ -3267,7 +3338,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       {/* A closed consultation can still start a diet plan. "Consultation +
                           Diet" patients land here the moment the consultation is marked
                           completed, and that is exactly when their plan gets booked. */}
-                      {DietButton && <div className="mt-3 flex items-center gap-1.5 [justify-content:safe_center] [&>*]:shrink-0">{DietButton}</div>}
+                      {(DietButton || RehabButton) && <div className="mt-3 flex items-center gap-1.5 [justify-content:safe_center] [&>*]:shrink-0">{DietButton}{RehabButton}</div>}
                     </div>
                   );
                 }
@@ -4067,6 +4138,95 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     >
                       {collectingTreatmentFee ? "Saving..." : `Collect ${modeLabel} Payment`}
                     </Button>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Collect the Rehab course fee. One step: the course and its price came from
+                the consultation, so this asks only how it was paid and how much — the
+                amount stays editable for a discount agreed at the desk. */}
+            {rehabFeeDraft && (() => {
+              const mode = rehabFeeDraft.payment_mode;
+              return (
+                <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" data-testid="cons-rehab-fee-modal">
+                  <div className="max-h-[90vh] w-full max-w-sm space-y-3 overflow-y-auto rounded-xl bg-white p-4 shadow-2xl">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-semibold text-slate-800">
+                        {selectedLead.rehab_fee_paid != null ? "Update Rehab Fee" : "Collect Rehab Fee"}
+                      </p>
+                      <button onClick={() => setRehabFeeDraft(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-rehab-fee-close"><X className="h-4 w-4" /></button>
+                    </div>
+
+                    <p className="text-[11px] text-slate-500">
+                      {selectedLead.rehab_package_name || "Rehab course"}
+                      {selectedLead.rehab_package_sessions ? ` · ${selectedLead.rehab_package_sessions} sessions` : ""}
+                      {selectedLead.rehab_package_mode ? <> · <span className="capitalize">{selectedLead.rehab_package_mode}</span></> : null}
+                    </p>
+
+                    <DiscountCalculator
+                      assignedPrice={selectedLead.rehab_package_price}
+                      amount={rehabFeeDraft.amount}
+                      onAmountChange={(v) => setRehabFeeDraft({ ...rehabFeeDraft, amount: v })}
+                      label="Rehab Fee (₹)"
+                      testPrefix="cons-rehab-fee"
+                    />
+
+                    <div>
+                      <label className="mb-1 block text-[11px] font-medium text-slate-500">Payment Mode</label>
+                      <PaymentModeSelect
+                        value={rehabFeeDraft.payment_mode}
+                        options={CONSULTATION_FEE_PAYMENT_MODES}
+                        onChange={(v) => setRehabFeeDraft({ ...rehabFeeDraft, payment_mode: v })}
+                        testId="cons-rehab-fee-mode"
+                      />
+                    </div>
+
+                    {mode === "upi" && (
+                      <div>
+                        <label className="mb-1 block text-[11px] font-medium text-slate-500">UPI Transaction ID</label>
+                        <Input value={rehabFeeDraft.upi_transaction_id} onChange={(e) => setRehabFeeDraft({ ...rehabFeeDraft, upi_transaction_id: e.target.value })} className="h-9" data-testid="cons-rehab-fee-upi-txn" />
+                      </div>
+                    )}
+
+                    {BANK_DETAIL_MODES.includes(mode) && (
+                      <>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium text-slate-500">Account Number</label>
+                          <Input value={rehabFeeDraft.account_number} onChange={(e) => setRehabFeeDraft({ ...rehabFeeDraft, account_number: e.target.value })} className="h-9" data-testid="cons-rehab-fee-account-number" />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium text-slate-500">Account Holder Name</label>
+                          <Input value={rehabFeeDraft.account_holder_name} onChange={(e) => setRehabFeeDraft({ ...rehabFeeDraft, account_holder_name: e.target.value })} className="h-9" data-testid="cons-rehab-fee-account-holder" />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium text-slate-500">Bank Name</label>
+                          <Input value={rehabFeeDraft.bank_name} onChange={(e) => setRehabFeeDraft({ ...rehabFeeDraft, bank_name: e.target.value })} className="h-9" data-testid="cons-rehab-fee-bank-name" />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium text-slate-500">IFSC Code</label>
+                          <Input value={rehabFeeDraft.ifsc_code} onChange={(e) => setRehabFeeDraft({ ...rehabFeeDraft, ifsc_code: e.target.value.toUpperCase() })} className="h-9" data-testid="cons-rehab-fee-ifsc" />
+                        </div>
+                        {mode === "account_transfer" && (
+                          <div>
+                            <label className="mb-1 block text-[11px] font-medium text-slate-500">Reference / UTR No.</label>
+                            <Input value={rehabFeeDraft.transfer_reference} onChange={(e) => setRehabFeeDraft({ ...rehabFeeDraft, transfer_reference: e.target.value })} className="h-9" data-testid="cons-rehab-fee-transfer-reference" />
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    <div className="flex gap-2">
+                      <Button variant="outline" className="flex-1 text-xs" onClick={() => setRehabFeeDraft(null)} data-testid="cons-rehab-fee-cancel">Cancel</Button>
+                      <Button
+                        className="flex-[2] bg-cyan-600 text-xs hover:bg-cyan-700"
+                        onClick={confirmCollectRehabFee}
+                        disabled={collectingRehabFee || !(parseFloat(rehabFeeDraft.amount) > 0)}
+                        data-testid="cons-rehab-fee-submit"
+                      >
+                        {collectingRehabFee ? "Saving..." : `Confirm Rs.${rehabFeeDraft.amount || 0}`}
+                      </Button>
+                    </div>
                   </div>
                 </div>
               );
