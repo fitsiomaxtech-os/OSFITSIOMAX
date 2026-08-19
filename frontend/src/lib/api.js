@@ -504,3 +504,12 @@ export const recruitmentCreateStage = async (payload) => (await api.post("/recru
 export const recruitmentUpdateStage = async (id, payload) => (await api.patch(`/recruitment/stages/${id}`, payload)).data;
 export const recruitmentDeleteStage = async (id) => (await api.delete(`/recruitment/stages/${id}`)).data;
 export const recruitmentReorderStages = async (ids) => (await api.post("/recruitment/stages/reorder", { ids })).data;
+
+// ---- Zumba (Branch Admin's own tab) ----
+// Not a clinical journey and so not a lead: no stage, no consultation, no discharge. The
+// summary splits by where the registration came from, which is the question the branch
+// actually asks of it.
+export const listZumba = async (branchId) => (await api.get("/branch/zumba", { params: branchId ? { branch_id: branchId } : {} })).data;
+export const addZumba = async (payload, branchId) => (await api.post("/branch/zumba", payload, { params: branchId ? { branch_id: branchId } : {} })).data;
+export const updateZumba = async (registrationId, payload) => (await api.patch(`/branch/zumba/${registrationId}`, payload)).data;
+export const deleteZumba = async (registrationId) => (await api.delete(`/branch/zumba/${registrationId}`)).data;
