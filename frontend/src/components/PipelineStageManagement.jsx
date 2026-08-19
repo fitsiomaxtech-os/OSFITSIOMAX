@@ -21,6 +21,10 @@ const TYPES = [
   { key: "consultation", label: "Branch Consultation", kpi: "Branch Consultation Stages", title: "Branch Consultation", tone: "orange", records: "Leads" },
   { key: "head_consultation", label: "Head Consultation", kpi: "Head Consultation Stages", title: "Head Consultation", tone: "sky", records: "Leads" },
   { key: "recruitment", label: "Recruitment", kpi: "Recruitment Stages", title: "Recruitment", tone: "violet", records: "Candidates" },
+  // Registrations, not leads — a dancer is nobody's patient. Ships with no stages at
+  // all: the pipelines above have the shape this clinic already ran, and a Zumba class
+  // has no received one, so the branch names its own with Add Stage.
+  { key: "zumba", label: "Zumba", kpi: "Zumba Stages", title: "Zumba", tone: "pink", records: "Registrations" },
 ];
 
 // Tailwind only ships classes it can actually see written out, so the tones are spelled in
@@ -31,6 +35,7 @@ const TONE_CLASSES = {
   orange: { border: "border-orange-500", text: "text-orange-600" },
   sky: { border: "border-sky-500", text: "text-sky-600" },
   violet: { border: "border-violet-500", text: "text-violet-600" },
+  pink: { border: "border-pink-500", text: "text-pink-600" },
 };
 
 export const PipelineStageManagement = ({ onBack }) => {

@@ -32,7 +32,18 @@ STAGE_TYPE_FIELD = {
 # but the count and the in-use check still have to look somewhere, so they look there.
 RECRUITMENT_TYPE = "recruitment"
 
-StageType = Literal["pre_sales", "sales", "consultation", "head_consultation", "recruitment"]
+# The second pipeline whose records aren't leads. A Zumba registration lives in
+# zumba_registrations and holds the stage's name, so unlike recruitment a rename does
+# have to be written through — it just has to be written to a different collection.
+#
+# Nothing is seeded for it. The other pipelines ship with the stages this clinic
+# already ran; a Zumba class has no such received shape, and inventing one here would
+# put words in the branch's mouth. The tab opens empty with Add Stage on it.
+ZUMBA_TYPE = "zumba"
+ZUMBA_COLLECTION = "zumba_registrations"
+ZUMBA_FIELD = "stage"
+
+StageType = Literal["pre_sales", "sales", "consultation", "head_consultation", "recruitment", "zumba"]
 
 
 class StageCreate(BaseModel):
@@ -121,6 +132,14 @@ async def list_stages(type: Optional[StageType] = None, _: V3UserOut = Depends(v
             r["lead_count"] = by_stage_id.get(r["id"], 0)
         return rows
 
+    if type == ZUMBA_TYPE:
+        by_stage = {}
+        async for row in v3_col(ZUMBA_COLLECTION).aggregate([{"$group": {"_id": f"${ZUMBA_FIELD}", "n": {"$sum": 1}}}]):
+            by_stage[row["_id"]] = row["n"]
+        for r in rows:
+            r["lead_count"] = by_stage.get(r["name"], 0)
+        return rows
+
     counts = {}
     if type:
         field = STAGE_TYPE_FIELD[type]
@@ -159,7 +178,13 @@ async def update_stage(stage_id: str, payload: StageUpdate, _: V3UserOut = Depen
     # candidates point at this stage by id, so there is nothing to rewrite.
     if "name" in updates:
         old = await v3_col("pipeline_stages").find_one({"id": stage_id}, {"_id": 0, "name": 1, "type": 1})
-        if old and old["name"] != updates["name"] and old["type"] != RECRUITMENT_TYPE:
+        renaming = bool(old and old["name"] != updates["name"])
+        if renaming and old["type"] == ZUMBA_TYPE:
+            # Same rewrite the leads get, aimed at the collection registrations live in.
+            await v3_col(ZUMBA_COLLECTION).update_many(
+                {ZUMBA_FIELD: old["name"]}, {"$set": {ZUMBA_FIELD: updates["name"]}}
+            )
+        elif renaming and old["type"] != RECRUITMENT_TYPE:
             field = STAGE_TYPE_FIELD[old["type"]]
             await v3_col("leads").update_many({field: old["name"]}, {"$set": {field: updates["name"]}})
     res = await v3_col("pipeline_stages").update_one({"id": stage_id}, {"$set": updates})
@@ -180,6 +205,12 @@ async def delete_stage(stage_id: str, _: V3UserOut = Depends(v3_require_roles("s
             raise HTTPException(status_code=409, detail=f"Stage in use by {in_use} candidate(s). Move them first.")
         if await v3_col("pipeline_stages").count_documents({"type": RECRUITMENT_TYPE}) <= 1:
             raise HTTPException(status_code=409, detail="A pipeline needs at least one stage")
+        await v3_col("pipeline_stages").delete_one({"id": stage_id})
+        return {"message": "Stage deleted"}
+    if stage["type"] == ZUMBA_TYPE:
+        in_use = await v3_col(ZUMBA_COLLECTION).count_documents({ZUMBA_FIELD: stage["name"]})
+        if in_use > 0:
+            raise HTTPException(status_code=409, detail=f"Stage in use by {in_use} registration(s). Move them first.")
         await v3_col("pipeline_stages").delete_one({"id": stage_id})
         return {"message": "Stage deleted"}
     field = STAGE_TYPE_FIELD[stage["type"]]
