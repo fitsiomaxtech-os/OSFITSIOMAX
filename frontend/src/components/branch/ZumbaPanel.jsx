@@ -18,17 +18,30 @@ const SOURCES = [
 ];
 const sourceLabel = (slug) => (SOURCES.find((s) => s.key === slug) || SOURCES[0]).label;
 
-// The strip, in the order asked for. Fee's Collected sits among the sources rather than
-// at the end because it answers the question asked next — of everyone who registered, how
-// many have actually paid — the same place Fee Collected sits on the Branch Leads bar.
-const CARDS = [
-  { key: "all", label: "All" },
-  { key: "direct", label: "Direct" },
-  { key: "consultant", label: "Consultant" },
-  { key: "branch", label: "Branch" },
-  { key: "fee_collected", label: "Fee's Collected" },
-  { key: "masters", label: "Masters" },
-  { key: "fitsiomax", label: "Fitsiomax" },
+// The strip, in the order asked for, split into the three things it is actually saying:
+// the total on its own, then the three desks a registration can come in through, then the
+// three that answer a different question — how many have paid, and how many arrived from
+// outside the branch. A wider gap between the groups is the whole point; without it seven
+// identical cards read as one undifferentiated row.
+//
+// `grow` keeps every card the same width despite the groups holding different numbers of
+// them: a group grows in proportion to how many cards it holds, so 1 : 3 : 3 divides the
+// row into sevenths rather than into thirds. Written out as literal class names because
+// Tailwind's JIT only compiles what it can read in the source.
+const CARD_GROUPS = [
+  { key: "total", grid: "grid-cols-1", grow: "sm:flex-1", cards: [
+    { key: "all", label: "All" },
+  ] },
+  { key: "sources", grid: "grid-cols-3", grow: "sm:flex-[3]", cards: [
+    { key: "direct", label: "Direct" },
+    { key: "consultant", label: "Consultant" },
+    { key: "branch", label: "Branch" },
+  ] },
+  { key: "reach", grid: "grid-cols-3", grow: "sm:flex-[3]", cards: [
+    { key: "fee_collected", label: "Fee's Collected" },
+    { key: "masters", label: "Masters" },
+    { key: "fitsiomax", label: "Fitsiomax" },
+  ] },
 ];
 
 const rupees = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
@@ -126,20 +139,27 @@ export const ZumbaPanel = ({ branchId }) => {
   return (
     <div className="flex flex-col gap-4" data-testid="branch-zumba-panel">
       {/* Same blank-card strip as Branch Leads: white cards on a grey ground, only the
-          selected one picked out. Four to a row on a phone, so seven land as 4 + 3. */}
+          selected one picked out — but in three groups, separated by a gap three times the
+          one between cards so the split is read as a split rather than as a stray margin.
+          On a phone the groups stack instead, one line each: All, then the three desks,
+          then the three that follow. */}
       <div className="-mx-1 rounded-xl border border-slate-200 bg-slate-100/95 p-1 shadow-sm" data-testid="zumba-summary">
-        <div className="grid grid-cols-4 gap-2 sm:flex sm:flex-nowrap">
-          {CARDS.map((c) => (
-            <StageTab
-              key={c.key}
-              label={c.label}
-              count={summary?.[c.key] || 0}
-              active={card === c.key}
-              onClick={() => setCard(c.key === "all" ? "all" : (card === c.key ? "all" : c.key))}
-              testid={`zumba-card-${c.key}`}
-              gridded
-              plain
-            />
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-nowrap sm:gap-6">
+          {CARD_GROUPS.map((g) => (
+            <div key={g.key} className={"grid gap-2 sm:flex sm:flex-nowrap " + g.grid + " " + g.grow} data-testid={"zumba-group-" + g.key}>
+              {g.cards.map((c) => (
+                <StageTab
+                  key={c.key}
+                  label={c.label}
+                  count={summary?.[c.key] || 0}
+                  active={card === c.key}
+                  onClick={() => setCard(c.key === "all" ? "all" : (card === c.key ? "all" : c.key))}
+                  testid={`zumba-card-${c.key}`}
+                  gridded
+                  plain
+                />
+              ))}
+            </div>
           ))}
         </div>
       </div>
