@@ -2611,14 +2611,30 @@ const CreateUserModal = ({ meta, reloadMeta, onClose, onSaved }) => {
     return map;
   }, [meta.custom_roles]);
 
-  // Every designation across every department, deduped. Super Admin never shows here —
-  // that account can only be created via the OTP-approved Super Admin creation page, same
-  // restriction the role list enforced before designations replaced it.
+  // Every designation across every department, plus every role added under Create Role.
+  //
+  // The roles were the half that was missing. A role is created in order to be given to
+  // somebody, and listing designations alone meant the only way to reach a freshly created
+  // one was to type its title a second time as a designation — the picker offering no
+  // trace of the role that had just been made.
+  //
+  // Deduped on the same letters-only key the resolver matches by, so a designation and a
+  // role of the same name ("Zumba Master" and ZUMBA MASTER) are one row, not two that pick
+  // the same account role. Super Admin never shows: that account can only be created via
+  // the OTP-approved Super Admin creation page.
   const designationOptions = useMemo(() => {
-    const set = new Set();
-    Object.values(meta.department_designations || {}).forEach((list) => (list || []).forEach((d) => set.add(d)));
-    return [...set].filter((d) => roleLabelToSlug[key(d)] !== "super_admin").sort((a, b) => a.localeCompare(b));
-  }, [meta.department_designations, roleLabelToSlug]);
+    const seen = new Set();
+    const labels = [];
+    const add = (label) => {
+      const k = key(label);
+      if (!k || seen.has(k) || roleLabelToSlug[k] === "super_admin") return;
+      seen.add(k);
+      labels.push(label);
+    };
+    Object.values(meta.department_designations || {}).forEach((list) => (list || []).forEach(add));
+    (meta.custom_roles || []).forEach((r) => add(r.label || r.name));
+    return labels.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  }, [meta.department_designations, meta.custom_roles, roleLabelToSlug]);
 
   // A designation that already matches a real access role (built-in or previously created)
   // is used as-is. One that doesn't is created as a new role from that exact title — the
@@ -2691,7 +2707,7 @@ const CreateUserModal = ({ meta, reloadMeta, onClose, onSaved }) => {
           <p className="mt-1 text-[10px] text-slate-400">
             {resolvingRole
               ? "Setting up that role..."
-              : "Designations come from Departments & Designation. One that isn't already a system role gets created as one automatically — page access for it still needs to be built separately."}
+              : "Roles come from Create Role, and job titles from Departments & Designation. A title that isn't already a role gets created as one automatically — either way, page access for a new role still has to be built separately."}
           </p>
         </Field>
         {isMultiBranchRole ? (
