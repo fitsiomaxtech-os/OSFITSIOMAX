@@ -2447,6 +2447,7 @@ export function PatientDetailPage({ patient, physioId, onClose, onRefresh }) {
 function CompleteSessionModal({ session, onClose, onDone }) {
   const [remarks, setRemarks] = useState(session.jr_physio_remarks || "");
   const [rehabRemarks, setRehabRemarks] = useState(session.rehab_remarks || "");
+  const [remarkTab, setRemarkTab] = useState("treatment");
   const [submitting, setSubmitting] = useState(false);
   const isDone = session.status === "completed";
   // Either one on its own is a report. A day of hands-on work with nothing to add about
@@ -2497,34 +2498,65 @@ function CompleteSessionModal({ session, onClose, onDone }) {
             </>
           ) : (
             <>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">
-                  Treatment Remarks <span className="font-normal text-slate-400">(visible to patient)</span>
-                </label>
-                <textarea
-                  value={remarks}
-                  onChange={(e) => setRemarks(e.target.value)}
-                  rows={3}
-                  placeholder="Exercises done, observations, next steps..."
-                  className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
-                  data-testid="session-remarks"
-                />
+              {/* One note at a time. Both textareas stacked made the popup a scroll on a
+                  phone, and a physio writing up a day is only ever in one of them. Neither
+                  is unmounted -- what has been typed into the other is state, not markup,
+                  so switching back and forth cannot lose it. */}
+              <div className="flex gap-1 border-b border-slate-200" data-testid="session-remark-tabs">
+                {[
+                  { key: "treatment", label: "Treatment Remarks", filled: Boolean(remarks.trim()) },
+                  { key: "rehab", label: "Rehab Remarks", filled: Boolean(rehabRemarks.trim()) },
+                ].map((t) => (
+                  <button
+                    key={t.key}
+                    type="button"
+                    onClick={() => setRemarkTab(t.key)}
+                    className={`shrink-0 whitespace-nowrap rounded-t-md px-3 py-2 text-xs font-medium transition ${
+                      remarkTab === t.key ? "border-b-2 border-sky-500 text-sky-700" : "border-b-2 border-transparent text-slate-400 hover:text-slate-600"
+                    }`}
+                    data-testid={`session-remark-tab-${t.key}`}
+                  >
+                    {t.label}
+                    {/* Which tab has been written in. Only one is on screen, so without
+                        this the button below enables itself for a note the physio cannot
+                        see -- and a day written up in the other tab reads as an empty box. */}
+                    {t.filled && <span className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 align-middle" />}
+                  </button>
+                ))}
               </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">
-                  Rehab Remarks <span className="font-normal text-slate-400">(visible to patient)</span>
-                </label>
-                <textarea
-                  value={rehabRemarks}
-                  onChange={(e) => setRehabRemarks(e.target.value)}
-                  rows={3}
-                  placeholder="Home programme, progress against the plan, precautions..."
-                  className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
-                  data-testid="session-rehab-remarks"
-                />
-              </div>
+
+              {remarkTab === "treatment" ? (
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-600">
+                    Treatment Remarks <span className="font-normal text-slate-400">(visible to patient)</span>
+                  </label>
+                  <textarea
+                    value={remarks}
+                    onChange={(e) => setRemarks(e.target.value)}
+                    rows={4}
+                    placeholder="Exercises done, observations, next steps..."
+                    className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
+                    data-testid="session-remarks"
+                  />
+                </div>
+              ) : (
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-600">
+                    Rehab Remarks <span className="font-normal text-slate-400">(visible to patient)</span>
+                  </label>
+                  <textarea
+                    value={rehabRemarks}
+                    onChange={(e) => setRehabRemarks(e.target.value)}
+                    rows={4}
+                    placeholder="Home programme, progress against the plan, precautions..."
+                    className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
+                    data-testid="session-rehab-remarks"
+                  />
+                </div>
+              )}
+
               {/* Said before the press rather than after: the button is disabled until one
-                  of the two has something in it. */}
+                  of the two has something in it -- either tab. */}
               <p className="text-[11px] text-slate-400" data-testid="session-remarks-hint">
                 Fill in at least one of the two.
               </p>
