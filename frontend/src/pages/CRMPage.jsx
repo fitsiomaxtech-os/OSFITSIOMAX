@@ -1161,7 +1161,7 @@ export const CRMPage = ({ auth, onLogout }) => {
         )}
 
         {showAccountantBoard && <AccountantBoard />}
-        {showZumbaBoard && <ZumbaMasterBoard />}
+        {showZumbaBoard && <ZumbaMasterBoard currentUser={auth.user} />}
 
         </div>
       </div>

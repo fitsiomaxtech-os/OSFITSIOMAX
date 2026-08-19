@@ -16,15 +16,23 @@ const MONTHS = [
   "July", "August", "September", "October", "November", "December",
 ];
 
-// Where a registration came from. A master's own referral is stored as "masters", which
-// is what Refer Customer writes; the other slugs arrive from the branch's own tab.
+// Where a registration came from. Kept in step with SOURCES in branch/ZumbaPanel.jsx,
+// which is the tab that writes most of them; a master's own referral is "master" and
+// carries the master's name, which is worth more on the row than the word Master.
 const SOURCE_LABELS = {
-  direct: "Direct",
-  consultant: "Consultant",
+  board: "Board",
+  consultations: "Consultations",
   branch: "Branch",
-  masters: "Masters",
+  social_media: "Social Media",
+  personal: "Personal",
   fitsiomax: "Fitsiomax",
 };
+const MASTER = "master";
+const sourceLabel = (row) => (
+  row.source === MASTER
+    ? (row.master_name || "Master")
+    : (SOURCE_LABELS[row.source] || SOURCE_LABELS.personal)
+);
 
 const rupees = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 
@@ -35,7 +43,7 @@ const shortDate = (iso) => {
   return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 };
 
-const EMPTY_REFERRAL = { name: "", phone: "", fee_amount: "", fee_paid: "", notes: "" };
+const EMPTY_REFERRAL = { name: "", phone: "", age: "", address: "", fee_amount: "", fee_paid: "" };
 
 /** One headline figure. The caption underneath is where the qualification goes, so the
  *  number itself is never asked to carry a footnote. */
@@ -121,7 +129,7 @@ const ClassCalendarModal = ({ students, onClose }) => {
 
 /** Refer a customer into the class. Source is fixed: this form exists to record the ones
  *  a master brought in, which is exactly what the "Masters" source counts. */
-const ReferCustomerModal = ({ onClose, onSaved }) => {
+const ReferCustomerModal = ({ masterName, onClose, onSaved }) => {
   const [form, setForm] = useState({ ...EMPTY_REFERRAL });
   const [saving, setSaving] = useState(false);
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
@@ -133,10 +141,14 @@ const ReferCustomerModal = ({ onClose, onSaved }) => {
       await addZumba({
         name: form.name.trim(),
         phone: (form.phone || "").trim(),
-        source: "masters",
+        age: form.age === "" ? null : Number(form.age),
+        address: (form.address || "").trim(),
+        source: MASTER,
+        // Signed with the master's own name, so the branch's tab reads who referred them
+        // rather than an anonymous "Master".
+        master_name: masterName || "",
         fee_amount: Number(form.fee_amount || 0),
         fee_paid: Number(form.fee_paid || 0),
-        notes: (form.notes || "").trim(),
       });
       toast.success("Customer referred");
       onSaved();
@@ -161,9 +173,19 @@ const ReferCustomerModal = ({ onClose, onSaved }) => {
             <label className="mb-1 block text-xs font-semibold text-slate-600">Name *</label>
             <Input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="Customer name" data-testid="zumba-refer-name" />
           </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-slate-600">Phone</label>
+              <Input value={form.phone} onChange={(e) => set("phone", e.target.value)} placeholder="Mobile number" data-testid="zumba-refer-phone" />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-slate-600">Age</label>
+              <Input type="number" min="0" value={form.age} onChange={(e) => set("age", e.target.value)} placeholder="—" data-testid="zumba-refer-age" />
+            </div>
+          </div>
           <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600">Phone</label>
-            <Input value={form.phone} onChange={(e) => set("phone", e.target.value)} placeholder="Mobile number" data-testid="zumba-refer-phone" />
+            <label className="mb-1 block text-xs font-semibold text-slate-600">Address</label>
+            <Input value={form.address} onChange={(e) => set("address", e.target.value)} placeholder="Area, city" data-testid="zumba-refer-address" />
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div>
@@ -175,19 +197,8 @@ const ReferCustomerModal = ({ onClose, onSaved }) => {
               <Input type="number" min="0" value={form.fee_paid} onChange={(e) => set("fee_paid", e.target.value)} placeholder="0" data-testid="zumba-refer-fee-paid" />
             </div>
           </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600">Notes</label>
-            <textarea
-              rows={2}
-              className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-violet-400 focus:outline-none focus:ring-1 focus:ring-violet-400"
-              value={form.notes}
-              onChange={(e) => set("notes", e.target.value)}
-              placeholder="Anything the branch should know"
-              data-testid="zumba-refer-notes"
-            />
-          </div>
           <p className="rounded-md bg-violet-50 px-3 py-2 text-[11px] font-medium text-violet-700">
-            Recorded against your branch with <b>Masters</b> as the source, so the branch sees who brought them in.
+            Recorded against your branch, referred by <b>{masterName || "you"}</b>, so the branch sees who brought them in.
           </p>
         </div>
 
@@ -213,7 +224,7 @@ const ReferCustomerModal = ({ onClose, onSaved }) => {
  * The branch is never passed: the server scopes a Zumba account to the branch it was
  * hired into, exactly as it scopes a Branch Admin.
  */
-export const ZumbaMasterBoard = () => {
+export const ZumbaMasterBoard = ({ currentUser }) => {
   const [rows, setRows] = useState([]);
   const [summary, setSummary] = useState({});
   const [loading, setLoading] = useState(true);
@@ -334,7 +345,7 @@ export const ZumbaMasterBoard = () => {
                         <td className="px-3 py-2.5 text-slate-600">{r.phone || "—"}</td>
                         <td className="px-3 py-2.5">
                           <span className="rounded bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
-                            {SOURCE_LABELS[r.source] || SOURCE_LABELS.direct}
+                            {sourceLabel(r)}
                           </span>
                         </td>
                         <td className="px-3 py-2.5">
@@ -352,7 +363,7 @@ export const ZumbaMasterBoard = () => {
         </CardContent>
       </Card>
 
-      {referring && <ReferCustomerModal onClose={() => setReferring(false)} onSaved={load} />}
+      {referring && <ReferCustomerModal masterName={currentUser?.full_name || ""} onClose={() => setReferring(false)} onSaved={load} />}
       {showCalendar && <ClassCalendarModal students={summary.all ?? 0} onClose={() => setShowCalendar(false)} />}
     </div>
   );
