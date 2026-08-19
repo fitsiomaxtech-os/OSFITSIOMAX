@@ -80,6 +80,12 @@ export const getTreatmentTypes = async () => (await api.get("/treatment-types"))
 export const createTreatmentType = async (payload) => (await api.post("/treatment-types", payload)).data;
 export const deleteTreatmentType = async (id) => (await api.delete(`/treatment-types/${id}`)).data;
 
+// Type of Physios — the physiotherapy services offered, Super Admin > Services and
+// Products. A name each, like treatments; prices live on the store packages.
+export const getPhysioTypes = async () => (await api.get("/physio-types")).data;
+export const createPhysioType = async (payload) => (await api.post("/physio-types", payload)).data;
+export const deletePhysioType = async (id) => (await api.delete(`/physio-types/${id}`)).data;
+
 export const getBranches = async () => (await api.get("/branches")).data;
 export const createBranch = async (payload) => (await api.post("/branches", payload)).data;
 export const updateBranch = async (branchId, payload) => (await api.put(`/branches/${branchId}`, payload)).data;

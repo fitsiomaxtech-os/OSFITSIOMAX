@@ -7,6 +7,7 @@ import { listStoreItems, getBranches } from "@/lib/api";
 import { StoreInventoryPanel } from "@/components/branch/StoreInventoryPanel";
 import {
   TABS,
+  SUPER_ADMIN_CATALOGUE_TABS,
   MODE_TAB_KEYS,
   CONSULTATIONS_SUBTABS,
   SESSIONS_SUBTABS,
@@ -269,7 +270,9 @@ export const FitsiomaxStorePanel = ({ branchId }) => {
   }, [branchId]);
 
   const modeFilter = mode || "all";
-  const branchStoreTabs = TABS.filter((t) => MODE_TAB_KEYS[modeFilter].has(t.key));
+  const branchStoreTabs = TABS.filter(
+    (t) => MODE_TAB_KEYS[modeFilter].has(t.key) && !SUPER_ADMIN_CATALOGUE_TABS.has(t.key),
+  );
 
   // Falls back to Consultations rather than leaving `tab` pointed at a key this branch's
   // own mode doesn't carry, once its vertical is known.

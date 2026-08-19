@@ -8,6 +8,7 @@ import { toast } from "@/components/ui/sonner";
 import { uploadStoreImage, createStoreItem, updateStoreItem, deleteStoreItem, listStoreItems, getPaymentHistory, getFollowUpHistory, getLoginHistory, getBranches } from "@/lib/api";
 import { StoreInventoryPanel } from "@/components/branch/StoreInventoryPanel";
 import { TreatmentTypesBoard } from "@/components/TreatmentTypesBoard";
+import { PhysioTypesBoard } from "@/components/PhysioTypesBoard";
 
 export const TABS = [
   { key: "consultations", label: "Consultations", icon: Stethoscope },
@@ -27,6 +28,9 @@ export const TABS = [
   // Moved in from its own top-level nav tab — the treatment catalogue belongs beside the
   // other things Super Admin catalogues here, not among Dashboard/HR/Branches.
   { key: "treatment", label: "Treatments", icon: ClipboardList },
+  // Beside Treatments, and after it, because the two are read together: a treatment is
+  // what is wrong with the patient, a physio type is the service sold to them.
+  { key: "physio_type", label: "Type of Physios", icon: Activity },
   { key: "history", label: "History", icon: History },
 ];
 
@@ -1213,7 +1217,7 @@ const SESSION_LIKE_TABS = {
   fitness: { category: "fitness", noun: "fitness package" },
 };
 
-const BUILT_TABS = new Set(["consultations", "sessions", "rehab", "zumba", "fitness", "diet", "history", "treatment", ...INVENTORY_TABS]);
+const BUILT_TABS = new Set(["consultations", "sessions", "rehab", "zumba", "fitness", "diet", "history", "treatment", "physio_type", ...INVENTORY_TABS]);
 
 // TABS above stays a flat, unbroken export — BranchStoreBoard.jsx imports and filters it
 // for its own layout too, and reshaping it here would reshape that board's as well.
@@ -1223,10 +1227,20 @@ const BUILT_TABS = new Set(["consultations", "sessions", "rehab", "zumba", "fitn
 // unrestricted (the full catalogue, Vending Machine included, since it isn't yet sorted
 // into either mode); Offline drops Vending Machine; Online drops everything that only
 // makes sense at a physical location (Tablet, Supplementary, Equipment, Vending Machine).
+// Catalogue tabs only Super Admin maintains. They ride in MODE_TAB_KEYS because that is
+// what decides which tabs a mode shows, but a branch has no business in them: the write
+// endpoints are super_admin-only, so a branch would get a list it cannot add to and a
+// button that 403s. BranchStoreBoard subtracts these.
+//
+// Treatments is deliberately not in here. It already shows in the branch store and has
+// since it was built; taking it away is a change to what branches see today, and not
+// one to make as a side effect of adding a neighbouring tab.
+export const SUPER_ADMIN_CATALOGUE_TABS = new Set(["physio_type"]);
+
 export const MODE_TAB_KEYS = {
-  all: new Set(["consultations", "sessions", "rehab", "zumba", "fitness", "diet", "tablet", "supplementary", "equipment", "vending_machine", "treatment"]),
-  offline: new Set(["consultations", "sessions", "rehab", "zumba", "fitness", "diet", "tablet", "supplementary", "equipment", "treatment"]),
-  online: new Set(["consultations", "sessions", "rehab", "fitness", "diet", "treatment"]),
+  all: new Set(["consultations", "sessions", "rehab", "zumba", "fitness", "diet", "tablet", "supplementary", "equipment", "vending_machine", "treatment", "physio_type"]),
+  offline: new Set(["consultations", "sessions", "rehab", "zumba", "fitness", "diet", "tablet", "supplementary", "equipment", "treatment", "physio_type"]),
+  online: new Set(["consultations", "sessions", "rehab", "fitness", "diet", "treatment", "physio_type"]),
 };
 
 const MODE_FILTERS = [
@@ -1475,6 +1489,7 @@ export const PackagesBoard = () => {
       {view === "catalog" && tab === "diet" && <PhysiotherapyPanel kind="diet_package" reloadToken={reloadTick} toolbarSlot={createSlot} />}
       {view === "history" && <HistoryPanel reloadToken={reloadTick} />}
       {view === "catalog" && tab === "treatment" && <TreatmentTypesBoard />}
+      {view === "catalog" && tab === "physio_type" && <PhysioTypesBoard />}
       {view === "catalog" && INVENTORY_TABS.has(tab) && <SuperAdminInventoryPanel key={tab} category={tab} reloadToken={reloadTick} />}
       {/* Whatever has no panel yet. A tab graduates by being handled above rather than by
           another branch being added here. */}

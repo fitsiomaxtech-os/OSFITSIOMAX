@@ -62,6 +62,21 @@ class V3TreatmentTypeOut(BaseModel):
     created_at: str
 
 
+# Type of Physios — the kinds of physiotherapy service the clinic offers, kept the same
+# shape as a treatment type for the same reason: a name is the whole record, because the
+# price and the session count belong to a package in FITSIO STORE.
+class V3PhysioTypeCreate(BaseModel):
+    name: str
+
+
+class V3PhysioTypeOut(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    name: str
+    created_at: str
+
+
 class V3BranchCreate(BaseModel):
     branch_name: str
     address: str

@@ -17,6 +17,7 @@ from schemas.v3 import (
     V3TeamMemberCreate, V3TeamMemberOut,
     V3DoctorCreate, V3DoctorSlotsInput, V3DoctorOut,
     V3TreatmentTypeCreate, V3TreatmentTypeOut,
+    V3PhysioTypeCreate, V3PhysioTypeOut,
 )
 
 router = APIRouter(prefix="/api/v3")
@@ -112,6 +113,52 @@ async def v3_delete_treatment_type(treatment_type_id: str, _: V3UserOut = Depend
         raise HTTPException(status_code=404, detail="Treatment not found")
     return {"message": "Treatment deleted"}
 
+
+# Type of Physios — which kinds of physiotherapy the clinic offers.
+#
+# The same shape as treatment types above, and deliberately so: a name and nothing else,
+# because the price, the session count and the duration belong to a package in FITSIO
+# STORE. Two lists rather than one because they answer different questions — a treatment
+# is what is wrong with the patient, a physio type is the service being sold.
+
+
+@router.get("/physio-types", response_model=List[V3PhysioTypeOut])
+async def v3_get_physio_types(_: V3UserOut = Depends(v3_current_user)):
+    # Any signed-in user reads it, like the treatment list: this is a picklist, and the
+    # people who pick from it are the ones seeing patients, not the one maintaining it.
+    rows = await v3_col("physio_types").find({}, {"_id": 0}).sort("name", 1).to_list(500)
+    return [V3PhysioTypeOut(**row) for row in rows]
+
+
+@router.post("/physio-types", response_model=V3PhysioTypeOut)
+async def v3_add_physio_type(payload: V3PhysioTypeCreate, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    name = (payload.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Service name is required")
+    # Case-insensitive: "Sports Physio" and "sports physio" are one service, and a picklist
+    # holding both is a picklist nobody trusts.
+    clash = await v3_col("physio_types").find_one(
+        {"name": {"$regex": f"^{re.escape(name)}$", "$options": "i"}}, {"_id": 0, "name": 1}
+    )
+    if clash:
+        raise HTTPException(status_code=409, detail=f"'{clash['name']}' already exists")
+    doc = {"id": str(uuid.uuid4()), "name": name, "created_at": now_iso()}
+    await v3_col("physio_types").insert_one(doc.copy())
+    return V3PhysioTypeOut(**doc)
+
+
+@router.delete("/physio-types/{physio_type_id}")
+async def v3_delete_physio_type(physio_type_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
+    """Remove a service from the Type of Physios list.
+
+    Unguarded for the same reason the treatment delete is: nothing in the OS references one
+    yet, so there is nothing to strand. The moment something does, this needs the check
+    v3_delete_vertical has — refusing while it is referenced and naming what still holds it.
+    """
+    res = await v3_col("physio_types").delete_one({"id": physio_type_id})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Service not found")
+    return {"message": "Service deleted"}
 
 @router.get("/branches", response_model=List[V3BranchOut])
 async def v3_get_branches(_: V3UserOut = Depends(v3_current_user)):
