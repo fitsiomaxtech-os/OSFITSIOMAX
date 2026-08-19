@@ -351,16 +351,14 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
   // amount, not a per-session rate. What is stored is still the rate (see submit) — this is
   // only about which figure the person filling the form is asked for.
   const isCourseTotal = COURSE_TOTAL_CATEGORIES.has(category);
-  // Zumba's two dials, in the terms it is actually sold in: how many months, and what the
-  // membership costs. Everything else about the plan is fixed.
+  // Zumba has one dial: how many months. The membership is sold at a standard price, so
+  // the amount is a property of the plan rather than something typed beside it — as a free
+  // field it drifted, and a 1 Month membership could be saved at 9,600.
   const [planMonths, setPlanMonths] = useState(
     () => zumbaMonthsFor(item?.sessions_offline || item?.sessions_online || 0) || ZUMBA_PLANS[0].months,
   );
-  const [planPrice, setPlanPrice] = useState(() => (
-    item
-      ? packageTotalFrom(item.price_offline ?? item.price_online, item.sessions_offline || item.sessions_online)
-      : ZUMBA_PLANS[0].price
-  ));
+  const zumbaPlan = ZUMBA_PLANS.find((p) => p.months === planMonths) || ZUMBA_PLANS[0];
+  const planPrice = zumbaPlan.price;
   const [name, setName] = useState(item?.name || "");
   const [description, setDescription] = useState(item?.description || "");
   // On a course-priced shelf these hold the course total, recovered from the stored rate
@@ -404,7 +402,6 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
 
   const submit = async () => {
     if (!name.trim()) { toast.error("Package name is required"); return; }
-    if (isZumba && !(Number(planPrice) > 0)) { toast.error("Plan amount is required"); return; }
     setSaving(true);
     try {
       let image_url = item?.image_url || null;
@@ -509,7 +506,7 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
                 <button
                   key={plan.months}
                   type="button"
-                  onClick={() => { setPlanMonths(plan.months); setPlanPrice(plan.price); }}
+                  onClick={() => setPlanMonths(plan.months)}
                   className={`rounded-lg border px-3 py-2 text-sm font-semibold transition ${planMonths === plan.months ? "border-violet-300 bg-violet-50 text-violet-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}
                   data-testid={`zumba-plan-${plan.months}m`}
                 >
@@ -523,11 +520,9 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
                 <div className="flex items-center justify-between"><span>Days</span><span className="font-bold">{ZUMBA_CLASS_DAYS}</span></div>
                 <div className="flex items-center justify-between"><span>Classes a month</span><span className="font-bold">{ZUMBA_CLASSES_PER_MONTH}</span></div>
                 <div className="flex items-center justify-between"><span>Total classes</span><span className="font-bold" data-testid="zumba-plan-sessions">{sessions}</span></div>
-              </div>
-              <label className="mb-0.5 mt-2 block text-[10px] font-semibold text-violet-700">Plan Amount</label>
-              <div className="relative">
-                <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-violet-600">₹</span>
-                <Input type="number" min="0" value={planPrice} onChange={(e) => setPlanPrice(e.target.value)} className="h-8 pl-6 text-sm" data-testid="zumba-plan-price" />
+                {/* Stated, not typed. The price belongs to the plan — picking the term is
+                    what sets it, and an editable box here is what let one drift. */}
+                <div className="flex items-center justify-between"><span>Plan amount</span><span className="font-bold" data-testid="zumba-plan-price">₹{planPrice}</span></div>
               </div>
               <div className="mt-2 flex items-center justify-between border-t border-violet-200 pt-1.5">
                 <span className="text-[11px] font-semibold text-violet-700">Per Class</span>
