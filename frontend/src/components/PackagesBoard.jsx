@@ -1453,7 +1453,11 @@ export const PackagesBoard = () => {
       </div>
 
       {view === "catalog" && (
-        <div className="hidden gap-1 overflow-x-auto rounded-lg border border-slate-200 bg-white p-1 md:flex" data-testid="packages-subtabs">
+        // Wraps onto a second row rather than scrolling sideways. As a scroller the last
+        // tab sat half-cut at the right edge with nothing to say the row continued — and
+        // this is the one tab bar in the app that scrolled; its own sub-tab rows, and the
+        // branch store's copy of this same bar, have always wrapped.
+        <div className="hidden flex-wrap gap-1 rounded-lg border border-slate-200 bg-white p-1 md:flex" data-testid="packages-subtabs">
           {visibleTabs.map((t) => {
             const Icon = t.icon;
             const active = tab === t.key;
