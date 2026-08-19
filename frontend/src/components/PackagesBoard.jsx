@@ -289,8 +289,13 @@ const CreateConsultationModal = ({ item, onClose, onSaved, kind = "consultation"
 };
 
 // A package's session count doesn't vary by Online vs Offline, only the per-session
-// price does — no dropdown to configure it, it's fixed for every package.
+// price does — no dropdown to configure it, it's fixed per catalogue.
 const FIXED_SESSIONS = 7;
+
+// Rehab runs a longer course than the rest, so its shelf is fixed at its own length.
+// Anything not named here keeps the standard count.
+const FIXED_SESSIONS_BY_CATEGORY = { rehab: 26 };
+const fixedSessionsFor = (category) => FIXED_SESSIONS_BY_CATEGORY[category] ?? FIXED_SESSIONS;
 
 const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiotherapy" }) => {
   const isEdit = Boolean(item);
@@ -310,7 +315,10 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
     setImagePreview(URL.createObjectURL(file));
   };
 
-  const sessions = FIXED_SESSIONS;
+  // An existing package keeps the count it was saved with. Editing one to correct a price
+  // should not quietly relabel it as a course of a different length — which is exactly what
+  // recalculating from the catalogue default would do to everything saved before this.
+  const sessions = item?.sessions_online || item?.sessions_offline || fixedSessionsFor(category);
   const totalOnline = (Number(priceOnline) || 0) * sessions;
   const totalOffline = (Number(priceOffline) || 0) * sessions;
 
