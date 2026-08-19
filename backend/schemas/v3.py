@@ -272,6 +272,15 @@ class V3LeadOut(BaseModel):
     session_package_price: Optional[float] = None
     session_package_sessions: Optional[int] = None
     session_package_mode: Optional[str] = None
+    # The Rehab course (FITSIO STORE > Rehab) chosen alongside the Rehab referral, kept
+    # apart from session_package_* because a patient can be sent away with treatment and
+    # rehab both, and one set of fields could only hold one of them. This model ignores
+    # extras, so without these the board could never show back what was chosen.
+    rehab_package_id: Optional[str] = None
+    rehab_package_name: Optional[str] = None
+    rehab_package_price: Optional[float] = None
+    rehab_package_sessions: Optional[int] = None
+    rehab_package_mode: Optional[str] = None
     consultation_decision: Optional[str] = None  # "consultation_only" | "consultation_treatment" — set by Head Physio at Save & Move
     # Whether the Head Physio also referred this patient to a Nutrition Coach. Orthogonal
     # to consultation_decision — see V3ConsultationDecisionInput.
@@ -509,6 +518,10 @@ class V3ConsultationDecisionInput(BaseModel):
     item_id: Optional[str] = None
     mode: Literal["online", "offline"] = "offline"
     sessions_override: Optional[int] = None
+    # The Rehab course, when one is picked alongside rehab_referred. Optional on purpose:
+    # referring to Rehab without settling the course is the flow that existed before this
+    # field, and the receipt still says "Waiting on a package in Rehab" for it.
+    rehab_item_id: Optional[str] = None
 
 
 class V3AssignPhysioSessionsInput(BaseModel):

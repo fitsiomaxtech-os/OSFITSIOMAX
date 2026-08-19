@@ -724,7 +724,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // have to be written first, but no add-on has to be picked — every toggle starts off,
   // which submits as a plain Consultation, the same as a patient who needs nothing else.
   // Picking Treatment reveals the Treatment Package (names only, no prices shown here).
-  const [decisionDraft, setDecisionDraft] = useState({ treatment: false, diet: false, rehab: false, fitness: false, item_id: "", mode: "offline", sessionsPerWeek: "" });
+  const [decisionDraft, setDecisionDraft] = useState({ treatment: false, diet: false, rehab: false, fitness: false, item_id: "", rehab_item_id: "", mode: "offline", sessionsPerWeek: "" });
   const [savingDecision, setSavingDecision] = useState(false);
   // The confirmation shown after a decision saves, and the flag that reopens the form
   // behind it. Both clear when the popup moves to another lead.
@@ -929,7 +929,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     setRescheduleDraft(null);
     setCollectFeeDraft(null);
     setTreatmentFeeDraft(null);
-    setDecisionDraft({ treatment: false, diet: false, rehab: false, fitness: false, item_id: "", mode: "offline", sessionsPerWeek: "" });
+    setDecisionDraft({ treatment: false, diet: false, rehab: false, fitness: false, item_id: "", rehab_item_id: "", mode: "offline", sessionsPerWeek: "" });
     setDecisionReceipt(null);
     setEditingDecision(false);
   }, [selectedLead?.id]);
@@ -946,7 +946,16 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
 
   // Session packages (weeks/session-count items) — the Treatment Package chosen
   // as part of the Consultation Decision (Consultation + Treatment only).
-  const treatmentPackageItems = storeItems.filter((i) => i.item_type === "session");
+  //
+  // Physiotherapy only. Rehab, Zumba and Fitness are written as session items too, so a
+  // bare item_type check offered a Zumba class as a Treatment Package. An item saved
+  // before the other shelves existed carries no category and is a treatment package by
+  // definition, so it keeps its place here.
+  const treatmentPackageItems = storeItems.filter((i) => i.item_type === "session" && (i.category || "physiotherapy") === "physiotherapy");
+  // The Rehab shelf, offered beside the referral itself. A rehab course is a session item
+  // under its own category and is priced the same way — a per-session rate whose total is
+  // the rate times the course's session count.
+  const rehabPackageItems = storeItems.filter((i) => i.item_type === "session" && i.category === "rehab");
 
   const moveStage = async (lead, next) => {
     if (next === lead.consultation_stage) return;
@@ -973,6 +982,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       decision,
       diet_recommended: decisionDraft.diet,
       rehab_referred: decisionDraft.rehab,
+      // Only meaningful with the referral, and the server enforces the same pairing.
+      rehab_item_id: decisionDraft.rehab ? decisionDraft.rehab_item_id || null : null,
       fitness_recommended: decisionDraft.fitness,
       mode: decisionDraft.mode,
     };
@@ -1047,6 +1058,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       rehab: !!lead.rehab_referred,
       fitness: !!lead.fitness_recommended,
       item_id: lead.session_package_id || "",
+      rehab_item_id: lead.rehab_package_id || "",
       mode: lead.consultation_mode || "offline",
       sessionsPerWeek: weeks && total ? String(Math.round(total / weeks)) : "",
     });
@@ -2632,6 +2644,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                               ...d,
                               [p.key]: !d[p.key],
                               ...(p.key === "treatment" && d.treatment ? { item_id: "", sessionsPerWeek: "" } : {}),
+                              ...(p.key === "rehab" && d.rehab ? { rehab_item_id: "" } : {}),
                             }))}
                             className="shrink-0 whitespace-nowrap rounded-md border px-3 py-1.5 text-xs font-semibold transition hover:brightness-95"
                             style={selected
@@ -2645,6 +2658,53 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       })}
                     </div>
                   </div>
+
+                  {/* The Rehab shelf from Services and Products, offered the moment Rehab is
+                      ticked. Optional: referring to Rehab and settling the course later is
+                      the flow that existed before this picker, and the receipt still reads
+                      "Waiting on a package in Rehab" when nothing is chosen. */}
+                  {decisionDraft.rehab && (
+                    <div data-testid="cons-decision-rehab-package">
+                      <label className="mb-1 block text-[11px] font-medium text-slate-500">Rehab Package <span className="font-normal text-slate-400">(optional)</span></label>
+                      <div className="flex flex-wrap gap-2" data-testid="cons-decision-rehab-options">
+                        {rehabPackageItems.map((i) => {
+                          const selected = decisionDraft.rehab_item_id === i.id;
+                          return (
+                            <button
+                              key={i.id}
+                              type="button"
+                              // Clicking the chosen one again clears it, which is the only
+                              // way back to no course once one has been picked.
+                              onClick={() => setDecisionDraft((p) => ({ ...p, rehab_item_id: selected ? "" : i.id }))}
+                              className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition ${
+                                selected
+                                  ? "border-cyan-600 bg-cyan-600 text-white"
+                                  : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                              }`}
+                              data-testid={`cons-decision-rehab-option-${i.id}`}
+                            >
+                              {i.name}
+                            </button>
+                          );
+                        })}
+                        {rehabPackageItems.length === 0 && (
+                          <p className="text-xs text-slate-400">No rehab packages in Services and Products yet.</p>
+                        )}
+                      </div>
+                      {/* Session count only, never the price — the same rule the Treatment
+                          picker follows, with the amount shown to Branch Admin at collection. */}
+                      {decisionDraft.rehab_item_id && (() => {
+                        const item = rehabPackageItems.find((i) => i.id === decisionDraft.rehab_item_id);
+                        if (!item) return null;
+                        const count = decisionDraft.mode === "online" ? item.sessions_online : item.sessions_offline;
+                        return (
+                          <p className="mt-2 text-xs text-slate-500" data-testid="cons-decision-rehab-summary">
+                            {item.name}{count ? ` · ${count} sessions` : ""}
+                          </p>
+                        );
+                      })()}
+                    </div>
+                  )}
 
                   {/* Only the two plans that include treatment need a package. Showing it
                       for the others would ask for a decision that has no meaning. */}

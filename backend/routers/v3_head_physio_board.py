@@ -402,6 +402,29 @@ async def hp_consultation_decision(
         })
         detail += f" · Package: {item['name']} ({sessions} sessions)"
 
+    # The Rehab course, priced exactly like a treatment package: price_online /
+    # price_offline is a per-session rate in every case, so a course shelf's total is
+    # that rate x the course's own session count and arrives back at the figure typed
+    # into the catalogue. Only accepted alongside the referral — a rehab course on a
+    # patient who was never sent to rehab is a fee nobody would know to collect.
+    if payload.rehab_referred and payload.rehab_item_id:
+        rehab_item = await v3_col("store_items").find_one({"id": payload.rehab_item_id}, {"_id": 0})
+        if not rehab_item:
+            raise HTTPException(status_code=404, detail="Rehab package not found")
+        if rehab_item.get("item_type") != "session" or rehab_item.get("category") != "rehab":
+            raise HTTPException(status_code=400, detail="That item is not a Rehab package")
+        r_rate = rehab_item.get("price_online") if payload.mode == "online" else rehab_item.get("price_offline")
+        r_sessions = rehab_item.get("sessions_online") if payload.mode == "online" else rehab_item.get("sessions_offline")
+        r_price = round(r_rate * r_sessions, 2) if r_rate is not None and r_sessions else r_rate
+        updates.update({
+            "rehab_package_id": rehab_item["id"],
+            "rehab_package_name": rehab_item["name"],
+            "rehab_package_price": r_price,
+            "rehab_package_sessions": r_sessions,
+            "rehab_package_mode": payload.mode,
+        })
+        detail += f" · Rehab: {rehab_item['name']} ({r_sessions} sessions)"
+
     await v3_col("leads").update_one({"id": lead_id}, {"$set": updates})
     await v3_col("lead_activity").insert_one({
         "id": str(uuid.uuid4()),
