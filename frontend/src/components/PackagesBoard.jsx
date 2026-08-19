@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Stethoscope, CalendarRange, Pill, Dumbbell, ShoppingCart, Activity, Plus, X, FlaskConical, Pencil, Trash2, ImagePlus, Wifi, MapPin, Clock, Eye, History, Salad, ChevronDown, RefreshCw, ClipboardList } from "lucide-react";
+import { Stethoscope, CalendarRange, Pill, Dumbbell, ShoppingCart, Activity, Plus, X, FlaskConical, Pencil, Trash2, ImagePlus, Wifi, MapPin, Clock, Eye, History, Salad, ChevronDown, RefreshCw, ClipboardList, HeartPulse, Music2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,6 +12,13 @@ import { TreatmentTypesBoard } from "@/components/TreatmentTypesBoard";
 export const TABS = [
   { key: "consultations", label: "Consultations", icon: Stethoscope },
   { key: "sessions", label: "Sessions", icon: CalendarRange },
+  // Three more programmes sold the same way a session package is — same create form, same
+  // per-session pricing — each with its own catalogue rather than a sub-tab of Sessions,
+  // because that is the shelf a branch browses them from. Zumba is offline only; the
+  // other two sell both ways (see MODE_TAB_KEYS).
+  { key: "rehab", label: "Rehab", icon: HeartPulse },
+  { key: "zumba", label: "Zumba Class", icon: Music2 },
+  { key: "fitness", label: "Fitness", icon: Dumbbell },
   { key: "diet", label: "Diet Package", icon: Salad },
   { key: "tablet", label: "Tablet", icon: Pill },
   { key: "supplementary", label: "Supplementary", icon: FlaskConical },
@@ -574,7 +581,7 @@ export const ViewItemModal = ({ item, kind, onClose, onEdit, canEdit = true }) =
 
 // Backs both Sessions sub-tabs; see PhysiotherapyPanel for why this is one component
 // with a category rather than two copies.
-const SessionsPhysiotherapyPanel = ({ category = "physiotherapy", reloadToken, toolbarSlot, modeFilter = "all" }) => {
+const SessionsPhysiotherapyPanel = ({ category = "physiotherapy", reloadToken, toolbarSlot, modeFilter = "all", noun = "session package" }) => {
   const [items, setItems] = useState([]);
   const [showCreate, setShowCreate] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
@@ -588,7 +595,7 @@ const SessionsPhysiotherapyPanel = ({ category = "physiotherapy", reloadToken, t
     if (!window.confirm(`Permanently delete "${it.name}"? This cannot be undone.`)) return;
     try {
       await deleteStoreItem(it.id);
-      toast.success("Session package deleted permanently");
+      toast.success(`${noun.charAt(0).toUpperCase()}${noun.slice(1)} deleted permanently`);
       loadItems();
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed to delete");
@@ -600,8 +607,8 @@ const SessionsPhysiotherapyPanel = ({ category = "physiotherapy", reloadToken, t
       {toolbarSlot && createPortal(
         <Button
           onClick={() => setShowCreate(true)}
-          title="Create session package"
-          aria-label="Create session package"
+          title={`Create ${noun}`}
+          aria-label={`Create ${noun}`}
           className="h-11 w-11 shrink-0 p-0"
           data-testid={`sessions-${category}-create-btn-mobile`}
         >
@@ -618,7 +625,7 @@ const SessionsPhysiotherapyPanel = ({ category = "physiotherapy", reloadToken, t
       {items.length === 0 ? (
         <Card>
           <CardContent className="p-8 text-center text-sm text-slate-400">
-            No session packages yet. Click Create to add one.
+            No {noun}s yet. Click Create to add one.
           </CardContent>
         </Card>
       ) : (
@@ -1034,7 +1041,23 @@ const INVENTORY_TABS = new Set(["tablet", "supplementary", "equipment"]);
 
 // Which tabs have a panel. Everything else falls through to the placeholder; Vending
 // Machine is the only one left, and it has no backend at all yet.
-const BUILT_TABS = new Set(["consultations", "sessions", "diet", "history", "treatment", ...INVENTORY_TABS]);
+/**
+ * The tabs that are a session package under another name: Rehab, Zumba Class and Fitness.
+ *
+ * Each is its own catalogue (`category`) sold through the session form, so Create on any of
+ * them opens exactly what Sessions opens. `noun` only changes the wording on the empty
+ * state and the button's title — the shelf, the form and the record are the same shape.
+ *
+ * Fitness deliberately points at the category the Sessions > Fitness sub-tab already
+ * writes to, so the tab shows that catalogue rather than an empty second one beside it.
+ */
+const SESSION_LIKE_TABS = {
+  rehab: { category: "rehab", noun: "rehab package" },
+  zumba: { category: "zumba", noun: "Zumba class" },
+  fitness: { category: "fitness", noun: "fitness package" },
+};
+
+const BUILT_TABS = new Set(["consultations", "sessions", "rehab", "zumba", "fitness", "diet", "history", "treatment", ...INVENTORY_TABS]);
 
 // TABS above stays a flat, unbroken export — BranchStoreBoard.jsx imports and filters it
 // for its own layout too, and reshaping it here would reshape that board's as well.
@@ -1045,9 +1068,9 @@ const BUILT_TABS = new Set(["consultations", "sessions", "diet", "history", "tre
 // into either mode); Offline drops Vending Machine; Online drops everything that only
 // makes sense at a physical location (Tablet, Supplementary, Equipment, Vending Machine).
 export const MODE_TAB_KEYS = {
-  all: new Set(["consultations", "sessions", "diet", "tablet", "supplementary", "equipment", "vending_machine", "treatment"]),
-  offline: new Set(["consultations", "sessions", "diet", "tablet", "supplementary", "equipment", "treatment"]),
-  online: new Set(["consultations", "sessions", "diet", "treatment"]),
+  all: new Set(["consultations", "sessions", "rehab", "zumba", "fitness", "diet", "tablet", "supplementary", "equipment", "vending_machine", "treatment"]),
+  offline: new Set(["consultations", "sessions", "rehab", "zumba", "fitness", "diet", "tablet", "supplementary", "equipment", "treatment"]),
+  online: new Set(["consultations", "sessions", "rehab", "fitness", "diet", "treatment"]),
 };
 
 const MODE_FILTERS = [
@@ -1280,6 +1303,19 @@ export const PackagesBoard = () => {
 
       {view === "catalog" && tab === "consultations" && <ConsultationsPanel reloadToken={reloadTick} toolbarSlot={createSlot} modeFilter={modeFilter} />}
       {view === "catalog" && tab === "sessions" && <SessionsPanel reloadToken={reloadTick} toolbarSlot={createSlot} modeFilter={modeFilter} />}
+      {/* The same panel Sessions runs, told which catalogue it is looking at. Its Create
+          opens the session package form, which is what was asked for — one form, three
+          more shelves, rather than three near-copies that drift apart. */}
+      {view === "catalog" && SESSION_LIKE_TABS[tab] && (
+        <SessionsPhysiotherapyPanel
+          key={tab}
+          category={SESSION_LIKE_TABS[tab].category}
+          noun={SESSION_LIKE_TABS[tab].noun}
+          reloadToken={reloadTick}
+          toolbarSlot={createSlot}
+          modeFilter={modeFilter}
+        />
+      )}
       {view === "catalog" && tab === "diet" && <PhysiotherapyPanel kind="diet_package" reloadToken={reloadTick} toolbarSlot={createSlot} />}
       {view === "history" && <HistoryPanel reloadToken={reloadTick} />}
       {view === "catalog" && tab === "treatment" && <TreatmentTypesBoard />}
