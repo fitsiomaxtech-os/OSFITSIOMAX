@@ -159,9 +159,15 @@ const CenteredPicker = ({ title, onClose, testid, children }) => (
  * Drop-in for `<Input type="date">`: onChange receives an event-shaped
  * `{ target: { value } }`, so existing `(e) => ...e.target.value` handlers keep working.
  */
+/**
+ * `iconOnly` squares the trigger down to the calendar glyph, for a toolbar where the
+ * date sits beside other icon buttons and a labelled field reads as one more filter
+ * rather than as the one control that opens a picker. The label is still carried on
+ * `title`, and the chosen date colours the glyph so a filter in force is never silent.
+ */
 export const MilkDateInput = ({
   value, onChange, min, max, disabled, className = "", accent = "amber",
-  placeholder = "Select date", centered = false, title = "Select Date", ...rest
+  placeholder = "Select date", centered = false, title = "Select Date", iconOnly = false, ...rest
 }) => {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -187,11 +193,14 @@ export const MilkDateInput = ({
         type="button"
         disabled={disabled}
         onClick={() => setOpen((o) => !o)}
-        className={`flex h-9 w-full items-center justify-between gap-2 rounded-md border border-input bg-transparent px-3 text-left text-sm shadow-sm disabled:cursor-not-allowed disabled:opacity-50 ${value ? "text-slate-800" : "text-muted-foreground"} ${className}`}
+        className={iconOnly
+          ? `flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-input bg-transparent shadow-sm disabled:cursor-not-allowed disabled:opacity-50 ${className}`
+          : `flex h-9 w-full items-center justify-between gap-2 rounded-md border border-input bg-transparent px-3 text-left text-sm shadow-sm disabled:cursor-not-allowed disabled:opacity-50 ${value ? "text-slate-800" : "text-muted-foreground"} ${className}`}
+        aria-label={iconOnly ? title : undefined}
         {...rest}
       >
-        <span className="truncate">{label}</span>
-        <CalendarDays className="h-4 w-4 shrink-0 text-slate-400" />
+        {!iconOnly && <span className="truncate">{label}</span>}
+        <CalendarDays className={`h-4 w-4 shrink-0 ${iconOnly && value ? "text-sky-600" : "text-slate-400"}`} />
       </button>
 
       {/* `centered` opens the calendar as a normal dialog in the middle of the screen

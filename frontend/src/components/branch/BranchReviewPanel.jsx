@@ -331,12 +331,13 @@ export const BranchReviewPanel = ({ branchId }) => {
         <div className="relative shrink-0" data-testid="branch-review-date-wrap">
           <MilkDateInput
             centered
+            iconOnly
             accent="sky"
             title={DATE_FIELD[sub].label}
             placeholder={DATE_FIELD[sub].label}
             value={dateFilter}
             onChange={(e) => setDateFilter(e.target.value)}
-            className="h-11 w-[9.5rem] rounded-xl border-slate-200 bg-white shadow-sm sm:w-[11rem]"
+            className="h-11 w-11 rounded-xl border-slate-200 bg-white shadow-sm"
             data-testid="branch-review-date-filter"
           />
           {dateFilter && (
@@ -351,21 +352,22 @@ export const BranchReviewPanel = ({ branchId }) => {
             </button>
           )}
         </div>
-        {/* Orange and icon-only at every width, matching the Refresh on Branch Leads,
-            Pre-Sales, Physio, Diet and HR. It was a labelled sky button here, which read
-            as another filter sitting beside the date rather than the one control that
-            acts. The word lives on title/aria-label.
+        {/* Grey and icon-only at every width, matching the Refresh on Branch Leads and
+            the Consultant board. It was a labelled sky button here, then an orange one,
+            both of which read as something to act on sitting beside the date; refreshing
+            is the least interesting thing on the row and is coloured accordingly. The
+            word lives on title/aria-label.
             h-11 and rounded-xl rather than the h-10 the other boards use: this row's
-            search and date field are h-11, and matching the row it sits in beats matching
-            a toolbar on another screen. The colour and the icon-only are the convention;
-            the height is local. */}
+            search and date button are h-11, and matching the row it sits in beats
+            matching a toolbar on another screen. The colour and the icon-only are the
+            convention; the height is local. */}
         <button
           type="button"
           onClick={load}
           disabled={loading}
           title="Refresh"
           aria-label="Refresh"
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-orange-500 text-white shadow-sm transition hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-60"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-slate-500 text-white shadow-sm transition hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-60"
           data-testid="branch-review-refresh"
         >
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
