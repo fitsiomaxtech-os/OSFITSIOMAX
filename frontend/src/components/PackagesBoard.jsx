@@ -1283,7 +1283,7 @@ export const PackagesBoard = () => {
       </div>
 
       {view === "catalog" && (
-        <div className="hidden flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1 md:flex" data-testid="packages-subtabs">
+        <div className="hidden gap-1 overflow-x-auto rounded-lg border border-slate-200 bg-white p-1 md:flex" data-testid="packages-subtabs">
           {visibleTabs.map((t) => {
             const Icon = t.icon;
             const active = tab === t.key;
@@ -1292,7 +1292,7 @@ export const PackagesBoard = () => {
                 key={t.key}
                 onClick={() => setTab(t.key)}
                 data-testid={`packages-subtab-${t.key}`}
-                className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${active ? "bg-violet-50 text-violet-600" : "text-slate-600 hover:bg-slate-50"}`}
+                className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-2 text-sm font-medium transition ${active ? "bg-violet-50 text-violet-600" : "text-slate-600 hover:bg-slate-50"}`}
               >
                 <Icon className="h-4 w-4" />{t.label}
               </button>
