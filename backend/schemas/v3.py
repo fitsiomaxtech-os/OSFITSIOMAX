@@ -636,7 +636,11 @@ class V3AssignSessionsInput(BaseModel):
 
 
 class V3CompleteSessionInput(BaseModel):
-    remarks: str
+    # A treatment day is written up as treatment notes, rehab notes, or both. Neither is
+    # required on its own -- the endpoint rejects only the pair being empty, so a physio
+    # with nothing to say about one of them is not made to type into it.
+    remarks: Optional[str] = ""
+    rehab_remarks: Optional[str] = ""
 
 
 class V3AbsentSessionInput(BaseModel):

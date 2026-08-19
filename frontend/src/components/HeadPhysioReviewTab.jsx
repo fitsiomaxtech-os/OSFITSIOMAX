@@ -403,8 +403,17 @@ export const HeadPhysioReviewTab = ({ selectedDate, dateRange = null, compact = 
                           </p>
                           {s.completed_by && <span className="text-[10px] text-slate-400">{s.completed_by}</span>}
                         </div>
-                        {s.jr_physio_remarks ? (
-                          <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{s.jr_physio_remarks}</p>
+                        {s.jr_physio_remarks || s.rehab_remarks ? (
+                          <>
+                            {s.jr_physio_remarks && (
+                              <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{s.jr_physio_remarks}</p>
+                            )}
+                            {s.rehab_remarks && (
+                              <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">
+                                <span className="font-semibold text-slate-500">Rehab: </span>{s.rehab_remarks}
+                              </p>
+                            )}
+                          </>
                         ) : (
                           // Said rather than skipped: a day completed without remarks and a
                           // day that never happened are different things to read past.

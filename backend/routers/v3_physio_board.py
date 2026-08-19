@@ -515,11 +515,23 @@ async def physio_complete_session(
             detail=f"Day {blocking} has not been completed yet — treatment days are completed in order",
         )
 
+    # One of the two is the report. Checked here and not only in the popup: this is what
+    # the day-report views read to tell a day that was written up from one that was ticked
+    # off, and a session completed through the API with neither would read as the latter.
+    treatment_remarks = (payload.remarks or "").strip()
+    rehab_remarks = (payload.rehab_remarks or "").strip()
+    if not treatment_remarks and not rehab_remarks:
+        raise HTTPException(status_code=400, detail="Treatment Remarks or Rehab Remarks is required")
+
     await v3_col("sessions").update_one(
         {"id": session_id},
         {"$set": {
             "status": "completed",
-            "jr_physio_remarks": payload.remarks,
+            "jr_physio_remarks": treatment_remarks,
+            # Kept beside the treatment note rather than folded into it: the Consultant
+            # reads the two for different reasons, and one field would make that a
+            # matter of how the physio happened to punctuate.
+            "rehab_remarks": rehab_remarks,
             # Who wrote the day's report. It was only ever in the activity log's prose,
             # which is not something the Head Physio's day-report view can read a name out
             # of. Rows completed before this stay blank rather than guessing.
@@ -529,11 +541,20 @@ async def physio_complete_session(
         }},
     )
 
+    # Only what was written gets a label in the log; an empty half would otherwise read
+    # as "Rehab remarks:" with nothing after it.
+    log_parts = []
+    if treatment_remarks:
+        log_parts.append(f"Remarks: {treatment_remarks}")
+    if rehab_remarks:
+        log_parts.append(f"Rehab remarks: {rehab_remarks}")
+    log_remarks = " · ".join(log_parts)
+
     activity = {
         "id": str(uuid.uuid4()),
         "lead_id": session["lead_id"],
         "action": "session_completed",
-        "details": f"Session #{session.get('session_number', '?')} completed by {user.full_name}. Remarks: {payload.remarks}",
+        "details": f"Session #{session.get('session_number', '?')} completed by {user.full_name}. {log_remarks}",
         "created_by": user.full_name,
         "created_by_role": user.role,
         "created_at": now_iso(),

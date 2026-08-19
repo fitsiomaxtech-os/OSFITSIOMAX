@@ -69,6 +69,7 @@ async def assign_sessions(
             "slot_time": normalized,
             "status": "upcoming",
             "jr_physio_remarks": "",
+            "rehab_remarks": "",
             "created_at": now_iso(),
             "updated_at": now_iso(),
         }

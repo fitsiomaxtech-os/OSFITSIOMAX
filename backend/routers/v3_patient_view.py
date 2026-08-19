@@ -29,6 +29,7 @@ async def patient_view(token: str):
             "slot_time": s.get("slot_time"),
             "status": s.get("status"),
             "jr_physio_remarks": s.get("jr_physio_remarks", ""),
+            "rehab_remarks": s.get("rehab_remarks", ""),
             "physio_name": s.get("physio_name", ""),
             "completed_at": s.get("completed_at"),
         })

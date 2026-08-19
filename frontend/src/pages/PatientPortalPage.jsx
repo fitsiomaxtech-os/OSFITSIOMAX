@@ -290,9 +290,14 @@ export function SessionsTab({ data }) {
                     <Clock className="h-3 w-3" />
                     {s.slot_time ? `${s.slot_time.split("T")[0]} at ${slotTo12h(s.slot_time)}` : "—"}
                   </p>
-                  {s.jr_physio_remarks && (
-                    <div className="mt-1.5 rounded border border-emerald-100 bg-emerald-50 p-2">
-                      <p className="text-[10px] text-emerald-600">{s.jr_physio_remarks}</p>
+                  {(s.jr_physio_remarks || s.rehab_remarks) && (
+                    <div className="mt-1.5 space-y-1 rounded border border-emerald-100 bg-emerald-50 p-2">
+                      {s.jr_physio_remarks && (
+                        <p className="text-[10px] text-emerald-600"><span className="font-semibold">Treatment: </span>{s.jr_physio_remarks}</p>
+                      )}
+                      {s.rehab_remarks && (
+                        <p className="text-[10px] text-emerald-600"><span className="font-semibold">Rehab: </span>{s.rehab_remarks}</p>
+                      )}
                     </div>
                   )}
                 </div>

@@ -1019,7 +1019,10 @@ function DayReports({ sessions }) {
     <div className="space-y-2" data-testid="hp-day-reports">
       {sessions.map((s) => {
         const done = s.status === "completed";
-        const remark = (s.jr_physio_remarks || "").trim();
+        const treatment = (s.jr_physio_remarks || "").trim();
+        const rehab = (s.rehab_remarks || "").trim();
+        // Either half counts as a written-up day, for the badge and the colour both.
+        const remark = treatment || rehab;
         return (
           <div
             key={s.id}
@@ -1044,7 +1047,12 @@ function DayReports({ sessions }) {
             </div>
             {remark ? (
               <>
-                <p className="mt-2 whitespace-pre-wrap text-xs text-slate-700">{remark}</p>
+                {treatment && <p className="mt-2 whitespace-pre-wrap text-xs text-slate-700">{treatment}</p>}
+                {rehab && (
+                  <p className="mt-2 whitespace-pre-wrap text-xs text-slate-700">
+                    <span className="font-semibold text-slate-500">Rehab: </span>{rehab}
+                  </p>
+                )}
                 {(s.completed_by || s.completed_at) && (
                   <p className="mt-1 text-[10px] text-slate-400">
                     {s.completed_by ? `— ${s.completed_by}` : ""}
@@ -1091,7 +1099,7 @@ function PatientSessionsModal({ patient, onClose }) {
         <div className="flex shrink-0 gap-1 border-b border-slate-200 px-5 pt-2" data-testid="hp-patient-tabs">
           {[
             { key: "sessions", label: "Sessions" },
-            { key: "reports", label: "Day Reports", count: sessions.filter((s) => (s.jr_physio_remarks || "").trim()).length },
+            { key: "reports", label: "Day Reports", count: sessions.filter((s) => (s.jr_physio_remarks || "").trim() || (s.rehab_remarks || "").trim()).length },
           ].map((t) => (
             <button
               key={t.key}
@@ -1125,7 +1133,9 @@ function PatientSessionsModal({ patient, onClose }) {
                   <div className="flex-1">
                     <p className="text-xs font-medium text-slate-700">Session #{s.session_number} · Week {s.week_number}</p>
                     <p className="text-[10px] text-slate-400">{s.slot_time ? `${s.slot_time.split("T")[0]} at ${slotTo12h(s.slot_time)}` : "—"}</p>
-                    {s.jr_physio_remarks && <p className="text-[10px] text-emerald-600 mt-0.5">Remarks: {s.jr_physio_remarks}</p>}
+                    {(s.jr_physio_remarks || s.rehab_remarks) && (
+                      <p className="text-[10px] text-emerald-600 mt-0.5">Remarks: {s.jr_physio_remarks || s.rehab_remarks}</p>
+                    )}
                   </div>
                   <span className={`rounded-full px-2 py-0.5 text-[9px] font-semibold ${s.status === "completed" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
                     {s.status}

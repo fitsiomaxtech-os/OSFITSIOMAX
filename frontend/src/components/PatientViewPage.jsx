@@ -101,9 +101,14 @@ export const PatientViewPage = ({ token }) => {
                     {s.slot_time ? `${s.slot_time.split("T")[0]} at ${slotTo12h(s.slot_time)}` : "—"}
                     {s.physio_name && <span> · {s.physio_name}</span>}
                   </p>
-                  {s.jr_physio_remarks && (
-                    <div className="mt-1.5 rounded bg-emerald-50 border border-emerald-100 p-2">
-                      <p className="text-[10px] text-emerald-600">{s.jr_physio_remarks}</p>
+                  {(s.jr_physio_remarks || s.rehab_remarks) && (
+                    <div className="mt-1.5 space-y-1 rounded bg-emerald-50 border border-emerald-100 p-2">
+                      {s.jr_physio_remarks && (
+                        <p className="text-[10px] text-emerald-600"><span className="font-semibold">Treatment: </span>{s.jr_physio_remarks}</p>
+                      )}
+                      {s.rehab_remarks && (
+                        <p className="text-[10px] text-emerald-600"><span className="font-semibold">Rehab: </span>{s.rehab_remarks}</p>
+                      )}
                     </div>
                   )}
                 </div>

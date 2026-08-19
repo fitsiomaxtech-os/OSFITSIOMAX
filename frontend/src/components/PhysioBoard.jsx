@@ -1818,7 +1818,9 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
                               ? "Missed class — Branch Admin to give this day a date"
                               : "—"}
                         </p>
-                        {s.jr_physio_remarks && <p className="mt-0.5 text-[10px] text-emerald-600">Remarks: {s.jr_physio_remarks}</p>}
+                        {(s.jr_physio_remarks || s.rehab_remarks) && (
+                          <p className="mt-0.5 text-[10px] text-emerald-600">Remarks: {s.jr_physio_remarks || s.rehab_remarks}</p>
+                        )}
                       </div>
                       {done ? (
                         <span className="shrink-0 rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-semibold text-emerald-700">Complete</span>
@@ -2361,7 +2363,9 @@ export function PatientDetailPage({ patient, physioId, onClose, onRefresh }) {
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-xs font-medium text-slate-700">Session #{s.session_number} · Week {s.week_number}</p>
                         <p className="text-[10px] text-slate-400">{s.slot_time ? `${s.slot_time.split("T")[0]} at ${slotTo12h(s.slot_time)}` : "—"}</p>
-                        {done && s.jr_physio_remarks && <p className="mt-0.5 truncate text-[10px] text-emerald-600">{s.jr_physio_remarks}</p>}
+                        {done && (s.jr_physio_remarks || s.rehab_remarks) && (
+                          <p className="mt-0.5 truncate text-[10px] text-emerald-600">{s.jr_physio_remarks || s.rehab_remarks}</p>
+                        )}
                       </div>
                       <span className={`shrink-0 rounded-full px-2 py-0.5 text-[9px] font-semibold ${done ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
                         {done ? "Completed" : "Pending"}
@@ -2442,14 +2446,18 @@ export function PatientDetailPage({ patient, physioId, onClose, onRefresh }) {
 // textarea and a submit button.
 function CompleteSessionModal({ session, onClose, onDone }) {
   const [remarks, setRemarks] = useState(session.jr_physio_remarks || "");
+  const [rehabRemarks, setRehabRemarks] = useState(session.rehab_remarks || "");
   const [submitting, setSubmitting] = useState(false);
   const isDone = session.status === "completed";
+  // Either one on its own is a report. A day of hands-on work with nothing to add about
+  // the rehab plan is a real day, and so is the reverse; only an empty pair is not.
+  const hasReport = Boolean(remarks.trim() || rehabRemarks.trim());
 
   const handleSubmit = async () => {
-    if (!remarks.trim()) { toast.error("Please add remarks"); return; }
+    if (!hasReport) { toast.error("Add Treatment Remarks or Rehab Remarks"); return; }
     setSubmitting(true);
     try {
-      await physioCompleteSession(session.id, { remarks });
+      await physioCompleteSession(session.id, { remarks, rehab_remarks: rehabRemarks });
       toast.success("Session completed");
       onDone();
     } catch (err) {
@@ -2465,22 +2473,68 @@ function CompleteSessionModal({ session, onClose, onDone }) {
           <h3 className="text-base font-semibold text-slate-800">{isDone ? "Session Summary" : "Complete Session"} #{session.session_number}</h3>
           <p className="text-[10px] text-slate-400">{session.lead_name} · {session.slot_time ? `${session.slot_time.split("T")[0]} at ${slotTo12h(session.slot_time)}` : "—"}</p>
         </div>
-        <div className="p-5">
-          <label className="text-xs font-medium text-slate-600 mb-1 block">Session {isDone ? "Summary" : "Remarks (visible to patient)"}</label>
-          <textarea
-            value={remarks}
-            onChange={(e) => setRemarks(e.target.value)}
-            rows={4}
-            disabled={isDone}
-            placeholder="Exercises done, observations, next steps..."
-            className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm disabled:bg-slate-50 disabled:text-slate-500"
-            data-testid="session-remarks"
-          />
+        <div className="space-y-4 p-5">
+          {isDone ? (
+            // A finished day reads back as what was written, with nothing standing in for
+            // the half that was not -- an empty box under a heading says a note is missing
+            // when the physio simply had none to make.
+            <>
+              {remarks.trim() && (
+                <div>
+                  <p className="mb-1 text-xs font-medium text-slate-600">Treatment Remarks</p>
+                  <p className="whitespace-pre-wrap rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-700" data-testid="session-summary-treatment">{remarks}</p>
+                </div>
+              )}
+              {rehabRemarks.trim() && (
+                <div>
+                  <p className="mb-1 text-xs font-medium text-slate-600">Rehab Remarks</p>
+                  <p className="whitespace-pre-wrap rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-700" data-testid="session-summary-rehab">{rehabRemarks}</p>
+                </div>
+              )}
+              {!remarks.trim() && !rehabRemarks.trim() && (
+                <p className="text-sm italic text-slate-400">Completed without remarks.</p>
+              )}
+            </>
+          ) : (
+            <>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-600">
+                  Treatment Remarks <span className="font-normal text-slate-400">(visible to patient)</span>
+                </label>
+                <textarea
+                  value={remarks}
+                  onChange={(e) => setRemarks(e.target.value)}
+                  rows={3}
+                  placeholder="Exercises done, observations, next steps..."
+                  className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
+                  data-testid="session-remarks"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-600">
+                  Rehab Remarks <span className="font-normal text-slate-400">(visible to patient)</span>
+                </label>
+                <textarea
+                  value={rehabRemarks}
+                  onChange={(e) => setRehabRemarks(e.target.value)}
+                  rows={3}
+                  placeholder="Home programme, progress against the plan, precautions..."
+                  className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
+                  data-testid="session-rehab-remarks"
+                />
+              </div>
+              {/* Said before the press rather than after: the button is disabled until one
+                  of the two has something in it. */}
+              <p className="text-[11px] text-slate-400" data-testid="session-remarks-hint">
+                Fill in at least one of the two.
+              </p>
+            </>
+          )}
         </div>
         <div className="flex justify-end gap-2 border-t p-4">
           <Button variant="outline" size="sm" onClick={onClose}>{isDone ? "Close" : "Cancel"}</Button>
           {!isDone && (
-            <Button size="sm" onClick={handleSubmit} disabled={submitting} className="bg-sky-600 hover:bg-sky-700 text-white" data-testid="session-complete-submit">
+            <Button size="sm" onClick={handleSubmit} disabled={submitting || !hasReport} className="bg-sky-600 hover:bg-sky-700 text-white" data-testid="session-complete-submit">
               {submitting ? "Completing..." : "Mark Complete"}
             </Button>
           )}

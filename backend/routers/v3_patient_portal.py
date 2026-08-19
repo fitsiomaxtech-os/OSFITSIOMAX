@@ -281,6 +281,7 @@ async def _build_portal_payload(lead: dict) -> dict:
                 "slot_time": s.get("slot_time"),
                 "status": s.get("status"),
                 "jr_physio_remarks": s.get("jr_physio_remarks"),
+                "rehab_remarks": s.get("rehab_remarks"),
             }
             for s in sessions
         ],
