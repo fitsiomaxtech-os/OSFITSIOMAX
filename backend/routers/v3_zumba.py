@@ -157,6 +157,81 @@ def _master_of(row: dict) -> str:
     return (row.get("master_name") or "").strip()
 
 
+def _extra(lead: dict, *keys):
+    """Age and address are configured lead fields rather than columns, so they arrive in
+    extra_fields under whatever key the branch set up. Try the likely ones and give up
+    quietly — a blank age is a gap in the record, not a reason to fail the list."""
+    extra = lead.get("extra_fields") or {}
+    for k in keys:
+        for candidate in (k, k.title(), k.upper(), k.replace("_", " ").title()):
+            if extra.get(candidate) not in (None, ""):
+                return extra[candidate]
+    return ""
+
+
+async def _referred_rows(branch_id: Optional[str]) -> list:
+    """Zumba referrals made by a CONSULTANT, read off the leads rather than copied here.
+
+    A referral is a decision recorded on the consultation, so this reads it live instead of
+    writing a registration at Save & Move. Un-ticking Zumba on the decision takes the row
+    back out on its own, and there is no second copy of the patient to keep in step with
+    the first. The cost is that these rows cannot be edited or deleted from this tab, which
+    is right: the consultation owns them.
+    """
+    query = {"zumba_recommended": True}
+    if branch_id:
+        query["branch_id"] = branch_id
+    leads = await v3_col("leads").find(query, {
+        "_id": 0, "id": 1, "name": 1, "phone": 1, "branch_id": 1, "extra_fields": 1,
+        "zumba_package_name": 1, "zumba_package_price": 1, "zumba_package_sessions": 1,
+        "updated_at": 1,
+    }).to_list(2000)
+    if not leads:
+        return []
+
+    # When the referral was made: the moment the decision holding it was last saved. Read
+    # from the activity trail rather than from a field, so nothing has to be written into
+    # the consultation's own save path to support this tab.
+    activities = await v3_col("lead_activity").find(
+        {"lead_id": {"$in": [l["id"] for l in leads]}, "action": "consultation_decision_saved"},
+        {"_id": 0, "lead_id": 1, "created_at": 1},
+    ).to_list(4000)
+    saved_at = {}
+    for a in activities:
+        prev = saved_at.get(a["lead_id"])
+        if not prev or (a.get("created_at") or "") > prev:
+            saved_at[a["lead_id"]] = a.get("created_at") or ""
+
+    rows = []
+    for l in leads:
+        rows.append({
+            # Prefixed so it cannot collide with a registration's uuid, and so the frontend
+            # can tell at a glance that this row is not one of its own.
+            "id": f"lead:{l['id']}",
+            "lead_id": l["id"],
+            "branch_id": l.get("branch_id"),
+            "name": l.get("name") or "",
+            "phone": l.get("phone") or "",
+            "age": _age(_extra(l, "age")),
+            "address": str(_extra(l, "address", "city", "location") or ""),
+            "source": "consultations",
+            "card": "consultant",
+            "master_name": "",
+            # What the package costs. Nothing is collected here: a referred patient pays
+            # through the consultation's own fee steps, and reporting money as in the
+            # drawer because a package was named would be a lie the accountant inherits.
+            "fee_amount": _amount(l.get("zumba_package_price")),
+            "fee_paid": 0.0,
+            "package_name": l.get("zumba_package_name") or "",
+            "package_sessions": l.get("zumba_package_sessions"),
+            "created_at": saved_at.get(l["id"]) or l.get("updated_at") or "",
+            "created_by": "Consultation",
+            # The tab reads this and offers no Edit or Delete: the consultation owns it.
+            "origin": "consultation",
+        })
+    return rows
+
+
 @router.get("/branch/zumba")
 async def list_zumba(
     branch_id: Optional[str] = Query(None),
@@ -167,8 +242,11 @@ async def list_zumba(
         return {"summary": {}, "registrations": [], "masters": []}
 
     query = {"branch_id": branch_id} if branch_id else {}
-    raw = await v3_col("zumba_registrations").find(query, {"_id": 0}).sort("created_at", -1).to_list(2000)
-    rows = [_shape(r) for r in raw]
+    raw = await v3_col("zumba_registrations").find(query, {"_id": 0}).to_list(2000)
+    rows = [_shape(r) for r in raw] + await _referred_rows(branch_id)
+    # Sorted after the merge, not before: two sources of rows interleave by date the way
+    # one would, rather than arriving as two blocks.
+    rows.sort(key=lambda r: r.get("created_at") or "", reverse=True)
 
     # today_session is who is booked into today's class, not who turned up: the class runs
     # Mon/Wed/Fri and a member is booked into every one of them, so on a class day it is the

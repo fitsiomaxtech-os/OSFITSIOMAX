@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CalendarDays, Music, Pencil, RefreshCw, Trash2, UserPlus, X } from "lucide-react";
+import { CalendarDays, Music, Pencil, RefreshCw, Stethoscope, Trash2, UserPlus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -331,6 +331,11 @@ export const ZumbaPanel = ({ branchId }) => {
                           <span className={`inline-block max-w-full truncate rounded px-2 py-0.5 text-[10px] font-semibold ${r.source === MASTER ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`} title={sourceLabel(r)}>
                             {sourceLabel(r)}
                           </span>
+                          {r.package_name ? (
+                            <p className="mt-0.5 truncate text-[10px] text-slate-500" title={r.package_name}>
+                              {r.package_name}{r.package_sessions ? ` · ${r.package_sessions} classes` : ""}
+                            </p>
+                          ) : null}
                         </td>
                         <td className="px-3 py-3 text-xs">
                           <span className={paid > 0 ? "font-semibold text-emerald-700" : "text-slate-400"}>{rupees(paid)}</span>
@@ -340,14 +345,25 @@ export const ZumbaPanel = ({ branchId }) => {
                         </td>
                         <td className="px-3 py-3 text-xs text-slate-500">{shortDate(r.created_at)}</td>
                         <td className="px-3 py-3 text-right">
-                          <div className="flex items-center justify-end gap-1.5">
-                            <Button size="sm" variant="outline" className="h-7 w-7 p-0" onClick={() => openForm(r)} title="Edit" aria-label="Edit" data-testid={`zumba-edit-${r.id}`}>
-                              <Pencil className="h-3 w-3" />
-                            </Button>
-                            <Button size="sm" variant="outline" className="h-7 w-7 border-rose-200 p-0 text-rose-700 hover:bg-rose-50" onClick={() => setRemoving(r)} title="Delete" aria-label="Delete" data-testid={`zumba-delete-${r.id}`}>
-                              <Trash2 className="h-3 w-3" />
-                            </Button>
-                          </div>
+                          {/* A referral is a decision recorded on the consultation, read
+                              live from the lead rather than copied here. Editing or
+                              deleting it would only put this tab out of step with the
+                              consultation that owns it — un-ticking Zumba there takes the
+                              row out on its own. */}
+                          {r.origin === "consultation" ? (
+                            <span className="inline-flex items-center gap-1 rounded bg-sky-50 px-2 py-1 text-[10px] font-semibold text-sky-700" title="Referred on the consultation — edit it there" data-testid={`zumba-referred-${r.id}`}>
+                              <Stethoscope className="h-3 w-3" /> Referred
+                            </span>
+                          ) : (
+                            <div className="flex items-center justify-end gap-1.5">
+                              <Button size="sm" variant="outline" className="h-7 w-7 p-0" onClick={() => openForm(r)} title="Edit" aria-label="Edit" data-testid={`zumba-edit-${r.id}`}>
+                                <Pencil className="h-3 w-3" />
+                              </Button>
+                              <Button size="sm" variant="outline" className="h-7 w-7 border-rose-200 p-0 text-rose-700 hover:bg-rose-50" onClick={() => setRemoving(r)} title="Delete" aria-label="Delete" data-testid={`zumba-delete-${r.id}`}>
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          )}
                         </td>
                       </tr>
                     );
