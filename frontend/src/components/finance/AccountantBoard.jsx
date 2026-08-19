@@ -50,11 +50,9 @@ export const AccountantBoard = () => {
 
   return (
     <div className="space-y-4" data-testid="accountant-board-root">
-      <div>
-        <h2 className="text-2xl font-bold text-slate-900">Finance</h2>
-        <p className="text-sm text-slate-500">Fees collected across every branch.</p>
-      </div>
-
+      {/* No page heading. "Finance" over "Fees collected across every branch." restated
+          the board an accountant just signed in to, above a tab row that names the four
+          things on it — a title costing a band of screen to tell you where you are. */}
       <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1" data-testid="accountant-board-tabs">
         {TABS.map((t) => {
           const Icon = t.icon;

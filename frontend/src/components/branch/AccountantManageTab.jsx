@@ -245,25 +245,28 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
 
   return (
     <div className="space-y-4" data-testid="accountant-manage-tab">
-      {!fixedBranchId && (
-        <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-3">
-          <label className="text-xs font-medium text-slate-600">Branch:</label>
-          <select
-            value={branchId}
-            onChange={(e) => setBranchId(e.target.value)}
-            className="h-9 rounded-md border border-slate-200 px-2 text-sm"
-            data-testid="accountant-manage-branch-select"
-          >
-            <option value="">All Branches</option>
-            {branches.map((br) => <option key={br.id} value={br.id}>{br.branch_name}</option>)}
-          </select>
-        </div>
-      )}
-
-      {/* One row: which view on the left, what it is scoped to on the right. The range
-          was a band of its own above this, which spent a whole row on five small buttons
-          and separated the tabs from the thing that narrows them. */}
+      {/* One row, read left to right: which branch, then which view of it, then the range
+          it is narrowed to. Branch and range each used to hold a band of their own — three
+          rows of controls above the figures, with the tabs stranded between the two things
+          that scope them. The branch select keeps its condition: the boards that pass a
+          fixed branch have nothing to choose, and the row starts at the tabs for them. */}
       <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white p-1.5" data-testid="accountant-manage-maintabs">
+        {!fixedBranchId && (
+          // The divider is desktop-only: once this wraps on a phone it is a line across
+          // the middle of a row rather than between two of them.
+          <div className="flex items-center gap-2 pl-1.5 sm:border-r sm:border-slate-200 sm:pr-3">
+            <label className="text-xs font-medium text-slate-600">Branch:</label>
+            <select
+              value={branchId}
+              onChange={(e) => setBranchId(e.target.value)}
+              className="h-9 rounded-md border border-slate-200 px-2 text-sm"
+              data-testid="accountant-manage-branch-select"
+            >
+              <option value="">All Branches</option>
+              {branches.map((br) => <option key={br.id} value={br.id}>{br.branch_name}</option>)}
+            </select>
+          </div>
+        )}
         <div className="flex flex-wrap gap-2">
           {MAIN_TABS.map((t) => (
             <button
