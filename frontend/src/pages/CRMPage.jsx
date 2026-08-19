@@ -203,6 +203,48 @@ const SETTINGS_SUB_TABS = [
 ];
 const isSuperAdminTabActive = (view, key) => (key === "settings" ? SETTINGS_SUB_VIEWS.includes(view) : view === key);
 
+/**
+ * Which Super Admin page is open outlives a refresh.
+ *
+ * Reloading in the middle of HR Admin or Finance used to land back on Dashboard, which
+ * reads as the app forgetting where you were rather than as a reload of the page you were
+ * on. Kept per browser rather than in the URL: this board is one route, and pushing a
+ * query string for every tab would fill the back button with tab switches.
+ *
+ * "settings" is never a stored value — it is a second name for the marketing/stages pair,
+ * not a state of its own — so the valid list is every other tab key plus those two.
+ */
+const SUPER_ADMIN_VIEW_STORAGE_KEY = "fitsiomax.super_admin_view";
+const SUPER_ADMIN_VIEWS = [
+  ...SUPER_ADMIN_TABS.map((t) => t.key).filter((k) => k !== "settings"),
+  ...SETTINGS_SUB_VIEWS,
+];
+// Storage throws outright in private mode and where site data is blocked, and a stored
+// view that no longer exists (a tab renamed since the last visit) has to fall through to
+// the default rather than render an empty board.
+const readStoredSuperAdminView = () => {
+  try {
+    const stored = window.localStorage.getItem(SUPER_ADMIN_VIEW_STORAGE_KEY);
+    return SUPER_ADMIN_VIEWS.includes(stored) ? stored : null;
+  } catch {
+    return null;
+  }
+};
+const writeStoredSuperAdminView = (view) => {
+  try {
+    window.localStorage.setItem(SUPER_ADMIN_VIEW_STORAGE_KEY, view);
+  } catch {
+    // The board still works; it just will not remember on the next reload.
+  }
+};
+const forgetStoredSuperAdminView = () => {
+  try {
+    window.localStorage.removeItem(SUPER_ADMIN_VIEW_STORAGE_KEY);
+  } catch {
+    // As above.
+  }
+};
+
 const SUPER_ADMIN_BOTTOM_KEYS = ["dashboard", "operations", "hr"];
 const SUPER_ADMIN_BOTTOM_TABS = SUPER_ADMIN_TABS.filter((t) => SUPER_ADMIN_BOTTOM_KEYS.includes(t.key));
 // Everything not on the bar, with nothing held back. CI/CD ROOTS used to be excluded here
@@ -368,11 +410,19 @@ export const CRMPage = ({ auth, onLogout }) => {
   const [presalesView, setPresalesView] = useState("leads");
 
   const [superAdminView, setSuperAdminView] = useState(() => {
-    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("sheets_connect")) {
+    if (typeof window === "undefined") return "dashboard";
+    // Google's OAuth callback returns with this flag and expects Marketing Source on
+    // screen, so it wins over whichever page was open when the redirect started.
+    if (new URLSearchParams(window.location.search).get("sheets_connect")) {
       return "marketing";
     }
-    return "dashboard";
+    return readStoredSuperAdminView() || "dashboard";
   });
+
+  // Written on every change rather than on unload, so a refresh, a crash and a closed tab
+  // all reopen on the page that was actually last on screen.
+  useEffect(() => { writeStoredSuperAdminView(superAdminView); }, [superAdminView]);
+
   const safeCall = async (fn, fallback) => {
     try {
       return await fn();
@@ -448,6 +498,9 @@ export const CRMPage = ({ auth, onLogout }) => {
     } catch {
       // no-op
     }
+    // Signing out ends the trail: the next person to sign in on this browser opens on
+    // Dashboard rather than on the page the last one was reading.
+    forgetStoredSuperAdminView();
     onLogout();
   };
 

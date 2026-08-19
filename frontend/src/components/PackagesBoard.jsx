@@ -1453,12 +1453,14 @@ export const PackagesBoard = () => {
       </div>
 
       {view === "catalog" && (
-        // Sized to hold all twelve on one line at a desk width: 12px type, a slightly
-        // smaller icon and tighter padding. Still wrapping rather than scrolling, because
-        // the fit is a fit and not a guarantee — a narrower window or a thirteenth shelf
-        // takes a second row, which is the honest failure. As a scroller the overflow was
-        // a half-cut tab at the right edge with nothing to say the row continued.
-        <div className="hidden flex-wrap gap-1 rounded-lg border border-slate-200 bg-white p-1 md:flex" data-testid="packages-subtabs">
+        // Justified across the bar: all twelve on one line at a desk width, spread to the
+        // full width rather than packed at the left with a gap trailing off the end.
+        // 13px type with the padding pulled in to pay for it — the space that buys goes
+        // between the tabs, where justify-between puts it, instead of inside each one.
+        // Still wrapping rather than scrolling: the fit is a fit and not a guarantee, and a
+        // narrower window taking a second row is the honest failure. As a scroller the
+        // overflow was a half-cut tab at the right edge with nothing to say it continued.
+        <div className="hidden flex-wrap justify-between gap-1 rounded-lg border border-slate-200 bg-white p-1 md:flex" data-testid="packages-subtabs">
           {visibleTabs.map((t) => {
             const Icon = t.icon;
             const active = tab === t.key;
@@ -1467,7 +1469,7 @@ export const PackagesBoard = () => {
                 key={t.key}
                 onClick={() => setTab(t.key)}
                 data-testid={`packages-subtab-${t.key}`}
-                className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-2 text-xs font-medium transition ${active ? "bg-violet-50 text-violet-600" : "text-slate-600 hover:bg-slate-50"}`}
+                className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-1.5 py-2 text-[13px] font-medium transition ${active ? "bg-violet-50 text-violet-600" : "text-slate-600 hover:bg-slate-50"}`}
               >
                 <Icon className="h-3.5 w-3.5 shrink-0" />{t.label}
               </button>
