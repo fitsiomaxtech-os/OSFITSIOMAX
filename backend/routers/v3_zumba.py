@@ -18,13 +18,14 @@ it through the leads' fee machinery would have meant inventing a lead to hang it
 """
 
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from database import v3_col
-from deps import v3_require_roles, is_branch_admin_role
+from deps import v3_current_user, is_branch_admin_role, is_zumba_role
 from schemas.v3 import V3UserOut
 from utils import now_iso
 
@@ -64,7 +65,27 @@ CARD_OF_SOURCE = {
 }
 CARDS = ("direct", "consultant", "branch", "masters", "fitsiomax")
 
-ROLES = ("branch_admin", "super_admin")
+# The class runs three evenings a week, the same three the membership is sold on (see
+# ZUMBA_CLASS_DAYS in frontend/src/components/PackagesBoard.jsx). Monday, Wednesday and
+# Friday as Python numbers them.
+CLASS_WEEKDAYS = {0, 2, 4}
+# Read in local time, not UTC: at 9pm on a Friday in India, UTC has not reached Friday's
+# end but the class has been and gone -- and on a Monday morning UTC is still on Sunday,
+# which would report no class on a day the room is full.
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def _is_class_day_today() -> bool:
+    return datetime.now(IST).weekday() in CLASS_WEEKDAYS
+
+
+async def require_zumba_reader(user: V3UserOut = Depends(v3_current_user)) -> V3UserOut:
+    """Who may read and keep the class roll: the branch that runs it, the Zumba desk that
+    fills it, and Super Admin. Written as a predicate rather than a role tuple because the
+    Zumba role's slug is typed by hand and varies by install."""
+    if is_branch_admin_role(user.role) or is_zumba_role(user.role):
+        return user
+    raise HTTPException(status_code=403, detail="Not allowed")
 
 
 def _source(value) -> str:
@@ -104,10 +125,23 @@ class ZumbaInput(BaseModel):
     fee_paid: Optional[float] = 0
 
 
+def _own_branch_only(user: V3UserOut) -> bool:
+    """Everyone but Super Admin reads one branch: their own.
+
+    A Zumba master runs the class at the branch they were hired into, so they are scoped
+    exactly as the Branch Admin above them is. Super Admin is the only account that may
+    ask for another branch, or for all of them at once.
+    """
+    if user.role == "super_admin":
+        return False
+    return is_branch_admin_role(user.role) or is_zumba_role(user.role)
+
+
 def _scoped_branch(user: V3UserOut, branch_id: Optional[str]) -> Optional[str]:
-    """Branch Admin is locked to their own branch; Super Admin may pass one or omit it to
-    see every branch at once, the same rule the finance and board endpoints use."""
-    if is_branch_admin_role(user.role):
+    """Branch Admin and the Zumba desk are locked to their own branch; Super Admin may pass
+    one or omit it to see every branch at once, the same rule the finance and board
+    endpoints use."""
+    if _own_branch_only(user):
         return user.branch_id
     return branch_id
 
@@ -126,17 +160,25 @@ def _master_of(row: dict) -> str:
 @router.get("/branch/zumba")
 async def list_zumba(
     branch_id: Optional[str] = Query(None),
-    user: V3UserOut = Depends(v3_require_roles(*ROLES)),
+    user: V3UserOut = Depends(require_zumba_reader),
 ):
     branch_id = _scoped_branch(user, branch_id)
-    if is_branch_admin_role(user.role) and not branch_id:
+    if _own_branch_only(user) and not branch_id:
         return {"summary": {}, "registrations": [], "masters": []}
 
     query = {"branch_id": branch_id} if branch_id else {}
     raw = await v3_col("zumba_registrations").find(query, {"_id": 0}).sort("created_at", -1).to_list(2000)
     rows = [_shape(r) for r in raw]
 
+    # today_session is who is booked into today's class, not who turned up: the class runs
+    # Mon/Wed/Fri and a member is booked into every one of them, so on a class day it is the
+    # whole roll and on any other day there is no class to be booked into. Nothing here
+    # reads attendance, which is not recorded -- a member who skips a Friday still counts,
+    # because they held the seat.
+    class_day = _is_class_day_today()
     summary = {"all": len(rows), "fee_collected": 0, "fee_total": 0.0}
+    summary["today_session"] = len(rows) if class_day else 0
+    summary["is_class_day"] = class_day
     for card in CARDS:
         summary[card] = 0
     for r in rows:
@@ -183,7 +225,7 @@ def _clean(payload: ZumbaInput) -> dict:
 async def add_zumba(
     payload: ZumbaInput,
     branch_id: Optional[str] = Query(None),
-    user: V3UserOut = Depends(v3_require_roles(*ROLES)),
+    user: V3UserOut = Depends(require_zumba_reader),
 ):
     branch_id = _scoped_branch(user, branch_id)
     if not branch_id:
@@ -204,13 +246,13 @@ async def add_zumba(
 async def update_zumba(
     registration_id: str,
     payload: ZumbaInput,
-    user: V3UserOut = Depends(v3_require_roles(*ROLES)),
+    user: V3UserOut = Depends(require_zumba_reader),
 ):
     existing = await v3_col("zumba_registrations").find_one({"id": registration_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Registration not found")
-    # A Branch Admin edits their own branch's registrations and nobody else's.
-    if is_branch_admin_role(user.role) and existing.get("branch_id") != user.branch_id:
+    # A Branch Admin or a Zumba master edits their own branch's registrations, nobody else's.
+    if _own_branch_only(user) and existing.get("branch_id") != user.branch_id:
         raise HTTPException(status_code=403, detail="Not your branch")
 
     changes = {
@@ -225,12 +267,12 @@ async def update_zumba(
 @router.delete("/branch/zumba/{registration_id}")
 async def delete_zumba(
     registration_id: str,
-    user: V3UserOut = Depends(v3_require_roles(*ROLES)),
+    user: V3UserOut = Depends(require_zumba_reader),
 ):
     existing = await v3_col("zumba_registrations").find_one({"id": registration_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Registration not found")
-    if is_branch_admin_role(user.role) and existing.get("branch_id") != user.branch_id:
+    if _own_branch_only(user) and existing.get("branch_id") != user.branch_id:
         raise HTTPException(status_code=403, detail="Not your branch")
     await v3_col("zumba_registrations").delete_one({"id": registration_id})
     return {"deleted": True}

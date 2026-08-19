@@ -64,6 +64,7 @@ import { FinanceWiseBoard } from "@/components/branch/FinanceWiseBoard";
 import { PackagesBoard } from "@/components/PackagesBoard";
 import { OperationsBoard } from "@/components/OperationsBoard";
 import { AccountantBoard } from "@/components/finance/AccountantBoard";
+import { ZumbaMasterBoard } from "@/components/ZumbaMasterBoard";
 
 const ROLE_META = {
   super_admin: { label: "Super Admin", icon: ShieldCheck },
@@ -160,6 +161,33 @@ const isPhysioRole = (role) => ["physio", "online_physio"].includes(String(role 
  */
 const PRE_SALES_ROLES = ["pre_sales", "sales_head"];
 const isPreSalesRole = (role) => PRE_SALES_ROLES.includes(String(role || "").trim().toLowerCase());
+
+/** Whether a role gets the Zumba master's board.
+ *
+ * Matched loosely, like isDietRole and isHumanResourceRole: this role is typed by hand in
+ * Roles & Credentials, so the slug is whatever wording was used — this install has
+ * "zumba", and a "Zumba Master" typed tomorrow would be "zumba_master". Matched on whole
+ * underscore-separated tokens so an unrelated role cannot slip through on a substring.
+ *
+ * Kept in step with is_zumba_role in backend/deps.py, except for Super Admin: they reach
+ * the class roll through their own board, so sending them here instead would take the
+ * whole of Super Admin away. */
+const isZumbaRole = (role) => {
+  const r = String(role || "").trim().toLowerCase();
+  if (r === "super_admin") return false;
+  return r.split("_").includes("zumba");
+};
+
+/** A role slug read back as a title: "zumba" -> "Zumba", "zumba_master" -> "Zumba Master".
+ *
+ * The last resort for a role nothing else names. A slug is stored the way it is typed and
+ * printed the way it is stored, so a role created as "Zumba" put "zumba Master View" in
+ * the header -- the one board title on the app starting in lower case. */
+const titleFromSlug = (role) => String(role || "")
+  .split("_")
+  .filter(Boolean)
+  .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+  .join(" ");
 
 // Same destinations as the desktop tab strip below. On a phone, three get a direct
 // bottom-nav slot each; the rest sit behind a "More" sheet — both derived from this one
@@ -379,7 +407,7 @@ export const CRMPage = ({ auth, onLogout }) => {
   // arbitrary wording are named by what they are.
   const roleLabel = ROLE_META[role]?.label
     || (isDietRole(role) ? "Nutritionist" : null)
-    || (isHumanResourceRole(role) ? "Human Resource" : role);
+    || (isHumanResourceRole(role) ? "Human Resource" : titleFromSlug(role));
   // Consultant, Nutritionist and Branch Admin stand alone, with no "Master View" after
   // them. The first two are named for the clinician rather than for a desk that
   // administers something, so the suffix was describing a view they do not have. Branch
@@ -757,6 +785,7 @@ export const CRMPage = ({ auth, onLogout }) => {
   const showPhysioBoard = isPhysioRole(role);
   const showDietBoard = isDietRole(role);
   const showAccountantBoard = role === "accountant";
+  const showZumbaBoard = isZumbaRole(role);
   const showHumanResourceBoard = isHumanResourceRole(role);
 
   const filteredAppointmentsForPhysioBoards = appointments;
@@ -1132,6 +1161,7 @@ export const CRMPage = ({ auth, onLogout }) => {
         )}
 
         {showAccountantBoard && <AccountantBoard />}
+        {showZumbaBoard && <ZumbaMasterBoard />}
 
         </div>
       </div>

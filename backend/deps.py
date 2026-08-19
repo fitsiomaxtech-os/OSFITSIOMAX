@@ -201,6 +201,24 @@ def is_diet_role(role: str) -> bool:
     return bool(set(r.split("_")) & {"diet", "nutrition", "nutritionist", "dietician", "dietitian"})
 
 
+def is_zumba_role(role: str) -> bool:
+    """Whether a role slug reads as the Zumba desk.
+
+    Same problem the HR and Diet predicates solve, arriving the same way: the role is
+    created by hand in Roles & Credentials, so its slug is whatever wording was typed --
+    this install has "zumba", and a "Zumba Master" typed tomorrow would be "zumba_master".
+    Pinning one literal leaves the board 403ing for the other.
+
+    Matched on whole underscore-separated tokens so an unrelated role cannot slip through
+    on a substring. Note this is the ROLE, not the store category of the same name: a
+    Zumba package on the shelf has nothing to do with who may read the class roll.
+    """
+    r = (role or "").strip().lower()
+    if r == "super_admin":
+        return True
+    return "zumba" in set(r.split("_"))
+
+
 def v3_require_diet(user: V3UserOut = Depends(v3_current_user)) -> V3UserOut:
     if not is_diet_role(user.role):
         raise HTTPException(status_code=403, detail="Not allowed")
