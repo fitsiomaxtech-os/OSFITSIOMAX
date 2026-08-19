@@ -28,16 +28,21 @@ const sourceLabel = (slug) => (SOURCES.find((s) => s.key === slug) || SOURCES[0]
 // them: a group grows in proportion to how many cards it holds, so 1 : 3 : 3 divides the
 // row into sevenths rather than into thirds. Written out as literal class names because
 // Tailwind's JIT only compiles what it can read in the source.
+//
+// `border` gives each group its own outline, so the split survives being looked at
+// quickly — the gap says where a group ends and the colour says which one it is. The
+// colour is the whole point of the border here, so it stays put when a card is selected;
+// the selected card is picked out by its fill, as it is on every other bar in the OS.
 const CARD_GROUPS = [
-  { key: "total", grid: "grid-cols-1", grow: "sm:flex-1", cards: [
+  { key: "total", grid: "grid-cols-1", grow: "sm:flex-1", border: "border border-purple-300", cards: [
     { key: "all", label: "All" },
   ] },
-  { key: "sources", grid: "grid-cols-3", grow: "sm:flex-[3]", cards: [
+  { key: "sources", grid: "grid-cols-3", grow: "sm:flex-[3]", border: "border border-orange-300", cards: [
     { key: "direct", label: "Direct" },
     { key: "consultant", label: "Consultant" },
     { key: "branch", label: "Branch" },
   ] },
-  { key: "reach", grid: "grid-cols-3", grow: "sm:flex-[3]", cards: [
+  { key: "reach", grid: "grid-cols-3", grow: "sm:flex-[3]", border: "border border-emerald-500", cards: [
     { key: "fee_collected", label: "Fee's Collected" },
     { key: "masters", label: "Masters" },
     { key: "fitsiomax", label: "Fitsiomax" },
@@ -157,6 +162,7 @@ export const ZumbaPanel = ({ branchId }) => {
                   testid={`zumba-card-${c.key}`}
                   gridded
                   plain
+                  borderClass={g.border}
                 />
               ))}
             </div>

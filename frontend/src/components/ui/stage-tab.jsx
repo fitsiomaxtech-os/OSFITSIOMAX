@@ -17,7 +17,12 @@ export const stageDisplayLabel = (name) => STAGE_DISPLAY_LABELS[name] || name;
 // picked out. Opt-in rather than the default because this bar is shared: Branch Leads
 // asked for blank cards, while the Consultations and Pre-Sales bars still read by
 // colour, and changing it here would have restyled all three at once.
-export const StageTab = ({ label, count, active, onClick, color, testid, gridded = false, plain = false }) => {
+// `borderClass` outlines the card in a colour of the caller's choosing — a Tailwind
+// border utility, passed as a literal class name so the JIT can see it. Only meaningful
+// alongside `plain`, whose cards are borderless by design; the coloured variant already
+// draws its own border from the stage tint. Empty by default, so every existing bar is
+// untouched.
+export const StageTab = ({ label, count, active, onClick, color, testid, gridded = false, plain = false, borderClass = "" }) => {
   const tint = color || "#0ea5e9";
   return (
     <button
@@ -34,7 +39,7 @@ export const StageTab = ({ label, count, active, onClick, color, testid, gridded
             ? "bg-sky-50 text-sky-700 shadow-sm"
             : "bg-white text-slate-600 shadow-sm hover:bg-slate-50")
           : ""
-      }`}
+      } ${plain ? borderClass : ""}`}
       style={
         plain
           ? undefined
