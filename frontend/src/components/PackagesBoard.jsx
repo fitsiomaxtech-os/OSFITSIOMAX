@@ -294,15 +294,83 @@ const FIXED_SESSIONS = 7;
 
 // Rehab runs a longer course than the rest, so its shelf is fixed at its own length.
 // Anything not named here keeps the standard count.
-const FIXED_SESSIONS_BY_CATEGORY = { rehab: 26 };
+const FIXED_SESSIONS_BY_CATEGORY = { rehab: 26, zumba: 12 };
 const fixedSessionsFor = (category) => FIXED_SESSIONS_BY_CATEGORY[category] ?? FIXED_SESSIONS;
+
+/**
+ * Zumba is not sold as a bundle of loose classes but as a membership. The class runs
+ * three days a week - Monday, Wednesday, Friday - which comes to 12 a month, and that
+ * never varies. What a member picks is how many months they pay for up front.
+ */
+const ZUMBA_CLASSES_PER_MONTH = 12;
+const ZUMBA_CLASS_DAYS = "Mon · Wed · Fri";
+const ZUMBA_PLANS = [
+  { months: 1, label: "1 Month", price: 3000 },
+  { months: 3, label: "3 Months", price: 9000 },
+  { months: 6, label: "6 Months", price: 15000 },
+];
+const zumbaSessionsFor = (months) => months * ZUMBA_CLASSES_PER_MONTH;
+const formatRupees = (amount) => {
+  const n = Number(amount) || 0;
+  return Number.isInteger(n) ? String(n) : n.toFixed(2);
+};
+
+// What gets stored is still the per-session rate every session package stores, so
+// assignment and collection keep charging rate x sessions and nothing downstream has to
+// learn that some shelves are sold as a whole course. The course amount is what that rate
+// was derived from, recovered here for display: neither 15000 / 72 nor 18000 / 26 divides
+// evenly, so the total is rounded back to the price that was actually typed rather than
+// shown as the rate multiplied out.
+const packageTotalFrom = (rate, sessions) => Math.round((Number(rate) || 0) * (Number(sessions) || 0));
+
+/**
+ * Shelves priced as a whole course rather than per session.
+ *
+ * Rehab is sold as one 26-session programme at one price — what a buyer agrees is the
+ * course, not a rate — so its form takes that figure and divides it down, the same way
+ * Zumba's membership price does. 18000 / 26 is not a round rate, which is exactly why the
+ * form must not ask for the rate: typing 692 to reach 18,000 lands on 17,992.
+ */
+const COURSE_TOTAL_CATEGORIES = new Set(["rehab"]);
+const COURSE_TOTAL_DEFAULTS = { rehab: { online: 14000, offline: 18000 } };
+
+// Only a whole number of months is a plan. Anything else is a Zumba row saved before this
+// existed, and calling it "1 Month" would contradict the class count printed beside it.
+const zumbaMonthsFor = (sessions) => (
+  sessions > 0 && sessions % ZUMBA_CLASSES_PER_MONTH === 0 ? sessions / ZUMBA_CLASSES_PER_MONTH : null
+);
 
 const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiotherapy" }) => {
   const isEdit = Boolean(item);
+  const isZumba = category === "zumba";
+  // Rehab and anything else sold as a whole course: the two price boxes hold the course
+  // amount, not a per-session rate. What is stored is still the rate (see submit) — this is
+  // only about which figure the person filling the form is asked for.
+  const isCourseTotal = COURSE_TOTAL_CATEGORIES.has(category);
+  // Zumba's two dials, in the terms it is actually sold in: how many months, and what the
+  // membership costs. Everything else about the plan is fixed.
+  const [planMonths, setPlanMonths] = useState(
+    () => zumbaMonthsFor(item?.sessions_offline || item?.sessions_online || 0) || ZUMBA_PLANS[0].months,
+  );
+  const [planPrice, setPlanPrice] = useState(() => (
+    item
+      ? packageTotalFrom(item.price_offline ?? item.price_online, item.sessions_offline || item.sessions_online)
+      : ZUMBA_PLANS[0].price
+  ));
   const [name, setName] = useState(item?.name || "");
   const [description, setDescription] = useState(item?.description || "");
-  const [priceOnline, setPriceOnline] = useState(item?.price_online ?? DEFAULT_PRICE_ONLINE);
-  const [priceOffline, setPriceOffline] = useState(item?.price_offline ?? DEFAULT_PRICE_OFFLINE);
+  // On a course-priced shelf these hold the course total, recovered from the stored rate
+  // when editing so the box shows the figure that was typed rather than the rate behind it.
+  const [priceOnline, setPriceOnline] = useState(() => {
+    if (!isCourseTotal) return item?.price_online ?? DEFAULT_PRICE_ONLINE;
+    if (item) return packageTotalFrom(item.price_online, item.sessions_online);
+    return COURSE_TOTAL_DEFAULTS[category]?.online ?? DEFAULT_PRICE_ONLINE;
+  });
+  const [priceOffline, setPriceOffline] = useState(() => {
+    if (!isCourseTotal) return item?.price_offline ?? DEFAULT_PRICE_OFFLINE;
+    if (item) return packageTotalFrom(item.price_offline, item.sessions_offline);
+    return COURSE_TOTAL_DEFAULTS[category]?.offline ?? DEFAULT_PRICE_OFFLINE;
+  });
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(item?.image_url || null);
   const [saving, setSaving] = useState(false);
@@ -318,12 +386,21 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
   // An existing package keeps the count it was saved with. Editing one to correct a price
   // should not quietly relabel it as a course of a different length — which is exactly what
   // recalculating from the catalogue default would do to everything saved before this.
-  const sessions = item?.sessions_online || item?.sessions_offline || fixedSessionsFor(category);
-  const totalOnline = (Number(priceOnline) || 0) * sessions;
-  const totalOffline = (Number(priceOffline) || 0) * sessions;
+  // A Zumba membership is the exception: its length is the plan, so the picker sets the
+  // class count outright instead of the saved one being preserved.
+  const sessions = isZumba
+    ? zumbaSessionsFor(planMonths)
+    : (item?.sessions_online || item?.sessions_offline || fixedSessionsFor(category));
+  const perClass = sessions > 0 ? (Number(planPrice) || 0) / sessions : 0;
+  const courseRate = (total) => (sessions > 0 ? (Number(total) || 0) / sessions : 0);
+  // A course shelf's boxes already hold the totals; everywhere else the total is the rate
+  // multiplied out.
+  const totalOnline = isCourseTotal ? (Number(priceOnline) || 0) : (Number(priceOnline) || 0) * sessions;
+  const totalOffline = isCourseTotal ? (Number(priceOffline) || 0) : (Number(priceOffline) || 0) * sessions;
 
   const submit = async () => {
     if (!name.trim()) { toast.error("Package name is required"); return; }
+    if (isZumba && !(Number(planPrice) > 0)) { toast.error("Plan amount is required"); return; }
     setSaving(true);
     try {
       let image_url = item?.image_url || null;
@@ -337,8 +414,13 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
         name: name.trim(),
         description,
         image_url,
-        price_online: Number(priceOnline) || 0,
-        price_offline: Number(priceOffline) || 0,
+        // Zumba runs offline only, but both prices are written all the same - the booking
+        // path picks one by mode, and leaving the other at zero would read as free.
+        // Stored as a per-session rate in every case. A course shelf divides its total by
+        // the session count here, so assignment and collection keep charging rate x
+        // sessions and arrive back at exactly the figure that was typed.
+        price_online: isZumba ? perClass : (isCourseTotal ? courseRate(priceOnline) : Number(priceOnline) || 0),
+        price_offline: isZumba ? perClass : (isCourseTotal ? courseRate(priceOffline) : Number(priceOffline) || 0),
         sessions_online: sessions,
         sessions_offline: sessions,
       };
@@ -362,7 +444,7 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} data-testid="session-create-modal">
       <div className="flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
         <div className="flex shrink-0 items-center justify-between bg-gradient-to-r from-sky-500 to-indigo-600 px-5 py-3 text-white">
-          <p className="text-base font-semibold">{isEdit ? "Edit Session Package" : "Add Session Package"}</p>
+          <p className="text-base font-semibold">{`${isEdit ? "Edit" : "Add"} ${isZumba ? "Zumba Membership" : "Session Package"}`}</p>
           <button onClick={onClose} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="session-create-close">
             <X className="h-4 w-4" />
           </button>
@@ -415,12 +497,50 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
             />
           </div>
 
+          {isZumba ? (
+          <div data-testid="zumba-plan-setup">
+            <label className="mb-1 block text-xs font-semibold text-slate-600">Membership Plan</label>
+            <div className="flex flex-wrap gap-2" data-testid="zumba-plan-options">
+              {ZUMBA_PLANS.map((plan) => (
+                <button
+                  key={plan.months}
+                  type="button"
+                  onClick={() => { setPlanMonths(plan.months); setPlanPrice(plan.price); }}
+                  className={`rounded-lg border px-3 py-2 text-sm font-semibold transition ${planMonths === plan.months ? "border-violet-300 bg-violet-50 text-violet-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}
+                  data-testid={`zumba-plan-${plan.months}m`}
+                >
+                  {plan.label}<span className="ml-1.5 text-xs font-normal opacity-70">₹{plan.price}</span>
+                </button>
+              ))}
+            </div>
+            <div className="mt-2 rounded-lg border border-violet-100 bg-violet-50/60 p-3">
+              <p className="mb-2 flex items-center gap-1 text-xs font-bold text-violet-800"><CalendarRange className="h-3 w-3" />Class Schedule</p>
+              <div className="space-y-1 text-[11px] text-violet-800">
+                <div className="flex items-center justify-between"><span>Days</span><span className="font-bold">{ZUMBA_CLASS_DAYS}</span></div>
+                <div className="flex items-center justify-between"><span>Classes a month</span><span className="font-bold">{ZUMBA_CLASSES_PER_MONTH}</span></div>
+                <div className="flex items-center justify-between"><span>Total classes</span><span className="font-bold" data-testid="zumba-plan-sessions">{sessions}</span></div>
+              </div>
+              <label className="mb-0.5 mt-2 block text-[10px] font-semibold text-violet-700">Plan Amount</label>
+              <div className="relative">
+                <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-violet-600">₹</span>
+                <Input type="number" min="0" value={planPrice} onChange={(e) => setPlanPrice(e.target.value)} className="h-8 pl-6 text-sm" data-testid="zumba-plan-price" />
+              </div>
+              <div className="mt-2 flex items-center justify-between border-t border-violet-200 pt-1.5">
+                <span className="text-[11px] font-semibold text-violet-700">Per Class</span>
+                <span className="text-sm font-extrabold text-violet-900" data-testid="zumba-plan-per-class">₹{formatRupees(perClass)}</span>
+              </div>
+            </div>
+          </div>
+          ) : (
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600">Online &amp; Offline Setup</label>
             <div className="grid grid-cols-2 gap-2" data-testid="session-create-mode-boxes">
               <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 p-3">
                 <p className="mb-2 flex items-center gap-1 text-xs font-bold text-emerald-800"><Wifi className="h-3 w-3" />Online Mode</p>
-                <label className="mb-0.5 block text-[10px] font-semibold text-emerald-700">Per Session Amount</label>
+                {/* The box asks for whatever that shelf is actually sold in — the whole
+                    course on Rehab, a rate everywhere else. Asking for the rate on a
+                    course-priced shelf is what made 18,000 unreachable. */}
+                <label className="mb-0.5 block text-[10px] font-semibold text-emerald-700">{isCourseTotal ? `Amount for ${sessions} Sessions` : "Per Session Amount"}</label>
                 <div className="relative mb-2">
                   <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-emerald-600">₹</span>
                   <Input type="number" min="0" value={priceOnline} onChange={(e) => setPriceOnline(e.target.value)} className="h-8 pl-6 text-sm" data-testid="session-create-price-online" />
@@ -428,13 +548,13 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
                 <label className="mb-0.5 block text-[10px] font-semibold text-emerald-700">Sessions</label>
                 <Input type="number" value={sessions} readOnly disabled className="h-8 bg-emerald-50 text-sm" data-testid="session-create-sessions-online" />
                 <div className="mt-2 flex items-center justify-between border-t border-emerald-200 pt-1.5">
-                  <span className="text-[11px] font-semibold text-emerald-700">Total Amount</span>
-                  <span className="text-sm font-extrabold text-emerald-900" data-testid="session-create-total-online">₹{totalOnline}</span>
+                  <span className="text-[11px] font-semibold text-emerald-700">{isCourseTotal ? "Per Session" : "Total Amount"}</span>
+                  <span className="text-sm font-extrabold text-emerald-900" data-testid="session-create-total-online">₹{isCourseTotal ? formatRupees(courseRate(priceOnline)) : totalOnline}</span>
                 </div>
               </div>
               <div className="rounded-lg border border-amber-100 bg-amber-50/60 p-3">
                 <p className="mb-2 flex items-center gap-1 text-xs font-bold text-amber-800"><MapPin className="h-3 w-3" />Offline Mode</p>
-                <label className="mb-0.5 block text-[10px] font-semibold text-amber-700">Per Session Amount</label>
+                <label className="mb-0.5 block text-[10px] font-semibold text-amber-700">{isCourseTotal ? `Amount for ${sessions} Sessions` : "Per Session Amount"}</label>
                 <div className="relative mb-2">
                   <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-amber-600">₹</span>
                   <Input type="number" min="0" value={priceOffline} onChange={(e) => setPriceOffline(e.target.value)} className="h-8 pl-6 text-sm" data-testid="session-create-price-offline" />
@@ -442,12 +562,13 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
                 <label className="mb-0.5 block text-[10px] font-semibold text-amber-700">Sessions</label>
                 <Input type="number" value={sessions} readOnly disabled className="h-8 bg-amber-50 text-sm" data-testid="session-create-sessions-offline" />
                 <div className="mt-2 flex items-center justify-between border-t border-amber-200 pt-1.5">
-                  <span className="text-[11px] font-semibold text-amber-700">Total Amount</span>
-                  <span className="text-sm font-extrabold text-amber-900" data-testid="session-create-total-offline">₹{totalOffline}</span>
+                  <span className="text-[11px] font-semibold text-amber-700">{isCourseTotal ? "Per Session" : "Total Amount"}</span>
+                  <span className="text-sm font-extrabold text-amber-900" data-testid="session-create-total-offline">₹{isCourseTotal ? formatRupees(courseRate(priceOffline)) : totalOffline}</span>
                 </div>
               </div>
             </div>
           </div>
+          )}
         </div>
         <div className="flex shrink-0 items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/40 px-5 py-3">
           <Button variant="outline" onClick={onClose} data-testid="session-create-cancel">Cancel</Button>
@@ -487,7 +608,7 @@ export const PriceModeBadges = ({ item, isSession, mode = "all" }) => (
           <Wifi className="h-3.5 w-3.5" />Online
         </span>
         <span className="text-sm font-extrabold text-emerald-900">
-          ₹{isSession ? (item.price_online ?? 0) * (item.sessions_online ?? 0) : (item.price_online ?? 0)}
+          ₹{isSession ? packageTotalFrom(item.price_online, item.sessions_online) : (item.price_online ?? 0)}
         </span>
       </div>
     )}
@@ -497,7 +618,7 @@ export const PriceModeBadges = ({ item, isSession, mode = "all" }) => (
           <MapPin className="h-3.5 w-3.5" />Offline
         </span>
         <span className="text-sm font-extrabold text-amber-900">
-          ₹{isSession ? (item.price_offline ?? 0) * (item.sessions_offline ?? 0) : (item.price_offline ?? 0)}
+          ₹{isSession ? packageTotalFrom(item.price_offline, item.sessions_offline) : (item.price_offline ?? 0)}
         </span>
       </div>
     )}
@@ -508,7 +629,33 @@ export const PriceModeBadges = ({ item, isSession, mode = "all" }) => (
 // Same mode convention as PriceModeBadges — "all" (default) keeps both boxes, exactly
 // what every existing caller (ViewItemModal, BranchStoreBoard) still gets since neither
 // passes it.
-export const SessionPriceBoxes = ({ item, testid, mode = "all" }) => (
+export const SessionPriceBoxes = ({ item, testid, mode = "all" }) => {
+  // A Zumba row is a membership: the schedule is fixed and the money that changes hands is
+  // the plan amount, so the per-session pair every other package shows would be reading out
+  // an internal figure. Offline only, so one box either way.
+  if (item.category === "zumba") {
+    const classes = item.sessions_offline || item.sessions_online || 0;
+    const months = zumbaMonthsFor(classes);
+    return (
+      <div className="rounded-xl border border-violet-100 bg-violet-50/60 p-3" data-testid={testid}>
+        <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-violet-800">
+          <Music2 className="h-3.5 w-3.5" />{months ? `${months} Month${months > 1 ? "s" : ""} Plan` : "Zumba Class"}
+        </p>
+        <div className="space-y-1.5 text-xs text-violet-800">
+          <div className="flex items-center justify-between"><span>Days</span><span className="font-bold">{ZUMBA_CLASS_DAYS}</span></div>
+          <div className="flex items-center justify-between">
+            <span>Classes</span>
+            <span className="font-bold">{months ? `${ZUMBA_CLASSES_PER_MONTH}/month · ${classes} total` : `${classes} total`}</span>
+          </div>
+          <div className="mt-1 flex items-center justify-between border-t border-violet-200 pt-1.5">
+            <span className="font-semibold">Plan Amount</span>
+            <span className="text-sm font-extrabold text-violet-900">₹{packageTotalFrom(item.price_offline ?? item.price_online, classes)}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  return (
   <div className={`grid gap-2 ${mode === "all" ? "grid-cols-2" : "grid-cols-1"}`} data-testid={testid}>
     {mode !== "offline" && (
       <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 p-3">
@@ -518,7 +665,7 @@ export const SessionPriceBoxes = ({ item, testid, mode = "all" }) => (
           <div className="flex items-center justify-between"><span>Total Sessions</span><span className="font-bold">{item.sessions_online ?? 0} Sessions</span></div>
           <div className="mt-1 flex items-center justify-between border-t border-emerald-200 pt-1.5">
             <span className="font-semibold">Total Amount</span>
-            <span className="text-sm font-extrabold text-emerald-900">₹{(item.price_online ?? 0) * (item.sessions_online ?? 0)}</span>
+            <span className="text-sm font-extrabold text-emerald-900">₹{packageTotalFrom(item.price_online, item.sessions_online)}</span>
           </div>
         </div>
       </div>
@@ -531,13 +678,14 @@ export const SessionPriceBoxes = ({ item, testid, mode = "all" }) => (
           <div className="flex items-center justify-between"><span>Total Sessions</span><span className="font-bold">{item.sessions_offline ?? 0} Sessions</span></div>
           <div className="mt-1 flex items-center justify-between border-t border-amber-200 pt-1.5">
             <span className="font-semibold">Total Amount</span>
-            <span className="text-sm font-extrabold text-amber-900">₹{(item.price_offline ?? 0) * (item.sessions_offline ?? 0)}</span>
+            <span className="text-sm font-extrabold text-amber-900">₹{packageTotalFrom(item.price_offline, item.sessions_offline)}</span>
           </div>
         </div>
       </div>
     )}
   </div>
-);
+  );
+};
 
 export const ViewItemModal = ({ item, kind, onClose, onEdit, canEdit = true }) => {
   const isSession = kind === "session";
