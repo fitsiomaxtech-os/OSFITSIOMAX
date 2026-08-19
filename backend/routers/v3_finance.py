@@ -736,13 +736,14 @@ def _lead_session_summary(lead: dict) -> dict:
 def _empty_day(day: str) -> dict:
     """One day's revenue row, with every line seeded. Both loops that build these use it,
     so a row can never be missing the key the other loop is about to add to."""
-    return {"date": day, "consultation": 0.0, "session": 0.0, "diet": 0.0, "store": 0.0}
+    return {"date": day, "consultation": 0.0, "session": 0.0, "diet": 0.0, "store": 0.0, "zumba": 0.0}
 
 
 def _empty_branch(bid, bname: str) -> dict:
     return {
         "branch_id": bid, "branch_name": bname,
         "consultation_total": 0.0, "session_total": 0.0, "diet_total": 0.0, "store_total": 0.0,
+        "zumba_total": 0.0,
     }
 
 
@@ -956,12 +957,77 @@ async def revenue_overview(
             "approved_at": "",
         })
 
-    total_collected = consultation_total + session_total + diet_total + store_total
+    # Zumba class fees. Like the store sales above, they come from their own collection
+    # rather than the lead activity trail — v3_zumba.py keeps the money on the
+    # registration because a class fee is flat, has no package or installments behind it,
+    # and hanging it on the leads' fee machinery would have meant inventing a lead per
+    # dancer. Same money either way, so it belongs in the same total.
+    #
+    # fee_paid, never fee_amount: what was agreed is not what is in the drawer, and every
+    # other figure on this payload is money actually collected.
+    zumba_query = {}
+    if branch_id:
+        zumba_query["branch_id"] = branch_id
+    if date_query:
+        zumba_query["created_at"] = date_query
+    zumba_rows = await v3_col("zumba_registrations").find(zumba_query, {"_id": 0}).sort("created_at", -1).to_list(5000)
+    if vertical_mode in ("online", "offline"):
+        zumba_rows = [z for z in zumba_rows if (z.get("branch_id") in online_branch_ids) == (vertical_mode == "online")]
+
+    zumba_total = 0.0
+    for reg in zumba_rows:
+        amount = float(reg.get("fee_paid") or 0)
+        if amount <= 0:
+            continue  # registered but not paid — counted by the Zumba tab, not by revenue
+        zumba_total += amount
+        bid = reg.get("branch_id")
+        bname = branch_name_map.get(bid, "Unknown")
+        day = (reg.get("created_at") or "")[:10]
+        # A registration records no payment mode, so these land under "unknown" and the
+        # Cash/UPI/Card pills simply never match them.
+        mode = "unknown"
+
+        d = by_day.setdefault(day, _empty_day(day))
+        d["zumba"] = d.get("zumba", 0.0) + amount
+
+        b = by_branch_acc.setdefault(bid or "unknown", _empty_branch(bid, bname))
+        b["zumba_total"] = b.get("zumba_total", 0.0) + amount
+
+        payment_modes[mode] = payment_modes.get(mode, 0.0) + amount
+
+        transactions.append({
+            "id": reg.get("id", ""),
+            "transaction_id": "",
+            "date": reg.get("created_at", ""),
+            "branch_name": bname,
+            "source": "zumba",
+            "gross": amount,
+            # A class fee is the flat price; there is no listed-versus-collected concept
+            # to discount against. Carried so every transaction in this list is one shape.
+            "discount": 0.0,
+            "original_amount": None,
+            "discount_reason": None,
+            "tax": 0.0,
+            "net": amount,
+            "collected_by": reg.get("created_by", ""),
+            # No lead behind a dancer, same as a counter sale — left empty rather than
+            # faked, so the client-history eye skips these instead of opening on nothing.
+            "lead_id": "",
+            "client_name": (reg.get("name") or "").strip() or "Zumba registration",
+            "phone": reg.get("phone", ""),
+            "payment_mode": mode,
+            "client_balance": max(float(reg.get("fee_amount") or 0) - amount, 0.0),
+            "approved": False,
+            "approved_by": "",
+            "approved_at": "",
+        })
+
+    total_collected = consultation_total + session_total + diet_total + store_total + zumba_total
     trend = sorted(by_day.values(), key=lambda r: r["date"])
     for r in trend:
-        r["total"] = r["consultation"] + r["session"] + r["diet"] + r["store"]
+        r["total"] = r["consultation"] + r["session"] + r["diet"] + r["store"] + r.get("zumba", 0.0)
     for r in by_branch_acc.values():
-        r["total_revenue"] = r["consultation_total"] + r["session_total"] + r["diet_total"] + r["store_total"]
+        r["total_revenue"] = r["consultation_total"] + r["session_total"] + r["diet_total"] + r["store_total"] + r.get("zumba_total", 0.0)
     by_branch = sorted(by_branch_acc.values(), key=lambda r: -r["total_revenue"])
 
     untouched_stages = {None} | await entry_branch_stage_names()
@@ -1045,10 +1111,12 @@ async def revenue_overview(
             "session_revenue": session_total,
             "diet_revenue": diet_total,
             "store_revenue": store_total,
+            "zumba_revenue": zumba_total,
             "consultation_pct": round(consultation_total / total_collected * 100, 1) if total_collected else 0,
             "session_pct": round(session_total / total_collected * 100, 1) if total_collected else 0,
             "diet_pct": round(diet_total / total_collected * 100, 1) if total_collected else 0,
             "store_pct": round(store_total / total_collected * 100, 1) if total_collected else 0,
+            "zumba_pct": round(zumba_total / total_collected * 100, 1) if total_collected else 0,
         },
         "trend": trend,
         "by_branch": by_branch,
