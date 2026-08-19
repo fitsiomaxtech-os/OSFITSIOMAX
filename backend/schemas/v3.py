@@ -281,12 +281,20 @@ class V3LeadOut(BaseModel):
     rehab_package_price: Optional[float] = None
     rehab_package_sessions: Optional[int] = None
     rehab_package_mode: Optional[str] = None
+    # The Zumba membership, kept apart from the other two for the same reason they are
+    # kept apart from each other: a patient can leave with any combination of them.
+    zumba_package_id: Optional[str] = None
+    zumba_package_name: Optional[str] = None
+    zumba_package_price: Optional[float] = None
+    zumba_package_sessions: Optional[int] = None
+    zumba_package_mode: Optional[str] = None
     consultation_decision: Optional[str] = None  # "consultation_only" | "consultation_treatment" — set by Head Physio at Save & Move
     # Whether the Head Physio also referred this patient to a Nutrition Coach. Orthogonal
     # to consultation_decision — see V3ConsultationDecisionInput.
     diet_recommended: Optional[bool] = False
     rehab_referred: Optional[bool] = False
     fitness_recommended: Optional[bool] = False
+    zumba_recommended: Optional[bool] = False
     # Who is actually delivering that diet plan, set by branch/assign-diet. This model
     # ignores extras, so without these three the Consultations board could never tell an
     # already-assigned patient from a new one and its Reassign control would never appear.
@@ -513,6 +521,8 @@ class V3ConsultationDecisionInput(BaseModel):
     rehab_referred: bool = False
     # Same idea as rehab_referred, its own routing flag rather than a value of `decision`.
     fitness_recommended: bool = False
+    # And again for Zumba, which the branch sells alongside the clinical verticals.
+    zumba_recommended: bool = False
     # Required only when decision == "consultation_treatment" — the Treatment/Session
     # package (FITSIO STORE > Sessions) the Head Physio is choosing on the patient's behalf.
     item_id: Optional[str] = None
@@ -522,6 +532,8 @@ class V3ConsultationDecisionInput(BaseModel):
     # referring to Rehab without settling the course is the flow that existed before this
     # field, and the receipt still says "Waiting on a package in Rehab" for it.
     rehab_item_id: Optional[str] = None
+    # The Zumba membership, when one is picked alongside it. Optional on the same terms.
+    zumba_item_id: Optional[str] = None
 
 
 class V3AssignPhysioSessionsInput(BaseModel):

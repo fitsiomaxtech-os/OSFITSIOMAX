@@ -219,17 +219,19 @@ const CONSULTATION_ADDONS = [
   { key: "diet", label: "Diet", tone: "#eb6834" },
   { key: "rehab", label: "Rehab", tone: "#0891b2" },
   { key: "fitness", label: "Fitness", tone: "#7c3aed" },
+  { key: "zumba", label: "Zumba", tone: "#db2777" },
 ];
 
 // "Consultation" first always, then whichever add-ons are on — same shape read back from
 // a saved lead (decisionSummaryOf) as from the draft mid-edit, so a label built one way
 // can never say something the other way wouldn't.
-const addonsLabel = ({ treatment, diet, rehab, fitness }) => [
+const addonsLabel = ({ treatment, diet, rehab, fitness, zumba }) => [
   "Consultation",
   treatment ? "Treatment" : null,
   diet ? "Diet" : null,
   rehab ? "Rehab" : null,
   fitness ? "Fitness" : null,
+  zumba ? "Zumba" : null,
 ].filter(Boolean).join(" + ");
 
 // What a confirmed treatment reads as, on screen and in a WhatsApp message. One shape
@@ -724,7 +726,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // have to be written first, but no add-on has to be picked — every toggle starts off,
   // which submits as a plain Consultation, the same as a patient who needs nothing else.
   // Picking Treatment reveals the Treatment Package (names only, no prices shown here).
-  const [decisionDraft, setDecisionDraft] = useState({ treatment: false, diet: false, rehab: false, fitness: false, item_id: "", rehab_item_id: "", mode: "offline", sessionsPerWeek: "" });
+  const [decisionDraft, setDecisionDraft] = useState({ treatment: false, diet: false, rehab: false, fitness: false, zumba: false, item_id: "", rehab_item_id: "", zumba_item_id: "", mode: "offline", sessionsPerWeek: "" });
   const [savingDecision, setSavingDecision] = useState(false);
   // The confirmation shown after a decision saves, and the flag that reopens the form
   // behind it. Both clear when the popup moves to another lead.
@@ -929,7 +931,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     setRescheduleDraft(null);
     setCollectFeeDraft(null);
     setTreatmentFeeDraft(null);
-    setDecisionDraft({ treatment: false, diet: false, rehab: false, fitness: false, item_id: "", rehab_item_id: "", mode: "offline", sessionsPerWeek: "" });
+    setDecisionDraft({ treatment: false, diet: false, rehab: false, fitness: false, zumba: false, item_id: "", rehab_item_id: "", zumba_item_id: "", mode: "offline", sessionsPerWeek: "" });
     setDecisionReceipt(null);
     setEditingDecision(false);
   }, [selectedLead?.id]);
@@ -956,6 +958,9 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // under its own category and is priced the same way — a per-session rate whose total is
   // the rate times the course's session count.
   const rehabPackageItems = storeItems.filter((i) => i.item_type === "session" && i.category === "rehab");
+  // The Zumba shelf. Its plan amount is stored divided down to a per-class rate, exactly
+  // like a rehab course, so the same rate-times-count arithmetic returns the plan price.
+  const zumbaPackageItems = storeItems.filter((i) => i.item_type === "session" && i.category === "zumba");
 
   const moveStage = async (lead, next) => {
     if (next === lead.consultation_stage) return;
@@ -985,6 +990,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       // Only meaningful with the referral, and the server enforces the same pairing.
       rehab_item_id: decisionDraft.rehab ? decisionDraft.rehab_item_id || null : null,
       fitness_recommended: decisionDraft.fitness,
+      zumba_recommended: decisionDraft.zumba,
+      zumba_item_id: decisionDraft.zumba ? decisionDraft.zumba_item_id || null : null,
       mode: decisionDraft.mode,
     };
     if (decisionDraft.treatment) {
@@ -1038,6 +1045,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
         diet: !!lead.diet_recommended,
         rehab: !!lead.rehab_referred,
         fitness: !!lead.fitness_recommended,
+        zumba: !!lead.zumba_recommended,
       }),
       packageName: lead.session_package_name || "",
       weeks: weeks || 0,
@@ -1057,8 +1065,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       diet: !!lead.diet_recommended,
       rehab: !!lead.rehab_referred,
       fitness: !!lead.fitness_recommended,
+      zumba: !!lead.zumba_recommended,
       item_id: lead.session_package_id || "",
       rehab_item_id: lead.rehab_package_id || "",
+      zumba_item_id: lead.zumba_package_id || "",
       mode: lead.consultation_mode || "offline",
       sessionsPerWeek: weeks && total ? String(Math.round(total / weeks)) : "",
     });
@@ -2579,6 +2589,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         diet: !!selectedLead.diet_recommended,
                         rehab: !!selectedLead.rehab_referred,
                         fitness: !!selectedLead.fitness_recommended,
+                        zumba: !!selectedLead.zumba_recommended,
                       })}
                     </p>
                     {selectedLead.consultation_decision === "consultation_treatment" && selectedLead.session_package_name && (
@@ -2645,6 +2656,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                               [p.key]: !d[p.key],
                               ...(p.key === "treatment" && d.treatment ? { item_id: "", sessionsPerWeek: "" } : {}),
                               ...(p.key === "rehab" && d.rehab ? { rehab_item_id: "" } : {}),
+                              ...(p.key === "zumba" && d.zumba ? { zumba_item_id: "" } : {}),
                             }))}
                             className="shrink-0 whitespace-nowrap rounded-md border px-3 py-1.5 text-xs font-semibold transition hover:brightness-95"
                             style={selected
@@ -2700,6 +2712,47 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         return (
                           <p className="mt-2 text-xs text-slate-500" data-testid="cons-decision-rehab-summary">
                             {item.name}{count ? ` · ${count} sessions` : ""}
+                          </p>
+                        );
+                      })()}
+                    </div>
+                  )}
+
+                  {/* The Zumba shelf, on the same terms as Rehab above: shown when Zumba is
+                      ticked, optional, and named without a price. */}
+                  {decisionDraft.zumba && (
+                    <div data-testid="cons-decision-zumba-package">
+                      <label className="mb-1 block text-[11px] font-medium text-slate-500">Zumba Package <span className="font-normal text-slate-400">(optional)</span></label>
+                      <div className="flex flex-wrap gap-2" data-testid="cons-decision-zumba-options">
+                        {zumbaPackageItems.map((i) => {
+                          const selected = decisionDraft.zumba_item_id === i.id;
+                          return (
+                            <button
+                              key={i.id}
+                              type="button"
+                              onClick={() => setDecisionDraft((p) => ({ ...p, zumba_item_id: selected ? "" : i.id }))}
+                              className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition ${
+                                selected
+                                  ? "border-pink-600 bg-pink-600 text-white"
+                                  : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                              }`}
+                              data-testid={`cons-decision-zumba-option-${i.id}`}
+                            >
+                              {i.name}
+                            </button>
+                          );
+                        })}
+                        {zumbaPackageItems.length === 0 && (
+                          <p className="text-xs text-slate-400">No Zumba packages in Services and Products yet.</p>
+                        )}
+                      </div>
+                      {decisionDraft.zumba_item_id && (() => {
+                        const item = zumbaPackageItems.find((i) => i.id === decisionDraft.zumba_item_id);
+                        if (!item) return null;
+                        const count = decisionDraft.mode === "online" ? item.sessions_online : item.sessions_offline;
+                        return (
+                          <p className="mt-2 text-xs text-slate-500" data-testid="cons-decision-zumba-summary">
+                            {item.name}{count ? ` · ${count} classes` : ""}
                           </p>
                         );
                       })()}

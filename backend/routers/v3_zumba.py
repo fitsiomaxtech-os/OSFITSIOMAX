@@ -33,29 +33,34 @@ router = APIRouter(prefix="/api/v3")
 # How a registration arrived. MASTER carries a master_name alongside it — the others are
 # whole answers on their own.
 MASTER = "master"
-SOURCES = (MASTER, "board", "consultations", "branch", "social_media", "personal")
+SOURCES = (MASTER, "board", "consultations", "branch", "social_media", "personal", "fitsiomax")
 DEFAULT_SOURCE = "personal"
 
 # The first cut of this tab shipped with a different, shorter vocabulary. Rows written then
-# still say "direct" or "fitsiomax", so they are read forward rather than left to fall
-# through to the default and quietly change which card they count towards.
+# still say "direct" or "consultant", so they are read forward rather than left to fall
+# through to the default and quietly change which card they count towards. "fitsiomax" is
+# not listed: it is a source in its own right now and needs no translation.
 LEGACY_SOURCES = {
     "direct": "personal",
     "consultant": "consultations",
     "masters": MASTER,
-    "fitsiomax": "social_media",
 }
 
-# Which summary card a source counts towards. The cards were named before the sources
-# were, so the two vocabularies are not the same size: Board and Social Media are both
-# Fitsiomax reaching somebody the branch never spoke to, and count together.
+# Which summary card a source counts towards.
+#
+# Direct means nobody referred them: they walked in, they found the page, they read the
+# board. Every other card names whoever did the referring. That is the line the cards are
+# actually drawn on, and it is why three sources feed Direct while the rest feed one card
+# each — a registration taken straight into this tab is Direct by default, since the
+# default source is the one nobody referred.
 CARD_OF_SOURCE = {
     "personal": "direct",
+    "social_media": "direct",
+    "board": "direct",
     "consultations": "consultant",
     "branch": "branch",
     MASTER: "masters",
-    "board": "fitsiomax",
-    "social_media": "fitsiomax",
+    "fitsiomax": "fitsiomax",
 }
 CARDS = ("direct", "consultant", "branch", "masters", "fitsiomax")
 

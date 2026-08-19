@@ -9,14 +9,19 @@ import { toast } from "@/components/ui/sonner";
 import { listZumba, addZumba, updateZumba, deleteZumba } from "@/lib/api";
 
 // How a registration arrived, as the branch would say it. A referral is recorded against
-// the master who made it rather than against a single "Masters" bucket, so these five are
+// the master who made it rather than against a single "Masters" bucket, so these six are
 // the answers that stand on their own; the masters are offered alongside them by name.
+//
+// Board, Social Media and Personal all count towards Direct: nobody referred them, they
+// came to us. The rest name whoever did the referring. The mapping lives on the server,
+// which stamps each row with its card so this list and the counts cannot disagree.
 const SOURCES = [
   { key: "board", label: "Board" },
   { key: "consultations", label: "Consultations" },
   { key: "branch", label: "Branch" },
   { key: "social_media", label: "Social Media" },
   { key: "personal", label: "Personal" },
+  { key: "fitsiomax", label: "Fitsiomax" },
 ];
 const MASTER = "master";
 const sourceLabel = (r) => (

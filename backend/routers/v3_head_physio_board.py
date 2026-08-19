@@ -346,6 +346,7 @@ async def hp_consultation_decision(
         # sent to rehab from one who simply has not been given a package.
         "rehab_referred": bool(payload.rehab_referred),
         "fitness_recommended": bool(payload.fitness_recommended),
+        "zumba_recommended": bool(payload.zumba_recommended),
         "head_consultation_stage": await _head_closing_stage(),
         "consultation_stage": await _branch_consultation_visit_stage(),
         "updated_at": now_iso(),
@@ -359,6 +360,8 @@ async def hp_consultation_decision(
         chosen += " + Diet"
     if payload.fitness_recommended:
         chosen += " + Fitness"
+    if payload.zumba_recommended:
+        chosen += " + Zumba"
     detail = f"Consultation decision: {chosen}"
 
     # Consultation Fee has a single fixed price (FITSIO STORE > Consultation) — there's
@@ -424,6 +427,27 @@ async def hp_consultation_decision(
             "rehab_package_mode": payload.mode,
         })
         detail += f" · Rehab: {rehab_item['name']} ({r_sessions} sessions)"
+
+    # The Zumba membership, priced the way rehab is — its plan amount is stored divided
+    # down to a per-class rate, so rate x classes lands back on the figure the catalogue
+    # was given. Only accepted alongside its own flag, for the same reason.
+    if payload.zumba_recommended and payload.zumba_item_id:
+        zumba_item = await v3_col("store_items").find_one({"id": payload.zumba_item_id}, {"_id": 0})
+        if not zumba_item:
+            raise HTTPException(status_code=404, detail="Zumba package not found")
+        if zumba_item.get("item_type") != "session" or zumba_item.get("category") != "zumba":
+            raise HTTPException(status_code=400, detail="That item is not a Zumba package")
+        z_rate = zumba_item.get("price_online") if payload.mode == "online" else zumba_item.get("price_offline")
+        z_sessions = zumba_item.get("sessions_online") if payload.mode == "online" else zumba_item.get("sessions_offline")
+        z_price = round(z_rate * z_sessions, 2) if z_rate is not None and z_sessions else z_rate
+        updates.update({
+            "zumba_package_id": zumba_item["id"],
+            "zumba_package_name": zumba_item["name"],
+            "zumba_package_price": z_price,
+            "zumba_package_sessions": z_sessions,
+            "zumba_package_mode": payload.mode,
+        })
+        detail += f" · Zumba: {zumba_item['name']} ({z_sessions} classes)"
 
     await v3_col("leads").update_one({"id": lead_id}, {"$set": updates})
     await v3_col("lead_activity").insert_one({
