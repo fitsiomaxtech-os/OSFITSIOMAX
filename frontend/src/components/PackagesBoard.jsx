@@ -1453,10 +1453,11 @@ export const PackagesBoard = () => {
       </div>
 
       {view === "catalog" && (
-        // Wraps onto a second row rather than scrolling sideways. As a scroller the last
-        // tab sat half-cut at the right edge with nothing to say the row continued — and
-        // this is the one tab bar in the app that scrolled; its own sub-tab rows, and the
-        // branch store's copy of this same bar, have always wrapped.
+        // Sized to hold all twelve on one line at a desk width: 12px type, a slightly
+        // smaller icon and tighter padding. Still wrapping rather than scrolling, because
+        // the fit is a fit and not a guarantee — a narrower window or a thirteenth shelf
+        // takes a second row, which is the honest failure. As a scroller the overflow was
+        // a half-cut tab at the right edge with nothing to say the row continued.
         <div className="hidden flex-wrap gap-1 rounded-lg border border-slate-200 bg-white p-1 md:flex" data-testid="packages-subtabs">
           {visibleTabs.map((t) => {
             const Icon = t.icon;
@@ -1466,9 +1467,9 @@ export const PackagesBoard = () => {
                 key={t.key}
                 onClick={() => setTab(t.key)}
                 data-testid={`packages-subtab-${t.key}`}
-                className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-2 text-sm font-medium transition ${active ? "bg-violet-50 text-violet-600" : "text-slate-600 hover:bg-slate-50"}`}
+                className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-2 text-xs font-medium transition ${active ? "bg-violet-50 text-violet-600" : "text-slate-600 hover:bg-slate-50"}`}
               >
-                <Icon className="h-4 w-4" />{t.label}
+                <Icon className="h-3.5 w-3.5 shrink-0" />{t.label}
               </button>
             );
           })}
