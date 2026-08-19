@@ -1246,9 +1246,18 @@ async def mark_installment_paid(
         mode_fields = {}
         detail_suffix = ""
         if mode == "upi":
-            mode_fields = {"upi_transaction_id": (payload.upi_transaction_id or "").strip(), "upi_utr": (payload.upi_utr or "").strip()}
-            if mode_fields["upi_transaction_id"] or mode_fields["upi_utr"]:
-                detail_suffix = f" · UPI txn {mode_fields['upi_transaction_id']}, UTR {mode_fields['upi_utr']}"
+            # UTR is named in the log only when there is one. The Collect popups stopped
+            # asking for it, so the old unconditional line wrote "UTR " with nothing after
+            # it onto every installment collected from here.
+            txn = (payload.upi_transaction_id or "").strip()
+            utr = (payload.upi_utr or "").strip()
+            mode_fields = {"upi_transaction_id": txn}
+            if utr:
+                mode_fields["upi_utr"] = utr
+            if txn or utr:
+                detail_suffix = f" · UPI txn {txn}"
+                if utr:
+                    detail_suffix += f", UTR {utr}"
         elif mode == "card":
             if not all([payload.account_number and payload.account_number.strip(), payload.account_holder_name and payload.account_holder_name.strip(),
                         payload.bank_name and payload.bank_name.strip(), payload.ifsc_code and payload.ifsc_code.strip()]):

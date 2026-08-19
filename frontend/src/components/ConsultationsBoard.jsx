@@ -1220,7 +1220,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // hasPendingInstallments is true.
   const openPartialScheduleDraft = () => {
     openTreatmentFeeDraft();
-    setTreatmentConfirmDraft({ upi_transaction_id: "", upi_utr: "", account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "" });
+    setTreatmentConfirmDraft({ upi_transaction_id: "", account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "" });
   };
 
   // Partial Payment is split by session count, not a raw amount — each installment's
@@ -1315,7 +1315,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       toast.error("Enter a valid Consultation Fee amount");
       return;
     }
-    setPackageConfirmDraft({ upi_transaction_id: "", upi_utr: "", account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "", transfer_reference: "" });
+    setPackageConfirmDraft({ upi_transaction_id: "", account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "", transfer_reference: "" });
   };
 
   // Card and Account Transfer share the same four bank fields; Account Transfer also
@@ -1346,7 +1346,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     const payload = { payment_mode: mode, amount, confirmed: true };
     if (mode === "upi") {
       payload.upi_transaction_id = packageConfirmDraft.upi_transaction_id.trim();
-      payload.upi_utr = packageConfirmDraft.upi_utr.trim();
     } else if (BANK_DETAIL_MODES.includes(mode)) {
       if (!attachBankDetails(payload, packageConfirmDraft, mode)) return;
     }
@@ -1392,7 +1391,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // "Collect" step there, rather than sharing one form with a mode selector.
   const chooseTreatmentPaymentMode = (mode) => {
     setTreatmentFeeDraft({ ...treatmentFeeDraft, payment_mode: mode });
-    setTreatmentConfirmDraft({ upi_transaction_id: "", upi_utr: "", account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "", transfer_reference: "" });
+    setTreatmentConfirmDraft({ upi_transaction_id: "", account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "", transfer_reference: "" });
   };
 
   // The dedicated popup's own submit button — dispatches to whichever path
@@ -1417,7 +1416,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     const payload = { payment_mode: mode, amount, confirmed: true };
     if (mode === "upi") {
       payload.upi_transaction_id = treatmentConfirmDraft.upi_transaction_id.trim();
-      payload.upi_utr = treatmentConfirmDraft.upi_utr.trim();
     } else if (BANK_DETAIL_MODES.includes(mode)) {
       if (!attachBankDetails(payload, treatmentConfirmDraft, mode)) return;
     }
@@ -1503,7 +1501,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       idx,
       amount: amount > 0 ? String(amount) : "",
       payment_mode: "cash",
-      upi_transaction_id: "", upi_utr: "",
+      upi_transaction_id: "",
       account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "",
       cheque_number: "", transfer_reference: "",
     });
@@ -1526,7 +1524,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     const payload = { payment_mode: mode, amount };
     if (mode === "upi") {
       payload.upi_transaction_id = draft.upi_transaction_id.trim();
-      payload.upi_utr = draft.upi_utr.trim();
     } else if (BANK_DETAIL_MODES.includes(mode)) {
       if (!attachBankDetails(payload, draft, mode)) return;
     } else if (mode === "cheque") {
@@ -1889,7 +1886,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     if (!(price > 0)) { toast.error(`This Diet Package has no ${dietFeeDraft.mode} price set`); return; }
     setDietFeeDraft((d) => ({ ...d, amount: String(price) }));
     setDietFeeConfirmDraft({
-      upi_transaction_id: "", upi_utr: "",
+      upi_transaction_id: "",
       account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "", transfer_reference: "",
     });
   };
@@ -1900,12 +1897,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     if (!(amount > 0)) { toast.error("Enter the amount collected"); return; }
     const payload = { item_id: dietFeeDraft.item_id, mode: dietFeeDraft.mode, payment_mode: mode, amount, confirmed: true };
     if (mode === "upi") {
-      if (!dietFeeConfirmDraft.upi_transaction_id.trim() || !dietFeeConfirmDraft.upi_utr.trim()) {
-        toast.error("UPI Transaction ID and UTR are required");
+      if (!dietFeeConfirmDraft.upi_transaction_id.trim()) {
+        toast.error("UPI Transaction ID is required");
         return;
       }
       payload.upi_transaction_id = dietFeeConfirmDraft.upi_transaction_id.trim();
-      payload.upi_utr = dietFeeConfirmDraft.upi_utr.trim();
     } else if (BANK_DETAIL_MODES.includes(mode)) {
       if (!attachBankDetails(payload, dietFeeConfirmDraft, mode)) return;
     }
@@ -3477,26 +3473,15 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     />
 
                     {mode === "upi" && (
-                      <>
-                        <div>
-                          <label className="mb-1 block text-[11px] font-medium text-slate-500">UPI Transaction ID</label>
-                          <Input
-                            value={packageConfirmDraft.upi_transaction_id}
-                            onChange={(e) => setPackageConfirmDraft({ ...packageConfirmDraft, upi_transaction_id: e.target.value })}
-                            className="h-9"
-                            data-testid="cons-collect-fee-upi-txn"
-                          />
-                        </div>
-                        <div>
-                          <label className="mb-1 block text-[11px] font-medium text-slate-500">UTR</label>
-                          <Input
-                            value={packageConfirmDraft.upi_utr}
-                            onChange={(e) => setPackageConfirmDraft({ ...packageConfirmDraft, upi_utr: e.target.value })}
-                            className="h-9"
-                            data-testid="cons-collect-fee-upi-utr"
-                          />
-                        </div>
-                      </>
+                      <div>
+                        <label className="mb-1 block text-[11px] font-medium text-slate-500">UPI Transaction ID</label>
+                        <Input
+                          value={packageConfirmDraft.upi_transaction_id}
+                          onChange={(e) => setPackageConfirmDraft({ ...packageConfirmDraft, upi_transaction_id: e.target.value })}
+                          className="h-9"
+                          data-testid="cons-collect-fee-upi-txn"
+                        />
+                      </div>
                     )}
 
                     {BANK_DETAIL_MODES.includes(mode) && (
@@ -3707,27 +3692,20 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       </div>
                     )}
 
+                    {/* Transaction ID alone. A UPI payment was asking for its UTR as
+                        well -- a second reference for the same transfer, typed off the
+                        same receipt, on the popup a Branch Admin fills at the desk with
+                        the patient waiting. */}
                     {mode === "upi" && (
-                      <>
-                        <div>
-                          <label className="mb-1 block text-[11px] font-medium text-slate-500">UPI Transaction ID</label>
-                          <Input
-                            value={treatmentConfirmDraft.upi_transaction_id}
-                            onChange={(e) => setTreatmentConfirmDraft({ ...treatmentConfirmDraft, upi_transaction_id: e.target.value })}
-                            className="h-9"
-                            data-testid="cons-treatment-fee-upi-txn"
-                          />
-                        </div>
-                        <div>
-                          <label className="mb-1 block text-[11px] font-medium text-slate-500">UTR</label>
-                          <Input
-                            value={treatmentConfirmDraft.upi_utr}
-                            onChange={(e) => setTreatmentConfirmDraft({ ...treatmentConfirmDraft, upi_utr: e.target.value })}
-                            className="h-9"
-                            data-testid="cons-treatment-fee-upi-utr"
-                          />
-                        </div>
-                      </>
+                      <div>
+                        <label className="mb-1 block text-[11px] font-medium text-slate-500">UPI Transaction ID</label>
+                        <Input
+                          value={treatmentConfirmDraft.upi_transaction_id}
+                          onChange={(e) => setTreatmentConfirmDraft({ ...treatmentConfirmDraft, upi_transaction_id: e.target.value })}
+                          className="h-9"
+                          data-testid="cons-treatment-fee-upi-txn"
+                        />
+                      </div>
                     )}
 
                     {BANK_DETAIL_MODES.includes(mode) && (
@@ -3876,26 +3854,15 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     </div>
 
                     {mode === "upi" && (
-                      <>
-                        <div>
-                          <label className="mb-1 block text-[11px] font-medium text-slate-500">UPI Transaction ID</label>
-                          <Input
-                            value={partialCollectDraft.upi_transaction_id}
-                            onChange={(e) => setPartialCollectDraft({ ...partialCollectDraft, upi_transaction_id: e.target.value })}
-                            className="h-9"
-                            data-testid="cons-partial-collect-upi-txn"
-                          />
-                        </div>
-                        <div>
-                          <label className="mb-1 block text-[11px] font-medium text-slate-500">UTR</label>
-                          <Input
-                            value={partialCollectDraft.upi_utr}
-                            onChange={(e) => setPartialCollectDraft({ ...partialCollectDraft, upi_utr: e.target.value })}
-                            className="h-9"
-                            data-testid="cons-partial-collect-upi-utr"
-                          />
-                        </div>
-                      </>
+                      <div>
+                        <label className="mb-1 block text-[11px] font-medium text-slate-500">UPI Transaction ID</label>
+                        <Input
+                          value={partialCollectDraft.upi_transaction_id}
+                          onChange={(e) => setPartialCollectDraft({ ...partialCollectDraft, upi_transaction_id: e.target.value })}
+                          className="h-9"
+                          data-testid="cons-partial-collect-upi-txn"
+                        />
+                      </div>
                     )}
 
                     {BANK_DETAIL_MODES.includes(mode) && (
@@ -4096,16 +4063,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     />
 
                     {mode === "upi" && (
-                      <>
-                        <div>
-                          <label className="mb-1 block text-[11px] font-medium text-slate-500">UPI Transaction ID</label>
-                          <Input value={dietFeeConfirmDraft.upi_transaction_id} onChange={(e) => setDietFeeConfirmDraft({ ...dietFeeConfirmDraft, upi_transaction_id: e.target.value })} className="h-9" data-testid="cons-diet-fee-upi-txn" />
-                        </div>
-                        <div>
-                          <label className="mb-1 block text-[11px] font-medium text-slate-500">UTR</label>
-                          <Input value={dietFeeConfirmDraft.upi_utr} onChange={(e) => setDietFeeConfirmDraft({ ...dietFeeConfirmDraft, upi_utr: e.target.value })} className="h-9" data-testid="cons-diet-fee-upi-utr" />
-                        </div>
-                      </>
+                      <div>
+                        <label className="mb-1 block text-[11px] font-medium text-slate-500">UPI Transaction ID</label>
+                        <Input value={dietFeeConfirmDraft.upi_transaction_id} onChange={(e) => setDietFeeConfirmDraft({ ...dietFeeConfirmDraft, upi_transaction_id: e.target.value })} className="h-9" data-testid="cons-diet-fee-upi-txn" />
+                      </div>
                     )}
 
                     {BANK_DETAIL_MODES.includes(mode) && (

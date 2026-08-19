@@ -195,10 +195,16 @@ def build_payment_details(payload) -> tuple:
     """
     mode = payload.payment_mode
     if mode == "upi":
-        if not (payload.upi_transaction_id or "").strip() or not (payload.upi_utr or "").strip():
-            raise HTTPException(status_code=400, detail="UPI Transaction ID and UTR are required")
-        txn, utr = payload.upi_transaction_id.strip(), payload.upi_utr.strip()
-        return {"upi_transaction_id": txn, "upi_utr": utr}, f" · UPI txn {txn}, UTR {utr}"
+        # Transaction id alone: none of the Collect popups ask for a UTR any more, and a
+        # field the form cannot supply would reject every UPI collection. A caller that
+        # still sends one has it recorded.
+        if not (payload.upi_transaction_id or "").strip():
+            raise HTTPException(status_code=400, detail="UPI Transaction ID is required")
+        txn = payload.upi_transaction_id.strip()
+        utr = (payload.upi_utr or "").strip()
+        if utr:
+            return {"upi_transaction_id": txn, "upi_utr": utr}, f" · UPI txn {txn}, UTR {utr}"
+        return {"upi_transaction_id": txn}, f" · UPI txn {txn}"
 
     if mode in ("card", "account_transfer"):
         required = [payload.account_number, payload.account_holder_name, payload.bank_name, payload.ifsc_code]
@@ -357,10 +363,18 @@ async def collect_package_payment(lead_id: str, payload: V3CollectPackagePayment
     payment_details = {}
     detail_suffix = ""
     if payload.payment_mode == "upi":
-        if not payload.upi_transaction_id or not payload.upi_transaction_id.strip() or not payload.upi_utr or not payload.upi_utr.strip():
-            raise HTTPException(status_code=400, detail="UPI Transaction ID and UTR are required")
-        payment_details = {"upi_transaction_id": payload.upi_transaction_id.strip(), "upi_utr": payload.upi_utr.strip()}
-        detail_suffix = f" · UPI txn {payload.upi_transaction_id.strip()}, UTR {payload.upi_utr.strip()}"
+        # Transaction id alone -- see the note in collect_treatment_fee below. The popup
+        # that posts here stopped asking for a UTR, so requiring one would 400 every UPI
+        # collection; it is still stored whenever a caller sends one.
+        if not payload.upi_transaction_id or not payload.upi_transaction_id.strip():
+            raise HTTPException(status_code=400, detail="UPI Transaction ID is required")
+        txn = payload.upi_transaction_id.strip()
+        utr = (payload.upi_utr or "").strip()
+        payment_details = {"upi_transaction_id": txn}
+        detail_suffix = f" · UPI txn {txn}"
+        if utr:
+            payment_details["upi_utr"] = utr
+            detail_suffix += f", UTR {utr}"
     elif payload.payment_mode == "card":
         if not all([payload.account_number and payload.account_number.strip(), payload.account_holder_name and payload.account_holder_name.strip(),
                     payload.bank_name and payload.bank_name.strip(), payload.ifsc_code and payload.ifsc_code.strip()]):
@@ -495,10 +509,20 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
     detail_suffix = ""
     installments = []
     if payload.payment_mode == "upi":
-        if not payload.upi_transaction_id or not payload.upi_transaction_id.strip() or not payload.upi_utr or not payload.upi_utr.strip():
-            raise HTTPException(status_code=400, detail="UPI Transaction ID and UTR are required")
-        payment_details = {"upi_transaction_id": payload.upi_transaction_id.strip(), "upi_utr": payload.upi_utr.strip()}
-        detail_suffix = f" · UPI txn {payload.upi_transaction_id.strip()}, UTR {payload.upi_utr.strip()}"
+        # Transaction id alone. The Treatment Fee's UPI popup stopped asking for a UTR,
+        # and a required field the form can no longer supply is a 400 on every UPI
+        # collection -- the one mode of payment the desk uses most. Still recorded when a
+        # caller sends one, so the collections taken while the field existed keep theirs
+        # and the older endpoints above are free to go on requiring it.
+        if not payload.upi_transaction_id or not payload.upi_transaction_id.strip():
+            raise HTTPException(status_code=400, detail="UPI Transaction ID is required")
+        txn = payload.upi_transaction_id.strip()
+        utr = (payload.upi_utr or "").strip()
+        payment_details = {"upi_transaction_id": txn}
+        detail_suffix = f" · UPI txn {txn}"
+        if utr:
+            payment_details["upi_utr"] = utr
+            detail_suffix += f", UTR {utr}"
     elif payload.payment_mode == "card":
         if not all([payload.account_number and payload.account_number.strip(), payload.account_holder_name and payload.account_holder_name.strip(),
                     payload.bank_name and payload.bank_name.strip(), payload.ifsc_code and payload.ifsc_code.strip()]):

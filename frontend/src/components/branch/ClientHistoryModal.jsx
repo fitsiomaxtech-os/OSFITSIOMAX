@@ -76,7 +76,7 @@ const COLLECT_MODES = [
 const emptyCollectDraft = {
   amount: "",
   payment_mode: "cash",
-  upi_transaction_id: "", upi_utr: "",
+  upi_transaction_id: "",
   account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "",
   cheque_number: "", transfer_reference: "",
 };
@@ -393,7 +393,6 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
     // a round trip that fails would otherwise send them back to an empty form.
     if (mode === "upi") {
       payload.upi_transaction_id = draft.upi_transaction_id.trim();
-      payload.upi_utr = draft.upi_utr.trim();
     } else if (mode === "card" || mode === "account_transfer") {
       if (!draft.account_number.trim() || !draft.account_holder_name.trim() || !draft.bank_name.trim() || !draft.ifsc_code.trim()) {
         toast.error("Account Number, Account Holder Name, Bank Name and IFSC Code are required");
@@ -762,7 +761,6 @@ export const ClientHistoryModal = ({ leadId, onClose, onChanged }) => {
                 {collectDraft.payment_mode === "upi" && (
                   <div className="space-y-3 rounded-lg border border-sky-100 bg-sky-50/50 p-3">
                     <CollectField label="UPI Transaction ID" value={collectDraft.upi_transaction_id} onChange={(e) => setDraft({ upi_transaction_id: e.target.value })} placeholder="e.g. 428301947281" testid="client-collect-upi-txn" />
-                    <CollectField label="UTR" value={collectDraft.upi_utr} onChange={(e) => setDraft({ upi_utr: e.target.value })} placeholder="e.g. 302411223344" testid="client-collect-upi-utr" />
                   </div>
                 )}
 
