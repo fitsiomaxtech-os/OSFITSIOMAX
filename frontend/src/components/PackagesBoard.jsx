@@ -546,10 +546,16 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
                 </div>
                 <label className="mb-0.5 block text-[10px] font-semibold text-emerald-700">Sessions</label>
                 <Input type="number" value={sessions} readOnly disabled className="h-8 bg-emerald-50 text-sm" data-testid="session-create-sessions-online" />
-                <div className="mt-2 flex items-center justify-between border-t border-emerald-200 pt-1.5">
-                  <span className="text-[11px] font-semibold text-emerald-700">{isCourseTotal ? "Per Session" : "Total Amount"}</span>
-                  <span className="text-sm font-extrabold text-emerald-900" data-testid="session-create-total-online">₹{isCourseTotal ? formatRupees(courseRate(priceOnline)) : totalOnline}</span>
-                </div>
+                {/* No footer on a course shelf: the box above already holds the amount and
+                    the label says what it covers. The per-session figure that used to sit
+                    here is the total divided down for the booking path — an internal
+                    number, and printing it invites reading it as the fee. */}
+                {!isCourseTotal && (
+                  <div className="mt-2 flex items-center justify-between border-t border-emerald-200 pt-1.5">
+                    <span className="text-[11px] font-semibold text-emerald-700">Total Amount</span>
+                    <span className="text-sm font-extrabold text-emerald-900" data-testid="session-create-total-online">₹{totalOnline}</span>
+                  </div>
+                )}
               </div>
               <div className="rounded-lg border border-amber-100 bg-amber-50/60 p-3">
                 <p className="mb-2 flex items-center gap-1 text-xs font-bold text-amber-800"><MapPin className="h-3 w-3" />Offline Mode</p>
@@ -560,10 +566,12 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
                 </div>
                 <label className="mb-0.5 block text-[10px] font-semibold text-amber-700">Sessions</label>
                 <Input type="number" value={sessions} readOnly disabled className="h-8 bg-amber-50 text-sm" data-testid="session-create-sessions-offline" />
-                <div className="mt-2 flex items-center justify-between border-t border-amber-200 pt-1.5">
-                  <span className="text-[11px] font-semibold text-amber-700">{isCourseTotal ? "Per Session" : "Total Amount"}</span>
-                  <span className="text-sm font-extrabold text-amber-900" data-testid="session-create-total-offline">₹{isCourseTotal ? formatRupees(courseRate(priceOffline)) : totalOffline}</span>
-                </div>
+                {!isCourseTotal && (
+                  <div className="mt-2 flex items-center justify-between border-t border-amber-200 pt-1.5">
+                    <span className="text-[11px] font-semibold text-amber-700">Total Amount</span>
+                    <span className="text-sm font-extrabold text-amber-900" data-testid="session-create-total-offline">₹{totalOffline}</span>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -654,13 +662,18 @@ export const SessionPriceBoxes = ({ item, testid, mode = "all" }) => {
       </div>
     );
   }
+  // A course-priced shelf shows the amount and the length, and no per-session line. That
+  // figure is the total divided down for the booking path to charge on — an internal
+  // number, not a price anybody set — and printing it here invites reading it as the fee.
+  // Same reason the Zumba card above shows a plan amount rather than a per-class rate.
+  const courseOnly = COURSE_TOTAL_CATEGORIES.has(item.category);
   return (
   <div className={`grid gap-2 ${mode === "all" ? "grid-cols-2" : "grid-cols-1"}`} data-testid={testid}>
     {mode !== "offline" && (
       <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 p-3">
         <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-emerald-800"><Wifi className="h-3.5 w-3.5" />Online Mode</p>
         <div className="space-y-1.5 text-xs text-emerald-800">
-          <div className="flex items-center justify-between"><span>Per Session</span><span className="font-bold">₹{item.price_online ?? 0}</span></div>
+          {!courseOnly && <div className="flex items-center justify-between"><span>Per Session</span><span className="font-bold">₹{item.price_online ?? 0}</span></div>}
           <div className="flex items-center justify-between"><span>Total Sessions</span><span className="font-bold">{item.sessions_online ?? 0} Sessions</span></div>
           <div className="mt-1 flex items-center justify-between border-t border-emerald-200 pt-1.5">
             <span className="font-semibold">Total Amount</span>
@@ -673,7 +686,7 @@ export const SessionPriceBoxes = ({ item, testid, mode = "all" }) => {
       <div className="rounded-xl border border-amber-100 bg-amber-50/60 p-3">
         <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-amber-800"><MapPin className="h-3.5 w-3.5" />Offline Mode</p>
         <div className="space-y-1.5 text-xs text-amber-800">
-          <div className="flex items-center justify-between"><span>Per Session</span><span className="font-bold">₹{item.price_offline ?? 0}</span></div>
+          {!courseOnly && <div className="flex items-center justify-between"><span>Per Session</span><span className="font-bold">₹{item.price_offline ?? 0}</span></div>}
           <div className="flex items-center justify-between"><span>Total Sessions</span><span className="font-bold">{item.sessions_offline ?? 0} Sessions</span></div>
           <div className="mt-1 flex items-center justify-between border-t border-amber-200 pt-1.5">
             <span className="font-semibold">Total Amount</span>
