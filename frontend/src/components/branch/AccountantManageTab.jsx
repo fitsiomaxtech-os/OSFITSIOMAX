@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Eye, Wallet, Stethoscope, Activity, ShoppingBag, Salad, RefreshCw, CalendarDays } from "lucide-react";
+import { Eye, Wallet, Stethoscope, Activity, ShoppingBag, Salad, RefreshCw, CalendarDays, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { StatTile } from "@/components/ui/stat-tile";
-import { MilkDateInput } from "@/components/ui/milk-calendar";
+import { maskDayMonthYear, manualToIso, isoToManual } from "@/components/DateFilterPopover";
 import { getBranches, getRevenueOverview } from "@/lib/api";
 import { ClientHistoryModal } from "@/components/branch/ClientHistoryModal";
 import { OutstandingAmountBoard } from "@/components/branch/OutstandingAmountBoard";
@@ -122,6 +122,15 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
   const [preset, setPreset] = useState("all");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
+  // The range is typed in a dialog rather than picked inline. Two calendar fields sat in
+  // the toolbar and each opened a month grid over the figures behind it; a range is two
+  // dates, which is quicker typed than navigated to twice.
+  const [showCustom, setShowCustom] = useState(false);
+  const [fromText, setFromText] = useState("");
+  const [toText, setToText] = useState("");
+  // What to fall back to if the dialog is dismissed without a range — leaving the screen
+  // on "Custom" with nothing set would show a filter that filters nothing.
+  const [presetBeforeCustom, setPresetBeforeCustom] = useState("all");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [viewingLeadId, setViewingLeadId] = useState(null);
@@ -158,6 +167,32 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
   }, [branchId, mode, startDate, endDate, preset, customFrom, customTo]);
 
   useEffect(() => { load(); }, [load]);
+
+  const openCustom = () => {
+    if (preset !== "custom") setPresetBeforeCustom(preset);
+    setFromText(isoToManual(customFrom));
+    setToText(isoToManual(customTo));
+    setShowCustom(true);
+  };
+
+  const fromIso = manualToIso(fromText);
+  const toIso = manualToIso(toText);
+  // Both must parse, and they must be the right way round — a reversed range returns
+  // nothing and reads as an empty month rather than as a mistake in the dialog.
+  const rangeValid = !!fromIso && !!toIso && fromIso <= toIso;
+
+  const applyCustom = () => {
+    if (!rangeValid) return;
+    setCustomFrom(fromIso);
+    setCustomTo(toIso);
+    setPreset("custom");
+    setShowCustom(false);
+  };
+
+  const dismissCustom = () => {
+    setShowCustom(false);
+    if (!customFrom || !customTo) setPreset(presetBeforeCustom);
+  };
 
   const k = data?.kpis || {};
   // `data?.x || []` builds a fresh array on every render, so every memo keyed on one was
@@ -248,7 +283,7 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
             {DATE_PRESETS.map((p) => (
               <button
                 key={p.key}
-                onClick={() => setPreset(p.key)}
+                onClick={() => (p.key === "custom" ? openCustom() : setPreset(p.key))}
                 className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${preset === p.key ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100"}`}
                 data-testid={`accountant-manage-preset-${p.key}`}
               >
@@ -256,13 +291,19 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
               </button>
             ))}
           </div>
-          {preset === "custom" && (
-            <div className="flex items-center gap-1.5 text-xs text-slate-500">
+          {/* The range that is actually in force, and the way back into the dialog to
+              change it — the figures are filtered by it, so it has to be readable without
+              opening anything. */}
+          {preset === "custom" && customFrom && customTo && (
+            <button
+              type="button"
+              onClick={openCustom}
+              className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:border-sky-300 hover:text-sky-600"
+              data-testid="accountant-manage-custom-chip"
+            >
               <CalendarDays className="h-3.5 w-3.5" />
-              <MilkDateInput value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className="h-8 rounded-md border border-slate-200 px-2 text-xs" data-testid="accountant-manage-custom-from" />
-              <span>to</span>
-              <MilkDateInput value={customTo} onChange={(e) => setCustomTo(e.target.value)} className="h-8 rounded-md border border-slate-200 px-2 text-xs" data-testid="accountant-manage-custom-to" />
-            </div>
+              {isoToManual(customFrom)} to {isoToManual(customTo)}
+            </button>
           )}
           <Button
             onClick={load}
@@ -345,6 +386,72 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
         <OutstandingAmountBoard rows={outstanding} onView={setViewingLeadId} onChanged={load} />
       ) : (
         <DiscountAppliedBoard rows={discountedTxns} onView={setViewingLeadId} />
+      )}
+
+      {showCustom && (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4"
+          onClick={(e) => { if (e.target === e.currentTarget) dismissCustom(); }}
+          data-testid="accountant-manage-custom-modal"
+        >
+          <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-2xl">
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <p className="text-base font-semibold text-slate-900">Custom Range</p>
+              <button
+                type="button"
+                onClick={dismissCustom}
+                className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100"
+                aria-label="Close"
+                data-testid="accountant-manage-custom-close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              {[
+                { label: "From", text: fromText, set: setFromText, iso: fromIso, tid: "from" },
+                { label: "To", text: toText, set: setToText, iso: toIso, tid: "to" },
+              ].map((f) => (
+                <div key={f.tid}>
+                  <label className="text-xs font-medium text-slate-500">{f.label}</label>
+                  <input
+                    value={f.text}
+                    onChange={(e) => f.set(maskDayMonthYear(e.target.value, f.text))}
+                    onKeyDown={(e) => { if (e.key === "Enter") applyCustom(); }}
+                    inputMode="numeric"
+                    maxLength={10}
+                    placeholder="DD-MM-YYYY"
+                    className={`h-9 w-full rounded-md border bg-white px-3 text-sm outline-none focus:ring-1 ${
+                      f.text && !f.iso
+                        ? "border-red-300 focus:border-red-400 focus:ring-red-400"
+                        : "border-slate-200 focus:border-sky-400 focus:ring-sky-400"
+                    }`}
+                    data-testid={`accountant-manage-custom-${f.tid}`}
+                  />
+                </div>
+              ))}
+              {/* Says which of the two ways it is wrong, rather than only refusing to apply. */}
+              <p className="text-[11px] text-slate-400" data-testid="accountant-manage-custom-hint">
+                {fromIso && toIso && fromIso > toIso
+                  ? "The From date is after the To date."
+                  : "Type both dates as DD-MM-YYYY, e.g. 04-08-2026."}
+              </p>
+            </div>
+
+            <div className="mt-5 flex gap-2">
+              <Button variant="outline" onClick={dismissCustom} className="flex-1" data-testid="accountant-manage-custom-cancel">Cancel</Button>
+              <Button
+                onClick={applyCustom}
+                disabled={!rangeValid}
+                className="flex-1 bg-sky-600 hover:bg-sky-700"
+                data-testid="accountant-manage-custom-apply"
+              >
+                Apply
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
 
       {viewingLeadId && <ClientHistoryModal leadId={viewingLeadId} onClose={() => setViewingLeadId(null)} onChanged={load} />}

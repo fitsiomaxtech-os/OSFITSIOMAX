@@ -42,7 +42,7 @@ const presets = (today) => ([
 const toInputValue = (d) => d ? new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10) : "";
 
 /** "2026-08-04" -> "04-08-2026", for showing an already-set range back in a typed field. */
-const isoToManual = (iso) => {
+export const isoToManual = (iso) => {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || "");
   return m ? `${m[3]}-${m[2]}-${m[1]}` : "";
 };
@@ -57,7 +57,7 @@ const isoToManual = (iso) => {
  *  a separator would re-add it immediately and the field could never be cleared past it.
  *  Hence `prev`: the only reliable way to tell a delete from an insert here is that the
  *  value got shorter. */
-const maskDayMonthYear = (value, prev = "") => {
+export const maskDayMonthYear = (value, prev = "") => {
   const digits = value.replace(/\D/g, "").slice(0, 8);
   const deleting = value.length < prev.length;
   if (digits.length <= 2) return digits + (digits.length === 2 && !deleting ? "-" : "");
@@ -72,7 +72,7 @@ const maskDayMonthYear = (value, prev = "") => {
  *  Accepts - / and . as separators and a single-digit day or month, because that is what
  *  people type. Rejects 31-02 rather than letting the Date constructor roll it forward to
  *  the 3rd of March, which would silently filter on a day nobody asked for. */
-const manualToIso = (text) => {
+export const manualToIso = (text) => {
   const m = /^\s*(\d{1,2})\s*[-/.]\s*(\d{1,2})\s*[-/.]\s*(\d{4})\s*$/.exec(text || "");
   if (!m) return "";
   const day = Number(m[1]);
