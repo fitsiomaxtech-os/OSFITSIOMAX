@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Users, ShieldCheck, BarChart3, Plus, Pencil, Trash2, Eye, EyeOff, KeyRound, X, UserPlus, MoreVertical, CheckCircle2, XCircle, AlertOctagon, CalendarOff, ChevronDown, ChevronUp, GripVertical, FolderTree, Search } from "lucide-react";
+import { Users, ShieldCheck, BarChart3, Plus, Pencil, Trash2, Eye, EyeOff, KeyRound, X, UserPlus, MoreVertical, CheckCircle2, XCircle, AlertOctagon, CalendarOff, ChevronDown, ChevronUp, GripVertical, FolderTree, Search, Camera, ImageOff } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import {
-  hrDashboard, hrEmployees, hrCreateEmployee, hrUpdateEmployee, hrDeleteEmployee,
+  hrDashboard, hrEmployees, hrCreateEmployee, hrUpdateEmployee, hrDeleteEmployee, uploadEmployeePhoto,
   hrUsers, hrCreateUser, hrUpdateUser, hrResetPassword, hrDeactivateUser, hrActivateUser, hrDeleteUserPermanent, hrUpdateUserRole, hrMeta, hrAddCustomRole, hrDeleteCustomRole,
   hrDepartments, hrCreateDepartment, hrRenameDepartment, hrDeleteDepartment, hrAddDesignation, hrRenameDesignation, hrReorderDesignations,
   getBranches, getVerticals,
@@ -283,15 +283,57 @@ const WorkTypeCell = ({ e }) => {
   );
 };
 
+/**
+ * An employee's face where there is one, their initial where there is not.
+ *
+ * One component for the directory, the record and the form so a photo cannot appear in
+ * some of those and not others, and so the fallback is the same shape as the photo — a
+ * row of avatars that changed size depending on who had uploaded one would read as broken
+ * layout rather than as missing pictures.
+ */
+const EmployeeAvatar = ({ employee, size = 40, className = "" }) => {
+  // Reset on the employee changing, not just on error: a failed load left the fallback
+  // showing for whoever was rendered into the same slot next.
+  const [failed, setFailed] = useState(false);
+  const url = employee?.photo_url || "";
+  useEffect(() => { setFailed(false); }, [url]);
+
+  const box = { width: size, height: size };
+  if (!url || failed) {
+    return (
+      <div
+        className={`flex shrink-0 items-center justify-center rounded-full bg-slate-100 font-semibold uppercase text-slate-500 ${className}`}
+        style={{ ...box, fontSize: Math.max(11, Math.round(size * 0.4)) }}
+        aria-hidden="true"
+      >
+        {(employee?.full_name || "?").trim().charAt(0) || "?"}
+      </div>
+    );
+  }
+  return (
+    <img
+      src={url}
+      alt=""
+      loading="lazy"
+      onError={() => setFailed(true)}
+      className={`shrink-0 rounded-full object-cover ${className}`}
+      style={box}
+    />
+  );
+};
+
 const EmployeeDirectory = ({ employees, onView }) => (
   <>
     <div className="space-y-2 md:hidden" data-testid="hr-emp-cards">
       {employees.map((e) => (
         <div key={e.id} className="rounded-xl border border-slate-200 bg-white p-3" data-testid={`hr-emp-card-${e.id}`}>
           <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <p className="truncate font-medium text-slate-800">{e.full_name}</p>
-              <p className="text-xs text-slate-400">{e.employee_code}</p>
+            <div className="flex min-w-0 items-center gap-2.5">
+              <EmployeeAvatar employee={e} size={36} />
+              <div className="min-w-0">
+                <p className="truncate font-medium text-slate-800">{e.full_name}</p>
+                <p className="text-xs text-slate-400">{e.employee_code}</p>
+              </div>
             </div>
             <span className={`shrink-0 rounded px-2 py-0.5 text-xs ${e.status === "active" ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}`}>{e.status || "active"}</span>
           </div>
@@ -326,8 +368,13 @@ const EmployeeDirectory = ({ employees, onView }) => (
                 <tr key={e.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`hr-emp-row-${e.id}`}>
                   <td className="px-3 py-2 text-slate-500">{i + 1}</td>
                   <td className="px-3 py-2">
-                    <p className="font-medium text-slate-800">{e.full_name}</p>
-                    <p className="text-xs text-slate-400">{e.employee_code}</p>
+                    <div className="flex items-center gap-2.5">
+                      <EmployeeAvatar employee={e} size={32} />
+                      <div className="min-w-0">
+                        <p className="font-medium text-slate-800">{e.full_name}</p>
+                        <p className="text-xs text-slate-400">{e.employee_code}</p>
+                      </div>
+                    </div>
                   </td>
                   <td className="px-3 py-2 text-slate-600">{e.department || "—"}</td>
                   <td className="px-3 py-2 text-slate-600">{e.designation || "—"}</td>
@@ -516,7 +563,9 @@ const EmployeeViewModal = ({ employee: e, onClose, onEdit, onDelete }) => (
   >
     <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg bg-white shadow-xl">
       <div className="flex shrink-0 items-start justify-between border-b border-slate-200 px-5 py-3">
-        <div className="min-w-0">
+        <div className="flex min-w-0 items-center gap-3">
+          <EmployeeAvatar employee={e} size={44} />
+          <div className="min-w-0">
           <div className="flex items-center gap-2">
             <h3 className="truncate text-base font-semibold text-slate-900" data-testid="hr-emp-view-name">{e.full_name}</h3>
             <span className={`shrink-0 rounded px-2 py-0.5 text-[10px] font-semibold ${e.status === "active" ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}`}>{e.status || "active"}</span>
@@ -524,6 +573,7 @@ const EmployeeViewModal = ({ employee: e, onClose, onEdit, onDelete }) => (
           <p className="mt-0.5 text-xs text-slate-500">
             {e.employee_code || "No code"}{e.designation ? ` · ${e.designation}` : ""}{e.department ? ` · ${e.department}` : ""}
           </p>
+          </div>
         </div>
         <button onClick={onClose} className="shrink-0 text-slate-400 hover:text-slate-600" data-testid="hr-emp-view-close"><X className="h-4 w-4" /></button>
       </div>
@@ -693,7 +743,7 @@ const EMP_TABS = [
 
 const blankEmployee = {
   full_name: "", email: "", phone: "", dob: "", gender: "", blood_group: "",
-  marital_status: "", father_name: "", mother_name: "",
+  marital_status: "", father_name: "", mother_name: "", photo_url: "",
   department: "", designation: "", joining_date: "", reporting_to: "", employee_code: "",
   pan: "", aadhar: "",
   address: "", emergency_contact_name: "", emergency_contact_phone: "",
@@ -708,6 +758,38 @@ const AddEmployeeModal = ({ employee, meta, initialDepartment, initialDesignatio
   // decide create vs. update, so this never risks turning a create into an update.
   const [form, setForm] = useState(employee ? { ...blankEmployee, ...employee } : { ...blankEmployee, department: initialDepartment || "", designation: initialDesignation || "" });
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+
+  // The picked photo is held here and only uploaded when the form is submitted — the same
+  // order the store's item images use. Abandoning the dialog then costs nothing at all,
+  // rather than leaving a file on disk nothing points at.
+  const [photoFile, setPhotoFile] = useState(null);
+  const [photoPreview, setPhotoPreview] = useState(null); // object URL for the picked file
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const photoInputRef = useRef(null);
+
+  // Revoked on replace and on unmount: an object URL pins the whole file in memory until
+  // it is, and this dialog can be opened over and over across a directory.
+  useEffect(() => () => { if (photoPreview) URL.revokeObjectURL(photoPreview); }, [photoPreview]);
+
+  const PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp"];
+  const pickPhoto = (file) => {
+    if (!file) return;
+    // Checked here as well as on the server so the answer is immediate — the server still
+    // refuses these, but after a full upload of something it was never going to keep.
+    if (!PHOTO_TYPES.includes(file.type)) { toast.error("Choose a JPG, PNG or WEBP image"); return; }
+    if (file.size > 5 * 1024 * 1024) { toast.error("Photo must be under 5MB"); return; }
+    setPhotoFile(file);
+    setPhotoPreview(URL.createObjectURL(file));
+  };
+
+  // Clears the stored photo too: "" is what update_employee reads as remove, since it
+  // drops nulls from a partial update.
+  const clearPhoto = () => {
+    setPhotoFile(null);
+    setPhotoPreview(null);
+    set("photo_url", "");
+    if (photoInputRef.current) photoInputRef.current.value = "";
+  };
 
   const [branches, setBranches] = useState([]);
   useEffect(() => { getBranches().then(setBranches).catch(() => {}); }, []);
@@ -744,6 +826,15 @@ const AddEmployeeModal = ({ employee, meta, initialDepartment, initialDesignatio
     payload.net_salary = Number(payload.net_salary) || 0;
     payload.gross_salary = Number(payload.gross_salary) || 0;
     try {
+      // Before the record, so it can point at the file. A failed upload stops here rather
+      // than saving an employee whose photo silently didn't take.
+      if (photoFile) {
+        setUploadingPhoto(true);
+        try {
+          const uploaded = await uploadEmployeePhoto(photoFile);
+          payload.photo_url = uploaded.url;
+        } finally { setUploadingPhoto(false); }
+      }
       if (employee) { await hrUpdateEmployee(employee.id, payload); toast.success("Employee updated"); }
       else { await hrCreateEmployee(payload); toast.success("Employee created"); }
       onSaved();
@@ -768,6 +859,61 @@ const AddEmployeeModal = ({ employee, meta, initialDepartment, initialDesignatio
         <div className="max-h-[60vh] overflow-y-auto p-5">
           {tab === "personal" && (
             <div className="grid gap-3 sm:grid-cols-3">
+              {/* Above the fields, and spanning them, because it is the one part of this
+                  record you identify a person by rather than read. The hidden input is
+                  driven by the buttons: a bare file input cannot be styled and prints the
+                  chosen filename beside itself, which here duplicates the preview. */}
+              <div className="flex items-center gap-4 rounded-lg border border-slate-200 bg-slate-50/60 p-3 sm:col-span-3">
+                <EmployeeAvatar
+                  employee={{ full_name: form.full_name, photo_url: photoPreview || form.photo_url }}
+                  size={72}
+                  className="ring-2 ring-white"
+                />
+                <div className="min-w-0">
+                  <p className="text-xs font-medium text-slate-600">Profile Photo</p>
+                  <p className="mt-0.5 text-[11px] text-slate-400">JPG, PNG or WEBP · up to 5MB</p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <input
+                      ref={photoInputRef}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      className="hidden"
+                      onChange={(ev) => pickPhoto(ev.target.files?.[0])}
+                      data-testid="hr-emp-photo-input"
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => photoInputRef.current?.click()}
+                      className="h-8 text-xs"
+                      data-testid="hr-emp-photo-pick"
+                    >
+                      <Camera className="mr-1.5 h-3.5 w-3.5" />
+                      {photoPreview || form.photo_url ? "Change Photo" : "Upload Photo"}
+                    </Button>
+                    {(photoPreview || form.photo_url) && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={clearPhoto}
+                        className="h-8 border-rose-200 text-xs text-rose-600 hover:bg-rose-50"
+                        data-testid="hr-emp-photo-remove"
+                      >
+                        <ImageOff className="mr-1.5 h-3.5 w-3.5" /> Remove
+                      </Button>
+                    )}
+                    {/* Says the picture is not saved yet, because the dialog's own Save is
+                        what sends it — closing here would drop it silently otherwise. */}
+                    {photoFile && (
+                      <span className="text-[11px] font-medium text-amber-600" data-testid="hr-emp-photo-pending">
+                        Saves with the form
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
               <Field label="Full Name *"><Input value={form.full_name} onChange={(e) => set("full_name", e.target.value)} data-testid="hr-emp-name" /></Field>
               <Field label="Email"><Input value={form.email} onChange={(e) => set("email", e.target.value)} data-testid="hr-emp-email" /></Field>
               <Field label="Phone"><Input value={form.phone} onChange={(e) => set("phone", e.target.value)} data-testid="hr-emp-phone" /></Field>
@@ -837,7 +983,7 @@ const AddEmployeeModal = ({ employee, meta, initialDepartment, initialDesignatio
         </div>
         <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-3">
           <Button variant="outline" onClick={onClose} data-testid="hr-emp-modal-cancel">Cancel</Button>
-          <Button onClick={submit} className="bg-sky-600 hover:bg-sky-700" data-testid="hr-emp-modal-submit">✓ {employee ? "Save" : "Add Employee"}</Button>
+          <Button onClick={submit} disabled={uploadingPhoto} className="bg-sky-600 hover:bg-sky-700" data-testid="hr-emp-modal-submit">{uploadingPhoto ? "Uploading photo…" : `✓ ${employee ? "Save" : "Add Employee"}`}</Button>
         </div>
       </div>
     </div>

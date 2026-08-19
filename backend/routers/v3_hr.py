@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, field_validator
+import os
 import re
 import uuid
 
@@ -163,6 +164,9 @@ class EmployeeCreate(BaseModel):
     marital_status: Optional[str] = ""
     father_name: Optional[str] = ""
     mother_name: Optional[str] = ""
+    # Where the uploaded photo landed, as a path this app serves ("/api/v3/uploads/...").
+    # The file itself goes up separately, before the record is saved — see upload-photo.
+    photo_url: Optional[str] = ""
     department: Optional[str] = ""
     designation: Optional[str] = ""
     # Neither is required — an employee can be tagged Online/Offline with no specific
@@ -196,6 +200,9 @@ class EmployeeUpdate(BaseModel):
     marital_status: Optional[str] = None
     father_name: Optional[str] = None
     mother_name: Optional[str] = None
+    # "" clears the photo; None (the default) leaves whatever is stored alone. update_employee
+    # drops None values, so an empty string is the only way to say "remove it".
+    photo_url: Optional[str] = None
     department: Optional[str] = None
     designation: Optional[str] = None
     work_type: Optional[str] = None
@@ -316,6 +323,47 @@ async def list_employees(status: Optional[str] = None, _: V3UserOut = Depends(v3
     for r in rows:
         r["branch_name"] = bmap.get(r.get("branch_id"), "") if r.get("branch_id") else ""
     return rows
+
+
+# Employee photos live beside the store's item images, under the `uploads/` tree server.py
+# already serves as static files. Deliberately not with the patient documents, which are
+# kept out of that tree and streamed through an authenticated route instead: those are
+# medical records, where a staff headshot is the same kind of thing as a product photo.
+PHOTO_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads", "employees")
+os.makedirs(PHOTO_DIR, exist_ok=True)
+
+PHOTO_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+MAX_PHOTO_BYTES = 5 * 1024 * 1024
+
+
+@router.post("/employees/upload-photo")
+async def upload_employee_photo(
+    file: UploadFile = File(...),
+    _: V3UserOut = Depends(v3_require_roles("super_admin")),
+):
+    """Store one employee photo and answer with the path to it.
+
+    Separate from saving the employee because the file has to exist before the record can
+    point at it. The form only calls this when it is submitted, so abandoning the dialog
+    leaves nothing behind, and a refused upload stops the save rather than writing an
+    employee whose photo silently didn't take.
+
+    Same gate as create/update employee: whoever may edit the record may set its picture.
+    """
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in PHOTO_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Only JPG, PNG or WEBP images are allowed")
+    contents = await file.read()
+    if not contents:
+        raise HTTPException(status_code=400, detail="That file is empty")
+    if len(contents) > MAX_PHOTO_BYTES:
+        raise HTTPException(status_code=400, detail="Photo must be under 5MB")
+    # A fresh name every upload rather than one keyed on the employee: replacing a photo
+    # must not leave browsers and this app's own <img> tags showing the old one from cache.
+    filename = f"{uuid.uuid4()}{ext}"
+    with open(os.path.join(PHOTO_DIR, filename), "wb") as f:
+        f.write(contents)
+    return {"url": f"/api/v3/uploads/employees/{filename}"}
 
 
 @router.post("/employees")

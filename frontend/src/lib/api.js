@@ -405,6 +405,14 @@ export const gsAutoSyncToggle = async (sourceId, payload) => (await api.patch(`/
 
 export const hrCreateEmployee = async (payload) => (await api.post("/hr/employees", payload)).data;
 export const hrUpdateEmployee = async (id, payload) => (await api.patch(`/hr/employees/${id}`, payload)).data;
+// The employee's photo, sent before the record that points at it — the file has to exist
+// for photo_url to mean anything. Answers with { url }; no explicit Content-Type, because
+// the browser has to set the multipart boundary itself.
+export const uploadEmployeePhoto = async (file) => {
+  const form = new FormData();
+  form.append("file", file);
+  return (await api.post("/hr/employees/upload-photo", form)).data;
+};
 export const hrDeleteEmployee = async (id) => (await api.delete(`/hr/employees/${id}`)).data;
 export const hrUsers = async (params = {}) => {
   const q = new URLSearchParams();
