@@ -35,8 +35,8 @@ const sourceLabel = (slug) => (SOURCES.find((s) => s.key === slug) || SOURCES[0]
 // is. The colour is the whole point of the outline here, so it stays put when a card is
 // selected; the selected card is picked out by its fill, as on every other bar in the OS.
 //
-// The tints are a step up from the palest ones because the strip they sit on is already
-// grey — a 50 against slate-100 is a difference you have to look for.
+// The tints are a step up from the palest ones. These boxes sit straight on the page with
+// no frame around them, so the tint is the only thing marking where a group starts.
 const CARD_GROUPS = [
   { key: "total", grid: "grid-cols-1", grow: "sm:flex-1", border: "border border-purple-300", wrap: "border border-purple-200 bg-purple-100", cards: [
     { key: "all", label: "All" },
@@ -147,31 +147,29 @@ export const ZumbaPanel = ({ branchId }) => {
 
   return (
     <div className="flex flex-col gap-4" data-testid="branch-zumba-panel">
-      {/* Same blank-card strip as Branch Leads: white cards, only the selected one picked
-          out — but in three tinted boxes, separated by a gap three times the one between
-          cards, so the split is read as a split rather than as a stray margin.
+      {/* Three tinted boxes, separated by a gap three times the one between cards, so the
+          split is read as a split rather than as a stray margin. No outer frame: the boxes
+          are the grouping, and a grey border round all three only argued with them.
           On a phone the boxes stack instead, one line each: All, then the three desks,
           then the three that follow. */}
-      <div className="-mx-1 rounded-xl border border-slate-200 bg-slate-100/95 p-1 shadow-sm" data-testid="zumba-summary">
-        <div className="flex flex-col gap-3 sm:flex-row sm:flex-nowrap sm:gap-6">
-          {CARD_GROUPS.map((g) => (
-            <div key={g.key} className={"grid gap-2 rounded-lg p-1.5 sm:flex sm:flex-nowrap " + g.grid + " " + g.grow + " " + g.wrap} data-testid={"zumba-group-" + g.key}>
-              {g.cards.map((c) => (
-                <StageTab
-                  key={c.key}
-                  label={c.label}
-                  count={summary?.[c.key] || 0}
-                  active={card === c.key}
-                  onClick={() => setCard(c.key === "all" ? "all" : (card === c.key ? "all" : c.key))}
-                  testid={`zumba-card-${c.key}`}
-                  gridded
-                  plain
-                  borderClass={g.border}
-                />
-              ))}
-            </div>
-          ))}
-        </div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-nowrap sm:gap-6" data-testid="zumba-summary">
+        {CARD_GROUPS.map((g) => (
+          <div key={g.key} className={"grid gap-2 rounded-lg p-1.5 sm:flex sm:flex-nowrap " + g.grid + " " + g.grow + " " + g.wrap} data-testid={"zumba-group-" + g.key}>
+            {g.cards.map((c) => (
+              <StageTab
+                key={c.key}
+                label={c.label}
+                count={summary?.[c.key] || 0}
+                active={card === c.key}
+                onClick={() => setCard(c.key === "all" ? "all" : (card === c.key ? "all" : c.key))}
+                testid={`zumba-card-${c.key}`}
+                gridded
+                plain
+                borderClass={g.border}
+              />
+            ))}
+          </div>
+        ))}
       </div>
 
       <Card>
