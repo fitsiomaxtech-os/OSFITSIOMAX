@@ -2,13 +2,13 @@ import { useCallback, useEffect, useState } from "react";
 import {
   ArrowLeft, MapPin, Clock, Calendar as CalendarIcon, Mail, Phone, User, RefreshCw, Pencil,
   Users, BarChart3, Stethoscope, Activity, ListChecks, FileText, Wallet, UserCog, X,
-  ArrowLeftRight, Plus,
+  ArrowLeftRight, Plus, Trash2, Archive, Power,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
-import { bmDetail, updateBranch, bmReassignAdmin, hrBranchAdminCandidates, bmHeadPhysioCandidates, bmAssignHeadPhysio, bmLeadControlHistory, bmPreSalesMembers, hrUpdateUser, bmTeamCandidates, bmTeamAdd, bmTeamRemove } from "@/lib/api";
+import { bmDetail, updateBranch, bmReassignAdmin, hrBranchAdminCandidates, bmHeadPhysioCandidates, bmAssignHeadPhysio, bmLeadControlHistory, bmPreSalesMembers, hrUpdateUser, bmTeamCandidates, bmTeamAdd, bmTeamRemove, hrActivateUser, hrDeactivateUser, hrDeleteUserPermanent } from "@/lib/api";
 import { BranchFormDialogV2 } from "@/components/branch/BranchFormDialogV2";
 import { LeadControlSwitch, normalizeLeadControl } from "@/components/branch/LeadControlSwitch";
 import { slotTo12h } from "@/lib/time";
@@ -343,6 +343,7 @@ const TeamTab = ({ staff, branchId, onChanged, readOnly = false }) => {
   const [editing, setEditing] = useState(null);   // a user row
   const [adding, setAdding] = useState(null);     // a TEAM_DESKS entry
   const [removing, setRemoving] = useState(null); // a user row
+  const [deleting, setDeleting] = useState(null); // a user row, permanent delete
   const [removeBusy, setRemoveBusy] = useState(false);
 
   const loadPreSales = useCallback(() => {
@@ -359,7 +360,7 @@ const TeamTab = ({ staff, branchId, onChanged, readOnly = false }) => {
   // Both lists reload: a new Physio changes the branch's staff, and a new Pre-Sales rep
   // changes only the separately-fetched list, so refreshing one of the two would leave
   // whichever desk was used looking like the save had not worked.
-  const afterSave = () => { setEditing(null); setAdding(null); setRemoving(null); loadPreSales(); onChanged && onChanged(); };
+  const afterSave = () => { setEditing(null); setAdding(null); setRemoving(null); setDeleting(null); loadPreSales(); onChanged && onChanged(); };
 
   const doRemove = async () => {
     setRemoveBusy(true);
@@ -373,9 +374,39 @@ const TeamTab = ({ staff, branchId, onChanged, readOnly = false }) => {
     setRemoveBusy(false);
   };
 
+  // One row per person, whichever desk they sit at, so the branch reads as a directory
+  // rather than as five card stacks visited one at a time. The desk pills narrow this one
+  // list now instead of switching between two different layouts.
+  //
+  // Deduped by id: the desk predicates are not mutually exclusive by construction, and a
+  // role matching two of them would otherwise be listed twice with two sets of controls.
+  const rows = (() => {
+    const source = desk === "all" ? groups : groups.filter((g) => g.key === desk);
+    const seen = new Set();
+    const out = [];
+    source.forEach((g) => {
+      (g.items || []).forEach((u) => {
+        if (seen.has(u.id)) return;
+        seen.add(u.id);
+        out.push({ ...u, deskKey: g.key, deskLabel: g.label });
+      });
+    });
+    return out;
+  })();
+
+  const runAction = async (label, fn) => {
+    try {
+      await fn();
+      toast.success(label);
+      afterSave();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || `Could not ${label.toLowerCase()}`);
+    }
+  };
+
   return (
     <div className="space-y-3" data-testid="branch-team-tab">
-      <div className="flex flex-wrap gap-1.5 rounded-lg border border-slate-200 bg-white p-1" data-testid="branch-team-desks">
+      <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-slate-200 bg-white p-1" data-testid="branch-team-desks">
         {[{ key: "all", label: "All", items: groups.flatMap((g) => g.items) }, ...groups].map((g) => (
           <button
             key={g.key}
@@ -392,80 +423,51 @@ const TeamTab = ({ staff, branchId, onChanged, readOnly = false }) => {
             </span>
           </button>
         ))}
+        {/* Add posts someone to the desk being shown, so it appears once a desk is chosen —
+            on All there is no one desk for a new person to join. */}
+        {!readOnly && active && (
+          <Button size="sm" className="ml-auto bg-sky-600 text-white hover:bg-sky-700" onClick={() => setAdding(active)} data-testid={`branch-team-add-${active.key}`}>
+            <Plus className="mr-1 h-3.5 w-3.5" /> Add {active.label}
+          </Button>
+        )}
       </div>
 
-      {desk === "all" ? (
-        <div className="grid gap-3 sm:grid-cols-2">
-          {groups.map((g) => (
-            <Card key={g.key} data-testid={`branch-team-${g.key}`}>
-              <CardHeader className="flex flex-row items-center justify-between gap-2">
-                <CardTitle className="text-base">{g.label}</CardTitle>
-                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">{g.items.length}</span>
-              </CardHeader>
-              <CardContent>
-                {g.items.length === 0 ? (
-                  <p className="text-sm text-slate-400">No {g.label.toLowerCase()} yet.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {g.items.map((u) => (
-                      <div key={u.id} className="flex items-center gap-3 rounded-md border border-slate-200 p-3" data-testid={`branch-team-${g.key}-${u.id}`}>
-                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-600">{initials(u.full_name)}</div>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-semibold text-slate-800">{u.full_name}</p>
-                          <p className="truncate text-xs text-slate-500">{u.specialization || u.email || ""}</p>
-                        </div>
-                        {u.profile_type && <span className="shrink-0 rounded bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-600">{u.profile_type}</span>}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      ) : (
-        <Card data-testid={`branch-team-desk-panel-${active.key}`}>
-          <CardHeader className="flex flex-row items-center justify-between gap-2">
-            <div>
-              <CardTitle className="text-base">{active.label}</CardTitle>
-              <p className="text-xs text-slate-500">{active.items.length} at this branch</p>
-            </div>
-            {!readOnly && (
-              <Button size="sm" className="bg-sky-600 text-white hover:bg-sky-700" onClick={() => setAdding(active)} data-testid={`branch-team-add-${active.key}`}>
-                <Plus className="mr-1 h-3.5 w-3.5" /> Add {active.label}
-              </Button>
-            )}
-          </CardHeader>
-          <CardContent>
-            {active.items.length === 0 ? (
-              <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">
-                No {active.label.toLowerCase()} at this branch yet.
-              </p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full table-fixed text-left text-sm">
-                  <thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                    <tr>
-                      <th className="w-[6%] px-3 py-2.5">S.No</th>
-                      <th className="w-[26%] px-3 py-2.5">Name</th>
-                      <th className="w-[26%] px-3 py-2.5">Email</th>
-                      <th className="w-[16%] px-3 py-2.5">Phone</th>
-                      <th className="w-[14%] px-3 py-2.5">Role</th>
-                      <th className="w-[12%] px-3 py-2.5 text-right">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {active.items.map((u, i) => (
-                      <tr key={u.id} className="align-middle hover:bg-slate-50/60" data-testid={`branch-team-row-${u.id}`}>
+      <Card data-testid="branch-team-directory">
+        <CardContent className="p-0">
+          {rows.length === 0 ? (
+            <p className="px-3 py-12 text-center text-sm text-slate-400">Nobody at this branch yet.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[52rem] text-left text-sm">
+                <thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                  <tr>
+                    <th className="w-[5%] px-3 py-2.5">S.No</th>
+                    <th className="w-[27%] px-3 py-2.5">Name</th>
+                    <th className="w-[15%] px-3 py-2.5">Desk</th>
+                    <th className="w-[13%] px-3 py-2.5">Role</th>
+                    <th className="w-[10%] px-3 py-2.5">Status</th>
+                    <th className="w-[30%] px-3 py-2.5 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {rows.map((u, i) => {
+                    // Absent reads as active: a Pre-Sales row comes from its own endpoint
+                    // and does not always carry the flag, and defaulting it off would show
+                    // that whole desk as inactive.
+                    const isActive = u.is_active !== false;
+                    return (
+                      <tr key={u.id} className={`align-middle hover:bg-slate-50/60 ${isActive ? "" : "bg-slate-50/40"}`} data-testid={`branch-team-row-${u.id}`}>
                         <td className="px-3 py-3 text-xs text-slate-400">{i + 1}</td>
                         <td className="px-3 py-3">
                           <div className="flex items-center gap-2">
-                            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-600">{initials(u.full_name)}</span>
-                            <span className="truncate font-semibold text-slate-800" title={u.full_name}>{u.full_name || "—"}</span>
+                            <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${isActive ? "bg-slate-100 text-slate-600" : "bg-slate-200 text-slate-400"}`}>{initials(u.full_name)}</span>
+                            <div className="min-w-0">
+                              <p className={`truncate font-semibold ${isActive ? "text-slate-800" : "text-slate-400"}`} title={u.full_name}>{u.full_name || "—"}</p>
+                              <p className="truncate text-[11px] text-slate-500" title={u.email}>{u.email || u.specialization || "—"}</p>
+                            </div>
                           </div>
                         </td>
-                        <td className="truncate px-3 py-3 text-xs text-slate-600" title={u.email}>{u.email || "—"}</td>
-                        <td className="truncate px-3 py-3 text-xs text-slate-600">{u.mobile_number || u.phone || "—"}</td>
+                        <td className="px-3 py-3 text-xs text-slate-600">{u.deskLabel}</td>
                         <td className="px-3 py-3">
                           {/* The stored slug, prettied. A Branch Admin (Physio) reads as
                               what they are rather than as a bare "Branch Admin". */}
@@ -473,36 +475,93 @@ const TeamTab = ({ staff, branchId, onChanged, readOnly = false }) => {
                             {String(u.role || u.profile_type || "—").replace(/_/g, " ")}
                           </span>
                         </td>
+                        <td className="px-3 py-3">
+                          <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${isActive ? "bg-emerald-50 text-emerald-700" : "bg-slate-200 text-slate-500"}`} data-testid={`branch-team-status-${u.id}`}>
+                            {isActive ? "Active" : "Inactive"}
+                          </span>
+                        </td>
                         <td className="px-3 py-3 text-right">
                           {readOnly ? (
                             <span className="text-xs text-slate-300">—</span>
                           ) : (
                             <div className="flex items-center justify-end gap-1.5">
-                              <Button size="sm" variant="outline" className="text-xs" onClick={() => setEditing(u)} data-testid={`branch-team-edit-${u.id}`}>
+                              <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => setEditing(u)} data-testid={`branch-team-edit-${u.id}`}>
                                 <Pencil className="mr-1 h-3 w-3" /> Edit
                               </Button>
-                              {/* Takes them off this branch. Not a delete — said on the
-                                  button so it is not mistaken for one. */}
+                              {/* Switching off keeps the account and its history and stops
+                                  it being offered anywhere. The row stays, greyed, which is
+                                  the whole reason this list carries inactive people. */}
                               <Button
                                 size="sm"
                                 variant="outline"
-                                className="border-rose-200 text-xs text-rose-700 hover:bg-rose-50"
-                                onClick={() => setRemoving(u)}
-                                data-testid={`branch-team-remove-${u.id}`}
+                                className={`h-7 text-[11px] ${isActive ? "border-amber-200 text-amber-700 hover:bg-amber-50" : "border-emerald-200 text-emerald-700 hover:bg-emerald-50"}`}
+                                onClick={() => runAction(isActive ? "Deactivated" : "Activated", () => (isActive ? hrDeactivateUser(u.id) : hrActivateUser(u.id)))}
+                                data-testid={`branch-team-toggle-${u.id}`}
                               >
-                                <X className="mr-1 h-3 w-3" /> Remove
+                                <Power className="mr-1 h-3 w-3" />{isActive ? "Deactivate" : "Activate"}
+                              </Button>
+                              {/* Off this branch, not out of the OS — the account survives
+                                  and can be posted to another branch. */}
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 border-slate-200 text-[11px] text-slate-600 hover:bg-slate-50"
+                                onClick={() => setRemoving(u)}
+                                data-testid={`branch-team-archive-${u.id}`}
+                              >
+                                <Archive className="mr-1 h-3 w-3" /> Archive
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 border-rose-200 text-[11px] text-rose-700 hover:bg-rose-50"
+                                onClick={() => setDeleting(u)}
+                                data-testid={`branch-team-delete-${u.id}`}
+                              >
+                                <Trash2 className="mr-1 h-3 w-3" /> Delete
                               </Button>
                             </div>
                           )}
                         </td>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Delete is the one that cannot be undone, so it asks in its own words rather than
+          sharing the Archive confirmation. */}
+      {deleting && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" data-testid="branch-team-delete-dialog">
+          <div className="w-full max-w-sm space-y-4 rounded-xl bg-white p-5 shadow-2xl">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-rose-100">
+                <Trash2 className="h-5 w-5 text-rose-600" />
               </div>
-            )}
-          </CardContent>
-        </Card>
+              <div className="min-w-0">
+                <h3 className="text-base font-semibold text-slate-900">Delete this account?</h3>
+                <p className="mt-1 text-xs text-slate-500">
+                  <b className="text-slate-700">{deleting.full_name}</b> is removed from the OS permanently, along with the expert record holding their calendar. This cannot be undone — Deactivate keeps the account and stops them being offered anywhere.
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="outline" size="sm" onClick={() => setDeleting(null)} data-testid="branch-team-delete-cancel">Cancel</Button>
+              <Button
+                size="sm"
+                className="bg-rose-600 hover:bg-rose-700"
+                onClick={() => { const u = deleting; setDeleting(null); runAction("Deleted", () => hrDeleteUserPermanent(u.id)); }}
+                data-testid="branch-team-delete-confirm"
+              >
+                Yes, Delete
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
 
       {editing && (

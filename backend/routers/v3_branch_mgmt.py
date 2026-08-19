@@ -300,7 +300,12 @@ async def branch_detail(branch_id: str, user: V3UserOut = Depends(v3_require_rol
     if branch.get("admin_user_id"):
         admin_user = await v3_col("users").find_one({"id": branch["admin_user_id"]}, {"_id": 0, "password": 0})
 
-    staff_rows = await v3_col("users").find({"branch_id": branch_id, "is_active": True}, {"_id": 0, "password": 0}).to_list(500)
+    # Inactive staff included, unlike the counts above. Team is the screen that switches
+    # someone off, and filtering them out here made that a one-way door: the row vanished
+    # on deactivate with nothing left to switch back on. Each row carries is_active so the
+    # list can say which is which. Only `staff` below reads these, so nothing else sees
+    # an inactive person appear.
+    staff_rows = await v3_col("users").find({"branch_id": branch_id}, {"_id": 0, "password": 0}).to_list(500)
     head_physios = [u for u in staff_rows if u.get("role") == "head_physio"]
     physios = [u for u in staff_rows if is_physio_role(u.get("role"))]
     # Off the predicate, not the literal: a Branch Admin (Physio), (Fitness) or an Online
