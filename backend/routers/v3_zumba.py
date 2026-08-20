@@ -59,12 +59,25 @@ CARD_OF_SOURCE = {
     "personal": "direct",
     "social_media": "direct",
     "board": "direct",
+    # A lead the branch itself took counts as Direct too: nobody referred them either, and
+    # its own card had no place left on a strip that now ends in the revenue split, so the
+    # count was being kept where nothing could show it.
+    "branch": "direct",
     "consultations": "consultant",
-    "branch": "branch",
     MASTER: "masters",
     "fitsiomax": "fitsiomax",
 }
-CARDS = ("direct", "consultant", "branch", "masters", "fitsiomax")
+CARDS = ("direct", "consultant", "masters", "fitsiomax")
+
+# When the class this student joins meets. Two slots, stored as they read, because they are
+# a label on a registration rather than a booking anything schedules against -- the class
+# itself is fixed at Mon/Wed/Fri. Anything else is dropped rather than stored, so the column
+# can never hold a time no class runs at.
+TIME_SLOTS = ("10:00 am - 11:00 am", "11:00 am - 12:00 pm")
+
+# Recorded as typed, from a fixed set. Unset stays unset: a blank is "not asked", which is
+# a different thing from any of the three answers.
+GENDERS = ("female", "male", "other")
 
 # What the Zumba pipeline starts life as, so CI/CD ROOTS lists something on a fresh install
 # rather than "No stages yet" — the branch tab's own summary cards, so the two screens open
@@ -166,6 +179,14 @@ class ZumbaInput(BaseModel):
     # this records who *teaches* them, which only a Branch Admin decides. A master's board
     # reads this one, so referring somebody cannot put them on your own roll.
     assigned_master_id: Optional[str] = ""
+    email: Optional[str] = ""
+    gender: Optional[str] = ""
+    # Which of the two class slots they attend, and the membership they bought -- the
+    # package's own name and id off the Zumba shelf, so a renamed or repriced package
+    # cannot rewrite what this student was actually sold.
+    time_slot: Optional[str] = ""
+    package_id: Optional[str] = ""
+    package_name: Optional[str] = ""
     fee_amount: Optional[float] = 0
     fee_paid: Optional[float] = 0
     # Where the registration sits in the Zumba pipeline. Left unset it starts at the entry
@@ -569,11 +590,19 @@ async def _clean(payload: ZumbaInput, user: V3UserOut) -> dict:
     if source == MASTER and not master_name:
         raise HTTPException(status_code=400, detail="Which master referred them?")
 
+    gender = (payload.gender or "").strip().lower()
+    time_slot = (payload.time_slot or "").strip()
+
     return {
         "name": name,
         "phone": (payload.phone or "").strip(),
+        "email": (payload.email or "").strip(),
         "age": _age(payload.age),
+        "gender": gender if gender in GENDERS else "",
         "address": (payload.address or "").strip(),
+        "time_slot": time_slot if time_slot in TIME_SLOTS else "",
+        "package_id": (payload.package_id or "").strip(),
+        "package_name": (payload.package_name or "").strip(),
         "source": source,
         "master_name": master_name if source == MASTER else "",
         "fee_amount": _amount(payload.fee_amount),

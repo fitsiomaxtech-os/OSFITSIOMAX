@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { MilkDateInput } from "@/components/ui/milk-calendar";
 import { toast } from "@/components/ui/sonner";
-import { listZumba, listZumbaMasters, addZumba, updateZumba, deleteZumba, moveZumbaStage } from "@/lib/api";
+import { listZumba, listZumbaMasters, addZumba, updateZumba, deleteZumba, moveZumbaStage, listStoreItems } from "@/lib/api";
 
 // How a registration arrived, as the branch would say it. A referral is recorded against
 // the master who made it rather than against a single "Masters" bucket, so these six are
@@ -15,14 +15,52 @@ import { listZumba, listZumbaMasters, addZumba, updateZumba, deleteZumba, moveZu
 // came to us. The rest name whoever did the referring. The mapping lives on the server,
 // which stamps each row with its card so this list and the counts cannot disagree.
 const SOURCES = [
+  { key: "branch", label: "Branch Admin" },
   { key: "board", label: "Board" },
-  { key: "consultations", label: "Consultations" },
-  { key: "branch", label: "Branch" },
+  { key: "consultations", label: "Consultation" },
   { key: "social_media", label: "Social Media" },
-  { key: "personal", label: "Personal" },
+  { key: "personal", label: "Personal Brand (Sumaiya Naaz)" },
   { key: "fitsiomax", label: "Fitsiomax" },
 ];
 const MASTER = "master";
+
+// The two slots the class is taught in. Kept in step with TIME_SLOTS in
+// backend/routers/v3_zumba.py, which drops anything it does not recognise.
+const TIME_SLOTS = ["10:00 am - 11:00 am", "11:00 am - 12:00 pm"];
+const GENDERS = [
+  { key: "female", label: "Female" },
+  { key: "male", label: "Male" },
+  { key: "other", label: "Other" },
+];
+
+// A membership is sold by the month — 12 classes in each. The shelf holds the per-class
+// rate, so the price a student is quoted is that rate across the whole plan, rounded back
+// to the figure that was typed when the package was priced.
+const CLASSES_PER_MONTH = 12;
+const planLabel = (item) => {
+  const classes = item.sessions_offline || item.sessions_online || 0;
+  const months = classes && classes % CLASSES_PER_MONTH === 0 ? classes / CLASSES_PER_MONTH : null;
+  return months ? `${months} Month${months > 1 ? "s" : ""}` : item.name;
+};
+const planTotal = (item) => Math.round(
+  (Number(item.price_offline ?? item.price_online) || 0) * (item.sessions_offline || item.sessions_online || 0),
+);
+
+/** The one dropdown shape this form uses, so six of them cannot drift into six looks. */
+const FormSelect = ({ value, onChange, children, testid }) => (
+  <select
+    value={value}
+    onChange={(e) => onChange(e.target.value)}
+    className="h-10 w-full rounded-md border border-slate-200 bg-white px-2.5 text-sm text-slate-700 focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400"
+    data-testid={testid}
+  >
+    {children}
+  </select>
+);
+
+const FieldLabel = ({ children }) => (
+  <label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">{children}</label>
+);
 const sourceLabel = (r) => (
   r.source === MASTER
     ? (r.master_name || "Master")
@@ -123,7 +161,11 @@ const shortDate = (iso) => {
 /** The stored timestamp as a plain YYYY-MM-DD, which is what the date inputs compare. */
 const dayOf = (iso) => String(iso || "").slice(0, 10);
 
-const EMPTY = { name: "", phone: "", age: "", address: "", source: "personal", master_name: "", assigned_master_id: "", fee_amount: "", fee_paid: "" };
+const EMPTY = {
+  name: "", email: "", phone: "", age: "", gender: "", address: "",
+  source: "personal", master_name: "", assigned_master_id: "", time_slot: "",
+  package_id: "", package_name: "", fee_amount: "", fee_paid: "",
+};
 
 /**
  * Zumba registrations for one branch.
@@ -149,6 +191,9 @@ export const ZumbaPanel = ({ branchId }) => {
   // the same list as `masters` above: that one is names typed onto referrals, and a
   // referral name with no account behind it cannot be given a class.
   const [zumbaMasters, setZumbaMasters] = useState([]);
+  // The Zumba shelf as Super Admin priced it — 1, 3 and 6 month memberships. Read rather
+  // than hardcoded, so a change of price on the shelf is the change of price here.
+  const [packages, setPackages] = useState([]);
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState(null);
   // The Zumba pipeline exactly as Super Admin has it in CI/CD ROOTS. Nothing is hardcoded
@@ -173,6 +218,15 @@ export const ZumbaPanel = ({ branchId }) => {
   }, [branchId]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Once, not per open: the shelf does not change while a form is on screen, and fetching
+  // it on every Create would put a spinner in front of a list that is nearly always the
+  // same three rows.
+  useEffect(() => {
+    listStoreItems("zumba", "session")
+      .then(setPackages)
+      .catch(() => setPackages([]));
+  }, []);
 
   // Loaded apart from the registrations: the roster does not change when a row does, and a
   // branch with no Zumba accounts should still get its board rather than an error.
@@ -256,7 +310,12 @@ export const ZumbaPanel = ({ branchId }) => {
         name: form.name.trim(),
         phone: (form.phone || "").trim(),
         age: form.age === "" || form.age == null ? null : Number(form.age),
+        email: (form.email || "").trim(),
+        gender: form.gender || "",
         address: (form.address || "").trim(),
+        time_slot: form.time_slot || "",
+        package_id: form.package_id || "",
+        package_name: form.package_name || "",
         source: form.source || "personal",
         master_name: (form.master_name || "").trim(),
         assigned_master_id: form.assigned_master_id || "",
@@ -557,122 +616,174 @@ export const ZumbaPanel = ({ branchId }) => {
 
       {form && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" data-testid="zumba-dialog">
-          <div className="max-h-[90vh] w-full max-w-md space-y-3 overflow-y-auto rounded-xl bg-white p-5 shadow-2xl">
+          <div className="max-h-[90vh] w-full max-w-3xl space-y-4 overflow-y-auto rounded-xl bg-white p-5 shadow-2xl">
             <h3 className="text-base font-semibold text-slate-900">{form.id ? "Edit Zumba Lead" : "Zumba Lead Create"}</h3>
-            <div className="space-y-2">
-              <label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Name *</label>
-              <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Full name" data-testid="zumba-field-name" />
-            </div>
-            <div className="grid grid-cols-3 gap-3">
-              <div className="col-span-2 space-y-2">
-                <label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Phone</label>
-                <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="10-digit number" data-testid="zumba-field-phone" />
-              </div>
-              <div className="space-y-2">
-                <label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Age</label>
-                <Input type="number" value={form.age} onChange={(e) => setForm({ ...form, age: e.target.value })} placeholder="—" data-testid="zumba-field-age" />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Address</label>
-              <Input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} placeholder="Area, city" data-testid="zumba-field-address" />
-            </div>
-            <div className="space-y-2">
-              <label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Source</label>
-              {/* One list, masters and channels together, because that is the one question
-                  being answered: how did this person get here. A master is picked by name
-                  — "Master" on its own would only prompt a second question. */}
-              <div className="flex flex-wrap gap-1.5">
-                {masterOptions.map((m) => {
-                  const on = form.source === MASTER && form.master_name === m;
-                  return (
-                    <button
-                      key={`master-${m}`}
-                      type="button"
-                      onClick={() => setForm({ ...form, source: MASTER, master_name: m })}
-                      className={`max-w-full truncate rounded-md px-2.5 py-1.5 text-xs font-semibold transition ${on ? "bg-emerald-600 text-white" : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"}`}
-                      title={m}
-                      data-testid={`zumba-field-master-${m}`}
-                    >
-                      {m}
-                    </button>
-                  );
-                })}
-                {SOURCES.map((s) => (
-                  <button
-                    key={s.key}
-                    type="button"
-                    onClick={() => setForm({ ...form, source: s.key, master_name: "" })}
-                    className={`rounded-md px-2.5 py-1.5 text-xs font-semibold transition ${form.source === s.key ? "bg-sky-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
-                    data-testid={`zumba-field-source-${s.key}`}
-                  >
-                    {s.label}
-                  </button>
-                ))}
-              </div>
-              {/* The roster is the names already referred from, so the first referral by a
-                  master has to introduce them. Typed once, then offered from then on. */}
-              <div className="flex items-center gap-2 pt-1">
-                <Input
-                  value={newMaster}
-                  onChange={(e) => setNewMaster(e.target.value)}
-                  placeholder="New master's name"
-                  className="h-8 text-xs"
-                  data-testid="zumba-field-new-master"
-                />
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-8 shrink-0 border-emerald-200 text-xs text-emerald-700 hover:bg-emerald-50"
-                  disabled={!newMaster.trim()}
-                  onClick={() => { setForm({ ...form, source: MASTER, master_name: newMaster.trim() }); setNewMaster(""); }}
-                  data-testid="zumba-field-add-master"
-                >
-                  Add Master
-                </Button>
-              </div>
-            </div>
-            {/* Deliberately its own field rather than a second use of Source: Source is
-                how this student arrived, this is whose class they are in. Only what is set
-                here reaches a master's board — a master referring somebody does not put
-                them on their own roll, which is the point of keeping the two apart. */}
-            <div className="space-y-2">
-              <label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Assigned Master</label>
-              {zumbaMasters.length === 0 ? (
-                <p className="rounded-md bg-slate-50 px-2.5 py-2 text-[11px] text-slate-500" data-testid="zumba-field-assign-empty">
-                  No Zumba accounts at this branch yet. Add one in HR Admin to assign students to a class.
-                </p>
-              ) : (
-                <div className="flex flex-wrap gap-1.5">
-                  {zumbaMasters.map((m) => {
-                    const on = form.assigned_master_id === m.id;
-                    return (
-                      <button
-                        key={m.id}
-                        type="button"
-                        onClick={() => setForm({ ...form, assigned_master_id: on ? "" : m.id })}
-                        className={`max-w-full truncate rounded-md px-2.5 py-1.5 text-xs font-semibold transition ${on ? "bg-pink-600 text-white" : "bg-pink-50 text-pink-700 hover:bg-pink-100"}`}
-                        title={m.name}
-                        data-testid={`zumba-field-assign-${m.id}`}
-                      >
-                        {m.name}
-                      </button>
-                    );
-                  })}
+
+            {/* Two columns, and the split is the question each answers: who the person is
+                on the left, what the branch is doing with them on the right. On a phone
+                they stack in that same order, which is the order they are asked in. */}
+            <div className="grid gap-5 md:grid-cols-2">
+
+              {/* ---------------------------------------------------- who they are */}
+              <div className="space-y-3">
+                <p className="border-b border-slate-100 pb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">Basic Details</p>
+                <div className="space-y-2">
+                  <FieldLabel>Name *</FieldLabel>
+                  <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Full name" data-testid="zumba-field-name" />
                 </div>
-              )}
-              <p className="text-[11px] text-slate-400">Unassigned until you pick one. Tap the same master again to take the student off their board.</p>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Fee Collected</label>
-                <Input type="number" value={form.fee_paid} onChange={(e) => setForm({ ...form, fee_paid: e.target.value })} placeholder="0" data-testid="zumba-field-paid" />
+                <div className="space-y-2">
+                  <FieldLabel>Email</FieldLabel>
+                  <Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="name@example.com" data-testid="zumba-field-email" />
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="col-span-2 space-y-2">
+                    <FieldLabel>Phone Number</FieldLabel>
+                    <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="10-digit number" data-testid="zumba-field-phone" />
+                  </div>
+                  <div className="space-y-2">
+                    <FieldLabel>Age</FieldLabel>
+                    <Input type="number" value={form.age} onChange={(e) => setForm({ ...form, age: e.target.value })} placeholder="—" data-testid="zumba-field-age" />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <FieldLabel>Gender</FieldLabel>
+                  <FormSelect value={form.gender} onChange={(v) => setForm({ ...form, gender: v })} testid="zumba-field-gender">
+                    <option value="">Not stated</option>
+                    {GENDERS.map((g) => <option key={g.key} value={g.key}>{g.label}</option>)}
+                  </FormSelect>
+                </div>
+                <div className="space-y-2">
+                  <FieldLabel>Address</FieldLabel>
+                  <Input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} placeholder="Where they are coming from" data-testid="zumba-field-address" />
+                </div>
               </div>
-              <div className="space-y-2">
-                <label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Fee Amount</label>
-                <Input type="number" value={form.fee_amount} onChange={(e) => setForm({ ...form, fee_amount: e.target.value })} placeholder="0" data-testid="zumba-field-amount" />
+
+              {/* -------------------------------------------- what the branch does */}
+              <div className="space-y-3">
+                <p className="border-b border-slate-100 pb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">Lead &amp; Class</p>
+
+                <div className="space-y-2">
+                  <FieldLabel>Source of the Lead</FieldLabel>
+                  <FormSelect
+                    value={form.source}
+                    onChange={(v) => setForm({ ...form, source: v, master_name: v === MASTER ? form.master_name : "" })}
+                    testid="zumba-field-source"
+                  >
+                    {SOURCES.map((src) => <option key={src.key} value={src.key}>{src.label}</option>)}
+                    <option value={MASTER}>Zumba Master</option>
+                  </FormSelect>
+                  {/* Which master, asked only once the source says a master referred them.
+                      The roster is the names already referred from, so the first referral
+                      by a master has to introduce them. */}
+                  {form.source === MASTER && (
+                    <div className="space-y-2 rounded-md border border-emerald-100 bg-emerald-50/60 p-2.5">
+                      <FieldLabel>Which master referred them?</FieldLabel>
+                      <FormSelect
+                        value={form.master_name}
+                        onChange={(v) => setForm({ ...form, master_name: v })}
+                        testid="zumba-field-master-name"
+                      >
+                        <option value="">Select a master…</option>
+                        {masterOptions.map((m) => <option key={m} value={m}>{m}</option>)}
+                      </FormSelect>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          value={newMaster}
+                          onChange={(e) => setNewMaster(e.target.value)}
+                          placeholder="New master's name"
+                          className="h-8 text-xs"
+                          data-testid="zumba-field-new-master"
+                        />
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-8 shrink-0 border-emerald-200 text-xs text-emerald-700 hover:bg-emerald-50"
+                          disabled={!newMaster.trim()}
+                          onClick={() => { setForm({ ...form, source: MASTER, master_name: newMaster.trim() }); setNewMaster(""); }}
+                          data-testid="zumba-field-add-master"
+                        >
+                          Add Master
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Its own field rather than a second use of Source: Source is how this
+                    student arrived, this is whose class they are in. Only what is set here
+                    reaches a master's board — referring somebody does not put them on your
+                    own roll, which is the point of keeping the two apart. */}
+                <div className="space-y-2">
+                  <FieldLabel>Assign To</FieldLabel>
+                  {zumbaMasters.length === 0 ? (
+                    <p className="rounded-md bg-slate-50 px-2.5 py-2 text-[11px] text-slate-500" data-testid="zumba-field-assign-empty">
+                      No Zumba accounts at this branch yet. Add one in HR Admin to assign students to a class.
+                    </p>
+                  ) : (
+                    <FormSelect
+                      value={form.assigned_master_id}
+                      onChange={(v) => setForm({ ...form, assigned_master_id: v })}
+                      testid="zumba-field-assign"
+                    >
+                      <option value="">Unassigned</option>
+                      {zumbaMasters.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                    </FormSelect>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <FieldLabel>Time</FieldLabel>
+                  <FormSelect value={form.time_slot} onChange={(v) => setForm({ ...form, time_slot: v })} testid="zumba-field-time">
+                    <option value="">Not set</option>
+                    {TIME_SLOTS.map((slot) => <option key={slot} value={slot}>{slot}</option>)}
+                  </FormSelect>
+                </div>
+
+                {/* The shelf, priced. Picking a membership fills the amount owed, which is
+                    what the plan costs; what has actually been handed over stays a separate
+                    number, because the two are only equal once the student has paid. */}
+                <div className="space-y-2">
+                  <FieldLabel>Fee</FieldLabel>
+                  {packages.length === 0 ? (
+                    <p className="rounded-md bg-slate-50 px-2.5 py-2 text-[11px] text-slate-500" data-testid="zumba-field-package-empty">
+                      No Zumba memberships on the shelf yet. Add them in Services and Products → Zumba Class.
+                    </p>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5" data-testid="zumba-field-packages">
+                      {packages.map((item) => {
+                        const on = form.package_id === item.id;
+                        const total = planTotal(item);
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => setForm(on
+                              ? { ...form, package_id: "", package_name: "", fee_amount: "" }
+                              : { ...form, package_id: item.id, package_name: item.name, fee_amount: total })}
+                            className={`rounded-md px-2.5 py-1.5 text-xs font-semibold transition ${on ? "bg-emerald-600 text-white" : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"}`}
+                            title={item.name}
+                            data-testid={`zumba-field-package-${item.id}`}
+                          >
+                            {planLabel(item)} · {rupees(total)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <div className="grid grid-cols-2 gap-3 pt-1">
+                    <div className="space-y-2">
+                      <FieldLabel>Fee Collected</FieldLabel>
+                      <Input type="number" value={form.fee_paid} onChange={(e) => setForm({ ...form, fee_paid: e.target.value })} placeholder="0" data-testid="zumba-field-paid" />
+                    </div>
+                    <div className="space-y-2">
+                      <FieldLabel>Fee Amount</FieldLabel>
+                      <Input type="number" value={form.fee_amount} onChange={(e) => setForm({ ...form, fee_amount: e.target.value, package_id: "", package_name: "" })} placeholder="0" data-testid="zumba-field-amount" />
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
+
             <div className="flex justify-end gap-2 pt-1">
               <Button variant="outline" size="sm" onClick={() => setForm(null)} data-testid="zumba-cancel">Cancel</Button>
               <Button size="sm" className="bg-sky-600 hover:bg-sky-700" disabled={saving} onClick={save} data-testid="zumba-save">
