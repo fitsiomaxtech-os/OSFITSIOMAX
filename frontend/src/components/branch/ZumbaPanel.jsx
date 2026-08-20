@@ -86,17 +86,8 @@ const sourceLabel = (r) => (
 // work the colours now do, and a group box inside a row of cards that each carry their own
 // colour reads as two systems arguing about the same thing.
 //
-// The colours run warm through the sources and cool through the three that follow, so the
-// old grouping is still legible without drawing a box around it.
-// Kept in step with MASTER_SHARE in backend/routers/v3_zumba.py, which is what the card
-// totals are already split by. Only the per-row line below is worked out here; the
-// figures on the cards still come from the server, so the two cannot drift.
-//
-// A row's share is rounded for display like every other rupee figure here, so a column
-// of them can land a rupee off the card above it on an odd total. The card is the
-// figure of record.
-const MASTER_SHARE = 0.5;
-
+// The colours run warm through the sources and cool through the four that follow, so the
+// two halves of the row stay legible without drawing a box around either.
 const CARDS = [
   { key: "all", label: "All", color: "#a855f7" },
   { key: "direct", label: "Direct", color: "#f59e0b" },
@@ -131,9 +122,149 @@ const STATUS_LABELS = { discontinued: "Discontinued", leave: "On leave" };
     there changes here without a deploy. */
 const stageColor = (stages, name) => (stages.find((st) => st.name === name) || {}).color || "#64748b";
 
-// The cards that show a cut of the fee rather than the whole of it. Read by the filter,
-// which sends them to the same rows Total Fees opens.
-const REVENUE_CARDS = new Set(["master_revenue", "fitsiomax_revenue"]);
+/** One labelled line of the detail popup. A blank reads as a dash rather than as nothing,
+ *  so a gap in the record is visible instead of invisible. */
+const DetailRow = ({ label, value }) => (
+  <div className="flex items-start justify-between gap-3 border-b border-slate-100 py-1.5 last:border-b-0">
+    <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-slate-400">{label}</span>
+    <span className="min-w-0 break-words text-right text-xs font-medium text-slate-700">{value || "—"}</span>
+  </div>
+);
+
+/**
+ * One registration, read rather than edited, and the two things that end it.
+ *
+ * Discontinue and Leave both ask why before they will save. The counts on the cards are
+ * only worth having if they can be read back as reasons -- "six discontinued" is a number,
+ * "six discontinued, four of them over the class time" is something a branch can act on.
+ *
+ * The two are kept apart because they are not the same event: Leave is a student expected
+ * back, Discontinue is one who is not. A row already ended offers the way back instead,
+ * which needs no reason -- returning to class is the normal state resuming.
+ */
+const ViewRegistrationModal = ({ row, masterNameOf, onClose, onSaved }) => {
+  const [pending, setPending] = useState(null); // "discontinued" | "leave" | null
+  const [remarks, setRemarks] = useState("");
+  const [saving, setSaving] = useState(false);
+  const status = row.status || "active";
+  const ended = status === "discontinued" || status === "leave";
+  // A consultation's referral is not a row of this collection -- it is read live off the
+  // lead that owns it. Ending it here would ask the server to change a record it does not
+  // hold, so the popup reads it and says where the decision actually lives.
+  const ownedElsewhere = row.origin === "consultation";
+
+  const apply = async (next, why) => {
+    setSaving(true);
+    try {
+      await setZumbaStatus(row.id, next, why);
+      toast.success(
+        next === "discontinued" ? "Marked discontinued"
+          : next === "leave" ? "Marked on leave"
+            : "Back on the class roll",
+      );
+      onSaved();
+      onClose();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not save");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const due = Number(row.fee_amount || 0) - Number(row.fee_paid || 0);
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" data-testid="zumba-view-dialog">
+      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-2xl">
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="truncate text-base font-semibold text-slate-900">{row.name || "—"}</h3>
+            <p className="text-xs text-slate-500">Registered {shortDate(row.created_at)}</p>
+          </div>
+          <button onClick={onClose} className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100" aria-label="Close" data-testid="zumba-view-close">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {ended && (
+          <div className={`mb-3 rounded-lg px-3 py-2 text-xs ${status === "discontinued" ? "bg-rose-50 text-rose-700" : "bg-indigo-50 text-indigo-700"}`} data-testid="zumba-view-status">
+            <p className="font-bold">{STATUS_LABELS[status]}</p>
+            {row.status_remarks ? <p className="mt-0.5">{row.status_remarks}</p> : null}
+            {row.status_by ? <p className="mt-0.5 opacity-70">{row.status_by} · {shortDate(row.status_at)}</p> : null}
+          </div>
+        )}
+
+        <div className="space-y-0.5">
+          <DetailRow label="Phone" value={row.phone} />
+          <DetailRow label="Email" value={row.email} />
+          <DetailRow label="Age" value={row.age} />
+          <DetailRow label="Gender" value={(GENDERS.find((g) => g.key === row.gender) || {}).label} />
+          <DetailRow label="Address" value={row.address} />
+          <DetailRow label="Source" value={sourceLabel(row)} />
+          <DetailRow label="Class" value={masterNameOf(row.assigned_master_id)} />
+          <DetailRow label="Time" value={row.time_slot} />
+          <DetailRow label="Package" value={row.package_name} />
+          <DetailRow label="Stage" value={row.stage} />
+          <DetailRow
+            label="Fee"
+            value={`${rupees(row.fee_paid)} paid${due > 0 ? ` · ${rupees(due)} due` : row.fee_amount ? " · settled" : ""}`}
+          />
+        </div>
+
+        {/* Asked before it is saved, not after: the reason is the point of recording it. */}
+        {pending ? (
+          <div className="mt-4 space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              Why are they {pending === "discontinued" ? "discontinuing" : "taking leave"}? *
+            </label>
+            <textarea
+              rows={3}
+              autoFocus
+              value={remarks}
+              onChange={(e) => setRemarks(e.target.value)}
+              placeholder={pending === "discontinued" ? "Moved away, too expensive, unhappy with the timing…" : "Travelling for a month, injury, exams…"}
+              className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400"
+              data-testid="zumba-status-remarks"
+            />
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => { setPending(null); setRemarks(""); }} data-testid="zumba-status-cancel">Cancel</Button>
+              <Button
+                size="sm"
+                className={pending === "discontinued" ? "bg-rose-600 hover:bg-rose-700" : "bg-indigo-600 hover:bg-indigo-700"}
+                disabled={saving || !remarks.trim()}
+                onClick={() => apply(pending, remarks.trim())}
+                data-testid="zumba-status-confirm"
+              >
+                {saving ? "Saving…" : pending === "discontinued" ? "Confirm Discontinue" : "Confirm Leave"}
+              </Button>
+            </div>
+          </div>
+        ) : ownedElsewhere ? (
+          <p className="mt-4 rounded-lg bg-sky-50 px-3 py-2 text-[11px] font-medium text-sky-700" data-testid="zumba-view-owned-elsewhere">
+            Referred on the consultation, which owns this record — discontinuing or ending it is done there, by un-ticking Zumba on the lead.
+          </p>
+        ) : (
+          <div className="mt-4 flex flex-wrap justify-end gap-2">
+            {ended ? (
+              <Button size="sm" variant="outline" disabled={saving} onClick={() => apply("active", "")} data-testid="zumba-status-restore">
+                Put back on the roll
+              </Button>
+            ) : (
+              <>
+                <Button size="sm" variant="outline" className="border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => setPending("discontinued")} data-testid="zumba-status-discontinue">
+                  Discontinue
+                </Button>
+                <Button size="sm" variant="outline" className="border-indigo-200 text-indigo-700 hover:bg-indigo-50" onClick={() => setPending("leave")} data-testid="zumba-status-leave">
+                  Leave
+                </Button>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
 
 /** The Human Resource board's stage card, in the one other place that wants it.
  *
@@ -889,6 +1020,15 @@ export const ZumbaPanel = ({ branchId }) => {
             </div>
           </div>
         </div>
+      )}
+
+      {viewing && (
+        <ViewRegistrationModal
+          row={viewing}
+          masterNameOf={(id) => (zumbaMasters.find((m) => m.id === id) || {}).name || ""}
+          onClose={() => setViewing(null)}
+          onSaved={load}
+        />
       )}
 
       {removing && (
