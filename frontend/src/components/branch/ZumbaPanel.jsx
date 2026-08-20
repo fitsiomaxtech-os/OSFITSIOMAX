@@ -171,6 +171,30 @@ const shortDate = (iso) => {
 /** The stored timestamp as a plain YYYY-MM-DD, which is what the date inputs compare. */
 const dayOf = (iso) => String(iso || "").slice(0, 10);
 
+/**
+ * What this registration still needs, named.
+ *
+ * A referral arrives as half a record: the master hands over a person -- name, phone, age,
+ * area -- and the branch owes the rest of it, which is the part that turns a name into a
+ * student in a class. These four are that part, and they are the four the row's badge
+ * offers to go and fill in.
+ *
+ * Deliberately not everything that could be blank. Age and email are worth having and not
+ * worth chasing, and listing them would put a badge on nearly every row, which says
+ * "something is missing here" so often that it stops meaning it.
+ *
+ * Read as a phrase, so the badge reads "Needs a class time & a package" rather than naming
+ * database columns at somebody.
+ */
+const missingDetails = (row) => {
+  const gaps = [];
+  if (!(row?.phone || "").trim()) gaps.push("a phone number");
+  if (!(row?.assigned_master_id || "").trim()) gaps.push("a master");
+  if (!(row?.time_slot || "").trim()) gaps.push("a class time");
+  if (!(row?.package_id || "").trim()) gaps.push("a package");
+  return gaps;
+};
+
 const EMPTY = {
   name: "", email: "", phone: "", age: "", gender: "", address: "",
   source: "personal", master_name: "", assigned_master_id: "", time_slot: "",
