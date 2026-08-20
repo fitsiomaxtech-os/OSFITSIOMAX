@@ -497,6 +497,15 @@ export const ZumbaPanel = ({ branchId }) => {
 
   const visible = useMemo(() => {
     let list = rows;
+    // A student who has discontinued is off the roll, so they appear on their own card and
+    // nowhere else: not in All, not under the source that brought them in, and not among
+    // who owes money. Applied before the card filters rather than inside each one, so
+    // there is a single place that decides who is still on the list.
+    //
+    // Leave is not the same and stays: they are expected back, and the counts that describe
+    // the roll should still include them. The server's summary draws the same line, so the
+    // number on a card and the rows behind it cannot disagree.
+    if (card !== "discontinued") list = list.filter((r) => (r.status || "active") !== "discontinued");
     // Four of the cards are not sources, so each says which rows it stands for. Where a
     // student came from and what became of them are different questions, and only the
     // first is the `card` the server stamps on the row.
@@ -532,7 +541,13 @@ export const ZumbaPanel = ({ branchId }) => {
 
   // Counted off every row, not the filtered ones: the point of the badge is to say
   // there is work waiting even while a card or a date range is hiding it.
-  const needsCount = useMemo(() => rows.filter((r) => missingDetails(r).length > 0).length, [rows]);
+  // Counted over the roll, not over everybody: a discontinued student missing a phone
+  // number is not work waiting, and chasing them is exactly what the badge would be asking
+  // somebody to do.
+  const needsCount = useMemo(
+    () => rows.filter((r) => (r.status || "active") !== "discontinued" && missingDetails(r).length > 0).length,
+    [rows],
+  );
 
   // Every master offered in the picker: the ones already referred from, plus one being
   // typed in now, so a new name is selectable the moment it exists.

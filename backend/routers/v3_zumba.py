@@ -573,8 +573,26 @@ async def list_zumba(
     # reads attendance, which is not recorded -- a member who skips a Friday still counts,
     # because they held the seat.
     class_day = _is_class_day_today()
-    summary = {"all": len(rows), "fee_collected": 0, "fee_total": 0.0}
-    summary["today_session"] = len(rows) if class_day else 0
+
+    # A student who has discontinued has left the class, so they are counted on their own
+    # card and on no other -- not in All, not under the source that brought them in, and
+    # not among who owes money. A count of All that includes people who have gone is a roll
+    # nobody can staff a class from, and Due Payment listing them turns a card somebody
+    # works from into a list of calls not worth making.
+    #
+    # Leave is deliberately not the same. They are expected back, so they stay on the roll
+    # and in every count that describes it. What they are out of is today's class, which is
+    # the one figure that asks who is actually in the room.
+    on_roll = [r for r in rows if _status(r.get("status")) != STATUS_DISCONTINUED]
+    in_class = [r for r in on_roll if _status(r.get("status")) != STATUS_LEAVE]
+
+    # today_session is who is booked into today's class, not who turned up: the class runs
+    # Mon/Wed/Fri and a member is booked into every one of them, so on a class day it is the
+    # whole roll and on any other day there is no class to be booked into. Nothing here
+    # reads attendance, which is not recorded -- a member who skips a Friday still counts,
+    # because they held the seat.
+    summary = {"all": len(on_roll), "fee_collected": 0, "fee_total": 0.0}
+    summary["today_session"] = len(in_class) if class_day else 0
     summary["is_class_day"] = class_day
     # The four the branch tab counts alongside the sources: where the money stands, and who
     # has stopped coming. Payment Done is a settled account rather than "paid something" --
@@ -588,6 +606,15 @@ async def list_zumba(
     for card in CARDS:
         summary[card] = 0
     for r in rows:
+        status = _status(r.get("status"))
+        if status == STATUS_DISCONTINUED:
+            # Counted here and nowhere else, money included: a fee still owed by somebody
+            # who has left is not the branch's collectable, and the card that lists what to
+            # chase should not send anyone after it.
+            summary["discontinued"] += 1
+            continue
+        if status == STATUS_LEAVE:
+            summary["leave"] += 1
         summary[r["card"]] += 1
         owed = _amount(r.get("fee_amount"))
         settled = _amount(r.get("fee_paid"))
@@ -595,11 +622,6 @@ async def list_zumba(
             summary["payment_done"] += 1
         elif owed > settled:
             summary["due_payment"] += 1
-        status = _status(r.get("status"))
-        if status == STATUS_DISCONTINUED:
-            summary["discontinued"] += 1
-        elif status == STATUS_LEAVE:
-            summary["leave"] += 1
         paid = _amount(r.get("fee_paid"))
         if paid > 0:
             summary["fee_collected"] += 1
@@ -622,7 +644,7 @@ async def list_zumba(
     # rename in CI/CD ROOTS rewrites. A stage nobody is at still reports 0 rather than
     # going missing from the bar.
     stage_counts = {st["name"]: 0 for st in stages}
-    for r in rows:
+    for r in on_roll:
         if r.get("stage") in stage_counts:
             stage_counts[r["stage"]] += 1
     summary["stage_counts"] = stage_counts
