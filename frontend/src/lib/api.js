@@ -528,6 +528,11 @@ export const listZumba = async (branchId) => (await api.get("/branch/zumba", { p
 export const addZumba = async (payload, branchId) => (await api.post("/branch/zumba", payload, { params: branchId ? { branch_id: branchId } : {} })).data;
 export const updateZumba = async (registrationId, payload) => (await api.patch(`/branch/zumba/${registrationId}`, payload)).data;
 export const deleteZumba = async (registrationId) => (await api.delete(`/branch/zumba/${registrationId}`)).data;
+
+// The Zumba master accounts at a branch, for the Branch Admin's assign control. Separate
+// from the `masters` list listZumba returns: that one is names typed onto referrals, this
+// one is accounts a student can actually be handed to.
+export const listZumbaMasters = async (branchId) => (await api.get("/branch/zumba/masters", { params: branchId ? { branch_id: branchId } : {} })).data;
 // Moving somebody along the class pipeline is the daily action, so it is its own call
 // rather than a field on the edit form. The stages themselves come back on listZumba,
 // straight from what Super Admin has in CI/CD ROOTS.

@@ -80,6 +80,12 @@ def _is_class_day_today() -> bool:
     return datetime.now(IST).weekday() in CLASS_WEEKDAYS
 
 
+# What a master keeps of the fees their students paid. The other half is Fitsiomax's,
+# taken as the remainder rather than a second multiplication so the two always add back up
+# to exactly what was collected -- this figure is somebody's pay.
+MASTER_SHARE = 0.5
+
+
 async def require_zumba_reader(user: V3UserOut = Depends(v3_current_user)) -> V3UserOut:
     """Who may read and keep the class roll: the branch that runs it, the Zumba desk that
     fills it, and Super Admin. Written as a predicate rather than a role tuple because the
@@ -122,6 +128,11 @@ class ZumbaInput(BaseModel):
     # Only meaningful when source is "master"; dropped otherwise, so moving the source off
     # a referral cannot leave a stale master's name attached to the row.
     master_name: Optional[str] = ""
+    # Which master's class this student sits in. Kept apart from master_name on purpose:
+    # master_name records who *referred* them, which a master writes for themselves, while
+    # this records who *teaches* them, which only a Branch Admin decides. A master's board
+    # reads this one, so referring somebody cannot put them on your own roll.
+    assigned_master_id: Optional[str] = ""
     fee_amount: Optional[float] = 0
     fee_paid: Optional[float] = 0
     # Where the registration sits in the Zumba pipeline. Left unset it starts at the entry
@@ -266,45 +277,25 @@ def _settle_stage(value, stages: list) -> str:
     return _entry_stage(stages)
 
 
-def _own_master_name(user: V3UserOut) -> str:
-    """The name a Zumba master's own referrals are filed under.
-
-    A registration names its master as free text, typed by whoever entered it, so the link
-    back to the master's account is that name matching theirs. Anyone else gets "" and is
-    read by branch alone.
-    """
-    return (user.full_name or "").strip() if is_zumba_role(user.role) else ""
-
-
 def _visible_query(user: V3UserOut, branch_id: Optional[str]) -> Optional[dict]:
     """Which registrations this account may read, or None when that is none of them.
 
-    A Zumba master reads their branch's roll AND every registration naming them, whatever
-    branch it was entered against — the second half because naming a master on a row is
-    how it is meant to reach them, and it did not. It is a union, not a filter: nothing
-    that used to be visible stops being, and Branch Admin and Super Admin are untouched.
+    A Zumba master reads their own roll and nothing else: the students a Branch Admin put
+    in their class, whatever branch the row was entered against. Not their branch's whole
+    book, and not the students they themselves referred -- a referral says who brought
+    somebody in, which is a claim on the lead, not a seat in a class. A master who refers
+    ten people has an empty board until the branch assigns them, which is the intended
+    reading and not a misconfiguration.
 
-    Without the name clause a master whose account carries no branch read an empty board
-    however many students had been filed against their name, which is a strange way for a
-    class roll to report that an account is misconfigured.
+    Everyone else -- Branch Admin, Super Admin -- is read by branch, unchanged.
     """
-    clauses = []
+    if is_zumba_role(user.role):
+        return {"assigned_master_id": user.id}
     if branch_id:
-        clauses.append({"branch_id": branch_id})
-    own_master = _own_master_name(user)
-    if own_master:
-        # Compared whole and case-folded: "master 1" and "Master 1" are one person, while a
-        # substring match would hand "Master 1" every row belonging to "Master 12". Done as
-        # $expr rather than a regex so a typed name is never parsed as a pattern.
-        clauses.append({"$expr": {"$eq": [
-            {"$toLower": {"$trim": {"input": {"$ifNull": ["$master_name", ""]}}}},
-            own_master.lower(),
-        ]}})
-    if not clauses:
-        # Super Admin asking for every branch at once. Anyone else with nothing to scope by
-        # reads nothing, which the caller turns into an empty board.
-        return None if _own_branch_only(user) else {}
-    return clauses[0] if len(clauses) == 1 else {"$or": clauses}
+        return {"branch_id": branch_id}
+    # Super Admin asking for every branch at once. Anyone else with nothing to scope by
+    # reads nothing, which the caller turns into an empty board.
+    return None if _own_branch_only(user) else {}
 
 
 def _extra(lead: dict, *keys):
@@ -408,7 +399,11 @@ async def list_zumba(
     raw = await v3_col("zumba_registrations").find(query, {"_id": 0}).to_list(2000)
     # A consultant's referral carries no master, so it can only be scoped by branch. An
     # account with no branch to scope by gets none of them rather than every branch's.
-    referred = await _referred_rows(branch_id, entry_stage) if (branch_id or not _own_branch_only(user)) else []
+    # A master never sees these: nobody has assigned them to a class yet, so they belong
+    # to the branch's inbox rather than to anybody's roll.
+    referred = []
+    if not is_zumba_role(user.role) and (branch_id or not _own_branch_only(user)):
+        referred = await _referred_rows(branch_id, entry_stage)
     rows = [_shape(r, stages) for r in raw] + referred
     # Sorted after the merge, not before: two sources of rows interleave by date the way
     # one would, rather than arriving as two blocks.
@@ -431,6 +426,11 @@ async def list_zumba(
         if paid > 0:
             summary["fee_collected"] += 1
             summary["fee_total"] += paid
+
+    # Worked out here, not on each board, so the master's Payment card and the Branch
+    # Admin's Master's Revenue card cannot drift apart: they are reading one number.
+    summary["master_revenue"] = round(summary["fee_total"] * MASTER_SHARE, 2)
+    summary["fitsiomax_revenue"] = round(summary["fee_total"] - summary["master_revenue"], 2)
 
     # The masters this branch has actually been referred by, gathered off the registrations
     # themselves. No separate roster to keep in step with reality: a name typed once is
@@ -458,7 +458,35 @@ async def list_zumba(
     }
 
 
-async def _clean(payload: ZumbaInput) -> dict:
+async def _assignment(payload: ZumbaInput, user: V3UserOut) -> dict:
+    """The master this student is assigned to, resolved to id and name.
+
+    Empty for a Zumba master: assigning is the Branch Admin's call, and a master posting
+    their own referral must not be able to put themselves on the roll -- that is exactly
+    the thing the assignment is meant to keep out. Returning no keys at all rather than
+    blank ones also means a master editing a row leaves the branch's assignment alone
+    instead of clearing it.
+
+    The name is stored beside the id so a board can print it without a second read, while
+    the id stays the thing that is matched on -- a master who is renamed keeps their roll.
+    """
+    if is_zumba_role(user.role):
+        return {}
+    master_id = (payload.assigned_master_id or "").strip()
+    if not master_id:
+        return {"assigned_master_id": "", "assigned_master_name": ""}
+    account = await v3_col("users").find_one(
+        {"id": master_id}, {"_id": 0, "full_name": 1, "email": 1}
+    )
+    if not account:
+        raise HTTPException(status_code=400, detail="That master no longer has an account")
+    return {
+        "assigned_master_id": master_id,
+        "assigned_master_name": (account.get("full_name") or account.get("email") or "").strip(),
+    }
+
+
+async def _clean(payload: ZumbaInput, user: V3UserOut) -> dict:
     name = (payload.name or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="Name is required")
@@ -478,7 +506,36 @@ async def _clean(payload: ZumbaInput) -> dict:
         "fee_amount": _amount(payload.fee_amount),
         "fee_paid": _amount(payload.fee_paid),
         "stage": _settle_stage(payload.stage, await _zumba_stages()),
+        **await _assignment(payload, user),
     }
+
+
+@router.get("/branch/zumba/masters")
+async def list_zumba_masters(
+    branch_id: Optional[str] = Query(None),
+    user: V3UserOut = Depends(require_zumba_reader),
+):
+    """The Zumba master accounts at this branch, for the Branch Admin's assign control.
+
+    Sifted in Python rather than queried by a role literal because the slug is whatever was
+    typed in Roles & Credentials -- "zumba" on this install, "zumba_master" on the next --
+    and is_zumba_role is the one place that knows both read as the Zumba desk.
+
+    A branch with no master accounts comes back empty and the control says so, rather than
+    offering a dropdown that assigns students to nobody.
+    """
+    branch_id = await _branch_for(user, branch_id)
+    query: dict = {"is_active": {"$ne": False}}
+    if branch_id:
+        query["branch_id"] = branch_id
+    rows = await v3_col("users").find(
+        query, {"_id": 0, "id": 1, "full_name": 1, "email": 1, "role": 1}
+    ).sort("full_name", 1).to_list(200)
+    return [
+        {"id": r["id"], "name": (r.get("full_name") or r.get("email") or "").strip()}
+        for r in rows
+        if is_zumba_role(r.get("role") or "")
+    ]
 
 
 @router.post("/branch/zumba")
@@ -494,7 +551,7 @@ async def add_zumba(
     row = {
         "id": str(uuid.uuid4()),
         "branch_id": branch_id,
-        **await _clean(payload),
+        **await _clean(payload, user),
         "created_at": now_iso(),
         "created_by": user.full_name or user.email,
     }
@@ -516,7 +573,7 @@ async def update_zumba(
         raise HTTPException(status_code=403, detail="Not your branch")
 
     changes = {
-        **await _clean(payload),
+        **await _clean(payload, user),
         "updated_at": now_iso(),
         "updated_by": user.full_name or user.email,
     }

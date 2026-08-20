@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { MilkDateInput } from "@/components/ui/milk-calendar";
 import { toast } from "@/components/ui/sonner";
-import { listZumba, addZumba, updateZumba, deleteZumba, moveZumbaStage } from "@/lib/api";
+import { listZumba, listZumbaMasters, addZumba, updateZumba, deleteZumba, moveZumbaStage } from "@/lib/api";
 
 // How a registration arrived, as the branch would say it. A referral is recorded against
 // the master who made it rather than against a single "Masters" bucket, so these six are
@@ -80,21 +80,6 @@ const hasMaster = (r) => !!(r.master_name || "").trim();
 // so a stale `card` value can never narrow the list to nothing.
 const DERIVED_CARDS = new Set(["master_revenue", "fitsiomax_revenue"]);
 
-// The class fee is split down the middle between the master who runs it and Fitsiomax.
-const MASTER_SHARE = 0.5;
-
-/** The two halves of the collected fee.
- *
- * Fitsiomax takes the remainder rather than its own percentage, so the two always add back
- * to exactly what was collected. Splitting an odd number both ways independently loses or
- * invents a rupee, and this figure is somebody's pay.
- */
-const revenueSplit = (feeTotal) => {
-  const total = Number(feeTotal) || 0;
-  const master = Math.round(total * MASTER_SHARE);
-  return { total, master, fitsiomax: total - master };
-};
-
 /** The Human Resource board's stage card, in the one other place that wants it.
  *
  * Copied rather than imported: that one is local to HumanResourceBoard.jsx and shaped for
@@ -149,7 +134,7 @@ const shortDate = (iso) => {
 /** The stored timestamp as a plain YYYY-MM-DD, which is what the date inputs compare. */
 const dayOf = (iso) => String(iso || "").slice(0, 10);
 
-const EMPTY = { name: "", phone: "", age: "", address: "", source: "personal", master_name: "", fee_amount: "", fee_paid: "" };
+const EMPTY = { name: "", phone: "", age: "", address: "", source: "personal", master_name: "", assigned_master_id: "", fee_amount: "", fee_paid: "" };
 
 /**
  * Zumba registrations for one branch.
@@ -171,6 +156,10 @@ export const ZumbaPanel = ({ branchId }) => {
   const [to, setTo] = useState("");
   const [form, setForm] = useState(null); // null | { ...fields, id? }
   const [newMaster, setNewMaster] = useState(""); // a master not yet on the list
+  // The Zumba accounts at this branch, which is what a student is assigned *to*. Not
+  // the same list as `masters` above: that one is names typed onto referrals, and a
+  // referral name with no account behind it cannot be given a class.
+  const [zumbaMasters, setZumbaMasters] = useState([]);
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState(null);
   // The Zumba pipeline exactly as Super Admin has it in CI/CD ROOTS. Nothing is hardcoded
@@ -196,11 +185,24 @@ export const ZumbaPanel = ({ branchId }) => {
 
   useEffect(() => { load(); }, [load]);
 
-  // The three money figures, off the one collected total the server already reports.
-  const money = useMemo(() => {
-    const { total, master, fitsiomax } = revenueSplit(summary?.fee_total);
-    return { total_fees: total, master_revenue: master, fitsiomax_revenue: fitsiomax };
-  }, [summary]);
+  // Loaded apart from the registrations: the roster does not change when a row does, and a
+  // branch with no Zumba accounts should still get its board rather than an error.
+  useEffect(() => {
+    let live = true;
+    listZumbaMasters(branchId)
+      .then((data) => { if (live) setZumbaMasters(Array.isArray(data) ? data : []); })
+      .catch(() => { if (live) setZumbaMasters([]); });
+    return () => { live = false; };
+  }, [branchId]);
+
+  // The three money figures, all read from the server rather than split here: the Zumba
+  // master's own Payment card reads the same fields, and two halves worked out in two
+  // places is exactly how they end up disagreeing by a rupee.
+  const money = useMemo(() => ({
+    total_fees: Number(summary?.fee_total) || 0,
+    master_revenue: Number(summary?.master_revenue) || 0,
+    fitsiomax_revenue: Number(summary?.fitsiomax_revenue) || 0,
+  }), [summary]);
 
   // Assign and Master are worked out here rather than on the server: they are a cut of
   // the rows this panel already holds, not a new fact about them. Every other count is
@@ -281,6 +283,7 @@ export const ZumbaPanel = ({ branchId }) => {
         address: (form.address || "").trim(),
         source: form.source || "personal",
         master_name: (form.master_name || "").trim(),
+        assigned_master_id: form.assigned_master_id || "",
         fee_amount: Number(form.fee_amount || 0),
         fee_paid: Number(form.fee_paid || 0),
       };
@@ -504,6 +507,15 @@ export const ZumbaPanel = ({ branchId }) => {
                               {r.package_name}{r.package_sessions ? ` · ${r.package_sessions} classes` : ""}
                             </p>
                           ) : null}
+                          {/* Drawn under the source and in a different colour because the
+                              two answer different questions: the pill above is who brought
+                              them in, this is whose class they turn up to and whose board
+                              they appear on. */}
+                          {r.assigned_master_name ? (
+                            <span className="mt-1 inline-block max-w-full truncate rounded bg-pink-50 px-2 py-0.5 text-[10px] font-semibold text-pink-700" title={`Class: ${r.assigned_master_name}`}>
+                              Class: {r.assigned_master_name}
+                            </span>
+                          ) : null}
                         </td>
                         {stages.length > 0 && (
                           <td className="px-3 py-3">
@@ -643,6 +655,37 @@ export const ZumbaPanel = ({ branchId }) => {
                   Add Master
                 </Button>
               </div>
+            </div>
+            {/* Deliberately its own field rather than a second use of Source: Source is
+                how this student arrived, this is whose class they are in. Only what is set
+                here reaches a master's board — a master referring somebody does not put
+                them on their own roll, which is the point of keeping the two apart. */}
+            <div className="space-y-2">
+              <label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Assigned Master</label>
+              {zumbaMasters.length === 0 ? (
+                <p className="rounded-md bg-slate-50 px-2.5 py-2 text-[11px] text-slate-500" data-testid="zumba-field-assign-empty">
+                  No Zumba accounts at this branch yet. Add one in HR Admin to assign students to a class.
+                </p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {zumbaMasters.map((m) => {
+                    const on = form.assigned_master_id === m.id;
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => setForm({ ...form, assigned_master_id: on ? "" : m.id })}
+                        className={`max-w-full truncate rounded-md px-2.5 py-1.5 text-xs font-semibold transition ${on ? "bg-pink-600 text-white" : "bg-pink-50 text-pink-700 hover:bg-pink-100"}`}
+                        title={m.name}
+                        data-testid={`zumba-field-assign-${m.id}`}
+                      >
+                        {m.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              <p className="text-[11px] text-slate-400">Unassigned until you pick one. Tap the same master again to take the student off their board.</p>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">

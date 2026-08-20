@@ -45,14 +45,32 @@ const shortDate = (iso) => {
 
 const EMPTY_REFERRAL = { name: "", phone: "", age: "", address: "" };
 
-/** One headline figure. The caption underneath is where the qualification goes, so the
- *  number itself is never asked to carry a footnote. */
-const SummaryCard = ({ label, value, caption, tone, testid }) => (
-  <div className={`flex-1 rounded-xl border p-4 ${tone}`} data-testid={testid}>
+/** What the roll below is showing, so the header names the open card rather than
+ *  always saying "Customers" over a list that has been narrowed. */
+const CARD_TITLES = {
+  all: "Customers",
+  today: "Today's Session Students",
+  payment: "Customers Who Have Paid",
+};
+
+/** One headline figure, and the filter behind it.
+ *
+ * The caption underneath is where the qualification goes, so the number itself is never
+ * asked to carry a footnote. Each card narrows the roll below to the people it counted —
+ * a figure you cannot open is a figure you have to take on trust.
+ */
+const SummaryCard = ({ label, value, caption, tone, active, onClick, testid }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    aria-pressed={active}
+    className={`flex-1 rounded-xl border p-4 text-left transition hover:brightness-[0.97] focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 ${tone} ${active ? "ring-2 ring-current ring-offset-1" : ""}`}
+    data-testid={testid}
+  >
     <p className="text-[11px] font-bold uppercase tracking-wider opacity-70">{label}</p>
     <p className="mt-1 text-3xl font-extrabold leading-none">{value}</p>
     <p className="mt-1.5 text-[11px] font-medium opacity-70">{caption}</p>
-  </div>
+  </button>
 );
 
 /**
@@ -152,7 +170,9 @@ const ReferCustomerModal = ({ masterName, branchName, onClose, onSaved }) => {
         // rather than an anonymous "Master".
         master_name: masterName || "",
       });
-      toast.success("Customer referred");
+      // Says where they went, because they will not appear on the roll below: a referral
+      // reaches the branch, and only the branch puts somebody in a class.
+      toast.success("Referred to the branch. They join your roll once the branch assigns them to you.");
       onSaved();
       onClose();
     } catch (e) {
@@ -224,6 +244,7 @@ export const ZumbaMasterBoard = ({ currentUser }) => {
   const [branch, setBranch] = useState(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [card, setCard] = useState("all"); // "all" | "today" | "payment"
   const [referring, setReferring] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
 
@@ -243,13 +264,19 @@ export const ZumbaMasterBoard = ({ currentUser }) => {
 
   useEffect(() => { load(); }, [load]);
 
-  const visible = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((r) => (r.name || "").toLowerCase().includes(q) || (r.phone || "").includes(q));
-  }, [rows, search]);
-
   const isClassDay = Boolean(summary.is_class_day);
+
+  const visible = useMemo(() => {
+    // Today's card is the whole roll on a class day and nobody on any other day, matching
+    // what the figure itself counts: a membership books all three evenings, so there is no
+    // per-day list to draw — only a class, or no class.
+    let list = rows;
+    if (card === "today") list = isClassDay ? rows : [];
+    else if (card === "payment") list = rows.filter((r) => Number(r.fee_paid || 0) > 0);
+    const q = search.trim().toLowerCase();
+    if (!q) return list;
+    return list.filter((r) => (r.name || "").toLowerCase().includes(q) || (r.phone || "").includes(q));
+  }, [rows, search, card, isClassDay]);
 
   return (
     <div className="flex flex-col gap-4" data-testid="zumba-master-board">
@@ -280,13 +307,16 @@ export const ZumbaMasterBoard = ({ currentUser }) => {
           the class does not run it reads zero, and without the caption a zero looks like
           an empty class rather than no class. */}
       <div className="flex flex-col gap-3 sm:flex-row" data-testid="zumba-master-summary">
-        {/* Two ways onto this roll, so the caption names both: the branch's own
-            registrations, plus anyone filed against this master by name. */}
+        {/* One way onto this roll: the branch assigned them to you. Referring somebody
+            does not, on purpose — a referral says who brought them in, which is a claim on
+            the lead, not a seat in your class. */}
         <SummaryCard
           label="All Customers"
           value={summary.all ?? 0}
-          caption="At your branch, or referred to you"
+          caption="Assigned to your class by the branch"
           tone="border-violet-200 bg-violet-50 text-violet-900"
+          active={card === "all"}
+          onClick={() => setCard("all")}
           testid="zumba-card-all"
         />
         <SummaryCard
@@ -294,13 +324,20 @@ export const ZumbaMasterBoard = ({ currentUser }) => {
           value={summary.today_session ?? 0}
           caption={isClassDay ? "Booked into today's class" : "No class today — Mon, Wed, Fri"}
           tone="border-sky-200 bg-sky-50 text-sky-900"
+          active={card === "today"}
+          onClick={() => setCard("today")}
           testid="zumba-card-today"
         />
+        {/* Your half of what the class paid, the same figure the branch's Master's Revenue
+            card draws — it comes back on the summary rather than being halved here, so the
+            two cannot answer differently. */}
         <SummaryCard
           label="Payment"
-          value={rupees(summary.fee_total)}
-          caption={`Collected from ${summary.fee_collected ?? 0} of ${summary.all ?? 0}`}
+          value={rupees(summary.master_revenue)}
+          caption={`Your 50% of ${rupees(summary.fee_total)} from ${summary.fee_collected ?? 0} of ${summary.all ?? 0}`}
           tone="border-emerald-200 bg-emerald-50 text-emerald-900"
+          active={card === "payment"}
+          onClick={() => setCard("payment")}
           testid="zumba-card-payment"
         />
       </div>
@@ -309,7 +346,7 @@ export const ZumbaMasterBoard = ({ currentUser }) => {
         <CardContent className="p-0">
           <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3 text-sm font-semibold text-slate-700">
             <Music className="h-4 w-4 text-violet-600" />
-            Customers
+            {CARD_TITLES[card] || "Customers"}
             <span className="rounded bg-slate-100 px-1.5 py-px text-[10px] font-bold text-slate-500" data-testid="zumba-master-count">{visible.length}</span>
             {branch?.name && (
               <span className="rounded bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700" data-testid="zumba-master-branch">
@@ -322,7 +359,13 @@ export const ZumbaMasterBoard = ({ currentUser }) => {
             <p className="px-4 py-12 text-center text-sm text-slate-400">Loading…</p>
           ) : visible.length === 0 ? (
             <p className="px-4 py-12 text-center text-sm text-slate-400" data-testid="zumba-master-empty">
-              {rows.length === 0 ? "No customers yet. Refer one to start the class roll." : "Nobody matches that search."}
+              {rows.length === 0
+                ? "Nobody assigned to your class yet. The branch admin assigns students to a master."
+                : search.trim()
+                  ? "Nobody matches that search."
+                  : card === "today"
+                    ? "No class today. The class runs Mon, Wed and Fri."
+                    : "Nobody here yet."}
             </p>
           ) : (
             <div className="overflow-x-auto">
