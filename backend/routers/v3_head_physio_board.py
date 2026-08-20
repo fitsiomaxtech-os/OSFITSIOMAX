@@ -405,20 +405,29 @@ async def hp_consultation_decision(
         })
         detail += f" · Package: {item['name']} ({sessions} sessions)"
 
-    # The Rehab course, priced exactly like a treatment package: price_online /
-    # price_offline is a per-session rate in every case, so a course shelf's total is
-    # that rate x the course's own session count and arrives back at the figure typed
-    # into the catalogue. Only accepted alongside the referral — a rehab course on a
-    # patient who was never sent to rehab is a fee nobody would know to collect.
+    # The Rehab course is priced by hand: the catalogue holds the whole course fee as it
+    # was typed, and it is charged as it stands. Nothing is derived, so nothing can come
+    # back a rupee off what was agreed.
+    #
+    # The rate x sessions path below it is for rows written before that, which still hold
+    # the total divided down. Startup converts them (migrate_rehab_prices_to_totals) and
+    # the flag says which is which; keeping both means the order of a deploy and a restart
+    # cannot decide what a patient is charged.
+    #
+    # Only accepted alongside the referral — a rehab course on a patient who was never sent
+    # to rehab is a fee nobody would know to collect.
     if payload.rehab_referred and payload.rehab_item_id:
         rehab_item = await v3_col("store_items").find_one({"id": payload.rehab_item_id}, {"_id": 0})
         if not rehab_item:
             raise HTTPException(status_code=404, detail="Rehab package not found")
         if rehab_item.get("item_type") != "session" or rehab_item.get("category") != "rehab":
             raise HTTPException(status_code=400, detail="That item is not a Rehab package")
-        r_rate = rehab_item.get("price_online") if payload.mode == "online" else rehab_item.get("price_offline")
+        r_amount = rehab_item.get("price_online") if payload.mode == "online" else rehab_item.get("price_offline")
         r_sessions = rehab_item.get("sessions_online") if payload.mode == "online" else rehab_item.get("sessions_offline")
-        r_price = round(r_rate * r_sessions, 2) if r_rate is not None and r_sessions else r_rate
+        if rehab_item.get("price_is_total"):
+            r_price = r_amount
+        else:
+            r_price = round(r_amount * r_sessions, 2) if r_amount is not None and r_sessions else r_amount
         updates.update({
             "rehab_package_id": rehab_item["id"],
             "rehab_package_name": rehab_item["name"],

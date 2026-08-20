@@ -490,6 +490,36 @@ async def _course_priced_item_ids() -> set:
     return {r["id"] for r in rows}
 
 
+async def migrate_rehab_prices_to_totals() -> None:
+    """Move Rehab packages from a per-session rate to the course total they were typed as.
+
+    Rehab is entered by hand now: what the Super Admin types is what is stored, shown and
+    charged, with nothing in between. Rows written before that hold the total divided by
+    the session count — 31,200 kept as 1,200 — so they are multiplied back out once and
+    marked, and the readers use the figure as it stands from then on.
+
+    Idempotent by the mark rather than by the value: an already-converted row is
+    indistinguishable from an unconverted one by price alone, and a second pass would
+    multiply a course total by its session count and sell 26 sessions for 811,200.
+
+    A row with no session count is left exactly as it is. There is nothing to multiply by,
+    and inventing a multiplier here would be putting a number on a course nobody quoted.
+    """
+    items = await v3_col("store_items").find(
+        {"item_type": "session", "category": "rehab", "price_is_total": {"$ne": True}},
+        {"_id": 0},
+    ).to_list(500)
+    for item in items:
+        updates = {"price_is_total": True, "updated_at": now_iso()}
+        online_sessions = item.get("sessions_online")
+        offline_sessions = item.get("sessions_offline")
+        if online_sessions and item.get("price_online") is not None:
+            updates["price_online"] = round(item["price_online"] * online_sessions, 2)
+        if offline_sessions and item.get("price_offline") is not None:
+            updates["price_offline"] = round(item["price_offline"] * offline_sessions, 2)
+        await v3_col("store_items").update_one({"id": item["id"]}, {"$set": updates})
+
+
 async def normalize_session_item_prices() -> None:
     """Enforce the fixed per-session rate across every FITSIO STORE Session item
     (the week-based Treatment Packages, e.g. "01 Week" = 7 sessions, "05 week" = 35

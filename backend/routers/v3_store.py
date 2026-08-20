@@ -49,6 +49,14 @@ VALID_DURATIONS_MINUTES = {15, 30, 45, 60, 120}
 # actual Diet Consultation booking moved to the Consultations tab. Not timed, same as
 # "session": no duration to validate.
 ITEM_TYPES = ("consultation", "session", "diet", "diet_package")
+
+# Shelves whose price is the course, entered and kept exactly as typed with no arithmetic
+# between the box and the bill. Rehab is sold as one programme at one agreed figure, so
+# there is no rate to derive and no reason to derive one.
+#
+# A property of the shelf, not of the row: a new Rehab package is entered this way the
+# moment it is created, without anyone remembering to mark it.
+PRICE_IS_TOTAL_CATEGORIES = ("rehab",)
 TIMED_ITEM_TYPES = ("consultation", "diet")
 
 
@@ -63,6 +71,10 @@ class StoreItemIn(BaseModel):
     duration_minutes: int = 30  # one of VALID_DURATIONS_MINUTES; consultation items only
     sessions_online: Optional[int] = None  # session items only
     sessions_offline: Optional[int] = None  # session items only
+    # Whether price_online/price_offline is the whole course rather than a rate per
+    # session. Set from the category on the way in, never accepted from the client — the
+    # two must not be able to disagree about what the number on the row means.
+    price_is_total: Optional[bool] = None
 
 
 class StoreItemOut(StoreItemIn):
@@ -104,6 +116,7 @@ async def create_store_item(payload: StoreItemIn, _: V3UserOut = Depends(v3_requ
     if payload.item_type == "session" and (not payload.sessions_offline or payload.sessions_offline < 1):
         raise HTTPException(status_code=400, detail="Offline sessions count must be at least 1")
     doc = payload.model_dump()
+    doc["price_is_total"] = payload.category in PRICE_IS_TOTAL_CATEGORIES
     doc["id"] = str(uuid.uuid4())
     doc["created_at"] = _now()
     doc["updated_at"] = _now()
@@ -126,6 +139,7 @@ async def update_store_item(item_id: str, payload: StoreItemIn, _: V3UserOut = D
     if payload.item_type == "session" and (not payload.sessions_offline or payload.sessions_offline < 1):
         raise HTTPException(status_code=400, detail="Offline sessions count must be at least 1")
     update = payload.model_dump()
+    update["price_is_total"] = payload.category in PRICE_IS_TOTAL_CATEGORIES
     update["updated_at"] = _now()
     res = await v3_col("store_items").update_one({"id": item_id}, {"$set": update})
     if res.matched_count == 0:

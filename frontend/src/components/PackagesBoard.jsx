@@ -328,12 +328,33 @@ const formatRupees = (amount) => {
 const packageTotalFrom = (rate, sessions) => Math.round((Number(rate) || 0) * (Number(sessions) || 0));
 
 /**
+ * What a package costs, in the terms its own shelf is priced in.
+ *
+ * A course shelf holds the whole fee as it was typed and it is read straight back — no
+ * multiplying, so no chance of the card and the bill disagreeing about a figure somebody
+ * negotiated. Every other shelf holds a rate and the total is that rate times the count.
+ *
+ * `price_is_total` comes off the item rather than being inferred from the category, so a
+ * row the startup conversion has not reached yet is still read the way it was written.
+ */
+const packageTotal = (item, mode) => {
+  const price = mode === "online" ? item?.price_online : item?.price_offline;
+  if (item?.price_is_total) return Number(price) || 0;
+  const sessions = mode === "online" ? item?.sessions_online : item?.sessions_offline;
+  return packageTotalFrom(price, sessions);
+};
+
+/**
  * Shelves priced as a whole course rather than per session.
  *
  * Rehab is sold as one 26-session programme at one price — what a buyer agrees is the
- * course, not a rate — so its form takes that figure and divides it down, the same way
- * Zumba's membership price does. 18000 / 26 is not a round rate, which is exactly why the
- * form must not ask for the rate: typing 692 to reach 18,000 lands on 17,992.
+ * course, not a rate — so the form takes that figure and keeps it. Typed, saved, shown and
+ * charged as the same number, with no arithmetic anywhere between the box and the bill.
+ *
+ * It used to divide the total down and multiply it back out. That returned the right
+ * figure, but the catalogue then held 692.3076923076923 for an 18,000 course: a number
+ * nobody agreed, that every screen had to be taught not to show, and that would have been
+ * charged as the whole course by any reader that forgot to multiply.
  */
 const COURSE_TOTAL_CATEGORIES = new Set(["rehab"]);
 const COURSE_TOTAL_DEFAULTS = { rehab: { online: 14000, offline: 18000 } };
@@ -365,12 +386,12 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
   // when editing so the box shows the figure that was typed rather than the rate behind it.
   const [priceOnline, setPriceOnline] = useState(() => {
     if (!isCourseTotal) return item?.price_online ?? DEFAULT_PRICE_ONLINE;
-    if (item) return packageTotalFrom(item.price_online, item.sessions_online);
+    if (item) return packageTotal(item, "online");
     return COURSE_TOTAL_DEFAULTS[category]?.online ?? DEFAULT_PRICE_ONLINE;
   });
   const [priceOffline, setPriceOffline] = useState(() => {
     if (!isCourseTotal) return item?.price_offline ?? DEFAULT_PRICE_OFFLINE;
-    if (item) return packageTotalFrom(item.price_offline, item.sessions_offline);
+    if (item) return packageTotal(item, "offline");
     return COURSE_TOTAL_DEFAULTS[category]?.offline ?? DEFAULT_PRICE_OFFLINE;
   });
   const [imageFile, setImageFile] = useState(null);
@@ -403,8 +424,7 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
   );
   const sessions = isZumba ? zumbaSessionsFor(planMonths) : Math.max(0, Number(sessionCount) || 0);
   const perClass = sessions > 0 ? (Number(planPrice) || 0) / sessions : 0;
-  const courseRate = (total) => (sessions > 0 ? (Number(total) || 0) / sessions : 0);
-  // A course shelf's boxes already hold the totals; everywhere else the total is the rate
+  // A course shelf's box holds the fee itself; everywhere else the total is the rate
   // multiplied out.
   const totalOnline = isCourseTotal ? (Number(priceOnline) || 0) : (Number(priceOnline) || 0) * sessions;
   const totalOffline = isCourseTotal ? (Number(priceOffline) || 0) : (Number(priceOffline) || 0) * sessions;
@@ -429,12 +449,16 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
         description,
         image_url,
         // Zumba runs offline only, but both prices are written all the same - the booking
-        // path picks one by mode, and leaving the other at zero would read as free.
-        // Stored as a per-session rate in every case. A course shelf divides its total by
-        // the session count here, so assignment and collection keep charging rate x
-        // sessions and arrive back at exactly the figure that was typed.
-        price_online: isZumba ? perClass : (isCourseTotal ? courseRate(priceOnline) : Number(priceOnline) || 0),
-        price_offline: isZumba ? perClass : (isCourseTotal ? courseRate(priceOffline) : Number(priceOffline) || 0),
+        // path picks one by mode, and leaving the other at zero would read as free. Its
+        // membership is still divided down to a per-class rate, because what a member buys
+        // is a number of months and the class count follows from that.
+        //
+        // A course shelf is entered by hand and saved exactly as typed. It used to be
+        // divided by the session count and multiplied back out on the way to the bill,
+        // which returned the right figure but meant the catalogue held 1,200 for a 31,200
+        // course — a number nobody had agreed and every reader had to be taught to hide.
+        price_online: isZumba ? perClass : (Number(priceOnline) || 0),
+        price_offline: isZumba ? perClass : (Number(priceOffline) || 0),
         sessions_online: sessions,
         sessions_offline: sessions,
       };
@@ -654,7 +678,7 @@ export const PriceModeBadges = ({ item, isSession, mode = "all" }) => (
           <Wifi className="h-3.5 w-3.5" />Online
         </span>
         <span className="text-sm font-extrabold text-emerald-900">
-          ₹{isSession ? packageTotalFrom(item.price_online, item.sessions_online) : (item.price_online ?? 0)}
+          ₹{isSession ? packageTotal(item, "online") : (item.price_online ?? 0)}
         </span>
       </div>
     )}
@@ -664,7 +688,7 @@ export const PriceModeBadges = ({ item, isSession, mode = "all" }) => (
           <MapPin className="h-3.5 w-3.5" />Offline
         </span>
         <span className="text-sm font-extrabold text-amber-900">
-          ₹{isSession ? packageTotalFrom(item.price_offline, item.sessions_offline) : (item.price_offline ?? 0)}
+          ₹{isSession ? packageTotal(item, "offline") : (item.price_offline ?? 0)}
         </span>
       </div>
     )}
@@ -716,7 +740,7 @@ export const SessionPriceBoxes = ({ item, testid, mode = "all" }) => {
           <div className="flex items-center justify-between"><span>Total Sessions</span><span className="font-bold">{item.sessions_online ?? 0} Sessions</span></div>
           <div className="mt-1 flex items-center justify-between border-t border-emerald-200 pt-1.5">
             <span className="font-semibold">Total Amount</span>
-            <span className="text-sm font-extrabold text-emerald-900">₹{packageTotalFrom(item.price_online, item.sessions_online)}</span>
+            <span className="text-sm font-extrabold text-emerald-900">₹{packageTotal(item, "online")}</span>
           </div>
         </div>
       </div>
@@ -729,7 +753,7 @@ export const SessionPriceBoxes = ({ item, testid, mode = "all" }) => {
           <div className="flex items-center justify-between"><span>Total Sessions</span><span className="font-bold">{item.sessions_offline ?? 0} Sessions</span></div>
           <div className="mt-1 flex items-center justify-between border-t border-amber-200 pt-1.5">
             <span className="font-semibold">Total Amount</span>
-            <span className="text-sm font-extrabold text-amber-900">₹{packageTotalFrom(item.price_offline, item.sessions_offline)}</span>
+            <span className="text-sm font-extrabold text-amber-900">₹{packageTotal(item, "offline")}</span>
           </div>
         </div>
       </div>
