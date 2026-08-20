@@ -103,6 +103,20 @@ GENDERS = ("female", "male", "other")
 # over months, and a class membership is settled in one go.
 PAYMENT_MODES = ("cash", "upi", "card", "account_transfer")
 
+# The modes that leave a trail somewhere else -- a UPI handle, a card or bank transaction
+# number -- and so must carry the thing a dispute is traced by. Cash leaves none, which is
+# why it is not here rather than an oversight.
+REFERENCE_MODES = ("upi", "card", "account_transfer")
+
+# What to call that trail, per mode. A UPI ID and a transaction number are different kinds
+# of thing, so the field says which is wanted rather than asking for a generic "reference"
+# and leaving the desk to guess.
+REFERENCE_LABELS = {
+    "upi": "UPI ID",
+    "card": "transaction ID",
+    "account_transfer": "transaction ID",
+}
+
 # What the Zumba pipeline starts life as, so CI/CD ROOTS lists something on a fresh install
 # rather than "No stages yet" — the branch tab's own summary cards, so the two screens open
 # on one vocabulary instead of two.
@@ -212,6 +226,9 @@ class ZumbaInput(BaseModel):
     # How the fee was taken. Only meaningful once something has been collected, and cleared
     # when nothing has, so a mode can never sit against a registration that has paid zero.
     payment_mode: Optional[str] = ""
+    # The UPI ID or transaction number behind that mode. Meaningless for cash, and dropped
+    # with the mode when nothing has been collected.
+    payment_reference: Optional[str] = ""
     package_id: Optional[str] = ""
     package_name: Optional[str] = ""
     fee_amount: Optional[float] = 0
@@ -654,6 +671,14 @@ async def _clean(payload: ZumbaInput, user: V3UserOut) -> dict:
     time_slot = (payload.time_slot or "").strip()
     payment_mode = (payload.payment_mode or "").strip().lower()
     fee_paid = _amount(payload.fee_paid)
+    if payment_mode not in PAYMENT_MODES or fee_paid <= 0:
+        payment_mode = ""
+    payment_reference = (payload.payment_reference or "").strip()
+    if payment_mode in REFERENCE_MODES and not payment_reference:
+        raise HTTPException(status_code=400, detail=f"Enter the {REFERENCE_LABELS[payment_mode]}")
+    if payment_mode not in REFERENCE_MODES:
+        # Cash keeps no reference, and neither does a row with no mode left on it.
+        payment_reference = ""
 
     return {
         "name": name,
@@ -672,7 +697,8 @@ async def _clean(payload: ZumbaInput, user: V3UserOut) -> dict:
         # Tied to the money rather than kept as a free-standing preference: dropping the
         # collected amount to zero drops the mode with it, so a row can never claim cash
         # was taken while reporting that nothing was.
-        "payment_mode": payment_mode if (fee_paid > 0 and payment_mode in PAYMENT_MODES) else "",
+        "payment_mode": payment_mode,
+        "payment_reference": payment_reference,
         "stage": _settle_stage(payload.stage, await _zumba_stages(), CARD_OF_SOURCE.get(source, "direct")),
         **await _assignment(payload, user),
     }

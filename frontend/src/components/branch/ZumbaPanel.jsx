@@ -38,6 +38,14 @@ const PAYMENT_MODES = [
 ];
 const PAYMENT_MODE_LABELS = Object.fromEntries(PAYMENT_MODES.map((m) => [m.value, m.label]));
 
+// The modes that leave a trail somewhere else, and what that trail is called. A UPI ID and
+// a transaction number are different kinds of thing, so the field asks for the one it
+// wants rather than a generic "reference" the desk has to interpret. Cash is absent
+// because cash leaves no trail — kept in step with REFERENCE_LABELS in
+// backend/routers/v3_zumba.py, which refuses a save that arrives without one.
+const REFERENCE_LABELS = { upi: "UPI ID", card: "Transaction ID", account_transfer: "Transaction ID" };
+const REFERENCE_PLACEHOLDERS = { upi: "name@bank", card: "Transaction number", account_transfer: "Transaction number" };
+
 const GENDERS = [
   { key: "female", label: "Female" },
   { key: "male", label: "Male" },
@@ -347,7 +355,7 @@ const missingDetails = (row) => {
 const EMPTY = {
   name: "", email: "", phone: "", age: "", gender: "", address: "",
   source: "personal", master_name: "", assigned_master_id: "", time_slot: "",
-  package_id: "", package_name: "", fee_amount: "", fee_paid: "", payment_mode: "",
+  package_id: "", package_name: "", fee_amount: "", fee_paid: "", payment_mode: "", payment_reference: "",
 };
 
 /**
@@ -513,6 +521,11 @@ export const ZumbaPanel = ({ branchId }) => {
 
   const save = async () => {
     if (!form?.name?.trim()) { toast.error("Name is required"); return; }
+    const wantsReference = Number(form.fee_paid) > 0 && REFERENCE_LABELS[form.payment_mode];
+    if (wantsReference && !(form.payment_reference || "").trim()) {
+      toast.error(`Enter the ${wantsReference}`);
+      return;
+    }
     if (form.source === MASTER && !(form.master_name || "").trim()) { toast.error("Which master referred them?"); return; }
     setSaving(true);
     try {
@@ -532,6 +545,7 @@ export const ZumbaPanel = ({ branchId }) => {
         fee_amount: Number(form.fee_amount || 0),
         fee_paid: Number(form.fee_paid || 0),
         payment_mode: form.payment_mode || "",
+        payment_reference: (form.payment_reference || "").trim(),
       };
       if (form.id) await updateZumba(form.id, payload);
       else await addZumba(payload, branchId);
@@ -778,8 +792,9 @@ export const ZumbaPanel = ({ branchId }) => {
                           {/* How it came in, under the figure it describes. Absent on a row
                               that has collected nothing, where there is nothing to describe. */}
                           {r.payment_mode ? (
-                            <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                            <p className="mt-0.5 truncate text-[10px] font-semibold uppercase tracking-wide text-slate-400" title={r.payment_reference || ""}>
                               {PAYMENT_MODE_LABELS[r.payment_mode] || r.payment_mode}
+                              {r.payment_reference ? <span className="font-normal normal-case tracking-normal text-slate-400"> · {r.payment_reference}</span> : null}
                             </p>
                           ) : null}
                         </td>
@@ -1006,6 +1021,20 @@ export const ZumbaPanel = ({ branchId }) => {
                     </FormSelect>
                     {!(Number(form.fee_paid) > 0) && (
                       <p className="text-[11px] text-slate-400">Recorded once a fee has been collected.</p>
+                    )}
+                    {/* Asked only by the modes that leave a trail elsewhere, and named for
+                        the one they leave: cash is settled by being handed over, so there
+                        is nothing to write down and nothing is asked. */}
+                    {REFERENCE_LABELS[form.payment_mode] && (
+                      <div className="space-y-2 pt-1">
+                        <FieldLabel>{REFERENCE_LABELS[form.payment_mode]}</FieldLabel>
+                        <Input
+                          value={form.payment_reference}
+                          onChange={(e) => setForm({ ...form, payment_reference: e.target.value })}
+                          placeholder={REFERENCE_PLACEHOLDERS[form.payment_mode]}
+                          data-testid="zumba-field-payment-reference"
+                        />
+                      </div>
                     )}
                   </div>
                 </div>
