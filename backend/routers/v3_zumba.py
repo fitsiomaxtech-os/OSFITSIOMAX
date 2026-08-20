@@ -69,6 +69,24 @@ CARD_OF_SOURCE = {
 }
 CARDS = ("direct", "consultant", "masters", "fitsiomax")
 
+# What has become of a student, where that is anything other than still attending.
+#
+# Active is the absence of the other two rather than a value anybody sets, so a row written
+# before this existed reads as active without a migration. Both of the others carry a
+# reason: a class roll that shrinks says nothing on its own, and "why" is the whole of what
+# the branch wants back from it a month later.
+STATUS_ACTIVE = "active"
+STATUS_DISCONTINUED = "discontinued"
+STATUS_LEAVE = "leave"
+STATUSES = (STATUS_ACTIVE, STATUS_DISCONTINUED, STATUS_LEAVE)
+ENDED_STATUSES = (STATUS_DISCONTINUED, STATUS_LEAVE)
+
+
+def _status(value) -> str:
+    slug = str(value or "").strip().lower()
+    return slug if slug in STATUSES else STATUS_ACTIVE
+
+
 # When the class this student joins meets. Two slots, stored as they read, because they are
 # a label on a registration rather than a booking anything schedules against -- the class
 # itself is fixed at Mon/Wed/Fri. Anything else is dropped rather than stored, so the column
@@ -78,6 +96,12 @@ TIME_SLOTS = ("10:00 am - 11:00 am", "11:00 am - 12:00 pm")
 # Recorded as typed, from a fixed set. Unset stays unset: a blank is "not asked", which is
 # a different thing from any of the three answers.
 GENDERS = ("female", "male", "other")
+
+# How the class fee was taken. The same four the consultation and store desks offer, in the
+# same slugs, so one student's cash reads as cash wherever the money is later counted.
+# Cheque and Partial are deliberately not here: those belong to a treatment plan paid down
+# over months, and a class membership is settled in one go.
+PAYMENT_MODES = ("cash", "upi", "card", "account_transfer")
 
 # What the Zumba pipeline starts life as, so CI/CD ROOTS lists something on a fresh install
 # rather than "No stages yet" — the branch tab's own summary cards, so the two screens open
@@ -185,6 +209,9 @@ class ZumbaInput(BaseModel):
     # package's own name and id off the Zumba shelf, so a renamed or repriced package
     # cannot rewrite what this student was actually sold.
     time_slot: Optional[str] = ""
+    # How the fee was taken. Only meaningful once something has been collected, and cleared
+    # when nothing has, so a mode can never sit against a registration that has paid zero.
+    payment_mode: Optional[str] = ""
     package_id: Optional[str] = ""
     package_name: Optional[str] = ""
     fee_amount: Optional[float] = 0
@@ -192,6 +219,11 @@ class ZumbaInput(BaseModel):
     # Where the registration sits in the Zumba pipeline. Left unset it starts at the entry
     # stage; a name the pipeline no longer has falls back there too.
     stage: Optional[str] = None
+
+
+class ZumbaStatusInput(BaseModel):
+    status: str
+    remarks: Optional[str] = ""
 
 
 class ZumbaStageInput(BaseModel):
@@ -290,6 +322,7 @@ def _shape(row: dict, stages: Optional[list] = None) -> dict:
     source = _source(row.get("source"))
     card = CARD_OF_SOURCE.get(source, "direct")
     shaped = {**row, "source": source, "card": card}
+    shaped["status"] = _status(row.get("status"))
     if stages is not None:
         shaped["stage"] = _settle_stage(row.get("stage"), stages, card)
     return shaped
@@ -512,10 +545,30 @@ async def list_zumba(
     summary = {"all": len(rows), "fee_collected": 0, "fee_total": 0.0}
     summary["today_session"] = len(rows) if class_day else 0
     summary["is_class_day"] = class_day
+    # The four the branch tab counts alongside the sources: where the money stands, and who
+    # has stopped coming. Payment Done is a settled account rather than "paid something" --
+    # a student who has handed over half of a 3,000 rupee membership is the Due Payment
+    # card's business, not this one's. A row with no fee on it at all is neither: nothing
+    # has been sold yet, so there is nothing to have settled or to owe.
+    summary["payment_done"] = 0
+    summary["due_payment"] = 0
+    summary["discontinued"] = 0
+    summary["leave"] = 0
     for card in CARDS:
         summary[card] = 0
     for r in rows:
         summary[r["card"]] += 1
+        owed = _amount(r.get("fee_amount"))
+        settled = _amount(r.get("fee_paid"))
+        if owed > 0 and settled >= owed:
+            summary["payment_done"] += 1
+        elif owed > settled:
+            summary["due_payment"] += 1
+        status = _status(r.get("status"))
+        if status == STATUS_DISCONTINUED:
+            summary["discontinued"] += 1
+        elif status == STATUS_LEAVE:
+            summary["leave"] += 1
         paid = _amount(r.get("fee_paid"))
         if paid > 0:
             summary["fee_collected"] += 1
@@ -599,6 +652,8 @@ async def _clean(payload: ZumbaInput, user: V3UserOut) -> dict:
 
     gender = (payload.gender or "").strip().lower()
     time_slot = (payload.time_slot or "").strip()
+    payment_mode = (payload.payment_mode or "").strip().lower()
+    fee_paid = _amount(payload.fee_paid)
 
     return {
         "name": name,
@@ -613,7 +668,11 @@ async def _clean(payload: ZumbaInput, user: V3UserOut) -> dict:
         "source": source,
         "master_name": master_name if source == MASTER else "",
         "fee_amount": _amount(payload.fee_amount),
-        "fee_paid": _amount(payload.fee_paid),
+        "fee_paid": fee_paid,
+        # Tied to the money rather than kept as a free-standing preference: dropping the
+        # collected amount to zero drops the mode with it, so a row can never claim cash
+        # was taken while reporting that nothing was.
+        "payment_mode": payment_mode if (fee_paid > 0 and payment_mode in PAYMENT_MODES) else "",
         "stage": _settle_stage(payload.stage, await _zumba_stages(), CARD_OF_SOURCE.get(source, "direct")),
         **await _assignment(payload, user),
     }
@@ -744,6 +803,50 @@ async def move_zumba_stage(
         "updated_by": user.full_name or user.email,
     }})
     return _shape({**existing, "stage": stage}, stages)
+
+
+@router.patch("/branch/zumba/{registration_id}/status")
+async def set_zumba_status(
+    registration_id: str,
+    payload: ZumbaStatusInput,
+    user: V3UserOut = Depends(require_zumba_reader),
+):
+    """Record that a student has discontinued or gone on leave, and why.
+
+    The reason is required, not optional. A roll that quietly shrinks answers none of the
+    questions asked of it a month later -- whether the class lost people to the timing, the
+    price or the teaching is exactly what these two counts are for, and a blank remark
+    turns the card into a number nobody can act on.
+
+    Putting somebody back on the roll is the same route with status active, and that one
+    needs no reason: returning to the class is the normal state resuming, not an event.
+    """
+    existing = await v3_col("zumba_registrations").find_one({"id": registration_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Registration not found")
+    if _own_branch_only(user) and existing.get("branch_id") != user.branch_id:
+        raise HTTPException(status_code=403, detail="Not your branch")
+
+    status = str(payload.status or "").strip().lower()
+    if status not in STATUSES:
+        raise HTTPException(status_code=400, detail=f"Status must be one of: {', '.join(STATUSES)}")
+
+    remarks = (payload.remarks or "").strip()
+    if status in ENDED_STATUSES and not remarks:
+        raise HTTPException(status_code=400, detail="Say why, so the card can be read as a reason rather than a number")
+
+    changes = {
+        "status": status,
+        # Cleared on a return rather than left behind: an old reason sitting on somebody
+        # back in class reads as current, and the history is the activity log's job.
+        "status_remarks": remarks if status in ENDED_STATUSES else "",
+        "status_at": now_iso() if status in ENDED_STATUSES else "",
+        "status_by": (user.full_name or user.email or "") if status in ENDED_STATUSES else "",
+        "updated_at": now_iso(),
+        "updated_by": user.full_name or user.email,
+    }
+    await v3_col("zumba_registrations").update_one({"id": registration_id}, {"$set": changes})
+    return _shape({**existing, **changes}, await _zumba_stages())
 
 
 @router.delete("/branch/zumba/{registration_id}")

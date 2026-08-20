@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Music, Pencil, RefreshCw, Stethoscope, Trash2, UserPlus, X } from "lucide-react";
+import { Eye, Music, Pencil, RefreshCw, Stethoscope, Trash2, UserPlus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { toast } from "@/components/ui/sonner";
-import { listZumba, listZumbaMasters, addZumba, updateZumba, deleteZumba, moveZumbaStage, listStoreItems } from "@/lib/api";
+import { listZumba, listZumbaMasters, addZumba, updateZumba, deleteZumba, moveZumbaStage, setZumbaStatus, listStoreItems } from "@/lib/api";
 
 // How a registration arrived, as the branch would say it. A referral is recorded against
 // the master who made it rather than against a single "Masters" bucket, so these six are
@@ -27,6 +27,17 @@ const MASTER = "master";
 // The two slots the class is taught in. Kept in step with TIME_SLOTS in
 // backend/routers/v3_zumba.py, which drops anything it does not recognise.
 const TIME_SLOTS = ["10:00 am - 11:00 am", "11:00 am - 12:00 pm"];
+// The same four the consultation and store desks offer, in the same slugs, so a class
+// fee taken in cash reads as cash wherever the money is counted later. Cheque and Partial
+// belong to a treatment plan paid down over months; a membership is settled in one go.
+const PAYMENT_MODES = [
+  { value: "cash", label: "Cash" },
+  { value: "upi", label: "UPI" },
+  { value: "card", label: "Card" },
+  { value: "account_transfer", label: "Account Transfer" },
+];
+const PAYMENT_MODE_LABELS = Object.fromEntries(PAYMENT_MODES.map((m) => [m.value, m.label]));
+
 const GENDERS = [
   { key: "female", label: "Female" },
   { key: "male", label: "Male" },
@@ -95,18 +106,25 @@ const CARDS = [
   // asked for. It held the branch-sourced count until that board existed and there was a
   // real master's referral to point it at.
   { key: "masters", label: "Refer Master", color: "#d97706" },
-  // The last three are money, not counts: what the students paid, and how it splits. They
-  // read as one figure and two halves of it, which is why they sit together at the end of
-  // the row after the four that count people.
+  // The last four are counts of people, like the four before them, but they answer what
+  // became of a student rather than where they came from: is the money settled, and are
+  // they still turning up. The revenue split that used to sit here said the same thing
+  // three times over and answered neither.
   //
-  // All three filter to the same rows — the students who have paid — because that is the
-  // money all three describe. What changes is what the Fee column says: Total Fees shows
-  // what came in, and each share shows the cut of it that card is counting, so opening one
-  // answers "which registrations is this figure made of, and how much from each".
-  { key: "total_fees", label: "Total Fees", color: "#059669", money: true },
-  { key: "master_revenue", label: "Master's Revenue", color: "#10b981", money: true, share: MASTER_SHARE },
-  { key: "fitsiomax_revenue", label: "Fitsiomax Revenue", color: "#14b8a6", money: true, share: 1 - MASTER_SHARE },
+  // Payment Done is a settled account, not "has paid something" — a student halfway
+  // through a 3,000 rupee membership belongs on Due Payment, which is the card somebody
+  // acts on. A row with no fee on it yet is on neither: nothing has been sold.
+  { key: "payment_done", label: "Payment Done", color: "#059669" },
+  { key: "due_payment", label: "Due Payment", color: "#d97706" },
+  { key: "discontinued", label: "Discontinue", color: "#e11d48" },
+  { key: "leave", label: "Leave", color: "#6366f1" },
 ];
+
+/** Whether this registration's fee is settled. Nothing sold is not settled. */
+const isPaidUp = (r) => Number(r?.fee_amount || 0) > 0 && Number(r?.fee_paid || 0) >= Number(r?.fee_amount || 0);
+const amountDue = (r) => Number(r?.fee_amount || 0) - Number(r?.fee_paid || 0);
+
+const STATUS_LABELS = { discontinued: "Discontinued", leave: "On leave" };
 
 /** The colour Super Admin gave a stage in CI/CD ROOTS, or a neutral slate for one that
     no longer exists. Read off the pipeline rather than kept here, so a colour changed
@@ -198,7 +216,7 @@ const missingDetails = (row) => {
 const EMPTY = {
   name: "", email: "", phone: "", age: "", gender: "", address: "",
   source: "personal", master_name: "", assigned_master_id: "", time_slot: "",
-  package_id: "", package_name: "", fee_amount: "", fee_paid: "",
+  package_id: "", package_name: "", fee_amount: "", fee_paid: "", payment_mode: "",
 };
 
 /**
@@ -236,6 +254,7 @@ export const ZumbaPanel = ({ branchId }) => {
   const [branch, setBranch] = useState(null);
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState(null);
+  const [viewing, setViewing] = useState(null);   // the registration open in the detail popup
   // The Zumba pipeline exactly as Super Admin has it in CI/CD ROOTS. Nothing is hardcoded
   // here: a clinic that has not set the pipeline up has no stages, and the Stage column
   // and its move control drop out of the table rather than drawing an empty pipeline.
@@ -279,24 +298,14 @@ export const ZumbaPanel = ({ branchId }) => {
     return () => { live = false; };
   }, [branchId]);
 
-  // The three money figures, all read from the server rather than split here: the Zumba
-  // master's own Payment card reads the same fields, and two halves worked out in two
-  // places is exactly how they end up disagreeing by a rupee.
-  const money = useMemo(() => ({
-    total_fees: Number(summary?.fee_total) || 0,
-    master_revenue: Number(summary?.master_revenue) || 0,
-    fitsiomax_revenue: Number(summary?.fitsiomax_revenue) || 0,
-  }), [summary]);
-
-  // The share card currently open, if it is one — read once here rather than per row.
-  const openShare = useMemo(() => CARDS.find((c) => c.key === card && c.share), [card]);
-
   const visible = useMemo(() => {
     let list = rows;
-    // The three money cards filter on the money rather than on where the person came from:
-    // the rows behind all of them are the ones that have paid. The two shares open that
-    // same list, and say their own cut of each row in the Fee column.
-    if (card === "total_fees" || REVENUE_CARDS.has(card)) list = list.filter((r) => Number(r.fee_paid || 0) > 0);
+    // Four of the cards are not sources, so each says which rows it stands for. Where a
+    // student came from and what became of them are different questions, and only the
+    // first is the `card` the server stamps on the row.
+    if (card === "payment_done") list = list.filter(isPaidUp);
+    else if (card === "due_payment") list = list.filter((r) => amountDue(r) > 0);
+    else if (card === "discontinued" || card === "leave") list = list.filter((r) => (r.status || "active") === card);
     else if (card !== "all") list = list.filter((r) => r.card === card);
     if (dateFilter) {
       // Compared as timestamps rather than as day strings: the picker hands back Dates
@@ -391,6 +400,7 @@ export const ZumbaPanel = ({ branchId }) => {
         assigned_master_id: form.assigned_master_id || "",
         fee_amount: Number(form.fee_amount || 0),
         fee_paid: Number(form.fee_paid || 0),
+        payment_mode: form.payment_mode || "",
       };
       if (form.id) await updateZumba(form.id, payload);
       else await addZumba(payload, branchId);
@@ -434,7 +444,7 @@ export const ZumbaPanel = ({ branchId }) => {
           <SummaryCard
             key={c.key}
             label={c.label}
-            count={c.money ? rupees(money[c.key]) : (summary?.[c.key] || 0)}
+            count={summary?.[c.key] || 0}
             color={c.color}
             active={card === c.key}
             onClick={() => setCard(c.key === "all" ? "all" : (card === c.key ? "all" : c.key))}
@@ -634,13 +644,12 @@ export const ZumbaPanel = ({ branchId }) => {
                           {/* Shown only when something is actually outstanding — a fully
                               paid row saying "0 due" is noise on every line. */}
                           {due > 0 ? <span className="ml-1 text-[10px] text-amber-600">{rupees(due)} due</span> : null}
-                          {/* With a share card open, what that share takes from this row —
-                              under the fee rather than replacing it, so the row still says
-                              what the student actually paid. */}
-                          {openShare ? (
-                            <span className="block text-[10px] text-slate-500" data-testid={`zumba-share-${r.id}`}>
-                              {openShare.label}: <b className="text-slate-700">{rupees(paid * openShare.share)}</b>
-                            </span>
+                          {/* How it came in, under the figure it describes. Absent on a row
+                              that has collected nothing, where there is nothing to describe. */}
+                          {r.payment_mode ? (
+                            <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                              {PAYMENT_MODE_LABELS[r.payment_mode] || r.payment_mode}
+                            </p>
                           ) : null}
                         </td>
                         <td className="px-3 py-3 text-xs text-slate-500">{shortDate(r.created_at)}</td>
@@ -651,11 +660,19 @@ export const ZumbaPanel = ({ branchId }) => {
                               consultation that owns it — un-ticking Zumba there takes the
                               row out on its own. */}
                           {r.origin === "consultation" ? (
-                            <span className="inline-flex items-center gap-1 rounded bg-sky-50 px-2 py-1 text-[10px] font-semibold text-sky-700" title="Referred on the consultation — edit it there" data-testid={`zumba-referred-${r.id}`}>
-                              <Stethoscope className="h-3 w-3" /> Referred
-                            </span>
+                            <div className="flex items-center justify-end gap-1.5">
+                              <Button size="sm" variant="outline" className="h-7 w-7 p-0" onClick={() => setViewing(r)} title="View" aria-label="View" data-testid={`zumba-view-${r.id}`}>
+                                <Eye className="h-3 w-3" />
+                              </Button>
+                              <span className="inline-flex items-center gap-1 rounded bg-sky-50 px-2 py-1 text-[10px] font-semibold text-sky-700" title="Referred on the consultation — edit it there" data-testid={`zumba-referred-${r.id}`}>
+                                <Stethoscope className="h-3 w-3" /> Referred
+                              </span>
+                            </div>
                           ) : (
                             <div className="flex items-center justify-end gap-1.5">
+                              <Button size="sm" variant="outline" className="h-7 w-7 p-0" onClick={() => setViewing(r)} title="View" aria-label="View" data-testid={`zumba-view-${r.id}`}>
+                                <Eye className="h-3 w-3" />
+                              </Button>
                               <Button size="sm" variant="outline" className="h-7 w-7 p-0" onClick={() => openForm(r)} title="Edit" aria-label="Edit" data-testid={`zumba-edit-${r.id}`}>
                                 <Pencil className="h-3 w-3" />
                               </Button>
@@ -840,6 +857,25 @@ export const ZumbaPanel = ({ branchId }) => {
                       <FieldLabel>Fee Amount</FieldLabel>
                       <Input type="number" value={form.fee_amount} onChange={(e) => setForm({ ...form, fee_amount: e.target.value, package_id: "", package_name: "" })} placeholder="0" data-testid="zumba-field-amount" />
                     </div>
+                  </div>
+                  {/* Under the amount rather than beside it, because it is a fact about the
+                      money above and not a third figure. Tied to it too: with nothing
+                      collected there is no mode to record, and the server clears one sent
+                      anyway rather than let a row claim cash was taken from a student who
+                      has paid nothing. */}
+                  <div className="space-y-2 pt-1">
+                    <FieldLabel>Mode of Payment</FieldLabel>
+                    <FormSelect
+                      value={form.payment_mode}
+                      onChange={(v) => setForm({ ...form, payment_mode: v })}
+                      testid="zumba-field-payment-mode"
+                    >
+                      <option value="">Not stated</option>
+                      {PAYMENT_MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+                    </FormSelect>
+                    {!(Number(form.fee_paid) > 0) && (
+                      <p className="text-[11px] text-slate-400">Recorded once a fee has been collected.</p>
+                    )}
                   </div>
                 </div>
               </div>
