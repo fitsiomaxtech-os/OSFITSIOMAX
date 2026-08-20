@@ -197,9 +197,9 @@ export const ZumbaPanel = ({ branchId }) => {
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState(null);
   // The Zumba pipeline exactly as Super Admin has it in CI/CD ROOTS. Nothing is hardcoded
-  // here: a clinic that has not set the pipeline up has no stages and gets no stage bar.
+  // here: a clinic that has not set the pipeline up has no stages, and the Stage column
+  // and its move control drop out of the table rather than drawing an empty pipeline.
   const [stages, setStages] = useState([]);
-  const [stageFilter, setStageFilter] = useState(null);
   const [movingId, setMovingId] = useState(null);
 
   const load = useCallback(async () => {
@@ -255,7 +255,6 @@ export const ZumbaPanel = ({ branchId }) => {
     // not a different set of people — and the card row does not offer them as a click.
     if (card === "total_fees") list = list.filter((r) => Number(r.fee_paid || 0) > 0);
     else if (card !== "all" && !DERIVED_CARDS.has(card)) list = list.filter((r) => r.card === card);
-    if (stageFilter) list = list.filter((r) => r.stage === stageFilter);
     if (from) list = list.filter((r) => dayOf(r.created_at) >= from);
     if (to) list = list.filter((r) => dayOf(r.created_at) <= to);
     const q = search.trim().toLowerCase();
@@ -263,16 +262,7 @@ export const ZumbaPanel = ({ branchId }) => {
       list = list.filter((r) => (r.name || "").toLowerCase().includes(q) || (r.phone || "").includes(q));
     }
     return list;
-  }, [rows, card, search, from, to, stageFilter]);
-
-  // Counted off the rows on screen rather than off the server's figure, so the bar agrees
-  // with the list underneath it once a card or a date range has narrowed things.
-  const stageCounts = useMemo(() => {
-    const out = {};
-    stages.forEach((st) => { out[st.name] = 0; });
-    rows.forEach((r) => { if (r.stage in out) out[r.stage] += 1; });
-    return out;
-  }, [rows, stages]);
+  }, [rows, card, search, from, to]);
 
   const moveStage = async (row, stage) => {
     if (!stage || stage === row.stage) return;
@@ -374,45 +364,6 @@ export const ZumbaPanel = ({ branchId }) => {
           />
         ))}
       </div>
-
-      {/* The Zumba pipeline, straight from Super Admin's CI/CD ROOTS. Absent entirely when
-          that pipeline has no stages yet — an empty bar would only claim a pipeline exists
-          and then not draw one. */}
-      {stages.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-slate-200 bg-white p-1.5" data-testid="zumba-stage-bar">
-          <button
-            type="button"
-            onClick={() => setStageFilter(null)}
-            className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${stageFilter === null ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`}
-            data-testid="zumba-stage-all"
-          >
-            All Stages
-            <span className={`ml-1.5 rounded px-1.5 py-px text-[10px] font-bold ${stageFilter === null ? "bg-white/25" : "bg-slate-100 text-slate-500"}`}>{rows.length}</span>
-          </button>
-          {stages.map((st) => {
-            const on = stageFilter === st.name;
-            return (
-              <button
-                key={st.id}
-                type="button"
-                onClick={() => setStageFilter(on ? null : st.name)}
-                className="rounded-md border px-3 py-1.5 text-xs font-semibold transition"
-                // Inline, because the colour is whatever Super Admin picked for the stage
-                // and Tailwind can only compile class names it can read in the source.
-                style={on
-                  ? { background: st.color || "#64748b", borderColor: st.color || "#64748b", color: "#fff" }
-                  : { background: `${st.color || "#64748b"}12`, borderColor: `${st.color || "#64748b"}44`, color: st.color || "#475569" }}
-                data-testid={`zumba-stage-${st.name}`}
-              >
-                {st.name}
-                <span className={`ml-1.5 rounded px-1.5 py-px text-[10px] font-bold ${on ? "bg-white/25" : "bg-white/70"}`}>
-                  {stageCounts[st.name] || 0}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      )}
 
       <Card>
         <CardContent className="p-0">
