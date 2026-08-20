@@ -1262,86 +1262,77 @@ const RoleCellDropdown = ({ value, options, onChange, testid }) => {
 // ---------- New Structure ----------
 
 /**
- * A branch picker in the page's own greys.
+ * A branch picker, opened as a dialog.
  *
- * Written rather than using a native <select> because a native one is painted by the
- * operating system: the open list arrives in the system highlight colour — blue on
- * Windows — over whichever accent the browser gives the closed box, and neither answers to
- * this page. The same reason RoleFilterDropdown above exists, wanting the opposite thing.
+ * A dialog rather than a panel hanging off the control: this sits deep inside a card, in a
+ * row, inside a list that scrolls — any one of which can clip a panel or stack over it. A
+ * dialog answers to none of them, and it has room to say whose branch is being changed,
+ * which a strip of options beside a button never did.
  *
- * So: no colour at all. White panel, slate text, a grey wash on hover, and the current
- * choice marked by weight rather than by hue.
+ * Portalled to the body for the same reason, so no ancestor's overflow or stacking context
+ * can crop it.
+ *
+ * No colour anywhere, which was the point of replacing the native select in the first
+ * place: white card, slate text, a grey wash on hover, and the current choice marked by
+ * weight and a tick rather than by hue.
  */
-const BranchDropdown = ({ value, options, onChange, disabled, label }) => {
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-
+const BranchPickerModal = ({ title, value, options, onPick, onClose }) => {
   useEffect(() => {
-    if (!open) return undefined;
-    const onDocClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, [open]);
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
-  const current = options.find((o) => o.value === value);
-
-  return (
-    <div className="relative shrink-0" ref={ref}>
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => setOpen((o) => !o)}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        aria-label={label}
-        className="flex h-7 w-40 items-center justify-between gap-1 rounded-md border border-slate-200 bg-white px-2 text-[11px] font-medium text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
-        data-testid="branch-dropdown-trigger"
-      >
-        <span className="truncate">{current?.label || "— No branch —"}</span>
-        <ChevronDown className={`h-3 w-3 shrink-0 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} />
-      </button>
-
-      {open && (
-        // Right-aligned: the control sits near the end of a row, and a panel hanging left
-        // from there would run off the card on a narrow screen.
-        <div
-          role="listbox"
-          className="absolute right-0 z-20 mt-1 max-h-60 w-48 overflow-y-auto rounded-md border border-slate-200 bg-white py-1 shadow-lg"
-          data-testid="branch-dropdown-list"
-        >
-          {options.map((o) => (
-            <button
-              key={o.value || "none"}
-              type="button"
-              role="option"
-              aria-selected={o.value === value}
-              onClick={() => { setOpen(false); onChange(o.value); }}
-              className={`block w-full truncate px-3 py-1.5 text-left text-xs transition hover:bg-slate-100 ${
-                o.value === value ? "font-bold text-slate-900" : "text-slate-600"
-              }`}
-              data-testid={`branch-dropdown-option-${o.value || "none"}`}
-            >
-              {o.label}
-            </button>
-          ))}
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      data-testid="hr-branch-picker-modal"
+    >
+      <div className="flex max-h-[80vh] w-full max-w-sm flex-col overflow-hidden rounded-lg bg-white shadow-xl">
+        <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-4 py-3">
+          <h3 className="min-w-0 truncate text-sm font-semibold text-slate-900">{title}</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="shrink-0 rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+            aria-label="Close"
+            data-testid="hr-branch-picker-close"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
-      )}
-    </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto py-1">
+          {options.map((o) => {
+            const on = o.value === value;
+            return (
+              <button
+                key={o.value || "none"}
+                type="button"
+                onClick={() => onPick(o.value)}
+                className={`flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left text-sm transition hover:bg-slate-100 ${
+                  on ? "font-bold text-slate-900" : "text-slate-600"
+                }`}
+                data-testid={`hr-branch-picker-option-${o.value || "none"}`}
+              >
+                <span className="truncate">{o.label}</span>
+                {on && <CheckCircle2 className="h-4 w-4 shrink-0 text-slate-500" />}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="shrink-0 border-t border-slate-200 px-4 py-2.5 text-right">
+          <Button variant="outline" size="sm" onClick={onClose} data-testid="hr-branch-picker-cancel">Cancel</Button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 };
 
 
-/**
- * The org read the way it is drawn: departments across the top, and whichever one is open
- * showing the designations under it.
- *
- * Departments & Designation is the screen for changing the structure — adding, renaming,
- * reordering, deleting. This one is for reading it, so nothing here edits: a row of tabs
- * and the list beneath, and the whole shape is one click away at every level.
- *
- * Its own fetch rather than a prop off the parent, so opening this tab shows what is
- * actually there rather than what the board happened to load when it mounted.
- */
 const StructureTab = ({ meta, reloadMeta }) => {
   const [depts, setDepts] = useState([]);
   const [employees, setEmployees] = useState([]);
@@ -1351,6 +1342,10 @@ const StructureTab = ({ meta, reloadMeta }) => {
   // The row whose branch is being written, so its control can be held shut while the
   // request is in flight rather than accepting a second change onto the first.
   const [movingEmployee, setMovingEmployee] = useState("");
+  // The employee whose branch is being picked. One dialog for the tab rather than one per
+  // row: only ever one is open, and a hundred mounted copies would be a hundred Escape
+  // listeners waiting on a key nobody has pressed.
+  const [branchPickerFor, setBranchPickerFor] = useState(null);
   // Which designation is open. One at a time, so the department's shape stays readable
   // while a designation's people are being looked at.
   const [openDesignation, setOpenDesignation] = useState("");
@@ -1522,13 +1517,17 @@ const StructureTab = ({ meta, reloadMeta }) => {
                             >
                               {emp.branch_name || "No branch"}
                             </span>
-                            <BranchDropdown
-                              value={emp.branch_id || ""}
-                              options={branchOptions}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 shrink-0 text-[11px] font-medium text-slate-600"
                               disabled={movingEmployee === emp.id}
-                              onChange={(v) => moveToBranch(emp, v)}
-                              label={`Change branch for ${emp.full_name}`}
-                            />
+                              onClick={() => setBranchPickerFor(emp)}
+                              aria-label={`Change branch for ${emp.full_name}`}
+                              data-testid={`hr-structure-branch-change-${emp.id}`}
+                            >
+                              Change
+                            </Button>
                             <Button
                               size="sm"
                               variant="outline"
@@ -1563,6 +1562,16 @@ const StructureTab = ({ meta, reloadMeta }) => {
           )}
         </CardContent>
       </Card>
+
+      {branchPickerFor && (
+        <BranchPickerModal
+          title={`Branch for ${branchPickerFor.full_name}`}
+          value={branchPickerFor.branch_id || ""}
+          options={branchOptions}
+          onPick={(v) => { const emp = branchPickerFor; setBranchPickerFor(null); moveToBranch(emp, v); }}
+          onClose={() => setBranchPickerFor(null)}
+        />
+      )}
 
       {showAddEmployee && (
         <AddEmployeeModal
