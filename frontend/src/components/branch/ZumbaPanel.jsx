@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CalendarDays, Music, Pencil, RefreshCw, Stethoscope, Trash2, UserPlus, X } from "lucide-react";
+import { Music, Pencil, RefreshCw, Stethoscope, Trash2, UserPlus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
-import { MilkDateInput } from "@/components/ui/milk-calendar";
+import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { toast } from "@/components/ui/sonner";
 import { listZumba, listZumbaMasters, addZumba, updateZumba, deleteZumba, moveZumbaStage, listStoreItems } from "@/lib/api";
 
@@ -192,9 +192,10 @@ export const ZumbaPanel = ({ branchId }) => {
   const [loading, setLoading] = useState(true);
   const [card, setCard] = useState("all");
   const [search, setSearch] = useState("");
-  const [showDates, setShowDates] = useState(false);
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
+  // The same shape Branch Leads keeps: { key, label, from, to } with Dates on the ends,
+  // or null for no filter. The presets and the typed range both come from the one
+  // control, so there is no From/To bar of this tab's own to keep in step with it.
+  const [dateFilter, setDateFilter] = useState(null);
   const [form, setForm] = useState(null); // null | { ...fields, id? }
   const [newMaster, setNewMaster] = useState(""); // a master not yet on the list
   // The Zumba accounts at this branch, which is what a student is assigned *to*. Not
@@ -267,8 +268,20 @@ export const ZumbaPanel = ({ branchId }) => {
     // same list, and say their own cut of each row in the Fee column.
     if (card === "total_fees" || REVENUE_CARDS.has(card)) list = list.filter((r) => Number(r.fee_paid || 0) > 0);
     else if (card !== "all") list = list.filter((r) => r.card === card);
-    if (from) list = list.filter((r) => dayOf(r.created_at) >= from);
-    if (to) list = list.filter((r) => dayOf(r.created_at) <= to);
+    if (dateFilter) {
+      // Compared as timestamps rather than as day strings: the picker hands back Dates
+      // whose ends are the start and the end of a day, so a single day is a range like
+      // any other and needs no special case.
+      const fromTs = dateFilter.from?.getTime();
+      const toTs = dateFilter.to?.getTime();
+      list = list.filter((r) => {
+        const ts = new Date(`${dayOf(r.created_at)}T00:00:00`).getTime();
+        if (!ts) return false;
+        if (fromTs && ts < fromTs) return false;
+        if (toTs && ts > toTs) return false;
+        return true;
+      });
+    }
     const q = search.trim().toLowerCase();
     if (q) {
       list = list.filter((r) => (r.name || "").toLowerCase().includes(q) || (r.phone || "").includes(q));
@@ -348,7 +361,6 @@ export const ZumbaPanel = ({ branchId }) => {
     }
   };
 
-  const dated = !!(from || to);
 
   return (
     <div className="flex flex-col gap-4" data-testid="branch-zumba-panel">
@@ -413,19 +425,16 @@ export const ZumbaPanel = ({ branchId }) => {
               >
                 <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
               </Button>
-              {/* Icon only, and lit while a range is set — the dates themselves are in the
-                  panel it opens, and a toolbar has no room to print them twice. */}
-              <Button
-                size="sm"
-                variant="outline"
-                className={`h-8 w-8 p-0 ${dated ? "border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100" : "border-slate-200 bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
-                onClick={() => setShowDates((v) => !v)}
-                title="Filter by date"
-                aria-label="Filter by date"
-                data-testid="zumba-date-toggle"
-              >
-                <CalendarDays className="h-3.5 w-3.5" />
-              </Button>
+              {/* The same control Branch Leads carries: presets and a typed range in one
+                  dialog, rather than a bar of this tab's own. iconOnly keeps it to the
+                  glyph until a range is set, when it prints the range instead. */}
+              <DateFilterPopover
+                value={dateFilter}
+                onChange={setDateFilter}
+                centered
+                iconOnly
+                testid="zumba-date-filter"
+              />
               <Button
                 size="sm"
                 className="h-8 w-8 bg-sky-600 p-0 text-white hover:bg-sky-700"
@@ -438,25 +447,6 @@ export const ZumbaPanel = ({ branchId }) => {
               </Button>
             </div>
           </div>
-
-          {showDates && (
-            <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 bg-slate-50 px-4 py-2.5" data-testid="zumba-date-filter">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Registered between</span>
-              <div className="w-40">
-                {/* Centred, not anchored: this bar sits above a table, and a panel hanging
-                    off the field opens over the rows and gets clipped. */}
-                <MilkDateInput value={from} onChange={(e) => setFrom(e.target.value)} placeholder="From" centered title="From" accent="sky" data-testid="zumba-date-from" />
-              </div>
-              <div className="w-40">
-                <MilkDateInput value={to} onChange={(e) => setTo(e.target.value)} placeholder="To" centered title="To" accent="sky" data-testid="zumba-date-to" />
-              </div>
-              {dated && (
-                <Button size="sm" variant="ghost" className="h-8 text-xs text-slate-500" onClick={() => { setFrom(""); setTo(""); }} data-testid="zumba-date-clear">
-                  <X className="mr-1 h-3 w-3" /> Clear
-                </Button>
-              )}
-            </div>
-          )}
 
           {loading ? (
             <p className="px-4 py-12 text-center text-sm text-slate-400">Loading…</p>
