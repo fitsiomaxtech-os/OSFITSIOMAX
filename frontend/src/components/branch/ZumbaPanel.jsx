@@ -48,12 +48,36 @@ const CARDS = [
   // asked for. It held the branch-sourced count until that board existed and there was a
   // real master's referral to point it at.
   { key: "masters", label: "Master", color: "#d97706" },
-  { key: "fee_collected", label: "Fee's Collected", color: "#059669" },
-  // The branch's own sign-ups, keeping the slot the count above vacated rather than
-  // shuffling the row. Named Masters today and to be renamed Master Revenue.
-  { key: "branch", label: "Masters", color: "#10b981" },
-  { key: "fitsiomax", label: "Fitsiomax", color: "#14b8a6" },
+  // The last three are money, not counts: what the students paid, and how it splits. They
+  // read as one figure and two halves of it, which is why they sit together at the end of
+  // the row after the four that count people.
+  //
+  // Only Total Fees filters — it has rows behind it, the ones that have paid. The two
+  // shares are the same money seen twice, so there is no subset of the list they could
+  // narrow to and they are not clickable.
+  { key: "total_fees", label: "Total Fees", color: "#059669", money: true },
+  { key: "master_revenue", label: "Master's Revenue", color: "#10b981", money: true, derived: true },
+  { key: "fitsiomax_revenue", label: "Fitsiomax Revenue", color: "#14b8a6", money: true, derived: true },
 ];
+
+// The two cards that are a share of the fee rather than a set of rows. Read by the filter
+// so a stale `card` value can never narrow the list to nothing.
+const DERIVED_CARDS = new Set(["master_revenue", "fitsiomax_revenue"]);
+
+// The class fee is split down the middle between the master who runs it and Fitsiomax.
+const MASTER_SHARE = 0.5;
+
+/** The two halves of the collected fee.
+ *
+ * Fitsiomax takes the remainder rather than its own percentage, so the two always add back
+ * to exactly what was collected. Splitting an odd number both ways independently loses or
+ * invents a rupee, and this figure is somebody's pay.
+ */
+const revenueSplit = (feeTotal) => {
+  const total = Number(feeTotal) || 0;
+  const master = Math.round(total * MASTER_SHARE);
+  return { total, master, fitsiomax: total - master };
+};
 
 /** The Human Resource board's stage card, in the one other place that wants it.
  *
@@ -61,11 +85,18 @@ const CARDS = [
  * a five-across phone row of nine stages, where this row holds seven. Lifting it into
  * components/ui to share would make both boards answer to one file for a look they only
  * happen to agree on today. */
-const SummaryCard = ({ label, count, color, active, onClick, testid }) => (
+const SummaryCard = ({ label, count, color, active, onClick, testid, readOnly = false }) => (
   <button
     type="button"
-    onClick={onClick}
-    className={`w-[calc(33.333%-0.34rem)] min-w-0 rounded-lg border-2 px-1 py-1.5 text-center transition hover:shadow-sm sm:w-full sm:rounded-xl sm:px-4 sm:py-4 sm:text-left ${
+    onClick={readOnly ? undefined : onClick}
+    // A card with nothing to filter to is still a card, but it must not offer the click:
+    // no hover lift, no pointer, and the keyboard skips it rather than landing on a
+    // control that does nothing.
+    disabled={readOnly}
+    tabIndex={readOnly ? -1 : undefined}
+    className={`w-[calc(33.333%-0.34rem)] min-w-0 rounded-lg border-2 px-1 py-1.5 text-center transition sm:w-full sm:rounded-xl sm:px-4 sm:py-4 sm:text-left ${
+      readOnly ? "cursor-default" : "hover:shadow-sm"
+    } ${
       active ? "shadow-sm" : "border-slate-200 bg-white"
     }`}
     style={active ? { borderColor: color, backgroundColor: `${color}14` } : undefined}
@@ -140,13 +171,20 @@ export const ZumbaPanel = ({ branchId }) => {
 
   useEffect(() => { load(); }, [load]);
 
+  // The three money figures, off the one collected total the server already reports.
+  const money = useMemo(() => {
+    const { total, master, fitsiomax } = revenueSplit(summary?.fee_total);
+    return { total_fees: total, master_revenue: master, fitsiomax_revenue: fitsiomax };
+  }, [summary]);
+
   const visible = useMemo(() => {
     let list = rows;
-    // Fee's Collected is the one card that is not a source, so it filters on the money
-    // rather than on where the person came from. Every other card matches the `card` the
-    // server worked out, so the list and the counts above cannot drift apart.
-    if (card === "fee_collected") list = list.filter((r) => Number(r.fee_paid || 0) > 0);
-    else if (card !== "all") list = list.filter((r) => r.card === card);
+    // Total Fees is the one card that is not a source, so it filters on the money rather
+    // than on where the person came from: the rows behind the figure are the ones that
+    // have paid. The two revenue shares filter nothing — they are that same money split,
+    // not a different set of people — and the card row does not offer them as a click.
+    if (card === "total_fees") list = list.filter((r) => Number(r.fee_paid || 0) > 0);
+    else if (card !== "all" && !DERIVED_CARDS.has(card)) list = list.filter((r) => r.card === card);
     if (from) list = list.filter((r) => dayOf(r.created_at) >= from);
     if (to) list = list.filter((r) => dayOf(r.created_at) <= to);
     const q = search.trim().toLowerCase();
@@ -224,9 +262,10 @@ export const ZumbaPanel = ({ branchId }) => {
           <SummaryCard
             key={c.key}
             label={c.label}
-            count={summary?.[c.key] || 0}
+            count={c.money ? rupees(money[c.key]) : (summary?.[c.key] || 0)}
             color={c.color}
             active={card === c.key}
+            readOnly={Boolean(c.derived)}
             onClick={() => setCard(c.key === "all" ? "all" : (card === c.key ? "all" : c.key))}
             testid={`zumba-card-${c.key}`}
           />
@@ -241,11 +280,9 @@ export const ZumbaPanel = ({ branchId }) => {
               Zumba Registrations
               <span className="rounded bg-slate-100 px-1.5 py-px text-[10px] font-bold text-slate-500">{visible.length}</span>
             </div>
-            {/* The money the Fee's Collected card counts. Printed here rather than inside
-                the card, which has room for a number only and would read as a count. */}
-            <span className="rounded bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700" data-testid="zumba-fee-total">
-              {rupees(summary?.fee_total)} collected
-            </span>
+            {/* The collected total used to be printed here because the card beside it had
+                room for a count only. The card carries the figure itself now, so repeating
+                it on the list header would state the same number twice. */}
             <div className="ml-auto flex flex-wrap items-center gap-2">
               <Input
                 value={search}
