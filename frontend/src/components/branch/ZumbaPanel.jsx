@@ -236,15 +236,22 @@ export const ZumbaPanel = ({ branchId }) => {
                 data-testid="zumba-search"
               />
               {/* Grey, because it changes nothing — it re-reads what is already on screen.
-                  The blue is spent on the one button that creates something. */}
+                  The blue is spent on the one button that creates something.
+
+                  Icon only, and square like the date toggle beside it: the glyph says
+                  refresh on its own, and the word was the widest thing in a row that has
+                  a search field to fit. The label lives on title/aria-label, so a hover
+                  still says what it does and a screen reader still announces it. */}
               <Button
                 size="sm"
                 variant="outline"
-                className="h-8 border-slate-200 bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-700"
+                className="h-8 w-8 border-slate-200 bg-slate-100 p-0 text-slate-600 hover:bg-slate-200 hover:text-slate-700"
                 onClick={load}
+                title="Refresh"
+                aria-label="Refresh"
                 data-testid="zumba-refresh"
               >
-                <RefreshCw className={`mr-1 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} /> Refresh
+                <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
               </Button>
               {/* Icon only, and lit while a range is set — the dates themselves are in the
                   panel it opens, and a toolbar has no room to print them twice. */}
