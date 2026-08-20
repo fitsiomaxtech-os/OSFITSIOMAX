@@ -110,7 +110,7 @@ const SummaryCard = ({ label, count, color, active, onClick, testid, readOnly = 
     // control that does nothing.
     disabled={readOnly}
     tabIndex={readOnly ? -1 : undefined}
-    className={`min-w-0 flex-1 rounded-lg border-2 px-1 py-1.5 text-center transition sm:rounded-xl sm:px-2 sm:py-4 sm:text-left ${
+    className={`min-w-0 flex-1 rounded-lg border-2 px-1 py-1.5 text-center transition sm:rounded-xl sm:px-2.5 sm:py-2.5 sm:text-left ${
       readOnly ? "cursor-default" : "hover:shadow-sm"
     } ${
       active ? "shadow-sm" : "border-slate-200 bg-white"
@@ -127,7 +127,10 @@ const SummaryCard = ({ label, count, color, active, onClick, testid, readOnly = 
     >
       {label}
     </span>
-    <span className="mt-0.5 block text-lg font-extrabold leading-tight sm:mt-1 sm:text-3xl" style={{ color }}>
+    {/* Sized for nine across, not the five this card was borrowed from: a rupee figure
+        at 3xl set the width of every card in the row and pushed the labels to an
+        ellipsis two words early. */}
+    <span className="mt-0.5 block text-base font-extrabold leading-tight sm:mt-0.5 sm:text-xl" style={{ color }}>
       {count}
     </span>
   </button>
