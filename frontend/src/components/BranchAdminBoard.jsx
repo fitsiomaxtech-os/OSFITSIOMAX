@@ -13,7 +13,7 @@ import {
   Trash2,
   UserPlus,
   X,
-  Activity,
+  Activity, HeartPulse,
   LayoutDashboard,
   FileText,
   Printer,
@@ -652,6 +652,9 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   const MANAGEMENT_SUB_TABS = [
     { key: "head_physio", label: "Consultant Calendar", icon: Calendar },
     { key: "physio", label: "Physio Calendar", icon: Activity },
+    // Between the two it sits between in practice: a rehab course is delivered after
+    // treatment and alongside diet, and the branch publishes all three the same way.
+    { key: "rehab", label: "Rehab Calendar", icon: HeartPulse },
     // Diet is the third vertical, so its calendar sits beside the other two rather than
     // anywhere new — the Branch Admin publishes a Nutrition Coach's days exactly the way
     // they publish a Physio's.
@@ -728,6 +731,8 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
           </div>
           {consultationsSubTab === "physio" ? (
             <HeadPhysioCalendar branchId={branchId} profileType="physio" />
+          ) : consultationsSubTab === "rehab" ? (
+            <HeadPhysioCalendar branchId={branchId} profileType="rehab" />
           ) : consultationsSubTab === "diet" ? (
             <HeadPhysioCalendar branchId={branchId} profileType="nutrition_coach" />
           ) : consultationsSubTab === "missed" ? (

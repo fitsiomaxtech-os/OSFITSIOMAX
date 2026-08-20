@@ -7,7 +7,7 @@ import uuid
 
 from database import v3_col
 from utils import now_iso
-from deps import v3_require_roles, is_diet_role, is_physio_role, BRANCH_ADMIN_ROLES
+from deps import v3_require_roles, is_diet_role, is_physio_role, is_rehab_role, BRANCH_ADMIN_ROLES
 from security import hash_password
 from schemas.v3 import V3UserOut
 
@@ -16,6 +16,16 @@ router = APIRouter(prefix="/api/v3/hr")
 
 
 DEFAULT_DEPARTMENTS = ["Pre-Sales", "Branch", "HR", "Accounts", "Operations", "Marketing", "Experts"]
+
+# An employee posted to every branch rather than to one, held in branch_id where a real
+# branch id would go. A sentinel rather than a second field: everything that reads an
+# employee's branch already reads branch_id, and a parallel "covers everything" flag would
+# have to be remembered at every one of those places to stay true.
+#
+# Underscored so it cannot collide with a uuid, and resolved to a name on the way out like
+# any other branch, so a reader never has to know it is a sentinel at all.
+ALL_BRANCHES = "__all__"
+ALL_BRANCHES_LABEL = "All Branches"
 # The branch_admin_* and online_*_admin entries are all Branch Admin, named for the practice
 # the person runs — physio, fitness, both, or the online arm. They hold the same board and
 # the same reach over one branch. See BRANCH_ADMIN_ROLES in deps.py for why these are fixed
@@ -68,7 +78,11 @@ def is_multi_branch_role(role: str) -> bool:
     r = (role or "").strip().lower()
     if r in MULTI_BRANCH_ROLES:
         return True
-    return r != "super_admin" and is_diet_role(r)
+    if r == "super_admin":
+        return False
+    # A rehab therapist holds a calendar at each branch they work, exactly as a
+    # Nutritionist does — same reasoning, same shape.
+    return is_diet_role(r) or is_rehab_role(r)
 
 
 def is_expert_role(role: str) -> bool:
@@ -90,8 +104,14 @@ def expert_profile_type(role: str) -> str:
     """
     if is_physio_role(role):
         return "physio"
-    if (role or "").strip().lower() != "super_admin" and is_diet_role(role):
+    if (role or "").strip().lower() == "super_admin":
+        return role
+    if is_diet_role(role):
         return "nutrition_coach"
+    # Every rehab query looks for profile_type "rehab" — the Rehab Calendar lists on
+    # it — so a differently-worded slug is stamped with the type, not with itself.
+    if is_rehab_role(role):
+        return "rehab"
     return role
 
 
@@ -321,7 +341,11 @@ async def list_employees(status: Optional[str] = None, _: V3UserOut = Depends(v3
     branch_docs = await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1}).to_list(500)
     bmap = {b["id"]: b.get("branch_name", "") for b in branch_docs}
     for r in rows:
-        r["branch_name"] = bmap.get(r.get("branch_id"), "") if r.get("branch_id") else ""
+        bid = r.get("branch_id")
+        if bid == ALL_BRANCHES:
+            r["branch_name"] = ALL_BRANCHES_LABEL
+        else:
+            r["branch_name"] = bmap.get(bid, "") if bid else ""
     return rows
 
 
@@ -495,13 +519,17 @@ async def create_user_account(payload: UserAccountCreate, _: V3UserOut = Depends
         "created_at": now_iso(),
     }
     await v3_col("users").insert_one(user.copy())
-    if is_diet_role(payload.role) and payload.role != "super_admin":
-        # A diet role belongs to a branch and holds a calendar there, exactly like a Physio.
+    if payload.role != "super_admin" and (is_diet_role(payload.role) or is_rehab_role(payload.role)):
+        # A diet or rehab role belongs to a branch and holds a calendar there, exactly
+        # like a Physio. Both are stamped with their own profile_type by
+        # expert_profile_type, so each lands on its own calendar and not the other's.
         for b_id in (payload.branch_ids or [payload.branch_id]):
             await v3_col("doctors").insert_one({
                 "id": str(uuid.uuid4()),
                 "full_name": payload.full_name,
-                "profile_type": "nutrition_coach",
+                # Not the literal: a rehab hire reaching this branch would otherwise be
+                # stamped as a coach and turn up on the Diet Calendar.
+                "profile_type": expert_profile_type(payload.role),
                 "branch_id": b_id,
                 "specialization": "",
                 "slots": [],

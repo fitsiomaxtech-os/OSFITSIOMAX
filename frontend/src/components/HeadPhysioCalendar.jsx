@@ -68,6 +68,9 @@ function getFirstDayOfMonth(year, month) {
 //   profileType "physio"           ->  PHYSIO CALENDAR      — treatment sessions only.
 //                                      Booked against a patient's session package (many per
 //                                      lead), cut at the session item's duration.
+//   profileType "rehab"            ->  REHAB CALENDAR       — rehab programme days, booked
+//                                      against a patient's rehab course. Same shape as the
+//                                      physio's; the course is the thing being delivered.
 //   profileType "nutrition_coach"  ->  DIET CALENDAR        — diet check-in days, booked
 //                                      against a patient's diet plan. Same shape as the
 //                                      physio's, against diet_sessions rather than sessions.
@@ -77,19 +80,22 @@ function getFirstDayOfMonth(year, month) {
 export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) => {
   const isPhysio = profileType === "physio";
   const isCoach = profileType === "nutrition_coach";
+  const isRehab = profileType === "rehab";
   // Both the physio and the coach book repeat visits against a plan, so they share the
   // slot-type vocabulary and the per-slot capacity control; only the Head Physio's
   // one-per-lead consultation flow differs.
-  const isRecurring = isPhysio || isCoach;
-  const roleLabel = isCoach ? "Nutritionist" : isPhysio ? "Physio" : "CONSULTANT";
-  const roleLabelPlural = isCoach ? "Nutritionists" : isPhysio ? "Physios" : "CONSULTANTS";
+  const isRecurring = isPhysio || isCoach || isRehab;
+  const roleLabel = isCoach ? "Nutritionist" : isRehab ? "Rehab Therapist" : isPhysio ? "Physio" : "CONSULTANT";
+  const roleLabelPlural = isCoach ? "Nutritionists" : isRehab ? "Rehab Therapists" : isPhysio ? "Physios" : "CONSULTANTS";
   const SLOT_TYPES = isRecurring ? SESSION_TYPES : CONSULTATION_TYPES;
   // The three calendars schedule different things and must not be read as interchangeable:
   // a Head Physio's day holds consultations (booked from Branch Leads → Appointment);
   // a Physio's day holds treatment sessions; a Coach's day holds diet check-ins.
-  const purpose = isCoach ? "Diet Check-ins" : isPhysio ? "Treatment Sessions" : "Consultations";
+  const purpose = isCoach ? "Diet Check-ins" : isRehab ? "Rehab Sessions" : isPhysio ? "Treatment Sessions" : "Consultations";
   const purposeLine = isCoach
     ? "Diet check-in days only — booked against a patient's diet plan."
+    : isRehab
+    ? "Rehab sessions only — booked against a patient's rehab course."
     : isPhysio
     ? "Treatment sessions only — booked against a patient's session package."
     : "Consultations only — booked from Branch Leads → Appointment.";

@@ -201,6 +201,26 @@ def is_diet_role(role: str) -> bool:
     return bool(set(r.split("_")) & {"diet", "nutrition", "nutritionist", "dietician", "dietitian"})
 
 
+def is_rehab_role(role: str) -> bool:
+    """Whether a role slug reads as the Rehab desk.
+
+    Same problem the Diet and Zumba predicates solve, arriving the same way: the role is
+    created by hand in Roles & Credentials, so its slug is whatever was typed — "rehab",
+    "rehab_therapist", "rehab_manage" all name the same desk.
+
+    Matched on whole underscore-separated tokens so an unrelated role cannot slip through
+    on a substring. Note this is the ROLE, not the store category of the same name: a
+    rehab course on the shelf has nothing to do with who holds the rehab calendar.
+
+    Super Admin is included for the same reason it is in is_diet_role — it may reach every
+    board — and excluded again wherever the question is "does this person hold a calendar".
+    """
+    r = (role or "").strip().lower()
+    if r == "super_admin":
+        return True
+    return bool(set(r.split("_")) & {"rehab", "rehabilitation"})
+
+
 def is_zumba_role(role: str) -> bool:
     """Whether a role slug reads as the Zumba desk.
 
