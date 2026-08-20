@@ -124,6 +124,13 @@ class ZumbaInput(BaseModel):
     master_name: Optional[str] = ""
     fee_amount: Optional[float] = 0
     fee_paid: Optional[float] = 0
+    # Where the registration sits in the Zumba pipeline. Left unset it starts at the entry
+    # stage; a name the pipeline no longer has falls back there too.
+    stage: Optional[str] = None
+
+
+class ZumbaStageInput(BaseModel):
+    stage: str
 
 
 def _own_branch_only(user: V3UserOut) -> bool:
@@ -180,15 +187,56 @@ async def _branch_for(user: V3UserOut, branch_id: Optional[str]) -> Optional[str
     return await _default_branch_id()
 
 
-def _shape(row: dict) -> dict:
+def _shape(row: dict, stages: Optional[list] = None) -> dict:
     """The stored row plus the card it counts towards, worked out here so the list and the
-    summary can never disagree about where a registration belongs."""
+    summary can never disagree about where a registration belongs.
+
+    The stage is settled against the live pipeline for the same reason: a registration
+    written before Super Admin added the pipeline, or holding a stage since deleted, reads
+    as sitting at the entry stage rather than at a name the board no longer draws.
+    """
     source = _source(row.get("source"))
-    return {**row, "source": source, "card": CARD_OF_SOURCE.get(source, "direct")}
+    shaped = {**row, "source": source, "card": CARD_OF_SOURCE.get(source, "direct")}
+    if stages is not None:
+        shaped["stage"] = _settle_stage(row.get("stage"), stages)
+    return shaped
 
 
 def _master_of(row: dict) -> str:
     return (row.get("master_name") or "").strip()
+
+
+async def _zumba_stages() -> list:
+    """The Zumba pipeline as Super Admin has it in CI/CD ROOTS.
+
+    Read on every request rather than cached: renaming a stage there rewrites the name on
+    every registration holding it (see v3_stages.py), so the list here has to be whatever
+    that screen says right now. An empty list is a legitimate answer — a clinic that has
+    not set the pipeline up simply has no stages, and the tab shows none.
+    """
+    return await v3_col("pipeline_stages").find(
+        {"type": "zumba"}, {"_id": 0}
+    ).sort("order", 1).to_list(100)
+
+
+def _entry_stage(stages: list) -> str:
+    """Where a registration starts: the first stage Super Admin ordered. Blank while the
+    pipeline is empty, which is honest — there is nowhere for it to start yet."""
+    return stages[0]["name"] if stages else ""
+
+
+def _settle_stage(value, stages: list) -> str:
+    """A stage the pipeline actually has, or the entry stage.
+
+    Names are matched case-insensitively but the pipeline's own spelling is what gets
+    stored, so a stage renamed in CI/CD ROOTS stays matchable and the value on the row is
+    always one the pipeline recognises.
+    """
+    wanted = str(value or "").strip().lower()
+    for st in stages:
+        if st["name"].strip().lower() == wanted:
+            return st["name"]
+    return _entry_stage(stages)
 
 
 def _own_master_name(user: V3UserOut) -> str:
@@ -244,7 +292,7 @@ def _extra(lead: dict, *keys):
     return ""
 
 
-async def _referred_rows(branch_id: Optional[str]) -> list:
+async def _referred_rows(branch_id: Optional[str], entry_stage: str = "") -> list:
     """Zumba referrals made by a CONSULTANT, read off the leads rather than copied here.
 
     A referral is a decision recorded on the consultation, so this reads it live instead of
@@ -301,6 +349,10 @@ async def _referred_rows(branch_id: Optional[str]) -> list:
             "package_sessions": l.get("zumba_package_sessions"),
             "created_at": saved_at.get(l["id"]) or l.get("updated_at") or "",
             "created_by": "Consultation",
+            # At the pipeline's entry stage and staying there. The row is read off the
+            # lead, so there is nothing here to write a move onto — moving it would mean
+            # copying the patient into this collection, which is what reading live avoids.
+            "stage": entry_stage,
             # The tab reads this and offers no Edit or Delete: the consultation owns it.
             "origin": "consultation",
         })
@@ -317,11 +369,14 @@ async def list_zumba(
     if query is None:
         return {"summary": {}, "registrations": [], "masters": []}
 
+    stages = await _zumba_stages()
+    entry_stage = _entry_stage(stages)
+
     raw = await v3_col("zumba_registrations").find(query, {"_id": 0}).to_list(2000)
     # A consultant's referral carries no master, so it can only be scoped by branch. An
     # account with no branch to scope by gets none of them rather than every branch's.
-    referred = await _referred_rows(branch_id) if (branch_id or not _own_branch_only(user)) else []
-    rows = [_shape(r) for r in raw] + referred
+    referred = await _referred_rows(branch_id, entry_stage) if (branch_id or not _own_branch_only(user)) else []
+    rows = [_shape(r, stages) for r in raw] + referred
     # Sorted after the merge, not before: two sources of rows interleave by date the way
     # one would, rather than arriving as two blocks.
     rows.sort(key=lambda r: r.get("created_at") or "", reverse=True)
@@ -352,10 +407,19 @@ async def list_zumba(
         key=str.lower,
     )
 
-    return {"summary": summary, "registrations": rows, "masters": masters}
+    # Counted by name rather than by id, which is what the registrations hold and what a
+    # rename in CI/CD ROOTS rewrites. A stage nobody is at still reports 0 rather than
+    # going missing from the bar.
+    stage_counts = {st["name"]: 0 for st in stages}
+    for r in rows:
+        if r.get("stage") in stage_counts:
+            stage_counts[r["stage"]] += 1
+    summary["stage_counts"] = stage_counts
+
+    return {"summary": summary, "registrations": rows, "masters": masters, "stages": stages}
 
 
-def _clean(payload: ZumbaInput) -> dict:
+async def _clean(payload: ZumbaInput) -> dict:
     name = (payload.name or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="Name is required")
@@ -374,6 +438,7 @@ def _clean(payload: ZumbaInput) -> dict:
         "master_name": master_name if source == MASTER else "",
         "fee_amount": _amount(payload.fee_amount),
         "fee_paid": _amount(payload.fee_paid),
+        "stage": _settle_stage(payload.stage, await _zumba_stages()),
     }
 
 
@@ -390,7 +455,7 @@ async def add_zumba(
     row = {
         "id": str(uuid.uuid4()),
         "branch_id": branch_id,
-        **_clean(payload),
+        **await _clean(payload),
         "created_at": now_iso(),
         "created_by": user.full_name or user.email,
     }
@@ -412,12 +477,46 @@ async def update_zumba(
         raise HTTPException(status_code=403, detail="Not your branch")
 
     changes = {
-        **_clean(payload),
+        **await _clean(payload),
         "updated_at": now_iso(),
         "updated_by": user.full_name or user.email,
     }
     await v3_col("zumba_registrations").update_one({"id": registration_id}, {"$set": changes})
     return _shape({**existing, **changes})
+
+
+@router.patch("/branch/zumba/{registration_id}/stage")
+async def move_zumba_stage(
+    registration_id: str,
+    payload: ZumbaStageInput,
+    user: V3UserOut = Depends(require_zumba_reader),
+):
+    """Move one registration along the Zumba pipeline.
+
+    Its own route rather than a field on the edit form: moving somebody through the class
+    is the thing done daily, from a dropdown in the list, and routing it through the full
+    payload would mean the rest of the record had to be sent along to change one word.
+    """
+    existing = await v3_col("zumba_registrations").find_one({"id": registration_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Registration not found")
+    if _own_branch_only(user) and existing.get("branch_id") != user.branch_id:
+        raise HTTPException(status_code=403, detail="Not your branch")
+
+    stages = await _zumba_stages()
+    if not stages:
+        raise HTTPException(status_code=400, detail="No Zumba stages yet — Super Admin sets them up in CI/CD ROOTS")
+    wanted = str(payload.stage or "").strip().lower()
+    if not any(st["name"].strip().lower() == wanted for st in stages):
+        raise HTTPException(status_code=400, detail="That stage is not in the Zumba pipeline")
+
+    stage = _settle_stage(payload.stage, stages)
+    await v3_col("zumba_registrations").update_one({"id": registration_id}, {"$set": {
+        "stage": stage,
+        "updated_at": now_iso(),
+        "updated_by": user.full_name or user.email,
+    }})
+    return _shape({**existing, "stage": stage}, stages)
 
 
 @router.delete("/branch/zumba/{registration_id}")

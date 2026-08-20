@@ -528,3 +528,7 @@ export const listZumba = async (branchId) => (await api.get("/branch/zumba", { p
 export const addZumba = async (payload, branchId) => (await api.post("/branch/zumba", payload, { params: branchId ? { branch_id: branchId } : {} })).data;
 export const updateZumba = async (registrationId, payload) => (await api.patch(`/branch/zumba/${registrationId}`, payload)).data;
 export const deleteZumba = async (registrationId) => (await api.delete(`/branch/zumba/${registrationId}`)).data;
+// Moving somebody along the class pipeline is the daily action, so it is its own call
+// rather than a field on the edit form. The stages themselves come back on listZumba,
+// straight from what Super Admin has in CI/CD ROOTS.
+export const moveZumbaStage = async (registrationId, stage) => (await api.patch(`/branch/zumba/${registrationId}/stage`, { stage })).data;
