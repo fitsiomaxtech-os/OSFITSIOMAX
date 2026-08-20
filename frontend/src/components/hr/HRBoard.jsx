@@ -15,6 +15,11 @@ import { MilkDateInput } from "@/components/ui/milk-calendar";
 import { SegmentedTabs } from "@/components/ui/segmented-tabs";
 import { downloadCsv } from "@/lib/printable";
 
+// Matches ALL_BRANCHES in backend/routers/v3_hr.py, which resolves it to a name on the way
+// out. Held in branch_id where a real branch id would go, so everything that already reads
+// an employee's branch keeps working without being told about it.
+const ALL_BRANCHES = "__all__";
+
 const TABS = [
   { key: "dashboard", label: "Dashboard", icon: BarChart3 },
   { key: "employees", label: "Employees", icon: Users },
@@ -1038,6 +1043,10 @@ const AddEmployeeModal = ({ employee, meta, initialDepartment, initialDesignatio
                     data-testid="hr-emp-branch"
                   >
                     <option value="">— Not picked —</option>
+                    {/* Offered here too, or an employee posted to every branch from New
+                        Structure would open this form showing "Not picked" — the stored
+                        value matching no option — and be cleared by the next save. */}
+                    <option value={ALL_BRANCHES}>All Branches</option>
                     {branchOptions.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
                   </select>
                 </Field>
@@ -1253,6 +1262,76 @@ const RoleCellDropdown = ({ value, options, onChange, testid }) => {
 // ---------- New Structure ----------
 
 /**
+ * A branch picker in the page's own greys.
+ *
+ * Written rather than using a native <select> because a native one is painted by the
+ * operating system: the open list arrives in the system highlight colour — blue on
+ * Windows — over whichever accent the browser gives the closed box, and neither answers to
+ * this page. The same reason RoleFilterDropdown above exists, wanting the opposite thing.
+ *
+ * So: no colour at all. White panel, slate text, a grey wash on hover, and the current
+ * choice marked by weight rather than by hue.
+ */
+const BranchDropdown = ({ value, options, onChange, disabled, label }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDocClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
+  const current = options.find((o) => o.value === value);
+
+  return (
+    <div className="relative shrink-0" ref={ref}>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={label}
+        className="flex h-7 w-40 items-center justify-between gap-1 rounded-md border border-slate-200 bg-white px-2 text-[11px] font-medium text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+        data-testid="branch-dropdown-trigger"
+      >
+        <span className="truncate">{current?.label || "— No branch —"}</span>
+        <ChevronDown className={`h-3 w-3 shrink-0 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {open && (
+        // Right-aligned: the control sits near the end of a row, and a panel hanging left
+        // from there would run off the card on a narrow screen.
+        <div
+          role="listbox"
+          className="absolute right-0 z-20 mt-1 max-h-60 w-48 overflow-y-auto rounded-md border border-slate-200 bg-white py-1 shadow-lg"
+          data-testid="branch-dropdown-list"
+        >
+          {options.map((o) => (
+            <button
+              key={o.value || "none"}
+              type="button"
+              role="option"
+              aria-selected={o.value === value}
+              onClick={() => { setOpen(false); onChange(o.value); }}
+              className={`block w-full truncate px-3 py-1.5 text-left text-xs transition hover:bg-slate-100 ${
+                o.value === value ? "font-bold text-slate-900" : "text-slate-600"
+              }`}
+              data-testid={`branch-dropdown-option-${o.value || "none"}`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+
+/**
  * The org read the way it is drawn: departments across the top, and whichever one is open
  * showing the designations under it.
  *
@@ -1302,6 +1381,14 @@ const StructureTab = ({ meta, reloadMeta }) => {
   // Who holds a designation, within the department that owns it. Both halves matter: the
   // same designation name can sit under two departments, and the people under it are not
   // the same people.
+  // "All Branches" sits at the top with "No branch": both are answers about the whole set
+  // rather than a choice from within it, so they read as a pair before the list proper.
+  const branchOptions = useMemo(() => ([
+    { value: "", label: "— No branch —" },
+    { value: ALL_BRANCHES, label: "All Branches" },
+    ...branches.map((b) => ({ value: b.id, label: b.branch_name })),
+  ]), [branches]);
+
   const holdersOf = (designation) => employees.filter(
     (e) => e.department === current?.name && e.designation === designation,
   );
@@ -1320,7 +1407,9 @@ const StructureTab = ({ meta, reloadMeta }) => {
     setMovingEmployee(emp.id);
     try {
       await hrUpdateEmployee(emp.id, { branch_id: branchId });
-      const name = branches.find((b) => b.id === branchId)?.branch_name || "";
+      const name = branchId === ALL_BRANCHES
+        ? "All Branches"
+        : (branches.find((b) => b.id === branchId)?.branch_name || "");
       setEmployees((prev) => prev.map(
         (e) => (e.id === emp.id ? { ...e, branch_id: branchId, branch_name: name } : e),
       ));
@@ -1433,18 +1522,13 @@ const StructureTab = ({ meta, reloadMeta }) => {
                             >
                               {emp.branch_name || "No branch"}
                             </span>
-                            <select
+                            <BranchDropdown
                               value={emp.branch_id || ""}
+                              options={branchOptions}
                               disabled={movingEmployee === emp.id}
-                              onChange={(e) => moveToBranch(emp, e.target.value)}
-                              className="h-7 w-36 shrink-0 rounded-md border border-slate-200 px-1.5 text-[11px] disabled:opacity-50"
-                              aria-label={`Change branch for ${emp.full_name}`}
-                              title="Move to another branch"
-                              data-testid={`hr-structure-branch-select-${emp.id}`}
-                            >
-                              <option value="">— No branch —</option>
-                              {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
-                            </select>
+                              onChange={(v) => moveToBranch(emp, v)}
+                              label={`Change branch for ${emp.full_name}`}
+                            />
                             <Button
                               size="sm"
                               variant="outline"
