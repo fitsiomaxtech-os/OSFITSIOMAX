@@ -468,6 +468,28 @@ SESSION_ITEM_RATE_PER_SESSION_ONLINE = 1200
 SESSION_ITEM_RATE_PER_SESSION_OFFLINE = 800
 
 
+# The shelves whose price is a whole course rather than a per-session rate.
+#
+# Zumba is sold as a membership -- 12 classes a month, priced by the month -- and Rehab as
+# one 26-session programme at one price. Both store the course total divided down, so the
+# flat rate below is not their rate and never was. Forcing it on them rewrote a Rs.3,000
+# membership as Rs.9,600 (12 x 800) on the next restart, which is what "the fees keep
+# changing" was: not the form, this migration, running on every boot.
+#
+# Kept as categories rather than as a flag on the item, because it is the shelf that is
+# sold this way, not the individual row -- a new Zumba membership must be exempt the moment
+# it is created, without anyone remembering to mark it.
+COURSE_PRICED_CATEGORIES = ("zumba", "rehab")
+
+
+async def _course_priced_item_ids() -> set:
+    rows = await v3_col("store_items").find(
+        {"item_type": "session", "category": {"$in": list(COURSE_PRICED_CATEGORIES)}},
+        {"_id": 0, "id": 1},
+    ).to_list(500)
+    return {r["id"] for r in rows}
+
+
 async def normalize_session_item_prices() -> None:
     """Enforce the fixed per-session rate across every FITSIO STORE Session item
     (the week-based Treatment Packages, e.g. "01 Week" = 7 sessions, "05 week" = 35
@@ -477,7 +499,11 @@ async def normalize_session_item_prices() -> None:
     hp_consultation_decision() both multiply this rate by a session count
     themselves — it must never be pre-multiplied here.) Idempotent/safe to
     re-run: only writes an item whose price doesn't already match."""
-    session_items = await v3_col("store_items").find({"item_type": "session"}, {"_id": 0}).to_list(500)
+    session_items = await v3_col("store_items").find(
+        # Course-priced shelves excluded: see COURSE_PRICED_CATEGORIES above.
+        {"item_type": "session", "category": {"$nin": list(COURSE_PRICED_CATEGORIES)}},
+        {"_id": 0},
+    ).to_list(500)
     for item in session_items:
         updates = {}
         if item.get("sessions_offline") and item.get("price_offline") != SESSION_ITEM_RATE_PER_SESSION_OFFLINE:
@@ -499,11 +525,17 @@ async def normalize_lead_session_package_prices() -> None:
     already match. Only touches leads that haven't paid the Treatment Fee yet — once
     treatment_fee_paid is on file, that figure is a real financial record and must
     never be silently rewritten. Idempotent/safe to re-run."""
+    # Same exemption as the store items above, one layer down: a lead holding a Zumba
+    # membership or a Rehab course is holding a real course price, and recomputing it at the
+    # flat rate would rewrite that patient's figure to one nobody quoted them.
+    course_items = await _course_priced_item_ids()
     leads = await v3_col("leads").find(
         {"session_package_sessions": {"$ne": None}, "treatment_fee_paid": None},
-        {"_id": 0, "id": 1, "session_package_sessions": 1, "session_package_price": 1, "session_package_mode": 1},
+        {"_id": 0, "id": 1, "session_package_sessions": 1, "session_package_price": 1, "session_package_mode": 1, "session_package_id": 1},
     ).to_list(2000)
     for lead in leads:
+        if lead.get("session_package_id") in course_items:
+            continue
         rate = SESSION_ITEM_RATE_PER_SESSION_ONLINE if lead.get("session_package_mode") == "online" else SESSION_ITEM_RATE_PER_SESSION_OFFLINE
         expected_price = round(lead["session_package_sessions"] * rate, 2)
         if lead.get("session_package_price") != expected_price:
