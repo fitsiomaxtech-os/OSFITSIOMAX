@@ -323,6 +323,7 @@ const TEAM_DESKS = [
   { key: "head_physios", label: "Consultants", from: "head_physios" },
   { key: "physios", label: "Physio", from: "physios" },
   { key: "diet", label: "Diet", from: "diet" },
+  { key: "zumba", label: "Zumba", from: "zumba" },
 ];
 
 /**

@@ -5,7 +5,7 @@ import uuid
 
 from database import v3_col
 from utils import now_iso, derive_branch_code, active_doctor_query
-from deps import v3_require_roles, is_branch_admin_role, is_physio_role, is_diet_role, is_pre_sales_role, PHYSIO_ROLES
+from deps import v3_require_roles, is_branch_admin_role, is_physio_role, is_diet_role, is_pre_sales_role, is_zumba_role, PHYSIO_ROLES
 # The desks a Physio or Nutritionist can hold several of, and the doctors profile_type
 # each role keeps its calendar under. Imported from HR rather than restated so posting
 # somebody to a branch here builds the same record HR's own assign builds.
@@ -315,6 +315,13 @@ async def branch_detail(branch_id: str, user: V3UserOut = Depends(v3_require_rol
     # The Diet desk had no group at all, so a branch's Nutritionist appeared nowhere on
     # Team even though they hold a calendar here like a Physio does.
     diet = [u for u in staff_rows if is_diet_role(u.get("role"))]
+    # Same omission, same fix: a Zumba master is posted to a branch, teaches its class and
+    # is assigned its students, and was on none of the desks that say who works here.
+    #
+    # Super Admin excluded for the reason the Diet line below it is: is_zumba_role answers
+    # True for them so they can reach the Zumba board, which would otherwise stand them on
+    # the Zumba desk of every branch in the company.
+    zumba = [u for u in staff_rows if u.get("role") != "super_admin" and is_zumba_role(u.get("role"))]
 
     doctors = await v3_col("doctors").find(active_doctor_query({"branch_id": branch_id}), {"_id": 0}).to_list(500)
 
@@ -352,6 +359,7 @@ async def branch_detail(branch_id: str, user: V3UserOut = Depends(v3_require_rol
             "head_physios": head_physios,
             "physios": physios,
             "diet": diet,
+            "zumba": zumba,
             "doctors": doctors,
         },
         "performance": {
@@ -418,6 +426,8 @@ def _desk_holds(desk: str):
         return lambda r: is_physio_role(r)
     if desk == "diet":
         return lambda r: r != "super_admin" and is_diet_role(r)
+    if desk == "zumba":
+        return lambda r: r != "super_admin" and is_zumba_role(r)
     return None
 
 
