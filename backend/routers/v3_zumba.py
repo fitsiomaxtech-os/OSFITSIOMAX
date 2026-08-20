@@ -17,6 +17,7 @@ flat class fee with no package, no installments and no consultation behind it, a
 it through the leads' fee machinery would have meant inventing a lead to hang it on.
 """
 
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -144,6 +145,39 @@ def _scoped_branch(user: V3UserOut, branch_id: Optional[str]) -> Optional[str]:
     if _own_branch_only(user):
         return user.branch_id
     return branch_id
+
+
+# The class runs out of one branch today, so a Zumba account created without a branch of
+# its own writes here rather than being told to "pick a branch" by a form that offers no
+# way to pick one.
+#
+# A default, not a rule: an account that HAS a branch keeps writing to its own, and giving
+# the account its branch in HR makes this line dead weight. Matched on the name at write
+# time rather than pinned to an id, so the branch can be recreated without a migration.
+DEFAULT_ZUMBA_BRANCH_NAME = "Anna Nagar"
+
+
+async def _default_branch_id() -> Optional[str]:
+    row = await v3_col("branches").find_one(
+        # Anchored and escaped: the name is a literal to match whole and case-folded, not a
+        # pattern, or a branch called "Anna Nagar 2" could answer for this one.
+        {"branch_name": {"$regex": f"^{re.escape(DEFAULT_ZUMBA_BRANCH_NAME)}$", "$options": "i"}},
+        {"_id": 0, "id": 1},
+    )
+    return row.get("id") if row else None
+
+
+async def _branch_for(user: V3UserOut, branch_id: Optional[str]) -> Optional[str]:
+    """The branch this request reads and writes, falling back for a branchless master.
+
+    Only the Zumba desk falls back. A Branch Admin without a branch is a broken account and
+    should read nothing rather than quietly be handed somebody else's branch, which is what
+    it has always done.
+    """
+    scoped = _scoped_branch(user, branch_id)
+    if scoped or not (_own_branch_only(user) and is_zumba_role(user.role)):
+        return scoped
+    return await _default_branch_id()
 
 
 def _shape(row: dict) -> dict:
@@ -278,7 +312,7 @@ async def list_zumba(
     branch_id: Optional[str] = Query(None),
     user: V3UserOut = Depends(require_zumba_reader),
 ):
-    branch_id = _scoped_branch(user, branch_id)
+    branch_id = await _branch_for(user, branch_id)
     query = _visible_query(user, branch_id)
     if query is None:
         return {"summary": {}, "registrations": [], "masters": []}
@@ -349,7 +383,7 @@ async def add_zumba(
     branch_id: Optional[str] = Query(None),
     user: V3UserOut = Depends(require_zumba_reader),
 ):
-    branch_id = _scoped_branch(user, branch_id)
+    branch_id = await _branch_for(user, branch_id)
     if not branch_id:
         raise HTTPException(status_code=400, detail="Pick a branch to register against")
 
