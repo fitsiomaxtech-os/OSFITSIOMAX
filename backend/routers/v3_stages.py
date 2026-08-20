@@ -133,6 +133,14 @@ async def list_stages(type: Optional[StageType] = None, _: V3UserOut = Depends(v
         return rows
 
     if type == ZUMBA_TYPE:
+        # Seeded on read, the same way recruitment is above: _ensure_seed only fires on a
+        # completely empty collection, so a pipeline added after this install existed would
+        # otherwise never appear and this screen would say "No stages yet" for good.
+        from routers.v3_zumba import ensure_zumba_stages
+        await ensure_zumba_stages()
+        rows = await v3_col("pipeline_stages").find(
+            {"type": ZUMBA_TYPE}, {"_id": 0}
+        ).sort("order", 1).to_list(500)
         by_stage = {}
         async for row in v3_col(ZUMBA_COLLECTION).aggregate([{"$group": {"_id": f"${ZUMBA_FIELD}", "n": {"$sum": 1}}}]):
             by_stage[row["_id"]] = row["n"]

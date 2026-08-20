@@ -66,6 +66,39 @@ CARD_OF_SOURCE = {
 }
 CARDS = ("direct", "consultant", "branch", "masters", "fitsiomax")
 
+# What the Zumba pipeline starts life as, so CI/CD ROOTS lists something on a fresh install
+# rather than "No stages yet" — the branch tab's own summary cards, so the two screens open
+# on one vocabulary instead of two.
+#
+# A starting point, not a fixture: these are ordinary stages once seeded, renameable and
+# deletable in CI/CD ROOTS like any other pipeline's, and a registration still moves along
+# them by hand. What the card decides is only where it starts.
+#
+# The three that count people, not the three that count money: a rupee figure is not a
+# place a student can stand, and Total Fees already answers a different question by
+# filtering the same list on whether it has been paid.
+#
+# Name, the card it mirrors, and that card's colour on the branch tab.
+ZUMBA_STAGE_CARDS = [
+    ("Direct", "direct", "#f59e0b"),
+    ("Consultant", "consultant", "#f97316"),
+    ("Refer Master", "masters", "#d97706"),
+]
+
+# Every seeded stage is a source, so every one of them can be a start.
+START_CARDS = frozenset(card for _n, card, _c in ZUMBA_STAGE_CARDS if card in CARDS)
+
+# A stage seeded before the card was stamped on it is recognised by the name it shipped
+# with, so an install that already ran this needs no migration.
+CARD_OF_SEEDED_NAME = {name: card for name, card, _c in ZUMBA_STAGE_CARDS}
+
+
+def stage_card(stage: dict):
+    """The card a stage mirrors: what it was stamped with, else what it was named at
+    seeding. A stage Super Admin wrote themselves mirrors nothing, and nothing starts
+    there — it is reached by moving somebody into it, like any other stage."""
+    return stage.get("card") or CARD_OF_SEEDED_NAME.get(stage.get("name"))
+
 # The class runs three evenings a week, the same three the membership is sold on (see
 # ZUMBA_CLASS_DAYS in frontend/src/components/PackagesBoard.jsx). Monday, Wednesday and
 # Friday as Python numbers them.
@@ -234,9 +267,10 @@ def _shape(row: dict, stages: Optional[list] = None) -> dict:
     as sitting at the entry stage rather than at a name the board no longer draws.
     """
     source = _source(row.get("source"))
-    shaped = {**row, "source": source, "card": CARD_OF_SOURCE.get(source, "direct")}
+    card = CARD_OF_SOURCE.get(source, "direct")
+    shaped = {**row, "source": source, "card": card}
     if stages is not None:
-        shaped["stage"] = _settle_stage(row.get("stage"), stages)
+        shaped["stage"] = _settle_stage(row.get("stage"), stages, card)
     return shaped
 
 
@@ -252,29 +286,68 @@ async def _zumba_stages() -> list:
     that screen says right now. An empty list is a legitimate answer — a clinic that has
     not set the pipeline up simply has no stages, and the tab shows none.
     """
+    await ensure_zumba_stages()
     return await v3_col("pipeline_stages").find(
         {"type": "zumba"}, {"_id": 0}
     ).sort("order", 1).to_list(100)
 
 
-def _entry_stage(stages: list) -> str:
-    """Where a registration starts: the first stage Super Admin ordered. Blank while the
-    pipeline is empty, which is honest — there is nowhere for it to start yet."""
+async def ensure_zumba_stages() -> None:
+    """Seed the pipeline from the branch tab's cards, once, while it is empty.
+
+    Only ever when there is nothing there. The names are the Super Admin's to change from
+    the moment they exist, and re-seeding over a curated list would undo that every time
+    somebody opened the screen.
+    """
+    if await v3_col("pipeline_stages").count_documents({"type": "zumba"}) > 0:
+        return
+    await v3_col("pipeline_stages").insert_many([
+        {
+            "id": str(uuid.uuid4()),
+            "name": name,
+            "color": color,
+            "type": "zumba",
+            "order": order,
+            "is_final": False,
+            # Which card this stage mirrors, stored rather than matched by name — so
+            # renaming Direct to "Walked In" keeps new walk-ins starting there instead of
+            # quietly sending them to the top of the list.
+            "card": card,
+            "created_at": now_iso(),
+        }
+        for order, (name, card, color) in enumerate(ZUMBA_STAGE_CARDS)
+    ])
+
+
+def _entry_stage(stages: list, card: Optional[str] = None) -> str:
+    """Where a registration starts.
+
+    The stage mirroring its card, if the pipeline still has one — a walk-in opens at
+    Direct, a consultation referral at Consultant — else the first stage in the order, as
+    anything without a card to go on always did. Blank while the pipeline is empty, which
+    is honest: there is nowhere for it to start yet.
+    """
+    if card in START_CARDS:
+        for st in stages:
+            if stage_card(st) == card:
+                return st["name"]
     return stages[0]["name"] if stages else ""
 
 
-def _settle_stage(value, stages: list) -> str:
-    """A stage the pipeline actually has, or the entry stage.
+def _settle_stage(value, stages: list, card: Optional[str] = None) -> str:
+    """A stage the pipeline actually has, or where this registration starts.
 
     Names are matched case-insensitively but the pipeline's own spelling is what gets
     stored, so a stage renamed in CI/CD ROOTS stays matchable and the value on the row is
-    always one the pipeline recognises.
+    always one the pipeline recognises. Anything unrecognised — nothing stored yet, or a
+    stage since deleted — falls to the start for its card rather than to the top of the
+    list, so a walk-in and a consultation referral do not both open at the same place.
     """
     wanted = str(value or "").strip().lower()
     for st in stages:
         if st["name"].strip().lower() == wanted:
             return st["name"]
-    return _entry_stage(stages)
+    return _entry_stage(stages, card)
 
 
 def _visible_query(user: V3UserOut, branch_id: Optional[str]) -> Optional[dict]:
@@ -505,7 +578,7 @@ async def _clean(payload: ZumbaInput, user: V3UserOut) -> dict:
         "master_name": master_name if source == MASTER else "",
         "fee_amount": _amount(payload.fee_amount),
         "fee_paid": _amount(payload.fee_paid),
-        "stage": _settle_stage(payload.stage, await _zumba_stages()),
+        "stage": _settle_stage(payload.stage, await _zumba_stages(), CARD_OF_SOURCE.get(source, "direct")),
         **await _assignment(payload, user),
     }
 
