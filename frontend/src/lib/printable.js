@@ -91,6 +91,37 @@ export const downloadPrintable = (html, filename) => {
   URL.revokeObjectURL(url);
 };
 
+// A cell that starts with one of these is executed as a formula when the sheet is opened,
+// so a designation somebody typed as "-Senior Physio" would run rather than read. Prefixed
+// with an apostrophe, which Excel strips on display and never evaluates.
+const CSV_FORMULA_START = /^[=+\-@\t\r]/;
+
+const csvCell = (value) => {
+  const raw = value == null ? "" : String(value);
+  const text = CSV_FORMULA_START.test(raw) ? `'${raw}` : raw;
+  // Quoted only when it has to be, and an inner quote doubled, which is how CSV escapes it.
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+};
+
+/**
+ * Rows of cells as a .csv, which Excel opens natively — no library, and no .xlsx writer to
+ * carry for a two-column list.
+ *
+ * The byte-order mark is not decoration: without it Excel reads the file in the local
+ * codepage and any name with an accent or a rupee sign arrives mangled. CRLF for the same
+ * reason — it is what Excel writes, and what older versions expect to read.
+ */
+export const downloadCsv = (rows, filename) => {
+  const body = rows.map((row) => row.map(csvCell).join(",")).join("\r\n");
+  const blob = new Blob([`\uFEFF${body}`], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+};
+
 /** Native share sheet where the device has one; otherwise the text goes to the clipboard. */
 export const sharePrintable = async (text, title) => {
   if (navigator.share) {

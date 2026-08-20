@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Users, ShieldCheck, BarChart3, Plus, Pencil, Trash2, Eye, EyeOff, KeyRound, X, UserPlus, MoreVertical, CheckCircle2, XCircle, AlertOctagon, CalendarOff, ChevronDown, ChevronUp, GripVertical, FolderTree, Search, Camera, ImageOff } from "lucide-react";
+import { Users, ShieldCheck, BarChart3, Plus, Pencil, Trash2, Eye, EyeOff, KeyRound, X, UserPlus, MoreVertical, CheckCircle2, XCircle, AlertOctagon, CalendarOff, ChevronDown, ChevronUp, GripVertical, FolderTree, Search, Camera, ImageOff, Download, Network } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,12 +13,14 @@ import {
 } from "@/lib/api";
 import { MilkDateInput } from "@/components/ui/milk-calendar";
 import { SegmentedTabs } from "@/components/ui/segmented-tabs";
+import { downloadCsv } from "@/lib/printable";
 
 const TABS = [
   { key: "dashboard", label: "Dashboard", icon: BarChart3 },
   { key: "employees", label: "Employees", icon: Users },
   { key: "roles", label: "Roles & Credentials", icon: ShieldCheck },
   { key: "departments", label: "Departments & Designation", short: "Depts", icon: FolderTree },
+  { key: "structure", label: "New Structure", short: "Structure", icon: Network },
 ];
 
 // Every default vertical is named "online_.../offline_..." — same helper as
@@ -166,11 +168,15 @@ export const HRBoard = () => {
   return (
     <div className="flex flex-col gap-5" data-testid="hr-board">
       {/* No heading. The nav tab above already reads HR Admin. */}
-      <SegmentedTabs tabs={TABS} value={tab} onChange={setTab} testid="hr-subtab" mobileCols={4} />
+      {/* Three, not five: SegmentedTabs only draws 2, 3 or 4 and anything else falls
+          through to one unstyled column on a phone. Five tabs across 3 is 3 + 2, which
+          is the balance its own note argues for over a row too narrow to read. */}
+      <SegmentedTabs tabs={TABS} value={tab} onChange={setTab} testid="hr-subtab" mobileCols={3} />
       {tab === "dashboard" && <DashboardTab onNavigate={(t, f) => { setEmpFilter(f || null); setTab(t); }} />}
       {tab === "employees" && <EmployeesTab meta={meta} initialFilter={empFilter} />}
       {tab === "roles" && <RolesTab meta={meta} reloadMeta={reloadMeta} />}
       {tab === "departments" && <DepartmentsDesignationTab meta={meta} reloadMeta={reloadMeta} />}
+      {tab === "structure" && <StructureTab />}
     </div>
   );
 };
@@ -1244,6 +1250,117 @@ const RoleCellDropdown = ({ value, options, onChange, testid }) => {
   );
 };
 
+// ---------- New Structure ----------
+
+/**
+ * The org read the way it is drawn: departments across the top, and whichever one is open
+ * showing the designations under it.
+ *
+ * Departments & Designation is the screen for changing the structure — adding, renaming,
+ * reordering, deleting. This one is for reading it, so nothing here edits: a row of tabs
+ * and the list beneath, and the whole shape is one click away at every level.
+ *
+ * Its own fetch rather than a prop off the parent, so opening this tab shows what is
+ * actually there rather than what the board happened to load when it mounted.
+ */
+const StructureTab = () => {
+  const [depts, setDepts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState("");
+
+  useEffect(() => {
+    let live = true;
+    hrDepartments()
+      .then((rows) => {
+        if (!live) return;
+        setDepts(rows || []);
+        // Opens on the first department rather than on nothing. There is no "all" here —
+        // the question this screen answers is about one department at a time.
+        setSelected((prev) => prev || rows?.[0]?.name || "");
+      })
+      .catch((e) => toast.error(e?.response?.data?.detail || "Failed to load departments"))
+      // Guarded too: a response arriving after the tab is closed would set state on a
+      // component that is gone.
+      .finally(() => { if (live) setLoading(false); });
+    return () => { live = false; };
+  }, []);
+
+  const current = depts.find((d) => d.name === selected) || null;
+  const designations = current?.designations || [];
+
+  if (loading) return <p className="py-12 text-center text-sm text-slate-400">Loading…</p>;
+  if (depts.length === 0) {
+    return (
+      <p className="rounded-xl border border-dashed border-slate-200 py-10 text-center text-sm text-slate-400" data-testid="hr-structure-empty">
+        No departments yet. Add them under Departments &amp; Designation.
+      </p>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-4" data-testid="hr-structure-tab">
+      {/* One row, scrolling sideways rather than wrapping: a department's place in the row
+          is how it is found again, and a row that reflows every time one is added moves
+          them all. min-w-0 so the strip scrolls inside the page instead of widening it. */}
+      <div className="min-w-0 overflow-x-auto">
+        <div className="flex w-max items-center gap-1.5 rounded-lg border border-slate-200 bg-white p-1" data-testid="hr-structure-depts">
+          {depts.map((d) => {
+            const on = d.name === selected;
+            const count = (d.designations || []).length;
+            return (
+              <button
+                key={d.id}
+                type="button"
+                onClick={() => setSelected(d.name)}
+                className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-2 text-xs font-semibold transition ${
+                  on ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-50"
+                }`}
+                data-testid={`hr-structure-dept-${d.id}`}
+              >
+                {d.name}
+                <span className={`rounded px-1.5 py-px text-[10px] font-bold ${on ? "bg-white/25" : "bg-slate-100 text-slate-500"}`}>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <Card data-testid="hr-structure-designations">
+        <CardHeader className="flex flex-row items-center justify-between gap-2 py-3">
+          <CardTitle className="text-sm font-semibold text-slate-800">{current?.name || "—"}</CardTitle>
+          <span className="shrink-0 rounded bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
+            {designations.length} {designations.length === 1 ? "designation" : "designations"}
+          </span>
+        </CardHeader>
+        <CardContent className="pb-4">
+          {designations.length === 0 ? (
+            <p className="py-8 text-center text-sm text-slate-400">
+              Nothing under {current?.name} yet.
+            </p>
+          ) : (
+            // Numbered, because the order is the department's own and says something —
+            // it is the order Departments &amp; Designation was arranged in.
+            <ol className="space-y-1.5">
+              {designations.map((name, i) => (
+                <li
+                  key={name}
+                  className="flex items-center gap-3 rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2"
+                  data-testid={`hr-structure-designation-${name}`}
+                >
+                  <span className="w-5 shrink-0 text-right text-[11px] font-bold text-slate-400">{i + 1}</span>
+                  <span className="min-w-0 truncate text-sm font-medium text-slate-700" title={name}>{name}</span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
+
 // ---------- Departments & Designation ----------
 
 const DEPT_DESIGNATION_SUB_TABS = [
@@ -1304,6 +1421,25 @@ const DepartmentsTab = ({ meta, reloadMeta }) => {
   const selectedDeptObj = useMemo(() => depts.find((d) => d.name === selectedDept) || null, [depts, selectedDept]);
 
   const selectTab = (name) => { setSelectedDept(name); setDesignationFilter(""); };
+
+  // Every department and every designation under it, as a sheet.
+  //
+  // One row per pairing rather than two separate lists, because a designation only means
+  // anything under the department that owns it — "Senior Physio" is a fact about Experts,
+  // not a name floating on its own. Sorting and filtering the sheet gives either list back.
+  //
+  // A department with nothing under it still gets a row. Which departments exist is half
+  // the question being asked, and dropping the empty ones answers only the other half.
+  const exportDepartments = () => {
+    const rows = [["Department", "Designation"]];
+    depts.forEach((d) => {
+      const designations = d.designations || [];
+      if (designations.length === 0) rows.push([d.name, ""]);
+      else designations.forEach((name) => rows.push([d.name, name]));
+    });
+    downloadCsv(rows, `departments-and-designations-${new Date().toISOString().slice(0, 10)}.csv`);
+    toast.success(`${rows.length - 1} rows exported`);
+  };
 
   const addDepartment = async () => {
     const name = newDeptName.trim();
@@ -1408,6 +1544,20 @@ const DepartmentsTab = ({ meta, reloadMeta }) => {
             <Plus className="h-4 w-4" />
           </button>
         )}
+        {/* Pushed to the end of the row, past the add control, because it is about the
+            whole list rather than about any one department — the same reason it stays
+            put when a department tab is selected. */}
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={exportDepartments}
+          disabled={depts.length === 0}
+          className="ml-auto h-9 shrink-0 border-slate-200 text-slate-600 hover:bg-slate-50"
+          title="Download every department and designation as a spreadsheet"
+          data-testid="hr-dept-export"
+        >
+          <Download className="mr-1 h-3.5 w-3.5" /> Export
+        </Button>
       </div>
 
       {/* Selected department's own actions — nothing to rename/delete/manage on "All". */}
@@ -1844,6 +1994,7 @@ const RolesTab = ({ meta, reloadMeta }) => {
   const [sortAZ, setSortAZ] = useState(null); // null = as-loaded | "asc" | "desc"
   const [showCreate, setShowCreate] = useState(false);
   const [actionTarget, setActionTarget] = useState(null);
+  const [view, setView] = useState("list"); // "list" | "branch"
 
   const load = useCallback(() => hrUsers({ search, role: roleFilter !== "all" ? roleFilter : undefined }).then(setUsers).catch((e) => console.warn("[load failed]", e?.message || e)), [search, roleFilter]);
   useEffect(() => { load(); }, [load]);
@@ -1867,6 +2018,55 @@ const RolesTab = ({ meta, reloadMeta }) => {
   const sortedUsers = sortAZ
     ? [...filteredUsers].sort((a, b) => (a.full_name || "").localeCompare(b.full_name || "") * (sortAZ === "asc" ? 1 : -1))
     : filteredUsers;
+
+  // Who works where, and as what.
+  //
+  // Grouped by branch and then by role, because the question this answers is about a
+  // branch rather than about a person: which desks are staffed at Anna Nagar, and who is
+  // on them. The flat list above answers the other question and is still there for it.
+  //
+  // Somebody covering three branches is listed under all three. They are genuinely on
+  // that branch's roster, and leaving them off the other two would make a branch read as
+  // unstaffed for a role that is in fact covered.
+  //
+  // Super Admin is left out throughout: the account that owns the OS is not a member of
+  // any branch's staff, and listing it under every branch would say otherwise.
+  const branchGroups = useMemo(() => {
+    const byBranch = new Map();
+    const place = (branchName, user) => {
+      if (!byBranch.has(branchName)) byBranch.set(branchName, new Map());
+      const byRole = byBranch.get(branchName);
+      const role = roleLabel(user.role);
+      if (!byRole.has(role)) byRole.set(role, []);
+      byRole.get(role).push(user);
+    };
+
+    sortedUsers
+      .filter((u) => u.role !== "super_admin")
+      .forEach((u) => {
+        const named = (u.branches || []).map((b) => b.name).filter(Boolean);
+        // A role that covers every branch is said once, under its own heading, rather
+        // than repeated into every branch as though it were posted to each.
+        if (u.org_wide) place("All branches", u);
+        else if (named.length) named.forEach((n) => place(n, u));
+        // Kept rather than dropped: an account belonging to no branch is nearly always
+        // an oversight, and it can only be noticed if it is shown somewhere.
+        else place("No branch assigned", u);
+      });
+
+    // Real branches first, alphabetically; the two catch-alls last, where they read as
+    // notes about the list rather than as branches in it.
+    const rank = (name) => (name === "All branches" ? 1 : name === "No branch assigned" ? 2 : 0);
+    return [...byBranch.entries()]
+      .map(([branch, byRole]) => ({
+        branch,
+        people: [...byRole.values()].reduce((n, list) => n + list.length, 0),
+        roles: [...byRole.entries()]
+          .map(([role, list]) => ({ role, list }))
+          .sort((a, b) => a.role.localeCompare(b.role)),
+      }))
+      .sort((a, b) => rank(a.branch) - rank(b.branch) || a.branch.localeCompare(b.branch));
+  }, [sortedUsers]);
 
   const changeRole = async (u, role) => {
     try { await hrUpdateUserRole(u.id, role); toast.success("Role updated"); load(); }
@@ -1901,7 +2101,62 @@ const RolesTab = ({ meta, reloadMeta }) => {
         ))}
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 md:hidden">
+      {/* Two questions, two shapes. The list answers "who is this person and what can
+          they do"; Branch Wise answers "which desks are staffed here, and by whom". */}
+      <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-slate-200 bg-white p-1" data-testid="hr-roles-view">
+        {[{ key: "list", label: "All Users" }, { key: "branch", label: "Branch Wise" }].map((v) => (
+          <button
+            key={v.key}
+            type="button"
+            onClick={() => setView(v.key)}
+            className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${view === v.key ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}
+            data-testid={`hr-roles-view-${v.key}`}
+          >
+            {v.label}
+          </button>
+        ))}
+      </div>
+
+      {view === "branch" && (
+        <div className="space-y-3" data-testid="hr-branch-wise">
+          {branchGroups.map((g) => (
+            <Card key={g.branch} data-testid={`hr-branch-group-${g.branch}`}>
+              <CardHeader className="flex flex-row items-center justify-between gap-2 py-3">
+                <CardTitle className="text-sm font-semibold text-slate-800">{g.branch}</CardTitle>
+                <span className="shrink-0 rounded bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
+                  {g.roles.length} {g.roles.length === 1 ? "role" : "roles"} · {g.people} {g.people === 1 ? "person" : "people"}
+                </span>
+              </CardHeader>
+              <CardContent className="space-y-1.5 p-0 pb-3">
+                {g.roles.map(({ role, list }) => (
+                  <div key={role} className="flex flex-wrap items-start gap-2 px-4 py-1.5" data-testid={`hr-branch-role-${role}`}>
+                    <span className={`w-44 shrink-0 rounded px-2 py-0.5 text-[11px] font-bold ${roleClasses(list[0].role)}`}>{role}</span>
+                    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                      {list.map((u) => (
+                        <span key={u.id} className="inline-flex items-center gap-1.5 text-xs text-slate-700" title={u.email}>
+                          {u.full_name}
+                          {/* An account switched off is still on the roster and still
+                              holds the desk, so it is shown and marked rather than hidden
+                              — a branch reading as staffed by somebody who cannot log in
+                              is the thing worth seeing. */}
+                          {u.is_active === false && (
+                            <span className="rounded bg-slate-200 px-1 py-px text-[9px] font-bold text-slate-500">INACTIVE</span>
+                          )}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          ))}
+          {branchGroups.length === 0 && (
+            <p className="rounded-xl border border-dashed border-slate-200 py-8 text-center text-sm text-slate-400">No users.</p>
+          )}
+        </div>
+      )}
+
+      <div className={`flex flex-wrap items-center gap-2 md:hidden ${view === "branch" ? "hidden" : ""}`}>
         <button
           onClick={() => setSortAZ((s) => (s === "asc" ? "desc" : "asc"))}
           className={`rounded-md px-3 py-2 text-sm font-medium ${sortAZ ? "bg-sky-600 text-white" : "bg-slate-100 text-slate-600"}`}
@@ -1914,7 +2169,7 @@ const RolesTab = ({ meta, reloadMeta }) => {
         <Button onClick={() => setShowCreate(true)} className="flex-1 bg-sky-600 hover:bg-sky-700" data-testid="hr-roles-create-btn-mobile"><UserPlus className="h-4 w-4 mr-1" />Create User</Button>
       </div>
 
-      <div className="space-y-2 md:hidden" data-testid="hr-user-cards">
+      <div className={`space-y-2 md:hidden ${view === "branch" ? "hidden" : ""}`} data-testid="hr-user-cards">
         {sortedUsers.map((u) => (
           <div key={u.id} className="rounded-xl border border-slate-200 bg-white p-3" data-testid={`hr-user-card-${u.id}`}>
             <div className="flex items-start justify-between gap-2">
@@ -1950,7 +2205,7 @@ const RolesTab = ({ meta, reloadMeta }) => {
         {sortedUsers.length === 0 && <p className="rounded-xl border border-dashed border-slate-200 py-8 text-center text-sm text-slate-400">No users.</p>}
       </div>
 
-      <Card className="hidden md:block">
+      <Card className={`hidden ${view === "branch" ? "" : "md:block"}`}>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-base">User Roles & Credentials</CardTitle>
           <div className="flex gap-2">
