@@ -110,7 +110,7 @@ const SummaryCard = ({ label, count, color, active, onClick, testid, readOnly = 
     // control that does nothing.
     disabled={readOnly}
     tabIndex={readOnly ? -1 : undefined}
-    className={`min-w-[6.5rem] flex-1 shrink-0 rounded-lg border-2 px-1 py-1.5 text-center transition sm:min-w-[8rem] sm:rounded-xl sm:px-3 sm:py-4 sm:text-left ${
+    className={`min-w-0 flex-1 rounded-lg border-2 px-1 py-1.5 text-center transition sm:rounded-xl sm:px-2 sm:py-4 sm:text-left ${
       readOnly ? "cursor-default" : "hover:shadow-sm"
     } ${
       active ? "shadow-sm" : "border-slate-200 bg-white"
@@ -313,10 +313,11 @@ export const ZumbaPanel = ({ branchId }) => {
           breaking as 7 + 2 read as two unrelated strips, and the second one looked like a
           separate thing rather than the tail of the first.
 
-          A minimum width keeps them readable rather than letting nine squeeze into a
-          phone, so below about 1200px the row scrolls sideways instead of wrapping. */}
+          No minimum width and no scroller: nine cards divide whatever width there is, so
+          the row ends exactly where the page does. What gives instead is the label, which
+          truncates and carries the full text on `title`. */}
       <div
-        className="flex flex-nowrap gap-1.5 overflow-x-auto pb-1 sm:gap-3"
+        className="flex flex-nowrap gap-1.5 sm:gap-2"
         data-testid="zumba-summary"
       >
         {CARDS.map((c) => (
