@@ -566,9 +566,15 @@ async def v3_dashboard_overview(
     # headline figures and the Collections boards can't disagree about what a payment was
     # for. `action` and `created_at` have to be projected for this — the branch buckets
     # below never needed either.
-    # "diet" is seeded because _revenue_category can return it — without the key the
-    # increment below raises the moment a Diet Consultation Fee lands in range.
-    revenue_split = {"consultation": 0.0, "session": 0.0, "diet": 0.0, "spot_joining": 0.0}
+    # Every category _revenue_category can return is seeded, because the increment below is
+    # `+=` and a missing key raises. "rehab" arrived with the Rehab fee and was not added
+    # here, which took the whole Super Admin dashboard down with a KeyError the first time
+    # one was collected — the board went dark over a line item it did not know about.
+    #
+    # Seeded AND defaulted: the seeding keeps the reported lines explicit, and the default
+    # means the next category added somewhere else costs a figure nobody labelled rather
+    # than the entire board. A dashboard that cannot name a payment should still count it.
+    revenue_split = {"consultation": 0.0, "session": 0.0, "diet": 0.0, "rehab": 0.0, "spot_joining": 0.0}
     activity_query = {"action": {"$in": REVENUE_ACTIONS}}
     activity_query.update(_date_range_query("created_at", start_date, end_date))
     activities = await v3_col("lead_activity").find(
@@ -603,7 +609,7 @@ async def v3_dashboard_overview(
         amount = _parse_rs_amount(a.get("details", ""))
         add_to_bucket(revenue_bucket, bid, vertical, amount)
         category = _revenue_category(a.get("action", ""))
-        revenue_split[category] += amount
+        revenue_split[category] = revenue_split.get(category, 0.0) + amount
         if category == "consultation":
             add_to_bucket(consultation_revenue_bucket, bid, vertical, amount)
         elif category == "session":
@@ -660,6 +666,7 @@ async def v3_dashboard_overview(
             "consultation": round(revenue_split["consultation"], 2),
             "session": round(revenue_split["session"], 2),
             "diet": round(revenue_split["diet"], 2),
+            "rehab": round(revenue_split["rehab"], 2),
             "spot_joining": round(revenue_split["spot_joining"], 2),
         },
     }
