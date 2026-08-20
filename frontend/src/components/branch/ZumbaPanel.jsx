@@ -82,9 +82,15 @@ const FieldLabel = ({ children }) => (
 );
 const sourceLabel = (r) => (
   r.source === MASTER
-    ? (r.master_name || "Master")
+    ? "Refer Master"
     : (SOURCES.find((s) => s.key === r.source) || { label: "Personal" }).label
 );
+
+/** The referring master's name, for the tooltip. The column says the channel; which master
+ *  it was is the detail behind it, and printing it in place of the channel put a person's
+ *  name in a column of channels — next to an Assignee column holding another person's
+ *  name, where the two read as each other. */
+const sourceDetail = (r) => (r.source === MASTER && r.master_name ? `Refer Master · ${r.master_name}` : sourceLabel(r));
 
 // The strip, in the order asked for. Styled like the Human Resource board's stage cards:
 // a white card each, the name in its own colour above the count, and the selected one
@@ -115,8 +121,11 @@ const CARDS = [
   // acts on. A row with no fee on it yet is on neither: nothing has been sold.
   { key: "payment_done", label: "Payment Done", color: "#059669" },
   { key: "due_payment", label: "Due Payment", color: "#d97706" },
-  { key: "discontinued", label: "Discontinue", color: "#e11d48" },
-  { key: "leave", label: "Leave", color: "#6366f1" },
+  // One card, not two: Discontinue and Leave are both "not turning up", and splitting
+  // them across the row asked the branch to read two numbers to learn one thing. The
+  // distinction survives where it is actually useful — on the row, which says which — and
+  // the server still counts them apart, so nothing downstream is coarsened by this.
+  { key: "discontinued", label: "Discontinue", color: "#e11d48", sum: ["discontinued", "leave"] },
 ];
 
 /** Whether this registration's fee is settled. Nothing sold is not settled. */
@@ -208,7 +217,7 @@ const ViewRegistrationModal = ({ row, masterNameOf, onClose, onSaved }) => {
           <DetailRow label="Age" value={row.age} />
           <DetailRow label="Gender" value={(GENDERS.find((g) => g.key === row.gender) || {}).label} />
           <DetailRow label="Address" value={row.address} />
-          <DetailRow label="Source" value={sourceLabel(row)} />
+          <DetailRow label="Source" value={sourceDetail(row)} />
           <DetailRow label="Class" value={masterNameOf(row.assigned_master_id)} />
           <DetailRow label="Time" value={row.time_slot} />
           <DetailRow label="Package" value={row.package_name} />
@@ -374,6 +383,7 @@ export const ZumbaPanel = ({ branchId }) => {
   const [card, setCard] = useState("all");
   const [search, setSearch] = useState("");
   const [needsOnly, setNeedsOnly] = useState(false); // show only the half-filled rows
+  const [modeFilter, setModeFilter] = useState(""); // "" = every mode, including none
   // The same shape Branch Leads keeps: { key, label, from, to } with Dates on the ends,
   // or null for no filter. The presets and the typed range both come from the one
   // control, so there is no From/To bar of this tab's own to keep in step with it.
@@ -453,7 +463,7 @@ export const ZumbaPanel = ({ branchId }) => {
     // first is the `card` the server stamps on the row.
     if (card === "payment_done") list = list.filter(isPaidUp);
     else if (card === "due_payment") list = list.filter((r) => amountDue(r) > 0);
-    else if (card === "discontinued" || card === "leave") list = list.filter((r) => (r.status || "active") === card);
+    else if (card === "discontinued") list = list.filter((r) => (r.status || "active") !== "active");
     else if (card !== "all") list = list.filter((r) => r.card === card);
     if (dateFilter) {
       // Compared as timestamps rather than as day strings: the picker hands back Dates
@@ -474,8 +484,12 @@ export const ZumbaPanel = ({ branchId }) => {
       list = list.filter((r) => (r.name || "").toLowerCase().includes(q) || (r.phone || "").includes(q));
     }
     if (needsOnly) list = list.filter((r) => missingDetails(r).length > 0);
+    // "unpaid" is its own answer rather than an absent one: a desk chasing money wants
+    // the rows that took none, and those have no mode to select by.
+    if (modeFilter === "none") list = list.filter((r) => !r.payment_mode);
+    else if (modeFilter) list = list.filter((r) => r.payment_mode === modeFilter);
     return list;
-  }, [rows, card, search, dateFilter, needsOnly]);
+  }, [rows, card, search, dateFilter, needsOnly, modeFilter]);
 
   // Counted off every row, not the filtered ones: the point of the badge is to say
   // there is work waiting even while a card or a date range is hiding it.
@@ -584,7 +598,7 @@ export const ZumbaPanel = ({ branchId }) => {
           <SummaryCard
             key={c.key}
             label={c.label}
-            count={summary?.[c.key] || 0}
+            count={(c.sum || [c.key]).reduce((n, k) => n + (Number(summary?.[k]) || 0), 0)}
             color={c.color}
             active={card === c.key}
             onClick={() => setCard(c.key === "all" ? "all" : (card === c.key ? "all" : c.key))}
@@ -604,6 +618,21 @@ export const ZumbaPanel = ({ branchId }) => {
                   {branch.name}
                 </span>
               )}
+              {/* Next to the branch rather than out with the search box: it narrows which
+                  registrations are listed, the same as the cards above, and belongs with
+                  the things that say what this list is. */}
+              <select
+                value={modeFilter}
+                onChange={(e) => setModeFilter(e.target.value)}
+                className={`h-6 rounded border px-1.5 text-[11px] font-semibold transition ${modeFilter ? "border-sky-300 bg-sky-50 text-sky-700" : "border-slate-200 bg-white text-slate-500"}`}
+                title="Filter by how the fee was taken"
+                aria-label="Mode of payment"
+                data-testid="zumba-mode-filter"
+              >
+                <option value="">All payment modes</option>
+                {PAYMENT_MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+                <option value="none">Nothing collected</option>
+              </select>
               <span className="rounded bg-slate-100 px-1.5 py-px text-[10px] font-bold text-slate-500">{visible.length}</span>
               {/* Only ever drawn when there is something to draw it for, so an empty queue
                   leaves the header alone rather than reporting nothing to do. */}
@@ -686,18 +715,21 @@ export const ZumbaPanel = ({ branchId }) => {
             </p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[52rem] text-left text-sm">
+              <table className="w-full min-w-[68rem] text-left text-sm">
                 <thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500">
                   <tr>
-                    <th className="w-[5%] px-3 py-2.5">S.No</th>
-                    <th className="w-[24%] px-3 py-2.5">Name</th>
-                    <th className="w-[13%] px-3 py-2.5">Phone</th>
-                    <th className="w-[6%] px-3 py-2.5">Age</th>
-                    <th className="w-[16%] px-3 py-2.5">Source</th>
-                    {showStage && <th className="w-[14%] px-3 py-2.5">Stage</th>}
-                    <th className="w-[12%] px-3 py-2.5">Fee</th>
-                    <th className="w-[10%] px-3 py-2.5">Registered</th>
-                    <th className="w-[10%] px-3 py-2.5 text-right">Actions</th>
+                    <th className="w-[4%] px-3 py-2.5">S.No</th>
+                    <th className="w-[14%] px-3 py-2.5">Name</th>
+                    <th className="w-[9%] px-3 py-2.5">Phone</th>
+                    <th className="w-[4%] px-3 py-2.5">Age</th>
+                    <th className="w-[9%] px-3 py-2.5">Source</th>
+                    <th className="w-[10%] px-3 py-2.5">Package</th>
+                    <th className="w-[10%] px-3 py-2.5">Assignee</th>
+                    {showStage && <th className="w-[8%] px-3 py-2.5">Stage</th>}
+                    <th className="w-[8%] px-3 py-2.5">Fee</th>
+                    <th className="w-[10%] px-3 py-2.5">Mode of Payment</th>
+                    <th className="w-[7%] px-3 py-2.5">Registered</th>
+                    <th className="w-[7%] px-3 py-2.5 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -737,23 +769,29 @@ export const ZumbaPanel = ({ branchId }) => {
                         <td className="px-3 py-3">
                           {/* A referral prints the master's name, because "Master" on its
                               own is the half of the answer nobody asks for. */}
-                          <span className={`inline-block max-w-full truncate rounded px-2 py-0.5 text-[10px] font-semibold ${r.source === MASTER ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`} title={sourceLabel(r)}>
+                          <span className={`inline-block max-w-full truncate rounded px-2 py-0.5 text-[10px] font-semibold ${r.source === MASTER ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`} title={sourceDetail(r)}>
                             {sourceLabel(r)}
                           </span>
+                        </td>
+                        {/* What they bought, in a column of its own. It used to sit under
+                            the source, where a membership and a lead channel read as one
+                            fact about the student rather than two. */}
+                        <td className="px-3 py-3">
                           {r.package_name ? (
-                            <p className="mt-0.5 truncate text-[10px] text-slate-500" title={r.package_name}>
-                              {r.package_name}{r.package_sessions ? ` · ${r.package_sessions} classes` : ""}
+                            <p className="truncate text-xs text-slate-600" title={r.package_name}>
+                              {r.package_name}
+                              {r.package_sessions ? <span className="block text-[10px] text-slate-400">{r.package_sessions} classes</span> : null}
                             </p>
-                          ) : null}
-                          {/* Drawn under the source and in a different colour because the
-                              two answer different questions: the pill above is who brought
-                              them in, this is whose class they turn up to and whose board
-                              they appear on. */}
+                          ) : <span className="text-xs text-slate-300">—</span>}
+                        </td>
+                        {/* Whose class they turn up to, which is not who brought them in.
+                            Only what is set here reaches a master's own board. */}
+                        <td className="px-3 py-3">
                           {r.assigned_master_name ? (
-                            <span className="mt-1 inline-block max-w-full truncate rounded bg-pink-50 px-2 py-0.5 text-[10px] font-semibold text-pink-700" title={`Class: ${r.assigned_master_name}`}>
-                              Class: {r.assigned_master_name}
+                            <span className="inline-block max-w-full truncate rounded bg-pink-50 px-2 py-0.5 text-[10px] font-semibold text-pink-700" title={r.assigned_master_name}>
+                              {r.assigned_master_name}
                             </span>
-                          ) : null}
+                          ) : <span className="text-xs text-slate-300">—</span>}
                         </td>
                         {showStage && (
                           <td className="px-3 py-3">
@@ -772,14 +810,21 @@ export const ZumbaPanel = ({ branchId }) => {
                           {/* Shown only when something is actually outstanding — a fully
                               paid row saying "0 due" is noise on every line. */}
                           {due > 0 ? <span className="ml-1 text-[10px] text-amber-600">{rupees(due)} due</span> : null}
-                          {/* How it came in, under the figure it describes. Absent on a row
-                              that has collected nothing, where there is nothing to describe. */}
+                        </td>
+                        {/* Beside the figure it describes rather than under it, so a column
+                            of modes can be read down. The reference sits below the mode:
+                            it is what a disputed payment is traced by, not a second mode. */}
+                        <td className="px-3 py-3">
                           {r.payment_mode ? (
-                            <p className="mt-0.5 truncate text-[10px] font-semibold uppercase tracking-wide text-slate-400" title={r.payment_reference || ""}>
-                              {PAYMENT_MODE_LABELS[r.payment_mode] || r.payment_mode}
-                              {r.payment_reference ? <span className="font-normal normal-case tracking-normal text-slate-400"> · {r.payment_reference}</span> : null}
-                            </p>
-                          ) : null}
+                            <>
+                              <span className="inline-block rounded bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
+                                {PAYMENT_MODE_LABELS[r.payment_mode] || r.payment_mode}
+                              </span>
+                              {r.payment_reference ? (
+                                <p className="mt-0.5 truncate text-[10px] text-slate-400" title={r.payment_reference}>{r.payment_reference}</p>
+                              ) : null}
+                            </>
+                          ) : <span className="text-xs text-slate-300">—</span>}
                         </td>
                         <td className="px-3 py-3 text-xs text-slate-500">{shortDate(r.created_at)}</td>
                         <td className="px-3 py-3 text-right">
