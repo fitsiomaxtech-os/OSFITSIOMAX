@@ -587,6 +587,13 @@ async def _clean(payload: ZumbaInput, user: V3UserOut) -> dict:
 
     source = _source(payload.source)
     master_name = (payload.master_name or "").strip()
+    # A master referring from their own board signs the row with their own name, so when
+    # that name is missing it is because the account was created without one -- not because
+    # the question went unanswered. Signing it with the account instead of refusing keeps
+    # the referral on the branch's Refer Master card, which is the whole point of sending
+    # it; an account with no name at all is the only case left to refuse.
+    if source == MASTER and not master_name and is_zumba_role(user.role):
+        master_name = (user.full_name or user.email or "").strip()
     if source == MASTER and not master_name:
         raise HTTPException(status_code=400, detail="Which master referred them?")
 
