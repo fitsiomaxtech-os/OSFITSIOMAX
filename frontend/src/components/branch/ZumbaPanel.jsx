@@ -3,7 +3,6 @@ import { CalendarDays, Music, Pencil, RefreshCw, Stethoscope, Trash2, UserPlus, 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
-import { StageTab } from "@/components/ui/stage-tab";
 import { MilkDateInput } from "@/components/ui/milk-calendar";
 import { toast } from "@/components/ui/sonner";
 import { listZumba, addZumba, updateZumba, deleteZumba } from "@/lib/api";
@@ -30,38 +29,58 @@ const sourceLabel = (r) => (
     : (SOURCES.find((s) => s.key === r.source) || { label: "Personal" }).label
 );
 
-// The strip, in the order asked for, split into the three things it is actually saying:
-// the total on its own, then where a registration came from, then the three that answer
-// something else. A wider gap between the groups is the whole point; without it seven
-// identical cards read as one undifferentiated row.
+// The strip, in the order asked for. Styled like the Human Resource board's stage cards:
+// a white card each, the name in its own colour above the count, and the selected one
+// picked out by taking that colour into its border and a wash of it behind.
 //
-// `grow` keeps every card the same width despite the groups holding different numbers of
-// them: a group grows in proportion to how many cards it holds, so 1 : 3 : 3 divides the
-// row into sevenths rather than into thirds. Written out as literal class names because
-// Tailwind's JIT only compiles what it can read in the source.
+// The tinted boxes that used to group these are gone with the style. They were doing the
+// work the colours now do, and a group box inside a row of cards that each carry their own
+// colour reads as two systems arguing about the same thing.
 //
-// `border` gives each card its own outline and `wrap` puts the group itself in a tinted
-// box: the gap says where a group ends, the box says the cards inside it belong together,
-// and the colour says which group it is. The colour is the whole point of the outline, so
-// it stays put when a card is selected; the selected card is picked out by its fill.
-//
-// The tints are a step up from the palest ones. These boxes sit straight on the page with
-// no frame around them, so the tint is the only thing marking where a group starts.
-const CARD_GROUPS = [
-  { key: "total", grid: "grid-cols-1", grow: "sm:flex-1", border: "border border-purple-300", wrap: "border border-purple-200 bg-purple-100", cards: [
-    { key: "all", label: "All" },
-  ] },
-  { key: "sources", grid: "grid-cols-3", grow: "sm:flex-[3]", border: "border border-orange-300", wrap: "border border-orange-200 bg-orange-100", cards: [
-    { key: "direct", label: "Direct" },
-    { key: "consultant", label: "Consultant" },
-    { key: "branch", label: "Branch" },
-  ] },
-  { key: "reach", grid: "grid-cols-3", grow: "sm:flex-[3]", border: "border border-emerald-500", wrap: "border border-emerald-200 bg-emerald-100", cards: [
-    { key: "fee_collected", label: "Fee's Collected" },
-    { key: "masters", label: "Masters" },
-    { key: "fitsiomax", label: "Fitsiomax" },
-  ] },
+// The colours run warm through the sources and cool through the three that follow, so the
+// old grouping is still legible without drawing a box around it.
+const CARDS = [
+  { key: "all", label: "All", color: "#a855f7" },
+  { key: "direct", label: "Direct", color: "#f59e0b" },
+  { key: "consultant", label: "Consultant", color: "#f97316" },
+  // Named Master, as asked. Note it sits two cards from "Masters", which counts referrals
+  // recorded against a named master — a different question from this one.
+  { key: "branch", label: "Master", color: "#d97706" },
+  { key: "fee_collected", label: "Fee's Collected", color: "#059669" },
+  { key: "masters", label: "Masters", color: "#10b981" },
+  { key: "fitsiomax", label: "Fitsiomax", color: "#14b8a6" },
 ];
+
+/** The Human Resource board's stage card, in the one other place that wants it.
+ *
+ * Copied rather than imported: that one is local to HumanResourceBoard.jsx and shaped for
+ * a five-across phone row of nine stages, where this row holds seven. Lifting it into
+ * components/ui to share would make both boards answer to one file for a look they only
+ * happen to agree on today. */
+const SummaryCard = ({ label, count, color, active, onClick, testid }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className={`w-[calc(33.333%-0.34rem)] min-w-0 rounded-lg border-2 px-1 py-1.5 text-center transition hover:shadow-sm sm:w-full sm:rounded-xl sm:px-4 sm:py-4 sm:text-left ${
+      active ? "shadow-sm" : "border-slate-200 bg-white"
+    }`}
+    style={active ? { borderColor: color, backgroundColor: `${color}14` } : undefined}
+    data-testid={testid}
+  >
+    {/* Wraps rather than truncates on a phone: "Fee's Collected" and "Fee's Collect…" are
+        the same width and only one of them can be read. */}
+    <span
+      className="block break-words text-[9px] font-bold uppercase leading-[1.15] [hyphens:auto] sm:truncate sm:text-xs sm:tracking-wider"
+      style={{ color }}
+      title={label}
+    >
+      {label}
+    </span>
+    <span className="mt-0.5 block text-lg font-extrabold leading-tight sm:mt-1 sm:text-3xl" style={{ color }}>
+      {count}
+    </span>
+  </button>
+);
 
 const rupees = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 
@@ -189,28 +208,24 @@ export const ZumbaPanel = ({ branchId }) => {
 
   return (
     <div className="flex flex-col gap-4" data-testid="branch-zumba-panel">
-      {/* Three tinted boxes, separated by a gap three times the one between cards, so the
-          split is read as a split rather than as a stray margin. No outer frame: the boxes
-          are the grouping, and a grey border round all three only argued with them.
-          On a phone the boxes stack instead, one line each: All, then the three desks,
-          then the three that follow. */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:flex-nowrap sm:gap-6" data-testid="zumba-summary">
-        {CARD_GROUPS.map((g) => (
-          <div key={g.key} className={"grid gap-2 rounded-lg p-1.5 sm:flex sm:flex-nowrap " + g.grid + " " + g.grow + " " + g.wrap} data-testid={"zumba-group-" + g.key}>
-            {g.cards.map((c) => (
-              <StageTab
-                key={c.key}
-                label={c.label}
-                count={summary?.[c.key] || 0}
-                active={card === c.key}
-                onClick={() => setCard(c.key === "all" ? "all" : (card === c.key ? "all" : c.key))}
-                testid={`zumba-card-${c.key}`}
-                gridded
-                plain
-                borderClass={g.border}
-              />
-            ))}
-          </div>
+      {/* One row, the way Human Resource lays its stages out. Three across on a phone so
+          seven cards land as 3 + 3 + 1 and the whole strip is visible without a swipe;
+          flex-wrap rather than a grid there, because a grid pins the last card to the first
+          column and leaves a hole, and a partial row cannot be centred. */}
+      <div
+        className="flex flex-wrap justify-center gap-1.5 sm:grid sm:grid-cols-4 sm:gap-3 lg:grid-cols-7"
+        data-testid="zumba-summary"
+      >
+        {CARDS.map((c) => (
+          <SummaryCard
+            key={c.key}
+            label={c.label}
+            count={summary?.[c.key] || 0}
+            color={c.color}
+            active={card === c.key}
+            onClick={() => setCard(c.key === "all" ? "all" : (card === c.key ? "all" : c.key))}
+            testid={`zumba-card-${c.key}`}
+          />
         ))}
       </div>
 
