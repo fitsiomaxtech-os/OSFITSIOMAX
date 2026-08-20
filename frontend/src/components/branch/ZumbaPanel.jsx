@@ -587,6 +587,12 @@ export const ZumbaPanel = ({ branchId }) => {
 
   const save = async () => {
     if (!form?.name?.trim()) { toast.error("Name is required"); return; }
+    // Belt to the server's braces: a lead-backed row has no registration to write to, and
+    // saying so here costs one comparison rather than a round trip that can only fail.
+    if (String(form.id || "").startsWith("lead:")) {
+      toast.error("Referred on the consultation — change it there, not here");
+      return;
+    }
     const wantsReference = Number(form.fee_paid) > 0 && REFERENCE_LABELS[form.payment_mode];
     if (wantsReference && !(form.payment_reference || "").trim()) {
       toast.error(`Enter the ${wantsReference}`);

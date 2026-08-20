@@ -535,6 +535,32 @@ async def _referred_rows(branch_id: Optional[str], entry_stage: str = "") -> lis
     return rows
 
 
+# A referral's row carries the lead's id under this prefix (see _referred_rows), so an id
+# arriving with it is not a registration that has gone missing -- it is a row that was never
+# in this collection, and "not found" sends the reader looking for a deletion that never
+# happened.
+LEAD_ROW_PREFIX = "lead:"
+
+
+async def _registration_or_400(registration_id: str) -> dict:
+    """The registration this id names, or the reason there is none.
+
+    Split out of the four routes that each did the lookup themselves, because the answer for
+    a lead-backed row is the same in all four and it is not "not found": the consultation
+    owns that record, and it is edited, ended and removed there. Said once here, so a client
+    running an older bundle is told what happened rather than told to go hunting.
+    """
+    if str(registration_id or "").startswith(LEAD_ROW_PREFIX):
+        raise HTTPException(
+            status_code=400,
+            detail="This is a Consultant's referral, read live from the consultation that made it. Change it there — un-ticking Zumba on the lead takes it off this tab.",
+        )
+    existing = await v3_col("zumba_registrations").find_one({"id": registration_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Registration not found")
+    return existing
+
+
 @router.get("/branch/zumba")
 async def list_zumba(
     branch_id: Optional[str] = Query(None),
@@ -817,9 +843,7 @@ async def update_zumba(
     payload: ZumbaInput,
     user: V3UserOut = Depends(require_zumba_reader),
 ):
-    existing = await v3_col("zumba_registrations").find_one({"id": registration_id}, {"_id": 0})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Registration not found")
+    existing = await _registration_or_400(registration_id)
     # A Branch Admin or a Zumba master edits their own branch's registrations, nobody else's.
     if _own_branch_only(user) and existing.get("branch_id") != user.branch_id:
         raise HTTPException(status_code=403, detail="Not your branch")
@@ -845,9 +869,7 @@ async def move_zumba_stage(
     is the thing done daily, from a dropdown in the list, and routing it through the full
     payload would mean the rest of the record had to be sent along to change one word.
     """
-    existing = await v3_col("zumba_registrations").find_one({"id": registration_id}, {"_id": 0})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Registration not found")
+    existing = await _registration_or_400(registration_id)
     if _own_branch_only(user) and existing.get("branch_id") != user.branch_id:
         raise HTTPException(status_code=403, detail="Not your branch")
 
@@ -883,9 +905,7 @@ async def set_zumba_status(
     Putting somebody back on the roll is the same route with status active, and that one
     needs no reason: returning to the class is the normal state resuming, not an event.
     """
-    existing = await v3_col("zumba_registrations").find_one({"id": registration_id}, {"_id": 0})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Registration not found")
+    existing = await _registration_or_400(registration_id)
     if _own_branch_only(user) and existing.get("branch_id") != user.branch_id:
         raise HTTPException(status_code=403, detail="Not your branch")
 
@@ -916,9 +936,7 @@ async def delete_zumba(
     registration_id: str,
     user: V3UserOut = Depends(require_zumba_reader),
 ):
-    existing = await v3_col("zumba_registrations").find_one({"id": registration_id}, {"_id": 0})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Registration not found")
+    existing = await _registration_or_400(registration_id)
     if _own_branch_only(user) and existing.get("branch_id") != user.branch_id:
         raise HTTPException(status_code=403, detail="Not your branch")
     await v3_col("zumba_registrations").delete_one({"id": registration_id})
