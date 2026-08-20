@@ -367,7 +367,7 @@ async def list_zumba(
     branch_id = await _branch_for(user, branch_id)
     query = _visible_query(user, branch_id)
     if query is None:
-        return {"summary": {}, "registrations": [], "masters": []}
+        return {"summary": {}, "registrations": [], "masters": [], "stages": []}
 
     stages = await _zumba_stages()
     entry_stage = _entry_stage(stages)
