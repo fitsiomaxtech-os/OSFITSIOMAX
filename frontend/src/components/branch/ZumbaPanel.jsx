@@ -292,7 +292,7 @@ export const ZumbaPanel = ({ branchId }) => {
       list = list.filter((r) => (r.name || "").toLowerCase().includes(q) || (r.phone || "").includes(q));
     }
     return list;
-  }, [rows, card, search, from, to]);
+  }, [rows, card, search, dateFilter]);
 
   const moveStage = async (row, stage) => {
     if (!stage || stage === row.stage) return;
