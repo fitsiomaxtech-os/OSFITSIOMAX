@@ -385,14 +385,23 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
     setImagePreview(URL.createObjectURL(file));
   };
 
-  // An existing package keeps the count it was saved with. Editing one to correct a price
-  // should not quietly relabel it as a course of a different length — which is exactly what
-  // recalculating from the catalogue default would do to everything saved before this.
-  // A Zumba membership is the exception: its length is the plan, so the picker sets the
-  // class count outright instead of the saved one being preserved.
-  const sessions = isZumba
-    ? zumbaSessionsFor(planMonths)
-    : (item?.sessions_online || item?.sessions_offline || fixedSessionsFor(category));
+  // How many sessions the package contains. Seeded from the saved package when editing,
+  // from the shelf's default when creating, and editable from there.
+  //
+  // It used to be a const with no input behind it, so a package was stuck for life with
+  // the count it was created at — a 12-session course could only ever be built by creating
+  // a new package and deleting the old one. Seeding still never recalculates from the
+  // catalogue default, so opening an old package to fix a price does not quietly relabel
+  // it as a course of a different length; it now just lets that length be changed on
+  // purpose.
+  //
+  // Zumba is the exception and stays derived: its length *is* the plan, so the months
+  // picker sets the class count and an editable box beside it would be a second, arguing
+  // source for the same number.
+  const [sessionCount, setSessionCount] = useState(
+    () => item?.sessions_online || item?.sessions_offline || fixedSessionsFor(category),
+  );
+  const sessions = isZumba ? zumbaSessionsFor(planMonths) : Math.max(0, Number(sessionCount) || 0);
   const perClass = sessions > 0 ? (Number(planPrice) || 0) / sessions : 0;
   const courseRate = (total) => (sessions > 0 ? (Number(total) || 0) / sessions : 0);
   // A course shelf's boxes already hold the totals; everywhere else the total is the rate
@@ -402,6 +411,10 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
 
   const submit = async () => {
     if (!name.trim()) { toast.error("Package name is required"); return; }
+    // Refused rather than saved as zero: a package of no sessions prices every course at
+    // nothing on a course shelf, and on a per-session shelf it sells a course nobody can
+    // attend. Both are worse than being asked for a number.
+    if (!isZumba && !(sessions > 0)) { toast.error("Sessions must be at least 1"); return; }
     setSaving(true);
     try {
       let image_url = item?.image_url || null;
@@ -545,7 +558,20 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
                   <Input type="number" min="0" value={priceOnline} onChange={(e) => setPriceOnline(e.target.value)} className="h-8 pl-6 text-sm" data-testid="session-create-price-online" />
                 </div>
                 <label className="mb-0.5 block text-[10px] font-semibold text-emerald-700">Sessions</label>
-                <Input type="number" value={sessions} readOnly disabled className="h-8 bg-emerald-50 text-sm" data-testid="session-create-sessions-online" />
+                {/* One count behind both boxes — submit writes the same number to
+                    sessions_online and sessions_offline, so two independent inputs would be
+                    two ways to set one stored value. Editing either moves both. */}
+                <Input
+                  type="number"
+                  min="1"
+                  value={sessions}
+                  onChange={(e) => setSessionCount(e.target.value)}
+                  readOnly={isZumba}
+                  disabled={isZumba}
+                  title={isZumba ? "Set by the plan above" : undefined}
+                  className={`h-8 text-sm ${isZumba ? "bg-emerald-50" : ""}`}
+                  data-testid="session-create-sessions-online"
+                />
                 {/* No footer on a course shelf: the box above already holds the amount and
                     the label says what it covers. The per-session figure that used to sit
                     here is the total divided down for the booking path — an internal
@@ -565,8 +591,21 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
                   <Input type="number" min="0" value={priceOffline} onChange={(e) => setPriceOffline(e.target.value)} className="h-8 pl-6 text-sm" data-testid="session-create-price-offline" />
                 </div>
                 <label className="mb-0.5 block text-[10px] font-semibold text-amber-700">Sessions</label>
-                <Input type="number" value={sessions} readOnly disabled className="h-8 bg-amber-50 text-sm" data-testid="session-create-sessions-offline" />
-                {!isCourseTotal && (
+                {/* One count behind both boxes — submit writes the same number to
+                    sessions_online and sessions_offline, so two independent inputs would be
+                    two ways to set one stored value. Editing either moves both. */}
+                <Input
+                  type="number"
+                  min="1"
+                  value={sessions}
+                  onChange={(e) => setSessionCount(e.target.value)}
+                  readOnly={isZumba}
+                  disabled={isZumba}
+                  title={isZumba ? "Set by the plan above" : undefined}
+                  className={`h-8 text-sm ${isZumba ? "bg-amber-50" : ""}`}
+                  data-testid="session-create-sessions-offline"
+                />
+{!isCourseTotal && (
                   <div className="mt-2 flex items-center justify-between border-t border-amber-200 pt-1.5">
                     <span className="text-[11px] font-semibold text-amber-700">Total Amount</span>
                     <span className="text-sm font-extrabold text-amber-900" data-testid="session-create-total-offline">₹{totalOffline}</span>
@@ -811,6 +850,17 @@ const SessionsPhysiotherapyPanel = ({ category = "physiotherapy", reloadToken, t
                       title="View"
                     >
                       <Eye className="h-3.5 w-3.5" />
+                    </button>
+                    {/* Editing was reachable only by opening View first and pressing Edit
+                        there, which is two clicks and a modal to correct a price. The View
+                        route still works — this is the same dialog, one click sooner. */}
+                    <button
+                      onClick={() => setEditingItem(it)}
+                      className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-sky-600"
+                      data-testid={`session-item-${it.id}-edit`}
+                      title="Edit"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
                     </button>
                     <button
                       onClick={() => handleDelete(it)}
