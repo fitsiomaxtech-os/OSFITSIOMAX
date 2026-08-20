@@ -13,7 +13,7 @@ import {
   getConsultationsBoard, moveConsultationStage, listStoreItems, collectRehabFee,
   collectPackagePayment, collectTreatmentFee, markInstallmentPaid, savePhysioDiagnosis, unlockPhysioDiagnosis,
   saveTreatmentSummary, unlockTreatmentSummary, stagesList, getDoctors,
-  assignPhysioWithSessions, getDoctorCalendar,
+  assignPhysioWithSessions, assignRehab, getDoctorCalendar,
   listNutritionCoaches, bookDietAppointment, collectDietFee,
   scheduleConsultationFollowUp, rescheduleConsultationFollowUp,
   getLeadRemarks, getLeadActivity,
@@ -686,6 +686,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // are never auto-filled: a treatment plan is spread across days deliberately, so the
   // Branch Admin fixes each session's date and time themselves.
   const [showPhysioModal, setShowPhysioModal] = useState(false);
+  const [assignTrack, setAssignTrack] = useState("treatment"); // "treatment" | "rehab"
   const [physioOptions, setPhysioOptions] = useState([]);
   const [physioPick, setPhysioPick] = useState("");
   const [assigningPhysio, setAssigningPhysio] = useState(false);
@@ -810,6 +811,9 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     // branch pipeline: the Head Physio's own board runs on head_consultation_stage and has
     // no such stage, so this must not fire there.
     if (!isConsultant && stageName === "Diet Consultation") return !!lead.diet_recommended;
+    // Rehab reads off the fee for the same reason Diet reads off its flag — nothing ever
+    // writes the stage. Branch pipeline only: the Consultant's own board has no such stage.
+    if (!isConsultant && stageName === "Rehab") return lead.rehab_fee_paid != null;
     return lead[stageField] === stageName;
   }, [isConsultant, stageField]);
 
@@ -1612,7 +1616,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   };
 
   // ---- Physio Assign (Branch Admin) — after fees are collected ----
-  const openPhysioModal = async () => {
+  // The same picker books two different courses. `track` says which: the treatment package
+  // (its own sessions, paid by the Treatment Fee) or the rehab course (its own days, paid
+  // by the Rehab Fee). They share a physio and a published calendar and nothing else — see
+  // backend/v3_rehab for why they are separate records.
+  const openPhysioModal = async (track = "treatment") => {
+    setAssignTrack(track);
     setShowPhysioModal(true);
     setShowSlotPicker(false);
     setPhysioPick(selectedLead.assigned_physio_id || "");
@@ -1658,7 +1667,16 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     return () => { cancelled = true; };
   }, [showPhysioModal]);
 
-  const totalSessionsNeeded = selectedLead?.session_package_sessions || 0;
+  const isRehabAssign = assignTrack === "rehab";
+  // Rehab counts its own days off the rehab course; treatment counts the session package.
+  const totalSessionsNeeded = (isRehabAssign
+    ? selectedLead?.rehab_package_sessions
+    : selectedLead?.session_package_sessions) || 0;
+  // What the picker calls a booked day, so its copy reads as the course being booked.
+  const dayNoun = isRehabAssign ? "rehab day" : "treatment day";
+  const courseName = (isRehabAssign
+    ? selectedLead?.rehab_package_name
+    : selectedLead?.session_package_name) || (isRehabAssign ? "Rehab course" : "Session package");
 
   // A physio treats two or three patients in the same hour, so a slot is only off the
   // table once it is FULL — not once it has anyone in it. Capacity comes from the
@@ -1708,6 +1726,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // already hold rather than a blank picker, so a reschedule only means moving the few
   // that actually change.
   useEffect(() => {
+    // Rehab starts from a blank plan: the calendar's booked map now carries this lead's
+    // treatment days as well as their rehab days, and pre-loading would quietly seed a
+    // rehab course with the dates of the treatment one. Re-assigning rehab replaces the
+    // course outright anyway — the backend clears the old days first.
+    if (isRehabAssign) return;
     if (!physioCalendarData || !selectedLead || physioPick !== selectedLead.assigned_physio_id) return;
     const seenDays = new Set();
     const mine = Object.entries(physioCalendarData.booked || {})
@@ -1725,7 +1748,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       });
     if (mine.length === 0) return;
     setPickedSessionSlots((prev) => (prev.length === 0 ? mine.slice(0, selectedLead.session_package_sessions || 0) : prev));
-  }, [physioCalendarData, physioPick, selectedLead]);
+  }, [physioCalendarData, physioPick, selectedLead, isRehabAssign]);
 
   const sortedPickedSlots = useMemo(() => [...pickedSessionSlots].sort(), [pickedSessionSlots]);
   const allSessionsPicked = totalSessionsNeeded > 0 && sortedPickedSlots.length === totalSessionsNeeded;
@@ -1736,6 +1759,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // against money that hasn't come in yet.
   const sessionPayment = useMemo(() => {
     const total = totalSessionsNeeded;
+    // The Rehab Fee is collected in one go — there is no installment plan to read, so every
+    // day of the course is paid for and the picker must not mark the later ones as owing.
+    if (isRehabAssign) {
+      const paidAmount = selectedLead?.rehab_fee_paid || 0;
+      return { total, paid: total, unpaid: 0, paidAmount, price: selectedLead?.rehab_package_price || paidAmount, dueAmount: 0, dueDate: null };
+    }
     const price = selectedLead?.session_package_price || 0;
     const rate = total > 0 ? price / total : 0;
     const installments = selectedLead?.treatment_fee_payment_details?.installments || [];
@@ -1761,7 +1790,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       dueAmount: outstanding.reduce((n, i) => n + (i.amount || 0), 0),
       dueDate: outstanding.map((i) => i.due_date).filter(Boolean).sort()[0] || null,
     };
-  }, [selectedLead, totalSessionsNeeded]);
+  }, [selectedLead, totalSessionsNeeded, isRehabAssign]);
 
   // Days are numbered in date order, so the first `paid` of them are the ones covered.
   const isPaidSession = (dayNumber) => dayNumber <= sessionPayment.paid;
@@ -1805,7 +1834,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     if (sameDay) { setPickedSessionSlots([...prev.filter((s) => s !== sameDay), slot]); return; }
 
     if (prev.length >= totalSessionsNeeded) {
-      toast.error(`All ${totalSessionsNeeded} treatment days are already fixed — remove one first`);
+      toast.error(`All ${totalSessionsNeeded} ${dayNoun}s are already fixed — remove one first`);
       return;
     }
     const next = [...prev, slot];
@@ -1839,20 +1868,27 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   const submitPhysioAssign = async () => {
     if (!physioPick) { toast.error("Choose a physio"); return; }
     if (!allSessionsPicked) {
-      toast.error(`Pick a date and time for all ${totalSessionsNeeded} sessions (${sortedPickedSlots.length} placed so far)`);
+      toast.error(`Pick a date and time for all ${totalSessionsNeeded} ${dayNoun}s (${sortedPickedSlots.length} placed so far)`);
       return;
     }
     setAssigningPhysio(true);
     try {
-      const res = await assignPhysioWithSessions(selectedLead.id, { physio_id: physioPick, slot_times: sortedPickedSlots });
-      toast.success(`Physio assigned — ${res.sessions_booked} sessions booked`);
+      // Two courses, two endpoints, two collections. Rehab days must not be written as
+      // treatment sessions: the review chain and the "Day 3 of 7" count are taken off the
+      // treatment rows, and a rehab day landing there puts both out.
+      const res = isRehabAssign
+        ? await assignRehab({ lead_id: selectedLead.id, physio_id: physioPick, slot_times: sortedPickedSlots })
+        : await assignPhysioWithSessions(selectedLead.id, { physio_id: physioPick, slot_times: sortedPickedSlots });
+      toast.success(isRehabAssign
+        ? `Rehab assigned to ${res.physio_name} — ${res.days_booked} days booked`
+        : `Physio assigned — ${res.sessions_booked} sessions booked`);
       setShowSlotPicker(false);
       setShowPhysioModal(false);
       // Close the lead card instantly, same as a plain stage move.
       setSelectedLead(null);
       setBoard((b) => ({ ...b, leads: (b.leads || []).map((l) => l.id === res.lead.id ? res.lead : l) }));
     } catch (err) {
-      toast.error(err?.response?.data?.detail || "Failed to assign physio");
+      toast.error(err?.response?.data?.detail || (isRehabAssign ? "Failed to assign rehab" : "Failed to assign physio"));
     }
     setAssigningPhysio(false);
   };
@@ -3197,7 +3233,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             {completingConsultation ? "Saving..." : "Mark Consultation Completed"}
                           </Button>
                           {DietButton}
-                        {RehabButton}
                           {RehabButton}
                           {CancelButton}
                         </div>
@@ -3315,12 +3350,56 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       <div className={`${treatmentPaid ? "mt-2" : "mt-3"} flex items-center gap-1.5 [justify-content:safe_center] [&>*]:shrink-0`}>
                         {FeeActions}
                         {treatmentPaid && (
-                          <Button size="sm" className={`bg-violet-600 hover:bg-violet-700 ${ACT_BTN}`} onClick={openPhysioModal} data-testid="cons-open-physio-assign-from-fee-collected">
+                          <Button size="sm" className={`bg-violet-600 hover:bg-violet-700 ${ACT_BTN}`} onClick={() => openPhysioModal("treatment")} data-testid="cons-open-physio-assign-from-fee-collected">
                             <Lbl full="Assign Physio" short="Physio" />
                           </Button>
                         )}
                         {DietButton}
                         {RehabButton}
+                        {CancelButton}
+                      </div>
+                    </div>
+                  );
+                }
+
+                // The Rehab tab is a cross-cutting view, not a position in the pipeline:
+                // a patient is on it because their Rehab Fee is in, while their
+                // consultation_stage still says where they actually are. So this panel keys
+                // off the tab being looked at rather than off the lead's own stage — the
+                // same reason matchesStage reads the fee for it.
+                if (stageFilter === "Rehab" && selectedLead.rehab_fee_paid != null) {
+                  const rehabDays = selectedLead.rehab_package_sessions || 0;
+                  return (
+                    <div className="rounded-lg border border-cyan-200 bg-cyan-50 p-3" data-testid="cons-stage-panel-rehab">
+                      <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-cyan-700">
+                        <Activity className="h-3.5 w-3.5" /> Rehab
+                      </p>
+                      <p className="text-xs text-slate-600">
+                        <span className="font-semibold text-slate-800">{selectedLead.rehab_package_name || "Rehab course"}</span>
+                        {rehabDays ? ` · ${rehabDays} day${rehabDays > 1 ? "s" : ""}` : ""}
+                        {` · Rs.${selectedLead.rehab_fee_paid} collected`}
+                      </p>
+                      {selectedLead.rehab_physio_name ? (
+                        <p className="mt-1 text-xs text-slate-600">
+                          Rehab Physio: <span className="font-semibold text-slate-800">{selectedLead.rehab_physio_name}</span>
+                          {" — the days are on their calendar and on their board."}
+                        </p>
+                      ) : (
+                        <p className="mt-1 text-xs text-slate-600">
+                          Rehab Fee collected. Choose the physio who will deliver the course and fix a date and time for every day.
+                        </p>
+                      )}
+                      <div className="mt-3 flex items-center gap-1.5 [justify-content:safe_center] [&>*]:shrink-0">
+                        <Button
+                          size="sm"
+                          variant={selectedLead.rehab_physio_name ? "outline" : undefined}
+                          className={selectedLead.rehab_physio_name ? "text-xs" : "bg-cyan-600 text-xs text-white hover:bg-cyan-700"}
+                          onClick={() => openPhysioModal("rehab")}
+                          data-testid="cons-open-rehab-assign"
+                        >
+                          {selectedLead.rehab_physio_name ? "Reassign Rehab Physio" : "Assign Physio"}
+                        </Button>
+                        {DietButton}
                         {CancelButton}
                       </div>
                     </div>
@@ -3336,11 +3415,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         </p>
                         <p className="text-xs text-slate-600">Treatment Fee collected. Choose the physiotherapist who will deliver the sessions.</p>
                         <div className="mt-3 flex items-center gap-1.5 [justify-content:safe_center] [&>*]:shrink-0">
-                          <Button size="sm" className="bg-violet-600 text-xs hover:bg-violet-700" onClick={openPhysioModal} data-testid="cons-open-physio-assign">
+                          <Button size="sm" className="bg-violet-600 text-xs hover:bg-violet-700" onClick={() => openPhysioModal("treatment")} data-testid="cons-open-physio-assign">
                             Assign Physio
                           </Button>
                           {DietButton}
-                        {RehabButton}
                           {RehabButton}
                           {CancelButton}
                         </div>
@@ -3356,7 +3434,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           {selectedLead.diet_appointment_at && ` · ${dayLabel(selectedLead.diet_appointment_at.split("T")[0])} at ${to12h(selectedLead.diet_appointment_at.split("T")[1])}`}</p>
                       )}
                       <div className="mt-3 flex items-center gap-1.5 [justify-content:safe_center] [&>*]:shrink-0">
-                        <Button size="sm" variant="outline" className="text-xs" onClick={openPhysioModal} data-testid="cons-reassign-physio">
+                        <Button size="sm" variant="outline" className="text-xs" onClick={() => openPhysioModal("treatment")} data-testid="cons-reassign-physio">
                           Reassign Physio
                         </Button>
                         {DietButton}
@@ -4812,7 +4890,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                   </div>
 
                   <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600" data-testid="cons-physio-package-context">
-                    <p className="font-semibold text-slate-700">{selectedLead.session_package_name || "Session package"} · {totalSessionsNeeded} sessions</p>
+                    <p className="font-semibold text-slate-700">{courseName} · {totalSessionsNeeded} {dayNoun}s</p>
                     <p className="mt-0.5">
                       Treatment Fee: {selectedLead.treatment_fee_paid != null ? (
                         <span className="font-semibold text-emerald-700">Rs.{selectedLead.treatment_fee_paid} paid ({selectedLead.treatment_fee_payment_mode || "—"})</span>
@@ -4881,7 +4959,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     {assigningPhysio
                       ? "Assigning..."
                       : allSessionsPicked
-                      ? `Assign & Book ${totalSessionsNeeded} Sessions`
+                      ? `Assign & Book ${totalSessionsNeeded} ${isRehabAssign ? "Rehab Days" : "Sessions"}`
                       : "Choose Treatment Dates & Times"}
                   </Button>
                 </div>
@@ -4909,7 +4987,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           {physioCalendarData?.doctor_name || physioOptions.find((p) => p.id === physioPick)?.full_name || "Physio"}
                         </p>
                         <p className="text-[11px] leading-snug text-white/75 sm:text-[13px]">
-                          {selectedLead.session_package_name || "Session package"} · {totalSessionsNeeded} sessions ·
+                          {courseName} · {totalSessionsNeeded} {dayNoun}s ·
                           {" "}one session a day · {sessionMinutes} min each · {openSlotCount} slots open
                         </p>
                       </div>
@@ -4942,7 +5020,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         className="w-full rounded-md border border-emerald-900 bg-emerald-700 px-3 py-1 text-center text-[11px] font-bold text-white shadow-sm sm:w-auto sm:rounded-lg sm:border-2 sm:px-4 sm:py-2 sm:text-sm"
                         data-testid="cons-slot-picker-count"
                       >
-                        {sortedPickedSlots.length} of {totalSessionsNeeded} treatment days fixed
+                        {sortedPickedSlots.length} of {totalSessionsNeeded} {dayNoun}s fixed
                       </span>
                       <span className="hidden w-full rounded-lg border-2 border-emerald-400 bg-emerald-50 sm:block px-3 py-1.5 text-center text-xs font-bold text-emerald-700 shadow-sm sm:w-auto sm:px-4 sm:py-2 sm:text-left sm:text-sm" data-testid="cons-payment-paid">
                         {sessionPayment.paid} session{sessionPayment.paid === 1 ? "" : "s"} PAID
@@ -5052,7 +5130,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             <span className="flex items-center gap-1"><span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400" /> Slots open</span>
                           </div>
                           <p className="text-[13px] text-slate-400">
-                            One treatment session a day — {totalSessionsNeeded} sessions means {totalSessionsNeeded} separate
+                            One {dayNoun} a day — {totalSessionsNeeded} means {totalSessionsNeeded} separate
                             days. Only days this physio has opened in <b>PHYSIO CALENDAR</b> can be picked. Pick a
                             time and it <b>jumps to the next open date</b> on its own, so the plan is laid out in one
                             run. Picking another time on a day already fixed <b>moves</b> that day's session and stays put.
@@ -5239,8 +5317,8 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     <div className="text-[12px] leading-snug text-slate-500 sm:text-[13px]">
                       <p className="font-bold text-slate-700">
                         {allSessionsPicked
-                          ? `All ${totalSessionsNeeded} treatment days are fixed${treatmentPlan.length > 0 ? ` · ${dayLabel(treatmentPlan[0].date)} to ${dayLabel(treatmentPlan[treatmentPlan.length - 1].date)}` : ""}.`
-                          : `${totalSessionsNeeded - sortedPickedSlots.length} more treatment day${totalSessionsNeeded - sortedPickedSlots.length === 1 ? "" : "s"} still need a date and time.`}
+                          ? `All ${totalSessionsNeeded} ${dayNoun}s are fixed${treatmentPlan.length > 0 ? ` · ${dayLabel(treatmentPlan[0].date)} to ${dayLabel(treatmentPlan[treatmentPlan.length - 1].date)}` : ""}.`
+                          : `${totalSessionsNeeded - sortedPickedSlots.length} more ${dayNoun}${totalSessionsNeeded - sortedPickedSlots.length === 1 ? "" : "s"} still need a date and time.`}
                       </p>
                       {sessionPayment.unpaid > 0 && (
                         <p className="mt-1 font-bold text-rose-600" data-testid="cons-slot-picker-unpaid-note">
@@ -5259,7 +5337,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         disabled={assigningPhysio || !allSessionsPicked}
                         data-testid="cons-slot-picker-submit"
                       >
-                        {assigningPhysio ? "Assigning..." : `Assign & Book ${totalSessionsNeeded} Sessions`}
+                        {assigningPhysio ? "Assigning..." : `Assign & Book ${totalSessionsNeeded} ${isRehabAssign ? "Rehab Days" : "Sessions"}`}
                       </Button>
                     </div>
                   </div>

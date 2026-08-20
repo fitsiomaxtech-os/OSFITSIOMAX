@@ -426,7 +426,14 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
           key: `day-${s.id}`,
           lead: lead || { id: s.lead_id, name: s.lead_name },
           time: (s.slot_time.split("T")[1] || "").slice(0, 5),
-          label: `Day ${s.session_number} of ${s.total_sessions}`,
+          // A rehab day says so. It is the same physio in the same room, but it belongs to
+          // the rehab course rather than the session package, and reading "Day 3 of 7" off
+          // it would have the patient three days into a treatment plan they may not even
+          // be on. The backend tags these — see _rehab_rows in v3_physio_board.
+          label: s.track === "rehab"
+            ? `Rehab Day ${s.session_number} of ${s.total_sessions}`
+            : `Day ${s.session_number} of ${s.total_sessions}`,
+          track: s.track || "treatment",
           sessionNumber: s.session_number,
           totalSessions: s.total_sessions,
           week: s.week_number,

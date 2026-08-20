@@ -41,10 +41,18 @@ async def get_doctor_calendar(doctor_id: str, _: V3UserOut = Depends(v3_require_
         {"coach_id": doctor_id, "status": "upcoming"},
         {"_id": 0, "slot_time": 1, "lead_name": 1, "lead_id": 1, "id": 1},
     ).to_list(1000)
+    # And rehab days from `rehab_sessions` (physio_id) — a fourth collection, for the same
+    # reason. A rehab day takes the same physio in the same room as a treatment day, so a
+    # calendar that did not read it would keep offering a slot that is already spoken for
+    # and let the picker double-book the hour.
+    rehab_rows = await v3_col("rehab_sessions").find(
+        {"physio_id": doctor_id, "status": "upcoming"},
+        {"_id": 0, "slot_time": 1, "lead_name": 1, "lead_id": 1, "id": 1},
+    ).to_list(1000)
     # A treatment day waiting on a date from the Branch Admin carries no slot_time. Left in,
     # it books the empty string — which then reads back as an occupied slot and can make the
     # picker refuse the very day it is being asked to place.
-    rows = [r for r in (*appt_rows, *session_rows, *diet_rows) if (r.get("slot_time") or "").strip()]
+    rows = [r for r in (*appt_rows, *session_rows, *diet_rows, *rehab_rows) if (r.get("slot_time") or "").strip()]
 
     # `booked` keeps its old shape — one row per slot — because callers read it to answer
     # "is this slot mine or someone else's". It cannot answer "how full is this slot",
@@ -177,7 +185,11 @@ async def remove_calendar_slots(doctor_id: str, payload: V3RemoveSlotsInput, _: 
         {"coach_id": doctor_id, "status": "upcoming", "slot_time": {"$in": list(normalized_remove)}},
         {"_id": 0, "slot_time": 1},
     ).to_list(100)
-    booked_times = {b["slot_time"] for b in [*booked_appts, *booked_sessions, *booked_checkins]}
+    booked_rehab = await v3_col("rehab_sessions").find(
+        {"physio_id": doctor_id, "status": "upcoming", "slot_time": {"$in": list(normalized_remove)}},
+        {"_id": 0, "slot_time": 1},
+    ).to_list(100)
+    booked_times = {b["slot_time"] for b in [*booked_appts, *booked_sessions, *booked_checkins, *booked_rehab]}
     blocked = normalized_remove.intersection(booked_times)
     if blocked:
         raise HTTPException(status_code=400, detail=f"Cannot remove booked slots: {', '.join(sorted(blocked))}")

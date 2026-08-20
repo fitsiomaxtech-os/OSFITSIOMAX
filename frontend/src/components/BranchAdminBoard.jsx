@@ -335,6 +335,10 @@ const BOTTOM_NAV_KEYS = ["pipeline", "review", "consultations"];
  */
 export const matchesConsultationStage = (lead, stageName) => {
   if (stageName === "Diet Consultation") return !!lead.diet_recommended;
+  // Rehab, on the same footing as Diet Consultation: a stage nothing writes. A patient is
+  // on the rehab list because their Rehab Fee is in, and they keep whatever position they
+  // actually hold in the physio pipeline — rehab runs beside it, not inside it.
+  if (stageName === "Rehab") return lead.rehab_fee_paid != null;
   return lead.consultation_stage === stageName;
 };
 

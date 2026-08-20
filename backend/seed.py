@@ -160,6 +160,44 @@ async def ensure_rnr_stage() -> None:
     })
 
 
+async def ensure_rehab_stage() -> None:
+    """Give the Branch consultation pipeline its Rehab pill, right after Physio Assign.
+
+    A stage nothing ever writes, exactly like Diet Consultation: a lead belongs under it
+    because its Rehab Fee has been collected, not because anyone moved it there — see
+    matchesConsultationStage on the frontend. Rehab runs beside the physio pipeline rather
+    than inside it, so the lead keeps whatever consultation_stage it actually holds.
+
+    Seeded here rather than added by hand in Pipeline Stage Management so every branch gets
+    it without a setup step. Idempotent, and a no-op until the consultation stages exist.
+    """
+    existing = await v3_col("pipeline_stages").find_one(
+        {"type": "consultation", "name": "Rehab"}, {"_id": 0, "id": 1}
+    )
+    if existing:
+        return
+    after = await v3_col("pipeline_stages").find_one(
+        {"type": "consultation", "name": "Physio Assign"}, {"_id": 0, "order": 1}
+    )
+    if not after:
+        return
+    insert_order = after["order"] + 1
+    await v3_col("pipeline_stages").update_many(
+        {"type": "consultation", "order": {"$gte": insert_order}},
+        {"$inc": {"order": 1}},
+    )
+    await v3_col("pipeline_stages").insert_one({
+        "id": str(uuid.uuid4()),
+        "name": "Rehab",
+        # Cyan, the colour the Rehab fee already wears on the Fee Collected panel.
+        "color": "#0891b2",
+        "type": "consultation",
+        "order": insert_order,
+        "is_final": False,
+        "created_at": now_iso(),
+    })
+
+
 async def ensure_branch_admin_stages() -> None:
     """Give the Branch pipeline its Branch-Admin-only opening: Branch Assign, then RNR.
 

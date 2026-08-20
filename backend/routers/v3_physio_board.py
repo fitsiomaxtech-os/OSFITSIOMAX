@@ -92,6 +92,28 @@ async def create_jr_physio(payload: V3CreateJrPhysioInput, user: V3UserOut = Dep
     }
 
 
+async def _rehab_rows(physio_id: str, prefix: str) -> list:
+    """This physio's rehab days whose date starts with `prefix`, shaped like a session row.
+
+    `track: "rehab"` is what tells the board apart from a treatment day. Every row also
+    carries day_number/total_days of its own *rehab course*, never of the session package —
+    the two are separate courses that happen to share a physio and a calendar, and merging
+    their counts is how "Day 3 of 7" starts lying. See v3_rehab for why they are separate
+    collections in the first place.
+    """
+    rows = await v3_col("rehab_sessions").find(
+        {"physio_id": physio_id, "slot_time": {"$regex": f"^{prefix}"}},
+        {"_id": 0},
+    ).sort("slot_time", 1).to_list(500)
+    for row in rows:
+        row["track"] = "rehab"
+        # Named the way the board already reads a session, so nothing downstream has to
+        # learn a second shape to render the row.
+        row["session_number"] = row.get("day_number")
+        row["total_sessions"] = row.get("total_days")
+    return rows
+
+
 @router.get("/physio/today")
 async def physio_today(physio_id: Optional[str] = None, user: V3UserOut = Depends(v3_require_roles("physio", "super_admin"))):
     doctor = await _resolve_doctor(user, physio_id)
@@ -104,6 +126,12 @@ async def physio_today(physio_id: Optional[str] = None, user: V3UserOut = Depend
         {"physio_id": doctor["id"], "slot_time": {"$regex": f"^{today}"}},
         {"_id": 0},
     ).sort("slot_time", 1).to_list(100)
+    # Rehab days sit on the same day, in the same room, for the same physio — so the day's
+    # list has to hold them or the physio arrives to a patient their board never mentioned.
+    # Merged in tagged rather than silently: a rehab day is not a day of the treatment
+    # package, and reading as one would put the "Day 3 of 7" count out.
+    sessions = sessions + await _rehab_rows(doctor["id"], today)
+    sessions.sort(key=lambda r: r.get("slot_time") or "")
 
     new_assigned = await v3_col("leads").find(
         {"assigned_physio_id": doctor["id"], "physio_assigned_at": {"$regex": f"^{today}"}},
@@ -140,6 +168,10 @@ async def physio_calendar(
         {"physio_id": doctor["id"], "slot_time": {"$regex": f"^{prefix}"}},
         {"_id": 0},
     ).sort("slot_time", 1).to_list(500)
+    # Same reason as /physio/today: the month has to show the rehab days too, or the week
+    # strip counts a day as free that the physio is already booked for.
+    sessions = sessions + await _rehab_rows(doctor["id"], prefix)
+    sessions.sort(key=lambda r: r.get("slot_time") or "")
 
     return {
         "sessions": sessions,
