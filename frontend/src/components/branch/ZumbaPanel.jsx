@@ -39,8 +39,6 @@ const sourceLabel = (r) => (
 //
 // The colours run warm through the sources and cool through the three that follow, so the
 // old grouping is still legible without drawing a box around it.
-const PINK = "#be185d";
-
 const CARDS = [
   { key: "all", label: "All", color: "#a855f7" },
   { key: "direct", label: "Direct", color: "#f59e0b" },
@@ -50,12 +48,6 @@ const CARDS = [
   // asked for. It held the branch-sourced count until that board existed and there was a
   // real master's referral to point it at.
   { key: "masters", label: "Refer Master", color: "#d97706" },
-  // Whether a master's name is against the row, asked from both ends: Master has one,
-  // Assign does not, and the two always sum to All. Dark pink because they are one
-  // question rather than two, and they sit on the seam — after the cards that count
-  // where people came from, before the ones that count money.
-  { key: "assign", label: "Assign", color: PINK },
-  { key: "master", label: "Master", color: PINK },
   // The last three are money, not counts: what the students paid, and how it splits. They
   // read as one figure and two halves of it, which is why they sit together at the end of
   // the row after the four that count people.
@@ -72,9 +64,6 @@ const CARDS = [
     no longer exists. Read off the pipeline rather than kept here, so a colour changed
     there changes here without a deploy. */
 const stageColor = (stages, name) => (stages.find((st) => st.name === name) || {}).color || "#64748b";
-
-/** Whether a registration has a master's name against it. */
-const hasMaster = (r) => !!(r.master_name || "").trim();
 
 // The two cards that are a share of the fee rather than a set of rows. Read by the filter
 // so a stale `card` value can never narrow the list to nothing.
@@ -204,15 +193,6 @@ export const ZumbaPanel = ({ branchId }) => {
     fitsiomax_revenue: Number(summary?.fitsiomax_revenue) || 0,
   }), [summary]);
 
-  // Assign and Master are worked out here rather than on the server: they are a cut of
-  // the rows this panel already holds, not a new fact about them. Every other count is
-  // still the server's own, so nothing that agreed before can start disagreeing.
-  const counts = useMemo(() => ({
-    ...(summary || {}),
-    master: rows.filter(hasMaster).length,
-    assign: rows.filter((r) => !hasMaster(r)).length,
-  }), [summary, rows]);
-
   const visible = useMemo(() => {
     let list = rows;
     // Total Fees is the one card that is not a source, so it filters on the money rather
@@ -220,10 +200,6 @@ export const ZumbaPanel = ({ branchId }) => {
     // have paid. The two revenue shares filter nothing — they are that same money split,
     // not a different set of people — and the card row does not offer them as a click.
     if (card === "total_fees") list = list.filter((r) => Number(r.fee_paid || 0) > 0);
-    // The pink pair splits on whether a master is named, not on where the person came
-    // from, so they cannot match against the server's `card` the way the rest do.
-    else if (card === "master") list = list.filter(hasMaster);
-    else if (card === "assign") list = list.filter((r) => !hasMaster(r));
     else if (card !== "all" && !DERIVED_CARDS.has(card)) list = list.filter((r) => r.card === card);
     if (stageFilter) list = list.filter((r) => r.stage === stageFilter);
     if (from) list = list.filter((r) => dayOf(r.created_at) >= from);
@@ -330,7 +306,7 @@ export const ZumbaPanel = ({ branchId }) => {
           <SummaryCard
             key={c.key}
             label={c.label}
-            count={c.money ? rupees(money[c.key]) : (counts[c.key] || 0)}
+            count={c.money ? rupees(money[c.key]) : (summary?.[c.key] || 0)}
             color={c.color}
             active={card === c.key}
             readOnly={Boolean(c.derived)}
