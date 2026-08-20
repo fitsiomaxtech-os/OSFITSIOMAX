@@ -2640,6 +2640,21 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         Treatment Package: <span className="font-semibold">{selectedLead.session_package_name}</span>
                       </p>
                     )}
+                    {/* The other two courses the Consultant can pick. Only the treatment
+                        package was named here, so a patient sent to Rehab read as "+ Rehab"
+                        with no way to see which course was chosen without reopening the
+                        Consultant's own form. */}
+                    {selectedLead.rehab_referred && selectedLead.rehab_package_name && (
+                      <p className="mt-0.5 text-xs text-slate-600" data-testid="cons-decision-summary-rehab">
+                        Rehab Package: <span className="font-semibold">{selectedLead.rehab_package_name}</span>
+                        {selectedLead.rehab_package_sessions ? <span className="text-slate-400"> · {selectedLead.rehab_package_sessions} sessions</span> : null}
+                      </p>
+                    )}
+                    {selectedLead.zumba_recommended && selectedLead.zumba_package_name && (
+                      <p className="mt-0.5 text-xs text-slate-600" data-testid="cons-decision-summary-zumba">
+                        Zumba Plan: <span className="font-semibold">{selectedLead.zumba_package_name}</span>
+                      </p>
+                    )}
                     <p className="mt-1.5 text-[11px] text-slate-500">Sent to Branch Admin — Consultation Visit.</p>
                     {/* Reopens the form on the choice and package already saved, rather
                         than on a blank one — see beginEditDecision. */}
@@ -3104,6 +3119,31 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           <div className="flex items-center justify-between" data-testid="cons-collect-diet-fee-row">
                             <span className="text-xs text-slate-500">Diet Fee</span>
                             <span className="font-semibold text-slate-800">{dietFeeDue != null ? `Rs.${dietFeeDue}` : "—"}</span>
+                          </div>
+                        )}
+                        {/* Rehab, gated the same way Diet is. The Consultant can send a
+                            patient to rehab and pick the course here, and none of it
+                            reached this panel — the one screen Branch Admin reads before
+                            taking money. They quoted the consultation fee alone and the
+                            rehab course went uncollected, because nothing said there was
+                            one. The course is named as well as priced: "Rs.18000" with no
+                            idea what it buys is not something to ask a patient to pay.
+                            Its own Collect Rehab Fee button appears once the consultation
+                            fee is in, which is why this is a quote and not a second
+                            button here. */}
+                        {selectedLead.rehab_referred && (
+                          <div data-testid="cons-collect-rehab-fee-row">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs text-slate-500">Rehab Fee</span>
+                              <span className="font-semibold text-slate-800">{selectedLead.rehab_package_price != null ? `Rs.${selectedLead.rehab_package_price}` : "—"}</span>
+                            </div>
+                            {selectedLead.rehab_package_name && (
+                              <p className="text-[11px] text-slate-400">
+                                {selectedLead.rehab_package_name}
+                                {selectedLead.rehab_package_sessions ? ` · ${selectedLead.rehab_package_sessions} sessions` : ""}
+                                {selectedLead.rehab_package_mode ? ` · ${selectedLead.rehab_package_mode}` : ""}
+                              </p>
+                            )}
                           </div>
                         )}
                         {alreadyPaid && (
