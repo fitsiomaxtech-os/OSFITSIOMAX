@@ -423,13 +423,46 @@ async def update_employee(emp_id: str, payload: EmployeeUpdate, _: V3UserOut = D
     res = await v3_col("employees").update_one({"id": emp_id}, {"$set": updates})
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Employee not found")
-    if "full_name" in updates:
+    # Both cascades want the same list, so it is fetched once and only when one of them
+    # actually has something to do.
+    linked_user_ids = (
+        await v3_col("users").distinct("id", {"employee_id": emp_id})
+        if ("full_name" in updates or "branch_id" in updates)
+        else []
+    )
+
+    if "full_name" in updates and linked_user_ids:
         # Cascade the rename to any linked User account, and from there to their doctors
         # record too — full_name is denormalized across employees/users/doctors.
-        linked_user_ids = await v3_col("users").distinct("id", {"employee_id": emp_id})
-        if linked_user_ids:
-            await v3_col("users").update_many({"employee_id": emp_id}, {"$set": {"full_name": updates["full_name"]}})
-            await v3_col("doctors").update_many({"user_id": {"$in": linked_user_ids}}, {"$set": {"full_name": updates["full_name"]}})
+        await v3_col("users").update_many({"employee_id": emp_id}, {"$set": {"full_name": updates["full_name"]}})
+        await v3_col("doctors").update_many({"user_id": {"$in": linked_user_ids}}, {"$set": {"full_name": updates["full_name"]}})
+
+    if "branch_id" in updates and linked_user_ids:
+        # Moving an employee has to move the login with them, or the record says one branch
+        # and the account they sign in with still scopes to another. The account is the half
+        # that decides what they can actually see.
+        #
+        # ALL_BRANCHES has no equivalent on a user: covering everything is said there by
+        # holding no branches at all, which list_users reads back as org-wide for the roles
+        # that can be. So it clears, and so does an employee taken off their branch — an
+        # account with no branch reads nothing rather than being handed somebody else's,
+        # which is the safe direction for this to fail in.
+        target = "" if updates["branch_id"] in (ALL_BRANCHES, "") else updates["branch_id"]
+        await v3_col("users").update_many({"employee_id": emp_id}, {"$set": {"branch_id": target}})
+
+        # branch_ids is deliberately left alone. A CONSULTANT or Physio can cover several
+        # branches, chosen on the user form, and an employee record holds one — flattening a
+        # considered selection down to it would lose what somebody set on purpose. Where a
+        # list exists it is what the OS reads, so this cascade is correctly a no-op there.
+        #
+        # The expert record moves only if it was posted to a branch to begin with. A Head
+        # Physio's is branchless by design (see consolidate_head_physio_doctors), and giving
+        # it a branch would undo that and hide them from every other one.
+        await v3_col("doctors").update_many(
+            {"user_id": {"$in": linked_user_ids}, "branch_id": {"$nin": ["", None]}},
+            {"$set": {"branch_id": target}},
+        )
+
     return await v3_col("employees").find_one({"id": emp_id}, {"_id": 0})
 
 
