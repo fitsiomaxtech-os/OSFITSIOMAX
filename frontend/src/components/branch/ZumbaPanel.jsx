@@ -36,6 +36,29 @@ const PAYMENT_MODES = [
   { value: "card", label: "Card" },
   { value: "account_transfer", label: "Account Transfer" },
 ];
+// The date row, in the shape DateFilterPopover hands back so the two controls write one
+// piece of state. "All" is null rather than an open-ended range: the absence of a filter
+// and a filter that happens to match everything read the same on screen but not in the
+// code, and null is the one the rest of this panel already understands.
+//
+// The week runs Monday to Sunday, matching DashboardBoard's row rather than the Sunday
+// start used elsewhere -- a class week is the week a branch talks about.
+const startOfDay = (d) => { const n = new Date(d); n.setHours(0, 0, 0, 0); return n; };
+const endOfDay = (d) => { const n = new Date(d); n.setHours(23, 59, 59, 999); return n; };
+const mondayOf = (d) => { const x = startOfDay(d); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; };
+
+const DATE_PRESETS = [
+  { key: "all", label: "All", range: () => null },
+  { key: "today", label: "Today", range: () => ({ from: startOfDay(new Date()), to: endOfDay(new Date()) }) },
+  { key: "this_week", label: "This Week", range: () => { const m = mondayOf(new Date()); const e = new Date(m); e.setDate(e.getDate() + 6); return { from: m, to: endOfDay(e) }; } },
+  { key: "this_month", label: "This Month", range: () => { const t = new Date(); return { from: startOfDay(new Date(t.getFullYear(), t.getMonth(), 1)), to: endOfDay(new Date(t.getFullYear(), t.getMonth() + 1, 0)) }; } },
+];
+const presetFilter = (p) => { const r = p.range(); return r ? { key: p.key, label: p.label, ...r } : null; };
+
+/** Whether a stored filter came from one of the pills above rather than the Custom dialog,
+ *  which is how the Custom pill knows to stay quiet while a preset is the active one. */
+const isPreset = (f) => !f || DATE_PRESETS.some((p) => p.key === f.key);
+
 const PAYMENT_MODE_LABELS = Object.fromEntries(PAYMENT_MODES.map((m) => [m.value, m.label]));
 
 // The modes that leave a trail somewhere else, and what that trail is called. A UPI ID and
@@ -43,6 +66,19 @@ const PAYMENT_MODE_LABELS = Object.fromEntries(PAYMENT_MODES.map((m) => [m.value
 // wants rather than a generic "reference" the desk has to interpret. Cash is absent
 // because cash leaves no trail — kept in step with REFERENCE_LABELS in
 // backend/routers/v3_zumba.py, which refuses a save that arrives without one.
+// The filter row's own list: the four the form offers, plus the rows that took no money
+// at all -- which is the answer a desk chasing payments actually wants and is not a mode.
+// Labelled "Bank Transfer" to match Accountant Manage and Finance > Approvals, which is
+// what this reads as everywhere else it is filtered by.
+const MODE_FILTERS = [
+  ["", "All Modes"],
+  ["cash", "Cash"],
+  ["upi", "UPI"],
+  ["card", "Card"],
+  ["account_transfer", "Bank Transfer"],
+  ["none", "Nothing collected"],
+];
+
 const REFERENCE_LABELS = { upi: "UPI ID", card: "Transaction ID", account_transfer: "Transaction ID" };
 const REFERENCE_PLACEHOLDERS = { upi: "name@bank", card: "Transaction number", account_transfer: "Transaction number" };
 
@@ -621,21 +657,7 @@ export const ZumbaPanel = ({ branchId }) => {
                   {branch.name}
                 </span>
               )}
-              {/* Next to the branch rather than out with the search box: it narrows which
-                  registrations are listed, the same as the cards above, and belongs with
-                  the things that say what this list is. */}
-              <select
-                value={modeFilter}
-                onChange={(e) => setModeFilter(e.target.value)}
-                className={`h-6 rounded border px-1.5 text-[11px] font-semibold transition ${modeFilter ? "border-sky-300 bg-sky-50 text-sky-700" : "border-slate-200 bg-white text-slate-500"}`}
-                title="Filter by how the fee was taken"
-                aria-label="Mode of payment"
-                data-testid="zumba-mode-filter"
-              >
-                <option value="">All payment modes</option>
-                {PAYMENT_MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-                <option value="none">Nothing collected</option>
-              </select>
+
               <span className="rounded bg-slate-100 px-1.5 py-px text-[10px] font-bold text-slate-500">{visible.length}</span>
               {/* Only ever drawn when there is something to draw it for, so an empty queue
                   leaves the header alone rather than reporting nothing to do. */}
@@ -681,16 +703,6 @@ export const ZumbaPanel = ({ branchId }) => {
               >
                 <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
               </Button>
-              {/* The same control Branch Leads carries: presets and a typed range in one
-                  dialog, rather than a bar of this tab's own. iconOnly keeps it to the
-                  glyph until a range is set, when it prints the range instead. */}
-              <DateFilterPopover
-                value={dateFilter}
-                onChange={setDateFilter}
-                centered
-                iconOnly
-                testid="zumba-date-filter"
-              />
               <Button
                 size="sm"
                 className="h-8 w-8 bg-sky-600 p-0 text-white hover:bg-sky-700"
@@ -701,6 +713,58 @@ export const ZumbaPanel = ({ branchId }) => {
               >
                 <UserPlus className="h-4 w-4" />
               </Button>
+            </div>
+          </div>
+
+          {/* Two rows, because they answer two questions and a person uses one at a time.
+              Pills rather than dropdowns: every option is a click away and the row says
+              what is currently on, where a closed select says only its own label. */}
+          <div className="flex flex-col gap-2 border-b border-slate-100 px-4 py-2.5">
+            <div className="flex flex-wrap items-center gap-1.5" data-testid="zumba-date-filter">
+              {DATE_PRESETS.map((preset) => {
+                const active = preset.key === "all" ? !dateFilter : dateFilter?.key === preset.key;
+                return (
+                  <button
+                    key={preset.key}
+                    type="button"
+                    onClick={() => setDateFilter(presetFilter(preset))}
+                    className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${active ? "bg-sky-600 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}
+                    data-testid={`zumba-date-${preset.key}`}
+                  >
+                    {preset.label}
+                  </button>
+                );
+              })}
+              {/* The trigger is a Button this component does not own, so its size and text
+                  are pinned from out here rather than by adding props to a control five
+                  other boards share. Handed null while a preset is active, so it reads
+                  "Custom" rather than echoing the pill already lit beside it. */}
+              <span className="[&_button]:h-[30px] [&_button]:rounded-md [&_button]:px-3 [&_button]:text-xs [&_button]:font-semibold [&_svg]:mr-1.5 [&_svg]:h-3.5 [&_svg]:w-3.5">
+                <DateFilterPopover
+                  value={isPreset(dateFilter) ? null : dateFilter}
+                  onChange={setDateFilter}
+                  centered
+                  placeholder="Custom"
+                  testid="zumba-date-custom"
+                />
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5" data-testid="zumba-mode-filter">
+              {MODE_FILTERS.map(([key, label]) => (
+                <button
+                  key={key || "all"}
+                  type="button"
+                  onClick={() => setModeFilter(key)}
+                  className={`rounded-full border px-3.5 py-1.5 text-xs font-medium transition ${
+                    modeFilter === key
+                      ? "border-indigo-600 bg-indigo-600 text-white shadow-sm"
+                      : "border-slate-200 bg-white text-slate-600 hover:border-indigo-300 hover:text-indigo-600"
+                  }`}
+                  data-testid={`zumba-mode-${key || "all"}`}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
           </div>
 
