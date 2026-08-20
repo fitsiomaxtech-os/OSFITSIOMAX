@@ -38,6 +38,16 @@ let webpackConfig = {
         // Functions stay exempt, since a hoisted declaration really is safe to call above
         // where it is written, and flagging those would bury this in noise.
         "no-use-before-define": ["error", { variables: true, functions: false, classes: true }],
+        // The sibling failure: a name that is never bound at all. It throws while React
+        // renders -- "from is not defined" took the Zumba tab down when a date filter was
+        // rewritten and the old names were left behind in a dependency array, where
+        // nothing reads them but the engine still evaluates them.
+        //
+        // exhaustive-deps stays a warning on purpose. It is the rule that would have caught
+        // that array before the names went stale, but there are hooks all over this app
+        // with deliberately partial deps, several with a disable comment already; promoting
+        // it would fail the build on all of them at once rather than on the one bug.
+        "no-undef": "error",
       },
     },
   },

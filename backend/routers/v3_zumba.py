@@ -650,13 +650,32 @@ async def list_zumba_masters(
     ]
 
 
+async def _write_branch(user: V3UserOut, branch_id: Optional[str]) -> Optional[str]:
+    """The branch a new registration is filed against.
+
+    Unlike reading, a Zumba master may name one: a referral is handed to whoever runs the
+    class nearest the person, which is not always the branch the master is on. It widens
+    nothing they can see -- a master's board reads assignments, not branches -- so filing a
+    referral elsewhere still leaves the receiving branch to decide whose class it becomes.
+
+    Checked against the branches that exist, so a stale id from a form left open writes a
+    row nobody's board reads rather than being told the branch is gone.
+    """
+    if branch_id and is_zumba_role(user.role):
+        exists = await v3_col("branches").find_one({"id": branch_id}, {"_id": 0, "id": 1})
+        if not exists:
+            raise HTTPException(status_code=400, detail="That branch no longer exists")
+        return branch_id
+    return await _branch_for(user, branch_id)
+
+
 @router.post("/branch/zumba")
 async def add_zumba(
     payload: ZumbaInput,
     branch_id: Optional[str] = Query(None),
     user: V3UserOut = Depends(require_zumba_reader),
 ):
-    branch_id = await _branch_for(user, branch_id)
+    branch_id = await _write_branch(user, branch_id)
     if not branch_id:
         raise HTTPException(status_code=400, detail="Pick a branch to register against")
 

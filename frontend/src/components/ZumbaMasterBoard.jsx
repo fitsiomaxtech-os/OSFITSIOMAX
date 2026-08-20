@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "@/components/ui/sonner";
-import { listZumba, addZumba } from "@/lib/api";
+import { listZumba, addZumba, getBranches } from "@/lib/api";
 
 // The three evenings the class runs, in the numbering Date.getDay() uses (0 = Sunday).
 // The same three the membership is sold on — see ZUMBA_CLASS_DAYS in PackagesBoard.jsx
@@ -151,10 +151,33 @@ const ClassCalendarModal = ({ students, onClose }) => {
  *  the money is taken and recorded -- asking for it here would invite a figure nobody at
  *  this desk can collect, and the Payment card counts what the branch actually banked. The
  *  source is fixed too: this form exists to record the ones a master brought in. */
-const ReferCustomerModal = ({ masterName, branchName, onClose, onSaved }) => {
+const ReferCustomerModal = ({ masterName, branchId, branchName, onClose, onSaved }) => {
   const [form, setForm] = useState({ ...EMPTY_REFERRAL });
   const [saving, setSaving] = useState(false);
+  // Starts on the master's own branch, which is where a referral goes nine times in ten.
+  // Held as an id rather than a name so renaming a branch cannot orphan a registration.
+  const [branch, setBranch] = useState(branchId || "");
+  const [branches, setBranches] = useState([]);
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+
+  // Fetched rather than passed down: the board only knows the one branch it is reading,
+  // and a referral may belong to another. A failed fetch leaves the picker on the master's
+  // own branch, which is the answer it would have given anyway.
+  useEffect(() => {
+    let live = true;
+    getBranches()
+      .then((rows) => {
+        if (!live) return;
+        const list = Array.isArray(rows) ? rows : [];
+        setBranches(list);
+        // Keeps the value and the options honest: a master whose own branch is not in the
+        // list would otherwise see the first option selected while the id underneath still
+        // pointed somewhere else, and save against a branch they never chose.
+        setBranch((cur) => (list.some((b) => b.id === cur) ? cur : (list[0]?.id || cur)));
+      })
+      .catch(() => { if (live) setBranches([]); });
+    return () => { live = false; };
+  }, []);
 
   const submit = async () => {
     if (!form.name.trim()) { toast.error("Name is required"); return; }
@@ -169,7 +192,7 @@ const ReferCustomerModal = ({ masterName, branchName, onClose, onSaved }) => {
         // Signed with the master's own name, so the branch's tab reads who referred them
         // rather than an anonymous "Master".
         master_name: masterName || "",
-      });
+      }, branch || undefined);
       // Says where they went, because they will not appear on the roll below: a referral
       // reaches the branch, and only the branch puts somebody in a class.
       toast.success("Referred to the branch. They join your roll once the branch assigns them to you.");
@@ -209,8 +232,25 @@ const ReferCustomerModal = ({ masterName, branchName, onClose, onSaved }) => {
             <label className="mb-1 block text-xs font-semibold text-slate-600">Area</label>
             <Input value={form.address} onChange={(e) => set("address", e.target.value)} placeholder="Area or locality" data-testid="zumba-refer-address" />
           </div>
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-slate-600" htmlFor="zumba-refer-branch">Branch</label>
+            {/* A select rather than a set of pills: there is one branch running Zumba today
+                and a row of one pill reads as a decision nobody is being asked to make. */}
+            <select
+              id="zumba-refer-branch"
+              value={branch}
+              onChange={(e) => setBranch(e.target.value)}
+              className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:border-violet-400 focus:outline-none"
+              data-testid="zumba-refer-branch"
+            >
+              {branches.length === 0 && <option value={branchId || ""}>{branchName || "Your branch"}</option>}
+              {branches.map((b) => (
+                <option key={b.id} value={b.id}>{b.branch_name || b.name || "Branch"}</option>
+              ))}
+            </select>
+          </div>
           <p className="rounded-md bg-violet-50 px-3 py-2 text-[11px] font-medium text-violet-700">
-            Recorded against <b>{branchName || "your branch"}</b>, referred by <b>{masterName || "you"}</b>, so the branch sees who brought them in.
+            Referred by <b>{masterName || "you"}</b>. Lands under <b>Refer Master</b> on that branch's Zumba tab, so the branch sees who brought them in.
           </p>
         </div>
 
@@ -412,6 +452,7 @@ export const ZumbaMasterBoard = ({ currentUser }) => {
       {referring && (
         <ReferCustomerModal
           masterName={currentUser?.full_name || ""}
+          branchId={branch?.id || ""}
           branchName={branch?.name || ""}
           onClose={() => setReferring(false)}
           onSaved={load}
