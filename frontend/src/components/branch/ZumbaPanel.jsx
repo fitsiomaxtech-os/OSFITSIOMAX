@@ -77,6 +77,15 @@ const sourceLabel = (r) => (
 //
 // The colours run warm through the sources and cool through the three that follow, so the
 // old grouping is still legible without drawing a box around it.
+// Kept in step with MASTER_SHARE in backend/routers/v3_zumba.py, which is what the card
+// totals are already split by. Only the per-row line below is worked out here; the
+// figures on the cards still come from the server, so the two cannot drift.
+//
+// A row's share is rounded for display like every other rupee figure here, so a column
+// of them can land a rupee off the card above it on an odd total. The card is the
+// figure of record.
+const MASTER_SHARE = 0.5;
+
 const CARDS = [
   { key: "all", label: "All", color: "#a855f7" },
   { key: "direct", label: "Direct", color: "#f59e0b" },
@@ -90,12 +99,13 @@ const CARDS = [
   // read as one figure and two halves of it, which is why they sit together at the end of
   // the row after the four that count people.
   //
-  // Only Total Fees filters — it has rows behind it, the ones that have paid. The two
-  // shares are the same money seen twice, so there is no subset of the list they could
-  // narrow to and they are not clickable.
+  // All three filter to the same rows — the students who have paid — because that is the
+  // money all three describe. What changes is what the Fee column says: Total Fees shows
+  // what came in, and each share shows the cut of it that card is counting, so opening one
+  // answers "which registrations is this figure made of, and how much from each".
   { key: "total_fees", label: "Total Fees", color: "#059669", money: true },
-  { key: "master_revenue", label: "Master's Revenue", color: "#10b981", money: true, derived: true },
-  { key: "fitsiomax_revenue", label: "Fitsiomax Revenue", color: "#14b8a6", money: true, derived: true },
+  { key: "master_revenue", label: "Master's Revenue", color: "#10b981", money: true, share: MASTER_SHARE },
+  { key: "fitsiomax_revenue", label: "Fitsiomax Revenue", color: "#14b8a6", money: true, share: 1 - MASTER_SHARE },
 ];
 
 /** The colour Super Admin gave a stage in CI/CD ROOTS, or a neutral slate for one that
@@ -103,9 +113,9 @@ const CARDS = [
     there changes here without a deploy. */
 const stageColor = (stages, name) => (stages.find((st) => st.name === name) || {}).color || "#64748b";
 
-// The two cards that are a share of the fee rather than a set of rows. Read by the filter
-// so a stale `card` value can never narrow the list to nothing.
-const DERIVED_CARDS = new Set(["master_revenue", "fitsiomax_revenue"]);
+// The cards that show a cut of the fee rather than the whole of it. Read by the filter,
+// which sends them to the same rows Total Fees opens.
+const REVENUE_CARDS = new Set(["master_revenue", "fitsiomax_revenue"]);
 
 /** The Human Resource board's stage card, in the one other place that wants it.
  *
@@ -247,14 +257,16 @@ export const ZumbaPanel = ({ branchId }) => {
     fitsiomax_revenue: Number(summary?.fitsiomax_revenue) || 0,
   }), [summary]);
 
+  // The share card currently open, if it is one — read once here rather than per row.
+  const openShare = useMemo(() => CARDS.find((c) => c.key === card && c.share), [card]);
+
   const visible = useMemo(() => {
     let list = rows;
-    // Total Fees is the one card that is not a source, so it filters on the money rather
-    // than on where the person came from: the rows behind the figure are the ones that
-    // have paid. The two revenue shares filter nothing — they are that same money split,
-    // not a different set of people — and the card row does not offer them as a click.
-    if (card === "total_fees") list = list.filter((r) => Number(r.fee_paid || 0) > 0);
-    else if (card !== "all" && !DERIVED_CARDS.has(card)) list = list.filter((r) => r.card === card);
+    // The three money cards filter on the money rather than on where the person came from:
+    // the rows behind all of them are the ones that have paid. The two shares open that
+    // same list, and say their own cut of each row in the Fee column.
+    if (card === "total_fees" || REVENUE_CARDS.has(card)) list = list.filter((r) => Number(r.fee_paid || 0) > 0);
+    else if (card !== "all") list = list.filter((r) => r.card === card);
     if (from) list = list.filter((r) => dayOf(r.created_at) >= from);
     if (to) list = list.filter((r) => dayOf(r.created_at) <= to);
     const q = search.trim().toLowerCase();
@@ -358,7 +370,6 @@ export const ZumbaPanel = ({ branchId }) => {
             count={c.money ? rupees(money[c.key]) : (summary?.[c.key] || 0)}
             color={c.color}
             active={card === c.key}
-            readOnly={Boolean(c.derived)}
             onClick={() => setCard(c.key === "all" ? "all" : (card === c.key ? "all" : c.key))}
             testid={`zumba-card-${c.key}`}
           />
@@ -532,6 +543,14 @@ export const ZumbaPanel = ({ branchId }) => {
                           {/* Shown only when something is actually outstanding — a fully
                               paid row saying "0 due" is noise on every line. */}
                           {due > 0 ? <span className="ml-1 text-[10px] text-amber-600">{rupees(due)} due</span> : null}
+                          {/* With a share card open, what that share takes from this row —
+                              under the fee rather than replacing it, so the row still says
+                              what the student actually paid. */}
+                          {openShare ? (
+                            <span className="block text-[10px] text-slate-500" data-testid={`zumba-share-${r.id}`}>
+                              {openShare.label}: <b className="text-slate-700">{rupees(paid * openShare.share)}</b>
+                            </span>
+                          ) : null}
                         </td>
                         <td className="px-3 py-3 text-xs text-slate-500">{shortDate(r.created_at)}</td>
                         <td className="px-3 py-3 text-right">
