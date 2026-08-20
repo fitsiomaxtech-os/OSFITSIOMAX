@@ -68,6 +68,84 @@ export const DURATION_OPTIONS = [
   { minutes: 120, label: "2 hours" },
 ];
 
+// ---------- Package artwork ----------
+//
+// The form asks for a 1080 x 1080 square, so anything larger is carrying pixels this OS
+// will never draw. A photo straight off a phone is several megabytes of them, and the web
+// server in front of the API caps a request body long before the API's own 5MB check ever
+// runs — nginx's client_max_body_size, 1MB by default. It refuses with a bare 413 and an
+// HTML page, so there is no `detail` to read and the failure arrives as "Failed to update"
+// with nothing said about why.
+//
+// Shrinking first means the request is a couple of hundred kilobytes and the question does
+// not come up. The 413 handling below stays anyway, for the file that will not shrink.
+const IMAGE_EDGE = 1080;
+const IMAGE_QUALITY = 0.85;
+const LEAVE_ALONE_UNDER = 300 * 1024;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // matches MAX_UPLOAD_BYTES in v3_store.py
+const IMAGE_TYPES = /\.(jpe?g|png|webp)$/i;
+
+const readableSize = (n) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+
+const shrinkImage = (file) => new Promise((resolve) => {
+  if (!String(file.type || "").startsWith("image/")) return resolve(file);
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    URL.revokeObjectURL(url);
+    const longest = Math.max(img.width, img.height);
+    const scale = Math.min(1, IMAGE_EDGE / (longest || 1));
+    // Already the right size and already small: re-encoding would only lose detail.
+    if (scale === 1 && file.size <= LEAVE_ALONE_UNDER) return resolve(file);
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(img.width * scale));
+    canvas.height = Math.max(1, Math.round(img.height * scale));
+    canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(
+      (blob) => {
+        // Whichever is smaller. Re-encoding an already-optimised PNG can come out bigger,
+        // and sending the larger one would be worse than having done nothing.
+        if (!blob || blob.size >= file.size) return resolve(file);
+        // Renamed because it is a JPEG now, and the server checks the extension.
+        const base = (file.name || "package").replace(/\.[^.]+$/, "");
+        resolve(new File([blob], `${base}.jpg`, { type: "image/jpeg" }));
+      },
+      "image/jpeg",
+      IMAGE_QUALITY,
+    );
+  };
+  // A format the browser cannot decode (HEIC off an iPhone, say) goes up as it is and is
+  // judged by the server's own extension check.
+  img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+  img.src = url;
+});
+
+/** Upload the artwork, shrunk first, saying what actually went wrong if it will not go. */
+const uploadPackageImage = async (file) => {
+  const ready = await shrinkImage(file);
+  if (ready.size > MAX_IMAGE_BYTES) {
+    throw new Error(`That image is ${readableSize(ready.size)} even after shrinking. Pick one under 5 MB.`);
+  }
+  try {
+    return await uploadStoreImage(ready);
+  } catch (err) {
+    // A 413 never reaches the API, so it carries no detail of its own to report.
+    if (err?.response?.status === 413) {
+      throw new Error(`The server refused the image at ${readableSize(ready.size)} — its upload limit is lower than this file. Try a smaller picture, or raise nginx client_max_body_size.`);
+    }
+    throw err;
+  }
+};
+
+/** What went wrong, in the words of whoever knows: the API's own message, else ours, else
+    the status. Anything is better than a bare "Failed to update", which was what a 413 and
+    a dropped connection both looked like. */
+const saveError = (err, verb) => (
+  err?.response?.data?.detail
+  || err?.message
+  || (err?.response?.status ? `${verb} failed (HTTP ${err.response.status})` : `${verb} failed`)
+);
+
 const PriceFields = ({ priceOnline, setPriceOnline, priceOffline, setPriceOffline, onlineTestId, offlineTestId }) => (
   <div className="grid grid-cols-2 gap-2">
     <div>
@@ -141,6 +219,13 @@ const CreateConsultationModal = ({ item, onClose, onSaved, kind = "consultation"
   const handleImageChange = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    // Refused here rather than after a round trip: the server checks the extension and
+    // would only say the same thing a second later, having carried the file to say it.
+    if (!IMAGE_TYPES.test(file.name || "")) {
+      toast.error("Only JPG, PNG or WEBP images can be used here");
+      e.target.value = "";
+      return;
+    }
     setImageFile(file);
     setImagePreview(URL.createObjectURL(file));
   };
@@ -151,7 +236,7 @@ const CreateConsultationModal = ({ item, onClose, onSaved, kind = "consultation"
     try {
       let image_url = item?.image_url || null;
       if (imageFile) {
-        const uploaded = await uploadStoreImage(imageFile);
+        const uploaded = await uploadPackageImage(imageFile);
         image_url = uploaded.url;
       }
       // Both prices carry the one figure when the kind is single-priced. Sending only
@@ -178,7 +263,7 @@ const CreateConsultationModal = ({ item, onClose, onSaved, kind = "consultation"
       onSaved();
       onClose();
     } catch (err) {
-      toast.error(err?.response?.data?.detail || `Failed to ${isEdit ? "update" : "create"}`);
+      toast.error(saveError(err, isEdit ? "Update" : "Create"));
     } finally {
       setSaving(false);
     }
@@ -402,6 +487,13 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
   const handleImageChange = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    // Refused here rather than after a round trip: the server checks the extension and
+    // would only say the same thing a second later, having carried the file to say it.
+    if (!IMAGE_TYPES.test(file.name || "")) {
+      toast.error("Only JPG, PNG or WEBP images can be used here");
+      e.target.value = "";
+      return;
+    }
     setImageFile(file);
     setImagePreview(URL.createObjectURL(file));
   };
@@ -439,7 +531,7 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
     try {
       let image_url = item?.image_url || null;
       if (imageFile) {
-        const uploaded = await uploadStoreImage(imageFile);
+        const uploaded = await uploadPackageImage(imageFile);
         image_url = uploaded.url;
       }
       const payload = {
@@ -472,7 +564,7 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
       onSaved();
       onClose();
     } catch (err) {
-      toast.error(err?.response?.data?.detail || `Failed to ${isEdit ? "update" : "create"}`);
+      toast.error(saveError(err, isEdit ? "Update" : "Create"));
     } finally {
       setSaving(false);
     }
