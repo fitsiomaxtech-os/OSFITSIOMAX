@@ -640,10 +640,13 @@ async def list_zumba_masters(
     rows = await v3_col("users").find(
         query, {"_id": 0, "id": 1, "full_name": 1, "email": 1, "role": 1}
     ).sort("full_name", 1).to_list(200)
+    # Super Admin excluded deliberately. is_zumba_role answers "may this account reach the
+    # Zumba desk", which Super Admin may, not "is this person a master who teaches a class",
+    # which they are not -- and this list is the one that hands students to somebody.
     return [
         {"id": r["id"], "name": (r.get("full_name") or r.get("email") or "").strip()}
         for r in rows
-        if is_zumba_role(r.get("role") or "")
+        if (r.get("role") or "") != "super_admin" and is_zumba_role(r.get("role") or "")
     ]
 
 

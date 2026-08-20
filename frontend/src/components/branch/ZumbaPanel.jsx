@@ -205,6 +205,10 @@ export const ZumbaPanel = ({ branchId }) => {
   // The Zumba shelf as Super Admin priced it — 1, 3 and 6 month memberships. Read rather
   // than hardcoded, so a change of price on the shelf is the change of price here.
   const [packages, setPackages] = useState([]);
+  // Which branch these rows belong to, as the server resolved it. Printed rather than
+  // assumed: an empty list is either "nobody has registered" or "you are looking at the
+  // wrong branch", and those two read identically until the branch is named.
+  const [branch, setBranch] = useState(null);
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState(null);
   // The Zumba pipeline exactly as Super Admin has it in CI/CD ROOTS. Nothing is hardcoded
@@ -221,6 +225,7 @@ export const ZumbaPanel = ({ branchId }) => {
       setSummary(data.summary || {});
       setMasters(data.masters || []);
       setStages(data.stages || []);
+      setBranch(data.branch || null);
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Could not load Zumba registrations");
     } finally {
@@ -305,11 +310,31 @@ export const ZumbaPanel = ({ branchId }) => {
 
   // Every master offered in the picker: the ones already referred from, plus one being
   // typed in now, so a new name is selectable the moment it exists.
+  /**
+   * Who can be named as the master who referred somebody.
+   *
+   * Three sources, in the order they matter. The Zumba accounts at this branch come first
+   * and are the answer nearly every time — a master with a login is a master the branch
+   * employs, and having to type their name while their account sits in the Assign To box
+   * below was the gap here. Then the names already typed onto earlier referrals, so a
+   * master with no account keeps working once introduced. Then whatever this row already
+   * says, so editing an old referral never silently blanks its master.
+   *
+   * Deduped on the name case-folded, since the same person reached from two of those
+   * sources is one option, not two that save the same string.
+   */
   const masterOptions = useMemo(() => {
-    const set = new Set(masters);
-    if (form?.source === MASTER && form.master_name) set.add(form.master_name);
-    return [...set].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
-  }, [masters, form]);
+    const seen = new Map();
+    const add = (name) => {
+      const label = (name || "").trim();
+      const key = label.toLowerCase();
+      if (label && !seen.has(key)) seen.set(key, label);
+    };
+    zumbaMasters.forEach((m) => add(m.name));
+    masters.forEach(add);
+    if (form?.source === MASTER) add(form.master_name);
+    return [...seen.values()].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+  }, [zumbaMasters, masters, form]);
 
   const openForm = (row) => {
     setNewMaster("");
@@ -394,6 +419,11 @@ export const ZumbaPanel = ({ branchId }) => {
             <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
               <Music className="h-4 w-4 text-sky-600" />
               Zumba Registrations
+              {branch?.name && (
+                <span className="rounded bg-sky-50 px-2 py-0.5 text-[11px] font-semibold text-sky-700" data-testid="zumba-branch-name">
+                  {branch.name}
+                </span>
+              )}
               <span className="rounded bg-slate-100 px-1.5 py-px text-[10px] font-bold text-slate-500">{visible.length}</span>
             </div>
             {/* The collected total used to be printed here because the card beside it had
@@ -452,7 +482,13 @@ export const ZumbaPanel = ({ branchId }) => {
             <p className="px-4 py-12 text-center text-sm text-slate-400">Loading…</p>
           ) : visible.length === 0 ? (
             <p className="px-4 py-12 text-center text-sm text-slate-400">
-              {rows.length === 0 ? "No Zumba registrations yet." : "Nothing under this filter."}
+              {rows.length > 0
+                ? "Nothing under this filter."
+                : branch?.name
+                  ? `No Zumba registrations at ${branch.name} yet. A registration is filed against the branch it was taken at — a master's referral lands on the branch their own account belongs to.`
+                  : branch
+                    ? "This account has no branch assigned, so there is no Zumba list to read. Assign one in HR Admin → Roles & Credentials."
+                    : "No Zumba registrations yet."}
             </p>
           ) : (
             <div className="overflow-x-auto">
