@@ -1266,8 +1266,12 @@ const RoleCellDropdown = ({ value, options, onChange, testid }) => {
 const StructureTab = ({ meta, reloadMeta }) => {
   const [depts, setDepts] = useState([]);
   const [employees, setEmployees] = useState([]);
+  const [branches, setBranches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState("");
+  // The row whose branch is being written, so its control can be held shut while the
+  // request is in flight rather than accepting a second change onto the first.
+  const [movingEmployee, setMovingEmployee] = useState("");
   // Which designation is open. One at a time, so the department's shape stays readable
   // while a designation's people are being looked at.
   const [openDesignation, setOpenDesignation] = useState("");
@@ -1277,9 +1281,10 @@ const StructureTab = ({ meta, reloadMeta }) => {
 
   const load = useCallback(async (keepOpen = false) => {
     try {
-      const [d, e] = await Promise.all([hrDepartments(), hrEmployees({})]);
+      const [d, e, b] = await Promise.all([hrDepartments(), hrEmployees({}), getBranches()]);
       setDepts(d || []);
       setEmployees(e || []);
+      setBranches(b || []);
       // Opens on the first department rather than on nothing. There is no "all" here —
       // the question this screen answers is about one department at a time.
       setSelected((prev) => prev || d?.[0]?.name || "");
@@ -1300,6 +1305,32 @@ const StructureTab = ({ meta, reloadMeta }) => {
   const holdersOf = (designation) => employees.filter(
     (e) => e.department === current?.name && e.designation === designation,
   );
+
+  /** Post somebody to a branch, or take them off one.
+   *
+   * A PATCH carrying nothing but the branch: the endpoint applies only what it is sent, so
+   * the rest of the record is not restated and cannot be flattened by an out-of-date copy
+   * held on this screen.
+   *
+   * The row is updated in place rather than by reloading everything, so the designation
+   * stays open and the list does not jump under the hand that just used it.
+   */
+  const moveToBranch = async (emp, branchId) => {
+    if (branchId === (emp.branch_id || "")) return;
+    setMovingEmployee(emp.id);
+    try {
+      await hrUpdateEmployee(emp.id, { branch_id: branchId });
+      const name = branches.find((b) => b.id === branchId)?.branch_name || "";
+      setEmployees((prev) => prev.map(
+        (e) => (e.id === emp.id ? { ...e, branch_id: branchId, branch_name: name } : e),
+      ));
+      toast.success(name ? `${emp.full_name} → ${name}` : `${emp.full_name} taken off their branch`);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not change the branch");
+    } finally {
+      setMovingEmployee("");
+    }
+  };
 
   if (loading) return <p className="py-12 text-center text-sm text-slate-400">Loading…</p>;
   if (depts.length === 0) {
@@ -1384,13 +1415,36 @@ const StructureTab = ({ meta, reloadMeta }) => {
                     {open && (
                       <div className="space-y-1.5 border-t border-slate-100 bg-white px-3 py-2" data-testid={`hr-structure-holders-${name}`}>
                         {holders.map((emp) => (
-                          <div key={emp.id} className="flex items-center gap-2 rounded-md border border-slate-100 px-2.5 py-1.5">
+                          <div key={emp.id} className="flex flex-wrap items-center gap-2 rounded-md border border-slate-100 px-2.5 py-1.5">
                             <div className="min-w-0 flex-1">
                               <p className="truncate text-sm font-medium text-slate-800">{emp.full_name}</p>
-                              <p className="truncate text-[11px] text-slate-500">
-                                {[emp.employee_code, emp.branch_name].filter(Boolean).join(" · ") || "—"}
-                              </p>
+                              <p className="truncate text-[11px] text-slate-500">{emp.employee_code || "—"}</p>
                             </div>
+                            {/* Said as a word before it is offered as a control: the branch
+                                is the fact being read, and a bare dropdown makes somebody
+                                open it to find out what it already says. Amber when there
+                                is none, because an unposted employee is a gap rather than a
+                                neutral state. */}
+                            <span
+                              className={`shrink-0 rounded px-2 py-0.5 text-[11px] font-semibold ${
+                                emp.branch_name ? "bg-sky-50 text-sky-700" : "bg-amber-50 text-amber-700"
+                              }`}
+                              data-testid={`hr-structure-branch-${emp.id}`}
+                            >
+                              {emp.branch_name || "No branch"}
+                            </span>
+                            <select
+                              value={emp.branch_id || ""}
+                              disabled={movingEmployee === emp.id}
+                              onChange={(e) => moveToBranch(emp, e.target.value)}
+                              className="h-7 w-36 shrink-0 rounded-md border border-slate-200 px-1.5 text-[11px] disabled:opacity-50"
+                              aria-label={`Change branch for ${emp.full_name}`}
+                              title="Move to another branch"
+                              data-testid={`hr-structure-branch-select-${emp.id}`}
+                            >
+                              <option value="">— No branch —</option>
+                              {branches.map((b) => <option key={b.id} value={b.id}>{b.branch_name}</option>)}
+                            </select>
                             <Button
                               size="sm"
                               variant="outline"
