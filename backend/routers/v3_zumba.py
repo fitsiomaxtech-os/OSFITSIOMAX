@@ -157,6 +157,47 @@ def _master_of(row: dict) -> str:
     return (row.get("master_name") or "").strip()
 
 
+def _own_master_name(user: V3UserOut) -> str:
+    """The name a Zumba master's own referrals are filed under.
+
+    A registration names its master as free text, typed by whoever entered it, so the link
+    back to the master's account is that name matching theirs. Anyone else gets "" and is
+    read by branch alone.
+    """
+    return (user.full_name or "").strip() if is_zumba_role(user.role) else ""
+
+
+def _visible_query(user: V3UserOut, branch_id: Optional[str]) -> Optional[dict]:
+    """Which registrations this account may read, or None when that is none of them.
+
+    A Zumba master reads their branch's roll AND every registration naming them, whatever
+    branch it was entered against — the second half because naming a master on a row is
+    how it is meant to reach them, and it did not. It is a union, not a filter: nothing
+    that used to be visible stops being, and Branch Admin and Super Admin are untouched.
+
+    Without the name clause a master whose account carries no branch read an empty board
+    however many students had been filed against their name, which is a strange way for a
+    class roll to report that an account is misconfigured.
+    """
+    clauses = []
+    if branch_id:
+        clauses.append({"branch_id": branch_id})
+    own_master = _own_master_name(user)
+    if own_master:
+        # Compared whole and case-folded: "master 1" and "Master 1" are one person, while a
+        # substring match would hand "Master 1" every row belonging to "Master 12". Done as
+        # $expr rather than a regex so a typed name is never parsed as a pattern.
+        clauses.append({"$expr": {"$eq": [
+            {"$toLower": {"$trim": {"input": {"$ifNull": ["$master_name", ""]}}}},
+            own_master.lower(),
+        ]}})
+    if not clauses:
+        # Super Admin asking for every branch at once. Anyone else with nothing to scope by
+        # reads nothing, which the caller turns into an empty board.
+        return None if _own_branch_only(user) else {}
+    return clauses[0] if len(clauses) == 1 else {"$or": clauses}
+
+
 def _extra(lead: dict, *keys):
     """Age and address are configured lead fields rather than columns, so they arrive in
     extra_fields under whatever key the branch set up. Try the likely ones and give up
@@ -238,12 +279,15 @@ async def list_zumba(
     user: V3UserOut = Depends(require_zumba_reader),
 ):
     branch_id = _scoped_branch(user, branch_id)
-    if _own_branch_only(user) and not branch_id:
+    query = _visible_query(user, branch_id)
+    if query is None:
         return {"summary": {}, "registrations": [], "masters": []}
 
-    query = {"branch_id": branch_id} if branch_id else {}
     raw = await v3_col("zumba_registrations").find(query, {"_id": 0}).to_list(2000)
-    rows = [_shape(r) for r in raw] + await _referred_rows(branch_id)
+    # A consultant's referral carries no master, so it can only be scoped by branch. An
+    # account with no branch to scope by gets none of them rather than every branch's.
+    referred = await _referred_rows(branch_id) if (branch_id or not _own_branch_only(user)) else []
+    rows = [_shape(r) for r in raw] + referred
     # Sorted after the merge, not before: two sources of rows interleave by date the way
     # one would, rather than arriving as two blocks.
     rows.sort(key=lambda r: r.get("created_at") or "", reverse=True)

@@ -284,10 +284,12 @@ export const ZumbaMasterBoard = ({ currentUser }) => {
           the class does not run it reads zero, and without the caption a zero looks like
           an empty class rather than no class. */}
       <div className="flex flex-col gap-3 sm:flex-row" data-testid="zumba-master-summary">
+        {/* Two ways onto this roll, so the caption names both: the branch's own
+            registrations, plus anyone filed against this master by name. */}
         <SummaryCard
           label="All Customers"
           value={summary.all ?? 0}
-          caption="Registered at your branch"
+          caption="At your branch, or referred to you"
           tone="border-violet-200 bg-violet-50 text-violet-900"
           testid="zumba-card-all"
         />
