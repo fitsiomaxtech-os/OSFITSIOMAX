@@ -176,7 +176,7 @@ export const HRBoard = () => {
       {tab === "employees" && <EmployeesTab meta={meta} initialFilter={empFilter} />}
       {tab === "roles" && <RolesTab meta={meta} reloadMeta={reloadMeta} />}
       {tab === "departments" && <DepartmentsDesignationTab meta={meta} reloadMeta={reloadMeta} />}
-      {tab === "structure" && <StructureTab />}
+      {tab === "structure" && <StructureTab meta={meta} reloadMeta={reloadMeta} />}
     </div>
   );
 };
@@ -1263,30 +1263,43 @@ const RoleCellDropdown = ({ value, options, onChange, testid }) => {
  * Its own fetch rather than a prop off the parent, so opening this tab shows what is
  * actually there rather than what the board happened to load when it mounted.
  */
-const StructureTab = () => {
+const StructureTab = ({ meta, reloadMeta }) => {
   const [depts, setDepts] = useState([]);
+  const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState("");
+  // Which designation is open. One at a time, so the department's shape stays readable
+  // while a designation's people are being looked at.
+  const [openDesignation, setOpenDesignation] = useState("");
+  const [showAddEmployee, setShowAddEmployee] = useState(false);
+  const [editingEmployee, setEditingEmployee] = useState(null);
+  const [pendingDesignation, setPendingDesignation] = useState("");
 
-  useEffect(() => {
-    let live = true;
-    hrDepartments()
-      .then((rows) => {
-        if (!live) return;
-        setDepts(rows || []);
-        // Opens on the first department rather than on nothing. There is no "all" here —
-        // the question this screen answers is about one department at a time.
-        setSelected((prev) => prev || rows?.[0]?.name || "");
-      })
-      .catch((e) => toast.error(e?.response?.data?.detail || "Failed to load departments"))
-      // Guarded too: a response arriving after the tab is closed would set state on a
-      // component that is gone.
-      .finally(() => { if (live) setLoading(false); });
-    return () => { live = false; };
+  const load = useCallback(async (keepOpen = false) => {
+    try {
+      const [d, e] = await Promise.all([hrDepartments(), hrEmployees({})]);
+      setDepts(d || []);
+      setEmployees(e || []);
+      // Opens on the first department rather than on nothing. There is no "all" here —
+      // the question this screen answers is about one department at a time.
+      setSelected((prev) => prev || d?.[0]?.name || "");
+      if (!keepOpen) setOpenDesignation("");
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Failed to load the structure");
+    }
+    setLoading(false);
   }, []);
+  useEffect(() => { load(); }, [load]);
 
   const current = depts.find((d) => d.name === selected) || null;
   const designations = current?.designations || [];
+
+  // Who holds a designation, within the department that owns it. Both halves matter: the
+  // same designation name can sit under two departments, and the people under it are not
+  // the same people.
+  const holdersOf = (designation) => employees.filter(
+    (e) => e.department === current?.name && e.designation === designation,
+  );
 
   if (loading) return <p className="py-12 text-center text-sm text-slate-400">Loading…</p>;
   if (depts.length === 0) {
@@ -1343,20 +1356,93 @@ const StructureTab = () => {
             // Numbered, because the order is the department's own and says something —
             // it is the order Departments &amp; Designation was arranged in.
             <ol className="space-y-1.5">
-              {designations.map((name, i) => (
-                <li
-                  key={name}
-                  className="flex items-center gap-3 rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2"
-                  data-testid={`hr-structure-designation-${name}`}
-                >
-                  <span className="w-5 shrink-0 text-right text-[11px] font-bold text-slate-400">{i + 1}</span>
-                  <span className="min-w-0 truncate text-sm font-medium text-slate-700" title={name}>{name}</span>
-                </li>
-              ))}
+              {designations.map((name, i) => {
+                const holders = holdersOf(name);
+                const open = openDesignation === name;
+                return (
+                  <li key={name} className="overflow-hidden rounded-lg border border-slate-100" data-testid={`hr-structure-designation-${name}`}>
+                    {/* The whole row opens it, not a chevron off to one side: the row is
+                        what somebody is looking at when they want to know who holds this. */}
+                    <button
+                      type="button"
+                      onClick={() => setOpenDesignation(open ? "" : name)}
+                      className={`flex w-full items-center gap-3 px-3 py-2 text-left transition ${open ? "bg-sky-50" : "bg-slate-50/60 hover:bg-slate-100"}`}
+                      aria-expanded={open}
+                      data-testid={`hr-structure-designation-open-${name}`}
+                    >
+                      <span className="w-5 shrink-0 text-right text-[11px] font-bold text-slate-400">{i + 1}</span>
+                      <span className={`min-w-0 flex-1 truncate text-sm font-medium ${open ? "text-sky-800" : "text-slate-700"}`} title={name}>{name}</span>
+                      {/* Counted whether it is open or not, so the row says how many people
+                          are behind it before anybody clicks. Nought reads as nought rather
+                          than as a missing badge. */}
+                      <span className={`shrink-0 rounded px-2 py-0.5 text-[10px] font-bold ${holders.length > 0 ? "bg-slate-200 text-slate-600" : "bg-slate-100 text-slate-400"}`}>
+                        {holders.length}
+                      </span>
+                      <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} />
+                    </button>
+
+                    {open && (
+                      <div className="space-y-1.5 border-t border-slate-100 bg-white px-3 py-2" data-testid={`hr-structure-holders-${name}`}>
+                        {holders.map((emp) => (
+                          <div key={emp.id} className="flex items-center gap-2 rounded-md border border-slate-100 px-2.5 py-1.5">
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-sm font-medium text-slate-800">{emp.full_name}</p>
+                              <p className="truncate text-[11px] text-slate-500">
+                                {[emp.employee_code, emp.branch_name].filter(Boolean).join(" · ") || "—"}
+                              </p>
+                            </div>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 shrink-0 text-[11px]"
+                              onClick={() => { setEditingEmployee(emp); setPendingDesignation(name); setShowAddEmployee(true); }}
+                              data-testid={`hr-structure-edit-${emp.id}`}
+                            >
+                              <Pencil className="mr-1 h-3 w-3" /> Edit
+                            </Button>
+                          </div>
+                        ))}
+                        {holders.length === 0 && (
+                          <p className="py-2 text-center text-xs text-slate-400">Nobody holds this designation yet.</p>
+                        )}
+                        {/* Seeded with this department and this designation, so the form
+                            opens where the click was rather than asking again for what was
+                            just pointed at. */}
+                        <Button
+                          size="sm"
+                          className="h-8 w-full bg-sky-600 text-white hover:bg-sky-700"
+                          onClick={() => { setEditingEmployee(null); setPendingDesignation(name); setShowAddEmployee(true); }}
+                          data-testid={`hr-structure-add-${name}`}
+                        >
+                          <Plus className="mr-1 h-3.5 w-3.5" /> Add {name}
+                        </Button>
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
             </ol>
           )}
         </CardContent>
       </Card>
+
+      {showAddEmployee && (
+        <AddEmployeeModal
+          employee={editingEmployee}
+          initialDepartment={current?.name || ""}
+          initialDesignation={pendingDesignation}
+          meta={meta}
+          onClose={() => { setShowAddEmployee(false); setEditingEmployee(null); }}
+          onSaved={() => {
+            setShowAddEmployee(false);
+            setEditingEmployee(null);
+            // Reloaded with the designation left open, so the row somebody was working in
+            // is still open behind the closing dialog and the new name is simply there.
+            load(true);
+            reloadMeta();
+          }}
+        />
+      )}
     </div>
   );
 };
