@@ -69,6 +69,23 @@ class V3PhysioTypeCreate(BaseModel):
     name: str
 
 
+class V3PhysioTypeUpdate(BaseModel):
+    name: str
+
+
+class V3DoctorServiceInput(BaseModel):
+    """The service an expert is offered under, by name.
+
+    The name and not the id: a doctors record already carries denormalised text for
+    everything a calendar prints, and a picklist entry that is renamed is renamed
+    through to the experts holding it, which the rename endpoint does.
+
+    Empty clears it — an expert offered under no particular service is the state every
+    one of them starts in.
+    """
+    service_type: str = ""
+
+
 class V3PhysioTypeOut(BaseModel):
     model_config = ConfigDict(extra="ignore")
 

@@ -17,7 +17,7 @@ from schemas.v3 import (
     V3TeamMemberCreate, V3TeamMemberOut,
     V3DoctorCreate, V3DoctorSlotsInput, V3DoctorOut,
     V3TreatmentTypeCreate, V3TreatmentTypeOut,
-    V3PhysioTypeCreate, V3PhysioTypeOut,
+    V3PhysioTypeCreate, V3PhysioTypeOut, V3PhysioTypeUpdate, V3DoctorServiceInput,
 )
 
 router = APIRouter(prefix="/api/v3")
@@ -147,17 +147,89 @@ async def v3_add_physio_type(payload: V3PhysioTypeCreate, _: V3UserOut = Depends
     return V3PhysioTypeOut(**doc)
 
 
+@router.patch("/physio-types/{physio_type_id}", response_model=V3PhysioTypeOut)
+async def v3_update_physio_type(
+    physio_type_id: str,
+    payload: V3PhysioTypeUpdate,
+    _: V3UserOut = Depends(v3_require_roles("super_admin")),
+):
+    """Rename a service.
+
+    The name is written through to every expert offered under the old one, because a
+    doctors record holds the service as text rather than as an id — leaving them behind
+    would strand experts under a name the picklist no longer offers.
+    """
+    name = (payload.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Service name is required")
+    existing = await v3_col("physio_types").find_one({"id": physio_type_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Service not found")
+    # Same case-insensitive rule the create has, minus this row: renaming a service to
+    # the case it already has is not a clash with itself.
+    clash = await v3_col("physio_types").find_one(
+        {"name": {"$regex": f"^{re.escape(name)}$", "$options": "i"}, "id": {"$ne": physio_type_id}},
+        {"_id": 0, "name": 1},
+    )
+    if clash:
+        raise HTTPException(status_code=409, detail=f"'{clash['name']}' already exists")
+    await v3_col("physio_types").update_one({"id": physio_type_id}, {"$set": {"name": name}})
+    if existing.get("name") != name:
+        await v3_col("doctors").update_many(
+            {"service_type": existing.get("name")}, {"$set": {"service_type": name}}
+        )
+    return V3PhysioTypeOut(**{**existing, "name": name})
+
+
+@router.patch("/doctors/{doctor_id}/service")
+async def v3_set_doctor_service(
+    doctor_id: str,
+    payload: V3DoctorServiceInput,
+    _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+):
+    """Say which service an expert is offered under, from the Service picklist.
+
+    Set where the calendar is published rather than where the expert is hired: the
+    question is asked when a branch is opening this person's days, and that is the
+    screen the answer is read back on.
+
+    Checked against the picklist so the calendar can never print a service Super Admin
+    does not offer — the same reason the list exists rather than a free-text field.
+    """
+    name = (payload.service_type or "").strip()
+    if name:
+        known = await v3_col("physio_types").find_one(
+            {"name": {"$regex": f"^{re.escape(name)}$", "$options": "i"}}, {"_id": 0, "name": 1}
+        )
+        if not known:
+            raise HTTPException(status_code=404, detail=f"'{name}' is not a service in Services and Products")
+        # Stored as the picklist spells it, not as the caller typed it.
+        name = known["name"]
+    res = await v3_col("doctors").update_one({"id": doctor_id}, {"$set": {"service_type": name}})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Expert not found")
+    return {"message": "Service updated", "service_type": name}
+
+
 @router.delete("/physio-types/{physio_type_id}")
 async def v3_delete_physio_type(physio_type_id: str, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
-    """Remove a service from the Type of Physios list.
+    """Remove a service from the Service list.
 
-    Unguarded for the same reason the treatment delete is: nothing in the OS references one
-    yet, so there is nothing to strand. The moment something does, this needs the check
-    v3_delete_vertical has — refusing while it is referenced and naming what still holds it.
+    Guarded now that experts are offered under one: deleting a service still held by a
+    calendar would leave those experts printing a service the picklist no longer offers,
+    which is the state this list exists to prevent. Refused and named, the way
+    v3_delete_vertical refuses.
     """
-    res = await v3_col("physio_types").delete_one({"id": physio_type_id})
-    if res.deleted_count == 0:
+    existing = await v3_col("physio_types").find_one({"id": physio_type_id}, {"_id": 0, "name": 1})
+    if not existing:
         raise HTTPException(status_code=404, detail="Service not found")
+    in_use = await v3_col("doctors").count_documents({"service_type": existing["name"]})
+    if in_use > 0:
+        raise HTTPException(
+            status_code=409,
+            detail=f"'{existing['name']}' is offered by {in_use} expert(s). Change theirs first.",
+        )
+    await v3_col("physio_types").delete_one({"id": physio_type_id})
     return {"message": "Service deleted"}
 
 @router.get("/branches", response_model=List[V3BranchOut])

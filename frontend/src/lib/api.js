@@ -84,7 +84,10 @@ export const deleteTreatmentType = async (id) => (await api.delete(`/treatment-t
 // Products. A name each, like treatments; prices live on the store packages.
 export const getPhysioTypes = async () => (await api.get("/physio-types")).data;
 export const createPhysioType = async (payload) => (await api.post("/physio-types", payload)).data;
+export const updatePhysioType = async (id, payload) => (await api.patch(`/physio-types/${id}`, payload)).data;
 export const deletePhysioType = async (id) => (await api.delete(`/physio-types/${id}`)).data;
+// Which service an expert is offered under, set where their calendar is published.
+export const setDoctorService = async (doctorId, serviceType) => (await api.patch(`/doctors/${doctorId}/service`, { service_type: serviceType })).data;
 
 export const getBranches = async () => (await api.get("/branches")).data;
 export const createBranch = async (payload) => (await api.post("/branches", payload)).data;

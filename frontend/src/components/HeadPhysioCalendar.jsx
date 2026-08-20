@@ -20,6 +20,8 @@ import {
   setDoctorDayShift,
   setDoctorShift,
   setDoctorSlotCapacity,
+  getPhysioTypes,
+  setDoctorService,
 } from "@/lib/api";
 import { to12h } from "@/lib/time";
 
@@ -94,6 +96,10 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
 
   const [doctors, setDoctors] = useState([]);
   const [selectedDoctor, setSelectedDoctor] = useState(null);
+  // The services Super Admin offers, from Services and Products. Loaded once rather than
+  // per expert: it is one short list and it does not change while a day is being opened.
+  const [services, setServices] = useState([]);
+  const [savingService, setSavingService] = useState(false);
   const [calendarData, setCalendarData] = useState(null);
 
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth());
@@ -154,6 +160,30 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
   }, [branchId, profileType]);
 
   useEffect(() => { loadDoctors(); }, [loadDoctors]);
+
+  // Only the treatment calendar asks: a consultation and a diet check-in are the service,
+  // where a physio's day could be any of several the clinic sells.
+  useEffect(() => {
+    if (!isPhysio) return;
+    getPhysioTypes().then(setServices).catch(() => setServices([]));
+  }, [isPhysio]);
+
+  const changeService = async (name) => {
+    if (!selectedDoctor) return;
+    setSavingService(true);
+    try {
+      await setDoctorService(selectedDoctor.id, name);
+      // Patched on both copies: the card in the list and the header above the grid read
+      // from different objects, and reloading the whole board to move one word would
+      // close the day that is mid-publish.
+      setSelectedDoctor((d) => (d ? { ...d, service_type: name } : d));
+      setDoctors((all) => all.map((d) => (d.id === selectedDoctor.id ? { ...d, service_type: name } : d)));
+      toast.success(name ? `Offered under ${name}` : "Service cleared");
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not set the service");
+    }
+    setSavingService(false);
+  };
 
   const loadCalendar = useCallback(async () => {
     if (!selectedDoctor) { setCalendarData(null); return; }
@@ -546,7 +576,7 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
                   <p className="truncate text-[10px] text-slate-400">
                     {doc.shift_name
                       ? `${doc.shift_name} · ${to12h(doc.shift_start)} – ${to12h(doc.shift_end)}`
-                      : doc.specialization || "Physiotherapist"}
+                      : doc.service_type || doc.specialization || "Physiotherapist"}
                   </p>
                 </div>
                 <div className="flex shrink-0 flex-col items-end">
@@ -590,6 +620,26 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
                     >
                       {shiftLabel || "No shift · full day"}
                     </span>
+                    {/* Which of the clinic's services this expert's day is being opened
+                        under. Beside the shift because the two are the same kind of fact —
+                        what is being published, and when — and both have to be right
+                        before a date is clicked. A select rather than a chip: the answer
+                        is set here, on the screen that asks the question. */}
+                    {isPhysio && (
+                      <select
+                        value={selectedDoctor.service_type || ""}
+                        onChange={(e) => changeService(e.target.value)}
+                        disabled={savingService}
+                        className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-600 outline-none disabled:opacity-60"
+                        title="The service this expert is offered under — from Services and Products"
+                        data-testid="calendar-service-select"
+                      >
+                        <option value="">No service</option>
+                        {services.map((sv) => (
+                          <option key={sv.id} value={sv.name}>{sv.name}</option>
+                        ))}
+                      </select>
+                    )}
                   </h3>
                   <p className="text-[11px] text-slate-400">
                     {purpose} · {slotDuration} min · {(calendarData?.slots || []).length} slots open

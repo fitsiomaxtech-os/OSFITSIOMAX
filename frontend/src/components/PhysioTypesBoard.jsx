@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Activity, Plus, RefreshCw, Search, Trash2, X } from "lucide-react";
+import { Activity, Pencil, Plus, RefreshCw, Search, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
-import { getPhysioTypes, createPhysioType, deletePhysioType } from "@/lib/api";
+import { getPhysioTypes, createPhysioType, updatePhysioType, deletePhysioType } from "@/lib/api";
 
 /**
  * Super Admin > Services and Products > Type of Physios.
@@ -18,15 +18,20 @@ import { getPhysioTypes, createPhysioType, deletePhysioType } from "@/lib/api";
  * and the duration belong to a package in FITSIO STORE, and repeating them here would be a
  * second place to maintain them and a question about which one is right.
  *
- * Nothing consumes it yet. It is a list to fill now and pick from later, which is also why
- * deleting is unguarded — see v3_delete_physio_type for the check it will need the moment
- * something does reference one.
+ * Something consumes it now: an expert's calendar is published under one of these, chosen
+ * on MANAGEMENT → PHYSIO CALENDAR. That is why a rename here writes through to the experts
+ * holding the old name, and why deleting one still held is refused rather than silently
+ * stranding them — both enforced server-side, see v3_update_physio_type.
  */
 export const PhysioTypesBoard = () => {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [showCreate, setShowCreate] = useState(false);
+  // The row being renamed, as { id, name } — the name is edited in place on this copy so
+  // an abandoned edit leaves the list untouched.
+  const [editing, setEditing] = useState(null);
+  const [savingEdit, setSavingEdit] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
 
   const load = useCallback(async () => {
@@ -45,6 +50,21 @@ export const PhysioTypesBoard = () => {
     const q = search.trim().toLowerCase();
     return q ? rows.filter((r) => (r.name || "").toLowerCase().includes(q)) : rows;
   }, [rows, search]);
+
+  const saveEdit = async () => {
+    const name = (editing.name || "").trim();
+    if (!name) { toast.error("Service name is required"); return; }
+    setSavingEdit(true);
+    try {
+      await updatePhysioType(editing.id, { name });
+      toast.success(`Renamed to ${name}`);
+      setEditing(null);
+      load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Rename failed");
+    }
+    setSavingEdit(false);
+  };
 
   const remove = async (row) => {
     try {
@@ -122,6 +142,15 @@ export const PhysioTypesBoard = () => {
                 <Activity className="h-4 w-4 shrink-0 text-slate-300" />
                 <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">{row.name}</span>
                 <button
+                  onClick={() => setEditing({ id: row.id, name: row.name })}
+                  className="shrink-0 rounded p-1.5 text-slate-400 transition hover:bg-sky-50 hover:text-sky-600"
+                  title={`Rename ${row.name}`}
+                  aria-label={`Rename ${row.name}`}
+                  data-testid={`physio-type-edit-${row.id}`}
+                >
+                  <Pencil className="h-4 w-4" />
+                </button>
+                <button
                   onClick={() => setConfirmDelete(row)}
                   className="shrink-0 rounded p-1.5 text-slate-400 transition hover:bg-rose-50 hover:text-rose-600"
                   title={`Delete ${row.name}`}
@@ -144,6 +173,38 @@ export const PhysioTypesBoard = () => {
         />
       )}
 
+      {editing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" data-testid="physio-type-edit-dialog">
+          <div className="w-full max-w-sm space-y-4 rounded-xl bg-white p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-3">
+              <h3 className="text-base font-semibold text-slate-900">Rename service</h3>
+              <button onClick={() => setEditing(null)} className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100" aria-label="Close" data-testid="physio-type-edit-close">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <Input
+              autoFocus
+              value={editing.name}
+              onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+              onKeyDown={(e) => { if (e.key === "Enter") saveEdit(); }}
+              placeholder="Service name"
+              data-testid="physio-type-edit-input"
+            />
+            {/* Says what a rename reaches, because it reaches further than this list: an
+                expert already offered under the old name is moved to the new one. */}
+            <p className="text-[11px] text-slate-400">
+              Every expert offered under this service is renamed with it.
+            </p>
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="outline" onClick={() => setEditing(null)} data-testid="physio-type-edit-cancel">Cancel</Button>
+              <Button onClick={saveEdit} disabled={savingEdit || !editing.name.trim()} className="bg-sky-600 hover:bg-sky-700" data-testid="physio-type-edit-save">
+                {savingEdit ? "Saving..." : "Save"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {confirmDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" data-testid="physio-type-delete-dialog">
           <div className="w-full max-w-sm space-y-4 rounded-xl bg-white p-5 shadow-2xl">
@@ -154,7 +215,7 @@ export const PhysioTypesBoard = () => {
               <div className="min-w-0">
                 <h3 className="text-base font-semibold text-slate-900">Delete service?</h3>
                 <p className="mt-1 text-xs text-slate-500">
-                  <b className="text-slate-700">{confirmDelete.name}</b> is removed from Type of Physios. Nothing else in the OS refers to it, so nothing else changes.
+                  <b className="text-slate-700">{confirmDelete.name}</b> is removed from the Service list. An expert is still offered under it, this is refused rather than leaving them stranded.
                 </p>
               </div>
             </div>

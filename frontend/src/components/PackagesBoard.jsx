@@ -30,7 +30,7 @@ export const TABS = [
   { key: "treatment", label: "Treatments", icon: ClipboardList },
   // Beside Treatments, and after it, because the two are read together: a treatment is
   // what is wrong with the patient, a physio type is the service sold to them.
-  { key: "physio_type", label: "Type of Physios", icon: Activity },
+  { key: "physio_type", label: "Service", icon: Activity },
   { key: "history", label: "History", icon: History },
 ];
 
