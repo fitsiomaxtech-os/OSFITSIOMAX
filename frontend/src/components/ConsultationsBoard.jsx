@@ -1209,7 +1209,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // opened together with the Consultation Fee draft above; also independently
   // reachable from the Fee Collected panel as a fallback if it wasn't collected
   // together the first time.
-  const openTreatmentFeeDraft = () => {
+  function openTreatmentFeeDraft() {
     // A Partial Payment schedule that already exists on the lead (whether or not
     // every installment is collected yet) is reloaded from the real saved rows —
     // never reset back to two blank ones — so reopening this always shows what's
@@ -1239,7 +1239,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
             { sessions: "", due_date: "" },
           ],
     });
-  };
+  }
 
   // Jumps straight to the Payment Schedule view (skipping the mode-picker click)
   // for a lead whose Partial Payment plan already exists — used by both the
@@ -1381,7 +1381,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
 
   // Actually calls the API. Leaves the Treatment Fee section (if present)
   // untouched and open for its own button.
-  const submitConsultationFee = async (payload) => {
+  async function submitConsultationFee(payload) {
     setCollectingFee(true);
     // Only the call is guarded. Anything below runs after the money is already taken,
     // and a failure there must never be reported as a failure to collect — that reads
@@ -1411,7 +1411,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       assignedPrice: selectedLead.package_price,
       transactionId: res.transaction_id,
     }));
-  };
+  }
 
   // Clicking one of the 5 Payment Mode buttons opens that mode's own dedicated
   // popup — every mode (including Cash) now goes through its own explicit
@@ -1437,7 +1437,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
 
   // Confirm button inside the second "Confirm Payment" popup — validates
   // UPI/Card's own fields (Cash just needed the mismatch acknowledged).
-  const confirmCollectTreatmentFee = () => {
+  function confirmCollectTreatmentFee() {
     const amount = parseFloat(treatmentFeeDraft.amount);
     const mode = treatmentFeeDraft.payment_mode;
     const payload = { payment_mode: mode, amount, confirmed: true };
@@ -1449,7 +1449,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     const splitPayload = attachSessionsSplit(payload);
     if (!splitPayload) return;
     submitTreatmentFee(splitPayload);
-  };
+  }
 
   // Submits the Treatment Fee — used both from the combined popup (its own button,
   // Consultation Fee handled separately above) and from the Fee Collected panel's
@@ -1457,7 +1457,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // closes the popup on success). Pass a payload directly for Cash/UPI/Card (built
   // above); omit it for Cheque/Partial Payment, which build their own from the
   // inline fields via buildTreatmentFeePayload.
-  const submitTreatmentFee = async (directPayload) => {
+  async function submitTreatmentFee(directPayload) {
     const payload = directPayload || buildTreatmentFeePayload();
     if (!payload) return;
     setCollectingTreatmentFee(true);
@@ -1513,7 +1513,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     setTreatmentFeeDraft(null);
     setSelectedLead(res.lead);
     setCollectingTreatmentFee(false);
-  };
+  }
 
   // Opens the Collect popup for one specific Partial Payment installment — amount
   // pre-filled from the real saved amount if the schedule already exists on the

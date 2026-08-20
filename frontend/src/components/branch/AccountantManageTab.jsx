@@ -182,16 +182,20 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
     setShowCustom(true);
   };
 
-  const fromIso = manualToIso(fromText);
-  const toIso = manualToIso(toText);
+  // Named for the boxes they come from, not "fromIso/toIso": a local toIso shadowed the
+  // module-level date formatter of that name across this whole component, and the range
+  // memo above — which runs at the line it is written on, well before these — reached the
+  // local's temporal dead zone. Picking Today or This Week crashed the board outright.
+  const customFromIso = manualToIso(fromText);
+  const customToIso = manualToIso(toText);
   // Both must parse, and they must be the right way round — a reversed range returns
   // nothing and reads as an empty month rather than as a mistake in the dialog.
-  const rangeValid = !!fromIso && !!toIso && fromIso <= toIso;
+  const rangeValid = !!customFromIso && !!customToIso && customFromIso <= customToIso;
 
   const applyCustom = () => {
     if (!rangeValid) return;
-    setCustomFrom(fromIso);
-    setCustomTo(toIso);
+    setCustomFrom(customFromIso);
+    setCustomTo(customToIso);
     setPreset("custom");
     setShowCustom(false);
   };
@@ -420,8 +424,8 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
 
             <div className="space-y-3">
               {[
-                { label: "From", text: fromText, set: setFromText, iso: fromIso, tid: "from" },
-                { label: "To", text: toText, set: setToText, iso: toIso, tid: "to" },
+                { label: "From", text: fromText, set: setFromText, iso: customFromIso, tid: "from" },
+                { label: "To", text: toText, set: setToText, iso: customToIso, tid: "to" },
               ].map((f) => (
                 <div key={f.tid}>
                   <label className="text-xs font-medium text-slate-500">{f.label}</label>
@@ -443,7 +447,7 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
               ))}
               {/* Says which of the two ways it is wrong, rather than only refusing to apply. */}
               <p className="text-[11px] text-slate-400" data-testid="accountant-manage-custom-hint">
-                {fromIso && toIso && fromIso > toIso
+                {customFromIso && customToIso && customFromIso > customToIso
                   ? "The From date is after the To date."
                   : "Type both dates as DD-MM-YYYY, e.g. 04-08-2026."}
               </p>

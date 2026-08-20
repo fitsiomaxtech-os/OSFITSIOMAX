@@ -201,6 +201,54 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
     setSavingCapacity(false);
   };
 
+  // The shift window and the day grid it cuts, above the handlers that reach for them.
+  // These were written two hundred lines lower, which is where a const starts existing —
+  // so saveDayShift was restaging a day against bindings that did not exist yet.
+  //
+  // The working window a day is opened across. It comes from the shift this expert is on
+  // (MANAGEMENT → TIME MANAGEMENT): a Morning physio's day is cut 7:00 AM – 2:00 PM, an
+  // Evening one's 3:00 PM – 7:00 PM. Nobody rostered falls back to the fixed 8:00 AM –
+  // 10:00 PM this calendar used before shifts existed, so an unassigned expert behaves
+  // exactly as they always did.
+  //
+  // Every generated slot finishes inside the window — a 45-minute slot is not offered at
+  // 1:30 PM on a day that ends at 2:00.
+  const shift = calendarData?.shift || null;
+  // Days this expert worked something other than their usual shift, keyed by date. A shift
+  // is a pattern, not a contract — a Morning physio who comes in full-time on Tuesday is
+  // normal, and the roster has to be able to say so without moving them off Morning.
+  const dayShifts = calendarData?.day_shifts || {};
+
+  /** The window one date is opened across: its own one-off, else the usual, else the default. */
+  const windowFor = (date) => (date && dayShifts[date]) || shift || null;
+  const labelOf = (w) => (w?.shift_name ? `${w.shift_name} · ${to12h(w.start_time)} – ${to12h(w.end_time)}` : "");
+
+  const gridTimes = (w) => {
+    const slots = [];
+    const step = slotDuration || 30;
+    const from = minutesOf(w?.start_time) ?? 8 * 60;
+    const to = minutesOf(w?.end_time) ?? 22 * 60;
+    for (let m = from; m + step <= to; m += step) {
+      slots.push(`${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`);
+    }
+    return slots;
+  };
+
+  // Every free slot of a day, staged as an addition. Anything already published for that
+  // date, and anything booked, is skipped so this never duplicates or disturbs a booking.
+  // `windowOverride` is for the moment a day's shift is changed: the new window is known
+  // from the response before calendarData has been reloaded, so the day re-cuts straight
+  // away instead of one render behind.
+  const stagedSlotsForDay = (d, windowOverride) => {
+    const alreadyOpen = new Set((calendarData?.slots || []).filter((s) => s.startsWith(`${d}T`)));
+    return gridTimes(windowOverride || windowFor(d))
+      .filter((time) => {
+        const full = `${d}T${time}`;
+        return !alreadyOpen.has(full) && !calendarData?.booked?.[full];
+      })
+      .map((time) => ({ slot_time: `${d}T${time}`, duration: slotDuration, consultation_type: slotType }));
+  };
+
   // Staged days are dropped with it: they were filled in across the old window, and half a
   // morning shift plus half an evening one is not a day anyone meant to publish.
   const saveShift = async (shiftId) => {
@@ -273,20 +321,6 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
     setPendingSlots([]);
   }, [slotDuration]);
 
-  // Every free slot of a day, staged as an addition. Anything already published for that
-  // date, and anything booked, is skipped so this never duplicates or disturbs a booking.
-  // `windowOverride` is for the moment a day's shift is changed: the new window is known
-  // from the response before calendarData has been reloaded, so the day re-cuts straight
-  // away instead of one render behind.
-  const stagedSlotsForDay = (d, windowOverride) => {
-    const alreadyOpen = new Set((calendarData?.slots || []).filter((s) => s.startsWith(`${d}T`)));
-    return gridTimes(windowOverride || windowFor(d))
-      .filter((time) => {
-        const full = `${d}T${time}`;
-        return !alreadyOpen.has(full) && !calendarData?.booked?.[full];
-      })
-      .map((time) => ({ slot_time: `${d}T${time}`, duration: slotDuration, consultation_type: slotType }));
-  };
 
   // Picking a date IS the availability confirmation — the whole working day fills in
   // straight away rather than making the Branch Admin click every slot by hand. Clicking
@@ -330,40 +364,12 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
     return calendarData?.booked?.[slotTime];
   };
 
-  // The working window a day is opened across. It comes from the shift this expert is on
-  // (MANAGEMENT → TIME MANAGEMENT): a Morning physio's day is cut 7:00 AM – 2:00 PM, an
-  // Evening one's 3:00 PM – 7:00 PM. Nobody rostered falls back to the fixed 8:00 AM –
-  // 10:00 PM this calendar used before shifts existed, so an unassigned expert behaves
-  // exactly as they always did.
-  //
-  // Every generated slot finishes inside the window — a 45-minute slot is not offered at
-  // 1:30 PM on a day that ends at 2:00.
-  const shift = calendarData?.shift || null;
-  // Days this expert worked something other than their usual shift, keyed by date. A shift
-  // is a pattern, not a contract — a Morning physio who comes in full-time on Tuesday is
-  // normal, and the roster has to be able to say so without moving them off Morning.
-  const dayShifts = calendarData?.day_shifts || {};
-
-  /** The window one date is opened across: its own one-off, else the usual, else the default. */
-  const windowFor = (date) => (date && dayShifts[date]) || shift || null;
-  const labelOf = (w) => (w?.shift_name ? `${w.shift_name} · ${to12h(w.start_time)} – ${to12h(w.end_time)}` : "");
-
   const shiftLabel = labelOf(shift);
   // What the focused day actually runs, and whether that differs from the usual.
   const dayWindow = windowFor(selectedDate);
   const dayShiftLabel = labelOf(dayWindow);
   const isOverridden = !!(selectedDate && dayShifts[selectedDate]);
 
-  const gridTimes = (w) => {
-    const slots = [];
-    const step = slotDuration || 30;
-    const from = minutesOf(w?.start_time) ?? 8 * 60;
-    const to = minutesOf(w?.end_time) ?? 22 * 60;
-    for (let m = from; m + step <= to; m += step) {
-      slots.push(`${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`);
-    }
-    return slots;
-  };
 
   const generateTimeGrid = (date) => gridTimes(windowFor(date));
 

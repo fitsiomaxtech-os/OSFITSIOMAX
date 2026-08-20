@@ -202,6 +202,10 @@ function GoogleSignInButton({ onLogin }) {
   );
 }
 
+/** Indian digit grouping — 4,97,896 rather than 497896. The patient is reading what they
+    were charged, and an ungrouped six-figure number is read wrong before it is read. */
+const money = (n) => (Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 });
+
 const ordinal = (n) => {
   const v = n % 100;
   const suffix = v >= 11 && v <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10] || "th";
@@ -558,9 +562,6 @@ export function PaymentTab({ data }) {
   );
 }
 
-/** Indian digit grouping — 4,97,896 rather than 497896. The patient is reading what they
-    were charged, and an ungrouped six-figure number is read wrong before it is read. */
-const money = (n) => (Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 });
 
 const prettyBytes = (n) => {
   const b = Number(n) || 0;

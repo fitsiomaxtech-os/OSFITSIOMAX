@@ -432,12 +432,6 @@ function LeadDetailModal({ lead, branches, onClose, onStageMove, onRefresh }) {
     setEditing(false);
   }, [lead]);
 
-  useEffect(() => {
-    if (activeTab === "remarks") loadRemarks();
-    if (activeTab === "followup") loadFollowUps();
-    if (activeTab === "activity") loadActivity();
-  }, [activeTab, lead.id]);
-
   const loadRemarks = async () => {
     try { setRemarks(await getLeadRemarks(lead.id)); } catch (e) { console.warn("[PreSalesBoard load failed]", e?.message || e); }
   };
@@ -447,6 +441,12 @@ function LeadDetailModal({ lead, branches, onClose, onStageMove, onRefresh }) {
   const loadActivity = async () => {
     try { setActivityLog(await getLeadActivity(lead.id)); } catch (e) { console.warn("[PreSalesBoard load failed]", e?.message || e); }
   };
+
+  useEffect(() => {
+    if (activeTab === "remarks") loadRemarks();
+    if (activeTab === "followup") loadFollowUps();
+    if (activeTab === "activity") loadActivity();
+  }, [activeTab, lead.id]);
 
   const saveEdit = async () => {
     try {
@@ -481,6 +481,14 @@ function LeadDetailModal({ lead, branches, onClose, onStageMove, onRefresh }) {
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed");
     }
+  };
+
+  const loadDoctorsForBranch = async (branchId) => {
+    if (!branchId) { setDoctors([]); return; }
+    try {
+      const data = await getDoctors({ branch_id: branchId });
+      setDoctors(data);
+    } catch { setDoctors([]); }
   };
 
   const completeFollowUpNow = async (fId) => {
@@ -521,14 +529,6 @@ function LeadDetailModal({ lead, branches, onClose, onStageMove, onRefresh }) {
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Assign failed");
     }
-  };
-
-  const loadDoctorsForBranch = async (branchId) => {
-    if (!branchId) { setDoctors([]); return; }
-    try {
-      const data = await getDoctors({ branch_id: branchId });
-      setDoctors(data);
-    } catch { setDoctors([]); }
   };
 
   const checkSlotAvailability = async (doctorId, slot) => {

@@ -185,6 +185,41 @@ const copyCardToClipboard = async (a) => {
 const isHandheld = () => (typeof window !== "undefined"
   && (window.matchMedia?.("(pointer: coarse)").matches || navigator.maxTouchPoints > 0));
 
+// Above the two senders that call them. A const is not hoisted, so the pair only start
+// existing at the line they are written on, and that line was below both callers.
+const downloadApptCard = async (a, prebuilt) => {
+  try {
+    const blob = prebuilt || await apptCardPng(a);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `appointment-${a.refNo || "confirmation"}.png`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch {
+    toast.error("Couldn't build the card image");
+  }
+};
+
+/** The confirmation as a note to the patient — the day, the hours, the place, and a line
+ *  telling them they're in hand. Short lines, because it is read on a phone in WhatsApp. */
+const apptMessage = (a) => {
+  const lines = [
+    `Hi ${a.patient},`,
+    "",
+    "Your appointment is",
+    weekdayLabel(a.date),
+    `${to12h(a.time)} to ${endTime12h(a.time, a.duration)}`,
+  ];
+  if (a.branch) lines.push(`at ${a.branch}`);
+  lines.push("", REASSURANCE, "— Team Fitsiomax", "", `CONSULTANT: ${a.headPhysio}`);
+  if (a.notes) lines.push(`Notes: ${a.notes}`);
+  if (a.branchAddress) lines.push("", `Location: ${a.branchAddress}`);
+  if (a.mapLocation) lines.push(a.mapLocation);
+  lines.push("", "Please arrive 10 minutes early.");
+  return lines.join("\n");
+};
+
 /**
  * Opens WhatsApp on the patient's own number with the confirmation already typed, and
  * leaves the card image on the clipboard so it can be pasted in on top.
@@ -251,39 +286,6 @@ const shareApptCard = async (a) => {
 };
 
 /** The card on its own, for attaching by hand where the share sheet isn't available. */
-const downloadApptCard = async (a, prebuilt) => {
-  try {
-    const blob = prebuilt || await apptCardPng(a);
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `appointment-${a.refNo || "confirmation"}.png`;
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  } catch {
-    toast.error("Couldn't build the card image");
-  }
-};
-
-/** The confirmation as a note to the patient — the day, the hours, the place, and a line
- *  telling them they're in hand. Short lines, because it is read on a phone in WhatsApp. */
-const apptMessage = (a) => {
-  const lines = [
-    `Hi ${a.patient},`,
-    "",
-    "Your appointment is",
-    weekdayLabel(a.date),
-    `${to12h(a.time)} to ${endTime12h(a.time, a.duration)}`,
-  ];
-  if (a.branch) lines.push(`at ${a.branch}`);
-  lines.push("", REASSURANCE, "— Team Fitsiomax", "", `CONSULTANT: ${a.headPhysio}`);
-  if (a.notes) lines.push(`Notes: ${a.notes}`);
-  if (a.branchAddress) lines.push("", `Location: ${a.branchAddress}`);
-  if (a.mapLocation) lines.push(a.mapLocation);
-  lines.push("", "Please arrive 10 minutes early.");
-  return lines.join("\n");
-};
-
 const apptHtml = (a) => `<!doctype html><html><head><meta charset="utf-8">
 <title>Appointment ${escapeHtml(a.refNo)}</title><style>${PRINTABLE_STYLES}</style></head>
 <body><div class="wrap">
@@ -1452,16 +1454,16 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
     setApptMonth((prev) => (prev.y === y && prev.m === m - 1 ? prev : { y, m: m - 1 }));
   }, [apptDraft?.appointment_date]);
 
-  useEffect(() => {
-    if (activeTab === "timeline") { loadRemarks(); loadActivity(); }
-  }, [activeTab, lead.id]);
-
   const loadRemarks = async () => {
     try { setRemarks(await getLeadRemarks(lead.id)); } catch { /* silent */ }
   };
   const loadActivity = async () => {
     try { setActivityLog(await getLeadActivity(lead.id)); } catch { /* silent */ }
   };
+
+  useEffect(() => {
+    if (activeTab === "timeline") { loadRemarks(); loadActivity(); }
+  }, [activeTab, lead.id]);
 
   const moveStage = async (stage) => {
     try {

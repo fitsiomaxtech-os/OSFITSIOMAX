@@ -203,6 +203,20 @@ export const BranchCalendarPanel = ({ branchId }) => {
     return slots.sort();
   })();
 
+  const cancelAppt = async () => {
+    if (!editingId) return;
+    setSaving(true);
+    try {
+      await cancelConsultAppointment(editingId);
+      toast.success("Appointment cancelled");
+      closeModal();
+      await load();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Could not cancel");
+    }
+    setSaving(false);
+  };
+
   const submit = async () => {
     if (!draft.patient_name.trim()) { toast.error("Enter the patient name"); return; }
     if (!draft.date) { toast.error("Pick a date"); return; }
@@ -219,20 +233,6 @@ export const BranchCalendarPanel = ({ branchId }) => {
       await load();
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Could not save appointment");
-    }
-    setSaving(false);
-  };
-
-  const cancelAppt = async () => {
-    if (!editingId) return;
-    setSaving(true);
-    try {
-      await cancelConsultAppointment(editingId);
-      toast.success("Appointment cancelled");
-      closeModal();
-      await load();
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || "Could not cancel");
     }
     setSaving(false);
   };
