@@ -735,7 +735,7 @@ export const ZumbaPanel = ({ branchId }) => {
               Pills rather than dropdowns: every option is a click away and the row says
               what is currently on, where a closed select says only its own label. */}
           <div className="flex flex-col gap-2 border-b border-slate-100 px-4 py-2.5">
-            <div className="flex flex-wrap items-center gap-1.5" data-testid="zumba-date-filter">
+            <div className="flex flex-wrap items-center justify-between gap-1.5" data-testid="zumba-date-filter">
               {DATE_PRESETS.map((preset) => {
                 const active = preset.key === "all" ? !dateFilter : dateFilter?.key === preset.key;
                 return (
@@ -764,7 +764,7 @@ export const ZumbaPanel = ({ branchId }) => {
                 />
               </span>
             </div>
-            <div className="flex flex-wrap items-center gap-1.5" data-testid="zumba-mode-filter">
+            <div className="flex flex-wrap items-center justify-between gap-1.5" data-testid="zumba-mode-filter">
               {MODE_FILTERS.map(([key, label]) => (
                 <button
                   key={key || "all"}
