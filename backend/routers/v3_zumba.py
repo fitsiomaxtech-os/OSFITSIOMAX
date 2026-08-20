@@ -164,14 +164,41 @@ def _scoped_branch(user: V3UserOut, branch_id: Optional[str]) -> Optional[str]:
 DEFAULT_ZUMBA_BRANCH_NAME = "Anna Nagar"
 
 
+def _normalized(name: Optional[str]) -> str:
+    """A branch name reduced to the letters and digits in it, for comparing by hand."""
+    return re.sub(r"[^a-z0-9]", "", (name or "").lower())
+
+
 async def _default_branch_id() -> Optional[str]:
-    row = await v3_col("branches").find_one(
-        # Anchored and escaped: the name is a literal to match whole and case-folded, not a
-        # pattern, or a branch called "Anna Nagar 2" could answer for this one.
-        {"branch_name": {"$regex": f"^{re.escape(DEFAULT_ZUMBA_BRANCH_NAME)}$", "$options": "i"}},
-        {"_id": 0, "id": 1},
-    )
-    return row.get("id") if row else None
+    """The branch a Zumba account with none of its own reads and writes.
+
+    Matched loosely -- case, spaces and punctuation removed -- because a branch is named by
+    hand and "Anna Nagar", "ANNA NAGAR" and "Anna-Nagar" are one place. An exact match on
+    that reduced form wins; failing that, the first name that starts with it, so a branch
+    saved as "Anna Nagar Clinic" still answers while "Nagarjuna" never does.
+
+    Sorted by name before either pass, so if two branches could answer, the same one
+    answers every time rather than whichever Mongo happened to return first.
+    """
+    wanted = _normalized(DEFAULT_ZUMBA_BRANCH_NAME)
+    rows = await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1}).to_list(500)
+    rows.sort(key=lambda b: (b.get("branch_name") or "").lower())
+    for row in rows:
+        if _normalized(row.get("branch_name")) == wanted:
+            return row.get("id")
+    for row in rows:
+        if _normalized(row.get("branch_name")).startswith(wanted):
+            return row.get("id")
+    return None
+
+
+async def _branch_label(branch_id: Optional[str]) -> dict:
+    """The branch this board is actually reading, named -- so the screen can say which one
+    rather than leaving a master to trust that "your branch" meant the right place."""
+    if not branch_id:
+        return {"id": "", "name": ""}
+    row = await v3_col("branches").find_one({"id": branch_id}, {"_id": 0, "branch_name": 1})
+    return {"id": branch_id, "name": (row or {}).get("branch_name") or ""}
 
 
 async def _branch_for(user: V3UserOut, branch_id: Optional[str]) -> Optional[str]:
@@ -367,7 +394,13 @@ async def list_zumba(
     branch_id = await _branch_for(user, branch_id)
     query = _visible_query(user, branch_id)
     if query is None:
-        return {"summary": {}, "registrations": [], "masters": [], "stages": []}
+        return {
+            "summary": {},
+            "registrations": [],
+            "masters": [],
+            "stages": [],
+            "branch": await _branch_label(branch_id),
+        }
 
     stages = await _zumba_stages()
     entry_stage = _entry_stage(stages)
@@ -416,7 +449,13 @@ async def list_zumba(
             stage_counts[r["stage"]] += 1
     summary["stage_counts"] = stage_counts
 
-    return {"summary": summary, "registrations": rows, "masters": masters, "stages": stages}
+    return {
+        "summary": summary,
+        "registrations": rows,
+        "masters": masters,
+        "stages": stages,
+        "branch": await _branch_label(branch_id),
+    }
 
 
 async def _clean(payload: ZumbaInput) -> dict:

@@ -133,7 +133,7 @@ const ClassCalendarModal = ({ students, onClose }) => {
  *  the money is taken and recorded -- asking for it here would invite a figure nobody at
  *  this desk can collect, and the Payment card counts what the branch actually banked. The
  *  source is fixed too: this form exists to record the ones a master brought in. */
-const ReferCustomerModal = ({ masterName, onClose, onSaved }) => {
+const ReferCustomerModal = ({ masterName, branchName, onClose, onSaved }) => {
   const [form, setForm] = useState({ ...EMPTY_REFERRAL });
   const [saving, setSaving] = useState(false);
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
@@ -190,7 +190,7 @@ const ReferCustomerModal = ({ masterName, onClose, onSaved }) => {
             <Input value={form.address} onChange={(e) => set("address", e.target.value)} placeholder="Area or locality" data-testid="zumba-refer-address" />
           </div>
           <p className="rounded-md bg-violet-50 px-3 py-2 text-[11px] font-medium text-violet-700">
-            Recorded against your branch, referred by <b>{masterName || "you"}</b>, so the branch sees who brought them in.
+            Recorded against <b>{branchName || "your branch"}</b>, referred by <b>{masterName || "you"}</b>, so the branch sees who brought them in.
           </p>
         </div>
 
@@ -219,6 +219,9 @@ const ReferCustomerModal = ({ masterName, onClose, onSaved }) => {
 export const ZumbaMasterBoard = ({ currentUser }) => {
   const [rows, setRows] = useState([]);
   const [summary, setSummary] = useState({});
+  // Which branch this board is reading, as the server resolved it — an account with no
+  // branch of its own falls back to one, and naming it here is how a master can tell.
+  const [branch, setBranch] = useState(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [referring, setReferring] = useState(false);
@@ -230,6 +233,7 @@ export const ZumbaMasterBoard = ({ currentUser }) => {
       const data = await listZumba();
       setRows(data.registrations || []);
       setSummary(data.summary || {});
+      setBranch(data.branch || null);
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Could not load the class roll");
     } finally {
@@ -307,6 +311,11 @@ export const ZumbaMasterBoard = ({ currentUser }) => {
             <Music className="h-4 w-4 text-violet-600" />
             Customers
             <span className="rounded bg-slate-100 px-1.5 py-px text-[10px] font-bold text-slate-500" data-testid="zumba-master-count">{visible.length}</span>
+            {branch?.name && (
+              <span className="rounded bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700" data-testid="zumba-master-branch">
+                {branch.name}
+              </span>
+            )}
           </div>
 
           {loading ? (
@@ -357,7 +366,14 @@ export const ZumbaMasterBoard = ({ currentUser }) => {
         </CardContent>
       </Card>
 
-      {referring && <ReferCustomerModal masterName={currentUser?.full_name || ""} onClose={() => setReferring(false)} onSaved={load} />}
+      {referring && (
+        <ReferCustomerModal
+          masterName={currentUser?.full_name || ""}
+          branchName={branch?.name || ""}
+          onClose={() => setReferring(false)}
+          onSaved={load}
+        />
+      )}
       {showCalendar && <ClassCalendarModal students={summary.all ?? 0} onClose={() => setShowCalendar(false)} />}
     </div>
   );
