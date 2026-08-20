@@ -141,6 +141,19 @@ const stageColor = (stages, name) => (stages.find((st) => st.name === name) || {
 
 /** One labelled line of the detail popup. A blank reads as a dash rather than as nothing,
  *  so a gap in the record is visible instead of invisible. */
+// Above ViewRegistrationModal, which reads both. A const is not hoisted, so writing
+// them below the modal that prints a fee and a date left them undefined at the line
+// that needed them.
+const rupees = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
+
+/** "06 Aug 2026" off the stored ISO timestamp; a dash rather than "Invalid Date". */
+const shortDate = (iso) => {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+};
+
 const DetailRow = ({ label, value }) => (
   <div className="flex items-start justify-between gap-3 border-b border-slate-100 py-1.5 last:border-b-0">
     <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-slate-400">{label}</span>
@@ -323,16 +336,6 @@ const SummaryCard = ({ label, count, color, active, onClick, testid, readOnly = 
     </span>
   </button>
 );
-
-const rupees = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
-
-/** "06 Aug 2026" off the stored ISO timestamp; a dash rather than "Invalid Date". */
-const shortDate = (iso) => {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-};
 
 /** The stored timestamp as a plain YYYY-MM-DD, which is what the date inputs compare. */
 const dayOf = (iso) => String(iso || "").slice(0, 10);
