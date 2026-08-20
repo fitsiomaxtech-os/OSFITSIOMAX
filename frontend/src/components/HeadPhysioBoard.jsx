@@ -169,6 +169,12 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
     [allRows, allKind],
   );
 
+  const [loading, setLoading] = useState(false);
+  const [selectedPatient, setSelectedPatient] = useState(null);
+  // Set by View on the All list, consumed by whichever board owns that row's popup.
+  const [autoOpenLead, setAutoOpenLead] = useState(null);
+  const [autoOpenReview, setAutoOpenReview] = useState(null);
+
   /**
    * View on an All row. The three queues merged into that list keep their own detail
    * popups, so this routes to the right one rather than building a fourth that would
@@ -183,11 +189,6 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
     if (r.kind === "consult") { setWorkTab("consultations"); setAutoOpenLead(r.leadId); return; }
     setWorkTab("review"); setAutoOpenReview(r.reviewId);
   };
-  const [loading, setLoading] = useState(false);
-  const [selectedPatient, setSelectedPatient] = useState(null);
-  // Set by View on the All list, consumed by whichever board owns that row's popup.
-  const [autoOpenLead, setAutoOpenLead] = useState(null);
-  const [autoOpenReview, setAutoOpenReview] = useState(null);
   // One Refresh for a board with three data sources behind it. loadPatients covers Rehab;
   // Consultations and Review each own their own fetch, so they are told by token.
   const [refreshTick, setRefreshTick] = useState(0);

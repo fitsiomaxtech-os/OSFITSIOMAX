@@ -25,6 +25,12 @@ import { leadDocuments, uploadLeadDocument, deleteLeadDocument, openLeadDocument
  * cause collapses into the same unhelpful sentence. Naming the status turns "it doesn't
  * work" into something someone can fix.
  */
+// Above uploadError, which reads fmtSize. A const is not hoisted, so writing these
+// below the only caller left the file in an order the reader could not follow and the
+// linter would not accept.
+const KB = 1024;
+const fmtSize = (n) => (n >= KB * KB ? `${(n / KB / KB).toFixed(1)} MB` : `${Math.max(1, Math.round(n / KB))} KB`);
+
 const uploadError = (err, file) => {
   const status = err?.response?.status;
   const detail = err?.response?.data?.detail;
@@ -37,7 +43,6 @@ const uploadError = (err, file) => {
   return "Upload failed — no response from the server. Check the connection and try again.";
 };
 
-const KB = 1024;
 // Kept in step with MAX_UPLOAD_BYTES in backend/routers/v3_lead_documents.py. The server
 // is the one that enforces it; this copy only exists to fail fast.
 const MAX_UPLOAD_MB = 500;
@@ -91,7 +96,6 @@ const compressImage = (file) => new Promise((resolve) => {
   img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
   img.src = url;
 });
-const fmtSize = (n) => (n >= KB * KB ? `${(n / KB / KB).toFixed(1)} MB` : `${Math.max(1, Math.round(n / KB))} KB`);
 const isImage = (t) => String(t || "").startsWith("image/");
 const fmtWhen = (iso) => (iso ? `${String(iso).slice(8, 10)}/${String(iso).slice(5, 7)}/${String(iso).slice(0, 4)}` : "—");
 
