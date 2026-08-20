@@ -110,7 +110,7 @@ const SummaryCard = ({ label, count, color, active, onClick, testid, readOnly = 
     // control that does nothing.
     disabled={readOnly}
     tabIndex={readOnly ? -1 : undefined}
-    className={`w-[calc(33.333%-0.34rem)] min-w-0 rounded-lg border-2 px-1 py-1.5 text-center transition sm:w-full sm:rounded-xl sm:px-4 sm:py-4 sm:text-left ${
+    className={`min-w-[6.5rem] flex-1 shrink-0 rounded-lg border-2 px-1 py-1.5 text-center transition sm:min-w-[8rem] sm:rounded-xl sm:px-3 sm:py-4 sm:text-left ${
       readOnly ? "cursor-default" : "hover:shadow-sm"
     } ${
       active ? "shadow-sm" : "border-slate-200 bg-white"
@@ -309,12 +309,14 @@ export const ZumbaPanel = ({ branchId }) => {
 
   return (
     <div className="flex flex-col gap-4" data-testid="branch-zumba-panel">
-      {/* One row, the way Human Resource lays its stages out. Three across on a phone so
-          seven cards land as 3 + 3 + 1 and the whole strip is visible without a swipe;
-          flex-wrap rather than a grid there, because a grid pins the last card to the first
-          column and leaves a hole, and a partial row cannot be centred. */}
+      {/* One row, always. The cards share the width evenly and never wrap: nine of them
+          breaking as 7 + 2 read as two unrelated strips, and the second one looked like a
+          separate thing rather than the tail of the first.
+
+          A minimum width keeps them readable rather than letting nine squeeze into a
+          phone, so below about 1200px the row scrolls sideways instead of wrapping. */}
       <div
-        className="flex flex-wrap justify-center gap-1.5 sm:grid sm:grid-cols-4 sm:gap-3 lg:grid-cols-7"
+        className="flex flex-nowrap gap-1.5 overflow-x-auto pb-1 sm:gap-3"
         data-testid="zumba-summary"
       >
         {CARDS.map((c) => (
