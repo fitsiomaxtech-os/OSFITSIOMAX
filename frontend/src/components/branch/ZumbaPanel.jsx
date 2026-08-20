@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { toast } from "@/components/ui/sonner";
-import { listZumba, listZumbaMasters, addZumba, updateZumba, deleteZumba, moveZumbaStage, setZumbaStatus, listStoreItems } from "@/lib/api";
+import { listZumba, listZumbaMasters, addZumba, updateZumba, deleteZumba, setZumbaStatus, listStoreItems } from "@/lib/api";
 
 // How a registration arrived, as the branch would say it. A referral is recorded against
 // the master who made it rather than against a single "Masters" bucket, so these six are
@@ -398,7 +398,6 @@ export const ZumbaPanel = ({ branchId }) => {
   // here: a clinic that has not set the pipeline up has no stages, and the Stage column
   // and its move control drop out of the table rather than drawing an empty pipeline.
   const [stages, setStages] = useState([]);
-  const [movingId, setMovingId] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -437,6 +436,16 @@ export const ZumbaPanel = ({ branchId }) => {
     return () => { live = false; };
   }, [branchId]);
 
+  // The Stage column belongs to All and nowhere else. Every other card is already an
+  // answer about these rows — where they came from, whether they have paid, whether they
+  // still come — and a stage beside that answer is a second axis nobody asked for on a
+  // list that has just been narrowed to one.
+  //
+  // On All it reads rather than edits: the column says where each student stands, and
+  // moving them is a decision made on the record, not from a dropdown in a table where
+  // the wrong row is one mis-click away.
+  const showStage = stages.length > 0 && card === "all";
+
   const visible = useMemo(() => {
     let list = rows;
     // Four of the cards are not sources, so each says which rows it stands for. Where a
@@ -471,20 +480,6 @@ export const ZumbaPanel = ({ branchId }) => {
   // Counted off every row, not the filtered ones: the point of the badge is to say
   // there is work waiting even while a card or a date range is hiding it.
   const needsCount = useMemo(() => rows.filter((r) => missingDetails(r).length > 0).length, [rows]);
-
-  const moveStage = async (row, stage) => {
-    if (!stage || stage === row.stage) return;
-    setMovingId(row.id);
-    try {
-      await moveZumbaStage(row.id, stage);
-      toast.success(`Moved to ${stage}`);
-      await load();
-    } catch (e) {
-      toast.error(e?.response?.data?.detail || "Could not move");
-    } finally {
-      setMovingId(null);
-    }
-  };
 
   // Every master offered in the picker: the ones already referred from, plus one being
   // typed in now, so a new name is selectable the moment it exists.
@@ -699,7 +694,7 @@ export const ZumbaPanel = ({ branchId }) => {
                     <th className="w-[13%] px-3 py-2.5">Phone</th>
                     <th className="w-[6%] px-3 py-2.5">Age</th>
                     <th className="w-[16%] px-3 py-2.5">Source</th>
-                    {stages.length > 0 && <th className="w-[14%] px-3 py-2.5">Stage</th>}
+                    {showStage && <th className="w-[14%] px-3 py-2.5">Stage</th>}
                     <th className="w-[12%] px-3 py-2.5">Fee</th>
                     <th className="w-[10%] px-3 py-2.5">Registered</th>
                     <th className="w-[10%] px-3 py-2.5 text-right">Actions</th>
@@ -760,28 +755,16 @@ export const ZumbaPanel = ({ branchId }) => {
                             </span>
                           ) : null}
                         </td>
-                        {stages.length > 0 && (
+                        {showStage && (
                           <td className="px-3 py-3">
-                            {/* A referral is read off the lead, so there is nowhere to
-                                write a move onto — it shows where it sits and no more. */}
-                            {r.origin === "consultation" ? (
-                              <span className="inline-block max-w-full truncate rounded px-2 py-0.5 text-[10px] font-semibold text-slate-600" style={{ background: `${stageColor(stages, r.stage)}18`, color: stageColor(stages, r.stage) }} title={r.stage || "—"}>
-                                {r.stage || "—"}
-                              </span>
-                            ) : (
-                              <select
-                                value={r.stage || ""}
-                                disabled={movingId === r.id}
-                                onChange={(e) => moveStage(r, e.target.value)}
-                                className="w-full max-w-[10rem] truncate rounded-md border px-1.5 py-1 text-[11px] font-semibold disabled:opacity-50"
-                                style={{ borderColor: `${stageColor(stages, r.stage)}55`, color: stageColor(stages, r.stage) }}
-                                data-testid={`zumba-stage-select-${r.id}`}
-                              >
-                                {stages.map((st) => (
-                                  <option key={st.id} value={st.name}>{st.name}</option>
-                                ))}
-                              </select>
-                            )}
+                            <span
+                              className="inline-block max-w-full truncate rounded px-2 py-0.5 text-[10px] font-semibold"
+                              style={{ background: `${stageColor(stages, r.stage)}18`, color: stageColor(stages, r.stage) }}
+                              title={r.stage || "—"}
+                              data-testid={`zumba-stage-${r.id}`}
+                            >
+                              {r.stage || "—"}
+                            </span>
                           </td>
                         )}
                         <td className="px-3 py-3 text-xs">
