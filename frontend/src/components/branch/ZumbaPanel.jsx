@@ -578,6 +578,9 @@ export const ZumbaPanel = ({ branchId }) => {
   }, [zumbaMasters, masters, form]);
 
   const openForm = (row) => {
+    // A consultation's referral is not a row of this collection -- it is the lead, read
+    // live. There is nothing here for Save to write to, so it is shown rather than opened.
+    if (row?.origin === "consultation") { setViewing(row); return; }
     setNewMaster("");
     setForm(row ? { ...EMPTY, ...row, age: row.age ?? "" } : { ...EMPTY });
   };
@@ -840,9 +843,11 @@ export const ZumbaPanel = ({ branchId }) => {
                           {gaps.length > 0 ? (
                             <button
                               type="button"
-                              onClick={() => openForm(r)}
+                              onClick={() => (r.origin === "consultation" ? setViewing(r) : openForm(r))}
                               className="mt-1 inline-flex items-center gap-1 rounded bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800 ring-1 ring-amber-300 transition hover:bg-amber-200"
-                              title={`Open this registration and fill in the ${gaps.join(" and ")}`}
+                              title={r.origin === "consultation"
+                                ? `Referred on the consultation, which owns this record — the ${gaps.join(" and ")} are filled in there`
+                                : `Open this registration and fill in the ${gaps.join(" and ")}`}
                               data-testid={`zumba-row-needs-${r.id}`}
                             >
                               Needs {gaps.join(" & ")}
