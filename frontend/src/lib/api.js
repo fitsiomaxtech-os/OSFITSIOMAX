@@ -537,3 +537,4 @@ export const listZumbaMasters = async (branchId) => (await api.get("/branch/zumb
 // rather than a field on the edit form. The stages themselves come back on listZumba,
 // straight from what Super Admin has in CI/CD ROOTS.
 export const moveZumbaStage = async (registrationId, stage) => (await api.patch(`/branch/zumba/${registrationId}/stage`, { stage })).data;
+export const setZumbaStatus = async (registrationId, status, remarks) => (await api.patch(`/branch/zumba/${registrationId}/status`, { status, remarks })).data;
