@@ -43,11 +43,15 @@ const CARDS = [
   { key: "all", label: "All", color: "#a855f7" },
   { key: "direct", label: "Direct", color: "#f59e0b" },
   { key: "consultant", label: "Consultant", color: "#f97316" },
-  // Named Master, as asked. Note it sits two cards from "Masters", which counts referrals
-  // recorded against a named master — a different question from this one.
-  { key: "branch", label: "Master", color: "#d97706" },
+  // Master is the leads a master brought in — a referral filed against a named master,
+  // which is what the Zumba Master View's Refer Customer writes and what this card is
+  // asked for. It held the branch-sourced count until that board existed and there was a
+  // real master's referral to point it at.
+  { key: "masters", label: "Master", color: "#d97706" },
   { key: "fee_collected", label: "Fee's Collected", color: "#059669" },
-  { key: "masters", label: "Masters", color: "#10b981" },
+  // The branch's own sign-ups, keeping the slot the count above vacated rather than
+  // shuffling the row. Named Masters today and to be renamed Master Revenue.
+  { key: "branch", label: "Masters", color: "#10b981" },
   { key: "fitsiomax", label: "Fitsiomax", color: "#14b8a6" },
 ];
 

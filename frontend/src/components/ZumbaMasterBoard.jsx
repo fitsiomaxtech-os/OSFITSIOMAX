@@ -43,7 +43,7 @@ const shortDate = (iso) => {
   return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 };
 
-const EMPTY_REFERRAL = { name: "", phone: "", age: "", address: "", fee_amount: "", fee_paid: "" };
+const EMPTY_REFERRAL = { name: "", phone: "", age: "", address: "" };
 
 /** One headline figure. The caption underneath is where the qualification goes, so the
  *  number itself is never asked to carry a footnote. */
@@ -127,8 +127,12 @@ const ClassCalendarModal = ({ students, onClose }) => {
   );
 };
 
-/** Refer a customer into the class. Source is fixed: this form exists to record the ones
- *  a master brought in, which is exactly what the "Masters" source counts. */
+/** Refer a customer into the class: name, phone, age, area, and nothing else.
+ *
+ *  The fee is deliberately absent. A master hands over a person, and the branch is where
+ *  the money is taken and recorded -- asking for it here would invite a figure nobody at
+ *  this desk can collect, and the Payment card counts what the branch actually banked. The
+ *  source is fixed too: this form exists to record the ones a master brought in. */
 const ReferCustomerModal = ({ masterName, onClose, onSaved }) => {
   const [form, setForm] = useState({ ...EMPTY_REFERRAL });
   const [saving, setSaving] = useState(false);
@@ -147,8 +151,6 @@ const ReferCustomerModal = ({ masterName, onClose, onSaved }) => {
         // Signed with the master's own name, so the branch's tab reads who referred them
         // rather than an anonymous "Master".
         master_name: masterName || "",
-        fee_amount: Number(form.fee_amount || 0),
-        fee_paid: Number(form.fee_paid || 0),
       });
       toast.success("Customer referred");
       onSaved();
@@ -184,18 +186,8 @@ const ReferCustomerModal = ({ masterName, onClose, onSaved }) => {
             </div>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600">Address</label>
-            <Input value={form.address} onChange={(e) => set("address", e.target.value)} placeholder="Area, city" data-testid="zumba-refer-address" />
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="mb-1 block text-xs font-semibold text-slate-600">Fee Amount</label>
-              <Input type="number" min="0" value={form.fee_amount} onChange={(e) => set("fee_amount", e.target.value)} placeholder="0" data-testid="zumba-refer-fee-amount" />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-semibold text-slate-600">Fee Paid</label>
-              <Input type="number" min="0" value={form.fee_paid} onChange={(e) => set("fee_paid", e.target.value)} placeholder="0" data-testid="zumba-refer-fee-paid" />
-            </div>
+            <label className="mb-1 block text-xs font-semibold text-slate-600">Area</label>
+            <Input value={form.address} onChange={(e) => set("address", e.target.value)} placeholder="Area or locality" data-testid="zumba-refer-address" />
           </div>
           <p className="rounded-md bg-violet-50 px-3 py-2 text-[11px] font-medium text-violet-700">
             Recorded against your branch, referred by <b>{masterName || "you"}</b>, so the branch sees who brought them in.
@@ -205,7 +197,7 @@ const ReferCustomerModal = ({ masterName, onClose, onSaved }) => {
         <div className="flex shrink-0 items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/40 px-5 py-3">
           <Button variant="outline" onClick={onClose} data-testid="zumba-refer-cancel">Cancel</Button>
           <Button onClick={submit} disabled={saving} className="bg-violet-600 text-white hover:bg-violet-700" data-testid="zumba-refer-submit">
-            {saving ? "Saving..." : "Refer Customer"}
+            {saving ? "Saving..." : "Save"}
           </Button>
         </div>
       </div>
