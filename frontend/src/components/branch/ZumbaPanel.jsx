@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { toast } from "@/components/ui/sonner";
-import { listZumba, listZumbaMasters, addZumba, updateZumba, deleteZumba, setZumbaStatus, listStoreItems } from "@/lib/api";
+import { listZumba, listZumbaMasters, addZumba, updateZumba, deleteZumba, setZumbaStatus, acceptZumbaReferral, listStoreItems } from "@/lib/api";
 
 // How a registration arrived, as the branch would say it. A referral is recorded against
 // the master who made it rather than against a single "Masters" bucket, so these six are
@@ -443,6 +443,7 @@ export const ZumbaPanel = ({ branchId }) => {
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState(null);
   const [viewing, setViewing] = useState(null);   // the registration open in the detail popup
+  const [accepting, setAccepting] = useState(null); // the referral being taken onto the books
   // The Zumba pipeline exactly as Super Admin has it in CI/CD ROOTS. Nothing is hardcoded
   // here: a clinic that has not set the pipeline up has no stages, and the Stage column
   // and its move control drop out of the table rather than drawing an empty pipeline.
@@ -578,11 +579,30 @@ export const ZumbaPanel = ({ branchId }) => {
   }, [zumbaMasters, masters, form]);
 
   const openForm = (row) => {
-    // A consultation's referral is not a row of this collection -- it is the lead, read
-    // live. There is nothing here for Save to write to, so it is shown rather than opened.
-    if (row?.origin === "consultation") { setViewing(row); return; }
     setNewMaster("");
     setForm(row ? { ...EMPTY, ...row, age: row.age ?? "" } : { ...EMPTY });
+  };
+
+  /**
+   * Take a CONSULTANT's referral onto the branch's books, then edit it.
+   *
+   * Until this runs the row is the lead, read live, with nothing to assign a master to or
+   * collect a fee against. One click does the taking over and opens the form on what it
+   * made, because nobody asks for a referral to be "accepted" as an end in itself -- they
+   * ask because they are about to fill something in.
+   */
+  const acceptAndEdit = async (row) => {
+    if (accepting) return;
+    setAccepting(row.id);
+    try {
+      const created = await acceptZumbaReferral(row.lead_id);
+      await load();
+      openForm(created);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not take this referral on");
+    } finally {
+      setAccepting(null);
+    }
   };
 
   const save = async () => {
@@ -849,10 +869,10 @@ export const ZumbaPanel = ({ branchId }) => {
                           {gaps.length > 0 ? (
                             <button
                               type="button"
-                              onClick={() => (r.origin === "consultation" ? setViewing(r) : openForm(r))}
+                              onClick={() => (r.origin === "consultation" ? acceptAndEdit(r) : openForm(r))}
                               className="mt-1 inline-flex items-center gap-1 rounded bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800 ring-1 ring-amber-300 transition hover:bg-amber-200"
                               title={r.origin === "consultation"
-                                ? `Referred on the consultation, which owns this record — the ${gaps.join(" and ")} are filled in there`
+                                ? `Take this referral onto the branch's books and fill in the ${gaps.join(" and ")}`
                                 : `Open this registration and fill in the ${gaps.join(" and ")}`}
                               data-testid={`zumba-row-needs-${r.id}`}
                             >
@@ -934,9 +954,20 @@ export const ZumbaPanel = ({ branchId }) => {
                               <Button size="sm" variant="outline" className="h-7 w-7 p-0" onClick={() => setViewing(r)} title="View" aria-label="View" data-testid={`zumba-view-${r.id}`}>
                                 <Eye className="h-3 w-3" />
                               </Button>
-                              <span className="inline-flex items-center gap-1 rounded bg-sky-50 px-2 py-1 text-[10px] font-semibold text-sky-700" title="Referred on the consultation — edit it there" data-testid={`zumba-referred-${r.id}`}>
-                                <Stethoscope className="h-3 w-3" /> Referred
-                              </span>
+                              {/* Says where it came from and offers the one thing to do
+                                  with it: a referral the branch has not taken on yet. */}
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 gap-1 border-sky-200 px-2 text-[10px] font-semibold text-sky-700 hover:bg-sky-50"
+                                disabled={accepting === r.id}
+                                onClick={() => acceptAndEdit(r)}
+                                title="Referred on the consultation — take it onto the branch's books to assign a master, set a time and collect the fee"
+                                data-testid={`zumba-accept-${r.id}`}
+                              >
+                                <Stethoscope className="h-3 w-3" />
+                                {accepting === r.id ? "Taking on…" : "Referred"}
+                              </Button>
                             </div>
                           ) : (
                             <div className="flex items-center justify-end gap-1.5">

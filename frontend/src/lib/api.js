@@ -541,3 +541,4 @@ export const listZumbaMasters = async (branchId) => (await api.get("/branch/zumb
 // straight from what Super Admin has in CI/CD ROOTS.
 export const moveZumbaStage = async (registrationId, stage) => (await api.patch(`/branch/zumba/${registrationId}/stage`, { stage })).data;
 export const setZumbaStatus = async (registrationId, status, remarks) => (await api.patch(`/branch/zumba/${registrationId}/status`, { status, remarks })).data;
+export const acceptZumbaReferral = async (leadId) => (await api.post(`/branch/zumba/accept/${leadId}`)).data;

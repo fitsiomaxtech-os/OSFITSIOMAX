@@ -474,8 +474,9 @@ async def _referred_rows(branch_id: Optional[str], entry_stage: str = "") -> lis
     A referral is a decision recorded on the consultation, so this reads it live instead of
     writing a registration at Save & Move. Un-ticking Zumba on the decision takes the row
     back out on its own, and there is no second copy of the patient to keep in step with
-    the first. The cost is that these rows cannot be edited or deleted from this tab, which
-    is right: the consultation owns them.
+    the first. The cost is that a live row cannot be edited from this tab, which is why
+    accept_referral exists: the branch takes the patient over, and from then on the
+    registration is the row and this stops reading the lead.
     """
     query = {"zumba_recommended": True}
     if branch_id:
@@ -485,6 +486,16 @@ async def _referred_rows(branch_id: Optional[str], entry_stage: str = "") -> lis
         "zumba_package_name": 1, "zumba_package_price": 1, "zumba_package_sessions": 1,
         "updated_at": 1,
     }).to_list(2000)
+    if not leads:
+        return []
+
+    # Dropped once the branch has taken them over. Read from the registrations rather than
+    # written back onto the lead, so the consultation's own record is never edited by this
+    # tab and un-ticking Zumba there still means what it always did.
+    taken = set(await v3_col("zumba_registrations").distinct(
+        "lead_id", {"lead_id": {"$in": [l["id"] for l in leads]}}
+    ))
+    leads = [l for l in leads if l["id"] not in taken]
     if not leads:
         return []
 
@@ -835,6 +846,81 @@ async def add_zumba(
     }
     await v3_col("zumba_registrations").insert_one(dict(row))
     return _shape(row)
+
+
+@router.post("/branch/zumba/accept/{lead_id}")
+async def accept_referral(
+    lead_id: str,
+    user: V3UserOut = Depends(require_zumba_reader),
+):
+    """Take a CONSULTANT's referral onto the branch's own books.
+
+    Until this is called the row on the tab is the lead, read live, and there is nothing to
+    assign a master to, set a class time on, or collect a fee against -- which is the whole
+    of what the branch does next with a referred patient. This writes the registration that
+    those answers can live on, seeded from what the consultation already decided: the
+    patient, and the package it recommended.
+
+    The lead is not touched. The link runs one way, from the registration back to the lead,
+    so the consultation's record still says what it always said and un-ticking Zumba there
+    still means what it meant. What changes is that this tab stops reading the lead for a
+    row and reads the registration instead.
+
+    Nothing is collected here either: fee_amount carries the package's price so the branch
+    knows what to ask for, and fee_paid stays at zero until somebody actually records a
+    payment on it.
+    """
+    lead = await v3_col("leads").find_one(
+        {"id": lead_id, "zumba_recommended": True},
+        {"_id": 0, "id": 1, "name": 1, "phone": 1, "branch_id": 1, "extra_fields": 1,
+         "zumba_package_name": 1, "zumba_package_price": 1, "zumba_package_sessions": 1},
+    )
+    if not lead:
+        raise HTTPException(status_code=404, detail="No Zumba referral on that lead")
+
+    branch_id = lead.get("branch_id")
+    if _own_branch_only(user) and branch_id != user.branch_id:
+        raise HTTPException(status_code=403, detail="Not your branch")
+    if not branch_id:
+        raise HTTPException(status_code=400, detail="That lead is not posted to a branch")
+
+    existing = await v3_col("zumba_registrations").find_one({"lead_id": lead_id}, {"_id": 0})
+    if existing:
+        # Not an error: two people opening the same row is ordinary, and the second one
+        # wants the registration rather than a complaint about the first.
+        return _shape(existing, await _zumba_stages())
+
+    stages = await _zumba_stages()
+    row = {
+        "id": str(uuid.uuid4()),
+        "branch_id": branch_id,
+        # The link back, and the reason _referred_rows stops reading this lead.
+        "lead_id": lead_id,
+        "name": (lead.get("name") or "").strip(),
+        "phone": (lead.get("phone") or "").strip(),
+        "email": "",
+        "age": _age(_extra(lead, "age")),
+        "gender": "",
+        "address": str(_extra(lead, "address", "city", "location") or ""),
+        "source": "consultations",
+        "master_name": "",
+        "assigned_master_id": "",
+        "assigned_master_name": "",
+        "time_slot": "",
+        "package_id": "",
+        "package_name": lead.get("zumba_package_name") or "",
+        "package_sessions": lead.get("zumba_package_sessions"),
+        "fee_amount": _amount(lead.get("zumba_package_price")),
+        "fee_paid": 0.0,
+        "payment_mode": "",
+        "payment_reference": "",
+        "status": STATUS_ACTIVE,
+        "stage": _entry_stage(stages, "consultant"),
+        "created_at": now_iso(),
+        "created_by": user.full_name or user.email,
+    }
+    await v3_col("zumba_registrations").insert_one(dict(row))
+    return _shape(row, stages)
 
 
 @router.patch("/branch/zumba/{registration_id}")
