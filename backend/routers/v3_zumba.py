@@ -247,6 +247,20 @@ class ZumbaStageInput(BaseModel):
     stage: str
 
 
+def _is_master_account(user: V3UserOut) -> bool:
+    """Whether this account IS a Zumba master, rather than merely being allowed to reach
+    the Zumba desk.
+
+    is_zumba_role answers True for Super Admin, deliberately, so they can read every board
+    in the OS. That is a question about reach. Whose class roll this is, whose branch this
+    is, and whose students these are, are questions about identity, and answering them with
+    the reach predicate handed Super Admin a query for their own assigned students -- of
+    which there are none -- so the Zumba tab read empty at every branch while the Branch
+    Admin under them saw the class perfectly well.
+    """
+    return user.role != "super_admin" and is_zumba_role(user.role)
+
+
 def _own_branch_only(user: V3UserOut) -> bool:
     """Everyone but Super Admin reads one branch: their own.
 
@@ -256,7 +270,7 @@ def _own_branch_only(user: V3UserOut) -> bool:
     """
     if user.role == "super_admin":
         return False
-    return is_branch_admin_role(user.role) or is_zumba_role(user.role)
+    return is_branch_admin_role(user.role) or _is_master_account(user)
 
 
 def _scoped_branch(user: V3UserOut, branch_id: Optional[str]) -> Optional[str]:
@@ -323,7 +337,7 @@ async def _branch_for(user: V3UserOut, branch_id: Optional[str]) -> Optional[str
     it has always done.
     """
     scoped = _scoped_branch(user, branch_id)
-    if scoped or not (_own_branch_only(user) and is_zumba_role(user.role)):
+    if scoped or not _is_master_account(user):
         return scoped
     return await _default_branch_id()
 
@@ -433,7 +447,7 @@ def _visible_query(user: V3UserOut, branch_id: Optional[str]) -> Optional[dict]:
 
     Everyone else -- Branch Admin, Super Admin -- is read by branch, unchanged.
     """
-    if is_zumba_role(user.role):
+    if _is_master_account(user):
         return {"assigned_master_id": user.id}
     if branch_id:
         return {"branch_id": branch_id}
@@ -546,7 +560,7 @@ async def list_zumba(
     # A master never sees these: nobody has assigned them to a class yet, so they belong
     # to the branch's inbox rather than to anybody's roll.
     referred = []
-    if not is_zumba_role(user.role) and (branch_id or not _own_branch_only(user)):
+    if not _is_master_account(user) and (branch_id or not _own_branch_only(user)):
         referred = await _referred_rows(branch_id, entry_stage)
     rows = [_shape(r, stages) for r in raw] + referred
     # Sorted after the merge, not before: two sources of rows interleave by date the way
@@ -634,7 +648,7 @@ async def _assignment(payload: ZumbaInput, user: V3UserOut) -> dict:
     The name is stored beside the id so a board can print it without a second read, while
     the id stays the thing that is matched on -- a master who is renamed keeps their roll.
     """
-    if is_zumba_role(user.role):
+    if _is_master_account(user):
         return {}
     master_id = (payload.assigned_master_id or "").strip()
     if not master_id:
@@ -662,7 +676,7 @@ async def _clean(payload: ZumbaInput, user: V3UserOut) -> dict:
     # the question went unanswered. Signing it with the account instead of refusing keeps
     # the referral on the branch's Refer Master card, which is the whole point of sending
     # it; an account with no name at all is the only case left to refuse.
-    if source == MASTER and not master_name and is_zumba_role(user.role):
+    if source == MASTER and not master_name and _is_master_account(user):
         master_name = (user.full_name or user.email or "").strip()
     if source == MASTER and not master_name:
         raise HTTPException(status_code=400, detail="Which master referred them?")
@@ -746,7 +760,7 @@ async def _write_branch(user: V3UserOut, branch_id: Optional[str]) -> Optional[s
     Checked against the branches that exist, so a stale id from a form left open writes a
     row nobody's board reads rather than being told the branch is gone.
     """
-    if branch_id and is_zumba_role(user.role):
+    if branch_id and _is_master_account(user):
         exists = await v3_col("branches").find_one({"id": branch_id}, {"_id": 0, "id": 1})
         if not exists:
             raise HTTPException(status_code=400, detail="That branch no longer exists")
