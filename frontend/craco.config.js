@@ -29,6 +29,15 @@ let webpackConfig = {
       rules: {
         "react-hooks/rules-of-hooks": "error",
         "react-hooks/exhaustive-deps": "warn",
+        // A const is not hoisted the way a function declaration is. Reading one above its
+        // declaration throws "Cannot access X before initialization" the moment the module
+        // is evaluated -- not when the code runs, but at import, which takes down every
+        // page importing the file rather than the one feature that got it wrong.
+        //
+        // An error, not a warning: the failure is total and the fix is to move one line.
+        // Functions stay exempt, since a hoisted declaration really is safe to call above
+        // where it is written, and flagging those would bury this in noise.
+        "no-use-before-define": ["error", { variables: true, functions: false, classes: true }],
       },
     },
   },

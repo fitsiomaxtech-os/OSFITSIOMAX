@@ -39,6 +39,8 @@ const sourceLabel = (r) => (
 //
 // The colours run warm through the sources and cool through the three that follow, so the
 // old grouping is still legible without drawing a box around it.
+const PINK = "#be185d";
+
 const CARDS = [
   { key: "all", label: "All", color: "#a855f7" },
   { key: "direct", label: "Direct", color: "#f59e0b" },
@@ -65,8 +67,6 @@ const CARDS = [
   { key: "master_revenue", label: "Master's Revenue", color: "#10b981", money: true, derived: true },
   { key: "fitsiomax_revenue", label: "Fitsiomax Revenue", color: "#14b8a6", money: true, derived: true },
 ];
-
-const PINK = "#be185d";
 
 /** Whether a registration has a master's name against it. */
 const hasMaster = (r) => !!(r.master_name || "").trim();
