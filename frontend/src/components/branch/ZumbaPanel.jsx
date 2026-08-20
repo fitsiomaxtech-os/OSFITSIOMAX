@@ -192,6 +192,7 @@ export const ZumbaPanel = ({ branchId }) => {
   const [loading, setLoading] = useState(true);
   const [card, setCard] = useState("all");
   const [search, setSearch] = useState("");
+  const [needsOnly, setNeedsOnly] = useState(false); // show only the half-filled rows
   // The same shape Branch Leads keeps: { key, label, from, to } with Dates on the ends,
   // or null for no filter. The presets and the typed range both come from the one
   // control, so there is no From/To bar of this tab's own to keep in step with it.
@@ -291,8 +292,13 @@ export const ZumbaPanel = ({ branchId }) => {
     if (q) {
       list = list.filter((r) => (r.name || "").toLowerCase().includes(q) || (r.phone || "").includes(q));
     }
+    if (needsOnly) list = list.filter((r) => missingDetails(r).length > 0);
     return list;
-  }, [rows, card, search, dateFilter]);
+  }, [rows, card, search, dateFilter, needsOnly]);
+
+  // Counted off every row, not the filtered ones: the point of the badge is to say
+  // there is work waiting even while a card or a date range is hiding it.
+  const needsCount = useMemo(() => rows.filter((r) => missingDetails(r).length > 0).length, [rows]);
 
   const moveStage = async (row, stage) => {
     if (!stage || stage === row.stage) return;
@@ -425,6 +431,20 @@ export const ZumbaPanel = ({ branchId }) => {
                 </span>
               )}
               <span className="rounded bg-slate-100 px-1.5 py-px text-[10px] font-bold text-slate-500">{visible.length}</span>
+              {/* Only ever drawn when there is something to draw it for, so an empty queue
+                  leaves the header alone rather than reporting nothing to do. */}
+              {needsCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setNeedsOnly((v) => !v)}
+                  aria-pressed={needsOnly}
+                  className={`rounded px-2 py-0.5 text-[10px] font-bold transition ${needsOnly ? "bg-amber-500 text-white" : "bg-amber-50 text-amber-700 ring-1 ring-amber-200 hover:bg-amber-100"}`}
+                  title={needsOnly ? "Show every registration" : "Show only the ones still to fill in"}
+                  data-testid="zumba-needs-details"
+                >
+                  {needsCount} to fill in
+                </button>
+              )}
             </div>
             {/* The collected total used to be printed here because the card beside it had
                 room for a count only. The card carries the figure itself now, so repeating
@@ -510,12 +530,33 @@ export const ZumbaPanel = ({ branchId }) => {
                   {visible.map((r, i) => {
                     const paid = Number(r.fee_paid || 0);
                     const due = Number(r.fee_amount || 0) - paid;
+                    // Tinted rather than badged alone: a row that needs work should be
+                    // findable while scrolling past it, not only once it is read.
+                    const gaps = missingDetails(r);
                     return (
-                      <tr key={r.id} className="align-middle hover:bg-slate-50/60" data-testid={`zumba-row-${r.id}`}>
+                      <tr
+                        key={r.id}
+                        className={`align-middle ${gaps.length > 0 ? "bg-amber-50/50 hover:bg-amber-50" : "hover:bg-slate-50/60"}`}
+                        data-testid={`zumba-row-${r.id}`}
+                      >
                         <td className="px-3 py-3 text-xs text-slate-400">{i + 1}</td>
                         <td className="px-3 py-3">
                           <p className="truncate font-semibold text-slate-800" title={r.name}>{r.name || "—"}</p>
                           {r.address ? <p className="truncate text-[11px] text-slate-500" title={r.address}>{r.address}</p> : null}
+                          {/* Names what is missing rather than saying "incomplete": the
+                              branch admin opens this row to do one specific thing, and the
+                              badge may as well say which. */}
+                          {gaps.length > 0 ? (
+                            <button
+                              type="button"
+                              onClick={() => openForm(r)}
+                              className="mt-1 inline-flex items-center gap-1 rounded bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800 ring-1 ring-amber-300 transition hover:bg-amber-200"
+                              title={`Open this registration and fill in the ${gaps.join(" and ")}`}
+                              data-testid={`zumba-row-needs-${r.id}`}
+                            >
+                              Needs {gaps.join(" & ")}
+                            </button>
+                          ) : null}
                         </td>
                         <td className="px-3 py-3 text-xs text-slate-600">{r.phone || "—"}</td>
                         <td className="px-3 py-3 text-xs text-slate-600">{r.age || "—"}</td>

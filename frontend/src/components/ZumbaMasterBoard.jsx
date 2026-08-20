@@ -250,7 +250,7 @@ const ReferCustomerModal = ({ masterName, branchId, branchName, onClose, onSaved
             </select>
           </div>
           <p className="rounded-md bg-violet-50 px-3 py-2 text-[11px] font-medium text-violet-700">
-            Referred by <b>{masterName || "you"}</b>. Lands under <b>Refer Master</b> on that branch's Zumba tab, so the branch sees who brought them in.
+            Referred by <b>{masterName || "you"}</b>. Lands under <b>Refer Master</b> on that branch's Zumba tab, flagged as still needing a fee and a class — the branch fills those in and allocates the master.
           </p>
         </div>
 
