@@ -84,15 +84,31 @@ async def _treatment_days(lead_id: str) -> int:
     rather than from the assignment date — a package booked three weeks out is not three
     weeks of treatment, and the review is about what the patient has been through, not
     how long ago they paid.
+
+    Counted per course, and the course furthest along decides the milestone. Never the
+    two added together: v3_rehab's docstring sets out why, and it is the whole reason
+    rehab days were given their own collection — four treatment days and three rehab days
+    are not a week of treatment, and summing them would fire the week-one review three
+    treatment days early. Taking the larger leaves each course to reach its own milestone
+    on its own days, and lets a patient sent to rehab having never bought a session
+    package reach one at all: counting `sessions` alone left them on nought for ever,
+    listed on the Review tab and never becoming due.
     """
-    return await v3_col("sessions").count_documents({"lead_id": lead_id, "status": "completed"})
+    treatment = await v3_col("sessions").count_documents({"lead_id": lead_id, "status": "completed"})
+    rehab = await v3_col("rehab_sessions").count_documents({"lead_id": lead_id, "status": "completed"})
+    return max(treatment, rehab)
 
 
 async def _first_session_date(lead_id: str) -> Optional[str]:
-    rows = await v3_col("sessions").find(
-        {"lead_id": lead_id}, {"_id": 0, "slot_time": 1}
-    ).sort("slot_time", 1).to_list(1)
-    return (rows[0].get("slot_time") or "")[:10] if rows else None
+    """The day this patient started, on whichever course began first."""
+    dates = []
+    for name in ("sessions", "rehab_sessions"):
+        rows = await v3_col(name).find(
+            {"lead_id": lead_id}, {"_id": 0, "slot_time": 1}
+        ).sort("slot_time", 1).to_list(1)
+        if rows and (rows[0].get("slot_time") or ""):
+            dates.append(rows[0]["slot_time"][:10])
+    return min(dates) if dates else None
 
 
 def _shape(rev: dict) -> dict:

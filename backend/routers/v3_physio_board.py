@@ -205,6 +205,22 @@ async def physio_patients(physio_id: Optional[str] = None, user: V3UserOut = Dep
     sessions = await v3_col("sessions").find(
         {"physio_id": doctor["id"], "lead_id": {"$in": lead_ids}}, {"_id": 0}
     ).sort("slot_time", 1).to_list(2000)
+    for row in sessions:
+        row.setdefault("track", "treatment")
+    # Rehab days counted here too. Listing the patient was only half of it: read off the
+    # sessions collection alone, someone sent straight to rehab having never bought a
+    # session package shows 0 of 0 on a course they are nine days into, with no next day.
+    # Mapped onto the field names the rest of this projection already uses; rehab runs in
+    # days and carries no week, so that one stays empty rather than inventing a Week 1.
+    rehab = await v3_col("rehab_sessions").find(
+        {"physio_id": doctor["id"], "lead_id": {"$in": lead_ids}}, {"_id": 0}
+    ).sort("slot_time", 1).to_list(2000)
+    for row in rehab:
+        row["track"] = "rehab"
+        row["session_number"] = row.get("day_number")
+        row["total_sessions"] = row.get("total_days")
+        row.setdefault("week_number", None)
+    sessions = sorted(sessions + rehab, key=lambda r: r.get("slot_time") or "")
     sessions_by_lead: dict = {}
     for s in sessions:
         sessions_by_lead.setdefault(s["lead_id"], []).append(s)
