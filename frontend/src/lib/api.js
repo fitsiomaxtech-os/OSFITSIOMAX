@@ -531,6 +531,12 @@ export const recruitmentUpdateStage = async (id, payload) => (await api.patch(`/
 export const recruitmentDeleteStage = async (id) => (await api.delete(`/recruitment/stages/${id}`)).data;
 export const recruitmentReorderStages = async (ids) => (await api.post("/recruitment/stages/reorder", { ids })).data;
 
+// ---- Patient feedback (the bell on the branch's header) ----
+// The bell's number is the New column rather than a flag of its own, so what it counts and
+// what the board shows can never disagree.
+export const listBranchFeedback = async (branchId) => (await api.get("/branch/feedback", { params: branchId ? { branch_id: branchId } : {} })).data;
+export const moveBranchFeedback = async (feedbackId, status, note) => (await api.patch(`/branch/feedback/${feedbackId}`, { status, note })).data;
+
 // ---- Zumba (Branch Admin's own tab) ----
 // Not a clinical journey and so not a lead: no stage, no consultation, no discharge. The
 // summary splits by where the registration came from, which is the question the branch

@@ -52,6 +52,13 @@ export const patientPortalMe = async () => {
   return data;
 };
 
+/** What the patient made of the place, in their own words. The session identifies them,
+    so nothing here says who is writing — the server takes that from the token. */
+export const patientPortalSubmitFeedback = async ({ rating, message }) => {
+  const { data } = await portalApi.post("/patient-portal/feedback", { rating, message }, { headers: authHeaders() });
+  return data;
+};
+
 export const patientPortalDocuments = async () => {
   const { data } = await portalApi.get("/patient-portal/documents", { headers: authHeaders() });
   return data;

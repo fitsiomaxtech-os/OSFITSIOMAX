@@ -12,8 +12,10 @@ import os
 import random
 import string
 import uuid
+from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException
+from pydantic import BaseModel
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token as google_id_token
 
@@ -24,6 +26,7 @@ from utils import now_iso
 from security import hash_password, verify_password
 from deps import v3_require_roles, is_branch_admin_role
 from routers.v3_lead_documents import DOC_DIR, is_shared_with_patient
+from routers.v3_feedback import MAX_MESSAGE, STATUS_NEW, _rating
 from schemas.v3 import V3UserOut, V3PortalAccountInput, V3PatientPortalLogin, V3PatientPortalGoogleLogin
 
 router = APIRouter(prefix="/api/v3")
@@ -362,6 +365,52 @@ async def patient_portal_me(lead_id: str = Depends(_current_patient_lead_id)):
     if not lead:
         raise HTTPException(status_code=404, detail="Patient not found")
     return await _build_portal_payload(lead)
+
+
+class V3PatientFeedbackIn(BaseModel):
+    rating: Optional[int] = None
+    message: Optional[str] = ""
+
+
+@router.post("/patient-portal/feedback")
+async def patient_portal_feedback(
+    payload: V3PatientFeedbackIn,
+    lead_id: str = Depends(_current_patient_lead_id),
+):
+    """What a patient thought, in their own words, from their own session.
+
+    Written here rather than in the feedback router because this is the one place that
+    knows which patient is asking -- the portal session is the identity, and taking a lead
+    id from the body would let anybody file feedback as anybody.
+
+    The patient and their branch are copied onto the row rather than looked up when the
+    branch reads it. Feedback is a thing somebody said on a day: it should still name who
+    said it after they have been moved to another branch, or after the lead behind it is
+    gone.
+
+    Refused when there is nothing to say. A rating with no words is a fine piece of
+    feedback and is allowed; an empty form is a misclick.
+    """
+    message = (payload.message or "").strip()[:MAX_MESSAGE]
+    rating = _rating(payload.rating)
+    if not message and rating is None:
+        raise HTTPException(status_code=400, detail="Tell us how it went, or leave a rating")
+
+    lead = await _lead_or_404(lead_id)
+    row = {
+        "id": str(uuid.uuid4()),
+        "lead_id": lead_id,
+        "branch_id": lead.get("branch_id"),
+        "patient_name": (lead.get("name") or "").strip(),
+        "patient_phone": (lead.get("phone") or "").strip(),
+        "rating": rating,
+        "message": message,
+        "status": STATUS_NEW,
+        "note": "",
+        "created_at": now_iso(),
+    }
+    await v3_col("patient_feedback").insert_one(dict(row))
+    return {"message": "Thank you — your branch has it.", "feedback": row}
 
 
 # --------------------------------------------------------------- Staff: preview a patient's

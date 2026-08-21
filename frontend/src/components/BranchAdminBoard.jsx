@@ -58,6 +58,7 @@ import {
   bulkDeleteLeads,
   setLeadFlags,
   rnrAttempt,
+  listBranchFeedback,
 } from "@/lib/api";
 import { to12h, endTime12h, callTimeStamp, callDateStamp } from "@/lib/time";
 import { HeadPhysioCalendar } from "@/components/HeadPhysioCalendar";
@@ -70,6 +71,7 @@ import { TimeManagementPanel } from "@/components/branch/TimeManagementPanel";
 import { BranchDetailPage } from "@/components/branch/BranchDetailPage";
 import MissedClassPanel from "@/components/branch/MissedClassPanel";
 import { BranchReviewPanel } from "@/components/branch/BranchReviewPanel";
+import { FeedbackBoard } from "@/components/branch/FeedbackBoard";
 import { PatientsPortalPanel } from "@/components/branch/PatientsPortalPanel";
 import { ZumbaPanel } from "@/components/branch/ZumbaPanel";
 import { FitnessPanel } from "@/components/branch/FitnessPanel";
@@ -494,6 +496,23 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   // straight on that lead's own rich modal instead of just the filtered list.
   const [autoOpenLeadId, setAutoOpenLeadId] = useState(null);
 
+  // The bell's number, kept beside the board rather than inside it: the count is wanted
+  // on every tab, and the board it belongs to is only mounted while somebody is looking
+  // at it.
+  const [showFeedback, setShowFeedback] = useState(false);
+  const [feedbackUnread, setFeedbackUnread] = useState(0);
+
+  // Asked once when the board opens. Not polled: feedback arrives at the pace people write
+  // it, and a request every thirty seconds to learn that nothing has changed is a cost
+  // paid all day for a number that moves twice.
+  useEffect(() => {
+    let live = true;
+    listBranchFeedback(branchId)
+      .then((data) => { if (live) setFeedbackUnread(data?.unread || 0); })
+      .catch(() => { /* the bell simply carries no count; the board says why when opened */ });
+    return () => { live = false; };
+  }, [branchId]);
+
   const loadBoard = useCallback(async () => {
     if (!branchId) return null;
     setLoading(true);
@@ -745,7 +764,37 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
             </button>
           );
         })}
+        {/* Pushed to the far end and outside the tab list, because it is not a tab: the
+            tabs change what this board is showing and the bell opens something over the
+            top of it. The count is what has arrived and not been picked up — the board's
+            first column, read from the same request, so the two cannot disagree. */}
+        <button
+          type="button"
+          onClick={() => setShowFeedback(true)}
+          className="relative ml-auto shrink-0 rounded-md p-2 text-slate-400 transition hover:bg-amber-50 hover:text-amber-600"
+          title={feedbackUnread > 0 ? `${feedbackUnread} new patient feedback` : "Patient feedback"}
+          aria-label={feedbackUnread > 0 ? `${feedbackUnread} new patient feedback` : "Patient feedback"}
+          data-testid="branch-feedback-bell"
+        >
+          <Bell className="h-4 w-4" />
+          {feedbackUnread > 0 && (
+            <span
+              className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white"
+              data-testid="branch-feedback-count"
+            >
+              {feedbackUnread > 99 ? "99+" : feedbackUnread}
+            </span>
+          )}
+        </button>
       </div>
+
+      {showFeedback && (
+        <FeedbackBoard
+          branchId={branchId}
+          onClose={() => setShowFeedback(false)}
+          onCounts={(data) => setFeedbackUnread(data?.unread || 0)}
+        />
+      )}
 
       {activeView === "consultations" ? (
         <div className="space-y-4" data-testid="branch-consultations-headphysio">

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Calendar, Check, ClipboardCheck, ClipboardList, Clock, Eye, EyeOff, IndianRupee, LogOut, PhoneCall, Salad, UserRound } from "lucide-react";
+import { Calendar, Check, ClipboardCheck, ClipboardList, Clock, Eye, EyeOff, IndianRupee, LogOut, MessageSquareHeart, PhoneCall, Salad, Star, UserRound } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,7 @@ import { slotTo12h } from "@/lib/time";
 import {
   loadPortalSession, savePortalSession, clearPortalSession,
   patientPortalLogin, patientPortalLogout, patientPortalMe, patientPortalGoogleLogin,
-  patientPortalDocuments, patientPortalDocumentUrl,
+  patientPortalDocuments, patientPortalDocumentUrl, patientPortalSubmitFeedback,
 } from "@/lib/patientPortalApi";
 
 const LOGO_URL =
@@ -716,7 +716,118 @@ const PORTAL_TABS = [
   { key: "sessions", label: "Sessions", short: "Sessions", icon: Calendar },
   { key: "treatment", label: "Treatment", short: "Treatment", icon: ClipboardList },
   { key: "payment", label: "Payment History", short: "Payments", icon: IndianRupee },
+  // Last, because it is the one tab a patient comes to say something rather than to look
+  // something up. "Feedback" fits at 360px, so short and label are the same word.
+  { key: "feedback", label: "Feedback", short: "Feedback", icon: MessageSquareHeart },
 ];
+
+/**
+ * What the patient made of it.
+ *
+ * A rating and some words, both optional on their own and refused only when neither is
+ * there — a patient who taps four stars and closes the app has said something useful, and
+ * one who writes a paragraph without rating anything has said more.
+ *
+ * Sent and then done with. There is no thread here and no reply: what happens next is the
+ * branch reading it on their board, and pretending otherwise would promise a conversation
+ * nothing in the OS can hold up.
+ */
+function FeedbackTab() {
+  const [rating, setRating] = useState(0);
+  const [message, setMessage] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+
+  const submit = async () => {
+    if (!rating && !message.trim()) {
+      toast.error("Leave a rating or tell us how it went");
+      return;
+    }
+    setSending(true);
+    try {
+      const res = await patientPortalSubmitFeedback({ rating: rating || null, message: message.trim() });
+      toast.success(res?.message || "Thank you");
+      setSent(true);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not send that. Please try again.");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  if (sent) {
+    return (
+      <Card data-testid="portal-feedback-sent">
+        <CardContent className="space-y-3 p-8 text-center">
+          <Check className="mx-auto h-8 w-8 text-emerald-600" />
+          <p className="text-sm font-semibold text-slate-800">Thank you — your branch has it.</p>
+          <p className="text-xs text-slate-500">Somebody there will read it. You can send more any time.</p>
+          <Button variant="outline" size="sm" onClick={() => { setSent(false); setRating(0); setMessage(""); }} data-testid="portal-feedback-again">
+            Send more feedback
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card data-testid="portal-feedback">
+      <CardContent className="space-y-4 p-5">
+        <div>
+          <p className="text-sm font-semibold text-slate-800">How has it been?</p>
+          <p className="mt-0.5 text-xs text-slate-500">Your branch reads this. Tell them anything — what went well, or what did not.</p>
+        </div>
+
+        <div>
+          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Rating</p>
+          <div className="flex items-center gap-1">
+            {[1, 2, 3, 4, 5].map((n) => (
+              <button
+                key={n}
+                type="button"
+                onClick={() => setRating(rating === n ? 0 : n)}
+                className="rounded p-1 transition hover:scale-110"
+                aria-label={`${n} out of 5`}
+                aria-pressed={rating === n}
+                data-testid={`portal-feedback-star-${n}`}
+              >
+                <Star className={`h-7 w-7 ${n <= rating ? "fill-amber-400 text-amber-400" : "text-slate-300"}`} />
+              </button>
+            ))}
+            {rating > 0 && (
+              <button type="button" onClick={() => setRating(0)} className="ml-2 text-[11px] text-slate-400 underline" data-testid="portal-feedback-clear">
+                clear
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div>
+          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">In your words</p>
+          <textarea
+            rows={5}
+            value={message}
+            maxLength={2000}
+            onChange={(e) => setMessage(e.target.value)}
+            placeholder="Optional — but it is the part a branch can act on."
+            className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400"
+            data-testid="portal-feedback-message"
+          />
+          <p className="mt-1 text-right text-[10px] text-slate-400">{message.length}/2000</p>
+        </div>
+
+        <Button
+          className="w-full"
+          disabled={sending || (!rating && !message.trim())}
+          onClick={submit}
+          data-testid="portal-feedback-submit"
+        >
+          {sending ? "Sending…" : "Send to my branch"}
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
 
 function PortalDashboard({ onLogout }) {
   // Lands on Overview, the first tab. A patient opening the app is most often checking
@@ -771,6 +882,7 @@ function PortalDashboard({ onLogout }) {
         {activeTab === "treatment" && <TreatmentTab data={data} />}
         {activeTab === "payment" && <PaymentTab data={data} />}
         {activeTab === "profile" && <ProfileTab data={data} />}
+        {activeTab === "feedback" && <FeedbackTab />}
       </div>
 
       {/* Unlike every other bottom nav in the OS this one has no md:hidden — the portal
