@@ -8,7 +8,7 @@ import { slotTo12h } from "@/lib/time";
 import {
   loadPortalSession, savePortalSession, clearPortalSession,
   patientPortalLogin, patientPortalLogout, patientPortalMe, patientPortalGoogleLogin,
-  patientPortalDocuments, patientPortalDocumentUrl, patientPortalSubmitFeedback,
+  patientPortalDocuments, patientPortalDocumentUrl, patientPortalSubmitFeedback, patientPortalMyFeedback,
 } from "@/lib/patientPortalApi";
 
 const LOGO_URL =
@@ -750,12 +750,78 @@ const FEEDBACK_TO = [
   },
 ];
 
+// What became of a piece of feedback, in the patient's words rather than the branch's.
+// "In Progress" is what the board calls it; "Being looked at" is what it means to the
+// person waiting, and they are the one reading this.
+const MY_FEEDBACK_STATUS = {
+  new: { label: "Sent", classes: "border-amber-200 bg-amber-50 text-amber-700", note: "Waiting to be picked up." },
+  in_progress: { label: "Being looked at", classes: "border-sky-200 bg-sky-50 text-sky-700", note: "Somebody has it." },
+  resolved: { label: "Closed", classes: "border-emerald-200 bg-emerald-50 text-emerald-700", note: "Finished with." },
+};
+
+const feedbackSentOn = (iso) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+};
+
+/** What this patient has sent, and where each one has got to.
+ *
+ * A patient who says something and hears nothing assumes it went nowhere, and either sends
+ * it again or stops sending. This does not promise a reply — it says somebody has it, which
+ * is the smallest honest thing to say.
+ */
+const MyFeedbackList = ({ mine }) => {
+  if (!mine || mine.length === 0) return null;
+  return (
+    <Card className="mt-4" data-testid="portal-feedback-mine">
+      <CardContent className="p-5">
+        <p className="text-sm font-semibold text-slate-800">What you have sent</p>
+        <div className="mt-3 space-y-3">
+          {mine.map((f) => {
+            const state = MY_FEEDBACK_STATUS[f.status || "new"] || MY_FEEDBACK_STATUS.new;
+            return (
+              <div key={f.id} className="rounded-lg border border-slate-200 p-3" data-testid={`portal-feedback-mine-${f.id}`}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className={`rounded border px-2 py-0.5 text-[10px] font-bold ${state.classes}`}>{state.label}</span>
+                  <span className="text-[10px] text-slate-400">{feedbackSentOn(f.created_at)}</span>
+                </div>
+                {f.rating ? (
+                  <span className="mt-2 inline-flex items-center gap-0.5" aria-label={`${f.rating} out of 5`}>
+                    {[1, 2, 3, 4, 5].map((n) => (
+                      <Star key={n} className={`h-3 w-3 ${n <= f.rating ? "fill-amber-400 text-amber-400" : "text-slate-200"}`} aria-hidden="true" />
+                    ))}
+                  </span>
+                ) : null}
+                {f.message ? (
+                  <p className="mt-1.5 whitespace-pre-wrap break-words text-xs leading-5 text-slate-600">{f.message}</p>
+                ) : null}
+                <p className="mt-1.5 text-[10px] text-slate-400">{state.note}</p>
+              </div>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
+
 function FeedbackTab() {
   const [rating, setRating] = useState(0);
   const [message, setMessage] = useState("");
   const [audience, setAudience] = useState("branch_admin");
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
+  const [mine, setMine] = useState([]);
+
+  // Reloaded after a send as well as on open, so what was just written appears in the list
+  // below rather than only after leaving the tab and coming back.
+  const loadMine = useCallback(() => {
+    patientPortalMyFeedback()
+      .then((data) => setMine(data?.feedback || []))
+      .catch(() => { /* the history is a courtesy; the form works without it */ });
+  }, []);
+  useEffect(() => { loadMine(); }, [loadMine]);
 
   const submit = async () => {
     if (!rating && !message.trim()) {
@@ -767,6 +833,7 @@ function FeedbackTab() {
       const res = await patientPortalSubmitFeedback({ rating: rating || null, message: message.trim(), audience });
       toast.success(res?.message || "Thank you");
       setSent(true);
+      loadMine();
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Could not send that. Please try again.");
     } finally {
@@ -776,7 +843,8 @@ function FeedbackTab() {
 
   if (sent) {
     return (
-      <Card data-testid="portal-feedback-sent">
+      <>
+        <Card data-testid="portal-feedback-sent">
         <CardContent className="space-y-3 p-8 text-center">
           <Check className="mx-auto h-8 w-8 text-emerald-600" />
           <p className="text-sm font-semibold text-slate-800">
@@ -787,12 +855,15 @@ function FeedbackTab() {
             Send more feedback
           </Button>
         </CardContent>
-      </Card>
+        </Card>
+        <MyFeedbackList mine={mine} />
+      </>
     );
   }
 
   return (
-    <Card data-testid="portal-feedback">
+    <>
+      <Card data-testid="portal-feedback">
       <CardContent className="space-y-4 p-5">
         <div>
           <p className="text-sm font-semibold text-slate-800">How has it been?</p>
@@ -872,7 +943,9 @@ function FeedbackTab() {
           {sending ? "Sending…" : "Send to my branch"}
         </Button>
       </CardContent>
-    </Card>
+      </Card>
+      <MyFeedbackList mine={mine} />
+    </>
   );
 }
 

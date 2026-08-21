@@ -59,6 +59,12 @@ export const patientPortalSubmitFeedback = async ({ rating, message }) => {
   return data;
 };
 
+/** What this patient has sent, and where each piece has got to. */
+export const patientPortalMyFeedback = async () => {
+  const { data } = await portalApi.get("/patient-portal/feedback", { headers: authHeaders() });
+  return data;
+};
+
 export const patientPortalDocuments = async () => {
   const { data } = await portalApi.get("/patient-portal/documents", { headers: authHeaders() });
   return data;

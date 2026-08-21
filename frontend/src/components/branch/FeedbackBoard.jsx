@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { Bell, RefreshCw, Star, X } from "lucide-react";
+import { Bell, CheckCircle2, Clock, Inbox, RefreshCw, Star, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { StatTile } from "@/components/ui/stat-tile";
 import { toast } from "@/components/ui/sonner";
 import { listBranchFeedback, moveBranchFeedback } from "@/lib/api";
 
@@ -8,10 +9,19 @@ import { listBranchFeedback, moveBranchFeedback } from "@/lib/api";
 // feedback arrives New, somebody picks it up, somebody finishes with it — which is what a
 // branch acts on. Kept in step with STATUSES in backend/routers/v3_feedback.py.
 const COLUMNS = [
-  { key: "new", label: "New", tint: "border-amber-200 bg-amber-50", dot: "bg-amber-500", empty: "Nothing waiting." },
-  { key: "in_progress", label: "In Progress", tint: "border-sky-200 bg-sky-50", dot: "bg-sky-500", empty: "Nothing being dealt with." },
-  { key: "resolved", label: "Resolved", tint: "border-emerald-200 bg-emerald-50", dot: "bg-emerald-500", empty: "Nothing finished yet." },
+  { key: "new", label: "New", icon: Inbox, color: "#d97706", sub: "waiting to be picked up", empty: "Nothing waiting." },
+  { key: "in_progress", label: "In Progress", icon: Clock, color: "#0284c7", sub: "being dealt with", empty: "Nothing being dealt with." },
+  { key: "resolved", label: "Resolved", icon: CheckCircle2, color: "#059669", sub: "finished with", empty: "Nothing finished yet." },
 ];
+
+// The chip a card wears, so a row read on its own says where it stands rather than relying
+// on which column it was sitting in — which is the whole of what the three columns used to
+// say, and is gone now the list is one list.
+const STATUS_CHIP = {
+  new: { label: "New", classes: "border-amber-200 bg-amber-50 text-amber-700" },
+  in_progress: { label: "In Progress", classes: "border-sky-200 bg-sky-50 text-sky-700" },
+  resolved: { label: "Resolved", classes: "border-emerald-200 bg-emerald-50 text-emerald-700" },
+};
 
 // Where a card can go from where it is. Both directions, because picking something up by
 // mistake is ordinary and a board you cannot walk backwards on gets worked around.
@@ -57,6 +67,14 @@ const FeedbackCard = ({ row, onMove, moving }) => (
         {row.patient_phone ? <p className="truncate text-[11px] text-slate-400">{row.patient_phone}</p> : null}
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
+        {/* Where it stands, on the card. The three columns used to say this by holding it,
+            and a single list has to say it outright. */}
+        <span
+          className={`whitespace-nowrap rounded border px-1.5 py-0.5 text-[10px] font-bold ${(STATUS_CHIP[row.status] || STATUS_CHIP.new).classes}`}
+          data-testid={`feedback-status-${row.id}`}
+        >
+          {(STATUS_CHIP[row.status] || STATUS_CHIP.new).label}
+        </span>
         {/* Only Super Admin ever sees one of these: the branch board filters them out. It
             says the patient chose to write past the branch, which is context the words
             underneath are read in. */}
@@ -118,6 +136,7 @@ export const FeedbackBoard = ({ branchId, onClose, onCounts }) => {
   const [loading, setLoading] = useState(true);
   const [moving, setMoving] = useState(null);
   const [error, setError] = useState("");
+  const [filter, setFilter] = useState("all"); // "all" | one of COLUMNS
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -136,6 +155,8 @@ export const FeedbackBoard = ({ branchId, onClose, onCounts }) => {
   }, [branchId, onCounts]);
 
   useEffect(() => { load(); }, [load]);
+
+  const visible = filter === "all" ? rows : rows.filter((r) => (r.status || "new") === filter);
 
   const move = async (row, to) => {
     setMoving(row.id);
@@ -186,24 +207,49 @@ export const FeedbackBoard = ({ branchId, onClose, onCounts }) => {
               No feedback yet. It arrives here when a patient leaves some in their portal.
             </p>
           ) : (
-            <div className="grid gap-4 md:grid-cols-3">
-              {COLUMNS.map((col) => {
-                const cards = rows.filter((r) => (r.status || "new") === col.key);
-                return (
-                  <div key={col.key} className={`rounded-xl border p-3 ${col.tint}`} data-testid={`feedback-column-${col.key}`}>
-                    <div className="mb-3 flex items-center gap-2">
-                      <span className={`h-2 w-2 rounded-full ${col.dot}`} aria-hidden="true" />
-                      <p className="text-[11px] font-bold uppercase tracking-wider text-slate-600">{col.label}</p>
-                      <span className="rounded bg-white/70 px-1.5 py-px text-[10px] font-bold text-slate-500">{cards.length}</span>
-                    </div>
-                    <div className="space-y-2">
-                      {cards.length === 0
-                        ? <p className="py-6 text-center text-[11px] text-slate-400">{col.empty}</p>
-                        : cards.map((r) => <FeedbackCard key={r.id} row={r} onMove={move} moving={moving === r.id} />)}
-                    </div>
-                  </div>
-                );
-              })}
+            <div className="space-y-4">
+              {/* The three counts as tiles, the way every other board here opens: a figure
+                  to read and, pressed, the rows behind it. They were column headings, which
+                  meant the only way to see just the resolved ones was to look at a third of
+                  the screen and ignore the rest. */}
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4" data-testid="feedback-summary">
+                <StatTile
+                  label="All"
+                  value={rows.length}
+                  sub="every piece of feedback"
+                  icon={Bell}
+                  color="#7c3aed"
+                  active={filter === "all"}
+                  onClick={() => setFilter("all")}
+                  testid="feedback-card-all"
+                />
+                {COLUMNS.map((col) => (
+                  <StatTile
+                    key={col.key}
+                    label={col.label}
+                    value={rows.filter((r) => (r.status || "new") === col.key).length}
+                    sub={col.sub}
+                    icon={col.icon}
+                    color={col.color}
+                    active={filter === col.key}
+                    onClick={() => setFilter(filter === col.key ? "all" : col.key)}
+                    testid={`feedback-card-${col.key}`}
+                  />
+                ))}
+              </div>
+
+              {/* Underneath, the feedback itself. Two across on a wide screen because the
+                  message is the point and a third of a modal is a narrow column to read a
+                  paragraph in. */}
+              {visible.length === 0 ? (
+                <p className="py-12 text-center text-sm text-slate-400" data-testid="feedback-none-here">
+                  {(COLUMNS.find((c) => c.key === filter) || {}).empty || "Nothing here."}
+                </p>
+              ) : (
+                <div className="grid gap-3 lg:grid-cols-2" data-testid="feedback-list">
+                  {visible.map((r) => <FeedbackCard key={r.id} row={r} onMove={move} moving={moving === r.id} />)}
+                </div>
+              )}
             </div>
           )}
         </div>

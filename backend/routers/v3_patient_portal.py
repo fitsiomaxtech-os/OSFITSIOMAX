@@ -423,6 +423,26 @@ async def patient_portal_feedback(
     }
 
 
+@router.get("/patient-portal/feedback")
+async def patient_portal_my_feedback(lead_id: str = Depends(_current_patient_lead_id)):
+    """What this patient has sent, and what has become of it.
+
+    A patient who says something and hears nothing back assumes it went nowhere, and sends
+    it again or stops sending. Showing the state of each one -- waiting, being looked at,
+    finished -- is the smallest honest answer: it does not promise a reply, it says
+    somebody has it.
+
+    What the branch wrote on it stays with the branch. The note is their working record of
+    what they did about it, written to be read by colleagues, and putting it in front of
+    the person it is about would change what gets written there.
+    """
+    rows = await v3_col("patient_feedback").find(
+        {"lead_id": lead_id},
+        {"_id": 0, "id": 1, "rating": 1, "message": 1, "status": 1, "created_at": 1, "audience": 1},
+    ).sort("created_at", -1).to_list(200)
+    return {"feedback": rows}
+
+
 # --------------------------------------------------------------- Staff: preview a patient's
 # --------------------------------------------------------------- own portal, without logging
 # --------------------------------------------------------------- in as them
