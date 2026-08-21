@@ -19,7 +19,7 @@ it through the leads' fee machinery would have meant inventing a lead to hang it
 
 import re
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -173,6 +173,73 @@ IST = timezone(timedelta(hours=5, minutes=30))
 
 def _is_class_day_today() -> bool:
     return datetime.now(IST).weekday() in CLASS_WEEKDAYS
+
+
+# A membership is sold by the month, twelve classes in each -- the same figure the shelf is
+# priced on (ZUMBA_CLASSES_PER_MONTH in frontend/src/components/PackagesBoard.jsx).
+CLASSES_PER_MONTH = 12
+
+# How close to the end a membership has to be before the branch is offered a renewal. Two
+# weeks of classes: near enough that the conversation is due, far enough that it is not
+# being had in the doorway on the last day.
+RENEWAL_WINDOW_CLASSES = 5
+
+
+def _as_date(value):
+    """A stored timestamp as a plain date, or None. Only the day matters here: a membership
+    bought at 9am and one bought at 6pm run out on the same day."""
+    text = str(value or "")[:10]
+    try:
+        return datetime.strptime(text, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def _finish_on(row: dict):
+    """The day this membership runs out: the day the term started, plus a month for every
+    twelve classes it holds.
+
+    No end date is stored -- it is the package's length counted forward, which is the same
+    answer without a second field to keep true. A term that has been renewed counts from
+    the renewal rather than from the day they first joined.
+
+    A short month clamps rather than spilling: starting on the 31st and finishing on the
+    3rd of the month after next is arithmetic nobody recognises as their own membership.
+    """
+    classes = _sessions(row.get("package_sessions"))
+    start = _as_date(row.get("term_start") or row.get("created_at"))
+    if not classes or classes % CLASSES_PER_MONTH or not start:
+        return None
+    months = classes // CLASSES_PER_MONTH
+    year = start.year + (start.month - 1 + months) // 12
+    month = (start.month - 1 + months) % 12 + 1
+    day = start.day
+    while day > 28:
+        try:
+            return date(year, month, day)
+        except ValueError:
+            day -= 1
+    return date(year, month, day)
+
+
+def _classes_left(row: dict):
+    """How many class days are left before the membership runs out, counting from tomorrow.
+
+    Counted off the calendar rather than off attendance, which is not recorded: it answers
+    "how much of what they bought is still ahead of them", which is the question a renewal
+    is prompted by. A membership already past its end has none left.
+    """
+    end = _finish_on(row)
+    if not end:
+        return None
+    today = datetime.now(IST).date()
+    if end <= today:
+        return 0
+    return sum(
+        1
+        for n in range((end - today).days)
+        if (today + timedelta(days=n + 1)).weekday() in CLASS_WEEKDAYS
+    )
 
 
 # What a master keeps of the fees their students paid. The other half is Fitsiomax's,
@@ -462,6 +529,12 @@ def _shape(row: dict, stages: Optional[list] = None) -> dict:
     card = CARD_OF_SOURCE.get(source, "direct")
     shaped = {**row, "source": source, "card": card}
     shaped["status"] = _status(row.get("status"))
+    # Worked out here rather than on each board, so the branch's tab and the master's roll
+    # cannot answer "when does this run out" differently.
+    end = _finish_on(row)
+    shaped["finish_on"] = end.isoformat() if end else ""
+    shaped["classes_left"] = _classes_left(row)
+    shaped["renewal_due"] = bool(end and (shaped["classes_left"] or 0) <= RENEWAL_WINDOW_CLASSES)
     if stages is not None:
         shaped["stage"] = _settle_stage(row.get("stage"), stages, card)
     return shaped
@@ -1200,6 +1273,98 @@ async def _dismiss_referral(lead_id: str, user: V3UserOut) -> dict:
         upsert=True,
     )
     return {"deleted": True, "dismissed": True}
+
+
+class ZumbaRenewInput(BaseModel):
+    """A fresh term on an existing membership."""
+    package_id: Optional[str] = ""
+    package_name: Optional[str] = ""
+    package_sessions: Optional[int] = None
+    fee_amount: Optional[float] = 0
+    payment_lines: Optional[List[ZumbaPaymentLine]] = None
+
+
+@router.post("/branch/zumba/{registration_id}/renew")
+async def renew_zumba(
+    registration_id: str,
+    payload: ZumbaRenewInput,
+    user: V3UserOut = Depends(require_zumba_reader),
+):
+    """Sell the same student another term.
+
+    The new term starts when the old one ends, not on the day the button is pressed. A
+    member who renews a week early has paid for those days and should not lose them, and a
+    member who renews late does not get to backdate the gap -- so it is whichever of the
+    two is later.
+
+    What they owe accumulates rather than being replaced. The Fee column answers "is this
+    member square with us", and resetting it every term would let an unpaid balance
+    disappear behind a renewal. The payment taken now is appended to the same list of
+    lines, so how each term was paid for is still there to read.
+
+    Renewing puts them back on the roll: somebody who buys another six months has not
+    discontinued, whatever the row said a minute ago.
+    """
+    existing = await _registration_or_400(registration_id)
+    if _own_branch_only(user) and existing.get("branch_id") != user.branch_id:
+        raise HTTPException(status_code=403, detail="Not your branch")
+
+    sessions = _sessions(payload.package_sessions)
+    if not sessions:
+        raise HTTPException(status_code=400, detail="Pick the membership they are renewing on")
+
+    money = _settle_payment(payload.payment_lines)
+    charged = _amount(payload.fee_amount)
+    if charged <= 0:
+        raise HTTPException(status_code=400, detail="What does this term cost?")
+
+    today = datetime.now(IST).date()
+    current_end = _finish_on(existing)
+    term_start = max(current_end, today) if current_end else today
+
+    lines = list(existing.get("payment_lines") or []) + money["payment_lines"]
+    paid = round(_amount(existing.get("fee_paid")) + money["fee_paid"], 2)
+    owed = round(_amount(existing.get("fee_amount")) + charged, 2)
+
+    changes = {
+        "term_start": term_start.isoformat(),
+        "package_id": (payload.package_id or "").strip(),
+        "package_name": (payload.package_name or "").strip(),
+        "package_sessions": sessions,
+        "fee_amount": owed,
+        "fee_paid": paid,
+        "payment_lines": lines,
+        # Read off every line the membership has ever carried, not just tonight's, so the
+        # column keeps meaning the same thing after a renewal as before one.
+        "payment_mode": (lines[0]["mode"] if len(lines) == 1 else "split") if lines else "",
+        "payment_reference": lines[0]["reference"] if len(lines) == 1 else "",
+        "status": STATUS_ACTIVE,
+        "status_remarks": "",
+        "status_at": "",
+        "status_by": "",
+        "updated_at": now_iso(),
+        "updated_by": user.full_name or user.email,
+    }
+    renewal = {
+        "id": str(uuid.uuid4()),
+        "package_name": changes["package_name"],
+        "package_sessions": sessions,
+        "fee_amount": charged,
+        "fee_paid": money["fee_paid"],
+        "lines": money["payment_lines"],
+        "term_start": changes["term_start"],
+        "renewed_at": now_iso(),
+        "renewed_by": user.full_name or user.email,
+    }
+    await v3_col("zumba_registrations").update_one(
+        {"id": registration_id}, {"$set": changes, "$push": {"renewals": renewal}}
+    )
+
+    shaped = _shape({**existing, **changes}, await _zumba_stages())
+    return {
+        "message": f"Renewed to {shaped['finish_on'] or 'the new term'}",
+        "registration": shaped,
+    }
 
 
 @router.delete("/branch/zumba/{registration_id}")

@@ -6,7 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { StatTile } from "@/components/ui/stat-tile";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { toast } from "@/components/ui/sonner";
-import { listZumba, listZumbaMasters, addZumba, updateZumba, deleteZumba, setZumbaStatus, acceptZumbaReferral, listStoreItems } from "@/lib/api";
+import { listZumba, listZumbaMasters, addZumba, updateZumba, deleteZumba, setZumbaStatus, acceptZumbaReferral, renewZumba, listStoreItems } from "@/lib/api";
 
 // How a registration arrived, as the branch would say it. A referral is recorded against
 // the master who made it rather than against a single "Masters" bucket, so these six are
@@ -144,6 +144,227 @@ const planLabel = (item) => {
 const planTotal = (item) => Math.round(
   (Number(item.price_offline ?? item.price_online) || 0) * (item.sessions_offline || item.sessions_online || 0),
 );
+
+/**
+ * Another term on a membership that is nearly up.
+ *
+ * Asks the two things a renewal is: which plan they are going back on, and what they have
+ * handed over for it. Everything else about the student is already known and is not asked
+ * again — a renewal is not a second registration.
+ *
+ * When the new term starts is the server's to decide, not this dialog's: it runs on from
+ * the end of the current one, so a member renewing early keeps the days they paid for.
+ */
+const RenewMembershipModal = ({ row, packages, onClose, onRenewed }) => {
+  const [pick, setPick] = useState(null);
+  const [lines, setLines] = useState([]);
+  const [saving, setSaving] = useState(false);
+
+  const setLine = (i, patch) => setLines((prev) => prev.map((l, n) => (n === i ? { ...l, ...patch } : l)));
+  const addLine = () => setLines((prev) => [...prev, prev.length === 0 ? { ...EMPTY_LINE } : { ...EMPTY_LINE, mode: "upi" }]);
+  const dropLine = (i) => setLines((prev) => prev.filter((_, n) => n !== i));
+  const collected = linesTotal(lines);
+  const price = pick ? planTotal(pick) : 0;
+
+  const submit = async () => {
+    if (!pick) { toast.error("Pick the membership they are renewing on"); return; }
+    const missingRef = lines.find(
+      (l) => lineTotal(l) > 0 && REFERENCE_LABELS[l.mode] && !(l.reference || "").trim(),
+    );
+    if (missingRef) { toast.error(`Enter the ${REFERENCE_LABELS[missingRef.mode]}`); return; }
+    setSaving(true);
+    try {
+      const res = await renewZumba(row.id, {
+        package_id: pick.id,
+        package_name: pick.name,
+        package_sessions: pick.sessions_offline || pick.sessions_online || null,
+        fee_amount: price,
+        payment_lines: lines.filter((l) => lineTotal(l) > 0).map((l) => ({
+          mode: l.mode,
+          amount: lineTotal(l),
+          reference: (l.reference || "").trim(),
+          denominations: l.mode === "cash" && noteTotal(l) > 0
+            ? Object.fromEntries(DENOMINATIONS.filter((d) => Number(l.notes?.[d]) > 0).map((d) => [String(d), Number(l.notes[d])]))
+            : undefined,
+        })),
+      });
+      // The server's own sentence, so what the branch reads back is what was recorded.
+      toast.success(res?.message || "Membership renewed");
+      onRenewed();
+      onClose();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not renew");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4" data-testid="zumba-renew-dialog">
+      <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 px-5 py-4">
+          <div className="min-w-0">
+            <h3 className="text-base font-semibold text-slate-900">Renew {row.name}</h3>
+            <p className="mt-0.5 text-[11px] text-slate-500">
+              {row.package_name ? `${row.package_name} · ` : ""}
+              {row.finish_on ? `runs out ${shortDate(row.finish_on)}` : "no end date on the current term"}
+              {typeof row.classes_left === "number" ? ` · ${row.classes_left} ${row.classes_left === 1 ? "class" : "classes"} left` : ""}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md p-1.5 text-slate-400 transition hover:bg-rose-50 hover:text-rose-600"
+            title="Close"
+            aria-label="Close"
+            data-testid="zumba-renew-close"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 space-y-4 overflow-y-auto p-5">
+          <div className="space-y-2">
+            <FieldLabel>Renewing On</FieldLabel>
+            {packages.length === 0 ? (
+              <p className="rounded-md bg-slate-50 px-2.5 py-2 text-[11px] text-slate-500">
+                No Zumba memberships on the shelf yet. Add them in Services and Products → Zumba Class.
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5" data-testid="zumba-renew-packages">
+                {packages.map((item) => {
+                  const on = pick?.id === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setPick(on ? null : item)}
+                      className={`rounded-md px-2.5 py-1.5 text-xs font-semibold transition ${on ? "bg-emerald-600 text-white" : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"}`}
+                      title={item.name}
+                      data-testid={`zumba-renew-package-${item.id}`}
+                    >
+                      {planLabel(item)} · {rupees(planTotal(item))}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <FieldLabel>Fee Collected</FieldLabel>
+            {lines.length === 0 ? (
+              <p className="rounded-md bg-slate-50 px-2.5 py-2 text-[11px] text-slate-500">
+                Nothing collected yet. A renewal can be recorded now and paid for later.
+              </p>
+            ) : (
+              lines.map((l, i) => (
+                <div key={i} className="rounded-lg border border-slate-200 p-3" data-testid={`zumba-renew-line-${i}`}>
+                  <div className="flex flex-wrap items-end gap-3">
+                    <div className="min-w-[140px] flex-1">
+                      <FieldLabel>Paid By</FieldLabel>
+                      <FormSelect value={l.mode} onChange={(v) => setLine(i, { mode: v, notes: {}, reference: "" })} testid={`zumba-renew-mode-${i}`}>
+                        {PAYMENT_MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+                      </FormSelect>
+                    </div>
+                    <div className="min-w-[110px] flex-1">
+                      <FieldLabel>Amount</FieldLabel>
+                      <Input
+                        type="number"
+                        min="0"
+                        value={l.mode === "cash" && noteTotal(l) > 0 ? noteTotal(l) : l.amount}
+                        onChange={(e) => setLine(i, { amount: e.target.value })}
+                        readOnly={l.mode === "cash" && noteTotal(l) > 0}
+                        className={l.mode === "cash" && noteTotal(l) > 0 ? "bg-slate-50" : ""}
+                        data-testid={`zumba-renew-amount-${i}`}
+                      />
+                    </div>
+                    {REFERENCE_LABELS[l.mode] && (
+                      <div className="min-w-[150px] flex-1">
+                        <FieldLabel>{REFERENCE_LABELS[l.mode]}</FieldLabel>
+                        <Input
+                          value={l.reference}
+                          onChange={(e) => setLine(i, { reference: e.target.value })}
+                          placeholder={REFERENCE_PLACEHOLDERS[l.mode]}
+                          data-testid={`zumba-renew-reference-${i}`}
+                        />
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => dropLine(i)}
+                      className="mb-1 rounded p-1.5 text-slate-400 transition hover:bg-rose-50 hover:text-rose-600"
+                      title="Remove this payment"
+                      aria-label="Remove this payment"
+                      data-testid={`zumba-renew-drop-${i}`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  {l.mode === "cash" && (
+                    <div className="mt-3 border-t border-slate-100 pt-3">
+                      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        Notes counted
+                        <span className="ml-1 font-normal normal-case text-slate-400">— leave blank to just type the amount</span>
+                      </p>
+                      <div className="grid grid-cols-4 gap-2 sm:grid-cols-8">
+                        {DENOMINATIONS.map((d) => (
+                          <div key={d}>
+                            <label className="mb-0.5 block text-center text-[11px] font-bold text-slate-500">₹{d}</label>
+                            <Input
+                              type="number"
+                              min="0"
+                              value={l.notes?.[d] ?? ""}
+                              onChange={(e) => setLine(i, { notes: { ...l.notes, [d]: e.target.value } })}
+                              className="h-9 px-1 text-center text-sm"
+                              data-testid={`zumba-renew-note-${i}-${d}`}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                      {noteTotal(l) > 0 && (
+                        <p className="mt-2 text-right text-[11px] text-slate-500">
+                          {DENOMINATIONS.filter((d) => Number(l.notes?.[d]) > 0).map((d) => `${l.notes[d]}×₹${d}`).join("  +  ")}
+                          {" = "}<b className="text-slate-700">{rupees(noteTotal(l))}</b>
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
+            <Button type="button" variant="outline" size="sm" onClick={addLine} data-testid="zumba-renew-add">
+              <Plus className="mr-1 h-3.5 w-3.5" />
+              {lines.length === 0 ? "Add Payment" : "Another Payment Mode"}
+            </Button>
+          </div>
+
+          {pick && (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs" data-testid="zumba-renew-summary">
+              <div className="flex items-center justify-between font-semibold text-slate-700">
+                <span>This term</span>
+                <span className="text-emerald-700">{rupees(price)}</span>
+              </div>
+              <p className="mt-1 text-[11px] text-slate-600">
+                {collected >= price ? "Paid up front." : `${rupees(price - collected)} of it will be outstanding.`}
+                {" The new term runs on from "}
+                {row.finish_on ? shortDate(row.finish_on) : "today"}.
+              </p>
+            </div>
+          )}
+        </div>
+
+        <div className="flex shrink-0 justify-end gap-2 border-t border-slate-100 px-5 py-3">
+          <Button variant="outline" size="sm" onClick={onClose} data-testid="zumba-renew-cancel">Cancel</Button>
+          <Button size="sm" className="bg-sky-600 hover:bg-sky-700" disabled={saving} onClick={submit} data-testid="zumba-renew-save">
+            {saving ? "Saving…" : "Save"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 /** The one dropdown shape this form uses, so six of them cannot drift into six looks. */
 const FormSelect = ({ value, onChange, children, testid }) => (
@@ -519,6 +740,7 @@ export const ZumbaPanel = ({ branchId }) => {
   const [branch, setBranch] = useState(null);
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState(null);
+  const [renewing, setRenewing] = useState(null); // the membership being sold another term
   const [viewing, setViewing] = useState(null);   // the registration open in the detail popup
   const [accepting, setAccepting] = useState(null); // the referral being taken onto the books
   // The Zumba pipeline exactly as Super Admin has it in CI/CD ROOTS. Nothing is hardcoded
@@ -957,6 +1179,7 @@ export const ZumbaPanel = ({ branchId }) => {
                     <th className="w-[11%] px-3 py-2.5">Phone</th>
                     <th className="w-[10%] px-3 py-2.5">Source</th>
                     <th className="w-[14%] px-3 py-2.5">Package</th>
+                    <th className="w-[11%] px-3 py-2.5">Finish</th>
                     <th className="w-[12%] px-3 py-2.5">Class</th>
                     {showStage && <th className="w-[9%] px-3 py-2.5">Stage</th>}
                     <th className="w-[10%] px-3 py-2.5">Fee</th>
@@ -1024,6 +1247,23 @@ export const ZumbaPanel = ({ branchId }) => {
                               {r.package_name}
                               {r.package_sessions ? <span className="block text-[10px] text-slate-400">{r.package_sessions} classes</span> : null}
                             </p>
+                          ) : <span className="text-xs text-slate-300">—</span>}
+                        </td>
+                        {/* When the membership runs out, counted forward from the term's
+                            start by the plan's own length — the server works it out so this
+                            column and the master's roll cannot answer it differently. The
+                            classes left sit under it, in amber once a renewal is due, so
+                            the date and the reason to act on it are read together. */}
+                        <td className="px-3 py-3">
+                          {r.finish_on ? (
+                            <>
+                              <p className="truncate text-xs text-slate-600">{shortDate(r.finish_on)}</p>
+                              {typeof r.classes_left === "number" ? (
+                                <p className={`truncate text-[10px] ${r.renewal_due ? "font-semibold text-amber-600" : "text-slate-400"}`}>
+                                  {r.classes_left === 0 ? "term over" : `${r.classes_left} left`}
+                                </p>
+                              ) : null}
+                            </>
                           ) : <span className="text-xs text-slate-300">—</span>}
                         </td>
                         {/* Whose class they turn up to, which is not who brought them in.
@@ -1146,6 +1386,24 @@ export const ZumbaPanel = ({ branchId }) => {
                               <Button size="sm" variant="outline" className="h-7 w-7 p-0" onClick={() => openForm(r)} title="Edit" aria-label="Edit" data-testid={`zumba-edit-${r.id}`}>
                                 <Pencil className="h-3 w-3" />
                               </Button>
+                              {/* Only once the term is nearly up. A renewal offered on the
+                                  first day of six months is a button nobody presses, and
+                                  one offered on the last is a conversation already missed. */}
+                              {r.renewal_due && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 gap-1 border-amber-300 px-2 text-[10px] font-semibold text-amber-700 hover:bg-amber-50"
+                                  onClick={(e) => { e.stopPropagation(); setRenewing(r); }}
+                                  title={r.classes_left === 0
+                                    ? "This membership has run out — sell them another term"
+                                    : `${r.classes_left} classes left — sell them another term`}
+                                  data-testid={`zumba-renew-${r.id}`}
+                                >
+                                  <RefreshCw className="h-3 w-3" />
+                                  Renew
+                                </Button>
+                              )}
                               <Button size="sm" variant="outline" className="h-7 w-7 border-rose-200 p-0 text-rose-700 hover:bg-rose-50" onClick={() => setRemoving(r)} title="Delete" aria-label="Delete" data-testid={`zumba-delete-${r.id}`}>
                                 <Trash2 className="h-3 w-3" />
                               </Button>
@@ -1479,6 +1737,15 @@ export const ZumbaPanel = ({ branchId }) => {
             </div>
           </div>
         </div>
+      )}
+
+      {renewing && (
+        <RenewMembershipModal
+          row={renewing}
+          packages={packages}
+          onClose={() => setRenewing(null)}
+          onRenewed={load}
+        />
       )}
 
       {viewing && (

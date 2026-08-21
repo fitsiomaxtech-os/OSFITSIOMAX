@@ -545,6 +545,10 @@ export const listZumbaMasters = async (branchId) => (await api.get("/branch/zumb
 // straight from what Super Admin has in CI/CD ROOTS.
 export const moveZumbaStage = async (registrationId, stage) => (await api.patch(`/branch/zumba/${registrationId}/stage`, { stage })).data;
 export const setZumbaStatus = async (registrationId, status, remarks) => (await api.patch(`/branch/zumba/${registrationId}/status`, { status, remarks })).data;
+
+// Another term on an existing membership. The server works out when the new term starts —
+// when the old one ends, not when the button was pressed — so nothing here has to.
+export const renewZumba = async (registrationId, payload) => (await api.post(`/branch/zumba/${registrationId}/renew`, payload)).data;
 export const acceptZumbaReferral = async (leadId) => (await api.post(`/branch/zumba/accept/${leadId}`)).data;
 
 // Fitness (gym) memberships — Branch Admin > Fitness. Its own desk beside Zumba: the gym
