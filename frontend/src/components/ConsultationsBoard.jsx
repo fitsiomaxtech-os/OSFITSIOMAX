@@ -686,6 +686,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // are never auto-filled: a treatment plan is spread across days deliberately, so the
   // Branch Admin fixes each session's date and time themselves.
   const [showPhysioModal, setShowPhysioModal] = useState(false);
+  // Which programme record is open in the lead panel: "diet", "rehab", or neither.
+  const [programmeDetail, setProgrammeDetail] = useState(null);
+  // Closed whenever a different patient is opened: a Diet card left standing would
+  // otherwise read as the new patient's, with the previous one's figures still in it.
+  useEffect(() => { setProgrammeDetail(null); }, [selectedLead?.id]);
   const [assignTrack, setAssignTrack] = useState("treatment"); // "treatment" | "rehab"
   const [physioOptions, setPhysioOptions] = useState([]);
   const [physioPick, setPhysioPick] = useState("");
@@ -3028,41 +3033,188 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 </Button>
               ) : null;
 
-              // Quiet versions of the two above, for the panels that already have one clear
-              // action of their own. Same conditions, same handlers, same labels — only the
-              // weight changes, so a panel whose job is "assign the physio" is not asking
-              // the eye to choose between three filled colours. Defined once here rather
-              // than restyled at each call site, and deliberately alongside the solid pair
-              // so the two can never drift apart in what they do.
-              const QuietDietButton = selectedLead.package_paid != null ? (
+              // Diet and Rehab each run a whole programme — a package, a fee, an expert,
+              // a set of days — and the panel only ever offered the next payment button for
+              // them. Where a patient actually stands went unanswered: is the fee in, how
+              // many days is the course, has anyone been assigned. These open that record
+              // in place, with the programme's own actions on it, so the branch reads the
+              // state and acts on it in one spot instead of pressing a fee button to find
+              // out what a fee button is going to say.
+              //
+              // One at a time: opening one closes the other, because they are alternative
+              // readings of the same patient rather than two things to compare.
+              const openDetail = (which) => setProgrammeDetail((cur) => (cur === which ? null : which));
+
+              const DetailRow = ({ label, value, tone = "" }) => (
+                <div className="flex items-baseline justify-between gap-4 px-3 py-2">
+                  <dt className="shrink-0 text-xs text-slate-500">{label}</dt>
+                  <dd className={`min-w-0 truncate text-right text-sm font-semibold ${tone || "text-slate-800"}`} title={String(value)}>{value}</dd>
+                </div>
+              );
+
+              const DietDetailCard = programmeDetail === "diet" ? (
+                <div className="mt-3 overflow-hidden rounded-xl border border-orange-200/80 bg-gradient-to-br from-orange-50 via-orange-50/60 to-white shadow-sm" data-testid="cons-diet-detail">
+                  <div className="flex items-center justify-between gap-3 border-b border-orange-100 px-4 py-2.5">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-orange-500/10 text-orange-600">
+                        <Salad className="h-4 w-4" />
+                      </span>
+                      <span className="truncate text-xs font-semibold uppercase tracking-wider text-orange-800">Diet Programme</span>
+                    </div>
+                    <span className={`flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${dietFeePaid ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+                      {dietFeePaid ? <><CheckCircle2 className="h-3 w-3" /> Fee Collected</> : "Diet Fee Due"}
+                    </span>
+                  </div>
+                  <div className="p-4">
+                    <div className="rounded-lg border border-slate-200/80 bg-white shadow-sm">
+                      <dl className="divide-y divide-slate-100">
+                        <DetailRow label="Diet Package" value={selectedLead.diet_package_name || "Not chosen yet"} />
+                        <DetailRow
+                          label="Diet Fee"
+                          value={dietFeePaid
+                            ? `Rs.${Number(selectedLead.diet_fee_paid).toLocaleString("en-IN")}${selectedLead.diet_fee_payment_mode ? ` (${selectedLead.diet_fee_payment_mode})` : ""}`
+                            : (dietFeeDue != null ? `Rs.${Number(dietFeeDue).toLocaleString("en-IN")} — not collected` : "Not collected")}
+                          tone={dietFeePaid ? "text-emerald-700" : "text-amber-700"}
+                        />
+                        <DetailRow
+                          label="Nutritionist"
+                          value={selectedLead.diet_coach_name || "Not assigned"}
+                          tone={dietAssigned ? "" : "text-amber-700"}
+                        />
+                        <DetailRow
+                          label="Diet Consultation"
+                          value={selectedLead.diet_appointment_at
+                            ? `${dayLabel(selectedLead.diet_appointment_at.split("T")[0])} at ${to12h(selectedLead.diet_appointment_at.split("T")[1])}`
+                            : "Not booked"}
+                          tone={dietBooked ? "" : "text-amber-700"}
+                        />
+                      </dl>
+                    </div>
+                    {/* The fee first and the nutritionist after it, because that is the
+                        order the backend enforces — assignment is refused until the fee
+                        is in, so offering it first would be offering a dead end. */}
+                    <div className="mt-3 flex flex-wrap items-center gap-2 [&>*]:shrink-0">
+                      <Button
+                        size="sm"
+                        className={`${dietFeePaid ? "bg-white text-orange-700 shadow-sm ring-1 ring-orange-200 hover:bg-orange-50" : "bg-orange-500 text-white shadow-sm hover:bg-orange-600"} ${ACT_BTN}`}
+                        onClick={openDietFeeDraft}
+                        data-testid="cons-diet-detail-fee"
+                      >
+                        <IndianRupee className="mr-1 h-3.5 w-3.5" />
+                        {dietFeePaid ? "Update Diet Fee" : "Collect Diet Fee"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        disabled={!dietFeePaid}
+                        title={dietFeePaid ? undefined : "Collect the Diet Fee first"}
+                        className={`${dietFeePaid ? "bg-orange-500 text-white shadow-sm hover:bg-orange-600" : "bg-slate-100 text-slate-400"} ${ACT_BTN}`}
+                        onClick={openDietModal}
+                        data-testid="cons-diet-detail-assign"
+                      >
+                        <Salad className="mr-1 h-3.5 w-3.5" />
+                        {dietBooked ? "Reschedule Diet" : "Assign Nutritionist"}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ) : null;
+
+              const RehabDetailCard = programmeDetail === "rehab" ? (
+                <div className="mt-3 overflow-hidden rounded-xl border border-cyan-200/80 bg-gradient-to-br from-cyan-50 via-cyan-50/60 to-white shadow-sm" data-testid="cons-rehab-detail">
+                  <div className="flex items-center justify-between gap-3 border-b border-cyan-100 px-4 py-2.5">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-cyan-600/10 text-cyan-700">
+                        <Activity className="h-4 w-4" />
+                      </span>
+                      <span className="truncate text-xs font-semibold uppercase tracking-wider text-cyan-800">Rehab Programme</span>
+                    </div>
+                    <span className={`flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${rehabFeePaid ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+                      {rehabFeePaid ? <><CheckCircle2 className="h-3 w-3" /> Fee Collected</> : "Rehab Fee Due"}
+                    </span>
+                  </div>
+                  <div className="p-4">
+                    <div className="rounded-lg border border-slate-200/80 bg-white shadow-sm">
+                      <dl className="divide-y divide-slate-100">
+                        <DetailRow label="Rehab Course" value={selectedLead.rehab_package_name || "Not chosen yet"} />
+                        <DetailRow
+                          label="Sessions"
+                          value={selectedLead.rehab_package_sessions
+                            ? `${selectedLead.rehab_package_sessions} day${selectedLead.rehab_package_sessions > 1 ? "s" : ""}`
+                            : "Not stated on the course"}
+                          tone={selectedLead.rehab_package_sessions ? "" : "text-slate-400"}
+                        />
+                        <DetailRow
+                          label="Rehab Fee"
+                          value={rehabFeePaid
+                            ? `Rs.${Number(selectedLead.rehab_fee_paid).toLocaleString("en-IN")}${selectedLead.rehab_fee_payment_mode ? ` (${selectedLead.rehab_fee_payment_mode})` : ""}`
+                            : (selectedLead.rehab_package_price != null ? `Rs.${Number(selectedLead.rehab_package_price).toLocaleString("en-IN")} — not collected` : "Not collected")}
+                          tone={rehabFeePaid ? "text-emerald-700" : "text-amber-700"}
+                        />
+                        <DetailRow
+                          label="Rehab Physio"
+                          value={selectedLead.rehab_physio_name || "Not assigned"}
+                          tone={selectedLead.rehab_physio_name ? "" : "text-amber-700"}
+                        />
+                      </dl>
+                    </div>
+                    {/* Same order and the same gate as diet: the days cannot be booked until
+                        the course is paid for, which is the rule assign-rehab itself holds. */}
+                    <div className="mt-3 flex flex-wrap items-center gap-2 [&>*]:shrink-0">
+                      <Button
+                        size="sm"
+                        className={`${rehabFeePaid ? "bg-white text-cyan-700 shadow-sm ring-1 ring-cyan-200 hover:bg-cyan-50" : "bg-cyan-600 text-white shadow-sm hover:bg-cyan-700"} ${ACT_BTN}`}
+                        onClick={openRehabFeeDraft}
+                        data-testid="cons-rehab-detail-fee"
+                      >
+                        <IndianRupee className="mr-1 h-3.5 w-3.5" />
+                        {rehabFeePaid ? "Update Rehab Fee" : "Collect Rehab Fee"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        disabled={!rehabFeePaid}
+                        title={rehabFeePaid ? undefined : "Collect the Rehab Fee first"}
+                        className={`${rehabFeePaid ? "bg-cyan-600 text-white shadow-sm hover:bg-cyan-700" : "bg-slate-100 text-slate-400"} ${ACT_BTN}`}
+                        onClick={() => openPhysioModal("rehab")}
+                        data-testid="cons-rehab-detail-assign"
+                      >
+                        <Activity className="mr-1 h-3.5 w-3.5" />
+                        {selectedLead.rehab_physio_name ? "Reassign Rehab Physio" : "Assign Physio"}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ) : null;
+
+              const ProgrammeDetails = (DietDetailCard || RehabDetailCard) ? (
+                <>{DietDetailCard}{RehabDetailCard}</>
+              ) : null;
+
+              // The buttons that open the two cards above. They replace the pair that used
+              // to fire a fee popup straight off this row — same place, but they now show
+              // the programme rather than assuming the next thing wanted is a payment.
+              const DietDetailButton = selectedLead.package_paid != null ? (
                 <Button
                   size="sm"
                   variant="outline"
-                  className={`border-slate-200 bg-white/70 text-slate-600 hover:bg-white ${ACT_BTN}`}
-                  onClick={!dietFeePaid ? openDietFeeDraft : openDietModal}
-                  data-testid="cons-open-diet-assign-quiet"
+                  className={`${programmeDetail === "diet" ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 bg-white/70 text-slate-600 hover:bg-white"} ${ACT_BTN}`}
+                  onClick={() => openDetail("diet")}
+                  data-testid="cons-open-diet-detail"
                 >
-                  <Salad className="mr-1 h-3.5 w-3.5" />{" "}
-                  {!dietFeePaid
-                    ? <Lbl full="Collect Diet Fee" short="Diet Fee" />
-                    : !dietBooked
-                    ? <Lbl full="Assign Nutritionist" short="Assign" />
-                    : <Lbl full="Reschedule Diet" short="Diet" />}
+                  <Salad className="mr-1 h-3.5 w-3.5" />
+                  <Lbl full="Diet Details" short="Diet" />
                 </Button>
               ) : null;
 
-              const QuietRehabButton = (selectedLead.package_paid != null && selectedLead.rehab_referred && selectedLead.rehab_package_id) ? (
+              const RehabDetailButton = (selectedLead.package_paid != null && selectedLead.rehab_referred && selectedLead.rehab_package_id) ? (
                 <Button
                   size="sm"
                   variant="outline"
-                  className={`border-slate-200 bg-white/70 text-slate-600 hover:bg-white ${ACT_BTN}`}
-                  onClick={openRehabFeeDraft}
-                  data-testid="cons-open-rehab-fee-quiet"
+                  className={`${programmeDetail === "rehab" ? "border-cyan-300 bg-cyan-50 text-cyan-700" : "border-slate-200 bg-white/70 text-slate-600 hover:bg-white"} ${ACT_BTN}`}
+                  onClick={() => openDetail("rehab")}
+                  data-testid="cons-open-rehab-detail"
                 >
-                  <Activity className="mr-1 h-3.5 w-3.5" />{" "}
-                  {rehabFeePaid
-                    ? <Lbl full="Update Rehab Fee" short="Rehab" />
-                    : <Lbl full="Collect Rehab Fee" short="Rehab Fee" />}
+                  <Activity className="mr-1 h-3.5 w-3.5" />
+                  <Lbl full="Rehab Details" short="Rehab" />
                 </Button>
               ) : null;
 
@@ -3204,7 +3356,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             <Activity className="mr-1.5 h-3.5 w-3.5" />
                             {rehabAssigned ? "Reassign Rehab Physio" : "Assign Physio"}
                           </Button>
-                          {QuietDietButton}
+                          {DietDetailButton}
                           {CancelButton}
                         </div>
                       </div>
@@ -3376,10 +3528,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             <Button size="sm" className="bg-emerald-600 text-xs text-white shadow-sm transition hover:bg-emerald-700 hover:shadow" onClick={submitMarkCompleted} disabled={completingConsultation} data-testid="cons-mark-completed">
                               {completingConsultation ? "Saving..." : "Mark Consultation Completed"}
                             </Button>
-                            {QuietDietButton}
-                            {QuietRehabButton}
+                            {DietDetailButton}
+                            {RehabDetailButton}
                             {CancelButton}
                           </div>
+                          {ProgrammeDetails}
                         </div>
                       </div>
                     );
@@ -3545,10 +3698,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                               <Lbl full="Assign Physio" short="Physio" />
                             </Button>
                           )}
-                          {QuietDietButton}
-                          {QuietRehabButton}
+                          {DietDetailButton}
+                          {RehabDetailButton}
                           {CancelButton}
                         </div>
+                        {ProgrammeDetails}
                       </div>
                     </div>
                   );
@@ -3622,7 +3776,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
 
               return (
                 <div className="space-y-3">
-                  <AllStagesStepper stages={stages} currentStage={stage} />
                   {panel}
                 </div>
               );
@@ -5883,39 +6036,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     </div>
   );
 };
-
-/** Read-only "All Stages" overview — every stage in order, current one highlighted,
- * passed ones checked off. Purely informational; there is no way to click back to
- * an earlier stage from here (moving backward isn't allowed once a lead has moved on). */
-function AllStagesStepper({ stages, currentStage }) {
-  const currentIdx = stages.findIndex((s) => s.name === currentStage);
-  return (
-    <div className="flex flex-wrap items-center justify-center gap-1.5 rounded-lg border border-slate-100 bg-slate-50/60 p-2.5" data-testid="cons-all-stages-stepper">
-      {stages.map((s, idx) => {
-        const hex = s.color || "#64748b";
-        const isCurrent = idx === currentIdx;
-        const isPassed = currentIdx >= 0 && idx < currentIdx;
-        return (
-          <span
-            key={s.id}
-            className="inline-flex items-center gap-1 rounded-none px-2.5 py-1 text-[11px] font-semibold"
-            style={
-              isCurrent
-                ? { background: hex, color: "#ffffff" }
-                : isPassed
-                  ? { background: `${hex}1f`, color: hex }
-                  : { background: "#f1f5f9", color: "#94a3b8" }
-            }
-            data-testid={`cons-all-stages-${s.name}`}
-          >
-            {isPassed && <CheckCircle2 className="h-3 w-3" />}
-            {s.name}
-          </span>
-        );
-      })}
-    </div>
-  );
-}
 
 // Colored, centered replacement for a native <select> of payment modes —
 // every option is shown inline as its own button (no click-to-open dropdown),
