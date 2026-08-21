@@ -43,7 +43,7 @@ const shortDate = (iso) => {
   return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 };
 
-const EMPTY_REFERRAL = { name: "", phone: "", age: "", address: "" };
+const EMPTY_REFERRAL = { name: "", phone: "", age: "" };
 
 /** What the roll below is showing, so the header names the open card rather than
  *  always saying "Customers" over a list that has been narrowed. */
@@ -187,7 +187,6 @@ const ReferCustomerModal = ({ masterName, branchId, branchName, onClose, onSaved
         name: form.name.trim(),
         phone: (form.phone || "").trim(),
         age: form.age === "" ? null : Number(form.age),
-        address: (form.address || "").trim(),
         source: MASTER,
         // Signed with the master's own name, so the branch's tab reads who referred them
         // rather than an anonymous "Master".
@@ -227,10 +226,6 @@ const ReferCustomerModal = ({ masterName, branchId, branchName, onClose, onSaved
               <label className="mb-1 block text-xs font-semibold text-slate-600">Age</label>
               <Input type="number" min="0" value={form.age} onChange={(e) => set("age", e.target.value)} placeholder="—" data-testid="zumba-refer-age" />
             </div>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600">Area</label>
-            <Input value={form.address} onChange={(e) => set("address", e.target.value)} placeholder="Area or locality" data-testid="zumba-refer-address" />
           </div>
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600" htmlFor="zumba-refer-branch">Branch</label>

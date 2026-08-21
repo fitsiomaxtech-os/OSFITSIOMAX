@@ -617,6 +617,9 @@ export const ZumbaPanel = ({ branchId }) => {
         age: form.age === "" || form.age == null ? null : Number(form.age),
         email: (form.email || "").trim(),
         gender: form.gender || "",
+        // Not asked for any more, but still sent: a consultation referral arrives with
+        // an address off the lead, and dropping it here would mean editing such a row
+        // for any other reason silently deleted it.
         address: (form.address || "").trim(),
         time_slot: form.time_slot || "",
         package_id: form.package_id || "",
@@ -1022,10 +1025,6 @@ export const ZumbaPanel = ({ branchId }) => {
                     <option value="">Not stated</option>
                     {GENDERS.map((g) => <option key={g.key} value={g.key}>{g.label}</option>)}
                   </FormSelect>
-                </div>
-                <div className="space-y-2">
-                  <FieldLabel>Address</FieldLabel>
-                  <Input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} placeholder="Where they are coming from" data-testid="zumba-field-address" />
                 </div>
               </div>
 
