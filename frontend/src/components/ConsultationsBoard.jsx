@@ -3093,43 +3093,87 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 // actually are — which for almost all of them is Fee Collected. Placed any
                 // lower, that branch returns first and the Rehab tab opens a patient onto
                 // the fee panel with no way to reach Assign Physio.
-                // a patient is on it because their Rehab Fee is in, while their
-                // consultation_stage still says where they actually are. So this panel keys
-                // off the tab being looked at rather than off the lead's own stage — the
-                // same reason matchesStage reads the fee for it.
                 if (stageFilter === "Rehab" && selectedLead.rehab_fee_paid != null) {
                   const rehabDays = selectedLead.rehab_package_sessions || 0;
+                  const rehabAssigned = !!selectedLead.rehab_physio_name;
                   return (
                     <div className="rounded-lg border border-cyan-200 bg-cyan-50 p-3" data-testid="cons-stage-panel-rehab">
                       <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-cyan-700">
                         <Activity className="h-3.5 w-3.5" /> Rehab
                       </p>
-                      <p className="text-xs text-slate-600">
-                        <span className="font-semibold text-slate-800">{selectedLead.rehab_package_name || "Rehab course"}</span>
-                        {rehabDays ? ` · ${rehabDays} day${rehabDays > 1 ? "s" : ""}` : ""}
-                        {` · Rs.${selectedLead.rehab_fee_paid} collected`}
+
+                      {/* The same white card the Consultation Fee summary uses one panel up:
+                          label left, value right, one fact per row. The facts used to run
+                          together on a single middot line, which read as a caption rather
+                          than as the record of what this patient bought. */}
+                      <div className="rounded-md border border-slate-200 bg-white p-2.5" data-testid="cons-rehab-summary">
+                        <div className="flex items-center justify-between gap-3 text-sm">
+                          <span className="shrink-0 text-xs text-slate-500">Course</span>
+                          <span className="min-w-0 truncate font-semibold text-slate-800" title={selectedLead.rehab_package_name || ""}>
+                            {selectedLead.rehab_package_name || "Rehab course"}
+                          </span>
+                        </div>
+                        {/* Only when the course states one. A row reading "0 days" would be
+                            claiming a fact the package never carried. */}
+                        {rehabDays > 0 && (
+                          <div className="mt-1 flex items-center justify-between gap-3 text-sm">
+                            <span className="shrink-0 text-xs text-slate-500">Duration</span>
+                            <span className="font-semibold text-slate-800">{rehabDays} day{rehabDays > 1 ? "s" : ""}</span>
+                          </div>
+                        )}
+                        <div className="mt-1 flex items-center justify-between gap-3 text-sm">
+                          <span className="shrink-0 text-xs text-slate-500">Rehab Fee</span>
+                          <span className="font-semibold text-slate-800">
+                            Rs.{selectedLead.rehab_fee_paid}
+                            {selectedLead.rehab_fee_payment_mode && (
+                              <span className="ml-1 capitalize text-emerald-600">({selectedLead.rehab_fee_payment_mode})</span>
+                            )}
+                          </span>
+                        </div>
+                        {rehabAssigned && (
+                          <div className="mt-1 flex items-center justify-between gap-3 text-sm">
+                            <span className="shrink-0 text-xs text-slate-500">Rehab Physio</span>
+                            <span className="min-w-0 truncate font-semibold text-slate-800">{selectedLead.rehab_physio_name}</span>
+                          </div>
+                        )}
+                        <p className="mt-1 flex items-center gap-1 text-[11px] font-medium text-emerald-600">
+                          <CheckCircle2 className="h-3 w-3" /> Already Collected
+                        </p>
+                      </div>
+
+                      <p className="mt-2 text-xs text-slate-600">
+                        {rehabAssigned
+                          ? "The course is booked — every day is on this physio's calendar and on their board."
+                          : "Choose the physio who will deliver the course and fix a date and time for every day."}
                       </p>
-                      {selectedLead.rehab_physio_name ? (
-                        <p className="mt-1 text-xs text-slate-600">
-                          Rehab Physio: <span className="font-semibold text-slate-800">{selectedLead.rehab_physio_name}</span>
-                          {" — the days are on their calendar and on their board."}
-                        </p>
-                      ) : (
-                        <p className="mt-1 text-xs text-slate-600">
-                          Rehab Fee collected. Choose the physio who will deliver the course and fix a date and time for every day.
-                        </p>
-                      )}
-                      <div className="mt-3 flex items-center gap-1.5 [justify-content:safe_center] [&>*]:shrink-0">
+
+                      {/* Left-aligned with everything above it, and one solid button only.
+                          Three filled colours side by side gave no clue which was the step
+                          to take; Diet and Cancel stay reachable as quiet outlines. */}
+                      <div className="mt-3 flex flex-wrap items-center gap-1.5 [&>*]:shrink-0">
                         <Button
                           size="sm"
-                          variant={selectedLead.rehab_physio_name ? "outline" : undefined}
-                          className={selectedLead.rehab_physio_name ? "text-xs" : "bg-cyan-600 text-xs text-white hover:bg-cyan-700"}
+                          className="bg-cyan-600 text-xs text-white hover:bg-cyan-700"
                           onClick={() => openPhysioModal("rehab")}
                           data-testid="cons-open-rehab-assign"
                         >
-                          {selectedLead.rehab_physio_name ? "Reassign Rehab Physio" : "Assign Physio"}
+                          <Activity className="mr-1 h-3.5 w-3.5" />
+                          {rehabAssigned ? "Reassign Rehab Physio" : "Assign Physio"}
                         </Button>
-                        {DietButton}
+                        {/* The shared DietButton is solid orange, which would compete with
+                            the one action this panel exists for. Same handlers, quieter. */}
+                        {selectedLead.package_paid != null && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className={`border-slate-200 text-slate-600 hover:bg-slate-50 ${ACT_BTN}`}
+                            onClick={!dietFeePaid ? openDietFeeDraft : openDietModal}
+                            data-testid="cons-rehab-diet-btn"
+                          >
+                            <Salad className="mr-1 h-3.5 w-3.5" />
+                            {!dietFeePaid ? <Lbl full="Collect Diet Fee" short="Diet Fee" /> : <Lbl full="Diet Consultation" short="Diet" />}
+                          </Button>
+                        )}
                         {CancelButton}
                       </div>
                     </div>
