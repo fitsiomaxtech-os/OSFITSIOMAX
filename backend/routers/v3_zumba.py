@@ -20,7 +20,7 @@ it through the leads' fee machinery would have meant inventing a lead to hang it
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -111,6 +111,11 @@ REFERENCE_MODES = ("upi", "card", "account_transfer")
 # What to call that trail, per mode. A UPI ID and a transaction number are different kinds
 # of thing, so the field says which is wanted rather than asking for a generic "reference"
 # and leaving the desk to guess.
+# The notes an Indian counter actually holds, largest first -- which is the order a
+# drawer is emptied in. Kept in step with DENOMINATIONS in v3_fitness.py, whose collect
+# dialog this mirrors: one counter counts both, and two orders would be two habits.
+DENOMINATIONS = (2000, 500, 200, 100, 50, 20, 10, 5)
+
 REFERENCE_LABELS = {
     "upi": "UPI ID",
     "card": "transaction ID",
@@ -203,6 +208,84 @@ def _age(value) -> Optional[int]:
     return age if 0 < age < 120 else None
 
 
+class ZumbaPaymentLine(BaseModel):
+    """One way a fee arrived. A payment can be several of these.
+
+    Split payments are ordinary at a counter -- half in cash, the rest by UPI -- and one
+    mode per registration forced the desk to pick whichever half was larger and record the
+    other as if it never happened.
+    """
+    mode: str
+    amount: Optional[float] = 0
+    reference: Optional[str] = ""
+    # Cash only: how many of each note, keyed by the note's value as a string because that
+    # is what survives a JSON round trip.
+    denominations: Optional[dict] = None
+
+
+def _denomination_total(raw) -> tuple:
+    """What a pile of notes comes to, and the tidied count behind it.
+
+    Anything that is not a note this counter holds, or not a positive whole number of them,
+    is dropped rather than guessed at -- a "3.5 x 500" is a typo, and turning it into 1750
+    would put a figure in the drawer nobody counted.
+    """
+    if not isinstance(raw, dict):
+        return 0.0, {}
+    clean: dict = {}
+    total = 0.0
+    for note in DENOMINATIONS:
+        for key in (str(note), note):
+            if key in raw:
+                try:
+                    count = int(raw[key])
+                except (TypeError, ValueError):
+                    count = 0
+                if count > 0:
+                    clean[str(note)] = count
+                    total += note * count
+                break
+    return round(total, 2), clean
+
+
+def _settle_payment(lines) -> dict:
+    """The payment lines, tidied, and what the registration reads off them.
+
+    fee_paid is their sum rather than a figure typed beside them: two numbers that can
+    disagree is one number nobody trusts. The mode reads "split" when a payment arrived
+    more than one way -- a row saying "cash" for a payment half of which came by UPI is
+    worse than one that says it was split.
+    """
+    cleaned = []
+    for line in lines or []:
+        mode = (line.mode or "").strip().lower()
+        if mode not in PAYMENT_MODES:
+            raise HTTPException(status_code=400, detail=f"Unknown payment mode: {line.mode}")
+        note_total, counted = _denomination_total(line.denominations)
+        # Counted notes settle the figure rather than sitting beside it: the count is the
+        # number somebody actually looked at.
+        amount = note_total if (mode == "cash" and counted) else _amount(line.amount)
+        if amount <= 0:
+            continue
+        reference = (line.reference or "").strip()
+        if mode in REFERENCE_MODES and not reference:
+            raise HTTPException(status_code=400, detail=f"Enter the {REFERENCE_LABELS[mode]}")
+        cleaned.append({
+            "mode": mode,
+            "amount": amount,
+            "reference": reference if mode in REFERENCE_MODES else "",
+            "denominations": counted if mode == "cash" else {},
+        })
+
+    total = round(sum(l["amount"] for l in cleaned), 2)
+    return {
+        "payment_lines": cleaned,
+        "fee_paid": total,
+        "payment_mode": (cleaned[0]["mode"] if len(cleaned) == 1 else "split") if cleaned else "",
+        "payment_reference": cleaned[0]["reference"] if len(cleaned) == 1 else "",
+    }
+
+
 class ZumbaInput(BaseModel):
     name: str
     phone: Optional[str] = ""
@@ -229,6 +312,10 @@ class ZumbaInput(BaseModel):
     # The UPI ID or transaction number behind that mode. Meaningless for cash, and dropped
     # with the mode when nothing has been collected.
     payment_reference: Optional[str] = ""
+    # How the fee arrived, line by line. When present it settles fee_paid, payment_mode and
+    # payment_reference between them, and the three scalars above are ignored -- they stay
+    # for the master's referral form, which collects no money and sends no lines.
+    payment_lines: Optional[List[ZumbaPaymentLine]] = None
     package_id: Optional[str] = ""
     package_name: Optional[str] = ""
     fee_amount: Optional[float] = 0
@@ -747,16 +834,26 @@ async def _clean(payload: ZumbaInput, user: V3UserOut) -> dict:
 
     gender = (payload.gender or "").strip().lower()
     time_slot = (payload.time_slot or "").strip()
-    payment_mode = (payload.payment_mode or "").strip().lower()
-    fee_paid = _amount(payload.fee_paid)
-    if payment_mode not in PAYMENT_MODES or fee_paid <= 0:
-        payment_mode = ""
-    payment_reference = (payload.payment_reference or "").strip()
-    if payment_mode in REFERENCE_MODES and not payment_reference:
-        raise HTTPException(status_code=400, detail=f"Enter the {REFERENCE_LABELS[payment_mode]}")
-    if payment_mode not in REFERENCE_MODES:
-        # Cash keeps no reference, and neither does a row with no mode left on it.
-        payment_reference = ""
+    # Lines settle the money when the caller sends them, which the branch's own form always
+    # does. The scalars below are the older shape, kept for the master's referral form: it
+    # collects nothing, so it sends no lines and lands on fee_paid 0 either way.
+    if payload.payment_lines is not None:
+        money = _settle_payment(payload.payment_lines)
+    else:
+        payment_mode = (payload.payment_mode or "").strip().lower()
+        fee_paid = _amount(payload.fee_paid)
+        if payment_mode not in PAYMENT_MODES or fee_paid <= 0:
+            payment_mode = ""
+        payment_reference = (payload.payment_reference or "").strip()
+        if payment_mode in REFERENCE_MODES and not payment_reference:
+            raise HTTPException(status_code=400, detail=f"Enter the {REFERENCE_LABELS[payment_mode]}")
+        money = {
+            "payment_lines": [],
+            "fee_paid": fee_paid,
+            "payment_mode": payment_mode,
+            # Cash keeps no reference, and neither does a row with no mode left on it.
+            "payment_reference": payment_reference if payment_mode in REFERENCE_MODES else "",
+        }
 
     return {
         "name": name,
@@ -771,12 +868,10 @@ async def _clean(payload: ZumbaInput, user: V3UserOut) -> dict:
         "source": source,
         "master_name": master_name if source == MASTER else "",
         "fee_amount": _amount(payload.fee_amount),
-        "fee_paid": fee_paid,
-        # Tied to the money rather than kept as a free-standing preference: dropping the
-        # collected amount to zero drops the mode with it, so a row can never claim cash
-        # was taken while reporting that nothing was.
-        "payment_mode": payment_mode,
-        "payment_reference": payment_reference,
+        # Tied to the money rather than kept as free-standing preferences: with nothing
+        # collected there is no mode and no reference, so a row can never claim cash was
+        # taken while reporting that nothing was.
+        **money,
         "stage": _settle_stage(payload.stage, await _zumba_stages(), CARD_OF_SOURCE.get(source, "direct")),
         **await _assignment(payload, user),
     }

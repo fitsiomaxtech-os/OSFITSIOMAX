@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Eye, Music, Pencil, RefreshCw, Stethoscope, Trash2, UserPlus, X } from "lucide-react";
+import { Eye, Music, Pencil, Plus, RefreshCw, Stethoscope, Trash2, UserPlus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -60,7 +60,7 @@ const presetFilter = (p) => { const r = p.range(); return r ? { key: p.key, labe
  *  which is how the Custom pill knows to stay quiet while a preset is the active one. */
 const isPreset = (f) => !f || DATE_PRESETS.some((p) => p.key === f.key);
 
-const PAYMENT_MODE_LABELS = Object.fromEntries(PAYMENT_MODES.map((m) => [m.value, m.label]));
+const PAYMENT_MODE_LABELS = { ...Object.fromEntries(PAYMENT_MODES.map((m) => [m.value, m.label])), split: "Split" };
 
 // The modes that leave a trail somewhere else, and what that trail is called. A UPI ID and
 // a transaction number are different kinds of thing, so the field asks for the one it
@@ -79,10 +79,51 @@ const MODE_FILTERS = [
   ["cash", "Cash"],
   ["upi", "UPI"],
   ["card", "Card"],
+  ["account_transfer", "Bank Transfer"],
+  // A payment that arrived more than one way is its own answer, not a missing one — and
+  // without a pill it was the one kind of row the filter row could not find.
+  ["split", "Split"],
 ];
 
 const REFERENCE_LABELS = { upi: "UPI ID", card: "Transaction ID", account_transfer: "Transaction ID" };
 const REFERENCE_PLACEHOLDERS = { upi: "name@bank", card: "Transaction number", account_transfer: "Transaction number" };
+
+// The notes an Indian counter actually holds, largest first — the order a drawer is
+// emptied in. Kept in step with DENOMINATIONS in FitnessPanel.jsx and v3_zumba.py: one
+// counter counts for both desks, and two orders would be two habits.
+const DENOMINATIONS = [2000, 500, 200, 100, 50, 20, 10, 5];
+
+const EMPTY_LINE = { mode: "cash", amount: "", reference: "", notes: {} };
+
+/** What one payment line comes to.
+ *
+ * Counted notes settle it rather than sitting beside it: two numbers that can disagree is
+ * one number nobody trusts, and the count is the one somebody actually looked at.
+ */
+const noteTotal = (l) => DENOMINATIONS.reduce((sum, d) => sum + d * (Number(l?.notes?.[d]) || 0), 0);
+const lineTotal = (l) => (l?.mode === "cash" && noteTotal(l) > 0 ? noteTotal(l) : Number(l?.amount) || 0);
+const linesTotal = (lines) => (lines || []).reduce((sum, l) => sum + lineTotal(l), 0);
+
+/** A stored row's payment, back in the shape the form edits.
+ *
+ * A row saved before payments were lines has a mode and a figure and no lines at all;
+ * rebuilding one from them means editing such a row shows what was taken rather than an
+ * empty payment the save would then overwrite with nothing.
+ */
+const linesOf = (row) => {
+  if (Array.isArray(row?.payment_lines) && row.payment_lines.length > 0) {
+    return row.payment_lines.map((l) => ({
+      mode: l.mode || "cash",
+      amount: String(l.amount ?? ""),
+      reference: l.reference || "",
+      notes: Object.fromEntries(Object.entries(l.denominations || {}).map(([d, n]) => [Number(d), String(n)])),
+    }));
+  }
+  if (Number(row?.fee_paid) > 0) {
+    return [{ mode: row.payment_mode && row.payment_mode !== "split" ? row.payment_mode : "cash", amount: String(row.fee_paid), reference: row.payment_reference || "", notes: {} }];
+  }
+  return [];
+};
 
 const GENDERS = [
   { key: "female", label: "Female" },
@@ -394,7 +435,7 @@ const missingDetails = (row) => {
 const EMPTY = {
   name: "", email: "", phone: "", age: "", gender: "", address: "",
   source: "personal", master_name: "", assigned_master_id: "", time_slot: "",
-  package_id: "", package_name: "", fee_amount: "", fee_paid: "", payment_mode: "", payment_reference: "",
+  package_id: "", package_name: "", fee_amount: "", fee_paid: "", payment_mode: "", payment_reference: "", payment_lines: [],
 };
 
 /**
@@ -566,9 +607,28 @@ export const ZumbaPanel = ({ branchId }) => {
     return [...seen.values()].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
   }, [zumbaMasters, masters, form]);
 
+  // The payment lines the dialog edits. Declared beside openForm rather than inside the
+  // dialog's JSX so the handlers are one thing each, and `collected` is read by both the
+  // Fee Collected box and the running total under the lines.
+  const setLine = (i, patch) => setForm((f) => ({
+    ...f,
+    payment_lines: (f.payment_lines || []).map((l, n) => (n === i ? { ...l, ...patch } : l)),
+  }));
+  // A second line starts on UPI rather than cash: somebody adding one has already taken
+  // the cash part, and the common split is cash plus something else.
+  const addLine = () => setForm((f) => ({
+    ...f,
+    payment_lines: [...(f.payment_lines || []), (f.payment_lines || []).length === 0 ? { ...EMPTY_LINE } : { ...EMPTY_LINE, mode: "upi" }],
+  }));
+  const dropLine = (i) => setForm((f) => ({
+    ...f,
+    payment_lines: (f.payment_lines || []).filter((_, n) => n !== i),
+  }));
+  const collected = linesTotal(form?.payment_lines);
+
   const openForm = (row) => {
     setNewMaster("");
-    setForm(row ? { ...EMPTY, ...row, age: row.age ?? "" } : { ...EMPTY });
+    setForm(row ? { ...EMPTY, ...row, age: row.age ?? "", payment_lines: linesOf(row) } : { ...EMPTY });
   };
 
   /**
@@ -601,9 +661,14 @@ export const ZumbaPanel = ({ branchId }) => {
       toast.error("Referred on the consultation — change it there, not here");
       return;
     }
-    const wantsReference = Number(form.fee_paid) > 0 && REFERENCE_LABELS[form.payment_mode];
-    if (wantsReference && !(form.payment_reference || "").trim()) {
-      toast.error(`Enter the ${wantsReference}`);
+    // Asked per line, because a split payment can have one traceable half and one not:
+    // the cash needs nothing and the UPI still needs its ID. Refused here as well as on the
+    // server, so the desk is told before the round trip.
+    const missingRef = (form.payment_lines || []).find(
+      (l) => lineTotal(l) > 0 && REFERENCE_LABELS[l.mode] && !(l.reference || "").trim(),
+    );
+    if (missingRef) {
+      toast.error(`Enter the ${REFERENCE_LABELS[missingRef.mode]}`);
       return;
     }
     if (form.source === MASTER && !(form.master_name || "").trim()) { toast.error("Which master referred them?"); return; }
@@ -627,8 +692,20 @@ export const ZumbaPanel = ({ branchId }) => {
         assigned_master_id: form.assigned_master_id || "",
         fee_amount: Number(form.fee_amount || 0),
         fee_paid: Number(form.fee_paid || 0),
-        payment_mode: form.payment_mode || "",
-        payment_reference: (form.payment_reference || "").trim(),
+        // The three the server works out from these are still in the payload above for
+        // callers that send no lines; with lines present they are ignored and settled here.
+        payment_lines: (form.payment_lines || [])
+          .filter((l) => lineTotal(l) > 0)
+          .map((l) => ({
+            mode: l.mode,
+            amount: lineTotal(l),
+            reference: (l.reference || "").trim(),
+            // Only for cash, and only what was actually counted — an empty map would read
+            // as "counted nothing" rather than "did not count".
+            denominations: l.mode === "cash" && noteTotal(l) > 0
+              ? Object.fromEntries(DENOMINATIONS.filter((d) => Number(l.notes?.[d]) > 0).map((d) => [String(d), Number(l.notes[d])]))
+              : undefined,
+          })),
       };
       if (form.id) await updateZumba(form.id, payload);
       else await addZumba(payload, branchId);
@@ -932,6 +1009,13 @@ export const ZumbaPanel = ({ branchId }) => {
                               {r.payment_reference ? (
                                 <p className="mt-0.5 truncate text-[10px] text-slate-400" title={r.payment_reference}>{r.payment_reference}</p>
                               ) : null}
+                              {/* "Split" on its own says a payment arrived more than one way
+                                  without saying which, which is the question it prompts. */}
+                              {r.payment_mode === "split" && Array.isArray(r.payment_lines) ? (
+                                <p className="mt-0.5 truncate text-[10px] text-slate-400" title={r.payment_lines.map((l) => `${PAYMENT_MODE_LABELS[l.mode] || l.mode} ${rupees(l.amount)}`).join(", ")}>
+                                  {r.payment_lines.map((l) => `${PAYMENT_MODE_LABELS[l.mode] || l.mode} ${rupees(l.amount)}`).join(" + ")}
+                                </p>
+                              ) : null}
                             </>
                           ) : <span className="text-xs text-slate-300">—</span>}
                         </td>
@@ -991,10 +1075,10 @@ export const ZumbaPanel = ({ branchId }) => {
           <div className="max-h-[90vh] w-full max-w-3xl space-y-4 overflow-y-auto rounded-xl bg-white p-5 shadow-2xl">
             <h3 className="text-base font-semibold text-slate-900">{form.id ? "Edit Zumba Lead" : "Zumba Lead Create"}</h3>
 
-            {/* Two columns, and the split is the question each answers: who the person is
-                on the left, what the branch is doing with them on the right. On a phone
-                they stack in that same order, which is the order they are asked in. */}
-            <div className="grid gap-5 md:grid-cols-2">
+            {/* One column, in the order the desk asks: who the person is, then what the
+                branch is doing with them. The headings keep the two apart without a second
+                column putting half the questions where a form is not read. */}
+            <div className="space-y-5">
 
               {/* ---------------------------------------------------- who they are */}
               <div className="space-y-3">
@@ -1141,45 +1225,132 @@ export const ZumbaPanel = ({ branchId }) => {
                   <div className="grid grid-cols-2 gap-3 pt-1">
                     <div className="space-y-2">
                       <FieldLabel>Fee Collected</FieldLabel>
-                      <Input type="number" value={form.fee_paid} onChange={(e) => setForm({ ...form, fee_paid: e.target.value })} placeholder="0" data-testid="zumba-field-paid" />
+                      {/* Read off the payment below rather than typed beside it: a figure
+                          that can disagree with the modes under it is a figure nobody can
+                          reconcile at the end of the day. */}
+                      <Input
+                        type="number"
+                        value={collected || ""}
+                        readOnly
+                        placeholder="0"
+                        className="bg-slate-50"
+                        data-testid="zumba-field-paid"
+                      />
                     </div>
                     <div className="space-y-2">
                       <FieldLabel>Fee Amount</FieldLabel>
                       <Input type="number" value={form.fee_amount} onChange={(e) => setForm({ ...form, fee_amount: e.target.value, package_id: "", package_name: "" })} placeholder="0" data-testid="zumba-field-amount" />
                     </div>
                   </div>
-                  {/* Under the amount rather than beside it, because it is a fact about the
-                      money above and not a third figure. Tied to it too: with nothing
-                      collected there is no mode to record, and the server clears one sent
-                      anyway rather than let a row claim cash was taken from a student who
-                      has paid nothing. */}
+                  {/* A payment can arrive more than one way — half in cash, the rest by
+                      UPI — and one mode per registration forced the desk to record the
+                      larger half and pretend the other never happened. The same shape the
+                      Fitness desk collects in, so one counter learns it once. */}
                   <div className="space-y-2 pt-1">
                     <FieldLabel>Mode of Payment</FieldLabel>
-                    <FormSelect
-                      value={form.payment_mode}
-                      onChange={(v) => setForm({ ...form, payment_mode: v })}
-                      testid="zumba-field-payment-mode"
-                    >
-                      <option value="">Not stated</option>
-                      {PAYMENT_MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-                    </FormSelect>
-                    {!(Number(form.fee_paid) > 0) && (
-                      <p className="text-[11px] text-slate-400">Recorded once a fee has been collected.</p>
+                    {(form.payment_lines || []).length === 0 ? (
+                      <p className="rounded-md bg-slate-50 px-2.5 py-2 text-[11px] text-slate-500">
+                        Nothing collected yet. Add a payment when the student pays.
+                      </p>
+                    ) : (
+                      (form.payment_lines || []).map((l, i) => (
+                        <div key={i} className="rounded-lg border border-slate-200 p-3" data-testid={`zumba-pay-line-${i}`}>
+                          <div className="flex flex-wrap items-end gap-3">
+                            <div className="min-w-[140px] flex-1">
+                              <FieldLabel>Paid By</FieldLabel>
+                              <FormSelect value={l.mode} onChange={(v) => setLine(i, { mode: v, notes: {}, reference: "" })} testid={`zumba-pay-mode-${i}`}>
+                                {PAYMENT_MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+                              </FormSelect>
+                            </div>
+                            <div className="min-w-[110px] flex-1">
+                              <FieldLabel>Amount</FieldLabel>
+                              <Input
+                                type="number"
+                                min="0"
+                                value={l.mode === "cash" && noteTotal(l) > 0 ? noteTotal(l) : l.amount}
+                                onChange={(e) => setLine(i, { amount: e.target.value })}
+                                readOnly={l.mode === "cash" && noteTotal(l) > 0}
+                                className={l.mode === "cash" && noteTotal(l) > 0 ? "bg-slate-50" : ""}
+                                data-testid={`zumba-pay-amount-${i}`}
+                              />
+                            </div>
+                            {REFERENCE_LABELS[l.mode] && (
+                              <div className="min-w-[150px] flex-1">
+                                <FieldLabel>{REFERENCE_LABELS[l.mode]}</FieldLabel>
+                                <Input
+                                  value={l.reference}
+                                  onChange={(e) => setLine(i, { reference: e.target.value })}
+                                  placeholder={REFERENCE_PLACEHOLDERS[l.mode]}
+                                  data-testid={`zumba-pay-reference-${i}`}
+                                />
+                              </div>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => dropLine(i)}
+                              className="mb-1 rounded p-1.5 text-slate-400 transition hover:bg-rose-50 hover:text-rose-600"
+                              title="Remove this payment"
+                              aria-label="Remove this payment"
+                              data-testid={`zumba-pay-drop-${i}`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+
+                          {/* Counted notes, so the drawer can be reconciled against the row
+                              rather than against somebody's memory of it. Optional: leaving
+                              them blank and typing the amount is still a payment. */}
+                          {l.mode === "cash" && (
+                            <div className="mt-3 border-t border-slate-100 pt-3">
+                              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                Notes counted
+                                <span className="ml-1 font-normal normal-case text-slate-400">— leave blank to just type the amount</span>
+                              </p>
+                              <div className="grid grid-cols-4 gap-2 sm:grid-cols-8">
+                                {DENOMINATIONS.map((d) => (
+                                  <div key={d}>
+                                    <label className="mb-0.5 block text-center text-[11px] font-bold text-slate-500">₹{d}</label>
+                                    <Input
+                                      type="number"
+                                      min="0"
+                                      value={l.notes?.[d] ?? ""}
+                                      onChange={(e) => setLine(i, { notes: { ...l.notes, [d]: e.target.value } })}
+                                      className="h-9 px-1 text-center text-sm"
+                                      data-testid={`zumba-pay-note-${i}-${d}`}
+                                    />
+                                  </div>
+                                ))}
+                              </div>
+                              {noteTotal(l) > 0 && (
+                                <p className="mt-2 text-right text-[11px] text-slate-500" data-testid={`zumba-pay-note-total-${i}`}>
+                                  {DENOMINATIONS.filter((d) => Number(l.notes?.[d]) > 0).map((d) => `${l.notes[d]}×₹${d}`).join("  +  ")}
+                                  {" = "}<b className="text-slate-700">{rupees(noteTotal(l))}</b>
+                                </p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      ))
                     )}
-                    {/* Asked only by the modes that leave a trail elsewhere, and named for
-                        the one they leave: cash is settled by being handed over, so there
-                        is nothing to write down and nothing is asked. */}
-                    {REFERENCE_LABELS[form.payment_mode] && (
-                      <div className="space-y-2 pt-1">
-                        <FieldLabel>{REFERENCE_LABELS[form.payment_mode]}</FieldLabel>
-                        <Input
-                          value={form.payment_reference}
-                          onChange={(e) => setForm({ ...form, payment_reference: e.target.value })}
-                          placeholder={REFERENCE_PLACEHOLDERS[form.payment_mode]}
-                          data-testid="zumba-field-payment-reference"
-                        />
-                      </div>
-                    )}
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                      <Button type="button" variant="outline" size="sm" onClick={addLine} data-testid="zumba-pay-add">
+                        <Plus className="mr-1 h-3.5 w-3.5" />
+                        {(form.payment_lines || []).length === 0 ? "Add Payment" : "Another Payment Mode"}
+                      </Button>
+                      {collected > 0 && (
+                        <p className="text-xs text-slate-500" data-testid="zumba-pay-total">
+                          Collecting <b className="text-emerald-700">{rupees(collected)}</b>
+                          {Number(form.fee_amount) > 0 && (
+                            collected > Number(form.fee_amount)
+                              ? <span className="text-rose-600"> — {rupees(collected - Number(form.fee_amount))} more than the fee</span>
+                              : collected < Number(form.fee_amount)
+                                ? <span> · {rupees(Number(form.fee_amount) - collected)} still due</span>
+                                : <span className="text-emerald-700"> · paid up</span>
+                          )}
+                        </p>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
