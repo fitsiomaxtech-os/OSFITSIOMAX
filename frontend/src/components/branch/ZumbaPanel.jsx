@@ -89,10 +89,11 @@ const MODE_FILTERS = [
 const REFERENCE_LABELS = { upi: "UPI ID", card: "Transaction ID", account_transfer: "Transaction ID" };
 const REFERENCE_PLACEHOLDERS = { upi: "name@bank", card: "Transaction number", account_transfer: "Transaction number" };
 
-// The notes an Indian counter actually holds, largest first — the order a drawer is
-// emptied in. Kept in step with DENOMINATIONS in FitnessPanel.jsx and v3_zumba.py: one
-// counter counts for both desks, and two orders would be two habits.
-const DENOMINATIONS = [2000, 500, 200, 100, 50, 20, 10, 5];
+// The notes a class fee is actually handed over in, largest first — the order a drawer is
+// emptied in. Kept in step with DENOMINATIONS in backend/routers/v3_zumba.py, which drops
+// a count in anything else. Shorter than the Fitness desk's list on purpose: the 2000 is
+// out of circulation, and nobody counts a 3,000 rupee membership out in fives.
+const DENOMINATIONS = [500, 200, 100, 50];
 
 const EMPTY_LINE = { mode: "cash", amount: "", reference: "", notes: {} };
 
@@ -117,7 +118,13 @@ const linesOf = (row) => {
       mode: l.mode || "cash",
       amount: String(l.amount ?? ""),
       reference: l.reference || "",
-      notes: Object.fromEntries(Object.entries(l.denominations || {}).map(([d, n]) => [Number(d), String(n)])),
+      // Only carried when every note counted is one this desk still offers. A line counted
+      // in a note since dropped would otherwise re-total to less than was handed over, and
+      // saving the row again would quietly reduce what the student has paid. Keeping the
+      // figure and losing the breakdown is the honest half to keep.
+      notes: Object.keys(l.denominations || {}).every((d) => DENOMINATIONS.includes(Number(d)))
+        ? Object.fromEntries(Object.entries(l.denominations || {}).map(([d, n]) => [Number(d), String(n)]))
+        : {},
     }));
   }
   if (Number(row?.fee_paid) > 0) {
@@ -1175,17 +1182,17 @@ export const ZumbaPanel = ({ branchId }) => {
                       each wide enough to be read. */}
                   <tr>
                     <th className="w-[4%] px-3 py-2.5">S.No</th>
-                    <th className="w-[19%] px-3 py-2.5">Student</th>
-                    <th className="w-[11%] px-3 py-2.5">Phone</th>
-                    <th className="w-[10%] px-3 py-2.5">Source</th>
-                    <th className="w-[14%] px-3 py-2.5">Package</th>
-                    <th className="w-[11%] px-3 py-2.5">Finish</th>
-                    <th className="w-[12%] px-3 py-2.5">Class</th>
-                    {showStage && <th className="w-[9%] px-3 py-2.5">Stage</th>}
-                    <th className="w-[10%] px-3 py-2.5">Fee</th>
+                    <th className="w-[16%] px-3 py-2.5">Student</th>
+                    <th className="w-[10%] px-3 py-2.5">Phone</th>
+                    <th className="w-[8%] px-3 py-2.5">Source</th>
+                    <th className="w-[11%] px-3 py-2.5">Package</th>
+                    <th className="w-[8%] px-3 py-2.5">Finish</th>
+                    <th className="w-[10%] px-3 py-2.5">Class</th>
+                    {showStage && <th className="w-[8%] px-3 py-2.5">Stage</th>}
+                    <th className="w-[8%] px-3 py-2.5">Fee</th>
                     <th className="w-[10%] px-3 py-2.5">Paid By</th>
-                    <th className="w-[9%] px-3 py-2.5">Status</th>
-                    <th className="w-[10%] px-3 py-2.5 text-right">Actions</th>
+                    <th className="w-[8%] px-3 py-2.5">Status</th>
+                    <th className="w-[7%] px-3 py-2.5 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -1199,7 +1206,7 @@ export const ZumbaPanel = ({ branchId }) => {
                       <tr
                         key={r.id}
                         onClick={() => setViewing(r)}
-                        className={`cursor-pointer align-middle ${gaps.length > 0 ? "bg-amber-50/50 hover:bg-amber-50" : "hover:bg-slate-50/60"}`}
+                        className={`cursor-pointer align-top ${gaps.length > 0 ? "bg-amber-50/50 hover:bg-amber-50" : "hover:bg-slate-50/60"}`}
                         data-testid={`zumba-row-${r.id}`}
                       >
                         <td className="px-3 py-3 text-xs text-slate-400">{i + 1}</td>
@@ -1234,7 +1241,7 @@ export const ZumbaPanel = ({ branchId }) => {
                         <td className="px-3 py-3">
                           {/* A referral prints the master's name, because "Master" on its
                               own is the half of the answer nobody asks for. */}
-                          <span className={`inline-block max-w-full truncate rounded px-2 py-0.5 text-[10px] font-semibold ${r.source === MASTER ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`} title={sourceDetail(r)}>
+                          <span className={`inline-block max-w-full truncate whitespace-nowrap rounded px-2 py-0.5 text-[10px] font-semibold ${r.source === MASTER ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`} title={sourceDetail(r)}>
                             {sourceLabel(r)}
                           </span>
                         </td>
@@ -1270,7 +1277,7 @@ export const ZumbaPanel = ({ branchId }) => {
                             Only what is set here reaches a master's own board. */}
                         <td className="px-3 py-3">
                           {r.assigned_master_name ? (
-                            <span className="inline-block max-w-full truncate rounded bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700" title={r.assigned_master_name}>
+                            <span className="inline-block max-w-full truncate whitespace-nowrap rounded bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700" title={r.assigned_master_name}>
                               {r.assigned_master_name}
                             </span>
                           ) : <span className="text-xs text-slate-300">—</span>}
@@ -1312,7 +1319,7 @@ export const ZumbaPanel = ({ branchId }) => {
                                 {PAYMENT_MODE_LABELS[r.payment_mode] || r.payment_mode}
                               </span>
                               {r.payment_reference ? (
-                                <p className="mt-0.5 truncate text-[10px] text-slate-400" title={r.payment_reference}>{r.payment_reference}</p>
+                                <p className="mt-0.5 max-w-full truncate text-[10px] text-slate-400" title={r.payment_reference}>{r.payment_reference}</p>
                               ) : null}
                               {/* "Split" on its own says a payment arrived more than one way
                                   without saying which, which is the question it prompts. */}
@@ -1329,7 +1336,7 @@ export const ZumbaPanel = ({ branchId }) => {
                           {(() => {
                             const chip = STATUS_CHIP[r.status || "active"] || STATUS_CHIP.active;
                             return (
-                              <span className={`inline-flex rounded-[5px] border px-2 py-0.5 text-[10px] font-bold ${chip.classes}`} data-testid={`zumba-row-status-${r.id}`}>
+                              <span className={`inline-flex whitespace-nowrap rounded-[5px] border px-2 py-0.5 text-[10px] font-bold ${chip.classes}`} data-testid={`zumba-row-status-${r.id}`}>
                                 {chip.label}
                               </span>
                             );
