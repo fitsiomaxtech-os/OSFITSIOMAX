@@ -21,8 +21,6 @@ const MONTHS = [
 // this roll ever saw them, and a master reads a class rather than a pipeline.
 const MASTER = "master";
 
-const rupees = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
-
 const shortDate = (iso) => {
   if (!iso) return "—";
   const d = new Date(iso);
@@ -64,7 +62,6 @@ const finishOn = (row) => {
 const CARD_TITLES = {
   all: "Customers",
   today: "Today's Session Students",
-  payment: "Customers Who Have Paid",
 };
 
 /** One headline figure, and the filter behind it.
@@ -293,7 +290,7 @@ export const ZumbaMasterBoard = ({ currentUser }) => {
   const [branch, setBranch] = useState(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [card, setCard] = useState("all"); // "all" | "today" | "payment"
+  const [card, setCard] = useState("all"); // "all" | "today"
   const [referring, setReferring] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
   const [session, setSession] = useState(""); // "" = both slots, else the time_slot chosen
@@ -328,7 +325,7 @@ export const ZumbaMasterBoard = ({ currentUser }) => {
     if (card === "today") {
       list = isClassDay ? rows : [];
       if (session) list = list.filter((r) => r.time_slot === session);
-    } else if (card === "payment") list = rows.filter((r) => Number(r.fee_paid || 0) > 0);
+    }
     const q = search.trim().toLowerCase();
     if (!q) return list;
     return list.filter((r) => (r.name || "").toLowerCase().includes(q) || (r.phone || "").includes(q));
@@ -383,18 +380,6 @@ export const ZumbaMasterBoard = ({ currentUser }) => {
           active={card === "today"}
           onClick={() => setCard("today")}
           testid="zumba-card-today"
-        />
-        {/* Your half of what the class paid, the same figure the branch's Master's Revenue
-            card draws — it comes back on the summary rather than being halved here, so the
-            two cannot answer differently. */}
-        <SummaryCard
-          label="Payment"
-          value={rupees(summary.master_revenue)}
-          caption={`Your 50% of ${rupees(summary.fee_total)} from ${summary.fee_collected ?? 0} of ${summary.all ?? 0}`}
-          tone="border-emerald-200 bg-emerald-50 text-emerald-900"
-          active={card === "payment"}
-          onClick={() => { setCard("payment"); setSession(""); }}
-          testid="zumba-card-payment"
         />
       </div>
 
