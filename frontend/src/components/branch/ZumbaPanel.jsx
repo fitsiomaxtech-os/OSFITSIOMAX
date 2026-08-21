@@ -1133,8 +1133,24 @@ export const ZumbaPanel = ({ branchId }) => {
 
       {form && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" data-testid="zumba-dialog">
-          <div className="max-h-[90vh] w-full max-w-3xl space-y-4 overflow-y-auto rounded-xl bg-white p-5 shadow-2xl">
-            <h3 className="text-base font-semibold text-slate-900">{form.id ? "Edit Zumba Lead" : "Zumba Lead Create"}</h3>
+          {/* Header outside the scroller rather than at the top of it: a close the reader
+              has to scroll back up to find is one they will look for on the backdrop
+              instead. The body scrolls under it. */}
+          <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
+            <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
+              <h3 className="text-base font-semibold text-slate-900">{form.id ? "Edit Zumba Lead" : "Zumba Lead Create"}</h3>
+              <button
+                type="button"
+                onClick={() => setForm(null)}
+                className="rounded-md p-1.5 text-slate-400 transition hover:bg-rose-50 hover:text-rose-600"
+                title="Close"
+                aria-label="Close"
+                data-testid="zumba-dialog-close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="flex-1 space-y-4 overflow-y-auto p-5">
 
             {/* One column, in the order the desk asks: who the person is, then what the
                 branch is doing with them. The headings keep the two apart without a second
@@ -1423,11 +1439,12 @@ export const ZumbaPanel = ({ branchId }) => {
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 pt-1">
-              <Button variant="outline" size="sm" onClick={() => setForm(null)} data-testid="zumba-cancel">Cancel</Button>
-              <Button size="sm" className="bg-sky-600 hover:bg-sky-700" disabled={saving} onClick={save} data-testid="zumba-save">
-                {saving ? "Saving…" : "Save"}
-              </Button>
+              <div className="flex justify-end gap-2 pt-1">
+                <Button variant="outline" size="sm" onClick={() => setForm(null)} data-testid="zumba-cancel">Cancel</Button>
+                <Button size="sm" className="bg-sky-600 hover:bg-sky-700" disabled={saving} onClick={save} data-testid="zumba-save">
+                  {saving ? "Saving…" : "Save"}
+                </Button>
+              </div>
             </div>
           </div>
         </div>
