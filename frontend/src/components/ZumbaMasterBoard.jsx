@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CalendarDays, ChevronLeft, ChevronRight, Music, Plus, RefreshCw, Search, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Music, Plus, RefreshCw, Search, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -11,10 +11,23 @@ import { listZumba, addZumba, getBranches } from "@/lib/api";
 // and CLASS_WEEKDAYS in backend/routers/v3_zumba.py, which is the one that counts.
 const CLASS_DAYS = [1, 3, 5];
 const WEEKDAY_INITIALS = ["S", "M", "T", "W", "T", "F", "S"];
-const MONTHS = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-];
+
+// A day as the strip counts by: local, not UTC, or a class after 5:30am IST lands on
+// yesterday's column.
+const pad = (n) => String(n).padStart(2, "0");
+const isoDay = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const todayIso = () => isoDay(new Date());
+const shiftIso = (iso, days) => {
+  const d = new Date(`${iso}T00:00:00`);
+  d.setDate(d.getDate() + days);
+  return isoDay(d);
+};
+const weekOf = (iso) => {
+  const d = new Date(`${iso}T00:00:00`);
+  const sunday = shiftIso(iso, -d.getDay());
+  return Array.from({ length: 7 }, (_, i) => shiftIso(sunday, i));
+};
+const isClassDayIso = (iso) => CLASS_DAYS.includes(new Date(`${iso}T00:00:00`).getDay());
 
 // The source a referral from this board is filed under. The rest of the vocabulary went
 // with the Source column: where a lead came from is the branch's question, answered before
@@ -83,78 +96,6 @@ const SummaryCard = ({ label, value, caption, tone, active, onClick, testid }) =
     <p className="mt-1.5 text-[11px] font-medium opacity-70">{caption}</p>
   </button>
 );
-
-/**
- * The month, with the class days marked.
- *
- * Read-only on purpose: nothing records who turned up, so a day can honestly say the class
- * runs and how many are booked into it, and nothing more. Every class day carries the same
- * roll because a membership books all three evenings a week — printing a different number
- * per day would be inventing attendance the OS does not have.
- */
-const ClassCalendarModal = ({ students, onClose }) => {
-  const today = new Date();
-  const [cursor, setCursor] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
-
-  const year = cursor.getFullYear();
-  const month = cursor.getMonth();
-  const firstWeekday = new Date(year, month, 1).getDay();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const cells = [
-    ...Array.from({ length: firstWeekday }, () => null),
-    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
-  ];
-  const classDaysThisMonth = cells.filter((d) => d && CLASS_DAYS.includes(new Date(year, month, d).getDay())).length;
-
-  const step = (by) => setCursor(new Date(year, month + by, 1));
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} data-testid="zumba-calendar-modal">
-      <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
-        <div className="flex items-center justify-between bg-gradient-to-r from-violet-500 to-fuchsia-600 px-5 py-3 text-white">
-          <p className="flex items-center gap-2 text-base font-semibold"><CalendarDays className="h-4 w-4" />Class Calendar</p>
-          <button onClick={onClose} className="rounded-full p-1.5 text-white/80 hover:bg-white/20" data-testid="zumba-calendar-close"><X className="h-4 w-4" /></button>
-        </div>
-
-        <div className="p-5">
-          <div className="mb-3 flex items-center justify-between">
-            <button onClick={() => step(-1)} className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100" aria-label="Previous month" data-testid="zumba-calendar-prev"><ChevronLeft className="h-4 w-4" /></button>
-            <p className="text-sm font-bold text-slate-800" data-testid="zumba-calendar-month">{MONTHS[month]} {year}</p>
-            <button onClick={() => step(1)} className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100" aria-label="Next month" data-testid="zumba-calendar-next"><ChevronRight className="h-4 w-4" /></button>
-          </div>
-
-          <div className="grid grid-cols-7 gap-1 text-center">
-            {WEEKDAY_INITIALS.map((d, i) => (
-              <span key={i} className="py-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">{d}</span>
-            ))}
-            {cells.map((day, i) => {
-              if (!day) return <span key={`pad-${i}`} />;
-              const date = new Date(year, month, day);
-              const isClass = CLASS_DAYS.includes(date.getDay());
-              const isToday = date.toDateString() === today.toDateString();
-              return (
-                <div
-                  key={day}
-                  className={`rounded-md py-1.5 text-xs ${isClass ? "bg-violet-50 font-bold text-violet-700" : "text-slate-400"} ${isToday ? "ring-2 ring-violet-500" : ""}`}
-                  title={isClass ? `Zumba class — ${students} booked` : "No class"}
-                  data-testid={`zumba-calendar-day-${day}`}
-                >
-                  {day}
-                  {isClass && <span className="block text-[9px] font-semibold opacity-70">{students}</span>}
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="mt-4 space-y-1 border-t border-slate-100 pt-3 text-xs text-slate-500">
-            <p><span className="font-semibold text-slate-700">Mon · Wed · Fri</span> — {classDaysThisMonth} classes this month</p>
-            <p><span className="font-semibold text-slate-700">{students}</span> students booked into each class</p>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
 
 /** Refer a customer into the class: name, phone, age, area, and nothing else.
  *
@@ -292,7 +233,9 @@ export const ZumbaMasterBoard = ({ currentUser }) => {
   const [search, setSearch] = useState("");
   const [card, setCard] = useState("all"); // "all" | "today"
   const [referring, setReferring] = useState(false);
-  const [showCalendar, setShowCalendar] = useState(false);
+  // The day the strip is on. Today to begin with, because the class a master opens this
+  // board to check is nearly always the one they are about to teach.
+  const [day, setDay] = useState(todayIso);
   const [session, setSession] = useState(""); // "" = both slots, else the time_slot chosen
 
   const load = useCallback(async () => {
@@ -311,10 +254,16 @@ export const ZumbaMasterBoard = ({ currentUser }) => {
 
   useEffect(() => { load(); }, [load]);
 
-  const isClassDay = Boolean(summary.is_class_day);
+  // Who is booked into a given day: the roll on a class day, nobody on any other. A
+  // membership books all three evenings, so there is no per-day list beyond that -- what
+  // the day does change is which hour the tabs below split it into.
+  const bookedOn = (iso, slot = "") => {
+    if (!isClassDayIso(iso)) return [];
+    return slot ? rows.filter((r) => r.time_slot === slot) : rows;
+  };
   // How many of today's class are in each slot, counted off the roll rather than asked for
   // separately, so a tab and the list behind it cannot disagree.
-  const bookedIn = (slot) => (isClassDay ? rows.filter((r) => r.time_slot === slot).length : 0);
+  const bookedIn = (slot) => bookedOn(day, slot).length;
 
   const visible = useMemo(() => {
     // Today's card is the whole roll on a class day and nobody on any other day, matching
@@ -323,13 +272,12 @@ export const ZumbaMasterBoard = ({ currentUser }) => {
     // because the two sessions are two rooms of people and a master teaches one at a time.
     let list = rows;
     if (card === "today") {
-      list = isClassDay ? rows : [];
-      if (session) list = list.filter((r) => r.time_slot === session);
+      list = bookedOn(day, session);
     }
     const q = search.trim().toLowerCase();
     if (!q) return list;
     return list.filter((r) => (r.name || "").toLowerCase().includes(q) || (r.phone || "").includes(q));
-  }, [rows, search, card, isClassDay, session]);
+  }, [rows, search, card, session, day]);
 
   return (
     <div className="flex flex-col gap-4" data-testid="zumba-master-board">
@@ -347,9 +295,6 @@ export const ZumbaMasterBoard = ({ currentUser }) => {
         </div>
         <Button onClick={() => setReferring(true)} className="h-10 bg-violet-600 text-white hover:bg-violet-700" data-testid="zumba-master-refer">
           <Plus className="mr-1 h-4 w-4" />Refer Customer
-        </Button>
-        <Button variant="outline" onClick={() => setShowCalendar(true)} className="h-10" data-testid="zumba-master-calendar">
-          <CalendarDays className="mr-1 h-4 w-4" />Calendar
         </Button>
         <Button variant="outline" onClick={load} className="h-10 w-10 p-0" title="Refresh" aria-label="Refresh" data-testid="zumba-master-refresh">
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
@@ -374,13 +319,80 @@ export const ZumbaMasterBoard = ({ currentUser }) => {
         />
         <SummaryCard
           label="Today's Session Students"
-          value={summary.today_session ?? 0}
-          caption={isClassDay ? "Booked into today's class" : "No class today — Mon, Wed, Fri"}
+          value={bookedOn(day).length}
+          caption={isClassDayIso(day)
+            ? (day === todayIso() ? "Booked into today's class" : `Booked into the class on ${shortDate(day)}`)
+            : "No class that day — Mon, Wed, Fri"}
           tone="border-sky-200 bg-sky-50 text-sky-900"
           active={card === "today"}
           onClick={() => setCard("today")}
           testid="zumba-card-today"
         />
+      </div>
+
+      {/* The week, as the Physio board draws it: the month over seven days, each carrying
+          how many are booked into it, and the arrows stepping a week at a time from beside
+          the row they move rather than from up in the label.
+
+          A day with no class carries no number -- the class runs Mon, Wed and Fri, and a
+          nought under Tuesday would read as an empty class rather than as no class. */}
+      <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-2 py-2" data-testid="zumba-master-week">
+        <button
+          type="button"
+          onClick={() => setDay((d) => shiftIso(d, -7))}
+          className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-100"
+          aria-label="Previous week"
+          data-testid="zumba-week-prev"
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </button>
+
+        <div className="min-w-0 flex-1">
+          <p className="mb-1 text-center text-[11px] font-semibold text-slate-600" data-testid="zumba-week-month">
+            {new Date(`${day}T00:00:00`).toLocaleDateString("en-US", { month: "long", year: "numeric" })}
+          </p>
+          <div className="grid grid-cols-7 gap-1">
+            {weekOf(day).map((iso, i) => {
+              const date = Number(iso.split("-")[2]);
+              const selected = iso === day;
+              const isToday = iso === todayIso();
+              const classDay = isClassDayIso(iso);
+              const booked = bookedOn(iso, session).length;
+              return (
+                <button
+                  key={iso}
+                  type="button"
+                  // Picking a day is asking who is in that class, so it opens the card that
+                  // answers that rather than leaving the choice with no visible effect.
+                  onClick={() => { setDay(iso); setCard("today"); }}
+                  className={`flex flex-col items-center gap-0.5 rounded-lg py-1 transition ${selected ? "bg-sky-600" : classDay ? "hover:bg-slate-50" : "hover:bg-slate-50 opacity-60"}`}
+                  title={classDay ? `${booked} booked` : "No class"}
+                  data-testid={`zumba-week-day-${iso}`}
+                >
+                  <span className={`text-[9px] font-semibold ${selected ? "text-sky-100" : "text-slate-400"}`}>{WEEKDAY_INITIALS[i]}</span>
+                  <span
+                    className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold ${
+                      selected ? "bg-white/20 text-white" : isToday ? "bg-sky-100 text-sky-700" : "text-slate-600"
+                    }`}
+                  >
+                    {date}
+                  </span>
+                  {classDay && <span className={`text-[9px] font-medium leading-none ${selected ? "text-sky-100" : "text-slate-400"}`}>{booked}</span>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setDay((d) => shiftIso(d, 7))}
+          className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-100"
+          aria-label="Next week"
+          data-testid="zumba-week-next"
+        >
+          <ChevronRight className="h-4 w-4" />
+        </button>
       </div>
 
       {/* Under today's card, and only there: the two slots are how one class day divides,
@@ -495,7 +507,6 @@ export const ZumbaMasterBoard = ({ currentUser }) => {
           onSaved={load}
         />
       )}
-      {showCalendar && <ClassCalendarModal students={summary.all ?? 0} onClose={() => setShowCalendar(false)} />}
     </div>
   );
 };
