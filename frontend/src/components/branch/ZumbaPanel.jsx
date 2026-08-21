@@ -3,6 +3,7 @@ import { Eye, Music, Pencil, RefreshCw, Stethoscope, Trash2, UserPlus, X } from 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
+import { StatTile } from "@/components/ui/stat-tile";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { toast } from "@/components/ui/sonner";
 import { listZumba, listZumbaMasters, addZumba, updateZumba, deleteZumba, setZumbaStatus, acceptZumbaReferral, listStoreItems } from "@/lib/api";
@@ -139,14 +140,14 @@ const sourceDetail = (r) => (r.source === MASTER && r.master_name ? `Refer Maste
 // The colours run warm through the sources and cool through the four that follow, so the
 // two halves of the row stay legible without drawing a box around either.
 const CARDS = [
-  { key: "all", label: "All", color: "#a855f7" },
-  { key: "direct", label: "Direct", color: "#f59e0b" },
-  { key: "consultant", label: "Consultant", color: "#f97316" },
+  { key: "all", label: "All", color: "#a855f7", sub: "on the roll" },
+  { key: "direct", label: "Direct", color: "#f59e0b", sub: "nobody referred them" },
+  { key: "consultant", label: "Consultant", color: "#f97316", sub: "from a consultation" },
   // Master is the leads a master brought in — a referral filed against a named master,
   // which is what the Zumba Master View's Refer Customer writes and what this card is
   // asked for. It held the branch-sourced count until that board existed and there was a
   // real master's referral to point it at.
-  { key: "masters", label: "Refer Master", color: "#d97706" },
+  { key: "masters", label: "Refer Master", color: "#d97706", sub: "brought by a master" },
   // The last four are counts of people, like the four before them, but they answer what
   // became of a student rather than where they came from: is the money settled, and are
   // they still turning up. The revenue split that used to sit here said the same thing
@@ -155,13 +156,13 @@ const CARDS = [
   // Payment Done is a settled account, not "has paid something" — a student halfway
   // through a 3,000 rupee membership belongs on Due Payment, which is the card somebody
   // acts on. A row with no fee on it yet is on neither: nothing has been sold.
-  { key: "payment_done", label: "Payment Done", color: "#059669" },
-  { key: "due_payment", label: "Due Payment", color: "#d97706" },
+  { key: "payment_done", label: "Payment Done", color: "#059669", sub: "nothing owed" },
+  { key: "due_payment", label: "Due Payment", color: "#d97706", sub: "still to collect" },
   // One card, not two: Discontinue and Leave are both "not turning up", and splitting
   // them across the row asked the branch to read two numbers to learn one thing. The
   // distinction survives where it is actually useful — on the row, which says which — and
   // the server still counts them apart, so nothing downstream is coarsened by this.
-  { key: "discontinued", label: "Discontinue", color: "#e11d48", sum: ["discontinued", "leave"] },
+  { key: "discontinued", label: "Discontinue", color: "#e11d48", sub: "left the class", sum: ["discontinued", "leave"] },
 ];
 
 /** Whether this registration's fee is settled. Nothing sold is not settled. */
@@ -361,47 +362,6 @@ const ViewRegistrationModal = ({ row, masterNameOf, onClose, onSaved }) => {
     </div>
   );
 };
-
-/** The Human Resource board's stage card, in the one other place that wants it.
- *
- * Copied rather than imported: that one is local to HumanResourceBoard.jsx and shaped for
- * a five-across phone row of nine stages, where this row holds seven. Lifting it into
- * components/ui to share would make both boards answer to one file for a look they only
- * happen to agree on today. */
-const SummaryCard = ({ label, count, color, active, onClick, testid, readOnly = false }) => (
-  <button
-    type="button"
-    onClick={readOnly ? undefined : onClick}
-    // A card with nothing to filter to is still a card, but it must not offer the click:
-    // no hover lift, no pointer, and the keyboard skips it rather than landing on a
-    // control that does nothing.
-    disabled={readOnly}
-    tabIndex={readOnly ? -1 : undefined}
-    className={`min-w-0 flex-1 rounded-lg border-2 px-1 py-1.5 text-center transition sm:rounded-xl sm:px-2.5 sm:py-2.5 sm:text-left ${
-      readOnly ? "cursor-default" : "hover:shadow-sm"
-    } ${
-      active ? "shadow-sm" : "border-slate-200 bg-white"
-    }`}
-    style={active ? { borderColor: color, backgroundColor: `${color}14` } : undefined}
-    data-testid={testid}
-  >
-    {/* Wraps rather than truncates on a phone: "Fee's Collected" and "Fee's Collect…" are
-        the same width and only one of them can be read. */}
-    <span
-      className="block break-words text-[9px] font-bold uppercase leading-[1.15] [hyphens:auto] sm:truncate sm:text-xs sm:tracking-wider"
-      style={{ color }}
-      title={label}
-    >
-      {label}
-    </span>
-    {/* Sized for nine across, not the five this card was borrowed from: a rupee figure
-        at 3xl set the width of every card in the row and pushed the labels to an
-        ellipsis two words early. */}
-    <span className="mt-0.5 block text-base font-extrabold leading-tight sm:mt-0.5 sm:text-xl" style={{ color }}>
-      {count}
-    </span>
-  </button>
-);
 
 /** The stored timestamp as a plain YYYY-MM-DD, which is what the date inputs compare. */
 const dayOf = (iso) => String(iso || "").slice(0, 10);
@@ -704,14 +664,16 @@ export const ZumbaPanel = ({ branchId }) => {
           the row ends exactly where the page does. What gives instead is the label, which
           truncates and carries the full text on `title`. */}
       <div
-        className="flex flex-nowrap gap-1.5 sm:gap-2"
+        className="grid grid-cols-2 items-stretch gap-2 sm:grid-cols-4 lg:grid-cols-7"
         data-testid="zumba-summary"
       >
         {CARDS.map((c) => (
-          <SummaryCard
+          <StatTile
             key={c.key}
             label={c.label}
-            count={(c.sum || [c.key]).reduce((n, k) => n + (Number(summary?.[k]) || 0), 0)}
+            value={(c.sum || [c.key]).reduce((n, k) => n + (Number(summary?.[k]) || 0), 0)}
+            sub={c.sub}
+            icon={Music}
             color={c.color}
             active={card === c.key}
             onClick={() => setCard(c.key === "all" ? "all" : (card === c.key ? "all" : c.key))}
