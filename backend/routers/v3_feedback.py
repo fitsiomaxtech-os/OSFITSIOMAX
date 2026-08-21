@@ -34,6 +34,25 @@ STATUSES = (STATUS_NEW, STATUS_IN_PROGRESS, STATUS_RESOLVED)
 
 MAX_MESSAGE = 2000
 
+# Who the patient chose to send it to.
+#
+# A branch runs its own people, so anything about a Consultant, a Physio or a Zumba master
+# is the Branch Admin's to answer. What a Branch Admin cannot be asked to answer is a
+# complaint about themselves -- so the portal offers Super Admin as the second address, and
+# what goes there is not shown on the branch's board at all. Routing it to the branch and
+# hoping they pass it up would ask the subject of a complaint to forward it.
+#
+# Rows written before this carry no audience and read as the branch's, which is where they
+# were sent and where they have been read since.
+AUDIENCE_BRANCH = "branch_admin"
+AUDIENCE_SUPER = "super_admin"
+AUDIENCES = (AUDIENCE_BRANCH, AUDIENCE_SUPER)
+
+
+def _audience(value) -> str:
+    slug = str(value or "").strip().lower()
+    return slug if slug in AUDIENCES else AUDIENCE_BRANCH
+
 
 def _status(value) -> str:
     slug = str(value or "").strip().lower()
@@ -74,6 +93,10 @@ async def list_feedback(
         if not user.branch_id:
             return {"feedback": [], "counts": {s: 0 for s in STATUSES}, "unread": 0}
         query["branch_id"] = user.branch_id
+        # Anything addressed to Super Admin is kept off this board. It is there because the
+        # patient did not want the branch to be the one who read it, and half of those are
+        # about the Branch Admin themselves.
+        query["audience"] = {"$ne": AUDIENCE_SUPER}
     elif branch_id:
         query["branch_id"] = branch_id
 
@@ -81,6 +104,7 @@ async def list_feedback(
     counts = {s: 0 for s in STATUSES}
     for row in rows:
         row["status"] = _status(row.get("status"))
+        row["audience"] = _audience(row.get("audience"))
         counts[row["status"]] += 1
     return {"feedback": rows, "counts": counts, "unread": counts[STATUS_NEW]}
 

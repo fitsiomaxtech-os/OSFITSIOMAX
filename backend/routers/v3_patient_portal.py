@@ -26,7 +26,7 @@ from utils import now_iso
 from security import hash_password, verify_password
 from deps import v3_require_roles, is_branch_admin_role
 from routers.v3_lead_documents import DOC_DIR, is_shared_with_patient
-from routers.v3_feedback import MAX_MESSAGE, STATUS_NEW, _rating
+from routers.v3_feedback import AUDIENCE_SUPER, MAX_MESSAGE, STATUS_NEW, _audience, _rating
 from schemas.v3 import V3UserOut, V3PortalAccountInput, V3PatientPortalLogin, V3PatientPortalGoogleLogin
 
 router = APIRouter(prefix="/api/v3")
@@ -370,6 +370,9 @@ async def patient_portal_me(lead_id: str = Depends(_current_patient_lead_id)):
 class V3PatientFeedbackIn(BaseModel):
     rating: Optional[int] = None
     message: Optional[str] = ""
+    # Who it is for: the branch that runs their care, or Super Admin. Anything unrecognised
+    # reads as the branch, which is where a patient who was not asked would have sent it.
+    audience: Optional[str] = None
 
 
 @router.post("/patient-portal/feedback")
@@ -393,6 +396,7 @@ async def patient_portal_feedback(
     """
     message = (payload.message or "").strip()[:MAX_MESSAGE]
     rating = _rating(payload.rating)
+    audience = _audience(payload.audience)
     if not message and rating is None:
         raise HTTPException(status_code=400, detail="Tell us how it went, or leave a rating")
 
@@ -405,12 +409,18 @@ async def patient_portal_feedback(
         "patient_phone": (lead.get("phone") or "").strip(),
         "rating": rating,
         "message": message,
+        "audience": audience,
         "status": STATUS_NEW,
         "note": "",
         "created_at": now_iso(),
     }
     await v3_col("patient_feedback").insert_one(dict(row))
-    return {"message": "Thank you — your branch has it.", "feedback": row}
+    # Says who has it, because the patient chose. "Your branch has it" over a complaint the
+    # patient deliberately sent past the branch would be the one thing they were avoiding.
+    return {
+        "message": "Thank you — Super Admin has it." if audience == AUDIENCE_SUPER else "Thank you — your branch has it.",
+        "feedback": row,
+    }
 
 
 # --------------------------------------------------------------- Staff: preview a patient's

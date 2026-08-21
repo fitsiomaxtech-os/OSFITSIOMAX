@@ -56,7 +56,17 @@ const FeedbackCard = ({ row, onMove, moving }) => (
         <p className="truncate text-sm font-semibold text-slate-800" title={row.patient_name}>{row.patient_name || "A patient"}</p>
         {row.patient_phone ? <p className="truncate text-[11px] text-slate-400">{row.patient_phone}</p> : null}
       </div>
-      <Stars rating={row.rating} />
+      <div className="flex shrink-0 items-center gap-1.5">
+        {/* Only Super Admin ever sees one of these: the branch board filters them out. It
+            says the patient chose to write past the branch, which is context the words
+            underneath are read in. */}
+        {row.audience === "super_admin" ? (
+          <span className="whitespace-nowrap rounded border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-700" title="Sent to head office rather than the branch" data-testid={`feedback-to-super-${row.id}`}>
+            To head office
+          </span>
+        ) : null}
+        <Stars rating={row.rating} />
+      </div>
     </div>
 
     {/* Their words, whole. A feedback card that truncates is one somebody has to open to

@@ -732,9 +732,28 @@ const PORTAL_TABS = [
  * branch reading it on their board, and pretending otherwise would promise a conversation
  * nothing in the OS can hold up.
  */
+// The two people a patient can write to, and the difference between them in the words a
+// patient would use. Named rather than described as "escalation": somebody unhappy enough
+// to go past their branch should not have to work out which word means that.
+const FEEDBACK_TO = [
+  {
+    key: "branch_admin",
+    label: "My branch",
+    who: "Branch Admin",
+    blurb: "Anything about your Consultant, Physio or Zumba master. Your branch runs their care and answers for it.",
+  },
+  {
+    key: "super_admin",
+    label: "Head office",
+    who: "Sumaiya Naaz",
+    blurb: "Something serious, or something about the branch itself. Goes straight to head office — your branch does not see it.",
+  },
+];
+
 function FeedbackTab() {
   const [rating, setRating] = useState(0);
   const [message, setMessage] = useState("");
+  const [audience, setAudience] = useState("branch_admin");
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
 
@@ -745,7 +764,7 @@ function FeedbackTab() {
     }
     setSending(true);
     try {
-      const res = await patientPortalSubmitFeedback({ rating: rating || null, message: message.trim() });
+      const res = await patientPortalSubmitFeedback({ rating: rating || null, message: message.trim(), audience });
       toast.success(res?.message || "Thank you");
       setSent(true);
     } catch (e) {
@@ -760,7 +779,9 @@ function FeedbackTab() {
       <Card data-testid="portal-feedback-sent">
         <CardContent className="space-y-3 p-8 text-center">
           <Check className="mx-auto h-8 w-8 text-emerald-600" />
-          <p className="text-sm font-semibold text-slate-800">Thank you — your branch has it.</p>
+          <p className="text-sm font-semibold text-slate-800">
+            Thank you — {audience === "super_admin" ? "head office has it." : "your branch has it."}
+          </p>
           <p className="text-xs text-slate-500">Somebody there will read it. You can send more any time.</p>
           <Button variant="outline" size="sm" onClick={() => { setSent(false); setRating(0); setMessage(""); }} data-testid="portal-feedback-again">
             Send more feedback
@@ -775,7 +796,33 @@ function FeedbackTab() {
       <CardContent className="space-y-4 p-5">
         <div>
           <p className="text-sm font-semibold text-slate-800">How has it been?</p>
-          <p className="mt-0.5 text-xs text-slate-500">Your branch reads this. Tell them anything — what went well, or what did not.</p>
+          <p className="mt-0.5 text-xs text-slate-500">Tell us anything — what went well, or what did not.</p>
+        </div>
+
+        {/* Asked before the rating rather than under the Send button: who is reading it
+            changes what somebody is willing to write, and finding that out afterwards is
+            finding it out too late. */}
+        <div>
+          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Send to</p>
+          <div className="grid gap-2 sm:grid-cols-2" data-testid="portal-feedback-audience">
+            {FEEDBACK_TO.map((a) => {
+              const on = audience === a.key;
+              return (
+                <button
+                  key={a.key}
+                  type="button"
+                  onClick={() => setAudience(a.key)}
+                  aria-pressed={on}
+                  className={`rounded-lg border p-3 text-left transition ${on ? "border-sky-500 bg-sky-50 ring-1 ring-sky-500" : "border-slate-200 bg-white hover:border-sky-300"}`}
+                  data-testid={`portal-feedback-to-${a.key}`}
+                >
+                  <p className={`text-xs font-bold ${on ? "text-sky-700" : "text-slate-700"}`}>{a.label}</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{a.who}</p>
+                  <p className="mt-1 text-[11px] leading-snug text-slate-500">{a.blurb}</p>
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         <div>
