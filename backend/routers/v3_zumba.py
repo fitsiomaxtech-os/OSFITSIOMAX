@@ -225,11 +225,18 @@ def _finish_on(row: dict):
 
 
 def _classes_left(row: dict):
-    """How many class days are left before the membership runs out, counting from tomorrow.
+    """How many classes are left before the membership runs out, counting from tomorrow.
 
     Counted off the calendar rather than off attendance, which is not recorded: it answers
     "how much of what they bought is still ahead of them", which is the question a renewal
     is prompted by. A membership already past its end has none left.
+
+    Capped at what was actually sold. A month is priced as twelve classes but holds
+    thirteen Mondays, Wednesdays and Fridays about half the time, so counting the calendar
+    alone reported thirteen of a twelve-class month -- more left than was ever bought, on
+    the first day of it. The cap only ever binds at the start of a term; from the point the
+    calendar count drops below the plan's length it is the smaller of the two and falls a
+    class at a time, which is the number somebody is actually counting down.
     """
     end = _finish_on(row)
     if not end:
@@ -237,11 +244,12 @@ def _classes_left(row: dict):
     today = datetime.now(IST).date()
     if end <= today:
         return 0
-    return sum(
+    ahead = sum(
         1
         for n in range((end - today).days)
         if (today + timedelta(days=n + 1)).weekday() in CLASS_WEEKDAYS
     )
+    return min(ahead, _sessions(row.get("package_sessions")) or ahead)
 
 
 # What a master keeps of the fees their students paid. The other half is Fitsiomax's,
