@@ -664,11 +664,6 @@ const amountDue = (r) => Number(r?.fee_amount || 0) - Number(r?.fee_paid || 0);
 
 const STATUS_LABELS = { discontinued: "Discontinued", leave: "On leave" };
 
-/** The colour Super Admin gave a stage in CI/CD ROOTS, or a neutral slate for one that
-    no longer exists. Read off the pipeline rather than kept here, so a colour changed
-    there changes here without a deploy. */
-const stageColor = (stages, name) => (stages.find((st) => st.name === name) || {}).color || "#64748b";
-
 /** One labelled line of the detail popup. A blank reads as a dash rather than as nothing,
  *  so a gap in the record is visible instead of invisible. */
 // Above ViewRegistrationModal, which reads both. A const is not hoisted, so writing
@@ -695,6 +690,16 @@ const STATUS_CHIP = {
   active: { label: "On the roll", classes: "border-emerald-200 bg-emerald-50 text-emerald-700" },
   discontinued: { label: "Discontinued", classes: "border-rose-200 bg-rose-50 text-rose-700" },
   leave: { label: "On leave", classes: "border-indigo-200 bg-indigo-50 text-indigo-700" },
+};
+
+/** The row's version: whether they are coming, in one word. Which kind of not-coming it is
+ *  stays in the tooltip and on the record — a column scanned down wants one distinction,
+ *  and the difference between discontinued and on leave is read when somebody stops on the
+ *  row, not while passing it. */
+const STATUS_ROW = {
+  active: { label: "Active", classes: "border-emerald-200 bg-emerald-50 text-emerald-700" },
+  discontinued: { label: "Inactive", classes: "border-rose-200 bg-rose-50 text-rose-700" },
+  leave: { label: "Inactive", classes: "border-amber-200 bg-amber-50 text-amber-700" },
 };
 
 /**
@@ -1036,16 +1041,6 @@ export const ZumbaPanel = ({ branchId }) => {
       .catch(() => { if (live) setZumbaMasters([]); });
     return () => { live = false; };
   }, [branchId]);
-
-  // The Stage column belongs to All and nowhere else. Every other card is already an
-  // answer about these rows — where they came from, whether they have paid, whether they
-  // still come — and a stage beside that answer is a second axis nobody asked for on a
-  // list that has just been narrowed to one.
-  //
-  // On All it reads rather than edits: the column says where each student stands, and
-  // moving them is a decision made on the record, not from a dropdown in a table where
-  // the wrong row is one mis-click away.
-  const showStage = stages.length > 0 && card === "all";
 
   const visible = useMemo(() => {
     let list = rows;
@@ -1410,17 +1405,15 @@ export const ZumbaPanel = ({ branchId }) => {
                       each wide enough to be read. */}
                   <tr>
                     <th className="w-[4%] px-3 py-2.5">S.No</th>
-                    <th className="w-[16%] px-3 py-2.5">Student</th>
-                    <th className="w-[10%] px-3 py-2.5">Phone</th>
-                    <th className="w-[8%] px-3 py-2.5">Source</th>
-                    <th className="w-[11%] px-3 py-2.5">Package</th>
-                    <th className="w-[8%] px-3 py-2.5">Finish</th>
-                    <th className="w-[10%] px-3 py-2.5">Class</th>
-                    {showStage && <th className="w-[8%] px-3 py-2.5">Stage</th>}
-                    <th className="w-[8%] px-3 py-2.5">Collected</th>
-                    <th className="w-[10%] px-3 py-2.5">Paid By</th>
-                    <th className="w-[8%] px-3 py-2.5">Status</th>
-                    <th className="w-[7%] px-3 py-2.5 text-right">Actions</th>
+                    <th className="w-[17%] px-3 py-2.5">Name</th>
+                    <th className="w-[11%] px-3 py-2.5">Phone Number</th>
+                    <th className="w-[13%] px-3 py-2.5">Package</th>
+                    <th className="w-[9%] px-3 py-2.5">Start</th>
+                    <th className="w-[9%] px-3 py-2.5">Finish</th>
+                    <th className="w-[9%] px-3 py-2.5">Collected</th>
+                    <th className="w-[9%] px-3 py-2.5">Due</th>
+                    <th className="w-[9%] px-3 py-2.5">Status</th>
+                    <th className="w-[10%] px-3 py-2.5 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -1441,14 +1434,9 @@ export const ZumbaPanel = ({ branchId }) => {
                         <td className="px-3 py-3">
                           <div className="flex flex-col items-start gap-0.5">
                           <p className="max-w-full truncate text-sm font-semibold leading-5 text-slate-800" title={r.name}>{r.name || "—"}</p>
-                          {/* Age, gender and the day they joined read as one line about the
-                              person rather than as three columns of one value each. The
-                              address goes with them into the record, where there is room to
-                              read it. */}
-                          <p className="max-w-full truncate text-[11px] leading-4 text-slate-400">
-                            {[r.age ? `${r.age}` : null, r.gender || null].filter(Boolean).join(" · ")}
-                            {(r.age || r.gender) ? " · " : ""}Joined {shortDate(r.joined_on || r.created_at)}
-                          </p>
+                          {/* Age and gender go into the record rather than under the name:
+                              the columns beside it are the ones the list is read for, and
+                              the day they joined has one of its own now. */}
                           {/* Names what is missing rather than saying "incomplete": the
                               branch admin opens this row to do one specific thing, and the
                               badge may as well say which. */}
@@ -1468,13 +1456,6 @@ export const ZumbaPanel = ({ branchId }) => {
                           </div>
                         </td>
                         <td className="px-3 py-3 text-xs leading-5 text-slate-600">{r.phone || "—"}</td>
-                        <td className="px-3 py-3">
-                          {/* A referral prints the master's name, because "Master" on its
-                              own is the half of the answer nobody asks for. */}
-                          <span className={`inline-block max-w-full truncate whitespace-nowrap rounded px-2 py-0.5 text-[10px] font-semibold ${r.source === MASTER ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`} title={sourceDetail(r)}>
-                            {sourceLabel(r)}
-                          </span>
-                        </td>
                         {/* What they bought, in a column of its own. It used to sit under
                             the source, where a membership and a lead channel read as one
                             fact about the student rather than two. */}
@@ -1487,6 +1468,12 @@ export const ZumbaPanel = ({ branchId }) => {
                               </>
                             ) : <span className="text-xs leading-5 text-slate-300">—</span>}
                           </div>
+                        </td>
+                        {/* When the term began. Its own column now rather than a line under
+                            the name: it is half of what the two dates either side of the
+                            package say together, and the other half was already here. */}
+                        <td className="px-3 py-3">
+                          <p className="text-xs leading-5 text-slate-600">{shortDate(r.joined_on || r.created_at)}</p>
                         </td>
                         {/* When the membership runs out, counted forward from the term's
                             start by the plan's own length — the server works it out so this
@@ -1507,77 +1494,30 @@ export const ZumbaPanel = ({ branchId }) => {
                             ) : <span className="text-xs leading-5 text-slate-300">—</span>}
                           </div>
                         </td>
-                        {/* Whose class they turn up to, which is not who brought them in.
-                            Only what is set here reaches a master's own board. */}
+                        {/* What has come in, and what has not, in a column each. The plan's
+                            price is neither: it is their sum, and the package two columns
+                            over already names it. */}
                         <td className="px-3 py-3">
-                          <div className="flex flex-col items-start gap-0.5">
-                            {r.assigned_master_name ? (
-                              <span className="block max-w-full truncate whitespace-nowrap rounded bg-violet-50 px-2 py-0.5 text-[10px] font-semibold leading-4 text-violet-700" title={r.assigned_master_name}>
-                                {r.assigned_master_name}
-                              </span>
-                            ) : <span className="text-xs leading-4 text-slate-300">—</span>}
-                            {/* The hour under the master, because "whose class" and "which
-                                class" are the same question asked twice otherwise. */}
-                            {r.time_slot ? <p className="max-w-full truncate text-[10px] leading-4 text-slate-400">{r.time_slot}</p> : null}
-                          </div>
+                          <p className="text-xs font-semibold leading-5 text-emerald-700">{rupees(paid)}</p>
                         </td>
-                        {showStage && (
-                          <td className="px-3 py-3">
-                            <span
-                              className="inline-block max-w-full truncate rounded px-2 py-0.5 text-[10px] font-semibold"
-                              style={{ background: `${stageColor(stages, r.stage)}18`, color: stageColor(stages, r.stage) }}
-                              title={r.stage || "—"}
-                              data-testid={`zumba-stage-${r.id}`}
-                            >
-                              {r.stage || "—"}
-                            </span>
-                          </td>
-                        )}
-                        {/* What has come in, and what is still to. The plan's price is not
-                            here: it is the sum of the two and is already named by the
-                            package a column over, so printing it made a third line the
-                            column had no room for and answered nothing the other two did
-                            not. The record still shows all three. */}
                         <td className="px-3 py-3">
-                          <div className="flex flex-col items-start gap-0.5">
-                            <p className="text-xs font-semibold leading-5 text-emerald-700">{rupees(paid)}</p>
-                            {due > 0
-                              ? <p className="text-[11px] font-semibold leading-4 text-rose-600">{rupees(due)} due</p>
-                              : Number(r.fee_amount || 0) > 0
-                                ? <p className="text-[11px] leading-4 text-emerald-600">Paid up</p>
-                                : <p className="text-[11px] leading-4 text-slate-400">Nothing sold</p>}
-                          </div>
-                        </td>
-                        {/* Beside the figure it describes rather than under it, so a column
-                            of modes can be read down. The reference sits below the mode:
-                            it is what a disputed payment is traced by, not a second mode. */}
-                        <td className="px-3 py-3">
-                          <div className="flex flex-col items-start gap-0.5">
-                            {r.payment_mode ? (
-                              <>
-                                <span className="block max-w-full truncate whitespace-nowrap rounded bg-slate-100 px-2 py-0.5 text-[10px] font-semibold leading-4 text-slate-600">
-                                  {PAYMENT_MODE_LABELS[r.payment_mode] || r.payment_mode}
-                                </span>
-                                {r.payment_reference ? (
-                                  <p className="max-w-full truncate text-[10px] leading-4 text-slate-400" title={r.payment_reference}>{r.payment_reference}</p>
-                                ) : null}
-                                {/* "Split" on its own says a payment arrived more than one way
-                                    without saying which, which is the question it prompts. */}
-                                {r.payment_mode === "split" && Array.isArray(r.payment_lines) ? (
-                                  <p className="max-w-full truncate text-[10px] leading-4 text-slate-400" title={r.payment_lines.map((l) => `${PAYMENT_MODE_LABELS[l.mode] || l.mode} ${rupees(l.amount)}`).join(", ")}>
-                                    {r.payment_lines.map((l) => `${PAYMENT_MODE_LABELS[l.mode] || l.mode} ${rupees(l.amount)}`).join(" + ")}
-                                  </p>
-                                ) : null}
-                              </>
-                            ) : <span className="text-xs leading-4 text-slate-300">—</span>}
-                          </div>
+                          {due > 0
+                            ? <p className="text-xs font-semibold leading-5 text-rose-600">{rupees(due)}</p>
+                            : Number(r.fee_amount || 0) > 0
+                              ? <p className="text-xs leading-5 text-emerald-600">Paid up</p>
+                              : <p className="text-xs leading-5 text-slate-300">—</p>}
                         </td>
                         {/* Whether they are still coming, in the words the record uses. */}
                         <td className="px-3 py-3">
                           {(() => {
-                            const chip = STATUS_CHIP[r.status || "active"] || STATUS_CHIP.active;
+                            const key = r.status || "active";
+                            const chip = STATUS_ROW[key] || STATUS_ROW.active;
                             return (
-                              <span className={`inline-flex whitespace-nowrap rounded-[5px] border px-2 py-0.5 text-[10px] font-bold ${chip.classes}`} data-testid={`zumba-row-status-${r.id}`}>
+                              <span
+                                className={`inline-flex whitespace-nowrap rounded-[5px] border px-2 py-0.5 text-[10px] font-bold ${chip.classes}`}
+                                title={(STATUS_CHIP[key] || STATUS_CHIP.active).label}
+                                data-testid={`zumba-row-status-${r.id}`}
+                              >
                                 {chip.label}
                               </span>
                             );
