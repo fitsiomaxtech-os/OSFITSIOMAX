@@ -425,9 +425,15 @@ async def delete_fitness(
 # went on the balance, and the lines stay on the row as a record of how it was taken.
 
 
-# The notes an Indian counter actually holds. Kept as a list so the order is the order they
-# are counted in — largest first, which is how a drawer is emptied.
-DENOMINATIONS = (2000, 500, 200, 100, 50, 20, 10, 5)
+# The notes a gym fee is actually handed over in, largest first -- which is the order a
+# drawer is emptied in. The same four the Zumba desk takes: the 2000 is out of circulation,
+# and nobody counts a membership out in fives, tens or twenties.
+#
+# Anything not listed here is dropped when a payment is settled, so a count in a note this
+# desk does not take cannot quietly become part of the total. A payment recorded before this
+# keeps whatever it was counted in -- the list governs what may be entered, not what has
+# already happened.
+DENOMINATIONS = (500, 200, 100, 50)
 
 
 class PaymentLine(BaseModel):

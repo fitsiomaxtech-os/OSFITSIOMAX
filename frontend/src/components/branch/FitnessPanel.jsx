@@ -805,7 +805,9 @@ const FitnessMemberDialog = ({ member, packages, branchId, onClose, onSaved }) =
  * they come to, and the count is also the thing worth keeping — "2900 cash" cannot be
  * checked against a till at the end of the day, and "1x2000, 1x500, 2x200" can.
  */
-const DENOMINATIONS = [2000, 500, 200, 100, 50, 20, 10, 5];
+// Kept in step with DENOMINATIONS in backend/routers/v3_fitness.py, which drops anything
+// it does not list when it settles a payment.
+const DENOMINATIONS = [500, 200, 100, 50];
 
 const COLLECT_MODES = [
   { value: "cash", label: "Cash" },
