@@ -117,10 +117,12 @@ REFERENCE_MODES = ("upi", "card", "account_transfer")
 # What to call that trail, per mode. A UPI ID and a transaction number are different kinds
 # of thing, so the field says which is wanted rather than asking for a generic "reference"
 # and leaving the desk to guess.
-# The notes an Indian counter actually holds, largest first -- which is the order a
-# drawer is emptied in. Kept in step with DENOMINATIONS in v3_fitness.py, whose collect
-# dialog this mirrors: one counter counts both, and two orders would be two habits.
-DENOMINATIONS = (2000, 500, 200, 100, 50, 20, 10, 5)
+# The notes a class fee is actually handed over in, largest first -- which is the order a
+# drawer is emptied in. Shorter than the Fitness desk's list on purpose: the 2000 is out of
+# circulation, and nobody counts a 3,000 rupee membership out in fives. Anything not listed
+# here is dropped when a payment is settled, so a count in a note this desk does not take
+# cannot quietly become part of the total.
+DENOMINATIONS = (500, 200, 100, 50)
 
 REFERENCE_LABELS = {
     "upi": "UPI ID",
