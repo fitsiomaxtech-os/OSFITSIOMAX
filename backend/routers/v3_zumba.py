@@ -865,6 +865,11 @@ async def list_zumba(
     # has been sold yet, so there is nothing to have settled or to owe.
     summary["payment_done"] = 0
     summary["due_payment"] = 0
+    # The money behind those two counts. Payment Done is asked what came in and Due Payment
+    # what has not, which is what a branch wants off a card about payment -- a headcount
+    # answers neither, and two students owing 500 between them is a different afternoon
+    # from one owing 9,000.
+    summary["due_total"] = 0.0
     summary["discontinued"] = 0
     summary["leave"] = 0
     for card in CARDS:
@@ -889,10 +894,14 @@ async def list_zumba(
             summary["payment_done"] += 1
         elif owed > settled:
             summary["due_payment"] += 1
+            summary["due_total"] += owed - settled
         paid = _amount(r.get("fee_paid"))
         if paid > 0:
             summary["fee_collected"] += 1
             summary["fee_total"] += paid
+
+    summary["due_total"] = round(summary["due_total"], 2)
+    summary["fee_total"] = round(summary["fee_total"], 2)
 
     # Worked out here, not on each board, so the master's Payment card and the Branch
     # Admin's Master's Revenue card cannot drift apart: they are reading one number.

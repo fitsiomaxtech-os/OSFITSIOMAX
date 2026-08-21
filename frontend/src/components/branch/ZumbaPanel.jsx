@@ -75,6 +75,10 @@ const PAYMENT_MODE_LABELS = { ...Object.fromEntries(PAYMENT_MODES.map((m) => [m.
 // card and filtering by the fourth found nothing. "Nothing collected" went the same way:
 // Due Payment above already answers who has not paid, and better, since it knows what is
 // owed rather than only that nothing came in.
+/** "1 student" / "3 students", for a caption that reads as a sentence rather than as a
+ *  number with a noun bolted on. */
+const pluralStudents = (n) => `${n} student${n === 1 ? "" : "s"}`;
+
 const MODE_FILTERS = [
   ["", "All Modes"],
   ["cash", "Cash"],
@@ -590,8 +594,12 @@ const CARDS = [
   // Payment Done is a settled account, not "has paid something" — a student halfway
   // through a 3,000 rupee membership belongs on Due Payment, which is the card somebody
   // acts on. A row with no fee on it yet is on neither: nothing has been sold.
-  { key: "payment_done", label: "Payment Done", color: "#059669", sub: "nothing owed" },
-  { key: "due_payment", label: "Due Payment", color: "#d97706", sub: "still to collect" },
+  // These two answer in money rather than headcount. "Two students have paid" is not what
+  // a branch wants off a card about payment, and two owing 500 between them is a different
+  // afternoon from one owing 9,000. The count moves into the caption, where it is still
+  // read but is no longer the answer.
+  { key: "payment_done", label: "Payment Done", color: "#059669", money: "fee_total", count: "fee_collected", countSub: (n) => `collected from ${n}` },
+  { key: "due_payment", label: "Due Payment", color: "#d97706", money: "due_total", count: "due_payment", countSub: (n) => `owed by ${n}` },
   // One card, not two: Discontinue and Leave are both "not turning up", and splitting
   // them across the row asked the branch to read two numbers to learn one thing. The
   // distinction survives where it is actually useful — on the row, which says which — and
@@ -599,8 +607,6 @@ const CARDS = [
   { key: "discontinued", label: "Discontinue", color: "#e11d48", sub: "left the class", sum: ["discontinued", "leave"] },
 ];
 
-/** Whether this registration's fee is settled. Nothing sold is not settled. */
-const isPaidUp = (r) => Number(r?.fee_amount || 0) > 0 && Number(r?.fee_paid || 0) >= Number(r?.fee_amount || 0);
 const amountDue = (r) => Number(r?.fee_amount || 0) - Number(r?.fee_paid || 0);
 
 const STATUS_LABELS = { discontinued: "Discontinued", leave: "On leave" };
@@ -1002,7 +1008,10 @@ export const ZumbaPanel = ({ branchId }) => {
     // Four of the cards are not sources, so each says which rows it stands for. Where a
     // student came from and what became of them are different questions, and only the
     // first is the `card` the server stamps on the row.
-    if (card === "payment_done") list = list.filter(isPaidUp);
+    // Everyone who has handed something over, because that is what the card now totals.
+    // Filtering to the settled would open a list whose payments do not add up to the
+    // figure that was clicked, which is the one thing a card must never do.
+    if (card === "payment_done") list = list.filter((r) => Number(r.fee_paid || 0) > 0);
     else if (card === "due_payment") list = list.filter((r) => amountDue(r) > 0);
     else if (card === "discontinued") list = list.filter((r) => (r.status || "active") !== "active");
     else if (card !== "all") list = list.filter((r) => r.card === card);
@@ -1186,8 +1195,12 @@ export const ZumbaPanel = ({ branchId }) => {
           <StatTile
             key={c.key}
             label={c.label}
-            value={(c.sum || [c.key]).reduce((n, k) => n + (Number(summary?.[k]) || 0), 0)}
-            sub={c.sub}
+            value={c.money
+              ? rupees(summary?.[c.money])
+              : (c.sum || [c.key]).reduce((n, k) => n + (Number(summary?.[k]) || 0), 0)}
+            sub={c.countSub
+              ? c.countSub(pluralStudents(Number(summary?.[c.count || c.key]) || 0))
+              : c.sub}
             icon={Music}
             color={c.color}
             active={card === c.key}
