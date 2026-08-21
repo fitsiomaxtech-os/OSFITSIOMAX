@@ -240,18 +240,26 @@ const ViewRegistrationModal = ({ row, masterNameOf, onClose, onSaved }) => {
   const due = Number(row.fee_amount || 0) - Number(row.fee_paid || 0);
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" data-testid="zumba-view-dialog">
-      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-2xl">
-        <div className="mb-3 flex items-start justify-between gap-3">
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      data-testid="zumba-view-dialog"
+    >
+      <div className="flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+        {/* The same band every Zumba dialog wears — the calendar and Refer Customer on the
+            master's board carry it too, so a popup is recognisably part of this tab before
+            a word of it is read. */}
+        <div className="flex shrink-0 items-start justify-between gap-3 bg-gradient-to-r from-violet-500 to-fuchsia-600 px-5 py-3 text-white">
           <div className="min-w-0">
-            <h3 className="truncate text-base font-semibold text-slate-900">{row.name || "—"}</h3>
-            <p className="text-xs text-slate-500">Registered {shortDate(row.created_at)}</p>
+            <p className="truncate text-base font-semibold" title={row.name || ""}>{row.name || "—"}</p>
+            <p className="text-[11px] text-white/80">Registered {shortDate(row.created_at)}</p>
           </div>
-          <button onClick={onClose} className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100" aria-label="Close" data-testid="zumba-view-close">
+          <button onClick={onClose} className="shrink-0 rounded-full p-1.5 text-white/80 hover:bg-white/20" aria-label="Close" data-testid="zumba-view-close">
             <X className="h-4 w-4" />
           </button>
         </div>
 
+        <div className="flex-1 overflow-y-auto p-5">
         {ended && (
           <div className={`mb-3 rounded-lg px-3 py-2 text-xs ${status === "discontinued" ? "bg-rose-50 text-rose-700" : "bg-indigo-50 text-indigo-700"}`} data-testid="zumba-view-status">
             <p className="font-bold">{STATUS_LABELS[status]}</p>
@@ -277,7 +285,9 @@ const ViewRegistrationModal = ({ row, masterNameOf, onClose, onSaved }) => {
           />
         </div>
 
-        {/* Asked before it is saved, not after: the reason is the point of recording it. */}
+        {/* Asked before it is saved, not after: the reason is the point of recording it.
+            Inside the body rather than on the rail below, because it is something to read
+            and answer, not a button to press. */}
         {pending ? (
           <div className="mt-4 space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
             <label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">
@@ -309,8 +319,15 @@ const ViewRegistrationModal = ({ row, masterNameOf, onClose, onSaved }) => {
           <p className="mt-4 rounded-lg bg-sky-50 px-3 py-2 text-[11px] font-medium text-sky-700" data-testid="zumba-view-owned-elsewhere">
             Referred on the consultation, which owns this record — discontinuing or ending it is done there, by un-ticking Zumba on the lead.
           </p>
-        ) : (
-          <div className="mt-4 flex flex-wrap justify-end gap-2">
+        ) : null}
+        </div>
+
+        {/* The rail the rest of the OS puts its actions on: pinned under the body so it
+            stays put while the record scrolls, and quiet enough that the two ways to end a
+            membership do not read as the point of opening the record. Absent entirely while
+            the reason is being asked, so there is one set of buttons on screen and not two. */}
+        {!pending && !ownedElsewhere && (
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/40 px-5 py-3">
             {ended ? (
               <Button size="sm" variant="outline" disabled={saving} onClick={() => apply("active", "")} data-testid="zumba-status-restore">
                 Put back on the roll
