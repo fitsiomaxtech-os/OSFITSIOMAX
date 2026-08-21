@@ -2477,15 +2477,22 @@ export function PatientDetailPage({ patient, physioId, onClose, onRefresh }) {
 function CompleteSessionModal({ session, onClose, onDone }) {
   const [remarks, setRemarks] = useState(session.jr_physio_remarks || "");
   const [rehabRemarks, setRehabRemarks] = useState(session.rehab_remarks || "");
-  const [remarkTab, setRemarkTab] = useState("treatment");
+  // A rehab day is written up as rehab and nothing else. The two boxes exist because a
+  // treatment day can carry a note about the rehab plan worked alongside it — that is a
+  // treatment session with rehab in it. A rehab day has no treatment half to write about,
+  // so offering the tab asks for a note that should not exist and lets the day be signed
+  // off with the wrong one filled in.
+  const isRehab = session.track === "rehab";
+  const [remarkTab, setRemarkTab] = useState(session.track === "rehab" ? "rehab" : "treatment");
   const [submitting, setSubmitting] = useState(false);
   const isDone = session.status === "completed";
-  // Either one on its own is a report. A day of hands-on work with nothing to add about
-  // the rehab plan is a real day, and so is the reverse; only an empty pair is not.
-  const hasReport = Boolean(remarks.trim() || rehabRemarks.trim());
+  // Either one on its own is a report on a treatment day — a day of hands-on work with
+  // nothing to add about the rehab plan is a real day, and so is the reverse. On a rehab
+  // day only the rehab note counts, because it is the only one being asked for.
+  const hasReport = isRehab ? Boolean(rehabRemarks.trim()) : Boolean(remarks.trim() || rehabRemarks.trim());
 
   const handleSubmit = async () => {
-    if (!hasReport) { toast.error("Add Treatment Remarks or Rehab Remarks"); return; }
+    if (!hasReport) { toast.error(isRehab ? "Add Rehab Remarks" : "Add Treatment Remarks or Rehab Remarks"); return; }
     setSubmitting(true);
     try {
       await physioCompleteSession(session.id, { remarks, rehab_remarks: rehabRemarks });
@@ -2501,7 +2508,13 @@ function CompleteSessionModal({ session, onClose, onDone }) {
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="w-full max-w-md rounded-xl bg-white shadow-2xl" data-testid="complete-session-modal">
         <div className="border-b p-5">
-          <h3 className="text-base font-semibold text-slate-800">{isDone ? "Session Summary" : "Complete Session"} #{session.session_number}</h3>
+          {/* A rehab day is named as one here too, so the heading matches the row that was
+              clicked and the only field underneath it. */}
+          <h3 className="text-base font-semibold text-slate-800">
+            {isDone
+              ? `${isRehab ? "Rehab Day" : "Session"} Summary`
+              : `Complete ${isRehab ? "Rehab Day" : "Session"}`} #{session.session_number}
+          </h3>
           <p className="text-[10px] text-slate-400">{session.lead_name} · {session.slot_time ? `${session.slot_time.split("T")[0]} at ${slotTo12h(session.slot_time)}` : "—"}</p>
         </div>
         <div className="space-y-4 p-5">
@@ -2532,7 +2545,7 @@ function CompleteSessionModal({ session, onClose, onDone }) {
                   phone, and a physio writing up a day is only ever in one of them. Neither
                   is unmounted -- what has been typed into the other is state, not markup,
                   so switching back and forth cannot lose it. */}
-              <div className="flex gap-1 border-b border-slate-200" data-testid="session-remark-tabs">
+              <div className={`flex gap-1 border-b border-slate-200 ${isRehab ? "hidden" : ""}`} data-testid="session-remark-tabs">
                 {[
                   { key: "treatment", label: "Treatment Remarks", filled: Boolean(remarks.trim()) },
                   { key: "rehab", label: "Rehab Remarks", filled: Boolean(rehabRemarks.trim()) },
@@ -2588,7 +2601,7 @@ function CompleteSessionModal({ session, onClose, onDone }) {
               {/* Said before the press rather than after: the button is disabled until one
                   of the two has something in it -- either tab. */}
               <p className="text-[11px] text-slate-400" data-testid="session-remarks-hint">
-                Fill in at least one of the two.
+                {isRehab ? "Required." : "Fill in at least one of the two."}
               </p>
             </>
           )}
