@@ -277,16 +277,19 @@ export const FitnessPanel = ({ branchId }) => {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[980px] table-fixed text-left text-sm">
+            <table className="w-full min-w-[900px] table-fixed text-left text-sm">
               <thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                {/* Age moved under the name, where the Zumba tab keeps it: a column six
+                    per cent wide held two digits and a heading twice their width, and the
+                    person's own details read as one line rather than as three columns of
+                    one value each. */}
                 <tr>
                   <th className="w-[5%] px-3 py-2.5">S.No</th>
-                  <th className="w-[17%] px-3 py-2.5">Name</th>
+                  <th className="w-[20%] px-3 py-2.5">Member</th>
                   <th className="w-[12%] px-3 py-2.5">Phone</th>
-                  <th className="w-[6%] px-3 py-2.5">Age</th>
-                  <th className="w-[18%] px-3 py-2.5">Package</th>
+                  <th className="w-[19%] px-3 py-2.5">Package</th>
                   <th className="w-[13%] px-3 py-2.5">Fee</th>
-                  <th className="w-[11%] px-3 py-2.5">Paid By</th>
+                  <th className="w-[13%] px-3 py-2.5">Paid By</th>
                   <th className="w-[10%] px-3 py-2.5">Status</th>
                   <th className="w-[8%] px-3 py-2.5 text-right">Actions</th>
                 </tr>
@@ -299,36 +302,57 @@ export const FitnessPanel = ({ branchId }) => {
                     <tr
                       key={r.id}
                       onClick={() => setViewing(r)}
-                      className="cursor-pointer align-middle hover:bg-slate-50/60"
+                      className="cursor-pointer align-top hover:bg-slate-50/60"
                       data-testid={`fitness-row-${r.id}`}
                     >
-                      <td className="px-3 py-3 text-xs text-slate-400">{i + 1}</td>
+                      <td className="px-3 py-3 text-xs leading-5 text-slate-400">{i + 1}</td>
                       <td className="px-3 py-3">
-                        <p className="truncate font-semibold text-slate-800" title={r.name}>{r.name}</p>
-                        <p className="truncate text-[11px] text-slate-400">
-                          {r.gender ? `${r.gender} · ` : ""}Joined {shortDate(r.joined_date || r.created_at)}
-                        </p>
+                        <div className="flex flex-col items-start gap-0.5">
+                          <p className="max-w-full truncate text-sm font-semibold leading-5 text-slate-800" title={r.name}>{r.name}</p>
+                          <p className="max-w-full truncate text-[11px] leading-4 text-slate-400">
+                            {[r.age ? `${r.age}` : null, r.gender || null].filter(Boolean).join(" · ")}
+                            {(r.age || r.gender) ? " · " : ""}Joined {shortDate(r.joined_date || r.created_at)}
+                          </p>
+                        </div>
                       </td>
-                      <td className="truncate px-3 py-3 text-xs text-slate-600">{r.phone || "—"}</td>
-                      <td className="px-3 py-3 text-xs text-slate-600">{r.age ?? "—"}</td>
+                      <td className="px-3 py-3 text-xs leading-5 text-slate-600">{r.phone || "—"}</td>
                       <td className="px-3 py-3">
-                        <p className="truncate text-xs font-medium text-slate-700" title={r.package_name}>{r.package_name || "—"}</p>
-                        {r.package_sessions ? <p className="text-[11px] text-slate-400">{r.package_sessions} sessions</p> : null}
-                      </td>
-                      <td className="px-3 py-3">
-                        <p className="text-xs font-semibold text-slate-800">{rupees(r.fee_amount)}</p>
-                        {/* The balance is what the branch is chasing, so it is said outright
-                            rather than left to be worked out from two figures. */}
-                        {due > 0
-                          ? <p className="text-[11px] font-semibold text-rose-600">{rupees(due)} due{r.due_date ? ` · ${shortDate(r.due_date)}` : ""}</p>
-                          : <p className="text-[11px] text-emerald-600">Paid up</p>}
+                        <div className="flex flex-col items-start gap-0.5">
+                          <p className="max-w-full truncate text-xs font-medium leading-5 text-slate-700" title={r.package_name}>{r.package_name || "—"}</p>
+                          {r.package_sessions ? <p className="text-[11px] leading-4 text-slate-400">{r.package_sessions} sessions</p> : null}
+                        </div>
                       </td>
                       <td className="px-3 py-3">
-                        <p className="text-xs text-slate-600">{MODE_LABELS[r.payment_mode] || "—"}</p>
-                        {r.payment_reference && <p className="truncate text-[10px] text-slate-400" title={r.payment_reference}>{r.payment_reference}</p>}
+                        <div className="flex flex-col items-start gap-0.5">
+                          <p className="text-xs font-semibold leading-5 text-slate-800">{rupees(r.fee_amount)}</p>
+                          {/* The balance is what the branch is chasing, so it is said outright
+                              rather than left to be worked out from two figures. A membership
+                              with no price on it is not paid up, it is unsold -- saying "Paid
+                              up" over a nought told a gym it had collected on somebody it had
+                              never charged. */}
+                          {due > 0
+                            ? <p className="text-[11px] font-semibold leading-4 text-rose-600">{rupees(due)} due{r.due_date ? ` · ${shortDate(r.due_date)}` : ""}</p>
+                            : Number(r.fee_amount || 0) > 0
+                              ? <p className="text-[11px] leading-4 text-emerald-600">Paid up</p>
+                              : <p className="text-[11px] leading-4 text-slate-400">Nothing sold</p>}
+                        </div>
                       </td>
                       <td className="px-3 py-3">
-                        <span className={`inline-flex rounded-[5px] border px-2 py-0.5 text-[10px] font-bold ${meta.classes}`}>{meta.label}</span>
+                        <div className="flex flex-col items-start gap-0.5">
+                          {r.payment_mode ? (
+                            <>
+                              <span className="block max-w-full truncate whitespace-nowrap rounded bg-slate-100 px-2 py-0.5 text-[10px] font-semibold leading-4 text-slate-600">
+                                {MODE_LABELS[r.payment_mode] || r.payment_mode}
+                              </span>
+                              {r.payment_reference ? (
+                                <p className="max-w-full truncate text-[10px] leading-4 text-slate-400" title={r.payment_reference}>{r.payment_reference}</p>
+                              ) : null}
+                            </>
+                          ) : <span className="text-xs leading-5 text-slate-300">—</span>}
+                        </div>
+                      </td>
+                      <td className="px-3 py-3">
+                        <span className={`inline-flex whitespace-nowrap rounded-[5px] border px-2 py-0.5 text-[10px] font-bold ${meta.classes}`}>{meta.label}</span>
                       </td>
                       {/* The actions cell swallows the click: pressing Collect or Delete
                           should not also open the row behind the dialog it just opened. */}
