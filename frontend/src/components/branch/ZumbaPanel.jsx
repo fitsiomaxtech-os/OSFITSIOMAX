@@ -735,7 +735,9 @@ const ViewRegistrationModal = ({ row, masterNameOf, onEdit, onCollect, onClose, 
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       data-testid="zumba-view-dialog"
     >
-      <div className="flex max-h-[88vh] w-full max-w-2xl flex-col rounded-xl bg-white shadow-2xl">
+      {/* overflow-hidden, or the tinted header and footer paint their own square
+          corners over the rounded ones this container draws. */}
+      <div className="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
         <div className="flex items-start justify-between gap-3 border-b bg-slate-50/60 p-5">
           <div className="min-w-0">
             <h3 className="flex flex-wrap items-center gap-2 text-base font-semibold text-slate-800">
