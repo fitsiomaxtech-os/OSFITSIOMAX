@@ -186,7 +186,11 @@ export const FitnessPanel = ({ branchId }) => {
 
   return (
     <div className="space-y-4" data-testid="branch-fitness-panel">
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+      {/* Five columns for five cards. It asked for six, so on a wide screen the row
+          stopped a column short of the page and left a gap that read as a card yet to
+          load. Written as a literal because Tailwind reads class names out of the source:
+          a count built from CARDS.length at runtime compiles to nothing. */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
         {CARDS.map((c) => (
           <StatTile
             key={c.key}
