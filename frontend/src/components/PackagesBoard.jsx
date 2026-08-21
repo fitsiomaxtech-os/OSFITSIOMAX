@@ -446,6 +446,15 @@ const packageTotal = (item, mode) => {
 // converts what was written before. A shelf added to one and not the others reads its own
 // prices two different ways.
 const COURSE_TOTAL_CATEGORIES = new Set(["rehab", "fitness"]);
+
+// Shelves with no online price to ask for. Group and Personal Training happen in the gym:
+// there is no version of them taken over video, so a second box asking what they cost
+// online was a question with no answer, and a figure typed into it went to the store as a
+// price somebody could be charged.
+//
+// The stored row still carries both prices -- the booking path picks one by mode, and a
+// zero on the other reads as free -- so what is entered once is written to both.
+const OFFLINE_ONLY_CATEGORIES = new Set(["fitness"]);
 const COURSE_TOTAL_DEFAULTS = { rehab: { online: 14000, offline: 18000 } };
 
 // Only a whole number of months is a plan. Anything else is a Zumba row saved before this
@@ -457,6 +466,7 @@ const zumbaMonthsFor = (sessions) => (
 const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiotherapy" }) => {
   const isEdit = Boolean(item);
   const isZumba = category === "zumba";
+  const isOfflineOnly = OFFLINE_ONLY_CATEGORIES.has(category);
   // Rehab and anything else sold as a whole course: the two price boxes hold the course
   // amount, not a per-session rate. What is stored is still the rate (see submit) — this is
   // only about which figure the person filling the form is asked for.
@@ -553,7 +563,7 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
         // divided by the session count and multiplied back out on the way to the bill,
         // which returned the right figure but meant the catalogue held 1,200 for a 31,200
         // course — a number nobody had agreed and every reader had to be taught to hide.
-        price_online: isZumba ? perClass : (Number(priceOnline) || 0),
+        price_online: isZumba ? perClass : (Number(isOfflineOnly ? priceOffline : priceOnline) || 0),
         price_offline: isZumba ? perClass : (Number(priceOffline) || 0),
         sessions_online: sessions,
         sessions_offline: sessions,
@@ -665,8 +675,11 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
           </div>
           ) : (
           <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600">Online &amp; Offline Setup</label>
-            <div className="grid grid-cols-2 gap-2" data-testid="session-create-mode-boxes">
+            <label className="mb-1 block text-xs font-semibold text-slate-600">
+              {isOfflineOnly ? "Offline Setup" : "Online & Offline Setup"}
+            </label>
+            <div className={`grid gap-2 ${isOfflineOnly ? "grid-cols-1" : "grid-cols-2"}`} data-testid="session-create-mode-boxes">
+              {!isOfflineOnly && (
               <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 p-3">
                 <p className="mb-2 flex items-center gap-1 text-xs font-bold text-emerald-800"><Wifi className="h-3 w-3" />Online Mode</p>
                 {/* The box asks for whatever that shelf is actually sold in — the whole
@@ -703,6 +716,7 @@ const CreateSessionPackageModal = ({ item, onClose, onSaved, category = "physiot
                   </div>
                 )}
               </div>
+              )}
               <div className="rounded-lg border border-amber-100 bg-amber-50/60 p-3">
                 <p className="mb-2 flex items-center gap-1 text-xs font-bold text-amber-800"><MapPin className="h-3 w-3" />Offline Mode</p>
                 <label className="mb-0.5 block text-[10px] font-semibold text-amber-700">{isCourseTotal ? `Amount for ${sessions} Sessions` : "Per Session Amount"}</label>
@@ -826,9 +840,14 @@ export const SessionPriceBoxes = ({ item, testid, mode = "all" }) => {
   // number, not a price anybody set — and printing it here invites reading it as the fee.
   // Same reason the Zumba card above shows a plan amount rather than a per-class rate.
   const courseOnly = COURSE_TOTAL_CATEGORIES.has(item.category);
+  // A shelf sold only in the room shows one box. Both prices are stored -- the booking path
+  // reads one by mode -- so an Online box here would print the same figure again under a
+  // heading for a thing that is not sold, which reads as two prices to choose between.
+  const offlineOnly = OFFLINE_ONLY_CATEGORIES.has(item.category);
+  const showOnline = mode !== "offline" && !offlineOnly;
   return (
-  <div className={`grid gap-2 ${mode === "all" ? "grid-cols-2" : "grid-cols-1"}`} data-testid={testid}>
-    {mode !== "offline" && (
+  <div className={`grid gap-2 ${mode === "all" && !offlineOnly ? "grid-cols-2" : "grid-cols-1"}`} data-testid={testid}>
+    {showOnline && (
       <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 p-3">
         <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-emerald-800"><Wifi className="h-3.5 w-3.5" />Online Mode</p>
         <div className="space-y-1.5 text-xs text-emerald-800">
@@ -843,7 +862,9 @@ export const SessionPriceBoxes = ({ item, testid, mode = "all" }) => {
     )}
     {mode !== "online" && (
       <div className="rounded-xl border border-amber-100 bg-amber-50/60 p-3">
-        <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-amber-800"><MapPin className="h-3.5 w-3.5" />Offline Mode</p>
+        <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-amber-800">
+          <MapPin className="h-3.5 w-3.5" />{offlineOnly ? "At the gym" : "Offline Mode"}
+        </p>
         <div className="space-y-1.5 text-xs text-amber-800">
           {!courseOnly && <div className="flex items-center justify-between"><span>Per Session</span><span className="font-bold">₹{item.price_offline ?? 0}</span></div>}
           <div className="flex items-center justify-between"><span>Total Sessions</span><span className="font-bold">{item.sessions_offline ?? 0} Sessions</span></div>
