@@ -99,7 +99,7 @@ const compressImage = (file) => new Promise((resolve) => {
 const isImage = (t) => String(t || "").startsWith("image/");
 const fmtWhen = (iso) => (iso ? `${String(iso).slice(8, 10)}/${String(iso).slice(5, 7)}/${String(iso).slice(0, 4)}` : "—");
 
-export const LeadDocuments = ({ leadId, canEdit = true, kind = "general", fixedLabel = "", hint }) => {
+export const LeadDocuments = ({ leadId, canEdit = true, kind = "general", fixedLabel = "", hint, onChanged }) => {
   const [docs, setDocs] = useState([]);
   const [sharing, setSharing] = useState(null); // the doc whose share flag is in flight
   const [loading, setLoading] = useState(true);
@@ -107,11 +107,26 @@ export const LeadDocuments = ({ leadId, canEdit = true, kind = "general", fixedL
   const [label, setLabel] = useState("");
   const fileRef = useRef(null);
 
+  // `onChanged` lets a caller react to what is on file — Consultation Visit will not take
+  // a payment until there is something here, and a gate that only opened on a page reload
+  // would read as the upload having failed.
+  //
+  // Held in a ref rather than named as a dependency of `load`. Callers pass an inline
+  // arrow, which is a new function every render: as a dependency it would rebuild `load`,
+  // which the effect below re-runs on, which sets state, which renders again — a fetch
+  // loop against the documents endpoint for as long as the card stayed open.
+  const onChangedRef = useRef(onChanged);
+  useEffect(() => { onChangedRef.current = onChanged; }, [onChanged]);
+
   const load = useCallback(() => {
     setLoading(true);
     leadDocuments(leadId, kind)
-      .then((r) => setDocs(r.documents || []))
-      .catch(() => setDocs([]))
+      .then((r) => {
+        const list = r.documents || [];
+        setDocs(list);
+        onChangedRef.current?.(list.length);
+      })
+      .catch(() => { setDocs([]); onChangedRef.current?.(0); })
       .finally(() => setLoading(false));
   }, [leadId, kind]);
 

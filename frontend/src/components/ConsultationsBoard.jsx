@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Activity, Calendar, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2, Ban, ClipboardCheck, IndianRupee, Printer, Share2, Download, Eye, Salad } from "lucide-react";
+import { Activity, AlertCircle, FileText, Calendar, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2, Ban, ClipboardCheck, IndianRupee, Printer, Share2, Download, Eye, Salad } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,7 +17,7 @@ import {
   assignPhysioWithSessions, assignRehab, getDoctorCalendar,
   listNutritionCoaches, bookDietAppointment, collectDietFee,
   scheduleConsultationFollowUp, rescheduleConsultationFollowUp,
-  getLeadRemarks, getLeadActivity,
+  getLeadRemarks, getLeadActivity, leadDocuments,
   saveConsultationDecision, markConsultationCompleted, getBranches,
   listTextPresets, addTextPreset, deleteTextPreset,
   getTreatmentTypes,
@@ -769,6 +769,23 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // "rehab". A tab selects a view outright — pressing the lit one again used to hide it
   // and drop the reader back onto a different panel, which is not what a tab does.
   const [programmeDetail, setProgrammeDetail] = useState("own");
+  // Whether this patient has anything on file at all. Consultation Visit will not take a
+  // payment until they do — see the panel — so this has to be known before the button is
+  // drawn rather than discovered when it is pressed. Bumped by the uploader so the gate
+  // opens on the upload rather than on a reload.
+  const [leadDocCount, setLeadDocCount] = useState(null); // null = not counted yet
+  const [docTick, setDocTick] = useState(0);
+  useEffect(() => {
+    if (!selectedLead?.id) { setLeadDocCount(null); return; }
+    let cancelled = false;
+    setLeadDocCount(null);
+    leadDocuments(selectedLead.id)
+      .then((r) => { if (!cancelled) setLeadDocCount((r?.documents || []).length); })
+      // Counted as none rather than left unknown: an upload screen that cannot say whether
+      // anything is there should ask for one, not quietly wave the patient through.
+      .catch(() => { if (!cancelled) setLeadDocCount(0); });
+    return () => { cancelled = true; };
+  }, [selectedLead?.id, docTick]);
   // Closed whenever a different patient is opened: a Diet card left standing would
   // otherwise read as the new patient's, with the previous one's figures still in it.
   useEffect(() => { setProgrammeDetail("own"); }, [selectedLead?.id]);
@@ -3252,6 +3269,31 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 </>
               );
 
+              // Documents, as a view of the panel rather than a trip to the Documents tab
+              // at the top of the card. Consultation Visit needs one before it will take a
+              // payment, and sending someone to another tab to satisfy a rule this panel is
+              // enforcing is how a person ends up not knowing why the button is dead.
+              // Consultation Visit is the one stage that will not proceed without paperwork.
+              // Everywhere else Documents is simply available.
+              const docsRequired = stage === "Consultation Visit";
+              const hasDocs = (leadDocCount || 0) > 0;
+
+              const DocumentsBody = (
+                <div data-testid="cons-documents-body">
+                  {docsRequired && !hasDocs && (
+                    <p className="mb-3 flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+                      <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" />
+                      <span>Upload the consultation paperwork before collecting the fee — the scan or photo is the record that the consultation happened.</span>
+                    </p>
+                  )}
+                  <LeadDocuments
+                    leadId={selectedLead.id}
+                    canEdit={["branch_admin", "super_admin", "head_physio"].includes(viewerRole)}
+                    onChanged={(n) => setLeadDocCount(n)}
+                  />
+                </div>
+              );
+
               // Which programme is on screen, if any. Null means the panel shows its own
               // stage — the fee summary and the line about what to do next.
               const detailView = programmeDetail === "diet" ? DIET_VIEW
@@ -3259,6 +3301,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 : null;
               const detailBody = programmeDetail === "diet" ? DietDetailBody
                 : programmeDetail === "rehab" ? RehabDetailBody
+                : programmeDetail === "documents" ? DocumentsBody
                 : null;
 
               // The buttons that open the two cards above. They replace the pair that used
@@ -3574,6 +3617,25 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       tabs={
                         <>
                           <OwnTab label={alreadyPaid ? "Payment" : "Collect Payment"} short="Payment" icon={IndianRupee} active="border-sky-300 bg-sky-50 text-sky-700" />
+                          {/* Required at this stage, so it is a tab here rather than a trip
+                              to the Documents tab at the top of the card: the rule is being
+                              enforced by this panel and has to be satisfiable from it. The
+                              amber ring is the only thing on the row asking to be pressed
+                              when nothing is on file yet. */}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className={`${programmeDetail === "documents"
+                              ? "border-sky-300 bg-sky-50 text-sky-700"
+                              : hasDocs
+                              ? "border-slate-200 bg-white/70 text-slate-600 hover:bg-white"
+                              : "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100"} ${ACT_BTN}`}
+                            onClick={() => openDetail("documents")}
+                            data-testid="cons-open-documents"
+                          >
+                            <FileText className="mr-1 h-3.5 w-3.5" />
+                            <Lbl full={hasDocs ? `Documents (${leadDocCount})` : "Documents — required"} short="Docs" />
+                          </Button>
                           {DietDetailButton}
                           {RehabDetailButton}
                           {CancelButton}
@@ -3622,11 +3684,39 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                               />
                             )}
                           </PanelCard>
-                          <div className="mt-3">
-                            <Button size="sm" className={`bg-sky-600 text-white shadow-sm transition hover:bg-sky-700 hover:shadow ${ACT_BTN}`} onClick={openCollectFeeDraft} data-testid="cons-open-collect-fee">
+                          {/* No paperwork, no payment. The scan is the record that the
+                              consultation happened, and a fee taken against nothing on file
+                              is a figure the branch cannot answer for later. Says why on the
+                              button rather than only in a tooltip: a dead button with no
+                              reason on it gets pressed again and then reported as broken.
+
+                              Updating a payment already taken is not blocked — that would
+                              strand a patient whose fee is in over a rule brought in after
+                              they paid. */}
+                          <div className="mt-3 flex flex-wrap items-center gap-2">
+                            <Button
+                              size="sm"
+                              disabled={docsRequired && !hasDocs && !alreadyPaid}
+                              title={docsRequired && !hasDocs && !alreadyPaid ? "Upload the consultation paperwork first" : undefined}
+                              className={`${docsRequired && !hasDocs && !alreadyPaid
+                                ? "bg-slate-100 text-slate-400"
+                                : "bg-sky-600 text-white shadow-sm transition hover:bg-sky-700 hover:shadow"} ${ACT_BTN}`}
+                              onClick={openCollectFeeDraft}
+                              data-testid="cons-open-collect-fee"
+                            >
                               <IndianRupee className="mr-1 h-3.5 w-3.5" />
                               {alreadyPaid ? "Update Payment" : "Collect Payment"}
                             </Button>
+                            {docsRequired && !hasDocs && !alreadyPaid && (
+                              <button
+                                type="button"
+                                onClick={() => openDetail("documents")}
+                                className="text-[11px] font-medium text-amber-700 underline underline-offset-2 hover:text-amber-800"
+                                data-testid="cons-docs-required-hint"
+                              >
+                                Upload the consultation paperwork first
+                              </button>
+                            )}
                           </div>
                         </>
                       )}
