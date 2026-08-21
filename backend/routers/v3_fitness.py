@@ -244,9 +244,11 @@ async def list_fitness(
     month_start, month_end = _month_bounds()
     counts = {
         "all": len(shaped),
-        # The three the tab was asked for: who is training now, who is paused, and who owes
-        # money that is already due.
-        "current": sum(1 for r in shaped if _status(r.get("status")) == STATUS_ACTIVE),
+        # Two states, not three: a member is on the roll or they have gone. "leave" was
+        # dropped from the board, so anybody still carrying it counts as on the roll —
+        # the alternative is a row that belongs to neither card and is findable only
+        # under All.
+        "current": sum(1 for r in shaped if _status(r.get("status")) != STATUS_DISCONTINUED),
         "leave": sum(1 for r in shaped if _status(r.get("status")) == STATUS_LEAVE),
         "unpaid_this_month": sum(1 for r in rows if _unpaid_this_month(r, month_start, month_end)),
         "discontinued": sum(1 for r in shaped if _status(r.get("status")) == STATUS_DISCONTINUED),

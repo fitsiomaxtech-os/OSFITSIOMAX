@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Dumbbell, Pencil, Plus, RefreshCw, Search, Trash2, X, PauseCircle, PlayCircle, LogOut } from "lucide-react";
+import { Dumbbell, Pencil, Plus, RefreshCw, Search, Trash2, X, PlayCircle, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
@@ -123,7 +123,6 @@ export const FitnessPanel = ({ branchId }) => {
   const CARDS = [
     { key: "all", label: "All", value: counts.all, color: "#6366f1", sub: "on the roll" },
     { key: "current", label: "Current", value: counts.current, color: "#059669", sub: "training now" },
-    { key: "leave", label: "On Leave", value: counts.leave, color: "#d97706", sub: "paused, expected back" },
     { key: "unpaid", label: "Not Paid", value: counts.unpaid_this_month, color: "#dc2626", sub: "due this month" },
     { key: "paid", label: "Paid Up", value: counts.paid, color: "#0284c7", sub: "nothing owed" },
     { key: "discontinued", label: "Discontinued", value: counts.discontinued, color: "#64748b", sub: "left the gym" },
@@ -142,8 +141,9 @@ export const FitnessPanel = ({ branchId }) => {
 
   const visible = useMemo(() => {
     let list = rows;
-    if (card === "current") list = list.filter((r) => r.status === "active");
-    else if (card === "leave") list = list.filter((r) => r.status === "leave");
+    // Matches the server's own counting — a card whose list filtered differently would
+    // show a number and a set of rows that disagree.
+    if (card === "current") list = list.filter((r) => r.status !== "discontinued");
     else if (card === "discontinued") list = list.filter((r) => r.status === "discontinued");
     else if (card === "paid") list = list.filter((r) => r.fully_paid);
     else if (card === "unpaid") list = list.filter(isUnpaidThisMonth);
@@ -325,28 +325,13 @@ export const FitnessPanel = ({ branchId }) => {
                       </td>
                       <td className="px-3 py-3">
                         <div className="flex items-center justify-end gap-1">
-                          {/* One click for the move this member is most likely to need:
-                              pause somebody who is training, restart somebody who is not. */}
+                          {/* Bringing somebody back is the move that needed finding, so it
+                              carries a word rather than an icon — a bare glyph on a
+                              discontinued row reads as "play" and nothing says it restores
+                              the membership. Going the other way stays an icon: it sits
+                              beside Edit and Delete on every active row and would crowd
+                              them out labelled. */}
                           {r.status === "active" ? (
-                            <button
-                              onClick={() => changeStatus(r, "leave")}
-                              className="rounded p-1.5 text-slate-400 hover:bg-amber-50 hover:text-amber-600"
-                              title="Mark on leave"
-                              data-testid={`fitness-leave-${r.id}`}
-                            >
-                              <PauseCircle className="h-4 w-4" />
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => changeStatus(r, "active")}
-                              className="rounded p-1.5 text-slate-400 hover:bg-emerald-50 hover:text-emerald-600"
-                              title="Back to training"
-                              data-testid={`fitness-resume-${r.id}`}
-                            >
-                              <PlayCircle className="h-4 w-4" />
-                            </button>
-                          )}
-                          {r.status !== "discontinued" && (
                             <button
                               onClick={() => changeStatus(r, "discontinued")}
                               className="rounded p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
@@ -354,6 +339,15 @@ export const FitnessPanel = ({ branchId }) => {
                               data-testid={`fitness-discontinue-${r.id}`}
                             >
                               <LogOut className="h-4 w-4" />
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => changeStatus(r, "active")}
+                              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700 transition hover:bg-emerald-100"
+                              title="Put this membership back on the roll"
+                              data-testid={`fitness-resume-${r.id}`}
+                            >
+                              <PlayCircle className="h-3.5 w-3.5" /> Make Current
                             </button>
                           )}
                           <button
