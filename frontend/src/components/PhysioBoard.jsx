@@ -450,10 +450,6 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
   // default, tapping "Total Days") shows everything; "completed"/"pending" isolate
   // just that group. Tapping an already-active tile clears back to "all".
   const [rowFilter, setRowFilter] = useState("all");
-  // Which course a day belongs to. Separate from rowFilter above, which asks whether a
-  // day is done — the two narrow the same list along different axes, and folding them
-  // into one control would mean losing the answer to one question to ask the other.
-  const [track, setTrack] = useState("all");
 
   /**
    * Patients who have finished their whole course — a different unit from the three
@@ -505,16 +501,13 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
     }
     if (rowFilter === "completed") rows = rows.filter((r) => r.done);
     else if (rowFilter === "pending") rows = rows.filter((r) => !r.done);
-    // A row with no track is a consultation appointment rather than a course day, so it
-    // belongs under neither tab and shows only under All.
-    if (track !== "all") rows = rows.filter((r) => r.track === track);
     // "finished" needs no filter of its own — finished.rows is already exactly that set.
     // Incomplete cards always show first, completed (green) cards always last —
     // each group keeps its own time order from rowsFor's sort.
     const incomplete = rows.filter((r) => !r.done);
     const completed = rows.filter((r) => r.done);
     return [...incomplete, ...completed];
-  }, [dayRows, finished.rows, search, rowFilter, track]);
+  }, [dayRows, finished.rows, search, rowFilter]);
 
   // Every treatment day this physio holds, regardless of date — the default when
   // no Meta-style date filter is active.
@@ -732,49 +725,6 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
         </button>
       </div>
 
-      {/* Treatment and Rehab are two courses that share a physio, a room and a calendar,
-          and until now shared one undivided list. Counted off the same rows the list is
-          about to show, so a tab reading 0 is a day with none of that kind rather than a
-          tab that does nothing. Hidden when there is no rehab to separate — a split with
-          everything on one side is a control that only takes a click to learn that. */}
-      {(() => {
-        const base = rowFilter === "finished" ? finished.rows : dayRows;
-        const counts = {
-          all: base.length,
-          treatment: base.filter((r) => r.track === "treatment").length,
-          rehab: base.filter((r) => r.track === "rehab").length,
-        };
-        if (!counts.rehab) return null;
-        return (
-          <div className="mb-3 flex flex-wrap gap-1.5 rounded-lg border border-slate-200 bg-white p-1" data-testid="physio-track-tabs">
-            {[
-              { key: "all", label: "All", tone: "#334155" },
-              { key: "treatment", label: "Treatment", tone: "#0284c7" },
-              { key: "rehab", label: "Rehab", tone: "#0891b2" },
-            ].map((t) => {
-              const on = track === t.key;
-              return (
-                <button
-                  key={t.key}
-                  type="button"
-                  onClick={() => setTrack(t.key)}
-                  className={`inline-flex shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition ${
-                    on ? "text-white" : "text-slate-600 hover:bg-slate-50"
-                  }`}
-                  style={on ? { background: t.tone } : undefined}
-                  data-testid={`physio-track-${t.key}`}
-                >
-                  {t.label}
-                  <span className={`rounded px-1.5 py-px text-[10px] font-bold ${on ? "bg-white/25" : "bg-slate-100 text-slate-500"}`}>
-                    {counts[t.key]}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        );
-      })()}
-
       {/* The week strip above is still on screen but no longer drives this list, and a day
           tapped with no visible effect reads as a bug. Says so, and offers the way back. */}
       {rowFilter === "finished" && (
@@ -804,12 +754,7 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
               ? (search.trim() ? `No finished patient matches "${search.trim()}"` : "No patient has finished their course yet")
               : search.trim()
                 ? `No patient matches "${search.trim()}" on this day`
-                // A track tab can empty a day that is not empty. Saying "nothing booked"
-                // there would send someone hunting through the week for days that are
-                // sitting on the tab beside this one.
-                : track !== "all"
-                  ? `No ${track} days on this day`
-                  : `Nothing booked for ${new Date(`${selectedDate}T00:00:00`).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}`}
+                : `Nothing booked for ${new Date(`${selectedDate}T00:00:00`).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}`}
           </p>
         </div>
       ) : (
@@ -867,7 +812,9 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
 
           <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white sm:block" data-testid="physio-treatment-list-desktop">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[720px] text-sm">
+              {/* 720 -> 820 for the Package column. The wrapper scrolls, so the columns keep their
+                  widths on a narrow desk rather than being squeezed to fit. */}
+              <table className="w-full min-w-[820px] text-sm">
                 <thead className="bg-slate-500 text-left text-[10px] uppercase tracking-wider text-white">
                   <tr>
                     <th className="px-4 py-2.5 font-semibold">Time</th>
@@ -875,6 +822,10 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
                     <th className="px-4 py-2.5 font-semibold">Day</th>
                     <th className="px-4 py-2.5 font-semibold">Reviews</th>
                     <th className="px-4 py-2.5 font-semibold">Status</th>
+                    {/* Which course the day belongs to. Treatment and Rehab share a physio,
+                        a room and a calendar, so without this the two read as one list and
+                        05/36 beside 05/26 says nothing about what either is. */}
+                    <th className="px-4 py-2.5 font-semibold">Package</th>
                     <th className="px-4 py-2.5" />
                   </tr>
                 </thead>
@@ -923,6 +874,17 @@ function TreatmentTab({ physioId, onCountChange, toolbarSlot }) {
                             <span className="inline-flex whitespace-nowrap rounded-full bg-violet-600 px-2 py-0.5 text-[10px] font-semibold text-white">Review Today</span>
                           ) : (
                             <span className="inline-flex whitespace-nowrap rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700">Pending</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          {/* A consultation appointment is neither, and says so with a dash
+                              rather than being called treatment by default. */}
+                          {r.track === "rehab" ? (
+                            <span className="inline-flex whitespace-nowrap rounded-full bg-cyan-100 px-2 py-0.5 text-[10px] font-semibold text-cyan-700">Rehab</span>
+                          ) : r.track === "treatment" ? (
+                            <span className="inline-flex whitespace-nowrap rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold text-sky-700">Treatment</span>
+                          ) : (
+                            <span className="text-slate-300">—</span>
                           )}
                         </td>
                         <td className="px-4 py-3 text-right">
