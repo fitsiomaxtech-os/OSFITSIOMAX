@@ -1452,21 +1452,23 @@ export const ZumbaPanel = ({ branchId }) => {
             </p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[900px] table-fixed text-left text-sm">
+              <table className="w-full min-w-[60rem] text-left text-sm">
                 <thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500">
                   {/* Ten columns where there were twelve. Age and Registered moved under
                       the name, which is where a person's own details belong and where the
                       gym's table already keeps them; what is left is one fact per column,
                       each wide enough to be read. */}
                   <tr>
-                    <th className="w-[5%] px-3 py-2.5">S.No</th>
-                    <th className="w-[20%] px-3 py-2.5">Member</th>
-                    <th className="w-[12%] px-3 py-2.5">Phone</th>
-                    <th className="w-[19%] px-3 py-2.5">Package</th>
-                    <th className="w-[13%] px-3 py-2.5">Fee</th>
-                    <th className="w-[13%] px-3 py-2.5">Paid By</th>
-                    <th className="w-[10%] px-3 py-2.5">Status</th>
-                    <th className="w-[8%] px-3 py-2.5 text-right">Actions</th>
+                    <th className="w-[4%] px-3 py-2.5">S.No</th>
+                    <th className="w-[17%] px-3 py-2.5">Name</th>
+                    <th className="w-[11%] px-3 py-2.5">Phone Number</th>
+                    <th className="w-[13%] px-3 py-2.5">Package</th>
+                    <th className="w-[9%] px-3 py-2.5">Start</th>
+                    <th className="w-[9%] px-3 py-2.5">Finish</th>
+                    <th className="w-[9%] px-3 py-2.5">Collected</th>
+                    <th className="w-[9%] px-3 py-2.5">Due</th>
+                    <th className="w-[9%] px-3 py-2.5">Status</th>
+                    <th className="w-[10%] px-3 py-2.5 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -1487,10 +1489,9 @@ export const ZumbaPanel = ({ branchId }) => {
                         <td className="px-3 py-3">
                           <div className="flex flex-col items-start gap-0.5">
                           <p className="max-w-full truncate text-sm font-semibold leading-5 text-slate-800" title={r.name}>{r.name || "—"}</p>
-                          <p className="max-w-full truncate text-[11px] leading-4 text-slate-400">
-                            {[r.age ? `${r.age}` : null, r.gender || null].filter(Boolean).join(" · ")}
-                            {(r.age || r.gender) ? " · " : ""}Joined {shortDate(r.joined_on || r.created_at)}
-                          </p>
+                          {/* Age and gender go into the record rather than under the name:
+                              the columns beside it are the ones the list is read for, and
+                              the day they joined has one of its own now. */}
                           {/* Names what is missing rather than saying "incomplete": the
                               branch admin opens this row to do one specific thing, and the
                               badge may as well say which. */}
@@ -1519,53 +1520,47 @@ export const ZumbaPanel = ({ branchId }) => {
                               <>
                                 <p className="max-w-full truncate text-xs leading-5 text-slate-600" title={r.package_name}>{r.package_name}</p>
                                 {r.package_sessions ? <p className="text-[10px] leading-4 text-slate-400">{r.package_sessions} classes</p> : null}
-                                {/* The term's dates went into the record with the columns
-                                    that held them. What could not go with them is the one
-                                    row a branch acts on: a membership close enough to its
-                                    end to need renewing says so here, and one that is not
-                                    stays as quiet as the gym's rows do. */}
-                                {r.renewal_due ? (
-                                  <p className="text-[10px] font-semibold leading-4 text-amber-600" title={r.finish_on ? `Ends ${shortDate(r.finish_on)}` : undefined}>
-                                    {r.classes_left === 0 ? "Term over" : `Renew · ${r.classes_left} left`}
-                                  </p>
-                                ) : null}
                               </>
                             ) : <span className="text-xs leading-5 text-slate-300">—</span>}
                           </div>
                         </td>
-                        {/* What the membership costs, then what is left of it -- one
-                            column, the way the gym's table says it. Two columns for the
-                            same sum asked the reader to do the subtraction the row could
-                            do for them. */}
+                        {/* When the term began. Its own column now rather than a line under
+                            the name: it is half of what the two dates either side of the
+                            package say together, and the other half was already here. */}
                         <td className="px-3 py-3">
-                          <div className="flex flex-col items-start gap-0.5">
-                            <p className="text-xs font-semibold leading-5 text-slate-800">{rupees(r.fee_amount)}</p>
-                            {due > 0
-                              ? <p className="text-[11px] font-semibold leading-4 text-rose-600">{rupees(due)} due</p>
-                              : Number(r.fee_amount || 0) > 0
-                                ? <p className="text-[11px] leading-4 text-emerald-600">Paid up</p>
-                                : <p className="text-[11px] leading-4 text-slate-400">Nothing sold</p>}
-                          </div>
+                          <p className="text-xs leading-5 text-slate-600">{shortDate(r.joined_on || r.created_at)}</p>
                         </td>
-                        {/* How it came in, beside what came in. */}
+                        {/* When the membership runs out, counted forward from the term's
+                            start by the plan's own length — the server works it out so this
+                            column and the master's roll cannot answer it differently. The
+                            classes left sit under it, in amber once a renewal is due, so
+                            the date and the reason to act on it are read together. */}
                         <td className="px-3 py-3">
                           <div className="flex flex-col items-start gap-0.5">
-                            {r.payment_mode ? (
+                            {r.finish_on ? (
                               <>
-                                <span className="block max-w-full truncate whitespace-nowrap rounded bg-slate-100 px-2 py-0.5 text-[10px] font-semibold leading-4 text-slate-600">
-                                  {PAYMENT_MODE_LABELS[r.payment_mode] || r.payment_mode}
-                                </span>
-                                {r.payment_reference ? (
-                                  <p className="max-w-full truncate text-[10px] leading-4 text-slate-400" title={r.payment_reference}>{r.payment_reference}</p>
-                                ) : null}
-                                {r.payment_mode === "split" && Array.isArray(r.payment_lines) ? (
-                                  <p className="max-w-full truncate text-[10px] leading-4 text-slate-400" title={r.payment_lines.map((l) => `${PAYMENT_MODE_LABELS[l.mode] || l.mode} ${rupees(l.amount)}`).join(", ")}>
-                                    {r.payment_lines.map((l) => `${PAYMENT_MODE_LABELS[l.mode] || l.mode} ${rupees(l.amount)}`).join(" + ")}
+                                <p className="max-w-full truncate text-xs leading-5 text-slate-600">{shortDate(r.finish_on)}</p>
+                                {typeof r.classes_left === "number" ? (
+                                  <p className={`max-w-full truncate text-[10px] leading-4 ${r.renewal_due ? "font-semibold text-amber-600" : "text-slate-400"}`}>
+                                    {r.classes_left === 0 ? "term over" : `${r.classes_left} left`}
                                   </p>
                                 ) : null}
                               </>
                             ) : <span className="text-xs leading-5 text-slate-300">—</span>}
                           </div>
+                        </td>
+                        {/* What has come in, and what has not, in a column each. The plan's
+                            price is neither: it is their sum, and the package two columns
+                            over already names it. */}
+                        <td className="px-3 py-3">
+                          <p className="text-xs font-semibold leading-5 text-emerald-700">{rupees(paid)}</p>
+                        </td>
+                        <td className="px-3 py-3">
+                          {due > 0
+                            ? <p className="text-xs font-semibold leading-5 text-rose-600">{rupees(due)}</p>
+                            : Number(r.fee_amount || 0) > 0
+                              ? <p className="text-xs leading-5 text-emerald-600">Paid up</p>
+                              : <p className="text-xs leading-5 text-slate-300">—</p>}
                         </td>
                         {/* Whether they are still coming, in the words the record uses. */}
                         <td className="px-3 py-3">
