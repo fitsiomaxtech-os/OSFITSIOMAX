@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { FileText, Image as ImageIcon, Trash2, Upload, X } from "lucide-react";
+import { createPortal } from "react-dom";
+import { ChevronLeft, ChevronRight, Eye, FileText, Image as ImageIcon, Trash2, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
@@ -97,6 +98,7 @@ const compressImage = (file) => new Promise((resolve) => {
   img.src = url;
 });
 const isImage = (t) => String(t || "").startsWith("image/");
+const NAV_BTN = "shrink-0 rounded-full bg-white/10 p-2 text-white transition hover:bg-white/25 sm:p-3";
 const fmtWhen = (iso) => (iso ? `${String(iso).slice(8, 10)}/${String(iso).slice(5, 7)}/${String(iso).slice(0, 4)}` : "—");
 
 export const LeadDocuments = ({ leadId, canEdit = true, kind = "general", fixedLabel = "", hint, onChanged }) => {
@@ -131,6 +133,69 @@ export const LeadDocuments = ({ leadId, canEdit = true, kind = "general", fixedL
   }, [leadId, kind]);
 
   useEffect(() => { load(); }, [load]);
+
+  // The images on file, in the order the list shows them, and where the viewer is standing
+  // in that order. Pages of a consultation form get photographed one after another, so what
+  // someone wants is to read them in sequence — not to open six browser tabs and hunt
+  // between them. PDFs are left to the download route: a blob in an <img> shows nothing.
+  const images = docs.filter((d) => isImage(d.content_type));
+  const [viewing, setViewing] = useState(null); // index into `images`, or null when closed
+  const [viewSrc, setViewSrc] = useState("");
+  const [viewBusy, setViewBusy] = useState(false);
+  const viewDoc = viewing == null ? null : images[viewing] || null;
+  const viewDocId = viewDoc?.id ?? null;
+
+  // One blob URL per document, kept so paging back to a page already read doesn't
+  // download it again. They are handed back on unmount — an object URL the document still
+  // owns holds its bytes in memory for the life of the tab.
+  const urlCache = useRef(new Map());
+  useEffect(() => {
+    const cache = urlCache.current;
+    return () => { cache.forEach((u) => URL.revokeObjectURL(u)); cache.clear(); };
+  }, []);
+
+  useEffect(() => {
+    if (!viewDocId) return undefined;
+    const cached = urlCache.current.get(viewDocId);
+    if (cached) { setViewSrc(cached); return undefined; }
+    let cancelled = false;
+    setViewSrc("");
+    setViewBusy(true);
+    openLeadDocument(leadId, viewDocId)
+      .then((url) => {
+        // Arrived after the reader had already moved on: revoked rather than cached, or
+        // it would sit in memory as a page nothing is going to show.
+        if (cancelled) { URL.revokeObjectURL(url); return; }
+        urlCache.current.set(viewDocId, url);
+        setViewSrc(url);
+      })
+      .catch(() => { if (!cancelled) { toast.error("Could not open that document"); setViewing(null); } })
+      .finally(() => { if (!cancelled) setViewBusy(false); });
+    return () => { cancelled = true; };
+  }, [viewDocId, leadId]);
+
+  // Deleting the page being looked at, or the last one, would otherwise leave the viewer
+  // open on an index that no longer exists.
+  useEffect(() => {
+    if (viewing != null && viewing >= images.length) setViewing(images.length ? images.length - 1 : null);
+  }, [viewing, images.length]);
+
+  const step = useCallback((by) => {
+    setViewing((i) => (i == null || images.length === 0 ? null : (i + by + images.length) % images.length));
+  }, [images.length]);
+
+  // Arrow keys and Escape. A viewer that can only be driven by clicking small targets is
+  // one people stop using by the third page.
+  useEffect(() => {
+    if (viewing == null) return undefined;
+    const onKey = (e) => {
+      if (e.key === "Escape") setViewing(null);
+      else if (e.key === "ArrowRight") step(1);
+      else if (e.key === "ArrowLeft") step(-1);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [viewing, step]);
 
   const pick = async (e) => {
     const file = e.target.files?.[0];
@@ -201,12 +266,31 @@ export const LeadDocuments = ({ leadId, canEdit = true, kind = "general", fixedL
     if (!window.confirm(`Delete "${doc.label || doc.original_name}"? This cannot be undone.`)) return;
     try {
       await deleteLeadDocument(leadId, doc.id);
+      const cached = urlCache.current.get(doc.id);
+      if (cached) { URL.revokeObjectURL(cached); urlCache.current.delete(doc.id); }
       toast.success("Document deleted");
       load();
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Delete failed");
     }
   };
+
+  // Defined once and placed twice — beside Choose File for whoever is uploading, and over
+  // the list for a physio or coach who can read the file but not add to it.
+  const viewButton = (
+    <Button
+      size="sm"
+      variant="outline"
+      disabled={images.length === 0}
+      title={images.length ? "Look through the uploaded images here" : "Nothing to view yet — no images uploaded"}
+      className="border-sky-200 bg-white text-sky-700 hover:bg-sky-50 disabled:opacity-60"
+      onClick={() => setViewing(0)}
+      data-testid="lead-doc-view"
+    >
+      <Eye className="mr-1.5 h-4 w-4" />
+      View{images.length ? ` (${images.length})` : ""}
+    </Button>
+  );
 
   return (
     <div className="space-y-3" data-testid="lead-documents">
@@ -242,8 +326,13 @@ export const LeadDocuments = ({ leadId, canEdit = true, kind = "general", fixedL
               <Upload className="mr-1.5 h-4 w-4" />
               {busy ? "Uploading…" : "Choose File"}
             </Button>
+            {viewButton}
           </div>
         </div>
+      )}
+
+      {!canEdit && images.length > 0 && (
+        <div className="flex justify-end">{viewButton}</div>
       )}
 
       {loading ? (
@@ -263,7 +352,14 @@ export const LeadDocuments = ({ leadId, canEdit = true, kind = "general", fixedL
                 </span>
                 <button
                   type="button"
-                  onClick={() => open(d)}
+                  onClick={() => {
+                    // The row and the View button lead to the same place for an image, so
+                    // clicking a page shows it here rather than throwing a tab at the
+                    // reader. A PDF has no viewer of ours to open in.
+                    const at = images.findIndex((i) => i.id === d.id);
+                    if (at >= 0) setViewing(at);
+                    else open(d);
+                  }}
                   className="min-w-0 flex-1 text-left"
                   data-testid={`lead-doc-open-${d.id}`}
                 >
@@ -313,6 +409,65 @@ export const LeadDocuments = ({ leadId, canEdit = true, kind = "general", fixedL
             );
           })}
         </ul>
+      )}
+
+      {/* Portalled to the body: this opens from inside a lead card that is itself a modal
+          with its own scroll box, and a full-screen sheet rendered inside that would be
+          clipped by it and stacked underneath it. */}
+      {viewDoc && createPortal(
+        <div
+          className="fixed inset-0 z-[95] flex flex-col bg-slate-950/90 p-3 sm:p-6"
+          onMouseDown={(e) => { if (e.target === e.currentTarget) setViewing(null); }}
+          data-testid="lead-doc-viewer"
+        >
+          <div className="flex items-start gap-3 text-white">
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold">{viewDoc.label || viewDoc.original_name}</p>
+              <p className="truncate text-[11px] text-white/60">
+                {images.length > 1 ? `${viewing + 1} of ${images.length} · ` : ""}
+                {fmtSize(viewDoc.size_bytes || 0)} · {fmtWhen(viewDoc.created_at)} · {viewDoc.uploaded_by || "—"}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setViewing(null)}
+              className="shrink-0 rounded-full p-2 text-white/80 transition hover:bg-white/15 hover:text-white"
+              title="Close (Esc)"
+              data-testid="lead-doc-viewer-close"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+
+          <div className="mt-3 flex min-h-0 flex-1 items-center gap-2 sm:gap-4">
+            {images.length > 1 && (
+              <button type="button" onClick={() => step(-1)} className={NAV_BTN} title="Previous (←)" data-testid="lead-doc-viewer-prev">
+                <ChevronLeft className="h-6 w-6" />
+              </button>
+            )}
+            <div
+              className="flex min-h-0 min-w-0 flex-1 items-center justify-center"
+              onMouseDown={(e) => { if (e.target === e.currentTarget) setViewing(null); }}
+            >
+              {viewBusy || !viewSrc ? (
+                <p className="text-sm text-white/70">Loading…</p>
+              ) : (
+                <img
+                  src={viewSrc}
+                  alt={viewDoc.label || viewDoc.original_name}
+                  className="max-h-full max-w-full rounded-lg object-contain shadow-2xl"
+                  data-testid="lead-doc-viewer-image"
+                />
+              )}
+            </div>
+            {images.length > 1 && (
+              <button type="button" onClick={() => step(1)} className={NAV_BTN} title="Next (→)" data-testid="lead-doc-viewer-next">
+                <ChevronRight className="h-6 w-6" />
+              </button>
+            )}
+          </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
