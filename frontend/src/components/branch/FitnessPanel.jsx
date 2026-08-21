@@ -533,6 +533,9 @@ const FitnessMemberDialog = ({ member, packages, branchId, onClose, onSaved }) =
     address: member?.address || "",
     package_id: member?.package_id || "",
     package_name: member?.package_name || "",
+    // The gym is a room somebody comes to, so there is nothing to choose here. Still
+    // carried and still sent, because a membership taken before this was settled may say
+    // otherwise and an edit should not quietly rewrite what it says.
     package_mode: member?.package_mode || "offline",
     package_sessions: member?.package_sessions ?? "",
     fee_amount: member?.fee_amount ?? "",
@@ -686,13 +689,6 @@ const FitnessMemberDialog = ({ member, packages, branchId, onClose, onSaved }) =
                     No Fitness packages published yet — Super Admin adds them in Services and Products → Sessions → Fitness.
                   </p>
                 )}
-              </div>
-              <div>
-                <FieldLabel>Mode</FieldLabel>
-                <FormSelect value={form.package_mode} onChange={(v) => set("package_mode", v)} testid="fitness-form-mode">
-                  <option value="offline">Offline</option>
-                  <option value="online">Online</option>
-                </FormSelect>
               </div>
               <div>
                 <FieldLabel>Sessions</FieldLabel>
