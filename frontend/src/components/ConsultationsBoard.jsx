@@ -3028,6 +3028,44 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 </Button>
               ) : null;
 
+              // Quiet versions of the two above, for the panels that already have one clear
+              // action of their own. Same conditions, same handlers, same labels — only the
+              // weight changes, so a panel whose job is "assign the physio" is not asking
+              // the eye to choose between three filled colours. Defined once here rather
+              // than restyled at each call site, and deliberately alongside the solid pair
+              // so the two can never drift apart in what they do.
+              const QuietDietButton = selectedLead.package_paid != null ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className={`border-slate-200 bg-white/70 text-slate-600 hover:bg-white ${ACT_BTN}`}
+                  onClick={!dietFeePaid ? openDietFeeDraft : openDietModal}
+                  data-testid="cons-open-diet-assign-quiet"
+                >
+                  <Salad className="mr-1 h-3.5 w-3.5" />{" "}
+                  {!dietFeePaid
+                    ? <Lbl full="Collect Diet Fee" short="Diet Fee" />
+                    : !dietBooked
+                    ? <Lbl full="Assign Nutritionist" short="Assign" />
+                    : <Lbl full="Reschedule Diet" short="Diet" />}
+                </Button>
+              ) : null;
+
+              const QuietRehabButton = (selectedLead.package_paid != null && selectedLead.rehab_referred && selectedLead.rehab_package_id) ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className={`border-slate-200 bg-white/70 text-slate-600 hover:bg-white ${ACT_BTN}`}
+                  onClick={openRehabFeeDraft}
+                  data-testid="cons-open-rehab-fee-quiet"
+                >
+                  <Activity className="mr-1 h-3.5 w-3.5" />{" "}
+                  {rehabFeePaid
+                    ? <Lbl full="Update Rehab Fee" short="Rehab" />
+                    : <Lbl full="Collect Rehab Fee" short="Rehab Fee" />}
+                </Button>
+              ) : null;
+
               // The pipeline the lead already carries (diet_stage, diet_consultation_report
               // written by the coach) made visible here — where Branch/Super Admin already
               // are — instead of only on the Nutrition Coach's own board.
@@ -3166,20 +3204,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             <Activity className="mr-1.5 h-3.5 w-3.5" />
                             {rehabAssigned ? "Reassign Rehab Physio" : "Assign Physio"}
                           </Button>
-                          {/* The shared DietButton is solid orange, which would compete with
-                              the one action this panel exists for. Same handlers, quieter. */}
-                          {selectedLead.package_paid != null && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className={`border-slate-200 bg-white/70 text-slate-600 hover:bg-white ${ACT_BTN}`}
-                              onClick={!dietFeePaid ? openDietFeeDraft : openDietModal}
-                              data-testid="cons-rehab-diet-btn"
-                            >
-                              <Salad className="mr-1 h-3.5 w-3.5" />
-                              {!dietFeePaid ? <Lbl full="Collect Diet Fee" short="Diet Fee" /> : <Lbl full="Diet Consultation" short="Diet" />}
-                            </Button>
-                          )}
+                          {QuietDietButton}
                           {CancelButton}
                         </div>
                       </div>
@@ -3328,20 +3353,33 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
 
                   if (decision === "consultation_only") {
                     return (
-                      <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3" data-testid="cons-stage-panel-fee-collected">
-                        <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-emerald-700">
-                          <ClipboardCheck className="h-3.5 w-3.5" /> Fee Collected
-                        </p>
-                        {ConsultationFeeSummary}
-                        {DietStatus}
-                        <p className="mb-2 mt-3 text-xs text-slate-600">Consultation Only — no treatment sessions. Mark this consultation as completed to close it out.</p>
-                        <div className="flex items-center gap-1.5 [justify-content:safe_center] [&>*]:shrink-0">
-                          <Button size="sm" className="bg-emerald-600 text-xs hover:bg-emerald-700" onClick={submitMarkCompleted} disabled={completingConsultation} data-testid="cons-mark-completed">
-                            {completingConsultation ? "Saving..." : "Mark Consultation Completed"}
-                          </Button>
-                          {DietButton}
-                          {RehabButton}
-                          {CancelButton}
+                      <div
+                        className="overflow-hidden rounded-xl border border-emerald-200/80 bg-gradient-to-br from-emerald-50 via-emerald-50/60 to-white shadow-sm ring-1 ring-inset ring-white/60"
+                        data-testid="cons-stage-panel-fee-collected"
+                      >
+                        <div className="flex items-center justify-between gap-3 border-b border-emerald-100 px-4 py-2.5">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-emerald-600/10 text-emerald-700">
+                              <ClipboardCheck className="h-4 w-4" />
+                            </span>
+                            <span className="truncate text-xs font-semibold uppercase tracking-wider text-emerald-800">Fee Collected</span>
+                          </div>
+                          <span className="flex shrink-0 items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+                            <CheckCircle2 className="h-3 w-3" /> Consultation Only
+                          </span>
+                        </div>
+                        <div className="p-4">
+                          {ConsultationFeeSummary}
+                          {DietStatus}
+                          <p className="mt-3 text-xs leading-relaxed text-slate-600">Consultation Only — no treatment sessions. Mark this consultation as completed to close it out.</p>
+                          <div className="mt-3 flex flex-wrap items-center gap-2 [&>*]:shrink-0">
+                            <Button size="sm" className="bg-emerald-600 text-xs text-white shadow-sm transition hover:bg-emerald-700 hover:shadow" onClick={submitMarkCompleted} disabled={completingConsultation} data-testid="cons-mark-completed">
+                              {completingConsultation ? "Saving..." : "Mark Consultation Completed"}
+                            </Button>
+                            {QuietDietButton}
+                            {QuietRehabButton}
+                            {CancelButton}
+                          </div>
                         </div>
                       </div>
                     );
@@ -3383,44 +3421,95 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     </Button>
                   ) : null;
 
+                  // The three money facts as one divided card, the way the Rehab panel
+                  // states its own. They used to be a card for the consultation fee and
+                  // then loose rows for treatment under a second heading, so one panel
+                  // carried two different shapes for the same kind of fact.
+                  const feeRows = [
+                    {
+                      label: "Consultation Fee",
+                      value: selectedLead.package_price != null ? `Rs.${Number(selectedLead.package_price).toLocaleString("en-IN")}` : "—",
+                      note: selectedLead.package_payment_mode || "",
+                      noteTone: "text-emerald-600",
+                    },
+                    {
+                      label: "Treatment Package",
+                      value: `${selectedLead.session_package_name || "—"}${selectedLead.session_package_sessions ? ` · ${selectedLead.session_package_sessions} sessions` : ""}`,
+                    },
+                    {
+                      label: "Treatment Fee",
+                      value: selectedLead.session_package_price != null ? `Rs.${Number(selectedLead.session_package_price).toLocaleString("en-IN")}` : "—",
+                      note: hasPendingInstallments ? "partial" : (treatmentPaid ? (selectedLead.treatment_fee_payment_mode || "") : ""),
+                      noteTone: hasPendingInstallments ? "text-indigo-600" : "text-emerald-600",
+                      strong: true,
+                    },
+                  ];
+
                   return (
-                    <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3" data-testid="cons-stage-panel-fee-collected">
-                      <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-indigo-700">
-                        <ClipboardCheck className="h-3.5 w-3.5" /> Fee Collected
-                      </p>
-                      {ConsultationFeeSummary}
-                      <div className="mt-3 border-t border-indigo-100 pt-3">
-                        <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-indigo-700">
-                          <Dumbbell className="h-3.5 w-3.5" /> Treatment Fee
-                        </p>
-                        <div className="space-y-1.5 text-sm">
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs text-slate-500">Treatment Package</span>
-                            <span className="font-semibold text-slate-800">
-                              {selectedLead.session_package_name || "—"}{selectedLead.session_package_sessions ? ` · ${selectedLead.session_package_sessions} sessions` : ""}
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs text-slate-500">Treatment Fee</span>
-                            <span className="font-semibold text-slate-800">
-                              {selectedLead.session_package_price != null ? `Rs.${selectedLead.session_package_price}` : "—"}
-                              {treatmentPaid && !hasPendingInstallments && <span className="ml-1 capitalize text-emerald-600">({selectedLead.treatment_fee_payment_mode})</span>}
-                              {hasPendingInstallments && <span className="ml-1 capitalize text-indigo-600">(partial)</span>}
-                            </span>
-                          </div>
+                    <div
+                      className="overflow-hidden rounded-xl border border-indigo-200/80 bg-gradient-to-br from-indigo-50 via-indigo-50/60 to-white shadow-sm ring-1 ring-inset ring-white/60"
+                      data-testid="cons-stage-panel-fee-collected"
+                    >
+                      {/* Header band: what this panel is, and where the money stands, before
+                          any figure is read. The chip is the one place that answers "is
+                          anything still owed" without working it out from the rows. */}
+                      <div className="flex items-center justify-between gap-3 border-b border-indigo-100 px-4 py-2.5">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-indigo-600/10 text-indigo-700">
+                            <ClipboardCheck className="h-4 w-4" />
+                          </span>
+                          <span className="truncate text-xs font-semibold uppercase tracking-wider text-indigo-800">Fee Collected</span>
                         </div>
-                        {/* What's still owed and when it's due. The buttons that act on it
+                        {partial ? (
+                          <span className={`flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${partial.overdue ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-700"}`}>
+                            {partial.overdue ? "Balance Overdue" : "Part-paid"}
+                          </span>
+                        ) : treatmentPaid ? (
+                          <span className="flex shrink-0 items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+                            <CheckCircle2 className="h-3 w-3" /> Both Fees Collected
+                          </span>
+                        ) : (
+                          <span className="flex shrink-0 items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+                            Treatment Fee Due
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="p-4">
+                        <div className="rounded-lg border border-slate-200/80 bg-white shadow-sm" data-testid="cons-fee-collected-summary">
+                          <dl className="divide-y divide-slate-100">
+                            {feeRows.map((row) => (
+                              <div key={row.label} className="flex items-baseline justify-between gap-4 px-3 py-2">
+                                <dt className="shrink-0 text-xs text-slate-500">{row.label}</dt>
+                                <dd className={`min-w-0 truncate text-right font-semibold text-slate-800 ${row.strong ? "text-[15px]" : "text-sm"}`} title={String(row.value)}>
+                                  {row.value}
+                                  {row.note && <span className={`ml-1 text-xs font-medium capitalize ${row.noteTone}`}>({row.note})</span>}
+                                </dd>
+                              </div>
+                            ))}
+                          </dl>
+                          {/* Only when there is nothing outstanding. A partial plan says its
+                              piece in the balance card below, and claiming "collected" over
+                              the top of a balance still owed is what this panel used to do. */}
+                          {!partial && treatmentPaid && (
+                            <p className="flex items-center gap-1 border-t border-slate-100 px-3 py-2 text-[11px] font-medium text-emerald-600" data-testid="cons-treatment-fee-already-collected">
+                              <CheckCircle2 className="h-3 w-3" /> Already Collected
+                            </p>
+                          )}
+                        </div>
+
+                        {/* What is still owed and when it is due. The buttons that act on it
                             are NOT here — they sit in the one action row at the bottom with
                             everything else this patient can be sent to next. */}
                         {partial && (
                           <>
-                            <p className="mt-1 text-[11px] text-slate-500">
+                            <p className="mt-2 text-[11px] text-slate-500">
                               {savedInstallments.filter((i) => i.paid).length} of {savedInstallments.length} installments collected.
                             </p>
-                            <div className={`mt-2 rounded-md border px-2.5 py-2 ${partial.overdue ? "border-rose-200 bg-rose-50" : "border-amber-200 bg-amber-50"}`} data-testid="cons-partial-balance-summary">
+                            <div className={`mt-2 rounded-lg border px-3 py-2 ${partial.overdue ? "border-rose-200 bg-rose-50" : "border-amber-200 bg-amber-50"}`} data-testid="cons-partial-balance-summary">
                               <div className="flex items-center justify-between">
                                 <span className={`text-[11px] font-semibold ${partial.overdue ? "text-rose-700" : "text-amber-700"}`}>Balance Amount</span>
-                                <span className={`text-sm font-bold ${partial.overdue ? "text-rose-700" : "text-amber-700"}`}>Rs.{partial.balance}</span>
+                                <span className={`text-sm font-bold ${partial.overdue ? "text-rose-700" : "text-amber-700"}`}>Rs.{Number(partial.balance).toLocaleString("en-IN")}</span>
                               </div>
                               <p className={`mt-0.5 text-[10px] ${partial.overdue ? "text-rose-600" : "text-amber-600"}`}>
                                 Next · {partialInstallmentLabel(partial.nextIdx)}
@@ -3432,38 +3521,34 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             </div>
                           </>
                         )}
-                        {!partial && treatmentPaid && (
-                          <p className="mt-1 flex items-center gap-1 text-[11px] font-medium text-emerald-600" data-testid="cons-treatment-fee-already-collected">
-                            <CheckCircle2 className="h-3 w-3" /> Already Collected
+
+                        {DietStatus}
+
+                        {treatmentPaid && (
+                          <p className="mt-3 text-xs leading-relaxed text-slate-600">
+                            {/* A Partial Payment plan reaches here with money in but a balance
+                                still owed, and this line read "Both fees collected" over the
+                                top of a Balance Amount card saying otherwise. */}
+                            {partial
+                              ? "Consultation Fee collected, Treatment Fee part-paid. The physiotherapist can be assigned now."
+                              : "Both fees collected. Choose the physiotherapist who will deliver the sessions."}
                           </p>
                         )}
-                      </div>
-                      {DietStatus}
-                      {treatmentPaid && (
-                        <p className="mt-3 border-t border-indigo-100 pt-3 text-xs text-slate-600">
-                          {/* A Partial Payment plan reaches here with money in but a balance
-                              still owed, and this line read "Both fees collected" over the
-                              top of a Balance Amount card saying otherwise. */}
-                          {partial
-                            ? "Consultation Fee collected, Treatment Fee part-paid. The physiotherapist can be assigned now."
-                            : "Both fees collected. Choose the physiotherapist who will deliver the sessions."}
-                        </p>
-                      )}
-                      {/* One action row: the money first, then where this patient goes next,
-                          then the way out. Collect Payment used to sit inside the Treatment
-                          Fee block above, so it took a line of its own and the row beneath
-                          it started with Diet Appointment — three buttons on two lines,
-                          reading as unrelated steps. Wraps on a phone. */}
-                      <div className={`${treatmentPaid ? "mt-2" : "mt-3"} flex items-center gap-1.5 [justify-content:safe_center] [&>*]:shrink-0`}>
-                        {FeeActions}
-                        {treatmentPaid && (
-                          <Button size="sm" className={`bg-violet-600 hover:bg-violet-700 ${ACT_BTN}`} onClick={() => openPhysioModal("treatment")} data-testid="cons-open-physio-assign-from-fee-collected">
-                            <Lbl full="Assign Physio" short="Physio" />
-                          </Button>
-                        )}
-                        {DietButton}
-                        {RehabButton}
-                        {CancelButton}
+
+                        {/* One action row on the same left edge as everything above it: the
+                            money first, then where this patient goes next, then the way out.
+                            Diet and Rehab are quiet here — this panel's step is the physio. */}
+                        <div className="mt-3 flex flex-wrap items-center gap-2 [&>*]:shrink-0">
+                          {FeeActions}
+                          {treatmentPaid && (
+                            <Button size="sm" className={`bg-violet-600 text-white shadow-sm transition hover:bg-violet-700 hover:shadow ${ACT_BTN}`} onClick={() => openPhysioModal("treatment")} data-testid="cons-open-physio-assign-from-fee-collected">
+                              <Lbl full="Assign Physio" short="Physio" />
+                            </Button>
+                          )}
+                          {QuietDietButton}
+                          {QuietRehabButton}
+                          {CancelButton}
+                        </div>
                       </div>
                     </div>
                   );
