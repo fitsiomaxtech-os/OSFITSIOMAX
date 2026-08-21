@@ -132,7 +132,7 @@ class FitnessStatusInput(BaseModel):
     remarks: Optional[str] = ""
 
 
-def _clean(payload: FitnessInput) -> dict:
+def _clean(payload: FitnessInput, *, check_paid: bool = True) -> dict:
     name = (payload.name or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="Member name is required")
@@ -141,7 +141,11 @@ def _clean(payload: FitnessInput) -> dict:
     fee_paid = _amount(payload.fee_paid)
     # Refused rather than clamped: a paid figure above the fee is a typo somewhere, and
     # quietly trimming it hides which of the two numbers was wrong.
-    if fee_paid > fee_amount:
+    #
+    # Skipped on an update, where the payload's figure is discarded in favour of what has
+    # actually been collected — checking a number that is about to be thrown away would
+    # reject an edit over a value the caller never sent.
+    if check_paid and fee_paid > fee_amount:
         raise HTTPException(
             status_code=400,
             detail=f"Paid ({fee_paid:g}) is more than the fee ({fee_amount:g})",
@@ -312,8 +316,30 @@ async def update_fitness(
     payload: FitnessInput,
     user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
 ):
-    await _row_or_404(registration_id, user)
-    updates = _clean(payload)
+    row = await _row_or_404(registration_id, user)
+    updates = _clean(payload, check_paid=False)
+
+    # What has been collected is not editable here. It moves through /collect, which records
+    # how each payment arrived — the mode, the reference, the notes counted, who took it and
+    # when. Letting a fee be typed over on this form would move the balance with none of
+    # that behind it, and the two would then disagree about the same money.
+    #
+    # Held back rather than trusted from the payload: the form no longer sends these, and a
+    # missing field would otherwise $set the collected total to zero.
+    collected = _amount(row.get("fee_paid"))
+    updates["fee_paid"] = collected
+    updates["payment_mode"] = row.get("payment_mode", "")
+    updates["payment_reference"] = row.get("payment_reference", "")
+
+    # Refused rather than left inconsistent: a fee below what has already been taken makes
+    # the membership overpaid, and there is no way to read that as anything but an error.
+    # Refunding is a payment problem, not a rename.
+    if collected > _amount(updates.get("fee_amount")):
+        raise HTTPException(
+            status_code=400,
+            detail=f"{collected:g} has already been collected — the fee cannot be set below that",
+        )
+
     await v3_col("fitness_registrations").update_one({"id": registration_id}, {"$set": updates})
     row = await v3_col("fitness_registrations").find_one({"id": registration_id}, {"_id": 0})
     return _shape(row)

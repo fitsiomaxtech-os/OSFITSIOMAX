@@ -95,6 +95,7 @@ export const FitnessPanel = ({ branchId }) => {
   const [modeFilter, setModeFilter] = useState("all");
   const [editing, setEditing] = useState(null);   // a row, or {} for a new one
   const [collecting, setCollecting] = useState(null);
+  const [viewing, setViewing] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
 
   const load = useCallback(async () => {
@@ -295,7 +296,12 @@ export const FitnessPanel = ({ branchId }) => {
                   const meta = STATUS_META[r.status] || STATUS_META.active;
                   const due = Number(r.fee_due || 0);
                   return (
-                    <tr key={r.id} className="align-middle hover:bg-slate-50/60" data-testid={`fitness-row-${r.id}`}>
+                    <tr
+                      key={r.id}
+                      onClick={() => setViewing(r)}
+                      className="cursor-pointer align-middle hover:bg-slate-50/60"
+                      data-testid={`fitness-row-${r.id}`}
+                    >
                       <td className="px-3 py-3 text-xs text-slate-400">{i + 1}</td>
                       <td className="px-3 py-3">
                         <p className="truncate font-semibold text-slate-800" title={r.name}>{r.name}</p>
@@ -324,7 +330,9 @@ export const FitnessPanel = ({ branchId }) => {
                       <td className="px-3 py-3">
                         <span className={`inline-flex rounded-[5px] border px-2 py-0.5 text-[10px] font-bold ${meta.classes}`}>{meta.label}</span>
                       </td>
-                      <td className="px-3 py-3">
+                      {/* The actions cell swallows the click: pressing Collect or Delete
+                          should not also open the row behind the dialog it just opened. */}
+                      <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-end gap-1">
                           {/* Wherever there is a balance, whatever the membership's state.
                               This was gated on the member not having discontinued, which hid
@@ -394,6 +402,15 @@ export const FitnessPanel = ({ branchId }) => {
           </div>
         )}
       </div>
+
+      {viewing && (
+        <FitnessDetailDialog
+          member={viewing}
+          onClose={() => setViewing(null)}
+          onEdit={() => { setEditing(viewing); setViewing(null); }}
+          onCollect={() => { setCollecting(viewing); setViewing(null); }}
+        />
+      )}
 
       {collecting && (
         <CollectPaymentDialog
@@ -485,13 +502,16 @@ const FitnessMemberDialog = ({ member, packages, branchId, onClose, onSaved }) =
     }));
   };
 
-  const due = Math.max(0, (Number(form.fee_amount) || 0) - (Number(form.fee_paid) || 0));
-  const overpaid = (Number(form.fee_paid) || 0) > (Number(form.fee_amount) || 0);
-  const needsReference = REFERENCE_MODES.includes(form.payment_mode);
+  // Against what has actually been collected, since this form no longer sets that.
+  const collected = Number(member?.fee_paid) || 0;
+  const due = Math.max(0, (Number(form.fee_amount) || 0) - collected);
+  // A fee below what has been taken leaves the membership overpaid, which the server
+  // refuses too — said here so the button can go dead instead of the save failing.
+  const overpaid = collected > (Number(form.fee_amount) || 0);
 
   const submit = async () => {
     if (!form.name.trim()) { toast.error("Member name is required"); return; }
-    if (overpaid) { toast.error("Paid is more than the fee"); return; }
+    if (overpaid) { toast.error(`${rupees(collected)} has already been collected — the fee cannot be below that`); return; }
     setSaving(true);
     const payload = {
       ...form,
@@ -614,25 +634,17 @@ const FitnessMemberDialog = ({ member, packages, branchId, onClose, onSaved }) =
                 <FieldLabel>Fee</FieldLabel>
                 <Input type="number" min="0" value={form.fee_amount} onChange={(e) => set("fee_amount", e.target.value)} data-testid="fitness-form-fee" />
               </div>
-              <div>
-                <FieldLabel>Collected</FieldLabel>
-                <Input type="number" min="0" value={form.fee_paid} onChange={(e) => set("fee_paid", e.target.value)} data-testid="fitness-form-paid" />
-                {overpaid && <p className="mt-1 text-[11px] font-medium text-rose-600" data-testid="fitness-form-overpaid">More than the fee.</p>}
-              </div>
-              <div>
-                <FieldLabel>Paid By</FieldLabel>
-                <FormSelect value={form.payment_mode} onChange={(v) => set("payment_mode", v)} testid="fitness-form-payment-mode">
-                  {PAYMENT_MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-                </FormSelect>
-              </div>
-              {needsReference && (
-                <div>
-                  <FieldLabel>{REFERENCE_LABELS[form.payment_mode]}</FieldLabel>
-                  <Input value={form.payment_reference} onChange={(e) => set("payment_reference", e.target.value)} data-testid="fitness-form-reference" />
-                </div>
-              )}
-              <div className="sm:col-span-2 flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                <span className="text-xs font-semibold text-slate-500">Balance</span>
+              {/* Collected and Paid By are not here. Money arrives through Collect, which
+                  records how each payment came in — the mode, the reference, the notes
+                  counted, who took it and when. A box on this form would move the same
+                  balance with none of that behind it, and the two records would then
+                  disagree about the same money. Shown read-only so the figure is still in
+                  front of whoever is editing. */}
+              <div className="sm:col-span-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                <span className="text-xs font-semibold text-slate-500">
+                  Collected <b className="text-slate-700">{rupees(member?.fee_paid)}</b>
+                  {isEdit && <span className="ml-1 font-normal text-slate-400">— taken with the Collect button on the row</span>}
+                </span>
                 <span className={`text-sm font-extrabold ${due > 0 ? "text-rose-700" : "text-emerald-700"}`} data-testid="fitness-form-balance">
                   {due > 0 ? `${rupees(due)} due` : "Paid up"}
                 </span>
@@ -849,6 +861,145 @@ const CollectPaymentDialog = ({ member, onClose, onCollected }) => {
           >
             {saving ? "Collecting..." : `Collect ${rupees(total)}`}
           </Button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/**
+ * Everything on one membership, read-only.
+ *
+ * The table shows what a branch scans for; this shows what it opens a row to find out. It
+ * is also the only place the payment history surfaces — every collection has been kept on
+ * the membership since Collect was built, with its lines, the notes counted, who took it
+ * and when, and none of that was on screen anywhere.
+ */
+const DetailLine = ({ label, children }) => (
+  <div className="flex items-start justify-between gap-3 py-1.5">
+    <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-slate-400">{label}</span>
+    <span className="min-w-0 text-right text-sm text-slate-700">{children ?? "—"}</span>
+  </div>
+);
+
+const FitnessDetailDialog = ({ member, onClose, onEdit, onCollect }) => {
+  const meta = STATUS_META[member.status] || STATUS_META.active;
+  const due = Number(member.fee_due || 0);
+  // Newest first: the last thing that happened is the thing being looked for.
+  const payments = [...(member.payments || [])].reverse();
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="flex max-h-[88vh] w-full max-w-2xl flex-col rounded-xl bg-white shadow-2xl" data-testid="fitness-detail-dialog">
+        <div className="flex items-start justify-between border-b p-5">
+          <div className="min-w-0">
+            <h3 className="flex flex-wrap items-center gap-2 text-base font-semibold text-slate-800">
+              {member.name}
+              <span className={`inline-flex rounded-[5px] border px-2 py-0.5 text-[10px] font-bold ${meta.classes}`}>{meta.label}</span>
+            </h3>
+            <p className="mt-0.5 text-[11px] text-slate-500">
+              {member.phone || "No phone"}{member.age ? ` · ${member.age}` : ""}{member.gender ? ` · ${member.gender}` : ""}
+            </p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600" data-testid="fitness-detail-close"><X className="h-4 w-4" /></button>
+        </div>
+
+        <div className="flex-1 space-y-4 overflow-y-auto p-5">
+          <div className={`rounded-lg border p-3 ${due > 0 ? "border-rose-200 bg-rose-50" : "border-emerald-200 bg-emerald-50"}`}>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Balance</p>
+                <p className={`text-xl font-extrabold ${due > 0 ? "text-rose-700" : "text-emerald-700"}`} data-testid="fitness-detail-balance">
+                  {due > 0 ? `${rupees(due)} due` : "Paid up"}
+                </p>
+              </div>
+              <p className="text-right text-[11px] text-slate-600">
+                Fee <b>{rupees(member.fee_amount)}</b><br />
+                Collected <b className="text-emerald-700">{rupees(member.fee_paid)}</b>
+              </p>
+            </div>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="rounded-lg border border-slate-200 p-3">
+              <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">Client</p>
+              <DetailLine label="Phone">{member.phone}</DetailLine>
+              <DetailLine label="Age">{member.age}</DetailLine>
+              <DetailLine label="Gender">{member.gender}</DetailLine>
+              <DetailLine label="Email">{member.email}</DetailLine>
+              <DetailLine label="Address">{member.address}</DetailLine>
+            </div>
+            <div className="rounded-lg border border-slate-200 p-3">
+              <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">Membership</p>
+              <DetailLine label="Package">{member.package_name}</DetailLine>
+              <DetailLine label="Sessions">{member.package_sessions}</DetailLine>
+              <DetailLine label="Mode">{member.package_mode}</DetailLine>
+              <DetailLine label="Joined">{shortDate(member.joined_date || member.created_at)}</DetailLine>
+              <DetailLine label="Next Due">{shortDate(member.due_date)}</DetailLine>
+            </div>
+          </div>
+
+          {member.notes && (
+            <div className="rounded-lg border border-slate-200 p-3">
+              <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">Notes</p>
+              <p className="whitespace-pre-wrap text-sm text-slate-700">{member.notes}</p>
+            </div>
+          )}
+
+          <div className="rounded-lg border border-slate-200 p-3">
+            <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              Payments <span className="font-normal normal-case text-slate-400">({payments.length})</span>
+            </p>
+            {payments.length === 0 ? (
+              <p className="py-4 text-center text-xs text-slate-400" data-testid="fitness-detail-no-payments">
+                Nothing collected through Collect yet.
+                {Number(member.fee_paid) > 0 && " The figure above was set on the membership directly."}
+              </p>
+            ) : (
+              <ul className="space-y-2" data-testid="fitness-detail-payments">
+                {payments.map((p) => (
+                  <li key={p.id} className="rounded-md border border-slate-100 bg-slate-50/60 p-2.5" data-testid={`fitness-detail-payment-${p.id}`}>
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <span className="text-sm font-bold text-emerald-700">{rupees(p.amount)}</span>
+                      <span className="text-[11px] text-slate-400">
+                        {shortDate(p.collected_at)}{p.collected_by ? ` · ${p.collected_by}` : ""}
+                      </span>
+                    </div>
+                    {(p.lines || []).map((l, i) => (
+                      <div key={i} className="mt-1 text-[11px] text-slate-600">
+                        <span className="font-semibold">{MODE_LABELS[l.mode] || l.mode}</span> {rupees(l.amount)}
+                        {l.reference ? <span className="text-slate-400"> · {l.reference}</span> : null}
+                        {/* The notes counted, spelled out — this is what a till is checked
+                            against at the end of the day. */}
+                        {l.denominations && Object.keys(l.denominations).length > 0 && (
+                          <span className="text-slate-400">
+                            {" · "}
+                            {Object.entries(l.denominations)
+                              .sort((a, b) => Number(b[0]) - Number(a[0]))
+                              .map(([note, count]) => `${count}×₹${note}`)
+                              .join(" + ")}
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                    {p.note && <p className="mt-1 text-[11px] italic text-slate-500">{p.note}</p>}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap justify-end gap-2 border-t p-4">
+          <Button variant="outline" size="sm" onClick={onClose}>Close</Button>
+          <Button variant="outline" size="sm" onClick={onEdit} data-testid="fitness-detail-edit">
+            <Pencil className="mr-1 h-3.5 w-3.5" /> Edit
+          </Button>
+          {due > 0 && (
+            <Button size="sm" onClick={onCollect} className="bg-emerald-600 text-white hover:bg-emerald-700" data-testid="fitness-detail-collect">
+              <IndianRupee className="mr-1 h-3.5 w-3.5" /> Collect {rupees(due)}
+            </Button>
+          )}
         </div>
       </div>
     </div>
