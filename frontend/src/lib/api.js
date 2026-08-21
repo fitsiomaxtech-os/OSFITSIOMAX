@@ -554,3 +554,6 @@ export const addFitness = async (payload, branchId) => (await api.post("/branch/
 export const updateFitness = async (registrationId, payload) => (await api.patch(`/branch/fitness/${registrationId}`, payload)).data;
 export const setFitnessStatus = async (registrationId, status, remarks) => (await api.patch(`/branch/fitness/${registrationId}/status`, { status, remarks })).data;
 export const deleteFitness = async (registrationId) => (await api.delete(`/branch/fitness/${registrationId}`)).data;
+// A collection is a list of lines, one per mode — a member can hand over cash and send
+// the rest by UPI, and both halves belong against the same membership.
+export const collectFitnessPayment = async (registrationId, lines, note) => (await api.post(`/branch/fitness/${registrationId}/collect`, { lines, note })).data;

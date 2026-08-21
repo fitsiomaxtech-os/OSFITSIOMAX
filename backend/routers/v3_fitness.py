@@ -39,6 +39,9 @@ PAYMENT_MODES = ("cash", "upi", "card", "account_transfer")
 # keeping, which is what the reference field holds.
 REFERENCE_MODES = ("upi", "card", "account_transfer")
 
+# What each mode is called when a payment is read back to whoever handed it over.
+PAYMENT_MODE_LABELS = {"cash": "Cash", "upi": "UPI", "card": "Card", "account_transfer": "Bank Transfer"}
+
 GENDERS = ("female", "male", "other")
 
 
@@ -355,3 +358,156 @@ async def delete_fitness(
     row = await _row_or_404(registration_id, user)
     await v3_col("fitness_registrations").delete_one({"id": registration_id})
     return {"message": f"{row.get('name', 'Membership')} removed"}
+
+
+# ------------------------------------------------------------------ Collecting the fee
+#
+# A membership is not always paid in one go or in one way: a member hands over two thousand
+# in cash and sends the rest by UPI, and the branch needs both halves recorded against the
+# same membership rather than one of them typed over the other.
+#
+# So a collection is a list of lines, each with its own mode. What it adds up to is what
+# went on the balance, and the lines stay on the row as a record of how it was taken.
+
+
+# The notes an Indian counter actually holds. Kept as a list so the order is the order they
+# are counted in — largest first, which is how a drawer is emptied.
+DENOMINATIONS = (2000, 500, 200, 100, 50, 20, 10, 5)
+
+
+class PaymentLine(BaseModel):
+    mode: str
+    amount: Optional[float] = 0
+    reference: Optional[str] = ""
+    # Cash only: how many of each note. Keyed by the note's value as a string, because that
+    # is what survives a JSON round trip.
+    denominations: Optional[dict] = None
+
+
+class CollectPaymentInput(BaseModel):
+    lines: List[PaymentLine]
+    note: Optional[str] = ""
+
+
+def _denomination_total(raw) -> tuple:
+    """What a pile of notes comes to, and the tidied count behind it.
+
+    Anything that is not a note this counter holds, or not a positive whole number of them,
+    is dropped rather than guessed at — a "3.5 x 500" is a typo, and turning it into 1750
+    would put a figure in the drawer nobody counted.
+    """
+    if not isinstance(raw, dict):
+        return 0.0, {}
+    clean: dict = {}
+    total = 0.0
+    for note in DENOMINATIONS:
+        for key in (str(note), note):
+            if key in raw:
+                try:
+                    count = int(raw[key])
+                except (TypeError, ValueError):
+                    count = 0
+                if count > 0:
+                    clean[str(note)] = count
+                    total += note * count
+                break
+    return round(total, 2), clean
+
+
+@router.post("/branch/fitness/{registration_id}/collect")
+async def collect_fitness_payment(
+    registration_id: str,
+    payload: CollectPaymentInput,
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+):
+    """Take a payment against a membership, in one mode or several.
+
+    The lines are the record of how it was taken; their sum is what moves the balance. Both
+    are kept: a total alone cannot answer "how much of today came in as cash", and lines
+    without a total would have to be re-added every time the balance is read.
+    """
+    row = await _row_or_404(registration_id, user)
+
+    fee_amount = _amount(row.get("fee_amount"))
+    already = _amount(row.get("fee_paid"))
+    outstanding = round(max(0.0, fee_amount - already), 2)
+    if fee_amount <= 0:
+        raise HTTPException(status_code=400, detail="Set this membership's fee before collecting against it")
+    if outstanding <= 0:
+        raise HTTPException(status_code=400, detail="This membership is already paid up")
+
+    cleaned = []
+    total = 0.0
+    for line in payload.lines or []:
+        mode = (line.mode or "").strip().lower()
+        if mode not in PAYMENT_MODES:
+            raise HTTPException(status_code=400, detail=f"Unknown payment mode: {line.mode}")
+
+        note_total, counted = _denomination_total(line.denominations)
+        # Counted notes settle the figure rather than sitting beside it. Two numbers that
+        # can disagree is one number nobody can trust, and the count is the one somebody
+        # actually looked at.
+        amount = note_total if (mode == "cash" and counted) else _amount(line.amount)
+        if amount <= 0:
+            continue
+
+        cleaned.append({
+            "mode": mode,
+            "amount": amount,
+            "reference": (line.reference or "").strip() if mode in REFERENCE_MODES else "",
+            "denominations": counted if mode == "cash" else {},
+        })
+        total += amount
+
+    total = round(total, 2)
+    if not cleaned or total <= 0:
+        raise HTTPException(status_code=400, detail="Enter an amount to collect")
+    # Refused rather than capped: taking more than is owed means one of the figures is
+    # wrong, and silently keeping the change hides which.
+    if total > outstanding:
+        raise HTTPException(
+            status_code=400,
+            detail=f"That is {total:g} against {outstanding:g} outstanding",
+        )
+
+    entry = {
+        "id": str(uuid.uuid4()),
+        "amount": total,
+        "lines": cleaned,
+        "note": (payload.note or "").strip(),
+        "collected_at": now_iso(),
+        "collected_by": user.full_name or user.email,
+    }
+
+    new_paid = round(already + total, 2)
+    # The mode on the membership stays the one it was last paid by, and reads "split" when a
+    # single collection came in more than one way — a row that says "cash" for a payment
+    # half of which arrived by UPI is worse than one that says it was split.
+    last_mode = cleaned[0]["mode"] if len(cleaned) == 1 else "split"
+    last_reference = cleaned[0]["reference"] if len(cleaned) == 1 else ""
+
+    await v3_col("fitness_registrations").update_one(
+        {"id": registration_id},
+        {
+            "$set": {
+                "fee_paid": new_paid,
+                "payment_mode": last_mode,
+                "payment_reference": last_reference,
+                "updated_at": now_iso(),
+            },
+            "$push": {"payments": entry},
+        },
+    )
+
+    updated = await v3_col("fitness_registrations").find_one({"id": registration_id}, {"_id": 0})
+    shaped = _shape(updated)
+    # The sentence the branch reads back to the member, built here so the board and any
+    # other caller say the same thing about the same payment.
+    parts = ", ".join(f"{PAYMENT_MODE_LABELS.get(l['mode'], l['mode'])} {l['amount']:g}" for l in cleaned)
+    summary = f"Collected {total:g} from {row.get('name', 'member')} — {parts}"
+    if shaped["fee_due"] > 0:
+        summary += f". {shaped['fee_due']:g} still due"
+    else:
+        summary += ". Paid up"
+
+    return {"message": summary, "payment": entry, "registration": shaped}

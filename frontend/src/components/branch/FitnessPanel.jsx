@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Dumbbell, Pencil, Plus, RefreshCw, Search, Trash2, X, PlayCircle, LogOut } from "lucide-react";
+import { Dumbbell, IndianRupee, Pencil, Plus, RefreshCw, Search, Trash2, X, PlayCircle, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { StatTile } from "@/components/ui/stat-tile";
-import { listFitness, addFitness, updateFitness, setFitnessStatus, deleteFitness, listStoreItems } from "@/lib/api";
+import { listFitness, addFitness, updateFitness, setFitnessStatus, deleteFitness, collectFitnessPayment, listStoreItems } from "@/lib/api";
 
 /**
  * Branch Admin > Fitness — the gym's membership roll.
@@ -94,6 +94,7 @@ export const FitnessPanel = ({ branchId }) => {
   const [card, setCard] = useState("all");
   const [modeFilter, setModeFilter] = useState("all");
   const [editing, setEditing] = useState(null);   // a row, or {} for a new one
+  const [collecting, setCollecting] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
 
   const load = useCallback(async () => {
@@ -325,6 +326,19 @@ export const FitnessPanel = ({ branchId }) => {
                       </td>
                       <td className="px-3 py-3">
                         <div className="flex items-center justify-end gap-1">
+                          {/* Only where there is something to take. On a paid-up membership
+                              the endpoint refuses anyway, and a button that always refuses
+                              is worse than no button. */}
+                          {due > 0 && r.status !== "discontinued" && (
+                            <button
+                              onClick={() => setCollecting(r)}
+                              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700 transition hover:bg-emerald-100"
+                              title={`Collect ${rupees(due)}`}
+                              data-testid={`fitness-collect-${r.id}`}
+                            >
+                              <IndianRupee className="h-3.5 w-3.5" /> Collect
+                            </button>
+                          )}
                           {/* Bringing somebody back is the move that needed finding, so it
                               carries a word rather than an icon — a bare glyph on a
                               discontinued row reads as "play" and nothing says it restores
@@ -376,6 +390,14 @@ export const FitnessPanel = ({ branchId }) => {
           </div>
         )}
       </div>
+
+      {collecting && (
+        <CollectPaymentDialog
+          member={collecting}
+          onClose={() => setCollecting(null)}
+          onCollected={() => { setCollecting(null); load(); }}
+        />
+      )}
 
       {editing && (
         <FitnessMemberDialog
@@ -623,6 +645,205 @@ const FitnessMemberDialog = ({ member, packages, branchId, onClose, onSaved }) =
           <Button variant="outline" size="sm" onClick={onClose} disabled={saving}>Cancel</Button>
           <Button size="sm" onClick={submit} disabled={saving || overpaid} className="bg-sky-600 text-white hover:bg-sky-700" data-testid="fitness-form-save">
             {saving ? "Saving..." : isEdit ? "Save Changes" : "Register Member"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/**
+ * Take a payment against a membership.
+ *
+ * A collection is a list of lines rather than one amount and one mode, because that is how
+ * money actually arrives: two thousand in cash and the rest by UPI is one payment taken two
+ * ways, and recording it as either one alone loses half of what happened.
+ *
+ * Cash is counted in notes. A branch emptying a drawer knows how many 500s it has, not what
+ * they come to, and the count is also the thing worth keeping — "2900 cash" cannot be
+ * checked against a till at the end of the day, and "1x2000, 1x500, 2x200" can.
+ */
+const DENOMINATIONS = [2000, 500, 200, 100, 50, 20, 10, 5];
+
+const COLLECT_MODES = [
+  { value: "cash", label: "Cash" },
+  { value: "upi", label: "UPI" },
+  { value: "card", label: "Card" },
+  { value: "account_transfer", label: "Bank Transfer" },
+];
+const COLLECT_REFERENCE_LABELS = { upi: "UPI ID", card: "Transaction ID", account_transfer: "Transaction ID" };
+
+const CollectPaymentDialog = ({ member, onClose, onCollected }) => {
+  const outstanding = Math.max(0, Number(member.fee_amount || 0) - Number(member.fee_paid || 0));
+  // Starts on one cash line, because most payments are one payment. A second mode is one
+  // click away rather than a form everybody fills in twice.
+  const [lines, setLines] = useState([{ mode: "cash", amount: "", reference: "", notes: {} }]);
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const setLine = (i, patch) => setLines((prev) => prev.map((l, n) => (n === i ? { ...l, ...patch } : l)));
+  const addLine = () => setLines((prev) => [...prev, { mode: "upi", amount: "", reference: "", notes: {} }]);
+  const dropLine = (i) => setLines((prev) => (prev.length === 1 ? prev : prev.filter((_, n) => n !== i)));
+
+  // What one line comes to. Counted notes settle it: two numbers that can disagree is one
+  // number nobody trusts, and the count is the one somebody actually looked at.
+  const noteTotal = (l) => DENOMINATIONS.reduce((sum, d) => sum + d * (Number(l.notes?.[d]) || 0), 0);
+  const lineTotal = (l) => (l.mode === "cash" && noteTotal(l) > 0 ? noteTotal(l) : Number(l.amount) || 0);
+  const total = lines.reduce((sum, l) => sum + lineTotal(l), 0);
+  const over = total > outstanding;
+  const remaining = Math.max(0, outstanding - total);
+
+  const submit = async () => {
+    if (total <= 0) { toast.error("Enter an amount to collect"); return; }
+    if (over) { toast.error(`That is ${rupees(total)} against ${rupees(outstanding)} outstanding`); return; }
+    setSaving(true);
+    const payload = lines
+      .filter((l) => lineTotal(l) > 0)
+      .map((l) => ({
+        mode: l.mode,
+        amount: lineTotal(l),
+        reference: l.reference || "",
+        // Only sent for cash, and only what was actually counted — an empty map would read
+        // as "counted nothing" rather than "did not count".
+        denominations: l.mode === "cash" && noteTotal(l) > 0
+          ? Object.fromEntries(DENOMINATIONS.filter((d) => Number(l.notes?.[d]) > 0).map((d) => [String(d), Number(l.notes[d])]))
+          : undefined,
+      }));
+    try {
+      const res = await collectFitnessPayment(member.id, payload, note);
+      // The server's own sentence, so what the branch reads back is what was recorded
+      // rather than a second version of it assembled here.
+      toast.success(res?.message || "Payment collected", { duration: 7000 });
+      onCollected();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Couldn't collect");
+    }
+    setSaving(false);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="flex max-h-[88vh] w-full max-w-2xl flex-col rounded-xl bg-white shadow-2xl" data-testid="fitness-collect-dialog">
+        <div className="flex items-start justify-between border-b p-5">
+          <div>
+            <h3 className="text-base font-semibold text-slate-800">Collect from {member.name}</h3>
+            <p className="mt-0.5 text-[11px] text-slate-500">
+              {member.package_name ? `${member.package_name} · ` : ""}Fee {rupees(member.fee_amount)} ·
+              Already paid {rupees(member.fee_paid)} · <b className="text-rose-600">{rupees(outstanding)} outstanding</b>
+            </p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600" data-testid="fitness-collect-close"><X className="h-4 w-4" /></button>
+        </div>
+
+        <div className="flex-1 space-y-3 overflow-y-auto p-5">
+          {lines.map((l, i) => (
+            <div key={i} className="rounded-lg border border-slate-200 p-3" data-testid={`fitness-collect-line-${i}`}>
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="min-w-[150px] flex-1">
+                  <FieldLabel>Paid By</FieldLabel>
+                  <FormSelect value={l.mode} onChange={(v) => setLine(i, { mode: v, notes: {} })} testid={`fitness-collect-mode-${i}`}>
+                    {COLLECT_MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+                  </FormSelect>
+                </div>
+                <div className="min-w-[120px] flex-1">
+                  <FieldLabel>Amount</FieldLabel>
+                  <Input
+                    type="number"
+                    min="0"
+                    value={l.mode === "cash" && noteTotal(l) > 0 ? noteTotal(l) : l.amount}
+                    onChange={(e) => setLine(i, { amount: e.target.value })}
+                    // Counted notes drive the figure, so the box shows the count rather than
+                    // inviting a second, different number beside it.
+                    readOnly={l.mode === "cash" && noteTotal(l) > 0}
+                    className={l.mode === "cash" && noteTotal(l) > 0 ? "bg-slate-50" : ""}
+                    data-testid={`fitness-collect-amount-${i}`}
+                  />
+                </div>
+                {l.mode !== "cash" && (
+                  <div className="min-w-[160px] flex-1">
+                    <FieldLabel>{COLLECT_REFERENCE_LABELS[l.mode]}</FieldLabel>
+                    <Input value={l.reference} onChange={(e) => setLine(i, { reference: e.target.value })} data-testid={`fitness-collect-reference-${i}`} />
+                  </div>
+                )}
+                {lines.length > 1 && (
+                  <button
+                    onClick={() => dropLine(i)}
+                    className="mb-1 rounded p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                    title="Remove this line"
+                    data-testid={`fitness-collect-drop-${i}`}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+
+              {l.mode === "cash" && (
+                <div className="mt-3 border-t border-slate-100 pt-3">
+                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                    Notes counted
+                    <span className="ml-1 font-normal normal-case text-slate-400">— leave blank to just type the amount</span>
+                  </p>
+                  <div className="grid grid-cols-4 gap-2 sm:grid-cols-8">
+                    {DENOMINATIONS.map((d) => (
+                      <div key={d}>
+                        <label className="mb-0.5 block text-center text-[11px] font-bold text-slate-500">₹{d}</label>
+                        <Input
+                          type="number"
+                          min="0"
+                          value={l.notes?.[d] ?? ""}
+                          onChange={(e) => setLine(i, { notes: { ...l.notes, [d]: e.target.value } })}
+                          className="h-9 px-1 text-center text-sm"
+                          data-testid={`fitness-collect-note-${i}-${d}`}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  {noteTotal(l) > 0 && (
+                    <p className="mt-2 text-right text-[11px] text-slate-500" data-testid={`fitness-collect-note-total-${i}`}>
+                      {DENOMINATIONS.filter((d) => Number(l.notes?.[d]) > 0).map((d) => `${l.notes[d]}×₹${d}`).join("  +  ")}
+                      {" = "}<b className="text-slate-700">{rupees(noteTotal(l))}</b>
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <Button variant="outline" size="sm" onClick={addLine} data-testid="fitness-collect-add-line">
+              <Plus className="mr-1 h-3.5 w-3.5" /> Another payment mode
+            </Button>
+            <div>
+              <FieldLabel>Note</FieldLabel>
+              <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional" className="min-w-[220px]" data-testid="fitness-collect-note" />
+            </div>
+          </div>
+
+          <div className={`rounded-lg border p-3 ${over ? "border-rose-200 bg-rose-50" : "border-emerald-200 bg-emerald-50"}`}>
+            <div className="flex items-center justify-between text-sm">
+              <span className="font-semibold text-slate-600">Collecting now</span>
+              <span className={`text-lg font-extrabold ${over ? "text-rose-700" : "text-emerald-700"}`} data-testid="fitness-collect-total">{rupees(total)}</span>
+            </div>
+            <p className="mt-1 text-[11px] text-slate-600" data-testid="fitness-collect-summary">
+              {over
+                ? `That is more than the ${rupees(outstanding)} outstanding.`
+                : remaining > 0
+                  ? `${rupees(remaining)} will still be due after this.`
+                  : total > 0 ? "This clears the membership." : "Nothing entered yet."}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2 border-t p-4">
+          <Button variant="outline" size="sm" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button
+            size="sm"
+            onClick={submit}
+            disabled={saving || over || total <= 0}
+            className="bg-emerald-600 text-white hover:bg-emerald-700"
+            data-testid="fitness-collect-submit"
+          >
+            {saving ? "Collecting..." : `Collect ${rupees(total)}`}
           </Button>
         </div>
       </div>
