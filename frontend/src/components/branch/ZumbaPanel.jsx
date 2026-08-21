@@ -97,6 +97,26 @@ const DENOMINATIONS = [500, 200, 100, 50];
 
 const EMPTY_LINE = { mode: "cash", amount: "", reference: "", notes: {} };
 
+/** When a term starting on `from` and running `classes` long would finish, as YYYY-MM-DD.
+ *
+ * A preview only. The server works this out for every row that has been saved and sends it
+ * back as finish_on, which is what every column reads; this exists so the form can answer
+ * the question before there is a row to ask it about. Kept to the same rule — a month per
+ * twelve classes, clamping rather than spilling on a short month — so the preview and the
+ * saved answer agree.
+ */
+const finishPreview = (from, classes) => {
+  const total = Number(classes) || 0;
+  if (!from || !total || total % CLASSES_PER_MONTH !== 0) return "";
+  const start = new Date(`${from}T00:00:00`);
+  if (Number.isNaN(start.getTime())) return "";
+  const end = new Date(start);
+  end.setMonth(end.getMonth() + total / CLASSES_PER_MONTH);
+  if (end.getDate() !== start.getDate()) end.setDate(0);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${end.getFullYear()}-${pad(end.getMonth() + 1)}-${pad(end.getDate())}`;
+};
+
 /** What one payment line comes to.
  *
  * Counted notes settle it rather than sitting beside it: two numbers that can disagree is
@@ -738,7 +758,10 @@ const ViewRegistrationModal = ({ row, masterNameOf, onEdit, onCollect, onClose, 
               <DetailRow label="Time" value={row.time_slot} />
               <DetailRow label="Class" value={masterNameOf(row.assigned_master_id)} />
               <DetailRow label="Source" value={sourceDetail(row)} />
-              <DetailRow label="Joined" value={shortDate(row.created_at)} />
+              <DetailRow label="Joined" value={shortDate(row.joined_on || row.created_at)} />
+              {/* The term's own end, beside the day it began. Read off the server so
+                  the sheet, the row and the master's roll are one answer. */}
+              {row.finish_on ? <DetailRow label="Finishing" value={shortDate(row.finish_on)} /> : null}
             </div>
           </div>
 
@@ -834,6 +857,15 @@ const ViewRegistrationModal = ({ row, masterNameOf, onEdit, onCollect, onClose, 
 /** The stored timestamp as a plain YYYY-MM-DD, which is what the date inputs compare. */
 const dayOf = (iso) => String(iso || "").slice(0, 10);
 
+/** Today, as the branch's own calendar has it. Not off toISOString(), which is UTC: at
+ *  three in the morning in India that still reads as yesterday, and a membership would be
+ *  dated to a day nobody was at the desk. */
+const todayLocal = () => {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+
 /**
  * What this registration still needs, named.
  *
@@ -860,7 +892,7 @@ const missingDetails = (row) => {
 
 const EMPTY = {
   name: "", email: "", phone: "", age: "", gender: "", address: "",
-  source: "personal", master_name: "", assigned_master_id: "", time_slot: "",
+  source: "personal", master_name: "", assigned_master_id: "", time_slot: "", joined_on: "",
   package_id: "", package_name: "", package_sessions: "", fee_amount: "", fee_paid: "", payment_mode: "", payment_reference: "", payment_lines: [],
 };
 
@@ -1042,7 +1074,9 @@ export const ZumbaPanel = ({ branchId }) => {
 
   const openForm = (row) => {
     setNewMaster("");
-    setForm(row ? { ...EMPTY, ...row, age: row.age ?? "", payment_lines: linesOf(row) } : { ...EMPTY });
+    setForm(row
+      ? { ...EMPTY, ...row, age: row.age ?? "", joined_on: row.joined_on || dayOf(row.created_at), payment_lines: linesOf(row) }
+      : { ...EMPTY, joined_on: todayLocal() });
   };
 
   /**
@@ -1097,6 +1131,7 @@ export const ZumbaPanel = ({ branchId }) => {
         // for any other reason silently deleted it.
         address: (form.address || "").trim(),
         time_slot: form.time_slot || "",
+        joined_on: form.joined_on || "",
         package_id: form.package_id || "",
         package_name: form.package_name || "",
         package_sessions: form.package_sessions === "" || form.package_sessions == null ? null : Number(form.package_sessions),
@@ -1345,7 +1380,7 @@ export const ZumbaPanel = ({ branchId }) => {
                               read it. */}
                           <p className="truncate text-[11px] text-slate-400">
                             {[r.age ? `${r.age}` : null, r.gender || null].filter(Boolean).join(" · ")}
-                            {(r.age || r.gender) ? " · " : ""}Joined {shortDate(r.created_at)}
+                            {(r.age || r.gender) ? " · " : ""}Joined {shortDate(r.joined_on || r.created_at)}
                           </p>
                           {/* Names what is missing rather than saying "incomplete": the
                               branch admin opens this row to do one specific thing, and the
@@ -1690,6 +1725,40 @@ export const ZumbaPanel = ({ branchId }) => {
                     <option value="">Not set</option>
                     {TIME_SLOTS.map((slot) => <option key={slot} value={slot}>{slot}</option>)}
                   </FormSelect>
+                </div>
+
+                {/* When the term runs, side by side because the second follows from the
+                    first. Joined is asked rather than taken from when the row was typed —
+                    a branch entering last week's walk-ins would otherwise date every
+                    membership to the paperwork. */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <FieldLabel>Joined</FieldLabel>
+                    <Input
+                      type="date"
+                      value={form.joined_on || ""}
+                      onChange={(e) => setForm({ ...form, joined_on: e.target.value })}
+                      data-testid="zumba-field-joined"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <FieldLabel>Finishing</FieldLabel>
+                    {/* Read-only because it is not a fact of its own: it is the joining date
+                        plus the plan's length, and a box that could disagree with those two
+                        is a third answer to a question that already has one. */}
+                    <Input
+                      type="date"
+                      value={finishPreview(form.joined_on, form.package_sessions)}
+                      readOnly
+                      className="bg-slate-50"
+                      data-testid="zumba-field-finish"
+                    />
+                    <p className="text-[11px] text-slate-400">
+                      {form.package_sessions
+                        ? "Follows from the membership below."
+                        : "Pick a membership below to set this."}
+                    </p>
+                  </div>
                 </div>
 
                 {/* The shelf, priced. Picking a membership fills the amount owed, which is

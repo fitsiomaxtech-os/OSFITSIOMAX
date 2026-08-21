@@ -209,7 +209,10 @@ def _finish_on(row: dict):
     3rd of the month after next is arithmetic nobody recognises as their own membership.
     """
     classes = _sessions(row.get("package_sessions"))
-    start = _as_date(row.get("term_start") or row.get("created_at"))
+    # term_start is set by a renewal and is the current term's beginning; joined_on is the
+    # day they first walked in. A membership never renewed has only the second, and a row
+    # from before either was asked falls back to when it was typed.
+    start = _as_date(row.get("term_start") or row.get("joined_on") or row.get("created_at"))
     if not classes or classes % CLASSES_PER_MONTH or not start:
         return None
     months = classes // CLASSES_PER_MONTH
@@ -400,6 +403,10 @@ class ZumbaInput(BaseModel):
     # package's own name and id off the Zumba shelf, so a renamed or repriced package
     # cannot rewrite what this student was actually sold.
     time_slot: Optional[str] = ""
+    # The day they joined, as YYYY-MM-DD. Asked rather than assumed from when the row was
+    # typed: a branch entering last week's walk-ins would otherwise have every membership
+    # running from the day somebody got round to the paperwork.
+    joined_on: Optional[str] = ""
     # How the fee was taken. Only meaningful once something has been collected, and cleared
     # when nothing has, so a mode can never sit against a registration that has paid zero.
     payment_mode: Optional[str] = ""
@@ -543,6 +550,10 @@ def _shape(row: dict, stages: Optional[list] = None) -> dict:
     # cannot answer "when does this run out" differently.
     end = _finish_on(row)
     shaped["finish_on"] = end.isoformat() if end else ""
+    # So a board reads one field rather than repeating this fallback in every column that
+    # wants to print when somebody joined.
+    joined = _as_date(row.get("joined_on") or row.get("created_at"))
+    shaped["joined_on"] = joined.isoformat() if joined else ""
     shaped["classes_left"] = _classes_left(row)
     shaped["renewal_due"] = bool(end and (shaped["classes_left"] or 0) <= RENEWAL_WINDOW_CLASSES)
     if stages is not None:
@@ -961,6 +972,10 @@ async def _clean(payload: ZumbaInput, user: V3UserOut) -> dict:
 
     gender = (payload.gender or "").strip().lower()
     time_slot = (payload.time_slot or "").strip()
+    # Kept only if it is a real date. A half-typed one is dropped rather than stored, and
+    # the row falls back to when it was created, which is what it did before this was asked.
+    joined_on = str(payload.joined_on or "")[:10]
+    joined_on = joined_on if _as_date(joined_on) else ""
     # Lines settle the money when the caller sends them, which the branch's own form always
     # does. The scalars below are the older shape, kept for the master's referral form: it
     # collects nothing, so it sends no lines and lands on fee_paid 0 either way.
@@ -990,6 +1005,7 @@ async def _clean(payload: ZumbaInput, user: V3UserOut) -> dict:
         "gender": gender if gender in GENDERS else "",
         "address": (payload.address or "").strip(),
         "time_slot": time_slot if time_slot in TIME_SLOTS else "",
+        "joined_on": joined_on,
         "package_id": (payload.package_id or "").strip(),
         "package_name": (payload.package_name or "").strip(),
         "package_sessions": _sessions(payload.package_sessions),

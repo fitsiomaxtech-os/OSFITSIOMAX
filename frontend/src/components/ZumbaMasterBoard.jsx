@@ -50,26 +50,6 @@ const SESSIONS = [
   { key: "11:00 am - 12:00 pm", label: "2nd Session", when: "11:00 am - 12:00 pm" },
 ];
 
-const CLASSES_PER_MONTH = 12;
-
-/** When the membership runs out: the day they joined, plus a month for every twelve
- *  classes it holds. Nothing stores an end date -- it is the package's length counted
- *  forward, which is the same answer without a second field to keep true.
- *
- *  A short month clamps rather than spilling: joining on the 31st and finishing on the 3rd
- *  of the month after next is arithmetic nobody recognises as their own membership. */
-const finishOn = (row) => {
-  const classes = Number(row?.package_sessions || 0);
-  if (!classes || classes % CLASSES_PER_MONTH !== 0 || !row?.created_at) return "—";
-  const start = new Date(row.created_at);
-  if (Number.isNaN(start.getTime())) return "—";
-  const months = classes / CLASSES_PER_MONTH;
-  const end = new Date(start);
-  end.setMonth(end.getMonth() + months);
-  if (end.getDate() !== start.getDate()) end.setDate(0);
-  return shortDate(end.toISOString());
-};
-
 /** What the roll below is showing, so the header names the open card rather than
  *  always saying "Customers" over a list that has been narrowed. */
 const CARD_TITLES = {
@@ -485,7 +465,7 @@ export const ZumbaMasterBoard = ({ currentUser }) => {
                         <span className="block max-w-[16rem] truncate" title={r.email || ""}>{r.email || "—"}</span>
                       </td>
                       <td className="px-3 py-2.5 text-slate-500">{shortDate(r.created_at)}</td>
-                      <td className="px-3 py-2.5 text-slate-500" data-testid={`zumba-master-finish-${r.id}`}>{finishOn(r)}</td>
+                      <td className="px-3 py-2.5 text-slate-500" data-testid={`zumba-master-finish-${r.id}`}>{r.finish_on ? shortDate(r.finish_on) : "—"}</td>
                       <td className="px-3 py-2.5 text-slate-600">
                         {r.package_sessions ? `${r.package_sessions} classes` : "—"}
                       </td>
