@@ -1384,14 +1384,15 @@ export const ZumbaPanel = ({ branchId }) => {
                         className={`cursor-pointer align-top ${gaps.length > 0 ? "bg-amber-50/50 hover:bg-amber-50" : "hover:bg-slate-50/60"}`}
                         data-testid={`zumba-row-${r.id}`}
                       >
-                        <td className="px-3 py-3 text-xs text-slate-400">{i + 1}</td>
+                        <td className="px-3 py-3 text-xs leading-5 text-slate-400">{i + 1}</td>
                         <td className="px-3 py-3">
-                          <p className="truncate font-semibold text-slate-800" title={r.name}>{r.name || "—"}</p>
+                          <div className="flex flex-col items-start gap-0.5">
+                          <p className="max-w-full truncate text-sm font-semibold leading-5 text-slate-800" title={r.name}>{r.name || "—"}</p>
                           {/* Age, gender and the day they joined read as one line about the
                               person rather than as three columns of one value each. The
                               address goes with them into the record, where there is room to
                               read it. */}
-                          <p className="truncate text-[11px] text-slate-400">
+                          <p className="max-w-full truncate text-[11px] leading-4 text-slate-400">
                             {[r.age ? `${r.age}` : null, r.gender || null].filter(Boolean).join(" · ")}
                             {(r.age || r.gender) ? " · " : ""}Joined {shortDate(r.joined_on || r.created_at)}
                           </p>
@@ -1402,7 +1403,7 @@ export const ZumbaPanel = ({ branchId }) => {
                             <button
                               type="button"
                               onClick={(e) => { e.stopPropagation(); return r.origin === "consultation" ? acceptAndEdit(r) : openForm(r); }}
-                              className="mt-1 inline-flex items-center gap-1 rounded bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800 ring-1 ring-amber-300 transition hover:bg-amber-200"
+                              className="mt-0.5 inline-flex max-w-full items-center gap-1 truncate rounded bg-amber-100 px-2 py-0.5 text-[10px] font-bold leading-4 text-amber-800 ring-1 ring-amber-300 transition hover:bg-amber-200"
                               title={r.origin === "consultation"
                                 ? `Take this referral onto the branch's books and fill in the ${gaps.join(" and ")}`
                                 : `Open this registration and fill in the ${gaps.join(" and ")}`}
@@ -1411,8 +1412,9 @@ export const ZumbaPanel = ({ branchId }) => {
                               Needs {gaps.join(" & ")}
                             </button>
                           ) : null}
+                          </div>
                         </td>
-                        <td className="px-3 py-3 text-xs text-slate-600">{r.phone || "—"}</td>
+                        <td className="px-3 py-3 text-xs leading-5 text-slate-600">{r.phone || "—"}</td>
                         <td className="px-3 py-3">
                           {/* A referral prints the master's name, because "Master" on its
                               own is the half of the answer nobody asks for. */}
@@ -1424,12 +1426,14 @@ export const ZumbaPanel = ({ branchId }) => {
                             the source, where a membership and a lead channel read as one
                             fact about the student rather than two. */}
                         <td className="px-3 py-3">
-                          {r.package_name ? (
-                            <p className="truncate text-xs text-slate-600" title={r.package_name}>
-                              {r.package_name}
-                              {r.package_sessions ? <span className="block text-[10px] text-slate-400">{r.package_sessions} classes</span> : null}
-                            </p>
-                          ) : <span className="text-xs text-slate-300">—</span>}
+                          <div className="flex flex-col items-start gap-0.5">
+                            {r.package_name ? (
+                              <>
+                                <p className="max-w-full truncate text-xs leading-5 text-slate-600" title={r.package_name}>{r.package_name}</p>
+                                {r.package_sessions ? <p className="text-[10px] leading-4 text-slate-400">{r.package_sessions} classes</p> : null}
+                              </>
+                            ) : <span className="text-xs leading-5 text-slate-300">—</span>}
+                          </div>
                         </td>
                         {/* When the membership runs out, counted forward from the term's
                             start by the plan's own length — the server works it out so this
@@ -1437,28 +1441,32 @@ export const ZumbaPanel = ({ branchId }) => {
                             classes left sit under it, in amber once a renewal is due, so
                             the date and the reason to act on it are read together. */}
                         <td className="px-3 py-3">
-                          {r.finish_on ? (
-                            <>
-                              <p className="truncate text-xs text-slate-600">{shortDate(r.finish_on)}</p>
-                              {typeof r.classes_left === "number" ? (
-                                <p className={`truncate text-[10px] ${r.renewal_due ? "font-semibold text-amber-600" : "text-slate-400"}`}>
-                                  {r.classes_left === 0 ? "term over" : `${r.classes_left} left`}
-                                </p>
-                              ) : null}
-                            </>
-                          ) : <span className="text-xs text-slate-300">—</span>}
+                          <div className="flex flex-col items-start gap-0.5">
+                            {r.finish_on ? (
+                              <>
+                                <p className="max-w-full truncate text-xs leading-5 text-slate-600">{shortDate(r.finish_on)}</p>
+                                {typeof r.classes_left === "number" ? (
+                                  <p className={`max-w-full truncate text-[10px] leading-4 ${r.renewal_due ? "font-semibold text-amber-600" : "text-slate-400"}`}>
+                                    {r.classes_left === 0 ? "term over" : `${r.classes_left} left`}
+                                  </p>
+                                ) : null}
+                              </>
+                            ) : <span className="text-xs leading-5 text-slate-300">—</span>}
+                          </div>
                         </td>
                         {/* Whose class they turn up to, which is not who brought them in.
                             Only what is set here reaches a master's own board. */}
                         <td className="px-3 py-3">
-                          {r.assigned_master_name ? (
-                            <span className="inline-block max-w-full truncate whitespace-nowrap rounded bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700" title={r.assigned_master_name}>
-                              {r.assigned_master_name}
-                            </span>
-                          ) : <span className="text-xs text-slate-300">—</span>}
-                          {/* The hour under the master, because "whose class" and "which
-                              class" are the same question asked twice otherwise. */}
-                          {r.time_slot ? <p className="mt-0.5 truncate text-[10px] text-slate-400">{r.time_slot}</p> : null}
+                          <div className="flex flex-col items-start gap-0.5">
+                            {r.assigned_master_name ? (
+                              <span className="block max-w-full truncate whitespace-nowrap rounded bg-violet-50 px-2 py-0.5 text-[10px] font-semibold leading-4 text-violet-700" title={r.assigned_master_name}>
+                                {r.assigned_master_name}
+                              </span>
+                            ) : <span className="text-xs leading-4 text-slate-300">—</span>}
+                            {/* The hour under the master, because "whose class" and "which
+                                class" are the same question asked twice otherwise. */}
+                            {r.time_slot ? <p className="max-w-full truncate text-[10px] leading-4 text-slate-400">{r.time_slot}</p> : null}
+                          </div>
                         </td>
                         {showStage && (
                           <td className="px-3 py-3">
@@ -1478,34 +1486,38 @@ export const ZumbaPanel = ({ branchId }) => {
                             column had no room for and answered nothing the other two did
                             not. The record still shows all three. */}
                         <td className="px-3 py-3">
-                          <p className="text-xs font-semibold text-emerald-700">{rupees(paid)}</p>
-                          {due > 0
-                            ? <p className="text-[11px] font-semibold text-rose-600">{rupees(due)} due</p>
-                            : Number(r.fee_amount || 0) > 0
-                              ? <p className="text-[11px] text-emerald-600">Paid up</p>
-                              : <p className="text-[11px] text-slate-400">Nothing sold</p>}
+                          <div className="flex flex-col items-start gap-0.5">
+                            <p className="text-xs font-semibold leading-5 text-emerald-700">{rupees(paid)}</p>
+                            {due > 0
+                              ? <p className="text-[11px] font-semibold leading-4 text-rose-600">{rupees(due)} due</p>
+                              : Number(r.fee_amount || 0) > 0
+                                ? <p className="text-[11px] leading-4 text-emerald-600">Paid up</p>
+                                : <p className="text-[11px] leading-4 text-slate-400">Nothing sold</p>}
+                          </div>
                         </td>
                         {/* Beside the figure it describes rather than under it, so a column
                             of modes can be read down. The reference sits below the mode:
                             it is what a disputed payment is traced by, not a second mode. */}
                         <td className="px-3 py-3">
-                          {r.payment_mode ? (
-                            <>
-                              <span className="inline-block rounded bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
-                                {PAYMENT_MODE_LABELS[r.payment_mode] || r.payment_mode}
-                              </span>
-                              {r.payment_reference ? (
-                                <p className="mt-0.5 max-w-full truncate text-[10px] text-slate-400" title={r.payment_reference}>{r.payment_reference}</p>
-                              ) : null}
-                              {/* "Split" on its own says a payment arrived more than one way
-                                  without saying which, which is the question it prompts. */}
-                              {r.payment_mode === "split" && Array.isArray(r.payment_lines) ? (
-                                <p className="mt-0.5 truncate text-[10px] text-slate-400" title={r.payment_lines.map((l) => `${PAYMENT_MODE_LABELS[l.mode] || l.mode} ${rupees(l.amount)}`).join(", ")}>
-                                  {r.payment_lines.map((l) => `${PAYMENT_MODE_LABELS[l.mode] || l.mode} ${rupees(l.amount)}`).join(" + ")}
-                                </p>
-                              ) : null}
-                            </>
-                          ) : <span className="text-xs text-slate-300">—</span>}
+                          <div className="flex flex-col items-start gap-0.5">
+                            {r.payment_mode ? (
+                              <>
+                                <span className="block max-w-full truncate whitespace-nowrap rounded bg-slate-100 px-2 py-0.5 text-[10px] font-semibold leading-4 text-slate-600">
+                                  {PAYMENT_MODE_LABELS[r.payment_mode] || r.payment_mode}
+                                </span>
+                                {r.payment_reference ? (
+                                  <p className="max-w-full truncate text-[10px] leading-4 text-slate-400" title={r.payment_reference}>{r.payment_reference}</p>
+                                ) : null}
+                                {/* "Split" on its own says a payment arrived more than one way
+                                    without saying which, which is the question it prompts. */}
+                                {r.payment_mode === "split" && Array.isArray(r.payment_lines) ? (
+                                  <p className="max-w-full truncate text-[10px] leading-4 text-slate-400" title={r.payment_lines.map((l) => `${PAYMENT_MODE_LABELS[l.mode] || l.mode} ${rupees(l.amount)}`).join(", ")}>
+                                    {r.payment_lines.map((l) => `${PAYMENT_MODE_LABELS[l.mode] || l.mode} ${rupees(l.amount)}`).join(" + ")}
+                                  </p>
+                                ) : null}
+                              </>
+                            ) : <span className="text-xs leading-4 text-slate-300">—</span>}
+                          </div>
                         </td>
                         {/* Whether they are still coming, in the words the record uses. */}
                         <td className="px-3 py-3">
