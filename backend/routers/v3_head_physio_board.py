@@ -5,7 +5,7 @@ from datetime import date
 import uuid
 
 from database import v3_col
-from utils import now_iso, slot_capacity_of
+from utils import now_iso, physio_slot_load, slot_capacity_of
 from deps import v3_current_user, v3_require_roles
 from constants import V3_HEAD_CONSULTATION_STAGES
 from stage_utils import get_closing_stage_name, get_stage_name_at
@@ -545,30 +545,45 @@ async def hp_assign_physio_with_sessions(
     if not physio:
         raise HTTPException(status_code=404, detail="Physio not found")
 
-    # Drop this lead's own previous, not-yet-completed sessions *before* the conflict
-    # check below — otherwise reassigning to the very same physio would see this lead's
-    # own existing bookings as a clash against itself. Whether that's a same-physio
-    # re-confirm or a switch to someone else, this lead's old session set is being
-    # replaced wholesale by the one just submitted either way.
-    await v3_col("sessions").delete_many({"lead_id": lead_id, "status": "upcoming"})
-
     # A physio runs a floor — two or three patients share a slot — so a slot is only
-    # unavailable once it is FULL. This used to reject on a single existing booking,
-    # which made the second and third patient of every hour unbookable.
+    # unavailable once it is FULL. This used to reject on a single existing booking, which
+    # made the second and third patient of every hour unbookable.
+    #
+    # Counted through the shared helper, which reads the physio's rehab days as well as
+    # their treatment days. This side used to count `sessions` alone, so a physio's rehab
+    # course was invisible here and a slot already holding three rehab patients still
+    # accepted three more treatment ones — while the picker, reading both off
+    # get_doctor_calendar, had drawn that same slot full.
+    #
+    # This lead's own sessions are discounted rather than deleted first. Deleting first
+    # answered "a re-assignment must not clash with itself" by destroying the schedule
+    # before anything had agreed to replace it: every refusal below returned 400 with the
+    # patient's existing sessions already gone from the physio's calendar.
     capacity = slot_capacity_of(physio)
-    already_booked = await v3_col("sessions").find(
-        {"physio_id": payload.physio_id, "status": "upcoming", "slot_time": {"$in": sorted_slots}},
-        {"_id": 0, "slot_time": 1},
-    ).to_list(1000)
-    taken: dict = {}
-    for b in already_booked:
-        taken[b["slot_time"]] = taken.get(b["slot_time"], 0) + 1
+    taken, lead_elsewhere = await physio_slot_load(
+        payload.physio_id, sorted_slots, lead_id=lead_id, replacing="sessions",
+    )
+
+    # A rehab day of this patient's own is not a seat to book beside — it is this patient,
+    # already spoken for at that hour. Named plainly, because "full" would send the branch
+    # looking for someone else's booking that isn't there.
+    clashing = sorted(s for s in sorted_slots if s in lead_elsewhere)
+    if clashing:
+        what = lead_elsewhere[clashing[0]]
+        raise HTTPException(
+            status_code=400,
+            detail=f"{lead.get('name', 'This patient')} already has a {what} at: {', '.join(clashing)}",
+        )
+
     full = sorted(s for s in sorted_slots if taken.get(s, 0) >= capacity)
     if full:
         raise HTTPException(
             status_code=400,
             detail=f"Full for this physio ({capacity} per slot): {', '.join(full)}",
         )
+
+    # Past every refusal: the old set can go now, and the new one replaces it.
+    await v3_col("sessions").delete_many({"lead_id": lead_id, "status": "upcoming"})
 
     now = now_iso()
     first_date = date.fromisoformat(sorted_slots[0].split("T")[0])

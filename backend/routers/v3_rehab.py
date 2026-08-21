@@ -25,7 +25,8 @@ rather than merely avoided.
 
 What is deliberately shared is the physio's calendar. A rehab day is booked onto the same
 published PHYSIO CALENDAR slot a treatment day would take, so the two cannot double-book
-the same physio — see rehab_slots_taken below, and get_doctor_calendar, which reads both.
+the same physio — see utils.physio_slot_load, which both assign endpoints count with,
+and get_doctor_calendar, which the slot picker draws from.
 """
 
 import uuid
@@ -37,7 +38,7 @@ from pydantic import BaseModel
 from database import v3_col
 from deps import v3_require_roles
 from schemas.v3 import V3LeadOut, V3UserOut
-from utils import normalize_slot_time, now_iso, slot_capacity_of
+from utils import normalize_slot_time, now_iso, physio_slot_load, slot_capacity_of
 
 router = APIRouter(prefix="/api/v3")
 
@@ -48,24 +49,6 @@ class AssignRehabInput(BaseModel):
     # by the same people, off the same published calendar, and lands on the same board.
     physio_id: str
     slot_times: List[str]
-
-
-async def rehab_slots_taken(physio_id: str, slots: List[str]) -> dict:
-    """How many patients each of these slots already holds for this physio.
-
-    Counts treatment days and rehab days together, because they are the same physio in the
-    same room at the same time. Counting only one of them is how a physio ends up owing two
-    patients the same hour.
-    """
-    taken: dict = {}
-    for collection in ("sessions", "rehab_sessions"):
-        rows = await v3_col(collection).find(
-            {"physio_id": physio_id, "status": "upcoming", "slot_time": {"$in": slots}},
-            {"_id": 0, "slot_time": 1},
-        ).to_list(1000)
-        for row in rows:
-            taken[row["slot_time"]] = taken.get(row["slot_time"], 0) + 1
-    return taken
 
 
 @router.post("/branch/assign-rehab")
@@ -111,18 +94,39 @@ async def assign_rehab(
             detail=f"Pick exactly {expected} rehab day{plural} (got {len(slots)})",
         )
 
-    # Cleared before the conflict check, or this lead's own existing days would read as a
-    # clash against themselves on a re-assignment.
-    await v3_col("rehab_sessions").delete_many({"lead_id": payload.lead_id, "status": "upcoming"})
-
+    # This lead's own rehab days are discounted rather than deleted first. Deleting first
+    # did answer the "a re-assignment must not clash with itself" problem, but it answered
+    # it by destroying the course before anything had agreed to replace it: every refusal
+    # below — a full slot, a clash — returned 400 with the patient's existing rehab days
+    # already gone from the physio's calendar. Nothing is removed now until the whole
+    # submission is known to be bookable.
     capacity = slot_capacity_of(physio)
-    taken = await rehab_slots_taken(payload.physio_id, slots)
+    taken, lead_elsewhere = await physio_slot_load(
+        payload.physio_id, slots, lead_id=payload.lead_id, replacing="rehab_sessions",
+    )
+
+    # The patient's own treatment days are the one thing a seat count cannot speak for.
+    # They occupy a seat like anyone else's, but they also mean this patient is already
+    # spoken for at that hour, so a free seat beside them is no use — checked first,
+    # because "you have a treatment day here" is the answer the branch can act on and
+    # "full" is not.
+    clashing = sorted(s for s in slots if s in lead_elsewhere)
+    if clashing:
+        what = lead_elsewhere[clashing[0]]
+        raise HTTPException(
+            status_code=400,
+            detail=f"{lead.get('name', 'This patient')} already has a {what} at: {', '.join(clashing)}",
+        )
+
     full = sorted(s for s in slots if taken.get(s, 0) >= capacity)
     if full:
         raise HTTPException(
             status_code=400,
             detail=f"Full for this physio ({capacity} per slot): {', '.join(full)}",
         )
+
+    # Past every refusal: the old course can go now, and the new one replaces it.
+    await v3_col("rehab_sessions").delete_many({"lead_id": payload.lead_id, "status": "upcoming"})
 
     now = now_iso()
     docs = [{

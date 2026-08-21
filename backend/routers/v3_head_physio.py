@@ -52,7 +52,26 @@ async def get_doctor_calendar(doctor_id: str, _: V3UserOut = Depends(v3_require_
     # A treatment day waiting on a date from the Branch Admin carries no slot_time. Left in,
     # it books the empty string — which then reads back as an occupied slot and can make the
     # picker refuse the very day it is being asked to place.
-    rows = [r for r in (*appt_rows, *session_rows, *diet_rows, *rehab_rows) if (r.get("slot_time") or "").strip()]
+    #
+    # Each row is tagged with the course it came from. An occupant's `lead_id` alone tells
+    # the picker "this one is mine", which it uses to discount a lead's own bookings from
+    # the seat count so re-confirming a patient onto the times they already hold isn't
+    # refused as a clash with themselves. But a physio runs two courses off this one
+    # calendar, and only the one being re-booked is actually being replaced: discounting a
+    # patient's *treatment* days while booking their *rehab* course drew a free seat the
+    # assign endpoint then counted and refused as "Full for this physio". `course` is what
+    # lets the picker discount exactly the right rows — and see the rest for what they are.
+    def tag(rows_in, course):
+        for r in rows_in:
+            r["course"] = course
+        return rows_in
+
+    rows = [r for r in (
+        *tag(appt_rows, "consult"),
+        *tag(session_rows, "session"),
+        *tag(diet_rows, "diet"),
+        *tag(rehab_rows, "rehab"),
+    ) if (r.get("slot_time") or "").strip()]
 
     # `booked` keeps its old shape — one row per slot — because callers read it to answer
     # "is this slot mine or someone else's". It cannot answer "how full is this slot",
@@ -63,7 +82,11 @@ async def get_doctor_calendar(doctor_id: str, _: V3UserOut = Depends(v3_require_
     for row in rows:
         st = row["slot_time"]
         occupancy[st] = occupancy.get(st, 0) + 1
-        occupants.setdefault(st, []).append({"lead_id": row.get("lead_id"), "lead_name": row.get("lead_name", "")})
+        occupants.setdefault(st, []).append({
+            "lead_id": row.get("lead_id"),
+            "lead_name": row.get("lead_name", ""),
+            "course": row.get("course", ""),
+        })
 
     # The hours this expert is rostered on (MANAGEMENT → TIME MANAGEMENT). The calendar cuts
     # its day across exactly this window, so an evening physio's day is offered 3 PM to 7 PM

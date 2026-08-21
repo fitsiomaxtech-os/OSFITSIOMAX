@@ -51,6 +51,11 @@ const INSTALLMENT_PAYMENT_MODES = [
 // Modes that collect the bank's own account details. Card and Account Transfer ask for
 // the same four fields; Account Transfer additionally needs the transfer's reference.
 const BANK_DETAIL_MODES = ["card", "account_transfer"];
+
+// What a booking on each of an expert's calendars is called, keyed by the `course` tag
+// get_doctor_calendar puts on every occupant. Used to tell a patient why a slot they can
+// see is not one they can take.
+const COURSE_DAY_NOUN = { session: "treatment day", rehab: "rehab day", diet: "check-in", consult: "consultation" };
 // These two mirror SETTLED_NOW_MODES / PART_SESSION_MODES in the backend's
 // v3_packages.py and must be kept in step with them. The first is every mode where the
 // money lands in full right now, so the amount is editable and a confirmation is
@@ -1786,19 +1791,43 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // physio's own record; a Head Physio is always 1, because a consultation is one-to-one.
   const slotCapacity = physioCalendarData?.slot_capacity || 1;
 
-  // This lead's own bookings don't count against the slot. Re-opening the picker for the
-  // physio they're already with would otherwise see their own sessions as a clash and
-  // refuse to let them keep the times they already have.
+  // Which course this picker is booking, spelled the way get_doctor_calendar tags its
+  // occupants. Only this lead's rows on *this* course are being replaced by what gets
+  // submitted; everything else on the slot is a standing booking.
+  const assignCourse = isRehabAssign ? "rehab" : "session";
+
+  // This lead's own bookings on the course being booked don't count against the slot.
+  // Re-opening the picker for the physio they're already with would otherwise see their
+  // own sessions as a clash and refuse to let them keep the times they already have.
+  //
+  // That course only. A physio runs two off one calendar, and this lead's days on the
+  // other one are not being replaced here — they are still standing, still filling a seat,
+  // and both assign endpoints count them. Discounting all of a lead's rows regardless of
+  // course was how this grid drew a free seat on a slot the backend then refused with
+  // "Full for this physio (3 per slot)" — the branch was shown the slot, picked it, and
+  // was told at submit that it had never been available.
   const slotSeatsTaken = useCallback((slot) => {
     const occ = physioCalendarData?.occupancy?.[slot] || 0;
     const mine = (physioCalendarData?.occupants?.[slot] || [])
-      .filter((o) => o.lead_id === selectedLead?.id).length;
+      .filter((o) => o.lead_id === selectedLead?.id && o.course === assignCourse).length;
     return Math.max(0, occ - mine);
-  }, [physioCalendarData, selectedLead]);
+  }, [physioCalendarData, selectedLead, assignCourse]);
 
+  // A day this patient already holds with this physio on the other course. The seat count
+  // cannot express it — the physio may well have a free seat — but the patient cannot be
+  // on the treatment floor and in rehab in the same half hour. Both assign endpoints
+  // refuse it by name; this takes the slot off the table before the branch gets that far.
+  const slotOwnOtherCourse = useCallback((slot) => {
+    const clash = (physioCalendarData?.occupants?.[slot] || [])
+      .find((o) => o.lead_id === selectedLead?.id && o.course && o.course !== assignCourse);
+    return clash ? (COURSE_DAY_NOUN[clash.course] || "booking") : "";
+  }, [physioCalendarData, selectedLead, assignCourse]);
+
+  // One gate for every place that asks "can this slot be picked" — the month grid's
+  // availability dots, the open-slot count, the tile, and the pick handler.
   const slotFull = useCallback(
-    (slot) => slotSeatsTaken(slot) >= slotCapacity,
-    [slotSeatsTaken, slotCapacity],
+    (slot) => slotSeatsTaken(slot) >= slotCapacity || !!slotOwnOtherCourse(slot),
+    [slotSeatsTaken, slotCapacity, slotOwnOtherCourse],
   );
 
   const slotOccupantNames = useCallback((slot) => (physioCalendarData?.occupants?.[slot] || [])
@@ -5722,6 +5751,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                                   const slot = `${pickerDate}T${time}`;
                                   const taken = slotFull(slot);
                                   const seats = slotSeatsTaken(slot);
+                                  // Off the table because this patient is already here on
+                                  // the other course, rather than because the physio is
+                                  // out of seats. Two different problems with two
+                                  // different answers, so the tile says which.
+                                  const ownClash = slotOwnOtherCourse(slot);
                                   const picked = planByDate[pickerDate]?.slot === slot;
                                   const pickedPaid = picked && isPaidSession(planByDate[pickerDate].day);
                                   return (
@@ -5739,7 +5773,9 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                                             : "border-rose-400 bg-rose-100 shadow-md ring-2 ring-rose-200"
                                           : "border-emerald-200 bg-emerald-50 hover:border-emerald-400 hover:shadow-sm"
                                       }`}
-                                      title={taken
+                                      title={ownClash
+                                        ? `${selectedLead.name} already has a ${ownClash} at ${to12h(time)} — move that first, or pick another time`
+                                        : taken
                                         ? `Full · ${seats}/${slotCapacity} · ${slotOccupantNames(slot) || "—"}`
                                         : `${to12h(time)} – ${endTime12h(time, sessionMinutes)} · ${seats}/${slotCapacity} taken${seats ? ` · ${slotOccupantNames(slot)}` : ""}${picked ? ` · Day ${planByDate[pickerDate].day} · ${pickedPaid ? "PAID" : "UNPAID"}` : ""}`}
                                       data-testid={`cons-slot-pick-${time}`}
@@ -5773,7 +5809,9 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                                         ) : (
                                           <>
                                             <SeatDots taken={seats} capacity={slotCapacity} />
-                                            {!taken && <span className="min-w-0 truncate">ends {endTime12h(time, sessionMinutes)}</span>}
+                                            {ownClash
+                                              ? <span className="min-w-0 truncate">your {ownClash}</span>
+                                              : !taken && <span className="min-w-0 truncate">ends {endTime12h(time, sessionMinutes)}</span>}
                                           </>
                                         )}
                                       </p>

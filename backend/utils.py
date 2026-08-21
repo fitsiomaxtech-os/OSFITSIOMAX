@@ -146,3 +146,61 @@ def slot_capacity_of(doctor: dict) -> int:
     # Clamped rather than trusted: a 0 or a negative would take the physio off the
     # calendar entirely, which no one would set on purpose and nothing else would explain.
     return max(1, min(n, MAX_PHYSIO_SLOT_CAPACITY))
+
+
+# The two courses a physio delivers off one published calendar: treatment days in
+# `sessions`, rehab days in `rehab_sessions`. They are separate collections on purpose —
+# v3_rehab's docstring sets out at length what folding rehab into `sessions` breaks — but
+# they are the same physio, in the same room, in the same half hour, so "how full is this
+# slot" has to read both. Counting only one is how a physio ends up owing two patients the
+# same hour; counting them differently in two places is how the picker draws an open seat
+# and the assign endpoint then refuses it.
+PHYSIO_COURSE_COLLECTIONS = ("sessions", "rehab_sessions")
+
+# What a row in each collection is called, so a refusal names the thing the branch has to
+# go and move rather than just reporting a number.
+PHYSIO_COURSE_DAY = {"sessions": "treatment day", "rehab_sessions": "rehab day"}
+
+
+async def physio_slot_load(physio_id: str, slots, lead_id: str = None, replacing: str = None):
+    """How busy each of these slots already is for this physio, and where this lead sits in it.
+
+    Returns `(taken, lead_elsewhere)`.
+
+    `taken[slot]` is the patients holding that slot across both courses. Rows belonging to
+    `lead_id` in the `replacing` collection are left out: an assign call rewrites that
+    lead's whole course in one go, so the days they hold today are not a clash with the
+    days they are being given — without this, re-confirming a patient onto the very times
+    they already have is refused as a conflict with themselves.
+
+    This is deliberately the same arithmetic the slot picker does to draw its seat dots.
+    get_doctor_calendar tags every occupant with the course it came from so the picker can
+    discount exactly this lead's rows on exactly the course being replaced and nothing
+    else. The two have to agree: when they drifted apart, a patient's own treatment day
+    silently filled a seat the picker had already shown as free, and booking their rehab
+    course came back "Full for this physio" on slots the branch had just been offered.
+
+    `lead_elsewhere[slot]` is set when this lead already holds that slot on the *other*
+    course. The physio may well have a free seat there, but the patient cannot be on the
+    treatment floor and in rehab in the same half hour, so it is refused on its own terms
+    rather than folded into the seat count — which would have reported the patient's own
+    booking as somebody else's and given the branch nothing to act on.
+    """
+    from database import v3_col
+
+    slots = list(slots)
+    taken: dict = {}
+    lead_elsewhere: dict = {}
+    for collection in PHYSIO_COURSE_COLLECTIONS:
+        rows = await v3_col(collection).find(
+            {"physio_id": physio_id, "status": "upcoming", "slot_time": {"$in": slots}},
+            {"_id": 0, "slot_time": 1, "lead_id": 1},
+        ).to_list(1000)
+        for row in rows:
+            slot = row["slot_time"]
+            if lead_id and row.get("lead_id") == lead_id:
+                if collection == replacing:
+                    continue
+                lead_elsewhere[slot] = PHYSIO_COURSE_DAY[collection]
+            taken[slot] = taken.get(slot, 0) + 1
+    return taken, lead_elsewhere
