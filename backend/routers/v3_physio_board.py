@@ -15,6 +15,10 @@ from schemas.v3 import (
 # redeclared so the Treatment Days popup marks its milestones where the reviews router
 # agrees they are.
 from routers.v3_reviews import REVIEW_AFTER_DAYS
+# Which leads belong to a physio. In its own module because both this board and the
+# reviews router need it, and this one already imports from that one — a helper living
+# in either would close the loop.
+from physio_scope import physio_lead_ids
 
 router = APIRouter(prefix="/api/v3")
 
@@ -192,11 +196,12 @@ async def physio_patients(physio_id: Optional[str] = None, user: V3UserOut = Dep
     if not doctor:
         return {"patients": []}
 
+    # Rehab patients included: they are this physio's too, and were missing from this list
+    # entirely because the lead carries no assigned_physio_id for them.
+    lead_ids = await physio_lead_ids(doctor["id"])
     leads = await v3_col("leads").find(
-        {"assigned_physio_id": doctor["id"]}, {"_id": 0}
+        {"id": {"$in": lead_ids}}, {"_id": 0}
     ).sort("updated_at", -1).to_list(500)
-
-    lead_ids = [l["id"] for l in leads]
     sessions = await v3_col("sessions").find(
         {"physio_id": doctor["id"], "lead_id": {"$in": lead_ids}}, {"_id": 0}
     ).sort("slot_time", 1).to_list(2000)

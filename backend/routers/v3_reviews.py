@@ -26,6 +26,8 @@ from utils import now_iso, active_doctor_query
 from deps import v3_require_roles
 from schemas.v3 import V3UserOut
 
+from physio_scope import physio_lead_ids
+
 router = APIRouter(prefix="/api/v3")
 
 # A patient becomes due a review once they've been in treatment this long.
@@ -144,7 +146,9 @@ async def physio_reviews(
     if not pid:
         return {"patients": [], "reviews": []}
 
-    lead_ids = await v3_col("sessions").distinct("lead_id", {"physio_id": pid})
+    # Off the shared helper, so a rehab patient is reviewable by the physio treating them.
+    # This read the sessions collection alone, which holds treatment days and nothing else.
+    lead_ids = await physio_lead_ids(pid)
     leads = await v3_col("leads").find({"id": {"$in": lead_ids}}, {"_id": 0}).to_list(500)
     existing = await v3_col("reviews").find({"physio_id": pid}, {"_id": 0}).to_list(500)
     by_lead: dict = {}
