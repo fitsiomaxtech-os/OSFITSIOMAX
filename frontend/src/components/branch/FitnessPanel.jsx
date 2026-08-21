@@ -289,15 +289,15 @@ export const FitnessPanel = ({ branchId }) => {
                     two layouts for the same kind of person. */}
                 <tr>
                   <th className="w-[4%] px-3 py-2.5">S.No</th>
-                  <th className="w-[17%] px-3 py-2.5">Name</th>
-                  <th className="w-[11%] px-3 py-2.5">Phone Number</th>
-                  <th className="w-[13%] px-3 py-2.5">Package</th>
-                  <th className="w-[9%] px-3 py-2.5">Start</th>
-                  <th className="w-[9%] px-3 py-2.5">Finish</th>
-                  <th className="w-[9%] px-3 py-2.5">Collected</th>
-                  <th className="w-[9%] px-3 py-2.5">Due</th>
-                  <th className="w-[9%] px-3 py-2.5">Status</th>
-                  <th className="w-[10%] px-3 py-2.5 text-right">Actions</th>
+                  <th className="w-[15%] px-3 py-2.5">Name</th>
+                  <th className="w-[10%] px-3 py-2.5">Phone Number</th>
+                  <th className="w-[12%] px-3 py-2.5">Package</th>
+                  <th className="w-[8%] px-3 py-2.5">Start</th>
+                  <th className="w-[8%] px-3 py-2.5">Finish</th>
+                  <th className="w-[8%] px-3 py-2.5">Collected</th>
+                  <th className="w-[8%] px-3 py-2.5">Due</th>
+                  <th className="w-[8%] px-3 py-2.5">Status</th>
+                  <th className="w-[19%] px-3 py-2.5 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -357,7 +357,7 @@ export const FitnessPanel = ({ branchId }) => {
                       {/* The actions cell swallows the click: pressing Collect or Delete
                           should not also open the row behind the dialog it just opened. */}
                       <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center justify-end gap-1">
+                        <div className="flex flex-wrap items-center justify-end gap-1">
                           {/* Wherever there is a balance, whatever the membership's state.
                               This was gated on the member not having discontinued, which hid
                               the button on exactly the people a gym chases hardest: somebody
