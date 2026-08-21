@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Activity, Calendar, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2, Ban, ClipboardCheck, IndianRupee, Printer, Share2, Download, Eye, FileText, Salad } from "lucide-react";
+import { Activity, Calendar, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2, Ban, ClipboardCheck, IndianRupee, Printer, Share2, Download, Eye, Salad } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -3096,85 +3096,92 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 if (stageFilter === "Rehab" && selectedLead.rehab_fee_paid != null) {
                   const rehabDays = selectedLead.rehab_package_sessions || 0;
                   const rehabAssigned = !!selectedLead.rehab_physio_name;
+                  // Label/value pairs built once, so the rows below are a list rather than
+                  // four hand-repeated flex divs — and so a row that has nothing to say is
+                  // dropped instead of printing "0 days" or an empty physio.
+                  const rehabRows = [
+                    { label: "Course", value: selectedLead.rehab_package_name || "Rehab course" },
+                    rehabDays > 0 ? { label: "Duration", value: `${rehabDays} day${rehabDays > 1 ? "s" : ""}` } : null,
+                    {
+                      label: "Rehab Fee",
+                      value: `Rs.${Number(selectedLead.rehab_fee_paid).toLocaleString("en-IN")}`,
+                      note: selectedLead.rehab_fee_payment_mode || "",
+                      strong: true,
+                    },
+                    rehabAssigned ? { label: "Rehab Physio", value: selectedLead.rehab_physio_name } : null,
+                  ].filter(Boolean);
                   return (
-                    <div className="rounded-lg border border-cyan-200 bg-cyan-50 p-3" data-testid="cons-stage-panel-rehab">
-                      <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-cyan-700">
-                        <Activity className="h-3.5 w-3.5" /> Rehab
-                      </p>
-
-                      {/* The same white card the Consultation Fee summary uses one panel up:
-                          label left, value right, one fact per row. The facts used to run
-                          together on a single middot line, which read as a caption rather
-                          than as the record of what this patient bought. */}
-                      <div className="rounded-md border border-slate-200 bg-white p-2.5" data-testid="cons-rehab-summary">
-                        <div className="flex items-center justify-between gap-3 text-sm">
-                          <span className="shrink-0 text-xs text-slate-500">Course</span>
-                          <span className="min-w-0 truncate font-semibold text-slate-800" title={selectedLead.rehab_package_name || ""}>
-                            {selectedLead.rehab_package_name || "Rehab course"}
+                    <div
+                      className="overflow-hidden rounded-xl border border-cyan-200/80 bg-gradient-to-br from-cyan-50 via-cyan-50/60 to-white shadow-sm ring-1 ring-inset ring-white/60"
+                      data-testid="cons-stage-panel-rehab"
+                    >
+                      {/* Header band: the icon gets a tile of its own and the state sits at
+                          the far end, so the panel says what it is and where it stands on
+                          one line before any figure is read. */}
+                      <div className="flex items-center justify-between gap-3 border-b border-cyan-100 px-4 py-2.5">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-cyan-600/10 text-cyan-700">
+                            <Activity className="h-4 w-4" />
                           </span>
+                          <span className="truncate text-xs font-semibold uppercase tracking-wider text-cyan-800">Rehab</span>
                         </div>
-                        {/* Only when the course states one. A row reading "0 days" would be
-                            claiming a fact the package never carried. */}
-                        {rehabDays > 0 && (
-                          <div className="mt-1 flex items-center justify-between gap-3 text-sm">
-                            <span className="shrink-0 text-xs text-slate-500">Duration</span>
-                            <span className="font-semibold text-slate-800">{rehabDays} day{rehabDays > 1 ? "s" : ""}</span>
-                          </div>
-                        )}
-                        <div className="mt-1 flex items-center justify-between gap-3 text-sm">
-                          <span className="shrink-0 text-xs text-slate-500">Rehab Fee</span>
-                          <span className="font-semibold text-slate-800">
-                            Rs.{selectedLead.rehab_fee_paid}
-                            {selectedLead.rehab_fee_payment_mode && (
-                              <span className="ml-1 capitalize text-emerald-600">({selectedLead.rehab_fee_payment_mode})</span>
-                            )}
-                          </span>
-                        </div>
-                        {rehabAssigned && (
-                          <div className="mt-1 flex items-center justify-between gap-3 text-sm">
-                            <span className="shrink-0 text-xs text-slate-500">Rehab Physio</span>
-                            <span className="min-w-0 truncate font-semibold text-slate-800">{selectedLead.rehab_physio_name}</span>
-                          </div>
-                        )}
-                        <p className="mt-1 flex items-center gap-1 text-[11px] font-medium text-emerald-600">
-                          <CheckCircle2 className="h-3 w-3" /> Already Collected
-                        </p>
+                        <span className="flex shrink-0 items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+                          <CheckCircle2 className="h-3 w-3" /> Fee Collected
+                        </span>
                       </div>
 
-                      <p className="mt-2 text-xs text-slate-600">
-                        {rehabAssigned
-                          ? "The course is booked — every day is on this physio's calendar and on their board."
-                          : "Choose the physio who will deliver the course and fix a date and time for every day."}
-                      </p>
+                      <div className="p-4">
+                        {/* Hairline-divided rows rather than four bordered boxes: one card,
+                            one column of values, nothing for the eye to step over. */}
+                        <div className="rounded-lg border border-slate-200/80 bg-white shadow-sm" data-testid="cons-rehab-summary">
+                          <dl className="divide-y divide-slate-100">
+                            {rehabRows.map((row) => (
+                              <div key={row.label} className="flex items-baseline justify-between gap-4 px-3 py-2">
+                                <dt className="shrink-0 text-xs text-slate-500">{row.label}</dt>
+                                <dd className={`min-w-0 truncate text-right font-semibold text-slate-800 ${row.strong ? "text-[15px]" : "text-sm"}`} title={String(row.value)}>
+                                  {row.value}
+                                  {row.note && <span className="ml-1 text-xs font-medium capitalize text-emerald-600">({row.note})</span>}
+                                </dd>
+                              </div>
+                            ))}
+                          </dl>
+                        </div>
 
-                      {/* Left-aligned with everything above it, and one solid button only.
-                          Three filled colours side by side gave no clue which was the step
-                          to take; Diet and Cancel stay reachable as quiet outlines. */}
-                      <div className="mt-3 flex flex-wrap items-center gap-1.5 [&>*]:shrink-0">
-                        <Button
-                          size="sm"
-                          className="bg-cyan-600 text-xs text-white hover:bg-cyan-700"
-                          onClick={() => openPhysioModal("rehab")}
-                          data-testid="cons-open-rehab-assign"
-                        >
-                          <Activity className="mr-1 h-3.5 w-3.5" />
-                          {rehabAssigned ? "Reassign Rehab Physio" : "Assign Physio"}
-                        </Button>
-                        {/* The shared DietButton is solid orange, which would compete with
-                            the one action this panel exists for. Same handlers, quieter. */}
-                        {selectedLead.package_paid != null && (
+                        <p className="mt-3 text-xs leading-relaxed text-slate-600">
+                          {rehabAssigned
+                            ? "The course is booked — every day sits on this physio's calendar and on their board."
+                            : "Choose the physio who will deliver the course and fix a date and time for every day."}
+                        </p>
+
+                        {/* One solid action on the same left edge as everything above it.
+                            Diet and Cancel stay reachable as quiet outlines rather than as
+                            two more filled colours competing with the step to take. */}
+                        <div className="mt-3 flex flex-wrap items-center gap-2 [&>*]:shrink-0">
                           <Button
                             size="sm"
-                            variant="outline"
-                            className={`border-slate-200 text-slate-600 hover:bg-slate-50 ${ACT_BTN}`}
-                            onClick={!dietFeePaid ? openDietFeeDraft : openDietModal}
-                            data-testid="cons-rehab-diet-btn"
+                            className="bg-cyan-600 text-xs text-white shadow-sm transition hover:bg-cyan-700 hover:shadow"
+                            onClick={() => openPhysioModal("rehab")}
+                            data-testid="cons-open-rehab-assign"
                           >
-                            <Salad className="mr-1 h-3.5 w-3.5" />
-                            {!dietFeePaid ? <Lbl full="Collect Diet Fee" short="Diet Fee" /> : <Lbl full="Diet Consultation" short="Diet" />}
+                            <Activity className="mr-1.5 h-3.5 w-3.5" />
+                            {rehabAssigned ? "Reassign Rehab Physio" : "Assign Physio"}
                           </Button>
-                        )}
-                        {CancelButton}
+                          {/* The shared DietButton is solid orange, which would compete with
+                              the one action this panel exists for. Same handlers, quieter. */}
+                          {selectedLead.package_paid != null && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className={`border-slate-200 bg-white/70 text-slate-600 hover:bg-white ${ACT_BTN}`}
+                              onClick={!dietFeePaid ? openDietFeeDraft : openDietModal}
+                              data-testid="cons-rehab-diet-btn"
+                            >
+                              <Salad className="mr-1 h-3.5 w-3.5" />
+                              {!dietFeePaid ? <Lbl full="Collect Diet Fee" short="Diet Fee" /> : <Lbl full="Diet Consultation" short="Diet" />}
+                            </Button>
+                          )}
+                          {CancelButton}
+                        </div>
                       </div>
                     </div>
                   );
@@ -3536,25 +3543,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               );
             })()}
 
-            {/* The paper Offline Consultation Form, photographed and filed against the
-                patient. Appears only once the Consultation Fee is collected, because
-                that is when the form has actually been filled in — offering it before
-                the consultation invites a blank scan, and the whole point of the record
-                is that it is the completed one. */}
-            {selectedLead.package_paid != null && (
-              <div className="rounded-xl border border-slate-200 p-3" data-testid="cons-consultation-form">
-                <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-sky-700">
-                  <FileText className="h-3.5 w-3.5" /> Consultation Form
-                </p>
-                <LeadDocuments
-                  leadId={selectedLead.id}
-                  kind="consultation_form"
-                  fixedLabel="Consultation Form"
-                  hint="Photograph or scan each page · JPG, PNG, WEBP or PDF · photos are shrunk automatically"
-                  canEdit={["branch_admin", "super_admin", "head_physio"].includes(viewerRole)}
-                />
-              </div>
-            )}
             </>
             )}
 
