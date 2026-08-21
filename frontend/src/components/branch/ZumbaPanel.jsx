@@ -245,7 +245,7 @@ const ViewRegistrationModal = ({ row, masterNameOf, onClose, onSaved }) => {
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       data-testid="zumba-view-dialog"
     >
-      <div className="flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+      <div className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
         {/* The same band every Zumba dialog wears — the calendar and Refer Customer on the
             master's board carry it too, so a popup is recognisably part of this tab before
             a word of it is read. */}
@@ -268,21 +268,34 @@ const ViewRegistrationModal = ({ row, masterNameOf, onClose, onSaved }) => {
           </div>
         )}
 
-        <div className="space-y-0.5">
-          <DetailRow label="Phone" value={row.phone} />
-          <DetailRow label="Email" value={row.email} />
-          <DetailRow label="Age" value={row.age} />
-          <DetailRow label="Gender" value={(GENDERS.find((g) => g.key === row.gender) || {}).label} />
-          <DetailRow label="Address" value={row.address} />
-          <DetailRow label="Source" value={sourceDetail(row)} />
-          <DetailRow label="Class" value={masterNameOf(row.assigned_master_id)} />
-          <DetailRow label="Time" value={row.time_slot} />
-          <DetailRow label="Package" value={row.package_name} />
-          <DetailRow label="Stage" value={row.stage} />
-          <DetailRow
-            label="Fee"
-            value={`${rupees(row.fee_paid)} paid${due > 0 ? ` · ${rupees(due)} due` : row.fee_amount ? " · settled" : ""}`}
-          />
+        {/* Two columns, split the way the form that filled them in is split: who the
+            person is on the left, what they were sold on the right. On a phone they stack
+            in that same order, which is the order they are asked in. */}
+        <div className="grid gap-x-8 gap-y-4 sm:grid-cols-2">
+          <div>
+            <p className="mb-1 border-b border-slate-100 pb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">Basic Details</p>
+            <div className="space-y-0.5">
+              <DetailRow label="Phone" value={row.phone} />
+              <DetailRow label="Email" value={row.email} />
+              <DetailRow label="Age" value={row.age} />
+              <DetailRow label="Gender" value={(GENDERS.find((g) => g.key === row.gender) || {}).label} />
+              <DetailRow label="Address" value={row.address} />
+            </div>
+          </div>
+          <div>
+            <p className="mb-1 border-b border-slate-100 pb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">Course Details</p>
+            <div className="space-y-0.5">
+              <DetailRow label="Source" value={sourceDetail(row)} />
+              <DetailRow label="Class" value={masterNameOf(row.assigned_master_id)} />
+              <DetailRow label="Time" value={row.time_slot} />
+              <DetailRow label="Package" value={row.package_name} />
+              <DetailRow label="Stage" value={row.stage} />
+              <DetailRow
+                label="Fee"
+                value={`${rupees(row.fee_paid)} paid${due > 0 ? ` · ${rupees(due)} due` : row.fee_amount ? " · settled" : ""}`}
+              />
+            </div>
+          </div>
         </div>
 
         {/* Asked before it is saved, not after: the reason is the point of recording it.
