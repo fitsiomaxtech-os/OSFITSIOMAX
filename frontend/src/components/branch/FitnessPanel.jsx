@@ -432,6 +432,7 @@ export const FitnessPanel = ({ branchId }) => {
           onClose={() => setViewing(null)}
           onEdit={() => { setEditing(viewing); setViewing(null); }}
           onCollect={() => { setCollecting(viewing); setViewing(null); }}
+          onStatus={(status) => { const m = viewing; setViewing(null); changeStatus(m, status); }}
         />
       )}
 
@@ -982,7 +983,7 @@ const DetailLine = ({ label, children }) => (
   </div>
 );
 
-const FitnessDetailDialog = ({ member, onClose, onEdit, onCollect }) => {
+const FitnessDetailDialog = ({ member, onClose, onEdit, onCollect, onStatus }) => {
   const meta = STATUS_META[member.status] || STATUS_META.active;
   const due = Number(member.fee_due || 0);
   // Newest first: the last thing that happened is the thing being looked for.
@@ -1005,24 +1006,86 @@ const FitnessDetailDialog = ({ member, onClose, onEdit, onCollect }) => {
         </div>
 
         <div className="flex-1 space-y-4 overflow-y-auto p-5">
-          <div className={`rounded-lg border p-3 ${due > 0 ? "border-rose-200 bg-rose-50" : "border-emerald-200 bg-emerald-50"}`}>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
+          {/* The same balance the Zumba tab draws: the headline first, then the three
+              figures on one line in the order they happen -- what it cost, what came in,
+              what is left. Stacked in a corner they read as a footnote to the balance
+              rather than as the arithmetic behind it. */}
+          <div className={`rounded-xl border p-4 ${due > 0 ? "border-rose-200 bg-rose-50/70" : "border-emerald-200 bg-emerald-50/70"}`}>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Balance</p>
-                <p className={`text-xl font-extrabold ${due > 0 ? "text-rose-700" : "text-emerald-700"}`} data-testid="fitness-detail-balance">
-                  {due > 0 ? `${rupees(due)} due` : "Paid up"}
+                <p className={`mt-0.5 text-2xl font-extrabold leading-none ${due > 0 ? "text-rose-700" : "text-emerald-700"}`} data-testid="fitness-detail-balance">
+                  {due > 0 ? `${rupees(due)} due` : Number(member.fee_amount || 0) > 0 ? "Paid up" : "Nothing sold yet"}
                 </p>
               </div>
-              <p className="text-right text-[11px] text-slate-600">
-                Fee <b>{rupees(member.fee_amount)}</b><br />
-                Collected <b className="text-emerald-700">{rupees(member.fee_paid)}</b>
-              </p>
+              {/* Offered from the balance rather than the footer, because it is the one
+                  thing to do about the figure beside it. */}
+              {due > 0 && (
+                <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={onCollect} data-testid="fitness-detail-collect-top">
+                  <IndianRupee className="mr-1 h-3.5 w-3.5" /> Collect {rupees(due)}
+                </Button>
+              )}
+            </div>
+            <div className="mt-3 grid grid-cols-3 gap-2 border-t border-white/70 pt-3 text-center">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Fee</p>
+                <p className="text-sm font-bold text-slate-700">{rupees(member.fee_amount)}</p>
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Collected</p>
+                <p className="text-sm font-bold text-emerald-700">{rupees(member.fee_paid)}</p>
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Due</p>
+                <p className={`text-sm font-bold ${due > 0 ? "text-rose-700" : "text-slate-400"}`}>{due > 0 ? rupees(due) : "—"}</p>
+              </div>
             </div>
           </div>
 
+          {/* How far through the term they are, as the Zumba record shows it. The gym keeps
+              no end date of its own, so the term runs to the day the next payment falls due
+              -- the day the current one stops covering. The bar is time elapsed rather than
+              classes left: a gym membership is sold by the month and nothing counts down
+              per visit, so drawing it as sessions would be inventing a number. */}
+          {(member.joined_date || member.created_at) && member.due_date && (
+            <div className="rounded-xl border border-slate-200 p-4" data-testid="fitness-detail-term">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Term</p>
+                <p className="text-xs font-medium text-slate-600">
+                  {shortDate(member.joined_date || member.created_at)} <span className="text-slate-300">→</span> {shortDate(member.due_date)}
+                </p>
+              </div>
+              {(() => {
+                const start = new Date(`${(member.joined_date || member.created_at || "").slice(0, 10)}T00:00:00`).getTime();
+                const end = new Date(`${member.due_date.slice(0, 10)}T00:00:00`).getTime();
+                if (!start || !end || end <= start) return null;
+                const now = Date.now();
+                const leftMs = end - now;
+                const daysLeft = Math.ceil(leftMs / 86400000);
+                const remaining = Math.min(100, Math.max(0, (leftMs / (end - start)) * 100));
+                const soon = daysLeft <= 7;
+                return (
+                  <>
+                    <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+                      <div
+                        className={`h-full rounded-full ${daysLeft <= 0 ? "bg-rose-500" : soon ? "bg-amber-500" : "bg-emerald-500"}`}
+                        style={{ width: `${remaining}%` }}
+                      />
+                    </div>
+                    <p className={`mt-1.5 text-[11px] ${daysLeft <= 0 ? "font-semibold text-rose-600" : soon ? "font-semibold text-amber-600" : "text-slate-500"}`}>
+                      {daysLeft <= 0
+                        ? "The term has run out."
+                        : `${daysLeft} day${daysLeft === 1 ? "" : "s"} left${soon ? " — due a renewal" : ""}.`}
+                    </p>
+                  </>
+                );
+              })()}
+            </div>
+          )}
+
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="rounded-lg border border-slate-200 p-3">
-              <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">Client</p>
+              <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">Customer</p>
               <DetailLine label="Phone">{member.phone}</DetailLine>
               <DetailLine label="Age">{member.age}</DetailLine>
               <DetailLine label="Gender">{member.gender}</DetailLine>
@@ -1090,11 +1153,41 @@ const FitnessDetailDialog = ({ member, onClose, onEdit, onCollect }) => {
           </div>
         </div>
 
-        <div className="flex flex-wrap justify-end gap-2 border-t p-4">
+        {/* Ending a membership is a decision about the person, so it is offered where the
+            person is read rather than only as an icon on the row -- the same place the
+            Zumba record offers it. Collect stays: on a gym roll it is the everyday one,
+            and it is already up beside the balance it settles. */}
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t p-4">
           <Button variant="outline" size="sm" onClick={onClose}>Close</Button>
           <Button variant="outline" size="sm" onClick={onEdit} data-testid="fitness-detail-edit">
             <Pencil className="mr-1 h-3.5 w-3.5" /> Edit
           </Button>
+          {member.status === "active" ? (
+            <>
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-rose-200 text-rose-700 hover:bg-rose-50"
+                onClick={() => onStatus("discontinued")}
+                data-testid="fitness-detail-discontinue"
+              >
+                Discontinue
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-amber-200 text-amber-700 hover:bg-amber-50"
+                onClick={() => onStatus("leave")}
+                data-testid="fitness-detail-leave"
+              >
+                Leave
+              </Button>
+            </>
+          ) : (
+            <Button size="sm" variant="outline" onClick={() => onStatus("active")} data-testid="fitness-detail-restore">
+              <PlayCircle className="mr-1 h-3.5 w-3.5" /> Back to training
+            </Button>
+          )}
           {due > 0 && (
             <Button size="sm" onClick={onCollect} className="bg-emerald-600 text-white hover:bg-emerald-700" data-testid="fitness-detail-collect">
               <IndianRupee className="mr-1 h-3.5 w-3.5" /> Collect {rupees(due)}
