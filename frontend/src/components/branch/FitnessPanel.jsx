@@ -277,21 +277,22 @@ export const FitnessPanel = ({ branchId }) => {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px] table-fixed text-left text-sm">
+            <table className="w-full min-w-[1000px] table-fixed text-left text-sm">
               <thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                {/* Age moved under the name, where the Zumba tab keeps it: a column six
-                    per cent wide held two digits and a heading twice their width, and the
-                    person's own details read as one line rather than as three columns of
-                    one value each. */}
+                {/* The Zumba tab's columns, in its order and under its names, so a branch
+                    reading one roll after the other reads the same row twice rather than
+                    two layouts for the same kind of person. */}
                 <tr>
-                  <th className="w-[5%] px-3 py-2.5">S.No</th>
-                  <th className="w-[20%] px-3 py-2.5">Member</th>
-                  <th className="w-[12%] px-3 py-2.5">Phone</th>
-                  <th className="w-[19%] px-3 py-2.5">Package</th>
-                  <th className="w-[13%] px-3 py-2.5">Fee</th>
-                  <th className="w-[13%] px-3 py-2.5">Paid By</th>
-                  <th className="w-[10%] px-3 py-2.5">Status</th>
-                  <th className="w-[8%] px-3 py-2.5 text-right">Actions</th>
+                  <th className="w-[4%] px-3 py-2.5">S.No</th>
+                  <th className="w-[17%] px-3 py-2.5">Name</th>
+                  <th className="w-[11%] px-3 py-2.5">Phone Number</th>
+                  <th className="w-[13%] px-3 py-2.5">Package</th>
+                  <th className="w-[9%] px-3 py-2.5">Start</th>
+                  <th className="w-[9%] px-3 py-2.5">Finish</th>
+                  <th className="w-[9%] px-3 py-2.5">Collected</th>
+                  <th className="w-[9%] px-3 py-2.5">Due</th>
+                  <th className="w-[9%] px-3 py-2.5">Status</th>
+                  <th className="w-[10%] px-3 py-2.5 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -306,50 +307,44 @@ export const FitnessPanel = ({ branchId }) => {
                       data-testid={`fitness-row-${r.id}`}
                     >
                       <td className="px-3 py-3 text-xs leading-5 text-slate-400">{i + 1}</td>
+                      {/* Age and gender go to the record, as they do on the Zumba tab: the
+                          day they joined has a column of its own now, and the columns
+                          beside the name are what the list is read for. */}
                       <td className="px-3 py-3">
-                        <div className="flex flex-col items-start gap-0.5">
-                          <p className="max-w-full truncate text-sm font-semibold leading-5 text-slate-800" title={r.name}>{r.name}</p>
-                          <p className="max-w-full truncate text-[11px] leading-4 text-slate-400">
-                            {[r.age ? `${r.age}` : null, r.gender || null].filter(Boolean).join(" · ")}
-                            {(r.age || r.gender) ? " · " : ""}Joined {shortDate(r.joined_date || r.created_at)}
-                          </p>
-                        </div>
+                        <p className="max-w-full truncate text-sm font-semibold leading-5 text-slate-800" title={r.name}>{r.name}</p>
                       </td>
                       <td className="px-3 py-3 text-xs leading-5 text-slate-600">{r.phone || "—"}</td>
                       <td className="px-3 py-3">
                         <div className="flex flex-col items-start gap-0.5">
-                          <p className="max-w-full truncate text-xs font-medium leading-5 text-slate-700" title={r.package_name}>{r.package_name || "—"}</p>
-                          {r.package_sessions ? <p className="text-[11px] leading-4 text-slate-400">{r.package_sessions} sessions</p> : null}
+                          <p className="max-w-full truncate text-xs leading-5 text-slate-600" title={r.package_name}>{r.package_name || "—"}</p>
+                          {r.package_sessions ? <p className="text-[10px] leading-4 text-slate-400">{r.package_sessions} sessions</p> : null}
                         </div>
                       </td>
+                      {/* When the membership began. */}
                       <td className="px-3 py-3">
-                        <div className="flex flex-col items-start gap-0.5">
-                          <p className="text-xs font-semibold leading-5 text-slate-800">{rupees(r.fee_amount)}</p>
-                          {/* The balance is what the branch is chasing, so it is said outright
-                              rather than left to be worked out from two figures. A membership
-                              with no price on it is not paid up, it is unsold -- saying "Paid
-                              up" over a nought told a gym it had collected on somebody it had
-                              never charged. */}
-                          {due > 0
-                            ? <p className="text-[11px] font-semibold leading-4 text-rose-600">{rupees(due)} due{r.due_date ? ` · ${shortDate(r.due_date)}` : ""}</p>
-                            : Number(r.fee_amount || 0) > 0
-                              ? <p className="text-[11px] leading-4 text-emerald-600">Paid up</p>
-                              : <p className="text-[11px] leading-4 text-slate-400">Nothing sold</p>}
-                        </div>
+                        <p className="text-xs leading-5 text-slate-600">{shortDate(r.joined_date || r.created_at)}</p>
+                      </td>
+                      {/* When the paid-up period runs out. The gym stores this as the date
+                          the next payment falls due, which is the same day the current one
+                          stops covering -- so it is that date under this heading, not a
+                          second one worked out from the package. A membership with none
+                          recorded says so rather than inventing one. */}
+                      <td className="px-3 py-3">
+                        {r.due_date
+                          ? <p className="text-xs leading-5 text-slate-600">{shortDate(r.due_date)}</p>
+                          : <span className="text-xs leading-5 text-slate-300">—</span>}
+                      </td>
+                      {/* What has come in, and what has not, in a column each. The price is
+                          neither: it is their sum, and the package names it. */}
+                      <td className="px-3 py-3">
+                        <p className="text-xs font-semibold leading-5 text-emerald-700">{rupees(r.fee_paid)}</p>
                       </td>
                       <td className="px-3 py-3">
-                        <div className="flex flex-col items-start gap-0.5">
-                          {r.payment_mode ? (
-                            <>
-                              <span className="block max-w-full truncate whitespace-nowrap rounded bg-slate-100 px-2 py-0.5 text-[10px] font-semibold leading-4 text-slate-600">
-                                {MODE_LABELS[r.payment_mode] || r.payment_mode}
-                              </span>
-                              {r.payment_reference ? (
-                                <p className="max-w-full truncate text-[10px] leading-4 text-slate-400" title={r.payment_reference}>{r.payment_reference}</p>
-                              ) : null}
-                            </>
-                          ) : <span className="text-xs leading-5 text-slate-300">—</span>}
-                        </div>
+                        {due > 0
+                          ? <p className="text-xs font-semibold leading-5 text-rose-600">{rupees(due)}</p>
+                          : Number(r.fee_amount || 0) > 0
+                            ? <p className="text-xs leading-5 text-emerald-600">Paid up</p>
+                            : <p className="text-xs leading-5 text-slate-300">—</p>}
                       </td>
                       <td className="px-3 py-3">
                         <span className={`inline-flex whitespace-nowrap rounded-[5px] border px-2 py-0.5 text-[10px] font-bold ${meta.classes}`}>{meta.label}</span>
