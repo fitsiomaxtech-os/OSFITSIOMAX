@@ -41,6 +41,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { StageTabBar, stageDisplayLabel } from "@/components/ui/stage-tab";
+import { LeadMarks } from "@/components/ui/lead-marks";
 import { apptCardPng, REASSURANCE } from "@/lib/apptCard";
 import {
   scheduleBranchAppointment,
@@ -600,16 +601,26 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   // The rows the table is actually showing. Hoisted out of the table body because the
   // select-all box and the delete bar have to agree with it exactly — "select all" that
   // picks up a row the stage filter is hiding deletes something nobody looked at.
-  const visibleLeads = useMemo(
-    () => (stageFilter ? filteredLeads.filter((l) => matchesBranchStage(l, stages.find((s) => s.name === stageFilter))) : filteredLeads),
-    [filteredLeads, stageFilter, stages],
-  );
+  // Which mark the list is narrowed to, if any. Only ever set on All Stages — the marks
+  // are put on and read there, and a filter that survived a move to another stage would
+  // silently hide most of that stage while its count above still said otherwise.
+  // All Stages only — see the row markup for why.
+  const canMarkLeads = !stageFilter;
+  const [markFilter, setMarkFilter] = useState(""); // "" | "vip" | "attention"
+  useEffect(() => { if (stageFilter) setMarkFilter(""); }, [stageFilter]);
+
+  const visibleLeads = useMemo(() => {
+    if (stageFilter) return filteredLeads.filter((l) => matchesBranchStage(l, stages.find((s) => s.name === stageFilter)));
+    if (markFilter === "vip") return filteredLeads.filter((l) => l.is_vip);
+    if (markFilter === "attention") return filteredLeads.filter((l) => l.needs_attention);
+    return filteredLeads;
+  }, [filteredLeads, stageFilter, stages, markFilter]);
 
   // A tick survives scrolling and reopening a row, but not a change to what is on screen.
   // Searching, filtering by date or switching stage replaces the list under the selection,
   // and a delete confirmed against rows the person can no longer see is one they cannot
   // check before agreeing to it.
-  useEffect(() => { setPicked(new Set()); }, [stageFilter, dateFilter, searchQuery, activeView]);
+  useEffect(() => { setPicked(new Set()); }, [stageFilter, dateFilter, searchQuery, activeView, markFilter]);
 
   const pickedVisible = useMemo(
     () => visibleLeads.filter((l) => picked.has(l.id)),
@@ -893,6 +904,43 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                 lets the search give up the width instead; on the narrowest phones that
                 leaves the placeholder clipped, which costs less than a second row. */}
             <div className={`${searchOpen ? "hidden sm:flex" : "flex"} shrink-0 items-center gap-1.5 sm:gap-3`}>
+            {/* Narrow the list to one mark. Only on All Stages: that is where a branch
+                puts these on and reads them back, and every other pill is already a
+                narrowing of its own — two narrowings at once, each with its own count
+                above, is a list nobody can account for.
+
+                Lit when active, and pressing the lit one clears it, so the same control
+                both narrows and returns. */}
+            {!stageFilter && !isConsultationStage && (
+              <div className="flex shrink-0 items-center gap-1" data-testid="branch-mark-filters">
+                <button
+                  type="button"
+                  onClick={() => setMarkFilter((m) => (m === "vip" ? "" : "vip"))}
+                  title={markFilter === "vip" ? "Showing VIP clients only — click to show all" : "Show VIP clients only"}
+                  aria-label="Show VIP clients only"
+                  aria-pressed={markFilter === "vip"}
+                  className={`flex h-10 w-10 items-center justify-center rounded-md border transition-colors ${
+                    markFilter === "vip" ? "border-amber-300 bg-amber-50" : "border-slate-200 bg-white hover:bg-amber-50"
+                  }`}
+                  data-testid="branch-filter-vip"
+                >
+                  <Star className={`h-4 w-4 ${markFilter === "vip" ? "fill-amber-400 text-amber-500" : "text-slate-400"}`} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMarkFilter((m) => (m === "attention" ? "" : "attention"))}
+                  title={markFilter === "attention" ? "Showing flagged patients only — click to show all" : "Show patients needing attention only"}
+                  aria-label="Show patients needing attention only"
+                  aria-pressed={markFilter === "attention"}
+                  className={`flex h-10 w-10 items-center justify-center rounded-md border transition-colors ${
+                    markFilter === "attention" ? "border-rose-300 bg-rose-50" : "border-slate-200 bg-white hover:bg-rose-50"
+                  }`}
+                  data-testid="branch-filter-attention"
+                >
+                  <AlertCircle className={`h-4 w-4 ${markFilter === "attention" ? "fill-rose-500 text-white" : "text-slate-400"}`} />
+                </button>
+              </div>
+            )}
             <DateFilterPopover value={dateFilter} onChange={setDateFilter} testid="branch-date-filter" centered iconOnly />
             <Button
               onClick={() => { loadBoard(); setRefreshTick((n) => n + 1); }}
@@ -1171,29 +1219,42 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                                 control is in the same place on every row — a mark that only
                                 appears once set cannot be set by anyone who has not seen it
                                 set before. */}
+                            {/* Set here and only here — All Stages is the whole branch in
+                                one list, which is where a person decides who is a VIP and
+                                who needs looking at. On a stage pill the same buttons would
+                                be offering that judgement about a fraction of the branch,
+                                against a count that describes the stage rather than the
+                                mark. Every other stage still SHOWS them, read-only, so a
+                                marked patient is recognisable wherever they surface. */}
                             <div className="ml-auto flex shrink-0 items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
-                              <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); toggleLeadFlag(lead, "is_vip"); }}
-                                title={lead.is_vip ? "VIP client — click to remove" : "Mark as VIP client"}
-                                aria-label={lead.is_vip ? `Remove VIP mark from ${lead.name || "patient"}` : `Mark ${lead.name || "patient"} as VIP`}
-                                aria-pressed={!!lead.is_vip}
-                                className="rounded p-1 transition-colors hover:bg-amber-50"
-                                data-testid={`branch-vip-${lead.id}`}
-                              >
-                                <Star className={`h-4 w-4 ${lead.is_vip ? "fill-amber-400 text-amber-500" : "text-slate-300 hover:text-amber-400"}`} />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); toggleLeadFlag(lead, "needs_attention"); }}
-                                title={lead.needs_attention ? "Needs attention — click to clear" : "Flag as needing attention"}
-                                aria-label={lead.needs_attention ? `Clear the attention flag on ${lead.name || "patient"}` : `Flag ${lead.name || "patient"} as needing attention`}
-                                aria-pressed={!!lead.needs_attention}
-                                className="rounded p-1 transition-colors hover:bg-rose-50"
-                                data-testid={`branch-attention-${lead.id}`}
-                              >
-                                <AlertCircle className={`h-4 w-4 ${lead.needs_attention ? "fill-rose-500 text-white" : "text-slate-300 hover:text-rose-400"}`} />
-                              </button>
+                              {canMarkLeads ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); toggleLeadFlag(lead, "is_vip"); }}
+                                    title={lead.is_vip ? "VIP client — click to remove" : "Mark as VIP client"}
+                                    aria-label={lead.is_vip ? `Remove VIP mark from ${lead.name || "patient"}` : `Mark ${lead.name || "patient"} as VIP`}
+                                    aria-pressed={!!lead.is_vip}
+                                    className="rounded p-1 transition-colors hover:bg-amber-50"
+                                    data-testid={`branch-vip-${lead.id}`}
+                                  >
+                                    <Star className={`h-4 w-4 ${lead.is_vip ? "fill-amber-400 text-amber-500" : "text-slate-300 hover:text-amber-400"}`} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); toggleLeadFlag(lead, "needs_attention"); }}
+                                    title={lead.needs_attention ? "Needs attention — click to clear" : "Flag as needing attention"}
+                                    aria-label={lead.needs_attention ? `Clear the attention flag on ${lead.name || "patient"}` : `Flag ${lead.name || "patient"} as needing attention`}
+                                    aria-pressed={!!lead.needs_attention}
+                                    className="rounded p-1 transition-colors hover:bg-rose-50"
+                                    data-testid={`branch-attention-${lead.id}`}
+                                  >
+                                    <AlertCircle className={`h-4 w-4 ${lead.needs_attention ? "fill-rose-500 text-white" : "text-slate-300 hover:text-rose-400"}`} />
+                                  </button>
+                                </>
+                              ) : (
+                                <LeadMarks lead={lead} />
+                              )}
                             </div>
                           </div>
                         </td>

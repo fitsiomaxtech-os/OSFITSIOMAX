@@ -9,6 +9,7 @@ import { StageTabBar } from "@/components/ui/stage-tab";
 import { WhatsAppIcon } from "@/components/ui/whatsapp-icon";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { LeadDocuments } from "@/components/LeadDocuments";
+import { LeadMarks } from "@/components/ui/lead-marks";
 import {
   getConsultationsBoard, moveConsultationStage, listStoreItems, collectRehabFee,
   collectPackagePayment, collectTreatmentFee, markInstallmentPaid, savePhysioDiagnosis, unlockPhysioDiagnosis,
@@ -2395,7 +2396,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-bold text-slate-800">
-                      <span className="mr-1.5 font-semibold text-slate-300">{i + 1}.</span>{l.name || "—"}
+                      <span className="mr-1.5 font-semibold text-slate-300">{i + 1}.</span>{l.name || "—"}<LeadMarks lead={l} className="ml-1.5" />
                     </p>
                     <p className="truncate text-xs text-slate-500">{l.phone || "—"}</p>
                   </div>
@@ -2498,7 +2499,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 return (
                   <tr key={l.id} onClick={() => { setSelectedLead(l); setDetailTab("overview"); }} className="cursor-pointer border-t border-slate-100 hover:bg-slate-50" data-testid={`cons-row-${l.id}`}>
                     <td className="px-3 py-3 align-middle text-slate-400">{i + 1}</td>
-                    <td className="truncate px-4 py-3 align-middle font-medium text-slate-800" title={l.name}>{l.name || "—"}</td>
+                    <td className="truncate px-4 py-3 align-middle font-medium text-slate-800" title={l.name}>{l.name || "—"}<LeadMarks lead={l} className="ml-1.5" /></td>
                     <td className="truncate px-4 py-3 align-middle font-mono text-xs text-slate-500" title={l.patient_number}>{l.patient_number || "—"}</td>
                     <td className="truncate px-4 py-3 align-middle text-slate-600" title={l.phone}>{l.phone || "—"}</td>
                     <td className="truncate px-4 py-3 align-middle text-slate-600" title={l.email}>{l.email || "—"}</td>

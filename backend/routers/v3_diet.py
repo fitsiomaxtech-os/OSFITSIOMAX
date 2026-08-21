@@ -595,6 +595,12 @@ async def diet_patients(coach_id: Optional[str] = None, user: V3UserOut = Depend
             "lead_id": lead["id"],
             "lead_name": lead.get("name", "Unknown"),
             "phone": lead.get("phone", ""),
+            # The branch's two hand-made marks, carried through so a treating
+            # clinician sees the VIP star and the attention flag on the same
+            # patient the branch marked. This row is a projection, so anything
+            # not named here simply never leaves the backend.
+            "is_vip": bool(lead.get("is_vip")),
+            "needs_attention": bool(lead.get("needs_attention")),
             "total_days": len(days),
             "completed_days": completed,
             "remaining_days": len(days) - completed,

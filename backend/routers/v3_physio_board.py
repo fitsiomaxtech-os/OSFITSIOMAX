@@ -238,6 +238,12 @@ async def physio_patients(physio_id: Optional[str] = None, user: V3UserOut = Dep
             "lead_id": lead["id"],
             "lead_name": lead.get("name", "Unknown"),
             "phone": lead.get("phone", ""),
+            # The branch's two hand-made marks, carried through so a treating
+            # clinician sees the VIP star and the attention flag on the same
+            # patient the branch marked. This row is a projection, so anything
+            # not named here simply never leaves the backend.
+            "is_vip": bool(lead.get("is_vip")),
+            "needs_attention": bool(lead.get("needs_attention")),
             "total_sessions": total,
             "completed_sessions": completed,
             "remaining_sessions": total - completed,
