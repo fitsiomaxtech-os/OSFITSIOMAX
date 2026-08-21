@@ -565,3 +565,7 @@ export const deleteFitness = async (registrationId) => (await api.delete(`/branc
 // A collection is a list of lines, one per mode — a member can hand over cash and send
 // the rest by UPI, and both halves belong against the same membership.
 export const collectFitnessPayment = async (registrationId, lines, note) => (await api.post(`/branch/fitness/${registrationId}/collect`, { lines, note })).data;
+
+// Another term on an existing membership. The server works out when the new term starts —
+// when the old one ends, not when the button was pressed — so nothing here has to.
+export const renewFitness = async (registrationId, payload) => (await api.post(`/branch/fitness/${registrationId}/renew`, payload)).data;

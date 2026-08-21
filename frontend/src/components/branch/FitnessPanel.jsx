@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { StatTile } from "@/components/ui/stat-tile";
-import { listFitness, addFitness, updateFitness, setFitnessStatus, deleteFitness, collectFitnessPayment, listStoreItems } from "@/lib/api";
+import { listFitness, addFitness, updateFitness, setFitnessStatus, deleteFitness, collectFitnessPayment, renewFitness, listStoreItems } from "@/lib/api";
 
 /**
  * Branch Admin > Fitness — the gym's membership roll.
@@ -95,6 +95,7 @@ export const FitnessPanel = ({ branchId }) => {
   const [modeFilter, setModeFilter] = useState("all");
   const [editing, setEditing] = useState(null);   // a row, or {} for a new one
   const [collecting, setCollecting] = useState(null);
+  const [renewing, setRenewing] = useState(null); // the membership being sold another term
   const [viewing, setViewing] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
 
@@ -374,6 +375,21 @@ export const FitnessPanel = ({ branchId }) => {
                               <IndianRupee className="h-3.5 w-3.5" /> Collect
                             </button>
                           )}
+                          {/* Only once the term is nearly up. A renewal offered in the first
+                              week of a month is a button nobody presses, and one offered the
+                              day after it lapses is a conversation already missed. */}
+                          {r.renewal_due && (
+                            <button
+                              onClick={() => setRenewing(r)}
+                              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700 transition hover:bg-amber-100"
+                              title={typeof r.days_left === "number" && r.days_left < 0
+                                ? `Ran out ${Math.abs(r.days_left)} days ago — sell them another term`
+                                : `${r.days_left} days left — sell them another term`}
+                              data-testid={`fitness-renew-${r.id}`}
+                            >
+                              <RefreshCw className="h-3.5 w-3.5" /> Renew
+                            </button>
+                          )}
                           {/* Bringing somebody back is the move that needed finding, so it
                               carries a word rather than an icon — a bare glyph on a
                               discontinued row reads as "play" and nothing says it restores
@@ -433,6 +449,15 @@ export const FitnessPanel = ({ branchId }) => {
           onEdit={() => { setEditing(viewing); setViewing(null); }}
           onCollect={() => { setCollecting(viewing); setViewing(null); }}
           onStatus={(status) => { const m = viewing; setViewing(null); changeStatus(m, status); }}
+        />
+      )}
+
+      {renewing && (
+        <RenewMembershipDialog
+          member={renewing}
+          packages={packages}
+          onClose={() => setRenewing(null)}
+          onRenewed={load}
         />
       )}
 
@@ -822,6 +847,249 @@ const paymentPayload = (lines) => (lines || [])
 const lineMissingReference = (lines) => (lines || []).find(
   (l) => lineTotal(l) > 0 && COLLECT_REFERENCE_LABELS[l.mode] && !(l.reference || "").trim(),
 );
+
+/**
+ * Another term on a membership that is nearly up.
+ *
+ * Asks the two things a renewal is: which package they are going back on, and what they
+ * have handed over for it. Everything else about the member is already known and is not
+ * asked again — a renewal is not a second registration.
+ *
+ * When the new term starts is the server's to decide, not this dialog's: it runs on from
+ * the end of the current one, so a member renewing early keeps the days they paid for.
+ */
+const RenewMembershipDialog = ({ member, packages, onClose, onRenewed }) => {
+  const [pick, setPick] = useState(null);
+  const [months, setMonths] = useState(1);
+  const [lines, setLines] = useState([]);
+  const [saving, setSaving] = useState(false);
+
+  const setLine = (i, patch) => setLines((prev) => prev.map((l, n) => (n === i ? { ...l, ...patch } : l)));
+  const addLine = () => setLines((prev) => [...prev, prev.length === 0 ? { ...EMPTY_LINE } : { ...EMPTY_LINE, mode: "upi" }]);
+  const dropLine = (i) => setLines((prev) => prev.filter((_, n) => n !== i));
+
+  const price = pick ? packageTotal(pick) * months : 0;
+  const taking = linesTotal(lines);
+  const over = taking > price;
+
+  const submit = async () => {
+    if (!pick) { toast.error("Pick the package they are renewing on"); return; }
+    if (over) { toast.error(`That is ${rupees(taking)} against a ${rupees(price)} term`); return; }
+    const missingRef = lineMissingReference(lines);
+    if (missingRef) { toast.error(`Enter the ${COLLECT_REFERENCE_LABELS[missingRef.mode]}`); return; }
+    setSaving(true);
+    try {
+      const res = await renewFitness(member.id, {
+        package_id: pick.id,
+        package_name: pick.name,
+        package_sessions: packageSessions(pick) || null,
+        fee_amount: price,
+        months,
+        lines: paymentPayload(lines),
+      });
+      // The server's own sentence, so what the branch reads back is what was recorded.
+      toast.success(res?.message || "Membership renewed", { duration: 7000 });
+      onRenewed();
+      onClose();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Couldn't renew");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl" data-testid="fitness-renew-dialog">
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b bg-slate-50/60 p-5">
+          <div className="min-w-0">
+            <h3 className="text-base font-semibold text-slate-800">Renew {member.name}</h3>
+            <p className="mt-0.5 text-[11px] text-slate-500">
+              {member.package_name ? `${member.package_name} · ` : ""}
+              {member.due_date ? `runs out ${shortDate(member.due_date)}` : "no end date on the current term"}
+              {typeof member.days_left === "number"
+                ? member.days_left < 0
+                  ? ` · ${Math.abs(member.days_left)} days ago`
+                  : ` · ${member.days_left} days left`
+                : ""}
+            </p>
+          </div>
+          <button onClick={onClose} className="rounded-md p-1.5 text-slate-400 transition hover:bg-rose-50 hover:text-rose-600" aria-label="Close" data-testid="fitness-renew-close">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 space-y-4 overflow-y-auto p-5">
+          <div className="space-y-2">
+            <FieldLabel>Renewing On</FieldLabel>
+            {packages.length === 0 ? (
+              <p className="rounded-md bg-slate-50 px-2.5 py-2 text-[11px] text-slate-500">
+                No gym packages on the shelf yet. Add them in Services and Products → Fitness.
+              </p>
+            ) : (
+              <div className="grid gap-2 sm:grid-cols-3" data-testid="fitness-renew-packages">
+                {packages.map((item) => {
+                  const on = pick?.id === item.id;
+                  const amount = packageTotal(item);
+                  const sessions = packageSessions(item);
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setPick(on ? null : item)}
+                      className={`rounded-lg border p-3 text-left transition ${
+                        on
+                          ? "border-sky-600 bg-sky-600 text-white shadow-sm"
+                          : "border-sky-100 bg-sky-50/60 text-sky-800 hover:border-sky-300 hover:bg-sky-50"
+                      }`}
+                      title={item.name}
+                      data-testid={`fitness-renew-package-${item.id}`}
+                    >
+                      <span className="block truncate text-xs font-bold">{item.name}</span>
+                      <span className="mt-1 block text-lg font-extrabold leading-none">{rupees(amount)}</span>
+                      {sessions ? (
+                        <span className={`mt-1.5 block text-[11px] ${on ? "text-white/80" : "text-sky-700/70"}`}>
+                          {sessions} sessions
+                        </span>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* How many of that package. A gym term is sold by the month and members often
+              take several at once; multiplying here beats making them renew three times. */}
+          <div className="space-y-2">
+            <FieldLabel>Terms</FieldLabel>
+            <div className="flex flex-wrap gap-1.5">
+              {[1, 3, 6, 12].map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => setMonths(n)}
+                  className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${months === n ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+                  data-testid={`fitness-renew-months-${n}`}
+                >
+                  {n} {n === 1 ? "month" : "months"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <FieldLabel>Fee Collected</FieldLabel>
+            {lines.length === 0 ? (
+              <p className="rounded-md bg-slate-50 px-2.5 py-2 text-[11px] text-slate-500">
+                Nothing collected yet. A renewal can be recorded now and paid for later.
+              </p>
+            ) : (
+              lines.map((l, i) => (
+                <div key={i} className="rounded-lg border border-slate-200 p-3" data-testid={`fitness-renew-line-${i}`}>
+                  <div className="flex flex-wrap items-end gap-3">
+                    <div className="min-w-[150px] flex-1">
+                      <FieldLabel>Paid By</FieldLabel>
+                      <FormSelect value={l.mode} onChange={(v) => setLine(i, { mode: v, notes: {}, reference: "" })} testid={`fitness-renew-mode-${i}`}>
+                        {COLLECT_MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+                      </FormSelect>
+                    </div>
+                    <div className="min-w-[120px] flex-1">
+                      <FieldLabel>Amount</FieldLabel>
+                      <Input
+                        type="number"
+                        min="0"
+                        value={l.mode === "cash" && noteTotal(l) > 0 ? noteTotal(l) : l.amount}
+                        onChange={(e) => setLine(i, { amount: e.target.value })}
+                        readOnly={l.mode === "cash" && noteTotal(l) > 0}
+                        className={l.mode === "cash" && noteTotal(l) > 0 ? "bg-slate-50" : ""}
+                        data-testid={`fitness-renew-amount-${i}`}
+                      />
+                    </div>
+                    {COLLECT_REFERENCE_LABELS[l.mode] && (
+                      <div className="min-w-[160px] flex-1">
+                        <FieldLabel>{COLLECT_REFERENCE_LABELS[l.mode]}</FieldLabel>
+                        <Input value={l.reference} onChange={(e) => setLine(i, { reference: e.target.value })} data-testid={`fitness-renew-reference-${i}`} />
+                      </div>
+                    )}
+                    <button
+                      onClick={() => dropLine(i)}
+                      className="mb-1 rounded p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                      title="Remove this line"
+                      aria-label="Remove this line"
+                      data-testid={`fitness-renew-drop-${i}`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  {l.mode === "cash" && (
+                    <div className="mt-3 border-t border-slate-100 pt-3">
+                      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        Notes counted
+                        <span className="ml-1 font-normal normal-case text-slate-400">— leave blank to just type the amount</span>
+                      </p>
+                      <div className="grid grid-cols-4 gap-2 sm:grid-cols-8">
+                        {DENOMINATIONS.map((d) => (
+                          <div key={d}>
+                            <label className="mb-0.5 block text-center text-[11px] font-bold text-slate-500">₹{d}</label>
+                            <Input
+                              type="number"
+                              min="0"
+                              value={l.notes?.[d] ?? ""}
+                              onChange={(e) => setLine(i, { notes: { ...l.notes, [d]: e.target.value } })}
+                              className="h-9 px-1 text-center text-sm"
+                              data-testid={`fitness-renew-note-${i}-${d}`}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                      {noteTotal(l) > 0 && (
+                        <p className="mt-2 text-right text-[11px] text-slate-500">
+                          {DENOMINATIONS.filter((d) => Number(l.notes?.[d]) > 0).map((d) => `${l.notes[d]}×₹${d}`).join("  +  ")}
+                          {" = "}<b className="text-slate-700">{rupees(noteTotal(l))}</b>
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
+            <Button type="button" variant="outline" size="sm" onClick={addLine} data-testid="fitness-renew-add">
+              <Plus className="mr-1 h-3.5 w-3.5" />
+              {lines.length === 0 ? "Add Payment" : "Another payment mode"}
+            </Button>
+          </div>
+
+          {pick && (
+            <div className={`rounded-lg border p-3 ${over ? "border-rose-200 bg-rose-50" : "border-emerald-200 bg-emerald-50"}`} data-testid="fitness-renew-summary">
+              <div className="flex items-center justify-between text-sm">
+                <span className="font-semibold text-slate-600">This term</span>
+                <span className={`text-lg font-extrabold ${over ? "text-rose-700" : "text-emerald-700"}`}>{rupees(price)}</span>
+              </div>
+              <p className="mt-1 text-[11px] text-slate-600">
+                {over
+                  ? `Collecting ${rupees(taking)}, which is more than the term costs.`
+                  : taking >= price
+                    ? "Paid up front."
+                    : `${rupees(price - taking)} of it will be outstanding.`}
+                {" The new term runs on from "}
+                {member.due_date ? shortDate(member.due_date) : "today"}.
+              </p>
+            </div>
+          )}
+        </div>
+
+        <div className="flex shrink-0 justify-end gap-2 border-t bg-slate-50/60 px-5 py-3">
+          <Button variant="outline" size="sm" onClick={onClose} data-testid="fitness-renew-cancel">Cancel</Button>
+          <Button size="sm" className="bg-sky-600 hover:bg-sky-700" disabled={saving || !pick || over} onClick={submit} data-testid="fitness-renew-save">
+            {saving ? "Saving…" : "Renew"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const CollectPaymentDialog = ({ member, onClose, onCollected }) => {
   const outstanding = Math.max(0, Number(member.fee_amount || 0) - Number(member.fee_paid || 0));

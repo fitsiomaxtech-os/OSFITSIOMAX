@@ -15,7 +15,7 @@ should not have two answers in one OS.
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional, List
-from datetime import date
+from datetime import date, datetime, timedelta
 import uuid
 
 from database import v3_col
@@ -41,6 +41,10 @@ REFERENCE_MODES = ("upi", "card", "account_transfer")
 
 # What each mode is called when a payment is read back to whoever handed it over.
 PAYMENT_MODE_LABELS = {"cash": "Cash", "upi": "UPI", "card": "Card", "account_transfer": "Bank Transfer"}
+
+# What to call the number behind each of those, so a refusal names the thing it wants
+# rather than asking for a generic "reference" and leaving the desk to guess which.
+REFERENCE_LABELS = {"upi": "UPI ID", "card": "transaction ID", "account_transfer": "transaction ID"}
 
 GENDERS = ("female", "male", "other")
 
@@ -187,11 +191,36 @@ def _clean(payload: FitnessInput, *, check_paid: bool = True) -> dict:
     }
 
 
+def _as_date(value):
+    """A stored YYYY-MM-DD as a date, or None. Only the day matters: a membership taken out
+    in the morning and one taken out at closing run out on the same day."""
+    try:
+        return datetime.strptime(str(value or "")[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+# How close to the end a membership has to be before the branch is offered a renewal. A
+# week: near enough that the conversation is due, far enough that it is not being had in
+# the doorway on the last day.
+RENEWAL_WINDOW_DAYS = 7
+
+
 def _shape(row: dict) -> dict:
     out = {k: v for k, v in row.items() if k != "_id"}
     amount = _amount(out.get("fee_amount"))
     paid = _amount(out.get("fee_paid"))
     out["fee_due"] = round(max(0.0, amount - paid), 2)
+    # How much of the term is left, and whether that is little enough to be worth asking
+    # about. Worked out here rather than in the browser so the tab and anything else
+    # reading this row agree about when a renewal is due.
+    ends = _as_date(out.get("due_date"))
+    out["days_left"] = (ends - date.today()).days if ends else None
+    out["renewal_due"] = bool(
+        ends
+        and _status(out.get("status")) != STATUS_DISCONTINUED
+        and (ends - date.today()).days <= RENEWAL_WINDOW_DAYS
+    )
     # Fully paid only counts when there was something to pay. A membership recorded with no
     # fee at all is not "paid up", it is unpriced, and calling it paid would hide it from
     # the very list meant to catch it.
@@ -438,6 +467,118 @@ def _denomination_total(raw) -> tuple:
                     total += note * count
                 break
     return round(total, 2), clean
+
+
+def _month_after(start: date, months: int = 1) -> date:
+    """The same day, that many months on, clamping rather than spilling.
+
+    A term beginning on the 31st ends on the 30th of a thirty-day month, not on the 1st of
+    the one after -- which is a date nobody recognises as their own membership.
+    """
+    year = start.year + (start.month - 1 + months) // 12
+    month = (start.month - 1 + months) % 12 + 1
+    day = start.day
+    while day > 28:
+        try:
+            return date(year, month, day)
+        except ValueError:
+            day -= 1
+    return date(year, month, day)
+
+
+class FitnessRenewInput(BaseModel):
+    """A fresh term on an existing membership."""
+    package_id: Optional[str] = ""
+    package_name: Optional[str] = ""
+    package_sessions: Optional[int] = None
+    fee_amount: Optional[float] = 0
+    months: Optional[int] = 1
+    lines: Optional[List[PaymentLine]] = None
+
+
+@router.post("/branch/fitness/{registration_id}/renew")
+async def renew_fitness(
+    registration_id: str,
+    payload: FitnessRenewInput,
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+):
+    """Sell the same member another term.
+
+    The new term runs on from the end of the old one rather than from the day the button is
+    pressed. A member who renews a week early has paid for those days and should not lose
+    them; one who renews late does not get to backdate the gap -- so it is whichever of the
+    two is later.
+
+    What they owe accumulates rather than being replaced, and the payment taken now is
+    appended to the same list of lines the membership already carries. The balance answers
+    "is this member square with us", and resetting it every term would let an unpaid one
+    disappear behind a renewal.
+
+    Renewing puts them back on the roll: somebody who has just bought another month has not
+    left the gym, whatever the row said a minute ago.
+    """
+    row = await _row_or_404(registration_id, user)
+
+    charged = _amount(payload.fee_amount)
+    if charged <= 0:
+        raise HTTPException(status_code=400, detail="What does this term cost?")
+    months = max(1, int(payload.months or 1))
+
+    cleaned = []
+    total = 0.0
+    for line in payload.lines or []:
+        mode = (line.mode or "").strip().lower()
+        if mode not in PAYMENT_MODES:
+            raise HTTPException(status_code=400, detail=f"Unknown payment mode: {line.mode}")
+        note_total, counted = _denomination_total(line.denominations)
+        amount = note_total if (mode == "cash" and counted) else _amount(line.amount)
+        if amount <= 0:
+            continue
+        reference = (line.reference or "").strip()
+        if mode in REFERENCE_MODES and not reference:
+            raise HTTPException(status_code=400, detail=f"Enter the {REFERENCE_LABELS[mode]}")
+        cleaned.append({
+            "mode": mode,
+            "amount": amount,
+            "reference": reference if mode in REFERENCE_MODES else "",
+            "denominations": counted if mode == "cash" else {},
+        })
+        total += amount
+    total = round(total, 2)
+    if total > charged:
+        raise HTTPException(status_code=400, detail=f"That is {total:g} against a {charged:g} term")
+
+    today = date.today()
+    current_end = _as_date(row.get("due_date"))
+    term_start = max(current_end, today) if current_end else today
+    changes = {
+        "package_id": (payload.package_id or "").strip(),
+        "package_name": (payload.package_name or "").strip(),
+        "package_sessions": payload.package_sessions,
+        "due_date": _month_after(term_start, months).isoformat(),
+        "fee_amount": round(_amount(row.get("fee_amount")) + charged, 2),
+        "fee_paid": round(_amount(row.get("fee_paid")) + total, 2),
+        "status": STATUS_ACTIVE,
+        "updated_at": now_iso(),
+    }
+    entry = {
+        "id": str(uuid.uuid4()),
+        "amount": total,
+        "lines": cleaned,
+        "note": f"Renewed to {changes['due_date']}",
+        "collected_at": now_iso(),
+        "collected_by": user.full_name or user.email,
+    }
+    update = {"$set": changes}
+    if cleaned:
+        update["$push"] = {"payments": entry}
+    await v3_col("fitness_registrations").update_one({"id": registration_id}, update)
+
+    updated = await v3_col("fitness_registrations").find_one({"id": registration_id}, {"_id": 0})
+    shaped = _shape(updated)
+    summary = f"Renewed {row.get('name', 'the member')} to {changes['due_date']}"
+    summary += f". {shaped['fee_due']:g} still due" if shaped["fee_due"] > 0 else ". Paid up"
+    return {"message": summary, "registration": shaped}
 
 
 @router.post("/branch/fitness/{registration_id}/collect")
