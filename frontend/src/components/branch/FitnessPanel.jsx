@@ -790,6 +790,39 @@ const COLLECT_MODES = [
 ];
 const COLLECT_REFERENCE_LABELS = { upi: "UPI ID", card: "Transaction ID", account_transfer: "Transaction ID" };
 
+/** What one payment line comes to, and what a set of them adds up to.
+ *
+ * Counted notes settle a line rather than sitting beside it: two numbers that can disagree
+ * is one number nobody trusts, and the count is the one somebody actually looked at.
+ *
+ * At module scope now that two dialogs take money -- collecting a balance and renewing a
+ * term. Written twice they are two places for the note list or the settling rule to drift.
+ */
+const noteTotal = (l) => DENOMINATIONS.reduce((sum, d) => sum + d * (Number(l?.notes?.[d]) || 0), 0);
+const lineTotal = (l) => (l?.mode === "cash" && noteTotal(l) > 0 ? noteTotal(l) : Number(l?.amount) || 0);
+const linesTotal = (lines) => (lines || []).reduce((sum, l) => sum + lineTotal(l), 0);
+const EMPTY_LINE = { mode: "cash", amount: "", reference: "", notes: {} };
+
+/** The payment lines a dialog sends, in the shape the server settles from. */
+const paymentPayload = (lines) => (lines || [])
+  .filter((l) => lineTotal(l) > 0)
+  .map((l) => ({
+    mode: l.mode,
+    amount: lineTotal(l),
+    reference: l.reference || "",
+    // Only sent for cash, and only what was actually counted — an empty map would read as
+    // "counted nothing" rather than "did not count".
+    denominations: l.mode === "cash" && noteTotal(l) > 0
+      ? Object.fromEntries(DENOMINATIONS.filter((d) => Number(l.notes?.[d]) > 0).map((d) => [String(d), Number(l.notes[d])]))
+      : undefined,
+  }));
+
+/** The first line missing the number its mode is traced by, so the desk is told which one
+ *  is short before the round trip rather than after it. */
+const lineMissingReference = (lines) => (lines || []).find(
+  (l) => lineTotal(l) > 0 && COLLECT_REFERENCE_LABELS[l.mode] && !(l.reference || "").trim(),
+);
+
 const CollectPaymentDialog = ({ member, onClose, onCollected }) => {
   const outstanding = Math.max(0, Number(member.fee_amount || 0) - Number(member.fee_paid || 0));
   // Starts on one cash line, because most payments are one payment. A second mode is one
@@ -802,11 +835,7 @@ const CollectPaymentDialog = ({ member, onClose, onCollected }) => {
   const addLine = () => setLines((prev) => [...prev, { mode: "upi", amount: "", reference: "", notes: {} }]);
   const dropLine = (i) => setLines((prev) => (prev.length === 1 ? prev : prev.filter((_, n) => n !== i)));
 
-  // What one line comes to. Counted notes settle it: two numbers that can disagree is one
-  // number nobody trusts, and the count is the one somebody actually looked at.
-  const noteTotal = (l) => DENOMINATIONS.reduce((sum, d) => sum + d * (Number(l.notes?.[d]) || 0), 0);
-  const lineTotal = (l) => (l.mode === "cash" && noteTotal(l) > 0 ? noteTotal(l) : Number(l.amount) || 0);
-  const total = lines.reduce((sum, l) => sum + lineTotal(l), 0);
+  const total = linesTotal(lines);
   const over = total > outstanding;
   const remaining = Math.max(0, outstanding - total);
 
@@ -814,20 +843,8 @@ const CollectPaymentDialog = ({ member, onClose, onCollected }) => {
     if (total <= 0) { toast.error("Enter an amount to collect"); return; }
     if (over) { toast.error(`That is ${rupees(total)} against ${rupees(outstanding)} outstanding`); return; }
     setSaving(true);
-    const payload = lines
-      .filter((l) => lineTotal(l) > 0)
-      .map((l) => ({
-        mode: l.mode,
-        amount: lineTotal(l),
-        reference: l.reference || "",
-        // Only sent for cash, and only what was actually counted — an empty map would read
-        // as "counted nothing" rather than "did not count".
-        denominations: l.mode === "cash" && noteTotal(l) > 0
-          ? Object.fromEntries(DENOMINATIONS.filter((d) => Number(l.notes?.[d]) > 0).map((d) => [String(d), Number(l.notes[d])]))
-          : undefined,
-      }));
     try {
-      const res = await collectFitnessPayment(member.id, payload, note);
+      const res = await collectFitnessPayment(member.id, paymentPayload(lines), note);
       // The server's own sentence, so what the branch reads back is what was recorded
       // rather than a second version of it assembled here.
       toast.success(res?.message || "Payment collected", { duration: 7000 });
@@ -1155,8 +1172,8 @@ const FitnessDetailDialog = ({ member, onClose, onEdit, onCollect, onStatus }) =
 
         {/* Ending a membership is a decision about the person, so it is offered where the
             person is read rather than only as an icon on the row -- the same place the
-            Zumba record offers it. Collect stays: on a gym roll it is the everyday one,
-            and it is already up beside the balance it settles. */}
+            Zumba record offers it. Collect is not here: it sits on the balance it
+            settles, and a second copy down here was the same button twice. */}
         <div className="flex flex-wrap items-center justify-end gap-2 border-t p-4">
           <Button variant="outline" size="sm" onClick={onClose}>Close</Button>
           <Button variant="outline" size="sm" onClick={onEdit} data-testid="fitness-detail-edit">
@@ -1186,11 +1203,6 @@ const FitnessDetailDialog = ({ member, onClose, onEdit, onCollect, onStatus }) =
           ) : (
             <Button size="sm" variant="outline" onClick={() => onStatus("active")} data-testid="fitness-detail-restore">
               <PlayCircle className="mr-1 h-3.5 w-3.5" /> Back to training
-            </Button>
-          )}
-          {due > 0 && (
-            <Button size="sm" onClick={onCollect} className="bg-emerald-600 text-white hover:bg-emerald-700" data-testid="fitness-detail-collect">
-              <IndianRupee className="mr-1 h-3.5 w-3.5" /> Collect {rupees(due)}
             </Button>
           )}
         </div>
