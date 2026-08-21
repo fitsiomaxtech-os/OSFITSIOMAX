@@ -528,6 +528,56 @@ async def _course_priced_item_ids() -> set:
     return {r["id"] for r in rows}
 
 
+# The gym sells two things and no more: one trainer to yourself, or the room. Both run
+# twenty-six sessions a month and both are priced as the month, not per session.
+FITNESS_PACKAGES = (
+    {"name": "Personal Training", "price": 18000.0},
+    {"name": "Group Training", "price": 14000.0},
+)
+FITNESS_SESSIONS_PER_MONTH = 26
+
+
+async def ensure_fitness_packages() -> None:
+    """Put the gym's two packages on the shelf, and only those two.
+
+    Fitness is not a catalogue anybody composes -- it is Personal Training or Group
+    Training, at a standard monthly price, and a branch registering somebody picks one of
+    the two. Seeding them means the shelf is never empty on a fresh install and never
+    depends on somebody remembering the figures.
+
+    Created if missing and left alone if present, matched on the name: a price the Super
+    Admin has deliberately corrected is theirs to keep, and rewriting it on every restart
+    would make the form a suggestion box. The same price is written to both modes because
+    the gym is a room somebody comes to -- there is no online rate to be different.
+    """
+    for plan in FITNESS_PACKAGES:
+        existing = await v3_col("store_items").find_one(
+            {"item_type": "session", "category": "fitness", "name": plan["name"]},
+            {"_id": 0, "id": 1},
+        )
+        if existing:
+            continue
+        now = now_iso()
+        await v3_col("store_items").insert_one({
+            "id": str(uuid.uuid4()),
+            "item_type": "session",
+            "category": "fitness",
+            "name": plan["name"],
+            "description": f"{FITNESS_SESSIONS_PER_MONTH} sessions a month",
+            "image_url": None,
+            "price_online": plan["price"],
+            "price_offline": plan["price"],
+            "duration_minutes": 60,
+            "sessions_online": FITNESS_SESSIONS_PER_MONTH,
+            "sessions_offline": FITNESS_SESSIONS_PER_MONTH,
+            # The figure above is the month, not a rate to multiply out. Kept in step with
+            # PRICE_IS_TOTAL_CATEGORIES in routers/v3_store.py.
+            "price_is_total": True,
+            "created_at": now,
+            "updated_at": now,
+        })
+
+
 async def migrate_course_prices_to_totals() -> None:
     """Move course-priced packages from a per-session rate to the total they were typed as.
 
