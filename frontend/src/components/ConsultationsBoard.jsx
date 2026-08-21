@@ -3053,9 +3053,19 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               );
 
               const DietDetailCard = programmeDetail === "diet" ? (
-                <div className="mt-3 overflow-hidden rounded-xl border border-orange-200/80 bg-gradient-to-br from-orange-50 via-orange-50/60 to-white shadow-sm" data-testid="cons-diet-detail">
+                <div className="overflow-hidden rounded-xl border border-orange-200/80 bg-gradient-to-br from-orange-50 via-orange-50/60 to-white shadow-sm" data-testid="cons-diet-detail">
                   <div className="flex items-center justify-between gap-3 border-b border-orange-100 px-4 py-2.5">
-                    <div className="flex min-w-0 items-center gap-2">
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setProgrammeDetail(null)}
+                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-orange-700 transition hover:bg-orange-100"
+                        title="Back"
+                        aria-label="Back"
+                        data-testid="cons-diet-detail-back"
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </button>
                       <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-orange-500/10 text-orange-600">
                         <Salad className="h-4 w-4" />
                       </span>
@@ -3120,9 +3130,19 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               ) : null;
 
               const RehabDetailCard = programmeDetail === "rehab" ? (
-                <div className="mt-3 overflow-hidden rounded-xl border border-cyan-200/80 bg-gradient-to-br from-cyan-50 via-cyan-50/60 to-white shadow-sm" data-testid="cons-rehab-detail">
+                <div className="overflow-hidden rounded-xl border border-cyan-200/80 bg-gradient-to-br from-cyan-50 via-cyan-50/60 to-white shadow-sm" data-testid="cons-rehab-detail">
                   <div className="flex items-center justify-between gap-3 border-b border-cyan-100 px-4 py-2.5">
-                    <div className="flex min-w-0 items-center gap-2">
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setProgrammeDetail(null)}
+                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-cyan-700 transition hover:bg-cyan-100"
+                        title="Back"
+                        aria-label="Back"
+                        data-testid="cons-rehab-detail-back"
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </button>
                       <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-cyan-600/10 text-cyan-700">
                         <Activity className="h-4 w-4" />
                       </span>
@@ -3183,10 +3203,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     </div>
                   </div>
                 </div>
-              ) : null;
-
-              const ProgrammeDetails = (DietDetailCard || RehabDetailCard) ? (
-                <>{DietDetailCard}{RehabDetailCard}</>
               ) : null;
 
               // The buttons that open the two cards above. They replace the pair that used
@@ -3277,6 +3293,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               ) : null;
 
               const panel = (() => {
+                // A programme card takes the whole panel while it is open. Shown underneath
+                // the stage panel it was read as one more section of Fee Collected, with
+                // that stage's own figures still above it — two sets of money on screen at
+                // once, only one of which the card was talking about. Back returns.
+                if (DietDetailCard) return DietDetailCard;
+                if (RehabDetailCard) return RehabDetailCard;
+
                 // FIRST in this chain, deliberately. The Rehab tab is a cross-cutting view
                 // rather than a position in the pipeline: a patient is on it because their
                 // Rehab Fee is in, while their consultation_stage still says where they
@@ -3532,8 +3555,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             {RehabDetailButton}
                             {CancelButton}
                           </div>
-                          {ProgrammeDetails}
-                        </div>
+                          </div>
                       </div>
                     );
                   }
@@ -3702,7 +3724,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           {RehabDetailButton}
                           {CancelButton}
                         </div>
-                        {ProgrammeDetails}
                       </div>
                     </div>
                   );
