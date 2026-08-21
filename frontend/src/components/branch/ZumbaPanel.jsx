@@ -736,7 +736,7 @@ const ViewRegistrationModal = ({ row, masterNameOf, onEdit, onCollect, onClose, 
       data-testid="zumba-view-dialog"
     >
       <div className="flex max-h-[88vh] w-full max-w-2xl flex-col rounded-xl bg-white shadow-2xl">
-        <div className="flex items-start justify-between border-b p-5">
+        <div className="flex items-start justify-between gap-3 border-b bg-slate-50/60 p-5">
           <div className="min-w-0">
             <h3 className="flex flex-wrap items-center gap-2 text-base font-semibold text-slate-800">
               {row.name || "—"}
@@ -758,30 +758,70 @@ const ViewRegistrationModal = ({ row, masterNameOf, onEdit, onCollect, onClose, 
         <div className="flex-1 space-y-4 overflow-y-auto p-5">
           {/* What is outstanding, first and largest. A settled row says so rather than
               printing a zero, which reads as a figure nobody has filled in yet. */}
-          <div className={`rounded-lg border p-3 ${due > 0 ? "border-rose-200 bg-rose-50" : "border-emerald-200 bg-emerald-50"}`}>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
+          <div className={`rounded-xl border p-4 ${due > 0 ? "border-rose-200 bg-rose-50/70" : "border-emerald-200 bg-emerald-50/70"}`}>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Balance</p>
-                <p className={`text-xl font-extrabold ${due > 0 ? "text-rose-700" : "text-emerald-700"}`} data-testid="zumba-view-balance">
+                <p className={`mt-0.5 text-2xl font-extrabold leading-none ${due > 0 ? "text-rose-700" : "text-emerald-700"}`} data-testid="zumba-view-balance">
                   {due > 0 ? `${rupees(due)} due` : owed > 0 ? "Paid up" : "Nothing sold yet"}
                 </p>
               </div>
-              <div className="flex items-center gap-3">
-                <p className="text-right text-[11px] text-slate-600">
-                  Fee <b>{rupees(owed)}</b><br />
-                  Collected <b className="text-emerald-700">{rupees(paid)}</b>
-                </p>
-                {/* Offered from the balance rather than the footer, because it is the one
-                    thing to do about the figure beside it. Absent when nothing is owed,
-                    where there is nothing to collect. */}
-                {due > 0 && !ownedElsewhere && (
-                  <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={onCollect} data-testid="zumba-view-collect">
-                    Collect Due
-                  </Button>
-                )}
+              {/* Offered from the balance rather than the footer, because it is the one
+                  thing to do about the figure beside it. Absent when nothing is owed,
+                  where there is nothing to collect. */}
+              {due > 0 && !ownedElsewhere && (
+                <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={onCollect} data-testid="zumba-view-collect">
+                  <IndianRupee className="mr-1 h-3.5 w-3.5" /> Collect Due
+                </Button>
+              )}
+            </div>
+            {/* The three figures on one line, in the order they happen: what it cost, what
+                came in, what is left. Stacked in a corner they read as a footnote to the
+                balance rather than as the arithmetic behind it. */}
+            <div className="mt-3 grid grid-cols-3 gap-2 border-t border-white/70 pt-3 text-center">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Fee</p>
+                <p className="text-sm font-bold text-slate-700">{rupees(owed)}</p>
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Collected</p>
+                <p className="text-sm font-bold text-emerald-700">{rupees(paid)}</p>
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Due</p>
+                <p className={`text-sm font-bold ${due > 0 ? "text-rose-700" : "text-slate-400"}`}>{due > 0 ? rupees(due) : "—"}</p>
               </div>
             </div>
           </div>
+
+          {/* How far through the term they are. The two dates were readable a card away and
+              the classes left were not readable at all, which is the half of it somebody
+              opening this record before a renewal actually wants. */}
+          {row.finish_on && (
+            <div className="rounded-xl border border-slate-200 p-4" data-testid="zumba-view-term">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Term</p>
+                <p className="text-xs font-medium text-slate-600">
+                  {shortDate(row.joined_on || row.created_at)} <span className="text-slate-300">→</span> {shortDate(row.finish_on)}
+                </p>
+              </div>
+              {typeof row.classes_left === "number" && Number(row.package_sessions) > 0 && (
+                <>
+                  <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+                    <div
+                      className={`h-full rounded-full ${row.renewal_due ? "bg-amber-500" : "bg-emerald-500"}`}
+                      style={{ width: `${Math.min(100, Math.max(0, (row.classes_left / Number(row.package_sessions)) * 100))}%` }}
+                    />
+                  </div>
+                  <p className={`mt-1.5 text-[11px] ${row.renewal_due ? "font-semibold text-amber-600" : "text-slate-500"}`}>
+                    {row.classes_left === 0
+                      ? "The term has run out."
+                      : `${row.classes_left} of ${row.package_sessions} classes left${row.renewal_due ? " — due a renewal" : ""}.`}
+                  </p>
+                </>
+              )}
+            </div>
+          )}
 
           {ended && (
             <div className={`rounded-lg border p-3 text-xs ${status === "discontinued" ? "border-rose-200 bg-rose-50 text-rose-700" : "border-indigo-200 bg-indigo-50 text-indigo-700"}`} data-testid="zumba-view-status">
@@ -791,8 +831,10 @@ const ViewRegistrationModal = ({ row, masterNameOf, onEdit, onCollect, onClose, 
             </div>
           )}
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="rounded-lg border border-slate-200 p-3">
+          {/* items-start, so the shorter card ends where its last row does rather than
+              stretching to match the taller one and trailing empty space. */}
+          <div className="grid items-start gap-4 sm:grid-cols-2">
+            <div className="rounded-xl border border-slate-200 p-4">
               <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">Customer</p>
               <DetailRow label="Phone" value={row.phone} />
               <DetailRow label="Age" value={row.age} />
@@ -800,7 +842,7 @@ const ViewRegistrationModal = ({ row, masterNameOf, onEdit, onCollect, onClose, 
               <DetailRow label="Email" value={row.email} />
               <DetailRow label="Address" value={row.address} />
             </div>
-            <div className="rounded-lg border border-slate-200 p-3">
+            <div className="rounded-xl border border-slate-200 p-4">
               <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">Membership</p>
               <DetailRow label="Package" value={row.package_name} />
               <DetailRow label="Classes" value={row.package_sessions ? `${row.package_sessions} classes` : ""} />
@@ -814,19 +856,50 @@ const ViewRegistrationModal = ({ row, masterNameOf, onEdit, onCollect, onClose, 
             </div>
           </div>
 
-          {/* How the money came in, where the gym's dialog lists its collections. A Zumba
-              fee is taken once at the desk rather than through a collect flow, so this is
-              the mode and its reference and nothing more — and says so when it is empty
-              rather than leaving a card that looks unfinished. */}
-          <div className="rounded-lg border border-slate-200 p-3">
-            <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">Payment</p>
-            {row.payment_mode ? (
+          {/* Every payment this membership has taken, listed. "Split" on its own named the
+              fact that money arrived more than one way and then withheld which ways, which
+              is exactly what somebody opening this card is here to read — and after a
+              renewal or two there are several to read. */}
+          <div className="rounded-xl border border-slate-200 p-4">
+            <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Payment</p>
+              {paid > 0 ? <p className="text-sm font-bold text-emerald-700">{rupees(paid)} collected</p> : null}
+            </div>
+            {Array.isArray(row.payment_lines) && row.payment_lines.length > 0 ? (
+              <div className="divide-y divide-slate-100" data-testid="zumba-view-payment">
+                {row.payment_lines.map((l, i) => {
+                  const notes = Object.entries(l.denominations || {})
+                    .sort((a, b) => Number(b[0]) - Number(a[0]))
+                    .map(([d, n]) => `${n}×₹${d}`)
+                    .join("  +  ");
+                  return (
+                    <div key={i} className="flex flex-wrap items-baseline justify-between gap-2 py-2 first:pt-0 last:pb-0">
+                      <div className="flex min-w-0 items-baseline gap-2">
+                        <span className="shrink-0 rounded bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
+                          {PAYMENT_MODE_LABELS[l.mode] || l.mode}
+                        </span>
+                        {/* The trail under the mode: a UPI ID, a transaction number, or the
+                            notes that were counted out. Whichever it is, it is what a
+                            disputed payment gets traced by. */}
+                        {l.reference || notes ? (
+                          <span className="min-w-0 truncate text-[11px] text-slate-500" title={l.reference || notes}>
+                            {l.reference || notes}
+                          </span>
+                        ) : null}
+                      </div>
+                      <span className="shrink-0 text-xs font-semibold text-slate-700">{rupees(l.amount)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : row.payment_mode ? (
+              // A row paid for before payments were kept line by line: it knows the mode and
+              // the total and nothing about how they were split, so it says that much.
               <div className="flex flex-wrap items-baseline justify-between gap-2" data-testid="zumba-view-payment">
-                <span className="text-sm font-bold text-emerald-700">{rupees(paid)}</span>
-                <span className="text-[11px] text-slate-500">
+                <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
                   {PAYMENT_MODE_LABELS[row.payment_mode] || row.payment_mode}
-                  {row.payment_reference ? ` · ${row.payment_reference}` : ""}
                 </span>
+                <span className="text-[11px] text-slate-500">{row.payment_reference || "—"}</span>
               </div>
             ) : (
               <p className="py-3 text-center text-xs text-slate-400" data-testid="zumba-view-no-payment">
@@ -874,19 +947,24 @@ const ViewRegistrationModal = ({ row, masterNameOf, onEdit, onCollect, onClose, 
           )}
         </div>
 
-        <div className="flex flex-wrap items-center justify-end gap-2 border-t p-4">
+        {/* Close on its own at the left, the two that end a membership at the right, and
+            Edit between them. Four buttons in one row read as four equally likely things
+            to do, and two of them are not: Discontinue and Leave take somebody off the
+            roll, and sitting them next to Close invites the mis-click. */}
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-slate-50/60 p-4">
           <Button variant="outline" size="sm" onClick={onClose} data-testid="zumba-view-close-btn">Close</Button>
           {!ownedElsewhere && (
-            <>
+            <div className="flex flex-wrap items-center gap-2">
               <Button variant="outline" size="sm" onClick={onEdit} data-testid="zumba-view-edit">
                 <Pencil className="mr-1 h-3.5 w-3.5" /> Edit
               </Button>
               {ended ? (
-                <Button size="sm" variant="outline" disabled={saving} onClick={() => apply("active", "")} data-testid="zumba-status-restore">
+                <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" disabled={saving} onClick={() => apply("active", "")} data-testid="zumba-status-restore">
                   Put back on the roll
                 </Button>
               ) : (
                 <>
+                  <span className="mx-1 hidden h-5 w-px bg-slate-200 sm:block" aria-hidden="true" />
                   <Button size="sm" variant="outline" className="border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => setPending("discontinued")} data-testid="zumba-status-discontinue">
                     Discontinue
                   </Button>
@@ -895,7 +973,7 @@ const ViewRegistrationModal = ({ row, masterNameOf, onEdit, onCollect, onClose, 
                   </Button>
                 </>
               )}
-            </>
+            </div>
           )}
         </div>
       </div>
