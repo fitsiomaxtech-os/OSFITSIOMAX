@@ -326,10 +326,14 @@ export const FitnessPanel = ({ branchId }) => {
                       </td>
                       <td className="px-3 py-3">
                         <div className="flex items-center justify-end gap-1">
-                          {/* Only where there is something to take. On a paid-up membership
-                              the endpoint refuses anyway, and a button that always refuses
-                              is worse than no button. */}
-                          {due > 0 && r.status !== "discontinued" && (
+                          {/* Wherever there is a balance, whatever the membership's state.
+                              This was gated on the member not having discontinued, which hid
+                              the button on exactly the people a gym chases hardest: somebody
+                              who left owing money still owes it, and the endpoint takes the
+                              payment perfectly well — it refuses an unpriced or a paid-up
+                              membership, not a closed one. Nothing to take is the only
+                              reason to hide it. */}
+                          {due > 0 && (
                             <button
                               onClick={() => setCollecting(r)}
                               className="inline-flex shrink-0 items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700 transition hover:bg-emerald-100"
