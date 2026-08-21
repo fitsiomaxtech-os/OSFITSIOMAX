@@ -945,21 +945,24 @@ export const ZumbaPanel = ({ branchId }) => {
             </p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[68rem] text-left text-sm">
+              <table className="w-full min-w-[60rem] text-left text-sm">
                 <thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                  {/* Ten columns where there were twelve. Age and Registered moved under
+                      the name, which is where a person's own details belong and where the
+                      gym's table already keeps them; what is left is one fact per column,
+                      each wide enough to be read. */}
                   <tr>
                     <th className="w-[4%] px-3 py-2.5">S.No</th>
-                    <th className="w-[14%] px-3 py-2.5">Name</th>
-                    <th className="w-[9%] px-3 py-2.5">Phone</th>
-                    <th className="w-[4%] px-3 py-2.5">Age</th>
-                    <th className="w-[9%] px-3 py-2.5">Source</th>
-                    <th className="w-[10%] px-3 py-2.5">Package</th>
-                    <th className="w-[10%] px-3 py-2.5">Assignee</th>
-                    {showStage && <th className="w-[8%] px-3 py-2.5">Stage</th>}
-                    <th className="w-[8%] px-3 py-2.5">Fee</th>
-                    <th className="w-[10%] px-3 py-2.5">Mode of Payment</th>
-                    <th className="w-[7%] px-3 py-2.5">Registered</th>
-                    <th className="w-[7%] px-3 py-2.5 text-right">Actions</th>
+                    <th className="w-[19%] px-3 py-2.5">Student</th>
+                    <th className="w-[11%] px-3 py-2.5">Phone</th>
+                    <th className="w-[10%] px-3 py-2.5">Source</th>
+                    <th className="w-[14%] px-3 py-2.5">Package</th>
+                    <th className="w-[12%] px-3 py-2.5">Class</th>
+                    {showStage && <th className="w-[9%] px-3 py-2.5">Stage</th>}
+                    <th className="w-[10%] px-3 py-2.5">Fee</th>
+                    <th className="w-[10%] px-3 py-2.5">Paid By</th>
+                    <th className="w-[9%] px-3 py-2.5">Status</th>
+                    <th className="w-[10%] px-3 py-2.5 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -972,20 +975,28 @@ export const ZumbaPanel = ({ branchId }) => {
                     return (
                       <tr
                         key={r.id}
-                        className={`align-middle ${gaps.length > 0 ? "bg-amber-50/50 hover:bg-amber-50" : "hover:bg-slate-50/60"}`}
+                        onClick={() => setViewing(r)}
+                        className={`cursor-pointer align-middle ${gaps.length > 0 ? "bg-amber-50/50 hover:bg-amber-50" : "hover:bg-slate-50/60"}`}
                         data-testid={`zumba-row-${r.id}`}
                       >
                         <td className="px-3 py-3 text-xs text-slate-400">{i + 1}</td>
                         <td className="px-3 py-3">
                           <p className="truncate font-semibold text-slate-800" title={r.name}>{r.name || "—"}</p>
-                          {r.address ? <p className="truncate text-[11px] text-slate-500" title={r.address}>{r.address}</p> : null}
+                          {/* Age, gender and the day they joined read as one line about the
+                              person rather than as three columns of one value each. The
+                              address goes with them into the record, where there is room to
+                              read it. */}
+                          <p className="truncate text-[11px] text-slate-400">
+                            {[r.age ? `${r.age}` : null, r.gender || null].filter(Boolean).join(" · ")}
+                            {(r.age || r.gender) ? " · " : ""}Joined {shortDate(r.created_at)}
+                          </p>
                           {/* Names what is missing rather than saying "incomplete": the
                               branch admin opens this row to do one specific thing, and the
                               badge may as well say which. */}
                           {gaps.length > 0 ? (
                             <button
                               type="button"
-                              onClick={() => (r.origin === "consultation" ? acceptAndEdit(r) : openForm(r))}
+                              onClick={(e) => { e.stopPropagation(); return r.origin === "consultation" ? acceptAndEdit(r) : openForm(r); }}
                               className="mt-1 inline-flex items-center gap-1 rounded bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800 ring-1 ring-amber-300 transition hover:bg-amber-200"
                               title={r.origin === "consultation"
                                 ? `Take this referral onto the branch's books and fill in the ${gaps.join(" and ")}`
@@ -997,7 +1008,6 @@ export const ZumbaPanel = ({ branchId }) => {
                           ) : null}
                         </td>
                         <td className="px-3 py-3 text-xs text-slate-600">{r.phone || "—"}</td>
-                        <td className="px-3 py-3 text-xs text-slate-600">{r.age || "—"}</td>
                         <td className="px-3 py-3">
                           {/* A referral prints the master's name, because "Master" on its
                               own is the half of the answer nobody asks for. */}
@@ -1020,10 +1030,13 @@ export const ZumbaPanel = ({ branchId }) => {
                             Only what is set here reaches a master's own board. */}
                         <td className="px-3 py-3">
                           {r.assigned_master_name ? (
-                            <span className="inline-block max-w-full truncate rounded bg-pink-50 px-2 py-0.5 text-[10px] font-semibold text-pink-700" title={r.assigned_master_name}>
+                            <span className="inline-block max-w-full truncate rounded bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700" title={r.assigned_master_name}>
                               {r.assigned_master_name}
                             </span>
                           ) : <span className="text-xs text-slate-300">—</span>}
+                          {/* The hour under the master, because "whose class" and "which
+                              class" are the same question asked twice otherwise. */}
+                          {r.time_slot ? <p className="mt-0.5 truncate text-[10px] text-slate-400">{r.time_slot}</p> : null}
                         </td>
                         {showStage && (
                           <td className="px-3 py-3">
@@ -1037,11 +1050,17 @@ export const ZumbaPanel = ({ branchId }) => {
                             </span>
                           </td>
                         )}
-                        <td className="px-3 py-3 text-xs">
-                          <span className={paid > 0 ? "font-semibold text-emerald-700" : "text-slate-400"}>{rupees(paid)}</span>
-                          {/* Shown only when something is actually outstanding — a fully
-                              paid row saying "0 due" is noise on every line. */}
-                          {due > 0 ? <span className="ml-1 text-[10px] text-amber-600">{rupees(due)} due</span> : null}
+                        {/* What the membership costs, then what is left of it — the same
+                            shape the gym's table uses, so the branch reads one pattern
+                            across both. The balance is said outright rather than left to be
+                            worked out from two figures, and a settled row says so. */}
+                        <td className="px-3 py-3">
+                          <p className="text-xs font-semibold text-slate-800">{rupees(r.fee_amount)}</p>
+                          {due > 0
+                            ? <p className="text-[11px] font-semibold text-rose-600">{rupees(due)} due</p>
+                            : Number(r.fee_amount || 0) > 0
+                              ? <p className="text-[11px] text-emerald-600">Paid up</p>
+                              : <p className="text-[11px] text-slate-400">Nothing sold</p>}
                         </td>
                         {/* Beside the figure it describes rather than under it, so a column
                             of modes can be read down. The reference sits below the mode:
@@ -1065,8 +1084,20 @@ export const ZumbaPanel = ({ branchId }) => {
                             </>
                           ) : <span className="text-xs text-slate-300">—</span>}
                         </td>
-                        <td className="px-3 py-3 text-xs text-slate-500">{shortDate(r.created_at)}</td>
-                        <td className="px-3 py-3 text-right">
+                        {/* Whether they are still coming, in the words the record uses. */}
+                        <td className="px-3 py-3">
+                          {(() => {
+                            const chip = STATUS_CHIP[r.status || "active"] || STATUS_CHIP.active;
+                            return (
+                              <span className={`inline-flex rounded-[5px] border px-2 py-0.5 text-[10px] font-bold ${chip.classes}`} data-testid={`zumba-row-status-${r.id}`}>
+                                {chip.label}
+                              </span>
+                            );
+                          })()}
+                        </td>
+                        {/* The actions cell swallows the click: pressing Edit or Delete
+                            should not also open the record behind the dialog it opened. */}
+                        <td className="px-3 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                           {/* A referral is a decision recorded on the consultation, read
                               live from the lead rather than copied here. Editing it would
                               only put this tab out of step with the consultation that owns
