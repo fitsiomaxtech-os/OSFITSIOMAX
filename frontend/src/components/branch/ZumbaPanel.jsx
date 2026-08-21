@@ -241,23 +241,27 @@ const DetailRow = ({ label, value }) => (
   </div>
 );
 
+const STATUS_CHIP = {
+  active: { label: "On the roll", classes: "border-emerald-200 bg-emerald-50 text-emerald-700" },
+  discontinued: { label: "Discontinued", classes: "border-rose-200 bg-rose-50 text-rose-700" },
+  leave: { label: "On leave", classes: "border-indigo-200 bg-indigo-50 text-indigo-700" },
+};
+
 /**
- * One registration, read rather than edited, and the two things that end it.
+ * Everything on one registration, read rather than edited, and the two things that end it.
  *
- * Discontinue and Leave both ask why before they will save. The counts on the cards are
- * only worth having if they can be read back as reasons -- "six discontinued" is a number,
- * "six discontinued, four of them over the class time" is something a branch can act on.
- *
- * The two are kept apart because they are not the same event: Leave is a student expected
- * back, Discontinue is one who is not. A row already ended offers the way back instead,
- * which needs no reason -- returning to class is the normal state resuming.
+ * Shaped like the gym's membership dialog next door, because they answer the same question
+ * about the same kind of person and reading them differently for no reason is a cost paid
+ * by whoever works both tabs. What is owed leads, since it is the thing a desk opens a row
+ * to find out; who they are and what they bought sit under it, side by side.
  */
-const ViewRegistrationModal = ({ row, masterNameOf, onClose, onSaved }) => {
+const ViewRegistrationModal = ({ row, masterNameOf, onEdit, onClose, onSaved }) => {
   const [pending, setPending] = useState(null); // "discontinued" | "leave" | null
   const [remarks, setRemarks] = useState("");
   const [saving, setSaving] = useState(false);
   const status = row.status || "active";
   const ended = status === "discontinued" || status === "leave";
+  const chip = STATUS_CHIP[status] || STATUS_CHIP.active;
   // A consultation's referral is not a row of this collection -- it is read live off the
   // lead that owns it. Ending it here would ask the server to change a record it does not
   // hold, so the popup reads it and says where the decision actually lives.
@@ -281,126 +285,166 @@ const ViewRegistrationModal = ({ row, masterNameOf, onClose, onSaved }) => {
     }
   };
 
-  const due = Number(row.fee_amount || 0) - Number(row.fee_paid || 0);
+  const owed = Number(row.fee_amount || 0);
+  const paid = Number(row.fee_paid || 0);
+  const due = owed - paid;
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       data-testid="zumba-view-dialog"
     >
-      <div className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-        {/* The same band every Zumba dialog wears — the calendar and Refer Customer on the
-            master's board carry it too, so a popup is recognisably part of this tab before
-            a word of it is read. */}
-        <div className="flex shrink-0 items-start justify-between gap-3 bg-gradient-to-r from-violet-500 to-fuchsia-600 px-5 py-3 text-white">
+      <div className="flex max-h-[88vh] w-full max-w-2xl flex-col rounded-xl bg-white shadow-2xl">
+        <div className="flex items-start justify-between border-b p-5">
           <div className="min-w-0">
-            <p className="truncate text-base font-semibold" title={row.name || ""}>{row.name || "—"}</p>
-            <p className="text-[11px] text-white/80">Registered {shortDate(row.created_at)}</p>
+            <h3 className="flex flex-wrap items-center gap-2 text-base font-semibold text-slate-800">
+              {row.name || "—"}
+              <span className={`inline-flex rounded-[5px] border px-2 py-0.5 text-[10px] font-bold ${chip.classes}`} data-testid="zumba-view-status-chip">
+                {chip.label}
+              </span>
+            </h3>
+            {/* The three that identify somebody at a glance, on one line — the same three
+                the gym's dialog leads with, and the reason neither needs a photo. */}
+            <p className="mt-0.5 text-[11px] text-slate-500">
+              {row.phone || "No phone"}{row.age ? ` · ${row.age}` : ""}{row.gender ? ` · ${row.gender}` : ""}
+            </p>
           </div>
-          <button onClick={onClose} className="shrink-0 rounded-full p-1.5 text-white/80 hover:bg-white/20" aria-label="Close" data-testid="zumba-view-close">
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600" aria-label="Close" data-testid="zumba-view-close">
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-5">
-        {ended && (
-          <div className={`mb-3 rounded-lg px-3 py-2 text-xs ${status === "discontinued" ? "bg-rose-50 text-rose-700" : "bg-indigo-50 text-indigo-700"}`} data-testid="zumba-view-status">
-            <p className="font-bold">{STATUS_LABELS[status]}</p>
-            {row.status_remarks ? <p className="mt-0.5">{row.status_remarks}</p> : null}
-            {row.status_by ? <p className="mt-0.5 opacity-70">{row.status_by} · {shortDate(row.status_at)}</p> : null}
+        <div className="flex-1 space-y-4 overflow-y-auto p-5">
+          {/* What is outstanding, first and largest. A settled row says so rather than
+              printing a zero, which reads as a figure nobody has filled in yet. */}
+          <div className={`rounded-lg border p-3 ${due > 0 ? "border-rose-200 bg-rose-50" : "border-emerald-200 bg-emerald-50"}`}>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Balance</p>
+                <p className={`text-xl font-extrabold ${due > 0 ? "text-rose-700" : "text-emerald-700"}`} data-testid="zumba-view-balance">
+                  {due > 0 ? `${rupees(due)} due` : owed > 0 ? "Paid up" : "Nothing sold yet"}
+                </p>
+              </div>
+              <p className="text-right text-[11px] text-slate-600">
+                Fee <b>{rupees(owed)}</b><br />
+                Collected <b className="text-emerald-700">{rupees(paid)}</b>
+              </p>
+            </div>
           </div>
-        )}
 
-        {/* Two columns, split the way the form that filled them in is split: who the
-            person is on the left, what they were sold on the right. On a phone they stack
-            in that same order, which is the order they are asked in. */}
-        <div className="grid gap-x-8 gap-y-4 sm:grid-cols-2">
-          <div>
-            <p className="mb-1 border-b border-slate-100 pb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">Basic Details</p>
-            <div className="space-y-0.5">
+          {ended && (
+            <div className={`rounded-lg border p-3 text-xs ${status === "discontinued" ? "border-rose-200 bg-rose-50 text-rose-700" : "border-indigo-200 bg-indigo-50 text-indigo-700"}`} data-testid="zumba-view-status">
+              <p className="font-bold">{STATUS_LABELS[status]}</p>
+              {row.status_remarks ? <p className="mt-0.5">{row.status_remarks}</p> : null}
+              {row.status_by ? <p className="mt-0.5 opacity-70">{row.status_by} · {shortDate(row.status_at)}</p> : null}
+            </div>
+          )}
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="rounded-lg border border-slate-200 p-3">
+              <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">Student</p>
               <DetailRow label="Phone" value={row.phone} />
-              <DetailRow label="Email" value={row.email} />
               <DetailRow label="Age" value={row.age} />
               <DetailRow label="Gender" value={(GENDERS.find((g) => g.key === row.gender) || {}).label} />
+              <DetailRow label="Email" value={row.email} />
               <DetailRow label="Address" value={row.address} />
             </div>
-          </div>
-          <div>
-            <p className="mb-1 border-b border-slate-100 pb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">Course Details</p>
-            <div className="space-y-0.5">
-              <DetailRow label="Source" value={sourceDetail(row)} />
-              <DetailRow label="Class" value={masterNameOf(row.assigned_master_id)} />
-              <DetailRow label="Time" value={row.time_slot} />
+            <div className="rounded-lg border border-slate-200 p-3">
+              <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">Membership</p>
               <DetailRow label="Package" value={row.package_name} />
-              <DetailRow label="Stage" value={row.stage} />
-              <DetailRow
-                label="Fee"
-                value={`${rupees(row.fee_paid)} paid${due > 0 ? ` · ${rupees(due)} due` : row.fee_amount ? " · settled" : ""}`}
-              />
+              <DetailRow label="Classes" value={row.package_sessions ? `${row.package_sessions} classes` : ""} />
+              <DetailRow label="Time" value={row.time_slot} />
+              <DetailRow label="Class" value={masterNameOf(row.assigned_master_id)} />
+              <DetailRow label="Source" value={sourceDetail(row)} />
+              <DetailRow label="Joined" value={shortDate(row.created_at)} />
             </div>
           </div>
-        </div>
 
-        {/* Asked before it is saved, not after: the reason is the point of recording it.
-            Inside the body rather than on the rail below, because it is something to read
-            and answer, not a button to press. */}
-        {pending ? (
-          <div className="mt-4 space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
-            <label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-              Why are they {pending === "discontinued" ? "discontinuing" : "taking leave"}? *
-            </label>
-            <textarea
-              rows={3}
-              autoFocus
-              value={remarks}
-              onChange={(e) => setRemarks(e.target.value)}
-              placeholder={pending === "discontinued" ? "Moved away, too expensive, unhappy with the timing…" : "Travelling for a month, injury, exams…"}
-              className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400"
-              data-testid="zumba-status-remarks"
-            />
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" size="sm" onClick={() => { setPending(null); setRemarks(""); }} data-testid="zumba-status-cancel">Cancel</Button>
-              <Button
-                size="sm"
-                className={pending === "discontinued" ? "bg-rose-600 hover:bg-rose-700" : "bg-indigo-600 hover:bg-indigo-700"}
-                disabled={saving || !remarks.trim()}
-                onClick={() => apply(pending, remarks.trim())}
-                data-testid="zumba-status-confirm"
-              >
-                {saving ? "Saving…" : pending === "discontinued" ? "Confirm Discontinue" : "Confirm Leave"}
-              </Button>
-            </div>
-          </div>
-        ) : ownedElsewhere ? (
-          <p className="mt-4 rounded-lg bg-sky-50 px-3 py-2 text-[11px] font-medium text-sky-700" data-testid="zumba-view-owned-elsewhere">
-            Referred on the consultation, which owns this record — discontinuing or ending it is done there, by un-ticking Zumba on the lead.
-          </p>
-        ) : null}
-        </div>
-
-        {/* The rail the rest of the OS puts its actions on: pinned under the body so it
-            stays put while the record scrolls, and quiet enough that the two ways to end a
-            membership do not read as the point of opening the record. Absent entirely while
-            the reason is being asked, so there is one set of buttons on screen and not two. */}
-        {!pending && !ownedElsewhere && (
-          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/40 px-5 py-3">
-            {ended ? (
-              <Button size="sm" variant="outline" disabled={saving} onClick={() => apply("active", "")} data-testid="zumba-status-restore">
-                Put back on the roll
-              </Button>
+          {/* How the money came in, where the gym's dialog lists its collections. A Zumba
+              fee is taken once at the desk rather than through a collect flow, so this is
+              the mode and its reference and nothing more — and says so when it is empty
+              rather than leaving a card that looks unfinished. */}
+          <div className="rounded-lg border border-slate-200 p-3">
+            <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">Payment</p>
+            {row.payment_mode ? (
+              <div className="flex flex-wrap items-baseline justify-between gap-2" data-testid="zumba-view-payment">
+                <span className="text-sm font-bold text-emerald-700">{rupees(paid)}</span>
+                <span className="text-[11px] text-slate-500">
+                  {PAYMENT_MODE_LABELS[row.payment_mode] || row.payment_mode}
+                  {row.payment_reference ? ` · ${row.payment_reference}` : ""}
+                </span>
+              </div>
             ) : (
-              <>
-                <Button size="sm" variant="outline" className="border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => setPending("discontinued")} data-testid="zumba-status-discontinue">
-                  Discontinue
-                </Button>
-                <Button size="sm" variant="outline" className="border-indigo-200 text-indigo-700 hover:bg-indigo-50" onClick={() => setPending("leave")} data-testid="zumba-status-leave">
-                  Leave
-                </Button>
-              </>
+              <p className="py-3 text-center text-xs text-slate-400" data-testid="zumba-view-no-payment">
+                {paid > 0
+                  ? "Collected without a mode recorded — the figure above was set on the registration directly."
+                  : "Nothing collected yet."}
+              </p>
             )}
           </div>
-        )}
+
+          {/* Asked before it is saved, not after: the reason is the point of recording it. */}
+          {pending ? (
+            <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                Why are they {pending === "discontinued" ? "discontinuing" : "taking leave"}? *
+              </label>
+              <textarea
+                rows={3}
+                autoFocus
+                value={remarks}
+                onChange={(e) => setRemarks(e.target.value)}
+                placeholder={pending === "discontinued" ? "Moved away, too expensive, unhappy with the timing…" : "Travelling for a month, injury, exams…"}
+                className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400"
+                data-testid="zumba-status-remarks"
+              />
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" size="sm" onClick={() => { setPending(null); setRemarks(""); }} data-testid="zumba-status-cancel">Cancel</Button>
+                <Button
+                  size="sm"
+                  className={pending === "discontinued" ? "bg-rose-600 hover:bg-rose-700" : "bg-indigo-600 hover:bg-indigo-700"}
+                  disabled={saving || !remarks.trim()}
+                  onClick={() => apply(pending, remarks.trim())}
+                  data-testid="zumba-status-confirm"
+                >
+                  {saving ? "Saving…" : pending === "discontinued" ? "Confirm Discontinue" : "Confirm Leave"}
+                </Button>
+              </div>
+            </div>
+          ) : null}
+
+          {ownedElsewhere && (
+            <p className="rounded-lg bg-sky-50 px-3 py-2 text-[11px] font-medium text-sky-700" data-testid="zumba-view-owned-elsewhere">
+              Referred on the consultation, which owns this record — discontinuing or ending it is done there, by un-ticking Zumba on the lead.
+            </p>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t p-4">
+          <Button variant="outline" size="sm" onClick={onClose} data-testid="zumba-view-close-btn">Close</Button>
+          {!ownedElsewhere && (
+            <>
+              <Button variant="outline" size="sm" onClick={onEdit} data-testid="zumba-view-edit">
+                <Pencil className="mr-1 h-3.5 w-3.5" /> Edit
+              </Button>
+              {ended ? (
+                <Button size="sm" variant="outline" disabled={saving} onClick={() => apply("active", "")} data-testid="zumba-status-restore">
+                  Put back on the roll
+                </Button>
+              ) : (
+                <>
+                  <Button size="sm" variant="outline" className="border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => setPending("discontinued")} data-testid="zumba-status-discontinue">
+                    Discontinue
+                  </Button>
+                  <Button size="sm" variant="outline" className="border-indigo-200 text-indigo-700 hover:bg-indigo-50" onClick={() => setPending("leave")} data-testid="zumba-status-leave">
+                    Leave
+                  </Button>
+                </>
+              )}
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -1378,6 +1422,7 @@ export const ZumbaPanel = ({ branchId }) => {
         <ViewRegistrationModal
           row={viewing}
           masterNameOf={(id) => (zumbaMasters.find((m) => m.id === id) || {}).name || ""}
+          onEdit={() => { const r = viewing; setViewing(null); openForm(r); }}
           onClose={() => setViewing(null)}
           onSaved={load}
         />
