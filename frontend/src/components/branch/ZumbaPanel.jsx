@@ -1316,7 +1316,7 @@ export const ZumbaPanel = ({ branchId }) => {
                     <th className="w-[8%] px-3 py-2.5">Finish</th>
                     <th className="w-[10%] px-3 py-2.5">Class</th>
                     {showStage && <th className="w-[8%] px-3 py-2.5">Stage</th>}
-                    <th className="w-[8%] px-3 py-2.5">Fee</th>
+                    <th className="w-[8%] px-3 py-2.5">Collected</th>
                     <th className="w-[10%] px-3 py-2.5">Paid By</th>
                     <th className="w-[8%] px-3 py-2.5">Status</th>
                     <th className="w-[7%] px-3 py-2.5 text-right">Actions</th>
@@ -1424,15 +1424,13 @@ export const ZumbaPanel = ({ branchId }) => {
                             </span>
                           </td>
                         )}
-                        {/* What the membership costs, what has come in against it, and
-                            what is left — the same shape the gym's table uses, so the branch
-                            reads one pattern across both. All three are said outright: a
-                            row that printed the fee and the balance left the figure between
-                            them, which is the one the drawer is reconciled against, to be
-                            worked out in somebody's head. */}
+                        {/* What has come in, and what is still to. The plan's price is not
+                            here: it is the sum of the two and is already named by the
+                            package a column over, so printing it made a third line the
+                            column had no room for and answered nothing the other two did
+                            not. The record still shows all three. */}
                         <td className="px-3 py-3">
-                          <p className="text-xs font-semibold text-slate-800">{rupees(r.fee_amount)}</p>
-                          {paid > 0 ? <p className="text-[11px] text-emerald-700">{rupees(paid)} collected</p> : null}
+                          <p className="text-xs font-semibold text-emerald-700">{rupees(paid)}</p>
                           {due > 0
                             ? <p className="text-[11px] font-semibold text-rose-600">{rupees(due)} due</p>
                             : Number(r.fee_amount || 0) > 0
