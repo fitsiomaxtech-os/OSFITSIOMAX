@@ -1,0 +1,355 @@
+"""Fitness (gym) memberships, per branch — Branch Admin > Fitness.
+
+The gym's own roll: who is a member, what they bought off the Fitness shelf, what they
+have paid, and whether they are currently training, on leave, or gone.
+
+Modelled on the Zumba desk next to it, and deliberately not folded into it. Zumba carries
+a referral pipeline, masters who own a class roll, and a revenue share; the gym has none
+of those — it has memberships that run out and need renewing. Sharing one collection would
+mean every Zumba query filtering out gym rows and every gym query filtering out students,
+and the first feature either one grew would have to be excluded from the other by hand.
+
+What it does share is the branch scoping, because that rule is about who may read what and
+should not have two answers in one OS.
+"""
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
+from typing import Optional, List
+from datetime import date
+import uuid
+
+from database import v3_col
+from utils import now_iso
+from deps import v3_require_roles, is_branch_admin_role
+from schemas.v3 import V3UserOut
+
+router = APIRouter(prefix="/api/v3")
+
+
+# Where a member stands with the gym. "leave" is a pause, not an ending: the membership is
+# still theirs and they are expected back, which is why it is counted apart from both the
+# people training now and the people who have gone.
+STATUS_ACTIVE = "active"
+STATUS_LEAVE = "leave"
+STATUS_DISCONTINUED = "discontinued"
+STATUSES = (STATUS_ACTIVE, STATUS_LEAVE, STATUS_DISCONTINUED)
+
+PAYMENT_MODES = ("cash", "upi", "card", "account_transfer")
+# A cash payment has nothing to reference. The other three all produce a number worth
+# keeping, which is what the reference field holds.
+REFERENCE_MODES = ("upi", "card", "account_transfer")
+
+GENDERS = ("female", "male", "other")
+
+
+def _status(value) -> str:
+    v = (value or "").strip().lower()
+    return v if v in STATUSES else STATUS_ACTIVE
+
+
+def _amount(value) -> float:
+    """A money field as a number, never None and never negative.
+
+    A blank box and a zero mean the same thing here — nothing collected — and letting one
+    of them through as None would make every comparison against it fail silently.
+    """
+    try:
+        n = float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    return max(0.0, round(n, 2))
+
+
+def _age(value) -> Optional[int]:
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return None
+    return n if 0 < n < 120 else None
+
+
+def _own_branch_only(user: V3UserOut) -> bool:
+    """Everyone but Super Admin reads one branch: their own.
+
+    Same rule as the Zumba desk and the finance endpoints — a Branch Admin runs one gym.
+    """
+    return user.role != "super_admin" and is_branch_admin_role(user.role)
+
+
+def _scoped_branch(user: V3UserOut, branch_id: Optional[str]) -> Optional[str]:
+    if _own_branch_only(user):
+        return user.branch_id
+    return branch_id
+
+
+async def _write_branch(user: V3UserOut, branch_id: Optional[str]) -> Optional[str]:
+    """The branch a new membership is filed against."""
+    target = _scoped_branch(user, branch_id)
+    if not target:
+        return None
+    exists = await v3_col("branches").find_one({"id": target}, {"_id": 0, "id": 1})
+    if not exists:
+        # A stale id from a form left open writes a row nobody's board reads. Better to say
+        # so than to file it somewhere invisible.
+        raise HTTPException(status_code=400, detail="That branch no longer exists")
+    return target
+
+
+class FitnessInput(BaseModel):
+    name: str
+    phone: Optional[str] = ""
+    age: Optional[int] = None
+    gender: Optional[str] = ""
+    email: Optional[str] = ""
+    address: Optional[str] = ""
+    # The membership bought off Services and Products > Fitness. The package's own name and
+    # price are copied onto the row rather than looked up through the id, so renaming or
+    # repricing the shelf cannot rewrite what this member was actually sold.
+    package_id: Optional[str] = ""
+    package_name: Optional[str] = ""
+    package_mode: Optional[str] = ""
+    package_sessions: Optional[int] = None
+    fee_amount: Optional[float] = 0
+    fee_paid: Optional[float] = 0
+    # Only meaningful once something has been collected, and cleared when nothing has, so a
+    # mode can never sit against a membership that has paid zero.
+    payment_mode: Optional[str] = ""
+    payment_reference: Optional[str] = ""
+    joined_date: Optional[str] = ""      # YYYY-MM-DD
+    # When the next payment is owed. A gym is sold by the month, so "who has not paid this
+    # month" is a question about this date rather than about the balance alone — a member
+    # who owes nothing until next month is not in arrears today.
+    due_date: Optional[str] = ""         # YYYY-MM-DD
+    status: Optional[str] = STATUS_ACTIVE
+    notes: Optional[str] = ""
+
+
+class FitnessStatusInput(BaseModel):
+    status: str
+    remarks: Optional[str] = ""
+
+
+def _clean(payload: FitnessInput) -> dict:
+    name = (payload.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Member name is required")
+
+    fee_amount = _amount(payload.fee_amount)
+    fee_paid = _amount(payload.fee_paid)
+    # Refused rather than clamped: a paid figure above the fee is a typo somewhere, and
+    # quietly trimming it hides which of the two numbers was wrong.
+    if fee_paid > fee_amount:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Paid ({fee_paid:g}) is more than the fee ({fee_amount:g})",
+        )
+
+    mode = (payload.payment_mode or "").strip().lower()
+    if mode and mode not in PAYMENT_MODES:
+        raise HTTPException(status_code=400, detail="Unknown payment mode")
+    # Nothing collected means no mode and no reference — otherwise a membership that has
+    # paid zero reads as having been paid by cash.
+    if fee_paid <= 0:
+        mode = ""
+    reference = (payload.payment_reference or "").strip() if mode in REFERENCE_MODES else ""
+
+    gender = (payload.gender or "").strip().lower()
+    if gender and gender not in GENDERS:
+        gender = ""
+
+    return {
+        "name": name,
+        "phone": (payload.phone or "").strip(),
+        "age": _age(payload.age),
+        "gender": gender,
+        "email": (payload.email or "").strip(),
+        "address": (payload.address or "").strip(),
+        "package_id": (payload.package_id or "").strip(),
+        "package_name": (payload.package_name or "").strip(),
+        "package_mode": (payload.package_mode or "").strip().lower(),
+        "package_sessions": payload.package_sessions,
+        "fee_amount": fee_amount,
+        "fee_paid": fee_paid,
+        "payment_mode": mode,
+        "payment_reference": reference,
+        "joined_date": (payload.joined_date or "").strip()[:10],
+        "due_date": (payload.due_date or "").strip()[:10],
+        "status": _status(payload.status),
+        "notes": (payload.notes or "").strip(),
+        "updated_at": now_iso(),
+    }
+
+
+def _shape(row: dict) -> dict:
+    out = {k: v for k, v in row.items() if k != "_id"}
+    amount = _amount(out.get("fee_amount"))
+    paid = _amount(out.get("fee_paid"))
+    out["fee_due"] = round(max(0.0, amount - paid), 2)
+    # Fully paid only counts when there was something to pay. A membership recorded with no
+    # fee at all is not "paid up", it is unpriced, and calling it paid would hide it from
+    # the very list meant to catch it.
+    out["fully_paid"] = amount > 0 and paid >= amount
+    return out
+
+
+def _month_bounds(today: Optional[date] = None):
+    d = today or date.today()
+    start = d.replace(day=1)
+    end = (start.replace(year=start.year + 1, month=1) if start.month == 12
+           else start.replace(month=start.month + 1))
+    return start.isoformat(), end.isoformat()
+
+
+def _unpaid_this_month(row: dict, month_start: str, month_end: str) -> bool:
+    """Whether this member owes money that is already due within the current month.
+
+    Three things have to be true, and each excludes a case the branch would otherwise be
+    chasing wrongly: there is a balance outstanding, the member is still with the gym (a
+    discontinued membership is a write-off, not an arrear), and the money was due by the
+    end of this month rather than at some point later.
+
+    A membership with no due date recorded counts as due — the fee was agreed and nothing
+    says it is owed later, so leaving it out would hide a genuine arrear behind an empty
+    field.
+    """
+    if _amount(row.get("fee_paid")) >= _amount(row.get("fee_amount")):
+        return False
+    if _amount(row.get("fee_amount")) <= 0:
+        return False
+    if _status(row.get("status")) == STATUS_DISCONTINUED:
+        return False
+    due = (row.get("due_date") or "").strip()[:10]
+    return (not due) or due < month_end
+
+
+@router.get("/branch/fitness")
+async def list_fitness(
+    branch_id: Optional[str] = Query(None),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+):
+    """The gym's roll for a branch, with the counts the tab's cards read.
+
+    Counted here rather than in the browser so every card is over the whole roll, not over
+    whichever page or filter happens to be on screen.
+    """
+    query: dict = {}
+    scoped = _scoped_branch(user, branch_id)
+    if scoped:
+        query["branch_id"] = scoped
+
+    rows = await v3_col("fitness_registrations").find(query, {"_id": 0}).to_list(2000)
+    rows.sort(key=lambda r: r.get("created_at") or "", reverse=True)
+    shaped = [_shape(r) for r in rows]
+
+    month_start, month_end = _month_bounds()
+    counts = {
+        "all": len(shaped),
+        # The three the tab was asked for: who is training now, who is paused, and who owes
+        # money that is already due.
+        "current": sum(1 for r in shaped if _status(r.get("status")) == STATUS_ACTIVE),
+        "leave": sum(1 for r in shaped if _status(r.get("status")) == STATUS_LEAVE),
+        "unpaid_this_month": sum(1 for r in rows if _unpaid_this_month(r, month_start, month_end)),
+        "discontinued": sum(1 for r in shaped if _status(r.get("status")) == STATUS_DISCONTINUED),
+        "paid": sum(1 for r in shaped if r.get("fully_paid")),
+    }
+    totals = {
+        "fee_amount": round(sum(_amount(r.get("fee_amount")) for r in shaped), 2),
+        "fee_paid": round(sum(_amount(r.get("fee_paid")) for r in shaped), 2),
+    }
+    totals["fee_due"] = round(max(0.0, totals["fee_amount"] - totals["fee_paid"]), 2)
+
+    return {
+        "registrations": shaped,
+        "counts": counts,
+        "totals": totals,
+        "month_start": month_start,
+        "statuses": list(STATUSES),
+        "payment_modes": list(PAYMENT_MODES),
+        "genders": list(GENDERS),
+    }
+
+
+async def _row_or_404(registration_id: str, user: V3UserOut) -> dict:
+    row = await v3_col("fitness_registrations").find_one({"id": registration_id}, {"_id": 0})
+    if not row:
+        raise HTTPException(status_code=404, detail="Membership not found")
+    # A Branch Admin reaching another branch's member by id is refused the same way the
+    # list refuses to show it — a request is not a screen.
+    if _own_branch_only(user) and row.get("branch_id") != user.branch_id:
+        raise HTTPException(status_code=404, detail="Membership not found")
+    return row
+
+
+@router.post("/branch/fitness")
+async def add_fitness(
+    payload: FitnessInput,
+    branch_id: Optional[str] = Query(None),
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+):
+    target = await _write_branch(user, branch_id)
+    if not target:
+        raise HTTPException(status_code=400, detail="Pick a branch to register against")
+
+    row = {
+        "id": str(uuid.uuid4()),
+        "branch_id": target,
+        **_clean(payload),
+        "created_at": now_iso(),
+        "created_by": user.full_name or user.email,
+    }
+    await v3_col("fitness_registrations").insert_one(dict(row))
+    return _shape(row)
+
+
+@router.patch("/branch/fitness/{registration_id}")
+async def update_fitness(
+    registration_id: str,
+    payload: FitnessInput,
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+):
+    await _row_or_404(registration_id, user)
+    updates = _clean(payload)
+    await v3_col("fitness_registrations").update_one({"id": registration_id}, {"$set": updates})
+    row = await v3_col("fitness_registrations").find_one({"id": registration_id}, {"_id": 0})
+    return _shape(row)
+
+
+@router.patch("/branch/fitness/{registration_id}/status")
+async def set_fitness_status(
+    registration_id: str,
+    payload: FitnessStatusInput,
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+):
+    """Move a member between training, on leave, and gone.
+
+    Its own endpoint rather than a field on the edit form: pausing somebody is one decision
+    taken on its own, and making it require the whole membership to be re-submitted is how
+    a fee gets changed by accident while marking somebody on leave.
+    """
+    row = await _row_or_404(registration_id, user)
+    status = (payload.status or "").strip().lower()
+    if status not in STATUSES:
+        raise HTTPException(status_code=400, detail=f"Status must be one of {list(STATUSES)}")
+
+    await v3_col("fitness_registrations").update_one(
+        {"id": registration_id},
+        {"$set": {
+            "status": status,
+            "status_remarks": (payload.remarks or "").strip(),
+            "status_changed_at": now_iso(),
+            "status_changed_by": user.full_name or user.email,
+            "updated_at": now_iso(),
+        }},
+    )
+    updated = await v3_col("fitness_registrations").find_one({"id": registration_id}, {"_id": 0})
+    return {"message": f"{row.get('name', 'Member')} marked {status}", "registration": _shape(updated)}
+
+
+@router.delete("/branch/fitness/{registration_id}")
+async def delete_fitness(
+    registration_id: str,
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+):
+    row = await _row_or_404(registration_id, user)
+    await v3_col("fitness_registrations").delete_one({"id": registration_id})
+    return {"message": f"{row.get('name', 'Membership')} removed"}

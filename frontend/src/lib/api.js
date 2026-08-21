@@ -546,3 +546,11 @@ export const listZumbaMasters = async (branchId) => (await api.get("/branch/zumb
 export const moveZumbaStage = async (registrationId, stage) => (await api.patch(`/branch/zumba/${registrationId}/stage`, { stage })).data;
 export const setZumbaStatus = async (registrationId, status, remarks) => (await api.patch(`/branch/zumba/${registrationId}/status`, { status, remarks })).data;
 export const acceptZumbaReferral = async (leadId) => (await api.post(`/branch/zumba/accept/${leadId}`)).data;
+
+// Fitness (gym) memberships — Branch Admin > Fitness. Its own desk beside Zumba: the gym
+// sells memberships that run out and need renewing, with no referral pipeline behind it.
+export const listFitness = async (branchId) => (await api.get("/branch/fitness", { params: branchId ? { branch_id: branchId } : {} })).data;
+export const addFitness = async (payload, branchId) => (await api.post("/branch/fitness", payload, { params: branchId ? { branch_id: branchId } : {} })).data;
+export const updateFitness = async (registrationId, payload) => (await api.patch(`/branch/fitness/${registrationId}`, payload)).data;
+export const setFitnessStatus = async (registrationId, status, remarks) => (await api.patch(`/branch/fitness/${registrationId}/status`, { status, remarks })).data;
+export const deleteFitness = async (registrationId) => (await api.delete(`/branch/fitness/${registrationId}`)).data;

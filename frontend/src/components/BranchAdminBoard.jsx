@@ -31,6 +31,7 @@ import {
   MoreHorizontal,
   PhoneOff,
   Music,
+  Dumbbell,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -67,6 +68,7 @@ import MissedClassPanel from "@/components/branch/MissedClassPanel";
 import { BranchReviewPanel } from "@/components/branch/BranchReviewPanel";
 import { PatientsPortalPanel } from "@/components/branch/PatientsPortalPanel";
 import { ZumbaPanel } from "@/components/branch/ZumbaPanel";
+import { FitnessPanel } from "@/components/branch/FitnessPanel";
 import { CreateLeadModal } from "@/components/CreateLeadModal";
 import { MilkCalendar, MilkDateInput, MilkTimeInput } from "@/components/ui/milk-calendar";
 import { LOGO_URL, PRINTABLE_STYLES, escapeHtml, rowsHtml, openPrintable } from "@/lib/printable";
@@ -637,6 +639,9 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     // signing up — but its own list, not a stage of theirs: nobody registering for a
     // Zumba class is consulted, treated or discharged.
     { key: "zumba", label: "Zumba", short: "Zumba", icon: Music },
+    // Beside Zumba because both are class-based memberships the branch sells and
+    // renews, rather than treatment a patient is referred for.
+    { key: "fitness", label: "Fitness", short: "Fitness", icon: Dumbbell },
     { key: "review", label: "Review", short: "Review", icon: ClipboardCheck },
     { key: "consultations", label: "Management", short: "Manage", icon: Stethoscope },
     { key: "patients", label: "Patients", short: "Patients", icon: User },
@@ -753,6 +758,8 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
         </div>
       ) : activeView === "zumba" ? (
         <ZumbaPanel branchId={branchId} />
+      ) : activeView === "fitness" ? (
+        <FitnessPanel branchId={branchId} />
       ) : activeView === "review" ? (
         <BranchReviewPanel branchId={branchId} />
       ) : activeView === "patients" ? (
