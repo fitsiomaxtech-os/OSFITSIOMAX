@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Eye, Music, Pencil, Plus, RefreshCw, Stethoscope, Trash2, UserPlus, X } from "lucide-react";
+import { Eye, IndianRupee, Music, Pencil, Plus, RefreshCw, Stethoscope, Trash2, UserPlus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -178,32 +178,6 @@ const paymentPayload = (lines) => (lines || [])
 
 const linesTotal = (lines) => (lines || []).reduce((sum, l) => sum + lineTotal(l), 0);
 
-/** A stored row's payment, back in the shape the form edits.
- *
- * A row saved before payments were lines has a mode and a figure and no lines at all;
- * rebuilding one from them means editing such a row shows what was taken rather than an
- * empty payment the save would then overwrite with nothing.
- */
-const linesOf = (row) => {
-  if (Array.isArray(row?.payment_lines) && row.payment_lines.length > 0) {
-    return row.payment_lines.map((l) => ({
-      mode: l.mode || "cash",
-      amount: String(l.amount ?? ""),
-      reference: l.reference || "",
-      // Only carried when every note counted is one this desk still offers. A line counted
-      // in a note since dropped would otherwise re-total to less than was handed over, and
-      // saving the row again would quietly reduce what the student has paid. Keeping the
-      // figure and losing the breakdown is the honest half to keep.
-      notes: Object.keys(l.denominations || {}).every((d) => DENOMINATIONS.includes(Number(d)))
-        ? Object.fromEntries(Object.entries(l.denominations || {}).map(([d, n]) => [Number(d), String(n)]))
-        : {},
-    }));
-  }
-  if (Number(row?.fee_paid) > 0) {
-    return [{ mode: row.payment_mode && row.payment_mode !== "split" ? row.payment_mode : "cash", amount: String(row.fee_paid), reference: row.payment_reference || "", notes: {} }];
-  }
-  return [];
-};
 
 const GENDERS = [
   { key: "female", label: "Female" },
@@ -968,7 +942,7 @@ const missingDetails = (row) => {
 const EMPTY = {
   name: "", email: "", phone: "", age: "", gender: "", address: "",
   source: "personal", master_name: "", assigned_master_id: "", time_slot: "", joined_on: "",
-  package_id: "", package_name: "", package_sessions: "", fee_amount: "", fee_paid: "", payment_mode: "", payment_reference: "", payment_lines: [],
+  package_id: "", package_name: "", package_sessions: "", fee_amount: "",
 };
 
 /**
@@ -1138,12 +1112,11 @@ export const ZumbaPanel = ({ branchId }) => {
   // The payment lines the dialog edits. Declared beside openForm rather than inside the
   // dialog's JSX so the handlers are one thing each, and `collected` is read by both the
   // Fee Collected box and the running total under the lines.
-  const collected = linesTotal(form?.payment_lines);
 
   const openForm = (row) => {
     setNewMaster("");
     setForm(row
-      ? { ...EMPTY, ...row, age: row.age ?? "", joined_on: row.joined_on || dayOf(row.created_at), payment_lines: linesOf(row) }
+      ? { ...EMPTY, ...row, age: row.age ?? "", joined_on: row.joined_on || dayOf(row.created_at) }
       : { ...EMPTY, joined_on: todayLocal() });
   };
 
@@ -1177,14 +1150,6 @@ export const ZumbaPanel = ({ branchId }) => {
       toast.error("Referred on the consultation — change it there, not here");
       return;
     }
-    // Asked per line, because a split payment can have one traceable half and one not:
-    // the cash needs nothing and the UPI still needs its ID. Refused here as well as on the
-    // server, so the desk is told before the round trip.
-    const missingRef = lineMissingReference(form.payment_lines);
-    if (missingRef) {
-      toast.error(`Enter the ${REFERENCE_LABELS[missingRef.mode]}`);
-      return;
-    }
     if (form.source === MASTER && !(form.master_name || "").trim()) { toast.error("Which master referred them?"); return; }
     setSaving(true);
     try {
@@ -1207,10 +1172,9 @@ export const ZumbaPanel = ({ branchId }) => {
         master_name: (form.master_name || "").trim(),
         assigned_master_id: form.assigned_master_id || "",
         fee_amount: Number(form.fee_amount || 0),
-        fee_paid: Number(form.fee_paid || 0),
-        // The three the server works out from these are still in the payload above for
-        // callers that send no lines; with lines present they are ignored and settled here.
-        payment_lines: paymentPayload(form.payment_lines),
+        // No fee_paid and no lines: this form registers a student, and saying nothing about
+        // the money is what leaves what has been collected alone. Sending a zero here would
+        // wipe a student's payments every time somebody fixed their phone number.
       };
       if (form.id) await updateZumba(form.id, payload);
       else await addZumba(payload, branchId);
@@ -1585,6 +1549,22 @@ export const ZumbaPanel = ({ branchId }) => {
                               <Button size="sm" variant="outline" className="h-7 w-7 p-0" onClick={() => openForm(r)} title="Edit" aria-label="Edit" data-testid={`zumba-edit-${r.id}`}>
                                 <Pencil className="h-3 w-3" />
                               </Button>
+                              {/* Only while something is owed. A student who is square with
+                                  us has nothing to collect, and a button that opens a dialog
+                                  saying so is a button that should not have been there. */}
+                              {due > 0 && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 gap-1 border-emerald-300 px-2 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-50"
+                                  onClick={(e) => { e.stopPropagation(); setCollecting(r); }}
+                                  title={`${rupees(due)} still due — take a payment`}
+                                  data-testid={`zumba-collect-${r.id}`}
+                                >
+                                  <IndianRupee className="h-3 w-3" />
+                                  Collect
+                                </Button>
+                              )}
                               {/* Only once the term is nearly up. A renewal offered on the
                                   first day of six months is a button nobody presses, and
                                   one offered on the last is a conversation already missed. */}
@@ -1809,53 +1789,13 @@ export const ZumbaPanel = ({ branchId }) => {
                       : { ...form, package_id: "", package_name: "", package_sessions: "", fee_amount: "" })}
                     prefix="zumba-field-package"
                   />
-                  <div className="grid grid-cols-2 gap-3 pt-1">
-                    <div className="space-y-2">
-                      <FieldLabel>Fee Collected</FieldLabel>
-                      {/* Read off the payment below rather than typed beside it: a figure
-                          that can disagree with the modes under it is a figure nobody can
-                          reconcile at the end of the day. */}
-                      <Input
-                        type="number"
-                        value={collected || ""}
-                        readOnly
-                        placeholder="0"
-                        className="bg-slate-50"
-                        data-testid="zumba-field-paid"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <FieldLabel>Fee Amount</FieldLabel>
-                      <Input type="number" value={form.fee_amount} onChange={(e) => setForm({ ...form, fee_amount: e.target.value, package_id: "", package_name: "", package_sessions: "" })} placeholder="0" data-testid="zumba-field-amount" />
-                    </div>
-                  </div>
-                  {/* A payment can arrive more than one way — half in cash, the rest by
-                      UPI — and one mode per registration forced the desk to record the
-                      larger half and pretend the other never happened. The same shape the
-                      Fitness desk collects in, so one counter learns it once. */}
                   <div className="space-y-2 pt-1">
-                    <FieldLabel>Mode of Payment</FieldLabel>
-                    <PaymentLinesEditor
-                      lines={form.payment_lines || []}
-                      onChange={(next) => setForm((f) => ({ ...f, payment_lines: next }))}
-                      prefix="zumba-pay"
-                      emptyNote="Nothing collected yet. Add a payment when the student pays."
-                    />
-
-                    <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
-                      {collected > 0 && (
-                        <p className="text-xs text-slate-500" data-testid="zumba-pay-total">
-                          Collecting <b className="text-emerald-700">{rupees(collected)}</b>
-                          {Number(form.fee_amount) > 0 && (
-                            collected > Number(form.fee_amount)
-                              ? <span className="text-rose-600"> — {rupees(collected - Number(form.fee_amount))} more than the fee</span>
-                              : collected < Number(form.fee_amount)
-                                ? <span> · {rupees(Number(form.fee_amount) - collected)} still due</span>
-                                : <span className="text-emerald-700"> · paid up</span>
-                          )}
-                        </p>
-                      )}
-                    </div>
+                    <FieldLabel>Fee Amount</FieldLabel>
+                    <Input type="number" value={form.fee_amount} onChange={(e) => setForm({ ...form, fee_amount: e.target.value, package_id: "", package_name: "", package_sessions: "" })} placeholder="0" data-testid="zumba-field-amount" />
+                    {/* What they owe, not what they have handed over. This form registers a
+                        student; money is taken at the counter afterwards, through Collect,
+                        which is a different act and has its own record of how it arrived. */}
+                    <p className="text-[11px] text-slate-400">Set by the membership above. Collect the fee from the row once they are registered.</p>
                   </div>
                 </div>
               </div>

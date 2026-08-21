@@ -424,7 +424,11 @@ class ZumbaInput(BaseModel):
     # this student was sold, and it is what the master's roll counts down from.
     package_sessions: Optional[int] = None
     fee_amount: Optional[float] = 0
-    fee_paid: Optional[float] = 0
+    # None means "not mentioned", which is different from 0 and has to stay different: the
+    # registration form does not collect money any more, and a save that left this at 0
+    # would wipe what a student had already paid every time somebody fixed their phone
+    # number.
+    fee_paid: Optional[float] = None
     # Where the registration sits in the Zumba pipeline. Left unset it starts at the entry
     # stage; a name the pipeline no longer has falls back there too.
     stage: Optional[str] = None
@@ -990,6 +994,11 @@ async def _clean(payload: ZumbaInput, user: V3UserOut) -> dict:
     # collects nothing, so it sends no lines and lands on fee_paid 0 either way.
     if payload.payment_lines is not None:
         money = _settle_payment(payload.payment_lines)
+    elif payload.fee_paid is None:
+        # Nothing said about the money, so nothing written about it. Registering does not
+        # collect and editing a registration is not a payment; both leave whatever has been
+        # taken exactly as it was, and the collect and renew routes are how it changes.
+        money = {}
     else:
         payment_mode = (payload.payment_mode or "").strip().lower()
         fee_paid = _amount(payload.fee_paid)
@@ -1093,6 +1102,12 @@ async def add_zumba(
     row = {
         "id": str(uuid.uuid4()),
         "branch_id": branch_id,
+        # Ahead of the spread so _clean can override them when a caller does mention money,
+        # and so a new row has them at zero rather than missing when it does not.
+        "fee_paid": 0.0,
+        "payment_lines": [],
+        "payment_mode": "",
+        "payment_reference": "",
         **await _clean(payload, user),
         "created_at": now_iso(),
         "created_by": user.full_name or user.email,
