@@ -498,6 +498,13 @@ const FitnessMemberDialog = ({ member, packages, branchId, onClose, onSaved }) =
     package_sessions: member?.package_sessions ?? "",
     fee_amount: member?.fee_amount ?? "",
     fee_paid: member?.fee_paid ?? "",
+    // Taken at the desk while the member is standing there, the way the Zumba form takes
+    // it. Not part of the membership payload: it is posted through Collect the moment the
+    // row exists, so the money arrives as a payment with a mode and a reference behind it
+    // rather than as a balance that moved with nothing to show for it.
+    collect_amount: "",
+    collect_mode: "cash",
+    collect_reference: "",
     payment_mode: member?.payment_mode || "",
     payment_reference: member?.payment_reference || "",
     joined_date: (member?.joined_date || "").slice(0, 10) || todayIso(),
@@ -548,8 +555,24 @@ const FitnessMemberDialog = ({ member, packages, branchId, onClose, onSaved }) =
         await updateFitness(member.id, payload);
         toast.success(`${form.name.trim()} updated`);
       } else {
-        await addFitness(payload, branchId);
-        toast.success(`${form.name.trim()} registered`);
+        const created = await addFitness(payload, branchId);
+        const takingNow = Number(form.collect_amount) || 0;
+        if (takingNow > 0 && created?.id) {
+          // Its own try: the member is registered either way, and a payment that will not
+          // go through is not a reason to lose them. Says which half failed.
+          try {
+            await collectFitnessPayment(created.id, [{
+              mode: form.collect_mode,
+              amount: takingNow,
+              reference: REFERENCE_MODES.includes(form.collect_mode) ? (form.collect_reference || "").trim() : "",
+            }]);
+            toast.success(`${form.name.trim()} registered · ${rupees(takingNow)} collected`);
+          } catch (err) {
+            toast.error(`${form.name.trim()} registered, but the payment did not go through: ${err?.response?.data?.detail || "try Collect on the row"}`);
+          }
+        } else {
+          toast.success(`${form.name.trim()} registered`);
+        }
       }
       onSaved();
     } catch (e) {
@@ -657,12 +680,66 @@ const FitnessMemberDialog = ({ member, packages, branchId, onClose, onSaved }) =
                 <FieldLabel>Fee</FieldLabel>
                 <Input type="number" min="0" value={form.fee_amount} onChange={(e) => set("fee_amount", e.target.value)} data-testid="fitness-form-fee" />
               </div>
-              {/* Collected and Paid By are not here. Money arrives through Collect, which
-                  records how each payment came in — the mode, the reference, the notes
-                  counted, who took it and when. A box on this form would move the same
-                  balance with none of that behind it, and the two records would then
-                  disagree about the same money. Shown read-only so the figure is still in
-                  front of whoever is editing. */}
+              {/* Registering somebody usually means taking their first payment there and
+                  then, which the Zumba form does on the form and this one made you save,
+                  find the row and press Collect for.
+
+                  It asks here now, but it does not write the balance: what is entered is
+                  posted through Collect the instant the row exists, so it lands as a
+                  payment with a mode, a reference and a name against it. That is the whole
+                  reason a box for "collected" never belonged on this form -- a balance that
+                  moves with nothing behind it leaves the two records disagreeing about the
+                  same money. */}
+              {!isEdit && Number(form.fee_amount) > 0 && (
+                <div className="sm:col-span-2 space-y-2 rounded-lg border border-emerald-200 bg-emerald-50/50 p-3" data-testid="fitness-form-collect">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">Collect now (optional)</p>
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    <div>
+                      <FieldLabel>Amount</FieldLabel>
+                      <Input
+                        type="number"
+                        min="0"
+                        max={Number(form.fee_amount) || 0}
+                        value={form.collect_amount}
+                        onChange={(e) => set("collect_amount", e.target.value)}
+                        placeholder="0"
+                        data-testid="fitness-form-collect-amount"
+                      />
+                    </div>
+                    <div>
+                      <FieldLabel>Mode</FieldLabel>
+                      <select
+                        value={form.collect_mode}
+                        onChange={(e) => set("collect_mode", e.target.value)}
+                        className="h-10 w-full rounded-md border border-slate-200 bg-white px-2.5 text-sm text-slate-700 focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400"
+                        data-testid="fitness-form-collect-mode"
+                      >
+                        {PAYMENT_MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <FieldLabel>{REFERENCE_LABELS[form.collect_mode] || "Reference"}</FieldLabel>
+                      <Input
+                        value={form.collect_reference}
+                        onChange={(e) => set("collect_reference", e.target.value)}
+                        disabled={!REFERENCE_MODES.includes(form.collect_mode)}
+                        placeholder={REFERENCE_MODES.includes(form.collect_mode) ? "" : "Cash leaves no reference"}
+                        data-testid="fitness-form-collect-reference"
+                      />
+                    </div>
+                  </div>
+                  {Number(form.collect_amount) > Number(form.fee_amount || 0) && (
+                    <p className="text-[11px] font-semibold text-rose-600" data-testid="fitness-form-collect-over">
+                      That is more than the fee. Collect at most {rupees(form.fee_amount)}.
+                    </p>
+                  )}
+                  <p className="text-[10px] text-emerald-700/80">
+                    Recorded as a payment on the membership, with the notes countable later through Collect.
+                  </p>
+                </div>
+              )}
+              {/* The balance itself is never typed. Shown read-only so the figure is still
+                  in front of whoever is editing. */}
               <div className="sm:col-span-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
                 <span className="text-xs font-semibold text-slate-500">
                   Collected <b className="text-slate-700">{rupees(member?.fee_paid)}</b>
@@ -682,7 +759,7 @@ const FitnessMemberDialog = ({ member, packages, branchId, onClose, onSaved }) =
 
         <div className="flex justify-end gap-2 border-t p-4">
           <Button variant="outline" size="sm" onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button size="sm" onClick={submit} disabled={saving || overpaid} className="bg-sky-600 text-white hover:bg-sky-700" data-testid="fitness-form-save">
+          <Button size="sm" onClick={submit} disabled={saving || overpaid || Number(form.collect_amount || 0) > Number(form.fee_amount || 0)} className="bg-sky-600 text-white hover:bg-sky-700" data-testid="fitness-form-save">
             {saving ? "Saving..." : isEdit ? "Save Changes" : "Register Member"}
           </Button>
         </div>
