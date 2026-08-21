@@ -527,6 +527,83 @@ const COLS_PLAIN = {
   stage: "w-[13%]", expert: "w-[11%]", discount: "", appt: "w-[9%]", updated: "w-[9%]", action: "w-[6%]",
 };
 
+// The one shape every stage panel in the lead card takes: a header band naming what is on
+// screen with its state at the far end, a row of controls that stays put, and a body under
+// them that swaps. Written once because it was hand-copied into four panels and had already
+// started to drift — centred buttons in some, left-aligned in others, three filled colours
+// here and one there.
+//
+// Tailwind reads the source for class names, so the tones are spelled out rather than built
+// from the `tone` string. Same reason segmented-tabs writes out its column layouts.
+const PANEL_TONES = {
+  indigo: { shell: "border-indigo-200/80 bg-gradient-to-br from-indigo-50 via-indigo-50/60 to-white", band: "border-indigo-100", tile: "bg-indigo-600/10 text-indigo-700", heading: "text-indigo-800" },
+  cyan: { shell: "border-cyan-200/80 bg-gradient-to-br from-cyan-50 via-cyan-50/60 to-white", band: "border-cyan-100", tile: "bg-cyan-600/10 text-cyan-700", heading: "text-cyan-800" },
+  orange: { shell: "border-orange-200/80 bg-gradient-to-br from-orange-50 via-orange-50/60 to-white", band: "border-orange-100", tile: "bg-orange-500/10 text-orange-600", heading: "text-orange-800" },
+  violet: { shell: "border-violet-200/80 bg-gradient-to-br from-violet-50 via-violet-50/60 to-white", band: "border-violet-100", tile: "bg-violet-600/10 text-violet-700", heading: "text-violet-800" },
+  sky: { shell: "border-sky-200/80 bg-gradient-to-br from-sky-50 via-sky-50/60 to-white", band: "border-sky-100", tile: "bg-sky-600/10 text-sky-700", heading: "text-sky-800" },
+  emerald: { shell: "border-emerald-200/80 bg-gradient-to-br from-emerald-50 via-emerald-50/60 to-white", band: "border-emerald-100", tile: "bg-emerald-600/10 text-emerald-700", heading: "text-emerald-800" },
+};
+
+/** The state at the end of a panel's header band — "Both Fees Collected", "Diet Fee Due". */
+const PanelChip = ({ tone = "amber", tick = false, children }) => (
+  <span className={`flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+    tone === "emerald" ? "bg-emerald-100 text-emerald-700"
+      : tone === "rose" ? "bg-rose-100 text-rose-700"
+      : tone === "slate" ? "bg-slate-100 text-slate-600"
+      : "bg-amber-100 text-amber-700"
+  }`}>
+    {tick && <CheckCircle2 className="h-3 w-3" />} {children}
+  </span>
+);
+
+function StagePanel({ tone = "indigo", icon: Icon, title, chip, tabs, children, testid }) {
+  const t = PANEL_TONES[tone] || PANEL_TONES.indigo;
+  return (
+    <div className={`overflow-hidden rounded-xl border shadow-sm ring-1 ring-inset ring-white/60 ${t.shell}`} data-testid={testid}>
+      <div className={`flex items-center justify-between gap-3 border-b px-4 py-2.5 ${t.band}`}>
+        <div className="flex min-w-0 items-center gap-2">
+          {Icon && (
+            <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${t.tile}`}>
+              <Icon className="h-4 w-4" />
+            </span>
+          )}
+          <span className={`truncate text-xs font-semibold uppercase tracking-wider ${t.heading}`}>{title}</span>
+        </div>
+        {chip}
+      </div>
+      <div className="p-4">
+        {/* The controls sit above a hairline and do not move when the body under them
+            changes, so the control that opened a view is the control that leaves it. */}
+        {tabs && (
+          <div className="flex flex-wrap items-center gap-2 border-b border-slate-200/70 pb-3 [&>*]:shrink-0" data-testid={`${testid}-tabs`}>
+            {tabs}
+          </div>
+        )}
+        <div className={tabs ? "mt-3" : ""}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+/** A label/value line inside a panel's white card. */
+const PanelRow = ({ label, value, note, noteTone = "text-emerald-600", tone = "", strong = false }) => (
+  <div className="flex items-baseline justify-between gap-4 px-3 py-2">
+    <dt className="shrink-0 text-xs text-slate-500">{label}</dt>
+    <dd className={`min-w-0 truncate text-right font-semibold ${strong ? "text-[15px]" : "text-sm"} ${tone || "text-slate-800"}`} title={String(value)}>
+      {value}
+      {note && <span className={`ml-1 text-xs font-medium capitalize ${noteTone}`}>({note})</span>}
+    </dd>
+  </div>
+);
+
+/** The white card those rows sit in. */
+const PanelCard = ({ children, testid, footer }) => (
+  <div className="rounded-lg border border-slate-200/80 bg-white shadow-sm" data-testid={testid}>
+    <dl className="divide-y divide-slate-100">{children}</dl>
+    {footer}
+  </div>
+);
+
 export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, showOwnStageBar = true, autoOpenLeadId, onAutoOpened, externalDate, hideDateFilter = false, onCountChange, onRowsChange, externalSearch, externalDateFilter, reloadToken, mobileCards = false, toolbarSlot = null }) => {
   const isConsultant = viewerRole === "head_physio";
   // Head Physio tracks progress on their own independent pipeline (head_consultation_stage),
@@ -687,10 +764,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // Branch Admin fixes each session's date and time themselves.
   const [showPhysioModal, setShowPhysioModal] = useState(false);
   // Which programme record is open in the lead panel: "diet", "rehab", or neither.
-  const [programmeDetail, setProgrammeDetail] = useState(null);
+  // Which view of the lead panel is on screen: "own" (the stage itself), "diet" or
+  // "rehab". A tab selects a view outright — pressing the lit one again used to hide it
+  // and drop the reader back onto a different panel, which is not what a tab does.
+  const [programmeDetail, setProgrammeDetail] = useState("own");
   // Closed whenever a different patient is opened: a Diet card left standing would
   // otherwise read as the new patient's, with the previous one's figures still in it.
-  useEffect(() => { setProgrammeDetail(null); }, [selectedLead?.id]);
+  useEffect(() => { setProgrammeDetail("own"); }, [selectedLead?.id]);
   const [assignTrack, setAssignTrack] = useState("treatment"); // "treatment" | "rehab"
   const [physioOptions, setPhysioOptions] = useState([]);
   const [physioPick, setPhysioPick] = useState("");
@@ -3042,7 +3122,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               // controls stay put and only the body under them changes, so the row that got
               // you into a programme is the row that gets you back out — a card that
               // replaced the whole panel took its own way out with it.
-              const openDetail = (which) => setProgrammeDetail((cur) => (cur === which ? null : which));
+              const openDetail = (which) => setProgrammeDetail(which);
 
               const DetailRow = ({ label, value, tone = "" }) => (
                 <div className="flex items-baseline justify-between gap-4 px-3 py-2">
@@ -3055,27 +3135,21 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               // body it belongs to so a view can never announce itself as one thing and then
               // show another.
               const DIET_VIEW = {
+                tone: "orange",
                 title: "Diet Programme",
                 icon: Salad,
-                shell: "border-orange-200/80 bg-gradient-to-br from-orange-50 via-orange-50/60 to-white",
-                band: "border-orange-100",
-                tile: "bg-orange-500/10 text-orange-600",
-                heading: "text-orange-800",
                 chip: dietFeePaid
-                  ? { className: "bg-emerald-100 text-emerald-700", label: "Fee Collected", tick: true }
-                  : { className: "bg-amber-100 text-amber-700", label: "Diet Fee Due", tick: false },
+                  ? { tone: "emerald", label: "Fee Collected", tick: true }
+                  : { tone: "amber", label: "Diet Fee Due", tick: false },
               };
 
               const REHAB_VIEW = {
+                tone: "cyan",
                 title: "Rehab Programme",
                 icon: Activity,
-                shell: "border-cyan-200/80 bg-gradient-to-br from-cyan-50 via-cyan-50/60 to-white",
-                band: "border-cyan-100",
-                tile: "bg-cyan-600/10 text-cyan-700",
-                heading: "text-cyan-800",
                 chip: rehabFeePaid
-                  ? { className: "bg-emerald-100 text-emerald-700", label: "Fee Collected", tick: true }
-                  : { className: "bg-amber-100 text-amber-700", label: "Rehab Fee Due", tick: false },
+                  ? { tone: "emerald", label: "Fee Collected", tick: true }
+                  : { tone: "amber", label: "Rehab Fee Due", tick: false },
               };
 
               const DietDetailBody = (
@@ -3214,6 +3288,22 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                   <Lbl full="Rehab Details" short="Rehab" />
                 </Button>
               ) : null;
+
+              // The tab for a panel's own stage. Each panel names it for what it holds —
+              // "Assign Physio" on Fee Collected — because "Overview" would tell the reader
+              // nothing about which of the three views they are on.
+              const OwnTab = ({ label, short, icon: TabIcon, active }) => (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className={`${programmeDetail === "own" ? active : "border-slate-200 bg-white/70 text-slate-600 hover:bg-white"} ${ACT_BTN}`}
+                  onClick={() => openDetail("own")}
+                  data-testid="cons-open-own-detail"
+                >
+                  <TabIcon className="mr-1 h-3.5 w-3.5" />
+                  <Lbl full={label} short={short || label} />
+                </Button>
+              );
 
               // The pipeline the lead already carries (diet_stage, diet_consultation_report
               // written by the coach) made visible here — where Branch/Super Admin already
@@ -3365,6 +3455,34 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                   );
                 }
 
+                // Diet Consultation is the same kind of pill as Rehab — nothing writes it,
+                // a patient is under it because they are on a diet plan — so it opens the
+                // diet programme rather than whatever stage the lead happens to sit at.
+                if (stageFilter === "Diet Consultation" && selectedLead.diet_recommended) {
+                  return (
+                    <StagePanel
+                      tone={detailView && detailView.tone === "cyan" ? "cyan" : "orange"}
+                      icon={detailView && detailView.tone === "cyan" ? Activity : Salad}
+                      title={detailView && detailView.tone === "cyan" ? "Rehab Programme" : "Diet Programme"}
+                      testid="cons-stage-panel-diet"
+                      chip={
+                        <PanelChip tone={dietFeePaid ? "emerald" : "amber"} tick={dietFeePaid}>
+                          {dietFeePaid ? "Fee Collected" : "Diet Fee Due"}
+                        </PanelChip>
+                      }
+                      tabs={
+                        <>
+                          <OwnTab label="Diet Details" short="Diet" icon={Salad} active="border-orange-300 bg-orange-50 text-orange-700" />
+                          {RehabDetailButton}
+                          {CancelButton}
+                        </>
+                      }
+                    >
+                      {programmeDetail === "rehab" ? RehabDetailBody : DietDetailBody}
+                    </StagePanel>
+                  );
+                }
+
                 if (stage === "New Appointment") {
                   return (
                     <div className="rounded-lg border border-blue-200 bg-blue-50 p-3" data-testid="cons-stage-panel-early">
@@ -3417,74 +3535,78 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                   const alreadyPaid = selectedLead.package_paid != null;
                   const hasTreatment = decision === "consultation_treatment";
                   return (
-                    <div className="rounded-lg border border-sky-200 bg-sky-50 p-3" data-testid="cons-stage-panel-consultation-visit">
-                      <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-sky-700">
-                        <IndianRupee className="h-3.5 w-3.5" /> Collect a Payment
-                      </p>
-                      <div className="space-y-1.5 text-sm">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs text-slate-500">Consultation Fee</span>
-                          <span className="font-semibold text-slate-800">{selectedLead.package_price != null ? `Rs.${selectedLead.package_price}` : "—"}</span>
-                        </div>
-                        {hasTreatment && (
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs text-slate-500">Treatment Fee</span>
-                            <span className="font-semibold text-slate-800">{selectedLead.session_package_price != null ? `Rs.${selectedLead.session_package_price}` : "—"}</span>
-                          </div>
-                        )}
-                        {/* Only for a patient actually taking a diet plan — gated the same
-                            way Treatment Fee is. Diet is optional, and quoting it to
-                            everyone would overstate what this patient owes on the one
-                            panel Branch Admin reads before taking money. */}
-                        {selectedLead.diet_recommended && (
-                          <div className="flex items-center justify-between" data-testid="cons-collect-diet-fee-row">
-                            <span className="text-xs text-slate-500">Diet Fee</span>
-                            <span className="font-semibold text-slate-800">{dietFeeDue != null ? `Rs.${dietFeeDue}` : "—"}</span>
-                          </div>
-                        )}
-                        {/* Rehab, gated the same way Diet is. The Consultant can send a
-                            patient to rehab and pick the course here, and none of it
-                            reached this panel — the one screen Branch Admin reads before
-                            taking money. They quoted the consultation fee alone and the
-                            rehab course went uncollected, because nothing said there was
-                            one. The course is named as well as priced: "Rs.18000" with no
-                            idea what it buys is not something to ask a patient to pay.
-                            Its own Collect Rehab Fee button appears once the consultation
-                            fee is in, which is why this is a quote and not a second
-                            button here. */}
-                        {selectedLead.rehab_referred && (
-                          <div data-testid="cons-collect-rehab-fee-row">
-                            <div className="flex items-center justify-between">
-                              <span className="text-xs text-slate-500">Rehab Fee</span>
-                              <span className="font-semibold text-slate-800">{selectedLead.rehab_package_price != null ? `Rs.${selectedLead.rehab_package_price}` : "—"}</span>
-                            </div>
-                            {selectedLead.rehab_package_name && (
-                              <p className="text-[11px] text-slate-400">
-                                {selectedLead.rehab_package_name}
-                                {selectedLead.rehab_package_sessions ? ` · ${selectedLead.rehab_package_sessions} sessions` : ""}
-                                {selectedLead.rehab_package_mode ? ` · ${selectedLead.rehab_package_mode}` : ""}
-                              </p>
+                    <StagePanel
+                      tone={detailView ? detailView.tone : "sky"}
+                      icon={detailView ? detailView.icon : IndianRupee}
+                      title={detailView ? detailView.title : "Collect a Payment"}
+                      testid="cons-stage-panel-consultation-visit"
+                      chip={detailView ? (
+                        <PanelChip tone={detailView.chip.tone} tick={detailView.chip.tick}>{detailView.chip.label}</PanelChip>
+                      ) : alreadyPaid ? (
+                        <PanelChip tone="emerald" tick>Consultation Fee In</PanelChip>
+                      ) : (
+                        <PanelChip>Payment Due</PanelChip>
+                      )}
+                      tabs={
+                        <>
+                          <OwnTab label={alreadyPaid ? "Payment" : "Collect Payment"} short="Payment" icon={IndianRupee} active="border-sky-300 bg-sky-50 text-sky-700" />
+                          {DietDetailButton}
+                          {RehabDetailButton}
+                          {CancelButton}
+                        </>
+                      }
+                    >
+                      {detailBody || (
+                        <>
+                          {/* Everything this patient has been quoted, on the one screen the
+                              Branch Admin reads before taking money. Each line is gated on
+                              the patient actually being on that programme — quoting diet or
+                              rehab to everyone would overstate what is owed. */}
+                          <PanelCard testid="cons-consultation-visit-summary">
+                            <PanelRow
+                              label="Consultation Fee"
+                              value={selectedLead.package_price != null ? `Rs.${Number(selectedLead.package_price).toLocaleString("en-IN")}` : "—"}
+                              strong
+                            />
+                            {hasTreatment && (
+                              <PanelRow
+                                label="Treatment Fee"
+                                value={selectedLead.session_package_price != null ? `Rs.${Number(selectedLead.session_package_price).toLocaleString("en-IN")}` : "—"}
+                              />
                             )}
+                            {selectedLead.diet_recommended && (
+                              <PanelRow
+                                label="Diet Fee"
+                                value={dietFeeDue != null ? `Rs.${Number(dietFeeDue).toLocaleString("en-IN")}` : "—"}
+                              />
+                            )}
+                            {/* The course is named as well as priced: "Rs.18,000" with no
+                                idea what it buys is not something to ask a patient to pay.
+                                Its own Collect Rehab Fee button lives on the Rehab tab once
+                                the consultation fee is in, which is why this is a quote. */}
+                            {selectedLead.rehab_referred && (
+                              <PanelRow
+                                label="Rehab Fee"
+                                value={`${selectedLead.rehab_package_price != null ? `Rs.${Number(selectedLead.rehab_package_price).toLocaleString("en-IN")}` : "—"}${selectedLead.rehab_package_name ? ` · ${selectedLead.rehab_package_name}` : ""}`}
+                              />
+                            )}
+                            {alreadyPaid && (
+                              <PanelRow
+                                label="Already Paid Via"
+                                value={selectedLead.package_payment_mode || "—"}
+                                tone="text-emerald-700"
+                              />
+                            )}
+                          </PanelCard>
+                          <div className="mt-3">
+                            <Button size="sm" className={`bg-sky-600 text-white shadow-sm transition hover:bg-sky-700 hover:shadow ${ACT_BTN}`} onClick={openCollectFeeDraft} data-testid="cons-open-collect-fee">
+                              <IndianRupee className="mr-1 h-3.5 w-3.5" />
+                              {alreadyPaid ? "Update Payment" : "Collect Payment"}
+                            </Button>
                           </div>
-                        )}
-                        {alreadyPaid && (
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs text-slate-500">Already Paid Via</span>
-                            <span className="font-medium capitalize text-emerald-700">{selectedLead.package_payment_mode}</span>
-                          </div>
-                        )}
-                      </div>
-                      {/* One row, like every other stage panel. Collect Payment used to sit
-                          outside the action row, so it hung against the left edge while
-                          Cancel centred on its own line underneath — two buttons on two
-                          rows, neither lining up with the other. */}
-                      <div className="mt-3 flex items-center gap-1.5 [justify-content:safe_center] [&>*]:shrink-0">
-                        <Button size="sm" className={`bg-sky-600 hover:bg-sky-700 ${ACT_BTN}`} onClick={openCollectFeeDraft} data-testid="cons-open-collect-fee">
-                          {alreadyPaid ? "Update Payment" : "Collect Payment"}
-                        </Button>
-                        {CancelButton}
-                      </div>
-                    </div>
+                        </>
+                      )}
+                    </StagePanel>
                   );
                 }
 
@@ -3600,112 +3722,72 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                   ];
 
                   return (
-                    <div
-                      className={`overflow-hidden rounded-xl border shadow-sm ring-1 ring-inset ring-white/60 ${detailView ? detailView.shell : "border-indigo-200/80 bg-gradient-to-br from-indigo-50 via-indigo-50/60 to-white"}`}
-                      data-testid="cons-stage-panel-fee-collected"
-                    >
-                      {/* Header band: what is on screen, and where it stands, before any
-                          figure is read. It names the open programme rather than the stage
-                          while one is open, so the panel never announces Fee Collected over
-                          the top of a diet fee. */}
-                      <div className={`flex items-center justify-between gap-3 border-b px-4 py-2.5 ${detailView ? detailView.band : "border-indigo-100"}`}>
-                        <div className="flex min-w-0 items-center gap-2">
-                          <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${detailView ? detailView.tile : "bg-indigo-600/10 text-indigo-700"}`}>
-                            {detailView ? <detailView.icon className="h-4 w-4" /> : <ClipboardCheck className="h-4 w-4" />}
-                          </span>
-                          <span className={`truncate text-xs font-semibold uppercase tracking-wider ${detailView ? detailView.heading : "text-indigo-800"}`}>
-                            {detailView ? detailView.title : "Fee Collected"}
-                          </span>
-                        </div>
-                        {detailView ? (
-                          <span className={`flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${detailView.chip.className}`}>
-                            {detailView.chip.tick && <CheckCircle2 className="h-3 w-3" />} {detailView.chip.label}
-                          </span>
-                        ) : partial ? (
-                          <span className={`flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${partial.overdue ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-700"}`}>
-                            {partial.overdue ? "Balance Overdue" : "Part-paid"}
-                          </span>
-                        ) : treatmentPaid ? (
-                          <span className="flex shrink-0 items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
-                            <CheckCircle2 className="h-3 w-3" /> Both Fees Collected
-                          </span>
-                        ) : (
-                          <span className="flex shrink-0 items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
-                            Treatment Fee Due
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="p-4">
-                        {/* The four controls stay put whatever is showing beneath them, so
-                            the row that opened a programme is the row that closes it —
-                            pressing the lit one again comes back to the fee summary. Money
-                            first, then where this patient goes next, then the way out. */}
-                        <div className="flex flex-wrap items-center gap-2 border-b border-slate-200/70 pb-3 [&>*]:shrink-0" data-testid="cons-fee-panel-tabs">
+                    <StagePanel
+                      tone={detailView ? detailView.tone : "indigo"}
+                      icon={detailView ? detailView.icon : ClipboardCheck}
+                      title={detailView ? detailView.title : "Fee Collected"}
+                      testid="cons-stage-panel-fee-collected"
+                      chip={detailView ? (
+                        <PanelChip tone={detailView.chip.tone} tick={detailView.chip.tick}>{detailView.chip.label}</PanelChip>
+                      ) : partial ? (
+                        <PanelChip tone={partial.overdue ? "rose" : "amber"}>{partial.overdue ? "Balance Overdue" : "Part-paid"}</PanelChip>
+                      ) : treatmentPaid ? (
+                        <PanelChip tone="emerald" tick>Both Fees Collected</PanelChip>
+                      ) : (
+                        <PanelChip>Treatment Fee Due</PanelChip>
+                      )}
+                      tabs={
+                        <>
                           {FeeActions}
-                          {treatmentPaid && (
-                            <Button size="sm" className={`bg-violet-600 text-white shadow-sm transition hover:bg-violet-700 hover:shadow ${ACT_BTN}`} onClick={() => openPhysioModal("treatment")} data-testid="cons-open-physio-assign-from-fee-collected">
-                              <Lbl full="Assign Physio" short="Physio" />
-                            </Button>
-                          )}
+                          {treatmentPaid && <OwnTab label="Assign Physio" short="Physio" icon={Users} active="border-violet-300 bg-violet-50 text-violet-700" />}
                           {DietDetailButton}
                           {RehabDetailButton}
                           {CancelButton}
-                        </div>
+                        </>
+                      }
+                    >
+                      {detailBody || (
+                        <>
+                          <PanelCard
+                            testid="cons-fee-collected-summary"
+                            footer={!partial && treatmentPaid ? (
+                              <p className="flex items-center gap-1 border-t border-slate-100 px-3 py-2 text-[11px] font-medium text-emerald-600" data-testid="cons-treatment-fee-already-collected">
+                                <CheckCircle2 className="h-3 w-3" /> Already Collected
+                              </p>
+                            ) : null}
+                          >
+                            {feeRows.map((row) => (
+                              <PanelRow key={row.label} label={row.label} value={row.value} note={row.note} noteTone={row.noteTone} strong={row.strong} />
+                            ))}
+                          </PanelCard>
 
-                        <div className="mt-3">
-                        {detailBody || (
-                          <>
-                            <div className="rounded-lg border border-slate-200/80 bg-white shadow-sm" data-testid="cons-fee-collected-summary">
-                              <dl className="divide-y divide-slate-100">
-                                {feeRows.map((row) => (
-                                  <div key={row.label} className="flex items-baseline justify-between gap-4 px-3 py-2">
-                                    <dt className="shrink-0 text-xs text-slate-500">{row.label}</dt>
-                                    <dd className={`min-w-0 truncate text-right font-semibold text-slate-800 ${row.strong ? "text-[15px]" : "text-sm"}`} title={String(row.value)}>
-                                      {row.value}
-                                      {row.note && <span className={`ml-1 text-xs font-medium capitalize ${row.noteTone}`}>({row.note})</span>}
-                                    </dd>
-                                  </div>
-                                ))}
-                              </dl>
-                              {/* Only when there is nothing outstanding. A partial plan says
-                                  its piece in the balance card below, and claiming
-                                  "collected" over the top of a balance still owed is what
-                                  this panel used to do. */}
-                              {!partial && treatmentPaid && (
-                                <p className="flex items-center gap-1 border-t border-slate-100 px-3 py-2 text-[11px] font-medium text-emerald-600" data-testid="cons-treatment-fee-already-collected">
-                                  <CheckCircle2 className="h-3 w-3" /> Already Collected
-                                </p>
-                              )}
-                            </div>
-
-                            {/* What is still owed and when it is due. The buttons that act on
-                                it are NOT here — they sit in the row above with everything
-                                else this patient can be sent to next. */}
-                            {partial && (
-                              <>
-                                <p className="mt-2 text-[11px] text-slate-500">
-                                  {savedInstallments.filter((i) => i.paid).length} of {savedInstallments.length} installments collected.
-                                </p>
-                                <div className={`mt-2 rounded-lg border px-3 py-2 ${partial.overdue ? "border-rose-200 bg-rose-50" : "border-amber-200 bg-amber-50"}`} data-testid="cons-partial-balance-summary">
-                                  <div className="flex items-center justify-between">
-                                    <span className={`text-[11px] font-semibold ${partial.overdue ? "text-rose-700" : "text-amber-700"}`}>Balance Amount</span>
-                                    <span className={`text-sm font-bold ${partial.overdue ? "text-rose-700" : "text-amber-700"}`}>Rs.{Number(partial.balance).toLocaleString("en-IN")}</span>
-                                  </div>
-                                  <p className={`mt-0.5 text-[10px] ${partial.overdue ? "text-rose-600" : "text-amber-600"}`}>
-                                    Next · {partialInstallmentLabel(partial.nextIdx)}
-                                    {partial.next.sessions ? ` · ${partial.next.sessions} sessions` : ""}
-                                    {partial.next.amount != null ? ` · Rs.${partial.next.amount}` : ""}
-                                    {partial.next.due_date ? ` · due ${partial.next.due_date}` : ""}
-                                    {partial.overdue ? " · OVERDUE" : ""}
-                                  </p>
+                          {/* What is still owed and when it is due. The button that acts on
+                              it sits in the row above with everything else. */}
+                          {partial && (
+                            <>
+                              <p className="mt-2 text-[11px] text-slate-500">
+                                {savedInstallments.filter((i) => i.paid).length} of {savedInstallments.length} installments collected.
+                              </p>
+                              <div className={`mt-2 rounded-lg border px-3 py-2 ${partial.overdue ? "border-rose-200 bg-rose-50" : "border-amber-200 bg-amber-50"}`} data-testid="cons-partial-balance-summary">
+                                <div className="flex items-center justify-between">
+                                  <span className={`text-[11px] font-semibold ${partial.overdue ? "text-rose-700" : "text-amber-700"}`}>Balance Amount</span>
+                                  <span className={`text-sm font-bold ${partial.overdue ? "text-rose-700" : "text-amber-700"}`}>Rs.{Number(partial.balance).toLocaleString("en-IN")}</span>
                                 </div>
-                              </>
-                            )}
+                                <p className={`mt-0.5 text-[10px] ${partial.overdue ? "text-rose-600" : "text-amber-600"}`}>
+                                  Next · {partialInstallmentLabel(partial.nextIdx)}
+                                  {partial.next.sessions ? ` · ${partial.next.sessions} sessions` : ""}
+                                  {partial.next.amount != null ? ` · Rs.${partial.next.amount}` : ""}
+                                  {partial.next.due_date ? ` · due ${partial.next.due_date}` : ""}
+                                  {partial.overdue ? " · OVERDUE" : ""}
+                                </p>
+                              </div>
+                            </>
+                          )}
 
-                            {DietStatus}
+                          {DietStatus}
 
-                            {treatmentPaid && (
+                          {treatmentPaid && (
+                            <>
                               <p className="mt-3 text-xs leading-relaxed text-slate-600">
                                 {/* A Partial Payment plan reaches here with money in but a
                                     balance still owed, and this line read "Both fees
@@ -3714,50 +3796,90 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                                   ? "Consultation Fee collected, Treatment Fee part-paid. The physiotherapist can be assigned now."
                                   : "Both fees collected. Choose the physiotherapist who will deliver the sessions."}
                               </p>
-                            )}
-                          </>
-                        )}
-                        </div>
-                      </div>
-                    </div>
+                              {/* The act itself lives in the view, not in the tab that opens
+                                  the view. A tab that also fired the picker could not be
+                                  pressed to come back to what it was showing. */}
+                              <div className="mt-3">
+                                <Button
+                                  size="sm"
+                                  className={`bg-violet-600 text-white shadow-sm transition hover:bg-violet-700 hover:shadow ${ACT_BTN}`}
+                                  onClick={() => openPhysioModal("treatment")}
+                                  data-testid="cons-open-physio-assign-from-fee-collected"
+                                >
+                                  <Users className="mr-1 h-3.5 w-3.5" />
+                                  {selectedLead.assigned_physio_name ? "Reassign Physio" : "Assign Physio & Book Sessions"}
+                                </Button>
+                              </div>
+                            </>
+                          )}
+                        </>
+                      )}
+                    </StagePanel>
                   );
                 }
 
                 if (stage === "Physio Assign") {
-                  if (!selectedLead.assigned_physio_name) {
-                    return (
-                      <div className="rounded-lg border border-violet-200 bg-violet-50 p-3" data-testid="cons-stage-panel-physio-assign">
-                        <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-violet-700">
-                          <Users className="h-3.5 w-3.5" /> Physio Assign
-                        </p>
-                        <p className="text-xs text-slate-600">Treatment Fee collected. Choose the physiotherapist who will deliver the sessions.</p>
-                        <div className="mt-3 flex items-center gap-1.5 [justify-content:safe_center] [&>*]:shrink-0">
-                          <Button size="sm" className="bg-violet-600 text-xs hover:bg-violet-700" onClick={() => openPhysioModal("treatment")} data-testid="cons-open-physio-assign">
-                            Assign Physio
-                          </Button>
-                          {DietButton}
-                          {RehabButton}
-                          {CancelButton}
-                        </div>
-                      </div>
-                    );
-                  }
+                  const assigned = !!selectedLead.assigned_physio_name;
                   return (
-                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3" data-testid="cons-stage-panel-assigned">
-                      <p className="text-sm font-semibold text-emerald-800">Treatment sessions in progress</p>
-                      <p className="mt-1 text-xs text-slate-600">Assigned Physio: <span className="font-semibold text-slate-800">{selectedLead.assigned_physio_name}</span></p>
-                      {selectedLead.diet_coach_name && (
-                        <p className="mt-0.5 text-xs text-slate-600">Diet Consultation: <span className="font-semibold text-slate-800">{selectedLead.diet_coach_name}</span>
-                          {selectedLead.diet_appointment_at && ` · ${dayLabel(selectedLead.diet_appointment_at.split("T")[0])} at ${to12h(selectedLead.diet_appointment_at.split("T")[1])}`}</p>
+                    <StagePanel
+                      tone={detailView ? detailView.tone : (assigned ? "emerald" : "violet")}
+                      icon={detailView ? detailView.icon : Users}
+                      title={detailView ? detailView.title : "Physio Assign"}
+                      testid="cons-stage-panel-physio-assign"
+                      chip={detailView ? (
+                        <PanelChip tone={detailView.chip.tone} tick={detailView.chip.tick}>{detailView.chip.label}</PanelChip>
+                      ) : assigned ? (
+                        <PanelChip tone="emerald" tick>Sessions In Progress</PanelChip>
+                      ) : (
+                        <PanelChip>Physio Not Assigned</PanelChip>
                       )}
-                      <div className="mt-3 flex items-center gap-1.5 [justify-content:safe_center] [&>*]:shrink-0">
-                        <Button size="sm" variant="outline" className="text-xs" onClick={() => openPhysioModal("treatment")} data-testid="cons-reassign-physio">
-                          Reassign Physio
-                        </Button>
-                        {DietButton}
-                        {RehabButton}
-                      </div>
-                    </div>
+                      tabs={
+                        <>
+                          <OwnTab label={assigned ? "Treatment" : "Assign Physio"} short="Physio" icon={Users} active="border-violet-300 bg-violet-50 text-violet-700" />
+                          {DietDetailButton}
+                          {RehabDetailButton}
+                          {CancelButton}
+                        </>
+                      }
+                    >
+                      {detailBody || (
+                        <>
+                          <PanelCard testid="cons-physio-assign-summary">
+                            <PanelRow
+                              label="Treatment Package"
+                              value={`${selectedLead.session_package_name || "—"}${selectedLead.session_package_sessions ? ` · ${selectedLead.session_package_sessions} sessions` : ""}`}
+                            />
+                            <PanelRow
+                              label="Assigned Physio"
+                              value={selectedLead.assigned_physio_name || "Not assigned"}
+                              tone={assigned ? "" : "text-amber-700"}
+                            />
+                            {selectedLead.diet_coach_name && (
+                              <PanelRow
+                                label="Diet Consultation"
+                                value={`${selectedLead.diet_coach_name}${selectedLead.diet_appointment_at ? ` · ${dayLabel(selectedLead.diet_appointment_at.split("T")[0])} at ${to12h(selectedLead.diet_appointment_at.split("T")[1])}` : ""}`}
+                              />
+                            )}
+                          </PanelCard>
+                          <p className="mt-3 text-xs leading-relaxed text-slate-600">
+                            {assigned
+                              ? "Treatment sessions are in progress — every day is on this physio's calendar and on their board."
+                              : "Treatment Fee collected. Choose the physiotherapist who will deliver the sessions."}
+                          </p>
+                          <div className="mt-3">
+                            <Button
+                              size="sm"
+                              className={`${assigned ? "bg-white text-violet-700 shadow-sm ring-1 ring-violet-200 hover:bg-violet-50" : "bg-violet-600 text-white shadow-sm hover:bg-violet-700"} ${ACT_BTN}`}
+                              onClick={() => openPhysioModal("treatment")}
+                              data-testid={assigned ? "cons-reassign-physio" : "cons-open-physio-assign"}
+                            >
+                              <Users className="mr-1 h-3.5 w-3.5" />
+                              {assigned ? "Reassign Physio" : "Assign Physio & Book Sessions"}
+                            </Button>
+                          </div>
+                        </>
+                      )}
+                    </StagePanel>
                   );
                 }
 
