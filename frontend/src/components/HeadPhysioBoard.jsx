@@ -54,6 +54,15 @@ const STAGE_TONES = {
   amber: "border-amber-200 bg-amber-50 text-amber-700",
 };
 
+// One track per tile. Written out rather than built from the count, because Tailwind reads
+// the source for class names and `sm:grid-cols-${n}` would compile to nothing at all —
+// leaving the row as one unstyled column. Same reason segmented-tabs spells its layouts out.
+const TAB_GRID_COLS = {
+  2: "sm:grid-cols-2",
+  3: "sm:grid-cols-3",
+  4: "sm:grid-cols-4",
+};
+
 const WORK_TABS = [
   { key: "consultations", label: "Consultations", icon: Calendar, color: "#0284c7" },
   { key: "review", label: "Review", icon: ClipboardCheck, color: "#7c3aed" },
@@ -233,7 +242,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
           {/* items-stretch on the phone row too, so the four come out level there as well
               as in the grid — the card carrying a filter is taller than the other three
               and the row has to answer to the tallest rather than each card to itself. */}
-          <div className="-mx-1 flex items-stretch gap-2 overflow-x-auto px-1 pb-1 sm:mx-0 sm:grid sm:grid-cols-4 sm:gap-3 sm:overflow-visible sm:px-0 sm:pb-0" data-testid="hp-work-tabs">
+          <div className={`-mx-1 flex items-stretch gap-2 overflow-x-auto px-1 pb-1 sm:mx-0 sm:grid ${TAB_GRID_COLS[WORK_TABS.length] || "sm:grid-cols-4"} sm:gap-3 sm:overflow-visible sm:px-0 sm:pb-0`} data-testid="hp-work-tabs">
             {WORK_TABS.map((t) => {
               const n = t.key === "consultations" ? (consultStages[firstStage] || 0)
                 : t.key === "review" ? reviewCount
@@ -421,7 +430,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
       {loading && <div className="fixed bottom-20 right-4 z-40 rounded-md bg-slate-900 px-3 py-2 text-sm text-white sm:bottom-4">Loading...</div>}
 
       {/* Mobile bottom bar — the Head Physio works this board on a phone between
-          patients, where the cards at the top are a stretch away. Same four, thumb-high. */}
+          patients, where the cards at the top are a stretch away. Same tabs, thumb-high. */}
       <nav className="fixed inset-x-0 bottom-0 z-50 flex border-t border-slate-600 bg-slate-500 shadow-[0_-2px_10px_rgba(0,0,0,0.06)] sm:hidden" data-testid="hp-bottom-nav">
         {WORK_TABS.map((t) => {
           const Icon = t.icon;
