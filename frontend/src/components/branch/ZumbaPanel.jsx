@@ -75,9 +75,9 @@ const PAYMENT_MODE_LABELS = { ...Object.fromEntries(PAYMENT_MODES.map((m) => [m.
 // card and filtering by the fourth found nothing. "Nothing collected" went the same way:
 // Due Payment above already answers who has not paid, and better, since it knows what is
 // owed rather than only that nothing came in.
-/** "1 student" / "3 students", for a caption that reads as a sentence rather than as a
+/** "1 customer" / "3 customers", for a caption that reads as a sentence rather than as a
  *  number with a noun bolted on. */
-const pluralStudents = (n) => `${n} student${n === 1 ? "" : "s"}`;
+const pluralCustomers = (n) => `${n} customer${n === 1 ? "" : "s"}`;
 
 const MODE_FILTERS = [
   ["", "All Modes"],
@@ -93,7 +93,7 @@ const MODE_FILTERS = [
 const REFERENCE_LABELS = { upi: "UPI ID", card: "Transaction ID", account_transfer: "Transaction ID" };
 
 // A membership is sold by the month — 12 classes in each. The shelf holds the per-class
-// rate, so the price a student is quoted is that rate across the whole plan, rounded back
+// rate, so the price a customer is quoted is that rate across the whole plan, rounded back
 // to the figure that was typed when the package was priced.
 const CLASSES_PER_MONTH = 12;
 
@@ -199,7 +199,7 @@ const planTotal = (item) => Math.round(
  *
  * Separate from the edit form on purpose: editing a registration is changing what it says,
  * while this is recording something that happened at the counter. A desk taking the second
- * half of a fee should not have to open a form full of the student's age and gender to do
+ * half of a fee should not have to open a form full of the customer's age and gender to do
  * it, and should not be able to change those by accident on the way past.
  *
  * Refuses more than is outstanding, and says so before the round trip. Taking more than
@@ -298,7 +298,7 @@ const CollectDueModal = ({ row, onClose, onCollected }) => {
  * Another term on a membership that is nearly up.
  *
  * Asks the two things a renewal is: which plan they are going back on, and what they have
- * handed over for it. Everything else about the student is already known and is not asked
+ * handed over for it. Everything else about the customer is already known and is not asked
  * again — a renewal is not a second registration.
  *
  * When the new term starts is the server's to decide, not this dialog's: it runs on from
@@ -495,7 +495,7 @@ const FieldLabel = ({ children }) => (
 /**
  * How a payment arrived, line by line.
  *
- * One editor for the three places money is taken — registering a student, renewing them,
+ * One editor for the three places money is taken — registering a customer, renewing them,
  * and collecting what is still due. They ask the identical question and were three copies
  * of the identical answer, which is three places for the denominations or the reference
  * rule to drift apart.
@@ -638,14 +638,14 @@ const CARDS = [
   // real master's referral to point it at.
   { key: "masters", label: "Refer Master", color: "#d97706", sub: "brought by a master" },
   // The last four are counts of people, like the four before them, but they answer what
-  // became of a student rather than where they came from: is the money settled, and are
+  // became of a customer rather than where they came from: is the money settled, and are
   // they still turning up. The revenue split that used to sit here said the same thing
   // three times over and answered neither.
   //
-  // Payment Done is a settled account, not "has paid something" — a student halfway
+  // Payment Done is a settled account, not "has paid something" — a customer halfway
   // through a 3,000 rupee membership belongs on Due Payment, which is the card somebody
   // acts on. A row with no fee on it yet is on neither: nothing has been sold.
-  // These two answer in money rather than headcount. "Two students have paid" is not what
+  // These two answer in money rather than headcount. "Two customers have paid" is not what
   // a branch wants off a card about payment, and two owing 500 between them is a different
   // afternoon from one owing 9,000. The count moves into the caption, where it is still
   // read but is no longer the answer.
@@ -793,7 +793,7 @@ const ViewRegistrationModal = ({ row, masterNameOf, onEdit, onCollect, onClose, 
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="rounded-lg border border-slate-200 p-3">
-              <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">Student</p>
+              <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">Customer</p>
               <DetailRow label="Phone" value={row.phone} />
               <DetailRow label="Age" value={row.age} />
               <DetailRow label="Gender" value={(GENDERS.find((g) => g.key === row.gender) || {}).label} />
@@ -920,7 +920,7 @@ const todayLocal = () => {
  *
  * A referral arrives as half a record: the master hands over a person -- name, phone, age,
  * area -- and the branch owes the rest of it, which is the part that turns a name into a
- * student in a class. These four are that part, and they are the four the row's badge
+ * customer in a class. These four are that part, and they are the four the row's badge
  * offers to go and fill in.
  *
  * Deliberately not everything that could be blank. Age and email are worth having and not
@@ -968,7 +968,7 @@ export const ZumbaPanel = ({ branchId }) => {
   const [dateFilter, setDateFilter] = useState(null);
   const [form, setForm] = useState(null); // null | { ...fields, id? }
   const [newMaster, setNewMaster] = useState(""); // a master not yet on the list
-  // The Zumba accounts at this branch, which is what a student is assigned *to*. Not
+  // The Zumba accounts at this branch, which is what a customer is assigned *to*. Not
   // the same list as `masters` above: that one is names typed onto referrals, and a
   // referral name with no account behind it cannot be given a class.
   const [zumbaMasters, setZumbaMasters] = useState([]);
@@ -1029,7 +1029,7 @@ export const ZumbaPanel = ({ branchId }) => {
 
   const visible = useMemo(() => {
     let list = rows;
-    // A student who has discontinued is off the roll, so they appear on their own card and
+    // A customer who has discontinued is off the roll, so they appear on their own card and
     // nowhere else: not in All, not under the source that brought them in, and not among
     // who owes money. Applied before the card filters rather than inside each one, so
     // there is a single place that decides who is still on the list.
@@ -1039,7 +1039,7 @@ export const ZumbaPanel = ({ branchId }) => {
     // number on a card and the rows behind it cannot disagree.
     if (card !== "discontinued") list = list.filter((r) => (r.status || "active") !== "discontinued");
     // Four of the cards are not sources, so each says which rows it stands for. Where a
-    // student came from and what became of them are different questions, and only the
+    // customer came from and what became of them are different questions, and only the
     // first is the `card` the server stamps on the row.
     // Everyone who has handed something over, because that is what the card now totals.
     // Filtering to the settled would open a list whose payments do not add up to the
@@ -1073,7 +1073,7 @@ export const ZumbaPanel = ({ branchId }) => {
 
   // Counted off every row, not the filtered ones: the point of the badge is to say
   // there is work waiting even while a card or a date range is hiding it.
-  // Counted over the roll, not over everybody: a discontinued student missing a phone
+  // Counted over the roll, not over everybody: a discontinued customer missing a phone
   // number is not work waiting, and chasing them is exactly what the badge would be asking
   // somebody to do.
   const needsCount = useMemo(
@@ -1172,9 +1172,9 @@ export const ZumbaPanel = ({ branchId }) => {
         master_name: (form.master_name || "").trim(),
         assigned_master_id: form.assigned_master_id || "",
         fee_amount: Number(form.fee_amount || 0),
-        // No fee_paid and no lines: this form registers a student, and saying nothing about
+        // No fee_paid and no lines: this form registers a customer, and saying nothing about
         // the money is what leaves what has been collected alone. Sending a zero here would
-        // wipe a student's payments every time somebody fixed their phone number.
+        // wipe a customer's payments every time somebody fixed their phone number.
       };
       if (form.id) await updateZumba(form.id, payload);
       else await addZumba(payload, branchId);
@@ -1222,7 +1222,7 @@ export const ZumbaPanel = ({ branchId }) => {
               ? rupees(summary?.[c.money])
               : (c.sum || [c.key]).reduce((n, k) => n + (Number(summary?.[k]) || 0), 0)}
             sub={c.countSub
-              ? c.countSub(pluralStudents(Number(summary?.[c.count || c.key]) || 0))
+              ? c.countSub(pluralCustomers(Number(summary?.[c.count || c.key]) || 0))
               : c.sub}
             icon={Music}
             color={c.color}
@@ -1433,7 +1433,7 @@ export const ZumbaPanel = ({ branchId }) => {
                         <td className="px-3 py-3 text-xs leading-5 text-slate-600">{r.phone || "—"}</td>
                         {/* What they bought, in a column of its own. It used to sit under
                             the source, where a membership and a lead channel read as one
-                            fact about the student rather than two. */}
+                            fact about the customer rather than two. */}
                         <td className="px-3 py-3">
                           <div className="flex flex-col items-start gap-0.5">
                             {r.package_name ? (
@@ -1549,7 +1549,7 @@ export const ZumbaPanel = ({ branchId }) => {
                               <Button size="sm" variant="outline" className="h-7 w-7 p-0" onClick={() => openForm(r)} title="Edit" aria-label="Edit" data-testid={`zumba-edit-${r.id}`}>
                                 <Pencil className="h-3 w-3" />
                               </Button>
-                              {/* Only while something is owed. A student who is square with
+                              {/* Only while something is owed. A customer who is square with
                                   us has nothing to collect, and a button that opens a dialog
                                   saying so is a button that should not have been there. */}
                               {due > 0 && (
@@ -1707,14 +1707,14 @@ export const ZumbaPanel = ({ branchId }) => {
                 </div>
 
                 {/* Its own field rather than a second use of Source: Source is how this
-                    student arrived, this is whose class they are in. Only what is set here
+                    customer arrived, this is whose class they are in. Only what is set here
                     reaches a master's board — referring somebody does not put them on your
                     own roll, which is the point of keeping the two apart. */}
                 <div className="space-y-2">
                   <FieldLabel>Assign To</FieldLabel>
                   {zumbaMasters.length === 0 ? (
                     <p className="rounded-md bg-slate-50 px-2.5 py-2 text-[11px] text-slate-500" data-testid="zumba-field-assign-empty">
-                      No Zumba accounts at this branch yet. Add one in HR Admin to assign students to a class.
+                      No Zumba accounts at this branch yet. Add one in HR Admin to assign customers to a class.
                     </p>
                   ) : (
                     <FormSelect
@@ -1772,7 +1772,7 @@ export const ZumbaPanel = ({ branchId }) => {
 
                 {/* The shelf, priced. Picking a membership fills the amount owed, which is
                     what the plan costs; what has actually been handed over stays a separate
-                    number, because the two are only equal once the student has paid. */}
+                    number, because the two are only equal once the customer has paid. */}
                 <div className="space-y-2">
                   <FieldLabel>Fee</FieldLabel>
                   <PackagePicker
@@ -1793,7 +1793,7 @@ export const ZumbaPanel = ({ branchId }) => {
                     <FieldLabel>Fee Amount</FieldLabel>
                     <Input type="number" value={form.fee_amount} onChange={(e) => setForm({ ...form, fee_amount: e.target.value, package_id: "", package_name: "", package_sessions: "" })} placeholder="0" data-testid="zumba-field-amount" />
                     {/* What they owe, not what they have handed over. This form registers a
-                        student; money is taken at the counter afterwards, through Collect,
+                        customer; money is taken at the counter afterwards, through Collect,
                         which is a different act and has its own record of how it arrived. */}
                     <p className="text-[11px] text-slate-400">Set by the membership above. Collect the fee from the row once they are registered.</p>
                   </div>

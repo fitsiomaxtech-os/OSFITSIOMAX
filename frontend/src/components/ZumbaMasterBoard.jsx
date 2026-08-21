@@ -54,7 +54,7 @@ const SESSIONS = [
  *  always saying "Customers" over a list that has been narrowed. */
 const CARD_TITLES = {
   all: "Customers",
-  today: "Today's Session Students",
+  today: "Today's Session Customers",
 };
 
 /** One headline figure, and the filter behind it.
@@ -289,7 +289,7 @@ export const ZumbaMasterBoard = ({ currentUser }) => {
             does not, on purpose — a referral says who brought them in, which is a claim on
             the lead, not a seat in your class. */}
         <SummaryCard
-          label="All Students"
+          label="All Customers"
           value={summary.all ?? 0}
           caption="Assigned to your class by the branch"
           tone="border-violet-200 bg-violet-50 text-violet-900"
@@ -298,7 +298,7 @@ export const ZumbaMasterBoard = ({ currentUser }) => {
           testid="zumba-card-all"
         />
         <SummaryCard
-          label="Today's Session Students"
+          label="Today's Session Customers"
           value={bookedOn(day).length}
           caption={isClassDayIso(day)
             ? (day === todayIso() ? "Booked into today's class" : `Booked into the class on ${shortDate(day)}`)
@@ -424,7 +424,7 @@ export const ZumbaMasterBoard = ({ currentUser }) => {
           ) : visible.length === 0 ? (
             <p className="px-4 py-12 text-center text-sm text-slate-400" data-testid="zumba-master-empty">
               {rows.length === 0
-                ? "Nobody assigned to your class yet. The branch admin assigns students to a master."
+                ? "Nobody assigned to your class yet. The branch admin assigns customers to a master."
                 : search.trim()
                   ? "Nobody matches that search."
                   : card === "today"
@@ -435,7 +435,7 @@ export const ZumbaMasterBoard = ({ currentUser }) => {
             <div className="overflow-x-auto">
               <table className="w-full min-w-[40rem] text-left text-sm">
                 <thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                  {/* What a master needs of a student: who they are, how to reach them,
+                  {/* What a master needs of a customer: who they are, how to reach them,
                       when their membership started and ends, and how much of it they
                       bought. The money is the branch's business and has gone with the
                       source, which said where a lead came from -- a question answered

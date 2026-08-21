@@ -65,7 +65,7 @@ CARD_OF_SOURCE = {
     "branch": "direct",
     # Fitsiomax's own channel is Direct for the same reason the four above it are: nobody
     # referred them. It had a card of its own until the strip was rebuilt around what
-    # became of a student, and a bucket no card draws is a count that goes nowhere -- a
+    # became of a customer, and a bucket no card draws is a count that goes nowhere -- a
     # Fitsiomax lead was landing on none of the three the branch can see.
     "fitsiomax": "direct",
     "consultations": "consultant",
@@ -75,7 +75,7 @@ CARD_OF_SOURCE = {
 # branch is told exists and cannot open.
 CARDS = ("direct", "consultant", "masters")
 
-# What has become of a student, where that is anything other than still attending.
+# What has become of a customer, where that is anything other than still attending.
 #
 # Active is the absence of the other two rather than a value anybody sets, so a row written
 # before this existed reads as active without a migration. Both of the others carry a
@@ -93,7 +93,7 @@ def _status(value) -> str:
     return slug if slug in STATUSES else STATUS_ACTIVE
 
 
-# When the class this student joins meets. Two slots, stored as they read, because they are
+# When the class this customer joins meets. Two slots, stored as they read, because they are
 # a label on a registration rather than a booking anything schedules against -- the class
 # itself is fixed at Mon/Wed/Fri. Anything else is dropped rather than stored, so the column
 # can never hold a time no class runs at.
@@ -104,7 +104,7 @@ TIME_SLOTS = ("10:00 am - 11:00 am", "11:00 am - 12:00 pm")
 GENDERS = ("female", "male", "other")
 
 # How the class fee was taken. The same four the consultation and store desks offer, in the
-# same slugs, so one student's cash reads as cash wherever the money is later counted.
+# same slugs, so one customer's cash reads as cash wherever the money is later counted.
 # Cheque and Partial are deliberately not here: those belong to a treatment plan paid down
 # over months, and a class membership is settled in one go.
 PAYMENT_MODES = ("cash", "upi", "card", "account_transfer")
@@ -139,7 +139,7 @@ REFERENCE_LABELS = {
 # them by hand. What the card decides is only where it starts.
 #
 # The three that count people, not the three that count money: a rupee figure is not a
-# place a student can stand, and Total Fees already answers a different question by
+# place a customer can stand, and Total Fees already answers a different question by
 # filtering the same list on whether it has been paid.
 #
 # Name, the card it mirrors, and that card's colour on the branch tab.
@@ -255,7 +255,7 @@ def _classes_left(row: dict):
     return min(ahead, _sessions(row.get("package_sessions")) or ahead)
 
 
-# What a master keeps of the fees their students paid. The other half is Fitsiomax's,
+# What a master keeps of the fees their customers paid. The other half is Fitsiomax's,
 # taken as the remainder rather than a second multiplication so the two always add back up
 # to exactly what was collected -- this figure is somebody's pay.
 MASTER_SHARE = 0.5
@@ -392,7 +392,7 @@ class ZumbaInput(BaseModel):
     # Only meaningful when source is "master"; dropped otherwise, so moving the source off
     # a referral cannot leave a stale master's name attached to the row.
     master_name: Optional[str] = ""
-    # Which master's class this student sits in. Kept apart from master_name on purpose:
+    # Which master's class this customer sits in. Kept apart from master_name on purpose:
     # master_name records who *referred* them, which a master writes for themselves, while
     # this records who *teaches* them, which only a Branch Admin decides. A master's board
     # reads this one, so referring somebody cannot put them on your own roll.
@@ -401,7 +401,7 @@ class ZumbaInput(BaseModel):
     gender: Optional[str] = ""
     # Which of the two class slots they attend, and the membership they bought -- the
     # package's own name and id off the Zumba shelf, so a renamed or repriced package
-    # cannot rewrite what this student was actually sold.
+    # cannot rewrite what this customer was actually sold.
     time_slot: Optional[str] = ""
     # The day they joined, as YYYY-MM-DD. Asked rather than assumed from when the row was
     # typed: a branch entering last week's walk-ins would otherwise have every membership
@@ -421,12 +421,12 @@ class ZumbaInput(BaseModel):
     package_name: Optional[str] = ""
     # How many classes the membership holds. Stored beside the name rather than looked up
     # from the shelf when needed: a package repriced or renamed later must not change what
-    # this student was sold, and it is what the master's roll counts down from.
+    # this customer was sold, and it is what the master's roll counts down from.
     package_sessions: Optional[int] = None
     fee_amount: Optional[float] = 0
     # None means "not mentioned", which is different from 0 and has to stay different: the
     # registration form does not collect money any more, and a save that left this at 0
-    # would wipe what a student had already paid every time somebody fixed their phone
+    # would wipe what a customer had already paid every time somebody fixed their phone
     # number.
     fee_paid: Optional[float] = None
     # Where the registration sits in the Zumba pipeline. Left unset it starts at the entry
@@ -449,8 +449,8 @@ def _is_master_account(user: V3UserOut) -> bool:
 
     is_zumba_role answers True for Super Admin, deliberately, so they can read every board
     in the OS. That is a question about reach. Whose class roll this is, whose branch this
-    is, and whose students these are, are questions about identity, and answering them with
-    the reach predicate handed Super Admin a query for their own assigned students -- of
+    is, and whose customers these are, are questions about identity, and answering them with
+    the reach predicate handed Super Admin a query for their own assigned customers -- of
     which there are none -- so the Zumba tab read empty at every branch while the Branch
     Admin under them saw the class perfectly well.
     """
@@ -644,9 +644,9 @@ def _settle_stage(value, stages: list, card: Optional[str] = None) -> str:
 def _visible_query(user: V3UserOut, branch_id: Optional[str]) -> Optional[dict]:
     """Which registrations this account may read, or None when that is none of them.
 
-    A Zumba master reads their own roll and nothing else: the students a Branch Admin put
+    A Zumba master reads their own roll and nothing else: the customers a Branch Admin put
     in their class, whatever branch the row was entered against. Not their branch's whole
-    book, and not the students they themselves referred -- a referral says who brought
+    book, and not the customers they themselves referred -- a referral says who brought
     somebody in, which is a claim on the lead, not a seat in a class. A master who refers
     ten people has an empty board until the branch assigns them, which is the intended
     reading and not a misconfiguration.
@@ -654,7 +654,7 @@ def _visible_query(user: V3UserOut, branch_id: Optional[str]) -> Optional[dict]:
     Everyone else -- Branch Admin, Super Admin -- is read by branch, unchanged.
     """
     if _is_master_account(user):
-        # A discontinued student is off the roll, not greyed out on it: the master is being
+        # A discontinued customer is off the roll, not greyed out on it: the master is being
         # told who is in their class, and somebody who has left is not. Matched with $ne so
         # a row written before statuses existed -- which carries no status at all -- still
         # reads as on the roll rather than silently vanishing from it.
@@ -842,7 +842,7 @@ async def list_zumba(
     # because they held the seat.
     class_day = _is_class_day_today()
 
-    # A student who has discontinued has left the class, so they are counted on their own
+    # A customer who has discontinued has left the class, so they are counted on their own
     # card and on no other -- not in All, not under the source that brought them in, and
     # not among who owes money. A count of All that includes people who have gone is a roll
     # nobody can staff a class from, and Due Payment listing them turns a card somebody
@@ -864,14 +864,14 @@ async def list_zumba(
     summary["is_class_day"] = class_day
     # The four the branch tab counts alongside the sources: where the money stands, and who
     # has stopped coming. Payment Done is a settled account rather than "paid something" --
-    # a student who has handed over half of a 3,000 rupee membership is the Due Payment
+    # a customer who has handed over half of a 3,000 rupee membership is the Due Payment
     # card's business, not this one's. A row with no fee on it at all is neither: nothing
     # has been sold yet, so there is nothing to have settled or to owe.
     summary["payment_done"] = 0
     summary["due_payment"] = 0
     # The money behind those two counts. Payment Done is asked what came in and Due Payment
     # what has not, which is what a branch wants off a card about payment -- a headcount
-    # answers neither, and two students owing 500 between them is a different afternoon
+    # answers neither, and two customers owing 500 between them is a different afternoon
     # from one owing 9,000.
     summary["due_total"] = 0.0
     summary["discontinued"] = 0
@@ -939,7 +939,7 @@ async def list_zumba(
 
 
 async def _assignment(payload: ZumbaInput, user: V3UserOut) -> dict:
-    """The master this student is assigned to, resolved to id and name.
+    """The master this customer is assigned to, resolved to id and name.
 
     Empty for a Zumba master: assigning is the Branch Admin's call, and a master posting
     their own referral must not be able to put themselves on the roll -- that is exactly
@@ -1051,7 +1051,7 @@ async def list_zumba_masters(
     and is_zumba_role is the one place that knows both read as the Zumba desk.
 
     A branch with no master accounts comes back empty and the control says so, rather than
-    offering a dropdown that assigns students to nobody.
+    offering a dropdown that assigns customers to nobody.
     """
     branch_id = await _branch_for(user, branch_id)
     query: dict = {"is_active": {"$ne": False}}
@@ -1062,7 +1062,7 @@ async def list_zumba_masters(
     ).sort("full_name", 1).to_list(200)
     # Super Admin excluded deliberately. is_zumba_role answers "may this account reach the
     # Zumba desk", which Super Admin may, not "is this person a master who teaches a class",
-    # which they are not -- and this list is the one that hands students to somebody.
+    # which they are not -- and this list is the one that hands customers to somebody.
     return [
         {"id": r["id"], "name": (r.get("full_name") or r.get("email") or "").strip()}
         for r in rows
@@ -1250,7 +1250,7 @@ async def set_zumba_status(
     payload: ZumbaStatusInput,
     user: V3UserOut = Depends(require_zumba_reader),
 ):
-    """Record that a student has discontinued or gone on leave, and why.
+    """Record that a customer has discontinued or gone on leave, and why.
 
     The reason is required, not optional. A roll that quietly shrinks answers none of the
     questions asked of it a month later -- whether the class lost people to the timing, the
@@ -1326,7 +1326,7 @@ async def _dismiss_referral(lead_id: str, user: V3UserOut) -> dict:
 
 
 class ZumbaCollectInput(BaseModel):
-    """Money taken against what a student already owes."""
+    """Money taken against what a customer already owes."""
     payment_lines: Optional[List[ZumbaPaymentLine]] = None
 
 
@@ -1383,7 +1383,7 @@ async def collect_zumba(
 
     shaped = _shape({**existing, **changes}, await _zumba_stages())
     left = round(owed - changes["fee_paid"], 2)
-    summary = f"Collected {taken:g} from {existing.get('name', 'the student')}"
+    summary = f"Collected {taken:g} from {existing.get('name', 'the customer')}"
     summary += f". {left:g} still due" if left > 0 else ". Paid up"
     return {"message": summary, "registration": shaped}
 
@@ -1403,7 +1403,7 @@ async def renew_zumba(
     payload: ZumbaRenewInput,
     user: V3UserOut = Depends(require_zumba_reader),
 ):
-    """Sell the same student another term.
+    """Sell the same customer another term.
 
     The new term starts when the old one ends, not on the day the button is pressed. A
     member who renews a week early has paid for those days and should not lose them, and a
