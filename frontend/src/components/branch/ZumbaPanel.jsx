@@ -91,6 +91,19 @@ const MODE_FILTERS = [
 ];
 
 const REFERENCE_LABELS = { upi: "UPI ID", card: "Transaction ID", account_transfer: "Transaction ID" };
+
+// A membership is sold by the month — 12 classes in each. The shelf holds the per-class
+// rate, so the price a student is quoted is that rate across the whole plan, rounded back
+// to the figure that was typed when the package was priced.
+const CLASSES_PER_MONTH = 12;
+
+/** "06 Aug 2026" off the stored ISO timestamp; a dash rather than "Invalid Date". */
+const shortDate = (iso) => {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+};
 const REFERENCE_PLACEHOLDERS = { upi: "name@bank", card: "Transaction number", account_transfer: "Transaction number" };
 
 // The notes a class fee is actually handed over in, largest first — the order a drawer is
@@ -128,6 +141,41 @@ const finishPreview = (from, classes) => {
  */
 const noteTotal = (l) => DENOMINATIONS.reduce((sum, d) => sum + d * (Number(l?.notes?.[d]) || 0), 0);
 const lineTotal = (l) => (l?.mode === "cash" && noteTotal(l) > 0 ? noteTotal(l) : Number(l?.amount) || 0);
+
+// Moved above their first use. They sat below it, which runs perfectly well —
+// module-level consts are initialised before any of these functions are called — but
+// no-use-before-define is an error here, and the build stopped.
+
+
+/** One labelled line of the detail popup. A blank reads as a dash rather than as nothing,
+ *  so a gap in the record is visible instead of invisible. */
+// Above ViewRegistrationModal, which reads both. A const is not hoisted, so writing
+// them below the modal that prints a fee and a date left them undefined at the line
+// that needed them.
+const rupees = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
+
+/** The first line a payment that is missing its reference. Used before a save so the desk
+ *  is told which line is short, rather than being handed the server's answer a round trip
+ *  later. A split can have one traceable half and one not: the cash needs nothing and the
+ *  UPI still needs its ID. */
+const lineMissingReference = (lines) => (lines || []).find(
+  (l) => lineTotal(l) > 0 && REFERENCE_LABELS[l.mode] && !(l.reference || "").trim(),
+);
+
+/** The payment lines a dialog sends, in the shape the server settles from. */
+const paymentPayload = (lines) => (lines || [])
+  .filter((l) => lineTotal(l) > 0)
+  .map((l) => ({
+    mode: l.mode,
+    amount: lineTotal(l),
+    reference: (l.reference || "").trim(),
+    // Only for cash, and only what was actually counted — an empty map would read as
+    // "counted nothing" rather than "did not count".
+    denominations: l.mode === "cash" && noteTotal(l) > 0
+      ? Object.fromEntries(DENOMINATIONS.filter((d) => Number(l.notes?.[d]) > 0).map((d) => [String(d), Number(l.notes[d])]))
+      : undefined,
+  }));
+
 const linesTotal = (lines) => (lines || []).reduce((sum, l) => sum + lineTotal(l), 0);
 
 /** A stored row's payment, back in the shape the form edits.
@@ -163,10 +211,6 @@ const GENDERS = [
   { key: "other", label: "Other" },
 ];
 
-// A membership is sold by the month — 12 classes in each. The shelf holds the per-class
-// rate, so the price a student is quoted is that rate across the whole plan, rounded back
-// to the figure that was typed when the package was priced.
-const CLASSES_PER_MONTH = 12;
 const planLabel = (item) => {
   const classes = item.sessions_offline || item.sessions_online || 0;
   const months = classes && classes % CLASSES_PER_MONTH === 0 ? classes / CLASSES_PER_MONTH : null;
@@ -586,27 +630,7 @@ const PaymentLinesEditor = ({ lines, onChange, prefix, emptyNote }) => {
   );
 };
 
-/** The first line a payment that is missing its reference. Used before a save so the desk
- *  is told which line is short, rather than being handed the server's answer a round trip
- *  later. A split can have one traceable half and one not: the cash needs nothing and the
- *  UPI still needs its ID. */
-const lineMissingReference = (lines) => (lines || []).find(
-  (l) => lineTotal(l) > 0 && REFERENCE_LABELS[l.mode] && !(l.reference || "").trim(),
-);
 
-/** The payment lines a dialog sends, in the shape the server settles from. */
-const paymentPayload = (lines) => (lines || [])
-  .filter((l) => lineTotal(l) > 0)
-  .map((l) => ({
-    mode: l.mode,
-    amount: lineTotal(l),
-    reference: (l.reference || "").trim(),
-    // Only for cash, and only what was actually counted — an empty map would read as
-    // "counted nothing" rather than "did not count".
-    denominations: l.mode === "cash" && noteTotal(l) > 0
-      ? Object.fromEntries(DENOMINATIONS.filter((d) => Number(l.notes?.[d]) > 0).map((d) => [String(d), Number(l.notes[d])]))
-      : undefined,
-  }));
 
 const sourceLabel = (r) => (
   r.source === MASTER
@@ -664,20 +688,7 @@ const amountDue = (r) => Number(r?.fee_amount || 0) - Number(r?.fee_paid || 0);
 
 const STATUS_LABELS = { discontinued: "Discontinued", leave: "On leave" };
 
-/** One labelled line of the detail popup. A blank reads as a dash rather than as nothing,
- *  so a gap in the record is visible instead of invisible. */
-// Above ViewRegistrationModal, which reads both. A const is not hoisted, so writing
-// them below the modal that prints a fee and a date left them undefined at the line
-// that needed them.
-const rupees = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 
-/** "06 Aug 2026" off the stored ISO timestamp; a dash rather than "Invalid Date". */
-const shortDate = (iso) => {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-};
 
 const DetailRow = ({ label, value }) => (
   <div className="flex items-start justify-between gap-3 border-b border-slate-100 py-1.5 last:border-b-0">
