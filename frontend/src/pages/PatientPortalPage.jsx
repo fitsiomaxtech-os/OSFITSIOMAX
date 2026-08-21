@@ -772,9 +772,20 @@ const feedbackSentOn = (iso) => {
  * is the smallest honest thing to say.
  */
 const MyFeedbackList = ({ mine }) => {
-  if (!mine || mine.length === 0) return null;
+  if (!mine || mine.length === 0) {
+    return (
+      <Card data-testid="portal-feedback-mine-empty">
+        <CardContent className="p-8 text-center">
+          <p className="text-sm font-semibold text-slate-800">Nothing sent yet</p>
+          <p className="mt-1 text-xs text-slate-500">
+            Anything you send shows up here with where it got to — waiting, being looked at, or closed.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
   return (
-    <Card className="mt-4" data-testid="portal-feedback-mine">
+    <Card data-testid="portal-feedback-mine">
       <CardContent className="p-5">
         <p className="text-sm font-semibold text-slate-800">What you have sent</p>
         <div className="mt-3 space-y-3">
@@ -783,7 +794,12 @@ const MyFeedbackList = ({ mine }) => {
             return (
               <div key={f.id} className="rounded-lg border border-slate-200 p-3" data-testid={`portal-feedback-mine-${f.id}`}>
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className={`rounded border px-2 py-0.5 text-[10px] font-bold ${state.classes}`}>{state.label}</span>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className={`rounded border px-2 py-0.5 text-[10px] font-bold ${state.classes}`}>{state.label}</span>
+                    <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
+                      {f.audience === "super_admin" ? "Head office" : "My branch"}
+                    </span>
+                  </div>
                   <span className="text-[10px] text-slate-400">{feedbackSentOn(f.created_at)}</span>
                 </div>
                 {f.rating ? (
@@ -813,6 +829,10 @@ function FeedbackTab() {
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [mine, setMine] = useState([]);
+  // Writing and checking are two errands, not one page: somebody coming back to see what
+  // happened to last week's complaint should not have to scroll past a blank form to find
+  // it. Opens on the form, which is what most visits are for.
+  const [view, setView] = useState("send"); // "send" | "history"
 
   // Reloaded after a send as well as on open, so what was just written appears in the list
   // below rather than only after leaving the tab and coming back.
@@ -851,18 +871,54 @@ function FeedbackTab() {
             Thank you — {audience === "super_admin" ? "head office has it." : "your branch has it."}
           </p>
           <p className="text-xs text-slate-500">Somebody there will read it. You can send more any time.</p>
-          <Button variant="outline" size="sm" onClick={() => { setSent(false); setRating(0); setMessage(""); }} data-testid="portal-feedback-again">
-            Send more feedback
-          </Button>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => { setSent(false); setRating(0); setMessage(""); }} data-testid="portal-feedback-again">
+              Send more feedback
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => { setSent(false); setRating(0); setMessage(""); setView("history"); }} data-testid="portal-feedback-see-history">
+              See what happened to it
+            </Button>
+          </div>
         </CardContent>
         </Card>
-        <MyFeedbackList mine={mine} />
       </>
     );
   }
 
   return (
     <>
+      {/* Two tabs rather than a form with a list under it: one of them is for saying
+          something, the other for finding out what came of it, and a patient arrives
+          wanting one or the other. The count says there is something to come back to. */}
+      <div className="mb-3 flex gap-1 rounded-lg border border-slate-200 bg-white p-1" data-testid="portal-feedback-tabs">
+        {[
+          { key: "send", label: "Feedback" },
+          { key: "history", label: "Feedback History" },
+        ].map((t) => {
+          const on = view === t.key;
+          return (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setView(t.key)}
+              aria-pressed={on}
+              className={`flex-1 rounded-md px-3 py-2 text-xs font-semibold transition ${on ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}
+              data-testid={`portal-feedback-tab-${t.key}`}
+            >
+              {t.label}
+              {t.key === "history" && mine.length > 0 && (
+                <span className={`ml-1.5 rounded px-1.5 py-px text-[10px] font-bold ${on ? "bg-white/25" : "bg-slate-100 text-slate-500"}`}>
+                  {mine.length}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {view === "history" ? (
+        <MyFeedbackList mine={mine} />
+      ) : (
       <Card data-testid="portal-feedback">
       <CardContent className="space-y-4 p-5">
         <div>
@@ -940,11 +996,11 @@ function FeedbackTab() {
           onClick={submit}
           data-testid="portal-feedback-submit"
         >
-          {sending ? "Sending…" : "Send to my branch"}
+          {sending ? "Sending…" : audience === "super_admin" ? "Send to head office" : "Send to my branch"}
         </Button>
       </CardContent>
       </Card>
-      <MyFeedbackList mine={mine} />
+      )}
     </>
   );
 }
