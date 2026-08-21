@@ -443,6 +443,62 @@ async def v3_move_stage(lead_id: str, payload: V3MoveStageInput, user: V3UserOut
     return V3LeadOut(**updated)
 
 
+class LeadFlagsInput(BaseModel):
+    # Both optional and both nullable-by-omission: the row toggles one mark at a time, and
+    # sending only the one that changed keeps a click on the star from also rewriting the
+    # attention mark someone else set a second earlier.
+    is_vip: Optional[bool] = None
+    needs_attention: Optional[bool] = None
+
+
+@router.patch("/leads/{lead_id}/flags", response_model=V3LeadOut)
+async def v3_set_lead_flags(
+    lead_id: str,
+    payload: LeadFlagsInput,
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "pre_sales", "business_dev")),
+):
+    """The two marks a branch puts on a patient by hand: VIP, and needs attention.
+
+    Deliberately its own endpoint rather than a field on the lead update: this is a one-click
+    toggle from a row in a list, and routing it through the full-record PUT would have a
+    star press send every other field on the lead back with it — overwriting whatever anyone
+    editing that patient had changed in the meantime.
+
+    Neither flag touches a stage. They say something about how the branch is treating a
+    patient, not where the patient is, so clearing one must never read as progress.
+    """
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    changes = {k: v for k, v in payload.model_dump().items() if v is not None}
+    if not changes:
+        raise HTTPException(status_code=400, detail="Nothing to change")
+    changes["updated_at"] = now_iso()
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": changes})
+
+    # Logged like any other hand-made decision on a patient, so "who marked this VIP" has an
+    # answer. Both marks are visible to the whole branch, and an unexplained one invites the
+    # next person to clear it.
+    said = []
+    if "is_vip" in changes:
+        said.append("marked VIP" if changes["is_vip"] else "removed the VIP mark")
+    if "needs_attention" in changes:
+        said.append("flagged for attention" if changes["needs_attention"] else "cleared the attention flag")
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": lead_id,
+        "action": "lead_flagged",
+        "details": " and ".join(said).capitalize(),
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": now_iso(),
+    })
+
+    updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    return V3LeadOut(**updated)
+
+
 @router.post("/leads/{lead_id}/rnr-attempt", response_model=V3LeadOut)
 async def v3_rnr_attempt(lead_id: str, user: V3UserOut = Depends(v3_require_roles("pre_sales", "business_dev", "super_admin", "branch_admin"))):
     """Increment the 'rnr_attempts' counter on a lead (Ring-Not-Responded)."""

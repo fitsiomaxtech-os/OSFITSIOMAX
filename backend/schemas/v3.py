@@ -315,6 +315,15 @@ class V3LeadOut(BaseModel):
     # to consultation_decision — see V3ConsultationDecisionInput.
     diet_recommended: Optional[bool] = False
     rehab_referred: Optional[bool] = False
+    # Two marks the branch puts on a patient by hand, and the only fields here that say
+    # something about how the branch feels about a patient rather than what the patient has
+    # bought or been referred to. Kept apart from the pipeline for that reason: neither ever
+    # moves a stage, and clearing one must never be read as progress.
+    #
+    #   is_vip          — treat this one especially well.
+    #   needs_attention — something here needs looking at, whatever the stage says.
+    is_vip: Optional[bool] = False
+    needs_attention: Optional[bool] = False
     fitness_recommended: Optional[bool] = False
     zumba_recommended: Optional[bool] = False
     # Who is actually delivering that diet plan, set by branch/assign-diet. This model

@@ -29,6 +29,8 @@ import {
   UserX,
   Clock,
   MoreHorizontal,
+  Star,
+  AlertCircle,
   PhoneOff,
   Music,
   Dumbbell,
@@ -53,6 +55,7 @@ import {
   scheduleBranchFollowUp,
   rescheduleBranchFollowUp,
   bulkDeleteLeads,
+  setLeadFlags,
   rnrAttempt,
 } from "@/lib/api";
 import { to12h, endTime12h, callTimeStamp, callDateStamp } from "@/lib/time";
@@ -503,6 +506,25 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     setLoading(false);
     return data;
   }, [branchId]);
+
+  // The two hand-made marks on a row: VIP, and needs attention. Patched into the list in
+  // place rather than reloading the board — this is a click on one row of a list that can
+  // run to thousands, and a full refetch would scroll-jump the person who pressed it.
+  //
+  // Only the flag that changed is sent, so pressing the star cannot also rewrite an
+  // attention mark a colleague set a moment ago.
+  const toggleLeadFlag = async (lead, field) => {
+    const next = !lead[field];
+    // Shown immediately and put back if the server refuses: a mark that lags a click reads
+    // as a dead button and gets pressed again.
+    setBoardData((b) => ({ ...b, leads: (b.leads || []).map((l) => (l.id === lead.id ? { ...l, [field]: next } : l)) }));
+    try {
+      await setLeadFlags(lead.id, { [field]: next });
+    } catch (err) {
+      setBoardData((b) => ({ ...b, leads: (b.leads || []).map((l) => (l.id === lead.id ? { ...l, [field]: !next } : l)) }));
+      toast.error(err?.response?.data?.detail || "Couldn't save that mark");
+    }
+  };
 
   useEffect(() => { loadBoard(); }, [loadBoard]);
   useEffect(() => { stagesList("consultation").then(setConsultationStages).catch(() => {}); }, []);
@@ -1139,6 +1161,39 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
                             <div className="min-w-0">
                               <span className="block truncate font-medium text-slate-800" title={lead.name}>{lead.name}</span>
                               {lead.patient_number && <span className="block truncate font-mono text-[10px] text-slate-400" title={lead.patient_number}>{lead.patient_number}</span>}
+                            </div>
+                            {/* The two marks, after the name so they read as something said
+                                about this patient rather than as part of their identity.
+                                stopPropagation on both: the row opens the patient, and
+                                marking one should not also open them.
+
+                                Unset they are faint outlines rather than absent, so the
+                                control is in the same place on every row — a mark that only
+                                appears once set cannot be set by anyone who has not seen it
+                                set before. */}
+                            <div className="ml-auto flex shrink-0 items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); toggleLeadFlag(lead, "is_vip"); }}
+                                title={lead.is_vip ? "VIP client — click to remove" : "Mark as VIP client"}
+                                aria-label={lead.is_vip ? `Remove VIP mark from ${lead.name || "patient"}` : `Mark ${lead.name || "patient"} as VIP`}
+                                aria-pressed={!!lead.is_vip}
+                                className="rounded p-1 transition-colors hover:bg-amber-50"
+                                data-testid={`branch-vip-${lead.id}`}
+                              >
+                                <Star className={`h-4 w-4 ${lead.is_vip ? "fill-amber-400 text-amber-500" : "text-slate-300 hover:text-amber-400"}`} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); toggleLeadFlag(lead, "needs_attention"); }}
+                                title={lead.needs_attention ? "Needs attention — click to clear" : "Flag as needing attention"}
+                                aria-label={lead.needs_attention ? `Clear the attention flag on ${lead.name || "patient"}` : `Flag ${lead.name || "patient"} as needing attention`}
+                                aria-pressed={!!lead.needs_attention}
+                                className="rounded p-1 transition-colors hover:bg-rose-50"
+                                data-testid={`branch-attention-${lead.id}`}
+                              >
+                                <AlertCircle className={`h-4 w-4 ${lead.needs_attention ? "fill-rose-500 text-white" : "text-slate-300 hover:text-rose-400"}`} />
+                              </button>
                             </div>
                           </div>
                         </td>

@@ -113,6 +113,10 @@ export const getClientPortalPreview = async (leadId) => (await api.get(`/leads/$
 export const listTestimonials = async () => (await api.get("/testimonials/manage")).data;
 export const addTestimonial = async (payload) => (await api.post("/testimonials", payload)).data;
 export const deleteTestimonial = async (id) => (await api.delete(`/testimonials/${id}`)).data;
+// The two marks a branch puts on a patient by hand — VIP, and needs attention. Its own
+// endpoint rather than updateLead: this is a one-click toggle from a row, and the full PUT
+// would send every other field back with it. Pass only the flag that changed.
+export const setLeadFlags = async (leadId, flags) => (await api.patch(`/leads/${leadId}/flags`, flags)).data;
 export const rnrAttempt = async (leadId) => (await api.post(`/leads/${leadId}/rnr-attempt`)).data;
 export const scheduleFollowUp = async (leadId, payload) => (await api.post(`/leads/${leadId}/follow-up`, payload)).data;
 export const rescheduleFollowUp = async (leadId, followupId, payload) => (await api.post(`/leads/${leadId}/follow-up/${followupId}/reschedule`, payload)).data;
