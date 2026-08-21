@@ -483,8 +483,8 @@ async def _referred_rows(branch_id: Optional[str], entry_stage: str = "") -> lis
         query["branch_id"] = branch_id
     leads = await v3_col("leads").find(query, {
         "_id": 0, "id": 1, "name": 1, "phone": 1, "branch_id": 1, "extra_fields": 1,
-        "zumba_package_name": 1, "zumba_package_price": 1, "zumba_package_sessions": 1,
-        "updated_at": 1,
+        "zumba_package_id": 1, "zumba_package_name": 1, "zumba_package_price": 1,
+        "zumba_package_sessions": 1, "updated_at": 1,
     }).to_list(2000)
     if not leads:
         return []
@@ -532,6 +532,11 @@ async def _referred_rows(branch_id: Optional[str], entry_stage: str = "") -> lis
             # drawer because a package was named would be a lie the accountant inherits.
             "fee_amount": _amount(l.get("zumba_package_price")),
             "fee_paid": 0.0,
+            # The catalogue item itself, not just what it was called. Carrying the id is
+            # what lets the branch's own form open this row with the membership already
+            # picked -- without it the row names a package the form cannot find, and the
+            # branch is asked to choose one that was chosen at the consultation.
+            "package_id": l.get("zumba_package_id") or "",
             "package_name": l.get("zumba_package_name") or "",
             "package_sessions": l.get("zumba_package_sessions"),
             "created_at": saved_at.get(l["id"]) or l.get("updated_at") or "",
@@ -873,7 +878,8 @@ async def accept_referral(
     lead = await v3_col("leads").find_one(
         {"id": lead_id, "zumba_recommended": True},
         {"_id": 0, "id": 1, "name": 1, "phone": 1, "branch_id": 1, "extra_fields": 1,
-         "zumba_package_name": 1, "zumba_package_price": 1, "zumba_package_sessions": 1},
+         "zumba_package_id": 1, "zumba_package_name": 1, "zumba_package_price": 1,
+         "zumba_package_sessions": 1},
     )
     if not lead:
         raise HTTPException(status_code=404, detail="No Zumba referral on that lead")
@@ -907,7 +913,7 @@ async def accept_referral(
         "assigned_master_id": "",
         "assigned_master_name": "",
         "time_slot": "",
-        "package_id": "",
+        "package_id": lead.get("zumba_package_id") or "",
         "package_name": lead.get("zumba_package_name") or "",
         "package_sessions": lead.get("zumba_package_sessions"),
         "fee_amount": _amount(lead.get("zumba_package_price")),
