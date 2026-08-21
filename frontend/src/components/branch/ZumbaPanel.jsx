@@ -770,7 +770,7 @@ export const ZumbaPanel = ({ branchId }) => {
     setRemoving(null);
     try {
       await deleteZumba(target.id);
-      toast.success("Registration removed");
+      toast.success(target.origin === "consultation" ? "Referral turned away" : "Registration removed");
       load();
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Could not remove");
@@ -1068,10 +1068,10 @@ export const ZumbaPanel = ({ branchId }) => {
                         <td className="px-3 py-3 text-xs text-slate-500">{shortDate(r.created_at)}</td>
                         <td className="px-3 py-3 text-right">
                           {/* A referral is a decision recorded on the consultation, read
-                              live from the lead rather than copied here. Editing or
-                              deleting it would only put this tab out of step with the
-                              consultation that owns it — un-ticking Zumba there takes the
-                              row out on its own. */}
+                              live from the lead rather than copied here. Editing it would
+                              only put this tab out of step with the consultation that owns
+                              it — but taking it off this list is the branch's own call, and
+                              is recorded here rather than by rewriting the lead. */}
                           {r.origin === "consultation" ? (
                             <div className="flex items-center justify-end gap-1.5">
                               <Button size="sm" variant="outline" className="h-7 w-7 p-0" onClick={() => setViewing(r)} title="View" aria-label="View" data-testid={`zumba-view-${r.id}`}>
@@ -1090,6 +1090,21 @@ export const ZumbaPanel = ({ branchId }) => {
                               >
                                 <Stethoscope className="h-3 w-3" />
                                 {accepting === r.id ? "Taking on…" : "Referred"}
+                              </Button>
+                              {/* The other thing to do with a referral: this branch is not
+                                  running the class for them. It comes off the list without
+                                  the consultation's record changing, and a fresh
+                                  recommendation later brings them back. */}
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 w-7 border-rose-200 p-0 text-rose-600 hover:bg-rose-50"
+                                onClick={() => setRemoving(r)}
+                                title="Take this referral off the Zumba list"
+                                aria-label="Take this referral off the Zumba list"
+                                data-testid={`zumba-delete-${r.id}`}
+                              >
+                                <Trash2 className="h-3 w-3" />
                               </Button>
                             </div>
                           ) : (
@@ -1436,9 +1451,17 @@ export const ZumbaPanel = ({ branchId }) => {
                 <Trash2 className="h-5 w-5 text-rose-600" />
               </div>
               <div className="min-w-0">
-                <h3 className="text-base font-semibold text-slate-900">Remove this registration?</h3>
+                {/* Two different acts behind one button, so the dialog says which. A
+                    registration is deleted; a referral is only turned away, and saying
+                    "cannot be undone" about that would be false. */}
+                <h3 className="text-base font-semibold text-slate-900">
+                  {removing.origin === "consultation" ? "Turn this referral away?" : "Remove this registration?"}
+                </h3>
                 <p className="mt-1 text-xs text-slate-500">
-                  <b className="text-slate-700">{removing.name}</b> comes off the Zumba list and out of the counts above. This cannot be undone.
+                  <b className="text-slate-700">{removing.name}</b> comes off the Zumba list and out of the counts above.
+                  {removing.origin === "consultation"
+                    ? " The consultation's own record is untouched, and a fresh Zumba recommendation there brings them back."
+                    : " This cannot be undone."}
                 </p>
               </div>
             </div>

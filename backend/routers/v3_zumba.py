@@ -627,8 +627,21 @@ async def _referred_rows(branch_id: Optional[str], entry_stage: str = "") -> lis
         if not prev or (a.get("created_at") or "") > prev:
             saved_at[a["lead_id"]] = a.get("created_at") or ""
 
+    # Referrals the branch has turned away. Held against the moment the referral was made
+    # rather than against the lead alone: a consultation that recommends Zumba again later
+    # is a new referral and comes back, which a flat "never show this lead" would bury.
+    dismissed = {
+        d["lead_id"]: d.get("referred_at") or ""
+        for d in await v3_col("zumba_referral_dismissals").find(
+            {"lead_id": {"$in": [l["id"] for l in leads]}}, {"_id": 0, "lead_id": 1, "referred_at": 1}
+        ).to_list(4000)
+    }
+
     rows = []
     for l in leads:
+        referred_at = saved_at.get(l["id"]) or l.get("updated_at") or ""
+        if l["id"] in dismissed and referred_at <= dismissed[l["id"]]:
+            continue
         rows.append({
             # Prefixed so it cannot collide with a registration's uuid, and so the frontend
             # can tell at a glance that this row is not one of its own.
@@ -654,7 +667,7 @@ async def _referred_rows(branch_id: Optional[str], entry_stage: str = "") -> lis
             "package_id": l.get("zumba_package_id") or "",
             "package_name": l.get("zumba_package_name") or "",
             "package_sessions": l.get("zumba_package_sessions"),
-            "created_at": saved_at.get(l["id"]) or l.get("updated_at") or "",
+            "created_at": referred_at,
             "created_by": "Consultation",
             # At the pipeline's entry stage and staying there. The row is read off the
             # lead, so there is nothing here to write a move onto — moving it would mean
@@ -1150,11 +1163,57 @@ async def set_zumba_status(
     return _shape({**existing, **changes}, await _zumba_stages())
 
 
+async def _dismiss_referral(lead_id: str, user: V3UserOut) -> dict:
+    """Take a consultation's Zumba referral off this tab without touching the consultation.
+
+    The row is read live off the lead, so there is nothing here to delete -- and deleting
+    from the lead is not this tab's to do: un-ticking Zumba is a decision the consultation
+    owns, and rewriting it from here would leave the two records disagreeing about what was
+    recommended. What is recorded instead is that the branch turned this referral away.
+
+    Stamped with the referral it turned away rather than with the lead alone. A
+    consultation that recommends Zumba again later is a new referral and comes back on this
+    tab, where a flat "never show this lead" would bury it for good.
+    """
+    lead = await v3_col("leads").find_one(
+        {"id": lead_id, "zumba_recommended": True}, {"_id": 0, "id": 1, "branch_id": 1, "updated_at": 1}
+    )
+    if not lead:
+        raise HTTPException(status_code=404, detail="No Zumba referral on that lead")
+    if _own_branch_only(user) and lead.get("branch_id") != user.branch_id:
+        raise HTTPException(status_code=403, detail="Not your branch")
+
+    latest = await v3_col("lead_activity").find(
+        {"lead_id": lead_id, "action": "consultation_decision_saved"}, {"_id": 0, "created_at": 1}
+    ).sort("created_at", -1).to_list(1)
+    referred_at = (latest[0].get("created_at") if latest else "") or lead.get("updated_at") or ""
+
+    await v3_col("zumba_referral_dismissals").update_one(
+        {"lead_id": lead_id},
+        {"$set": {
+            "lead_id": lead_id,
+            "branch_id": lead.get("branch_id"),
+            "referred_at": referred_at,
+            "dismissed_at": now_iso(),
+            "dismissed_by": user.full_name or user.email,
+        }},
+        upsert=True,
+    )
+    return {"deleted": True, "dismissed": True}
+
+
 @router.delete("/branch/zumba/{registration_id}")
 async def delete_zumba(
     registration_id: str,
     user: V3UserOut = Depends(require_zumba_reader),
 ):
+    # A referral carries the lead's id behind a prefix rather than a registration's, and
+    # comes off the tab by being turned away rather than deleted -- same button, same
+    # confirmation, because "take them off this list" is the one thing being asked either
+    # way.
+    if registration_id.startswith("lead:"):
+        return await _dismiss_referral(registration_id[len("lead:"):], user)
+
     existing = await _registration_or_400(registration_id)
     if _own_branch_only(user) and existing.get("branch_id") != user.branch_id:
         raise HTTPException(status_code=403, detail="Not your branch")
