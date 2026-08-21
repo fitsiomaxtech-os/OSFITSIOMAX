@@ -63,11 +63,17 @@ CARD_OF_SOURCE = {
     # its own card had no place left on a strip that now ends in the revenue split, so the
     # count was being kept where nothing could show it.
     "branch": "direct",
+    # Fitsiomax's own channel is Direct for the same reason the four above it are: nobody
+    # referred them. It had a card of its own until the strip was rebuilt around what
+    # became of a student, and a bucket no card draws is a count that goes nowhere -- a
+    # Fitsiomax lead was landing on none of the three the branch can see.
+    "fitsiomax": "direct",
     "consultations": "consultant",
     MASTER: "masters",
-    "fitsiomax": "fitsiomax",
 }
-CARDS = ("direct", "consultant", "masters", "fitsiomax")
+# Only what a card actually draws. A key here with nothing to show it is a number the
+# branch is told exists and cannot open.
+CARDS = ("direct", "consultant", "masters")
 
 # What has become of a student, where that is anything other than still attending.
 #
@@ -759,7 +765,10 @@ async def list_zumba(
             continue
         if status == STATUS_LEAVE:
             summary["leave"] += 1
-        summary[r["card"]] += 1
+        # Defaulted rather than indexed: a row carrying a card this build no longer
+        # draws would otherwise 500 the whole board over one bad key, which is how a
+        # renamed bucket takes the tab down with it.
+        summary[r["card"]] = summary.get(r["card"], 0) + 1
         owed = _amount(r.get("fee_amount"))
         settled = _amount(r.get("fee_paid"))
         if owed > 0 and settled >= owed:

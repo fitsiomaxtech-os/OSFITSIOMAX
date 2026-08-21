@@ -12,9 +12,10 @@ import { listZumba, listZumbaMasters, addZumba, updateZumba, deleteZumba, setZum
 // the master who made it rather than against a single "Masters" bucket, so these six are
 // the answers that stand on their own; the masters are offered alongside them by name.
 //
-// Board, Social Media and Personal all count towards Direct: nobody referred them, they
-// came to us. The rest name whoever did the referring. The mapping lives on the server,
-// which stamps each row with its card so this list and the counts cannot disagree.
+// Everything but Consultation and Zumba Master counts towards Direct: nobody referred
+// them, they came to us. Those two name whoever did the refer, and land on Consultant and
+// Refer Master. The mapping lives on the server, which stamps each row with its card so
+// this list and the counts cannot disagree.
 const SOURCES = [
   { key: "branch", label: "Branch Admin" },
   { key: "board", label: "Board" },
