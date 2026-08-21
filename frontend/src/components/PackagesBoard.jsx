@@ -908,13 +908,20 @@ export const ViewItemModal = ({ item, kind, onClose, onEdit, canEdit = true }) =
 
 // Backs both Sessions sub-tabs; see PhysiotherapyPanel for why this is one component
 // with a category rather than two copies.
-const SessionsPhysiotherapyPanel = ({ category = "physiotherapy", reloadToken, toolbarSlot, modeFilter = "all", noun = "session package", fixed = false }) => {
+const SessionsPhysiotherapyPanel = ({ category = "physiotherapy", reloadToken, toolbarSlot, modeFilter = "all", noun = "session package" }) => {
   const [items, setItems] = useState([]);
   const [showCreate, setShowCreate] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
   const [viewingItem, setViewingItem] = useState(null);
+  // A failed load used to be swallowed, which left the shelf reading as empty — the same
+  // thing it says when there genuinely is nothing on it. Two different situations that
+  // look identical is the one that gets acted on wrongly: somebody adds a package that
+  // already exists because the list that would have shown it never arrived.
+  const [loadError, setLoadError] = useState("");
 
-  const loadItems = () => listStoreItems(category, "session").then(setItems).catch(() => {});
+  const loadItems = () => listStoreItems(category, "session")
+    .then((rows) => { setItems(rows || []); setLoadError(""); })
+    .catch((err) => setLoadError(err?.response?.data?.detail || "Could not load this shelf."));
   // category in the deps, or switching sub-tab keeps the other one's list on screen.
   useEffect(() => { loadItems(); }, [category, reloadToken]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -931,7 +938,7 @@ const SessionsPhysiotherapyPanel = ({ category = "physiotherapy", reloadToken, t
 
   return (
     <div className="space-y-3" data-testid={`sessions-subpanel-${category}`}>
-      {!fixed && toolbarSlot && createPortal(
+      {toolbarSlot && createPortal(
         <Button
           onClick={() => setShowCreate(true)}
           title={`Create ${noun}`}
@@ -943,20 +950,24 @@ const SessionsPhysiotherapyPanel = ({ category = "physiotherapy", reloadToken, t
         </Button>,
         toolbarSlot,
       )}
-      {!fixed && (
-        <div className="hidden items-center justify-end sm:flex">
-          <Button size="sm" onClick={() => setShowCreate(true)} data-testid={`sessions-${category}-create-btn`}>
-            <Plus className="mr-1 h-4 w-4" />Create
-          </Button>
-        </div>
-      )}
+      <div className="hidden items-center justify-end sm:flex">
+        <Button size="sm" onClick={() => setShowCreate(true)} data-testid={`sessions-${category}-create-btn`}>
+          <Plus className="mr-1 h-4 w-4" />Create
+        </Button>
+      </div>
 
-      {items.length === 0 ? (
+      {loadError ? (
+        <Card>
+          <CardContent className="space-y-2 p-8 text-center text-sm">
+            <p className="font-medium text-rose-600" data-testid={`sessions-${category}-load-error`}>{loadError}</p>
+            <p className="text-xs text-slate-400">Nothing has been lost — this is the list failing to arrive, not an empty shelf.</p>
+            <Button size="sm" variant="outline" onClick={loadItems}>Try again</Button>
+          </CardContent>
+        </Card>
+      ) : items.length === 0 ? (
         <Card>
           <CardContent className="p-8 text-center text-sm text-slate-400">
-            {fixed
-              ? `The ${noun}s are set up by the system and will appear here. Refresh if this stays empty.`
-              : `No ${noun}s yet. Click Create to add one.`}
+            No {noun}s yet. Click Create to add one.
           </CardContent>
         </Card>
       ) : (
@@ -1396,11 +1407,7 @@ const INVENTORY_TABS = new Set(["tablet", "supplementary", "equipment"]);
 const SESSION_LIKE_TABS = {
   rehab: { category: "rehab", noun: "rehab package" },
   zumba: { category: "zumba", noun: "Zumba class" },
-  // `fixed`: the gym sells Personal Training or Group Training and nothing else, both
-  // seeded by the server (ensure_fitness_packages in backend/seed.py). The shelf is a
-  // price list to keep current rather than a catalogue to compose, so there is nothing to
-  // create — a third package here would be one no branch has a way to sell.
-  fitness: { category: "fitness", noun: "fitness package", fixed: true },
+  fitness: { category: "fitness", noun: "fitness package" },
 };
 
 const BUILT_TABS = new Set(["consultations", "sessions", "rehab", "zumba", "fitness", "diet", "history", "treatment", "physio_type", ...INVENTORY_TABS]);
@@ -1674,7 +1681,6 @@ export const PackagesBoard = () => {
           key={tab}
           category={SESSION_LIKE_TABS[tab].category}
           noun={SESSION_LIKE_TABS[tab].noun}
-          fixed={SESSION_LIKE_TABS[tab].fixed}
           reloadToken={reloadTick}
           toolbarSlot={createSlot}
           modeFilter={modeFilter}
