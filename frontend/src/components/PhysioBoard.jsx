@@ -1476,7 +1476,7 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
     setSubmitting(false);
   };
 
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const todayIso = isoOf(new Date());
   // Next unpaid Treatment Fee installment on this client's record, if any.
   const paymentDue = ((lead.treatment_fee_payment_details?.installments) || [])
     .filter((i) => !i.paid)
@@ -1523,9 +1523,14 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
   // The lowest still-open day before a given one, or null when it is next in line. The
   // server refuses out-of-order completion too; this is so the button can say why before
   // it is pressed rather than after.
+  // Ordered inside the day's own course. Rehab and treatment run side by side on
+  // one calendar and each number from 1, so without the track a treatment day left
+  // open would report a rehab day out of order and neither could ever be ticked off.
   const firstOpenBefore = (s) => {
     const n = s.session_number || 0;
+    const track = s.track || "treatment";
     const earlier = sessions
+      .filter((x) => (x.track || "treatment") === track)
       .filter((x) => x.status !== "completed" && (x.session_number || 0) < n)
       .map((x) => x.session_number || 0);
     return earlier.length ? Math.min(...earlier) : null;
@@ -1792,10 +1797,27 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
                   // Never the dateless one: with no strip open every day counts as active,
                   // which would offer Complete on a day that has not been booked yet.
                   const isActiveDay = !awaiting && (!activeDate || (s.slot_time || "").startsWith(activeDate));
+                  // A day already behind is overdue rather than early, so it stays workable
+                  // from whatever date the strip is on. Days run in order, so a patient who
+                  // stopped turning up would otherwise wall off every day after them: the
+                  // opened day refuses as out of order, and the day holding it up refuses
+                  // as not today. Nothing in the popup could be pressed at all.
+                  const isPastDay = !awaiting && Boolean(s.slot_time) && s.slot_time.slice(0, 10) < todayIso;
+                  const canWork = isActiveDay || isPastDay;
                   // The earliest day still open before this one. Ordered on the day number,
                   // not the date: an absence pushes a day past the one after it until that
                   // one shifts too, and comparing dates would call the order broken.
                   const blockedBy = done ? null : firstOpenBefore(s);
+                  // Says which date is holding this day up, so the block reads as somewhere
+                  // to go rather than a dead end.
+                  const blockedByRow = blockedBy
+                    ? sessions.find(
+                        (x) =>
+                          (x.track || "treatment") === (s.track || "treatment") &&
+                          (x.session_number || 0) === blockedBy
+                      )
+                    : null;
+                  const blockedByDate = blockedByRow ? fmtDate(blockedByRow.slot_time) : null;
                   return (
                     <Fragment key={s.id}>
                     {firstDone && (
@@ -1873,12 +1895,12 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
                           size="sm"
                           disabled
                           className="shrink-0 bg-slate-100 text-xs text-slate-400 hover:bg-slate-100"
-                          title={`Day ${blockedBy} has to be finished first`}
+                          title={`Day ${blockedBy}${blockedByDate ? ` on ${blockedByDate}` : ""} has to be finished first`}
                           data-testid={`physio-day-out-of-order-${s.id}`}
                         >
                           <Check className="mr-1 h-3 w-3" /> After Day {blockedBy}
                         </Button>
-                      ) : isActiveDay ? (
+                      ) : canWork ? (
                         <div className="flex shrink-0 items-center gap-1.5">
                           <Button
                             size="sm"
@@ -1903,7 +1925,7 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
                           size="sm"
                           disabled
                           className="shrink-0 bg-slate-100 text-xs text-slate-400 hover:bg-slate-100"
-                          title={`Pick ${fmtDate(s.slot_time)} in the date strip to complete this day`}
+                          title={`${fmtDate(s.slot_time)} has not come round yet — pick it in the date strip on that day`}
                           data-testid={`physio-day-locked-${s.id}`}
                         >
                           <Check className="mr-1 h-3 w-3" /> Complete
