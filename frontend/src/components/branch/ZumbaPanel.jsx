@@ -67,17 +67,18 @@ const PAYMENT_MODE_LABELS = Object.fromEntries(PAYMENT_MODES.map((m) => [m.value
 // wants rather than a generic "reference" the desk has to interpret. Cash is absent
 // because cash leaves no trail — kept in step with REFERENCE_LABELS in
 // backend/routers/v3_zumba.py, which refuses a save that arrives without one.
-// The filter row's own list: the four the form offers, plus the rows that took no money
-// at all -- which is the answer a desk chasing payments actually wants and is not a mode.
-// Labelled "Bank Transfer" to match Accountant Manage and Finance > Approvals, which is
-// what this reads as everywhere else it is filtered by.
+// The three a Zumba fee is taken by at the desk, and All Modes over them.
+//
+// Account Transfer is still a mode -- the form offers it and the Fee column names it -- it
+// just has no pill here, because a class fee handed over at the counter is cash, UPI or a
+// card and filtering by the fourth found nothing. "Nothing collected" went the same way:
+// Due Payment above already answers who has not paid, and better, since it knows what is
+// owed rather than only that nothing came in.
 const MODE_FILTERS = [
   ["", "All Modes"],
   ["cash", "Cash"],
   ["upi", "UPI"],
   ["card", "Card"],
-  ["account_transfer", "Bank Transfer"],
-  ["none", "Nothing collected"],
 ];
 
 const REFERENCE_LABELS = { upi: "UPI ID", card: "Transaction ID", account_transfer: "Transaction ID" };
@@ -523,10 +524,7 @@ export const ZumbaPanel = ({ branchId }) => {
       list = list.filter((r) => (r.name || "").toLowerCase().includes(q) || (r.phone || "").includes(q));
     }
     if (needsOnly) list = list.filter((r) => missingDetails(r).length > 0);
-    // "unpaid" is its own answer rather than an absent one: a desk chasing money wants
-    // the rows that took none, and those have no mode to select by.
-    if (modeFilter === "none") list = list.filter((r) => !r.payment_mode);
-    else if (modeFilter) list = list.filter((r) => r.payment_mode === modeFilter);
+    if (modeFilter) list = list.filter((r) => r.payment_mode === modeFilter);
     return list;
   }, [rows, card, search, dateFilter, needsOnly, modeFilter]);
 
@@ -797,10 +795,10 @@ export const ZumbaPanel = ({ branchId }) => {
                   key={key || "all"}
                   type="button"
                   onClick={() => setModeFilter(key)}
-                  className={`rounded-full border px-3.5 py-1.5 text-xs font-medium transition ${
+                  className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition ${
                     modeFilter === key
-                      ? "border-indigo-600 bg-indigo-600 text-white shadow-sm"
-                      : "border-slate-200 bg-white text-slate-600 hover:border-indigo-300 hover:text-indigo-600"
+                      ? "border-sky-600 bg-sky-600 text-white shadow-sm"
+                      : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"
                   }`}
                   data-testid={`zumba-mode-${key || "all"}`}
                 >
