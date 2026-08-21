@@ -345,29 +345,12 @@ const RenewMembershipModal = ({ row, packages, onClose, onRenewed }) => {
         <div className="flex-1 space-y-4 overflow-y-auto p-5">
           <div className="space-y-2">
             <FieldLabel>Renewing On</FieldLabel>
-            {packages.length === 0 ? (
-              <p className="rounded-md bg-slate-50 px-2.5 py-2 text-[11px] text-slate-500">
-                No Zumba memberships on the shelf yet. Add them in Services and Products → Zumba Class.
-              </p>
-            ) : (
-              <div className="flex flex-wrap gap-1.5" data-testid="zumba-renew-packages">
-                {packages.map((item) => {
-                  const on = pick?.id === item.id;
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => setPick(on ? null : item)}
-                      className={`rounded-md px-2.5 py-1.5 text-xs font-semibold transition ${on ? "bg-emerald-600 text-white" : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"}`}
-                      title={item.name}
-                      data-testid={`zumba-renew-package-${item.id}`}
-                    >
-                      {planLabel(item)} · {rupees(planTotal(item))}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+            <PackagePicker
+              packages={packages}
+              selectedId={pick?.id}
+              onPick={setPick}
+              prefix="zumba-renew-package"
+            />
           </div>
 
           <div className="space-y-2">
@@ -402,6 +385,76 @@ const RenewMembershipModal = ({ row, packages, onClose, onRenewed }) => {
           </Button>
         </div>
       </div>
+    </div>
+  );
+};
+
+/** How many classes a plan holds, and how many months that is. */
+const planClasses = (item) => Number(item?.sessions_offline || item?.sessions_online || 0);
+const planMonths = (item) => {
+  const classes = planClasses(item);
+  return classes && classes % CLASSES_PER_MONTH === 0 ? classes / CLASSES_PER_MONTH : 0;
+};
+
+/**
+ * The shelf, priced and spelled out.
+ *
+ * A pill saying "6 Months · ₹15,000" is the headline of the plan and not the plan: a desk
+ * quoting it is asked how many classes that is, what it works out to a month, and whether
+ * it beats the shorter one. All of that is arithmetic on two numbers already here, so it
+ * is printed rather than left to be done at the counter.
+ *
+ * The per-month and per-class figures are what the plan divides down to, not prices in
+ * their own right — nothing can be bought at that rate, which is why they are set below
+ * the total rather than beside it.
+ */
+const PackagePicker = ({ packages, selectedId, onPick, prefix }) => {
+  if (packages.length === 0) {
+    return (
+      <p className="rounded-md bg-slate-50 px-2.5 py-2 text-[11px] text-slate-500" data-testid={`${prefix}-empty`}>
+        No Zumba memberships on the shelf yet. Add them in Services and Products → Zumba Class.
+      </p>
+    );
+  }
+  return (
+    <div className="grid gap-2 sm:grid-cols-3" data-testid={`${prefix}s`}>
+      {packages.map((item) => {
+        const on = selectedId === item.id;
+        const total = planTotal(item);
+        const classes = planClasses(item);
+        const months = planMonths(item);
+        return (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => onPick(on ? null : item)}
+            className={`rounded-lg border p-3 text-left transition ${
+              on
+                ? "border-emerald-600 bg-emerald-600 text-white shadow-sm"
+                : "border-emerald-100 bg-emerald-50/60 text-emerald-800 hover:border-emerald-300 hover:bg-emerald-50"
+            }`}
+            title={item.name}
+            data-testid={`${prefix}-${item.id}`}
+          >
+            <span className="block text-xs font-bold uppercase tracking-wide opacity-80">{planLabel(item)}</span>
+            <span className="mt-1 block text-lg font-extrabold leading-none">{rupees(total)}</span>
+            {classes ? (
+              <span className={`mt-1.5 block text-[11px] ${on ? "text-white/80" : "text-emerald-700/70"}`}>
+                {classes} classes{months ? ` · ${CLASSES_PER_MONTH} a month` : ""}
+              </span>
+            ) : null}
+            {/* What it divides down to. Nothing can be bought at these rates — they are
+                here because "is the six-month one better value" is the question the row is
+                actually being read to answer. */}
+            {classes && total ? (
+              <span className={`mt-0.5 block text-[10px] ${on ? "text-white/70" : "text-emerald-700/60"}`}>
+                {months ? `${rupees(Math.round(total / months))} a month · ` : ""}
+                {rupees(Math.round(total / classes))} a class
+              </span>
+            ) : null}
+          </button>
+        );
+      })}
     </div>
   );
 };
@@ -1791,38 +1844,20 @@ export const ZumbaPanel = ({ branchId }) => {
                     number, because the two are only equal once the student has paid. */}
                 <div className="space-y-2">
                   <FieldLabel>Fee</FieldLabel>
-                  {packages.length === 0 ? (
-                    <p className="rounded-md bg-slate-50 px-2.5 py-2 text-[11px] text-slate-500" data-testid="zumba-field-package-empty">
-                      No Zumba memberships on the shelf yet. Add them in Services and Products → Zumba Class.
-                    </p>
-                  ) : (
-                    <div className="flex flex-wrap gap-1.5" data-testid="zumba-field-packages">
-                      {packages.map((item) => {
-                        const on = form.package_id === item.id;
-                        const total = planTotal(item);
-                        return (
-                          <button
-                            key={item.id}
-                            type="button"
-                            onClick={() => setForm(on
-                              ? { ...form, package_id: "", package_name: "", package_sessions: "", fee_amount: "" }
-                              : {
-                                  ...form,
-                                  package_id: item.id,
-                                  package_name: item.name,
-                                  package_sessions: item.sessions_offline || item.sessions_online || "",
-                                  fee_amount: total,
-                                })}
-                            className={`rounded-md px-2.5 py-1.5 text-xs font-semibold transition ${on ? "bg-emerald-600 text-white" : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"}`}
-                            title={item.name}
-                            data-testid={`zumba-field-package-${item.id}`}
-                          >
-                            {planLabel(item)} · {rupees(total)}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
+                  <PackagePicker
+                    packages={packages}
+                    selectedId={form.package_id}
+                    onPick={(item) => setForm(item
+                      ? {
+                          ...form,
+                          package_id: item.id,
+                          package_name: item.name,
+                          package_sessions: planClasses(item) || "",
+                          fee_amount: planTotal(item),
+                        }
+                      : { ...form, package_id: "", package_name: "", package_sessions: "", fee_amount: "" })}
+                    prefix="zumba-field-package"
+                  />
                   <div className="grid grid-cols-2 gap-3 pt-1">
                     <div className="space-y-2">
                       <FieldLabel>Fee Collected</FieldLabel>
