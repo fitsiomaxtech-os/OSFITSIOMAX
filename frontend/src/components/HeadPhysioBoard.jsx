@@ -27,7 +27,6 @@ import { WeekStrip, todayIso } from "@/components/WeekStrip";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import {
   getHPMyCalendar,
-  getHPMyPatients,
   hpRecommendPackage,
   physioSessions,
 } from "@/lib/api";
@@ -58,17 +57,15 @@ const STAGE_TONES = {
 const WORK_TABS = [
   { key: "consultations", label: "Consultations", icon: Calendar, color: "#0284c7" },
   { key: "review", label: "Review", icon: ClipboardCheck, color: "#7c3aed" },
-  { key: "rehab", label: "Rehab", icon: Activity, color: "#d97706" },
   { key: "all", label: "All", icon: LayoutList, color: "#0d9488" },
 ];
 
-// The three queues All merges, and the labels its own filter offers. Kept beside
-// WORK_TABS because the keys have to match the `kind` each row is flattened to.
+// The two queues All merges, and the labels its own filter offers. Kept beside WORK_TABS
+// because the keys have to match the `kind` each row is flattened to.
 const ALL_KINDS = [
   { key: "all", label: "All" },
   { key: "consult", label: "Consult" },
   { key: "review", label: "Review" },
-  { key: "rehab", label: "Rehab" },
 ];
 
 // A stage counts as finished when it says so. Read from the name rather than matched
@@ -96,7 +93,6 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
   // The rows behind those counts, so All can merge all three into one list.
   const [consultRows, setConsultRows] = useState([]);
   const [reviewRows, setReviewRows] = useState([]);
-  const [patients, setPatients] = useState([]);
   // New Rehab is a patient with no package recommended yet — the same shape as the other
   // cards: what is still waiting on this Head Physio, not everything on their list.
   // Whatever the first head-consultation stage is currently called.
@@ -104,8 +100,6 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
 
   const q = search.trim().toLowerCase();
   const matches = (...fields) => !q || fields.some((f) => String(f || "").toLowerCase().includes(q));
-  const visiblePatients = patients.filter((p) => matches(p.lead_name, p.phone));
-  const newRehab = visiblePatients.filter((p) => !p.has_recommendation);
 
   // All is one list, not three stacked sections — the same patient can be in more than one
   // of them, and reading three tables to find the day's work defeats the point. Every row
@@ -145,21 +139,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
       when: r.review_date || "",
       who: r.physio_name || "",
     })),
-    ...visiblePatients.map((p) => ({
-      key: `p-${p.lead_id}`,
-      kind: "rehab",
-      patient: p,
-      name: p.lead_name || "Unknown",
-      patientNo: "",
-      phone: p.phone || "",
-      // A rehab patient is done once a package has been recommended — that is the whole
-      // job this board holds them for.
-      stage: p.has_recommendation ? "Rehab · Completed" : "Rehab",
-      tone: p.has_recommendation ? "emerald" : "amber",
-      when: "",
-      who: p.branch_stage || "",
-    })),
-  ], [consultRows, reviewRows, visiblePatients]);
+  ], [consultRows, reviewRows]);
 
   // What All actually renders. Narrowed by the filter on the All card itself; the
   // count on that card stays the full total, because it is the card's own figure and
@@ -170,46 +150,31 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
   );
 
   const [loading, setLoading] = useState(false);
-  const [selectedPatient, setSelectedPatient] = useState(null);
   // Set by View on the All list, consumed by whichever board owns that row's popup.
   const [autoOpenLead, setAutoOpenLead] = useState(null);
   const [autoOpenReview, setAutoOpenReview] = useState(null);
 
   /**
-   * View on an All row. The three queues merged into that list keep their own detail
-   * popups, so this routes to the right one rather than building a fourth that would
-   * show less than any of them.
+   * View on an All row. The two queues merged into that list keep their own detail popups,
+   * so this routes to the right one rather than building a third that would show less than
+   * either of them.
    *
-   * Consultations and Review switch tab first: both boards stay mounted but `hidden`
-   * when not selected, and a modal rendered inside display:none does not appear. Rehab
-   * needs no switch — PatientSessionsModal hangs off the board root, above the tabs.
+   * Both switch tab first: the boards stay mounted but `hidden` when not selected, and a
+   * modal rendered inside display:none does not appear.
    */
   const openRow = (r) => {
-    if (r.kind === "rehab") { setSelectedPatient(r.patient); return; }
     if (r.kind === "consult") { setWorkTab("consultations"); setAutoOpenLead(r.leadId); return; }
     setWorkTab("review"); setAutoOpenReview(r.reviewId);
   };
-  // One Refresh for a board with three data sources behind it. loadPatients covers Rehab;
-  // Consultations and Review each own their own fetch, so they are told by token.
+  // One Refresh for the two boards behind this one. Each owns its own fetch, so both are
+  // told by token rather than called from here.
   const [refreshTick, setRefreshTick] = useState(0);
-  const [showRecommendModal, setShowRecommendModal] = useState(null);
 
   // Head Physios cover every branch and carry none of their own, so "all" is the normal
   // case here — without it the board asked for branch `undefined` and every list came back
   // empty while the appointments sat there booked.
   const assignedBranchIds = branchIds && branchIds.length ? branchIds : (branchId ? [branchId] : []);
   const effectiveBranchId = assignedBranchIds[0] || branchId || "all";
-
-  const loadPatients = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await getHPMyPatients(effectiveBranchId);
-      setPatients(data.patients || []);
-    } catch { /* silent */ }
-    setLoading(false);
-  }, [effectiveBranchId]);
-
-  useEffect(() => { loadPatients(); }, [loadPatients]);
 
   return (
     // Bottom padding on phones clears the fixed bottom bar, so the last row of any list
@@ -244,7 +209,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
         </div>
         <button
           type="button"
-          onClick={() => { loadPatients(); setRefreshTick((n) => n + 1); }}
+          onClick={() => setRefreshTick((n) => n + 1)}
           disabled={loading}
           title="Refresh"
           aria-label="Refresh"
@@ -272,12 +237,10 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
             {WORK_TABS.map((t) => {
               const n = t.key === "consultations" ? (consultStages[firstStage] || 0)
                 : t.key === "review" ? reviewCount
-                : t.key === "rehab" ? newRehab.length
-                // All is the three of them together, every stage, nothing narrowed.
-                : consultCount + reviewCount + patients.length;
+                // All is the two of them together, every stage, nothing narrowed.
+                : consultCount + reviewCount;
               const sub = t.key === "consultations" ? (firstStage ? `in ${firstStage}` : "on this day")
                 : t.key === "review" ? "on this day"
-                : t.key === "rehab" ? "awaiting a plan"
                 : "everything on this day";
               // The wrapper keeps the phone's side-scrolling row of fixed-width cards; the
               // tile itself fills whatever it is given.
@@ -452,35 +415,7 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
             </div>
           )}
 
-          {/* Rehab is the list of patients still waiting on a plan, and nothing else. The
-              Weekly Assessments block that used to sit under it was a second list on the
-              same card doing a different job. */}
-          {workTab === "rehab" && (
-            <div className="space-y-6" data-testid="hp-work-rehab">
-              <PatientsTab
-                patients={newRehab}
-                onRecommend={(p) => setShowRecommendModal(p)}
-                onSelect={(p) => setSelectedPatient(p)}
-                loading={loading}
-              />
-            </div>
-          )}
       </div>
-
-      {showRecommendModal && (
-        <RecommendPackageModal
-          patient={showRecommendModal}
-          onClose={() => setShowRecommendModal(null)}
-          onDone={() => { setShowRecommendModal(null); loadPatients(); }}
-        />
-      )}
-
-      {selectedPatient && (
-        <PatientSessionsModal
-          patient={selectedPatient}
-          onClose={() => setSelectedPatient(null)}
-        />
-      )}
 
       {/* Sits above the bottom bar on phones so it never covers the nav. */}
       {loading && <div className="fixed bottom-20 right-4 z-40 rounded-md bg-slate-900 px-3 py-2 text-sm text-white sm:bottom-4">Loading...</div>}
@@ -798,355 +733,6 @@ function DaySlots({ date, slots, booked, onBack }) {
           })}
         </div>
       )}
-    </div>
-  );
-}
-
-function PatientsTab({ patients, onRecommend, onSelect, loading }) {
-  if (patients.length === 0 && !loading) {
-    return (
-      <div className="text-center py-16">
-        <Stethoscope className="h-10 w-10 text-slate-200 mx-auto mb-3" />
-        <p className="text-sm text-slate-400">No patients assigned yet</p>
-      </div>
-    );
-  }
-
-  // A list rather than a card grid: these are read down a column and compared — who has a
-  // package, who is still waiting — which a grid of three-across cards makes harder than
-  // it needs to be.
-  return (
-    <div data-testid="hp-patients-list">
-      {/* Cards on a phone, the table from sm — same rows either way. */}
-      <div className="space-y-2 sm:hidden">
-        {patients.map((p, i) => (
-          <div key={p.lead_id} className="rounded-xl border border-slate-200 bg-white p-3" data-testid={`hp-patient-card-${p.lead_id}`}>
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex min-w-0 items-center gap-2.5">
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-teal-50 text-xs font-bold text-teal-700">
-                  {p.lead_name?.charAt(0)?.toUpperCase() || "?"}
-                </span>
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-bold text-slate-800">
-                    <span className="mr-1.5 font-semibold text-slate-300">{i + 1}.</span>{p.lead_name}
-                  </p>
-                  <p className="truncate text-xs text-slate-500">{p.phone || "—"}</p>
-                </div>
-              </div>
-              <span className={`shrink-0 whitespace-nowrap rounded-[5px] px-2 py-0.5 text-[10px] font-bold ${
-                p.branch_stage === "Portfolio" ? "bg-emerald-100 text-emerald-700"
-                  : p.has_recommendation ? "bg-violet-100 text-violet-700"
-                  : "bg-slate-100 text-slate-500"
-              }`}>
-                {p.branch_stage || "—"}
-              </span>
-            </div>
-            <p className="mt-2 text-[11px] text-slate-500">
-              {p.recommendation
-                ? `${p.recommendation.recommended_weeks}w × ${p.recommendation.sessions_per_week}/week = ${p.recommendation.total_sessions} sessions · ${p.recommendation.status}`
-                : "Not recommended yet"}
-            </p>
-            <div className="mt-2.5 flex gap-2">
-              <Button size="sm" variant="outline" className="flex-1 text-xs" onClick={() => onSelect(p)}>
-                <Calendar className="mr-1 h-3 w-3" /> Sessions
-              </Button>
-              {!p.has_recommendation && (
-                <Button size="sm" className="flex-1 bg-teal-600 text-xs text-white hover:bg-teal-700" onClick={() => onRecommend(p)}>
-                  <Package className="mr-1 h-3 w-3" /> Recommend
-                </Button>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white sm:block">
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[760px] text-sm">
-          <thead className="bg-slate-500 text-left text-[10px] uppercase tracking-wider text-white">
-            <tr>
-              <th className="w-12 px-4 py-2.5 font-semibold">S.No</th>
-              <th className="px-4 py-2.5 font-semibold">Patient</th>
-              <th className="px-4 py-2.5 font-semibold">Phone</th>
-              <th className="px-4 py-2.5 font-semibold">Stage</th>
-              <th className="px-4 py-2.5 font-semibold">Recommendation</th>
-              <th className="px-4 py-2.5 text-right font-semibold">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {patients.map((p, i) => (
-              <tr key={p.lead_id} className="hover:bg-slate-50" data-testid={`hp-patient-${p.lead_id}`}>
-                <td className="px-4 py-3 text-slate-400">{i + 1}</td>
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-2.5">
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-teal-50 text-xs font-bold text-teal-700">
-                      {p.lead_name?.charAt(0)?.toUpperCase() || "?"}
-                    </span>
-                    <span className="font-medium text-slate-800">{p.lead_name}</span>
-                  </div>
-                </td>
-                <td className="px-4 py-3 text-slate-600">{p.phone || "—"}</td>
-                <td className="px-4 py-3">
-                  <span className={`inline-flex whitespace-nowrap rounded-[5px] px-2 py-0.5 text-[10px] font-bold ${
-                    p.branch_stage === "Portfolio" ? "bg-emerald-100 text-emerald-700"
-                      : p.has_recommendation ? "bg-violet-100 text-violet-700"
-                      : "bg-slate-100 text-slate-500"
-                  }`}>
-                    {p.branch_stage || "—"}
-                  </span>
-                </td>
-                <td className="px-4 py-3">
-                  {p.recommendation ? (
-                    <div>
-                      <p className="text-xs font-semibold text-violet-800">
-                        {p.recommendation.recommended_weeks}w × {p.recommendation.sessions_per_week}/week
-                        {" = "}{p.recommendation.total_sessions} sessions
-                      </p>
-                      <span className={`mt-0.5 inline-block rounded-full px-2 py-0.5 text-[9px] font-semibold ${
-                        p.recommendation.status === "assigned" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
-                      }`}>
-                        {p.recommendation.status}
-                      </span>
-                    </div>
-                  ) : (
-                    <span className="text-xs text-slate-400">Not recommended yet</span>
-                  )}
-                </td>
-                <td className="px-4 py-3">
-                  <div className="flex items-center justify-end gap-2">
-                    <Button size="sm" variant="outline" className="text-xs" onClick={() => onSelect(p)} data-testid={`hp-view-sessions-${p.lead_id}`}>
-                      <Calendar className="mr-1 h-3 w-3" /> Sessions
-                    </Button>
-                    {!p.has_recommendation && (
-                      <Button size="sm" className="bg-teal-600 text-xs text-white hover:bg-teal-700" onClick={() => onRecommend(p)} data-testid={`hp-recommend-${p.lead_id}`}>
-                        <Package className="mr-1 h-3 w-3" /> Recommend
-                      </Button>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      </div>
-    </div>
-  );
-}
-
-function RecommendPackageModal({ patient, onClose, onDone }) {
-  const [weeks, setWeeks] = useState(8);
-  const [sessionsPerWeek, setSessionsPerWeek] = useState(3);
-  const [notes, setNotes] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-
-  const handleSubmit = async () => {
-    setSubmitting(true);
-    try {
-      await hpRecommendPackage({
-        lead_id: patient.lead_id,
-        recommended_weeks: weeks,
-        sessions_per_week: sessionsPerWeek,
-        notes,
-      });
-      toast.success("Package recommended successfully");
-      onDone();
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || "Failed");
-    }
-    setSubmitting(false);
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} data-testid="recommend-modal-overlay">
-      <div className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-xl bg-white shadow-2xl" data-testid="recommend-modal">
-        <div className="flex items-center justify-between border-b p-5">
-          <h3 className="text-base font-semibold text-slate-800">Recommend Package — {patient.lead_name}</h3>
-          <button type="button" onClick={onClose} className="p-1 rounded hover:bg-slate-100"><X className="h-5 w-5 text-slate-400" /></button>
-        </div>
-        <div className="p-5 space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs font-medium text-slate-600 mb-1 block">Weeks</label>
-              <Input type="number" value={weeks} onChange={(e) => setWeeks(parseInt(e.target.value) || 1)} min={1} data-testid="rec-weeks" />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-slate-600 mb-1 block">Sessions/Week</label>
-              <Input type="number" value={sessionsPerWeek} onChange={(e) => setSessionsPerWeek(parseInt(e.target.value) || 1)} min={1} data-testid="rec-sessions" />
-            </div>
-          </div>
-          <div className="rounded-lg bg-teal-50 p-3 text-center">
-            <p className="text-2xl font-bold text-teal-700">{weeks * sessionsPerWeek}</p>
-            <p className="text-[10px] text-teal-500">Total Sessions</p>
-          </div>
-          <div>
-            <label className="text-xs font-medium text-slate-600 mb-1 block">Notes / Treatment Plan</label>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Focus areas, exercises, precautions..."
-              rows={3}
-              className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
-              data-testid="rec-notes"
-            />
-          </div>
-        </div>
-        <div className="flex justify-end gap-2 border-t p-4">
-          <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
-          <Button size="sm" onClick={handleSubmit} disabled={submitting} className="bg-teal-600 hover:bg-teal-700 text-white" data-testid="rec-submit">
-            {submitting ? "Submitting..." : "Recommend Package"}
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/**
- * What the physio wrote on each treatment day, in day order.
- *
- * Every booked day is listed, not only the ones with a report, because the gap is the
- * point: a completed day with nothing written is a day the Head Physio needs to chase,
- * and a list of only the written ones hides exactly that.
- *
- * completed_by is blank on days finished before it started being recorded — shown as
- * nothing rather than guessed at.
- */
-function DayReports({ sessions }) {
-  if (!sessions.length) {
-    return <p className="py-8 text-center text-xs text-slate-400">No treatment days booked yet</p>;
-  }
-  return (
-    <div className="space-y-2" data-testid="hp-day-reports">
-      {sessions.map((s) => {
-        const done = s.status === "completed";
-        const treatment = (s.jr_physio_remarks || "").trim();
-        const rehab = (s.rehab_remarks || "").trim();
-        // Either half counts as a written-up day, for the badge and the colour both.
-        const remark = treatment || rehab;
-        return (
-          <div
-            key={s.id}
-            className={`rounded-lg border p-3 ${remark ? "border-emerald-200 bg-emerald-50/60" : done ? "border-amber-200 bg-amber-50/60" : "border-slate-200 bg-white"}`}
-            data-testid={`hp-day-report-${s.id}`}
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-xs font-semibold text-slate-700">
-                  Day {s.session_number}{s.total_sessions ? ` of ${s.total_sessions}` : ""}
-                  {s.week_number ? ` · Week ${s.week_number}` : ""}
-                </p>
-                <p className="text-[10px] text-slate-400">
-                  {s.slot_time ? `${s.slot_time.split("T")[0]} at ${slotTo12h(s.slot_time)}` : "—"}
-                </p>
-              </div>
-              <span className={`shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[9px] font-semibold ${
-                remark ? "bg-emerald-100 text-emerald-700" : done ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500"
-              }`}>
-                {remark ? "Reported" : done ? "No report" : "Upcoming"}
-              </span>
-            </div>
-            {remark ? (
-              <>
-                {treatment && <p className="mt-2 whitespace-pre-wrap text-xs text-slate-700">{treatment}</p>}
-                {rehab && (
-                  <p className="mt-2 whitespace-pre-wrap text-xs text-slate-700">
-                    <span className="font-semibold text-slate-500">Rehab: </span>{rehab}
-                  </p>
-                )}
-                {(s.completed_by || s.completed_at) && (
-                  <p className="mt-1 text-[10px] text-slate-400">
-                    {s.completed_by ? `— ${s.completed_by}` : ""}
-                    {s.completed_at ? `${s.completed_by ? " · " : ""}${String(s.completed_at).slice(0, 10)}` : ""}
-                  </p>
-                )}
-              </>
-            ) : (
-              <p className="mt-2 text-[11px] text-slate-400">
-                {done ? "Completed without a written report." : "Not treated yet."}
-              </p>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function PatientSessionsModal({ patient, onClose }) {
-  const [sessions, setSessions] = useState([]);
-  const [tab, setTab] = useState("sessions");
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const data = await physioSessions(patient.lead_id);
-        setSessions(data.sessions || []);
-      } catch { /* silent */ }
-    })();
-  }, [patient.lead_id]);
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="w-full max-w-2xl rounded-xl bg-white shadow-2xl max-h-[80vh] flex flex-col">
-        <div className="flex items-center justify-between border-b p-5">
-          <h3 className="text-base font-semibold text-slate-800">{patient.lead_name}</h3>
-          <button type="button" onClick={onClose} className="p-1 rounded hover:bg-slate-100"><X className="h-5 w-5 text-slate-400" /></button>
-        </div>
-
-        {/* Sessions is the schedule — which days exist and which are done. Day Reports is
-            what the physio actually wrote on each of them, which is the thing a Head
-            Physio opens this for and which used to be a grey sub-line inside the schedule. */}
-        <div className="flex shrink-0 gap-1 border-b border-slate-200 px-5 pt-2" data-testid="hp-patient-tabs">
-          {[
-            { key: "sessions", label: "Sessions" },
-            { key: "reports", label: "Day Reports", count: sessions.filter((s) => (s.jr_physio_remarks || "").trim() || (s.rehab_remarks || "").trim()).length },
-          ].map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => setTab(t.key)}
-              className={`shrink-0 whitespace-nowrap rounded-t-md px-3 py-2 text-xs font-medium transition ${
-                tab === t.key ? "border-b-2 border-sky-500 text-sky-700" : "border-b-2 border-transparent text-slate-400 hover:text-slate-600"
-              }`}
-              data-testid={`hp-patient-tab-${t.key}`}
-            >
-              {t.label}
-              {t.key === "reports" && sessions.length > 0 && (
-                <span className="ml-1.5 text-[10px] text-slate-400">{t.count}/{sessions.length}</span>
-              )}
-            </button>
-          ))}
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-5">
-          {tab === "reports" ? (
-            <DayReports sessions={sessions} />
-          ) : sessions.length === 0 ? (
-            <p className="text-xs text-slate-400 text-center py-8">No sessions assigned yet</p>
-          ) : (
-            <div className="space-y-2">
-              {sessions.map((s) => (
-                <div key={s.id} className={`rounded-lg border p-3 flex items-center gap-3 ${s.status === "completed" ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-white"}`}>
-                  <div className={`h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold ${s.status === "completed" ? "bg-emerald-200 text-emerald-800" : "bg-slate-100 text-slate-500"}`}>
-                    {s.session_number}
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-xs font-medium text-slate-700">Session #{s.session_number} · Week {s.week_number}</p>
-                    <p className="text-[10px] text-slate-400">{s.slot_time ? `${s.slot_time.split("T")[0]} at ${slotTo12h(s.slot_time)}` : "—"}</p>
-                    {(s.jr_physio_remarks || s.rehab_remarks) && (
-                      <p className="text-[10px] text-emerald-600 mt-0.5">Remarks: {s.jr_physio_remarks || s.rehab_remarks}</p>
-                    )}
-                  </div>
-                  <span className={`rounded-full px-2 py-0.5 text-[9px] font-semibold ${s.status === "completed" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
-                    {s.status}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
     </div>
   );
 }
