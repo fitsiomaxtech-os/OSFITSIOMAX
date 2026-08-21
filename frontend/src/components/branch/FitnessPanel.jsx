@@ -164,8 +164,9 @@ export const FitnessPanel = ({ branchId }) => {
     else if (card === "paid") list = list.filter((r) => r.fully_paid);
     else if (card === "unpaid") list = list.filter(isUnpaidThisMonth);
 
-    if (modeFilter === "none") list = list.filter((r) => !r.payment_mode);
-    else if (modeFilter !== "all") list = list.filter((r) => r.payment_mode === modeFilter);
+    // Its own if, not a continuation of the cards above: a card and a mode are two
+    // questions, and chaining them would apply the mode only while no card was open.
+    if (modeFilter !== "all") list = list.filter((r) => r.payment_mode === modeFilter);
 
     const q = search.trim().toLowerCase();
     if (q) {
@@ -260,7 +261,7 @@ export const FitnessPanel = ({ branchId }) => {
 
         <div className="flex flex-wrap items-center gap-1.5 border-b border-slate-100 px-3 py-2">
           <span className="mr-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Paid by</span>
-          {[{ value: "all", label: "All Modes" }, ...PAYMENT_MODES.filter((m) => m.value), { value: "none", label: "Nothing collected" }].map((m) => (
+          {[{ value: "all", label: "All Modes" }, ...PAYMENT_MODES.filter((m) => m.value)].map((m) => (
             <button
               key={m.value}
               type="button"
