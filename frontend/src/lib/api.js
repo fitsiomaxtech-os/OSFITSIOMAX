@@ -549,6 +549,10 @@ export const setZumbaStatus = async (registrationId, status, remarks) => (await 
 // Another term on an existing membership. The server works out when the new term starts —
 // when the old one ends, not when the button was pressed — so nothing here has to.
 export const renewZumba = async (registrationId, payload) => (await api.post(`/branch/zumba/${registrationId}/renew`, payload)).data;
+
+// Money against a balance already owed. Adds to what has been collected rather than
+// replacing it, and refuses more than is outstanding.
+export const collectZumba = async (registrationId, paymentLines) => (await api.post(`/branch/zumba/${registrationId}/collect`, { payment_lines: paymentLines })).data;
 export const acceptZumbaReferral = async (leadId) => (await api.post(`/branch/zumba/accept/${leadId}`)).data;
 
 // Fitness (gym) memberships — Branch Admin > Fitness. Its own desk beside Zumba: the gym

@@ -1285,6 +1285,69 @@ async def _dismiss_referral(lead_id: str, user: V3UserOut) -> dict:
     return {"deleted": True, "dismissed": True}
 
 
+class ZumbaCollectInput(BaseModel):
+    """Money taken against what a student already owes."""
+    payment_lines: Optional[List[ZumbaPaymentLine]] = None
+
+
+@router.post("/branch/zumba/{registration_id}/collect")
+async def collect_zumba(
+    registration_id: str,
+    payload: ZumbaCollectInput,
+    user: V3UserOut = Depends(require_zumba_reader),
+):
+    """Take a payment against an outstanding balance, in one mode or several.
+
+    Adds to what has been collected rather than replacing it, and appends to the same list
+    of lines the registration already carries, so how each instalment arrived is still
+    there to read afterwards.
+
+    Refused rather than capped when it comes to more than is owed: taking more than the
+    balance means one of the two figures is wrong, and quietly keeping the difference hides
+    which one.
+    """
+    existing = await _registration_or_400(registration_id)
+    if _own_branch_only(user) and existing.get("branch_id") != user.branch_id:
+        raise HTTPException(status_code=403, detail="Not your branch")
+
+    owed = _amount(existing.get("fee_amount"))
+    already = _amount(existing.get("fee_paid"))
+    outstanding = round(max(0.0, owed - already), 2)
+    if owed <= 0:
+        raise HTTPException(status_code=400, detail="Set this membership's fee before collecting against it")
+    if outstanding <= 0:
+        raise HTTPException(status_code=400, detail="This membership is already paid up")
+
+    money = _settle_payment(payload.payment_lines)
+    taken = money["fee_paid"]
+    if taken <= 0:
+        raise HTTPException(status_code=400, detail="Enter an amount to collect")
+    if taken > outstanding:
+        raise HTTPException(
+            status_code=400,
+            detail=f"That is {taken:g} against {outstanding:g} outstanding",
+        )
+
+    lines = list(existing.get("payment_lines") or []) + money["payment_lines"]
+    changes = {
+        "fee_paid": round(already + taken, 2),
+        "payment_lines": lines,
+        # Read off every line the membership has ever carried, so the column keeps meaning
+        # the same thing after an instalment as before one.
+        "payment_mode": (lines[0]["mode"] if len(lines) == 1 else "split") if lines else "",
+        "payment_reference": lines[0]["reference"] if len(lines) == 1 else "",
+        "updated_at": now_iso(),
+        "updated_by": user.full_name or user.email,
+    }
+    await v3_col("zumba_registrations").update_one({"id": registration_id}, {"$set": changes})
+
+    shaped = _shape({**existing, **changes}, await _zumba_stages())
+    left = round(owed - changes["fee_paid"], 2)
+    summary = f"Collected {taken:g} from {existing.get('name', 'the student')}"
+    summary += f". {left:g} still due" if left > 0 else ". Paid up"
+    return {"message": summary, "registration": shaped}
+
+
 class ZumbaRenewInput(BaseModel):
     """A fresh term on an existing membership."""
     package_id: Optional[str] = ""
