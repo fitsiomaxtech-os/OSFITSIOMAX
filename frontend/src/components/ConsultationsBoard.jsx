@@ -3263,7 +3263,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               // The buttons that open the two cards above. They replace the pair that used
               // to fire a fee popup straight off this row — same place, but they now show
               // the programme rather than assuming the next thing wanted is a payment.
-              const DietDetailButton = selectedLead.package_paid != null ? (
+              // Gated on the referral, like its Rehab twin below. It was offered to every
+              // patient whose consultation fee was in, so a Consultant who sent somebody to
+              // Rehab and nowhere else still produced a Diet Details button on the Branch
+              // Admin's panel — a programme this patient was never put on, sitting beside
+              // the one they were.
+              const DietDetailButton = (selectedLead.package_paid != null && selectedLead.diet_recommended) ? (
                 <Button
                   size="sm"
                   variant="outline"
@@ -3465,17 +3470,35 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       icon={detailView && detailView.tone === "cyan" ? Activity : Salad}
                       title={detailView && detailView.tone === "cyan" ? "Rehab Programme" : "Diet Programme"}
                       testid="cons-stage-panel-diet"
+                      /* Both the chip and the own-tab follow whichever programme is on
+                         screen. This panel shows either, and it read "Diet Fee Due" over a
+                         rehab course — a patient on both was told the wrong fee was
+                         outstanding for the thing they were looking at. */
                       chip={
-                        <PanelChip tone={dietFeePaid ? "emerald" : "amber"} tick={dietFeePaid}>
-                          {dietFeePaid ? "Fee Collected" : "Diet Fee Due"}
-                        </PanelChip>
+                        programmeDetail === "rehab" ? (
+                          <PanelChip tone={selectedLead.rehab_fee_paid != null ? "emerald" : "amber"} tick={selectedLead.rehab_fee_paid != null}>
+                            {selectedLead.rehab_fee_paid != null ? "Fee Collected" : "Rehab Fee Due"}
+                          </PanelChip>
+                        ) : (
+                          <PanelChip tone={dietFeePaid ? "emerald" : "amber"} tick={dietFeePaid}>
+                            {dietFeePaid ? "Fee Collected" : "Diet Fee Due"}
+                          </PanelChip>
+                        )
                       }
                       tabs={
-                        <>
-                          <OwnTab label="Diet Details" short="Diet" icon={Salad} active="border-orange-300 bg-orange-50 text-orange-700" />
-                          {RehabDetailButton}
-                          {CancelButton}
-                        </>
+                        programmeDetail === "rehab" ? (
+                          <>
+                            <OwnTab label="Rehab Details" short="Rehab" icon={Activity} active="border-cyan-300 bg-cyan-50 text-cyan-700" />
+                            {DietDetailButton}
+                            {CancelButton}
+                          </>
+                        ) : (
+                          <>
+                            <OwnTab label="Diet Details" short="Diet" icon={Salad} active="border-orange-300 bg-orange-50 text-orange-700" />
+                            {RehabDetailButton}
+                            {CancelButton}
+                          </>
+                        )
                       }
                     >
                       {programmeDetail === "rehab" ? RehabDetailBody : DietDetailBody}
