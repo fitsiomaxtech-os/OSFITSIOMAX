@@ -190,6 +190,17 @@ def _source(value) -> str:
     return slug if slug in SOURCES else DEFAULT_SOURCE
 
 
+def _sessions(value) -> Optional[int]:
+    """A class count, or nothing. Zero and negatives are nothing: a membership of no
+    classes is a gap in the record, and storing it as 0 would have the master's roll count
+    down from a number nobody sold."""
+    try:
+        count = int(value)
+    except (TypeError, ValueError):
+        return None
+    return count if count > 0 else None
+
+
 def _amount(value) -> float:
     try:
         amount = float(value or 0)
@@ -318,6 +329,10 @@ class ZumbaInput(BaseModel):
     payment_lines: Optional[List[ZumbaPaymentLine]] = None
     package_id: Optional[str] = ""
     package_name: Optional[str] = ""
+    # How many classes the membership holds. Stored beside the name rather than looked up
+    # from the shelf when needed: a package repriced or renamed later must not change what
+    # this student was sold, and it is what the master's roll counts down from.
+    package_sessions: Optional[int] = None
     fee_amount: Optional[float] = 0
     fee_paid: Optional[float] = 0
     # Where the registration sits in the Zumba pipeline. Left unset it starts at the entry
@@ -865,6 +880,7 @@ async def _clean(payload: ZumbaInput, user: V3UserOut) -> dict:
         "time_slot": time_slot if time_slot in TIME_SLOTS else "",
         "package_id": (payload.package_id or "").strip(),
         "package_name": (payload.package_name or "").strip(),
+        "package_sessions": _sessions(payload.package_sessions),
         "source": source,
         "master_name": master_name if source == MASTER else "",
         "fee_amount": _amount(payload.fee_amount),

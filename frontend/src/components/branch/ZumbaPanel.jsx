@@ -435,7 +435,7 @@ const missingDetails = (row) => {
 const EMPTY = {
   name: "", email: "", phone: "", age: "", gender: "", address: "",
   source: "personal", master_name: "", assigned_master_id: "", time_slot: "",
-  package_id: "", package_name: "", fee_amount: "", fee_paid: "", payment_mode: "", payment_reference: "", payment_lines: [],
+  package_id: "", package_name: "", package_sessions: "", fee_amount: "", fee_paid: "", payment_mode: "", payment_reference: "", payment_lines: [],
 };
 
 /**
@@ -687,6 +687,7 @@ export const ZumbaPanel = ({ branchId }) => {
         time_slot: form.time_slot || "",
         package_id: form.package_id || "",
         package_name: form.package_name || "",
+        package_sessions: form.package_sessions === "" || form.package_sessions == null ? null : Number(form.package_sessions),
         source: form.source || "personal",
         master_name: (form.master_name || "").trim(),
         assigned_master_id: form.assigned_master_id || "",
@@ -1210,8 +1211,14 @@ export const ZumbaPanel = ({ branchId }) => {
                             key={item.id}
                             type="button"
                             onClick={() => setForm(on
-                              ? { ...form, package_id: "", package_name: "", fee_amount: "" }
-                              : { ...form, package_id: item.id, package_name: item.name, fee_amount: total })}
+                              ? { ...form, package_id: "", package_name: "", package_sessions: "", fee_amount: "" }
+                              : {
+                                  ...form,
+                                  package_id: item.id,
+                                  package_name: item.name,
+                                  package_sessions: item.sessions_offline || item.sessions_online || "",
+                                  fee_amount: total,
+                                })}
                             className={`rounded-md px-2.5 py-1.5 text-xs font-semibold transition ${on ? "bg-emerald-600 text-white" : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"}`}
                             title={item.name}
                             data-testid={`zumba-field-package-${item.id}`}
@@ -1239,7 +1246,7 @@ export const ZumbaPanel = ({ branchId }) => {
                     </div>
                     <div className="space-y-2">
                       <FieldLabel>Fee Amount</FieldLabel>
-                      <Input type="number" value={form.fee_amount} onChange={(e) => setForm({ ...form, fee_amount: e.target.value, package_id: "", package_name: "" })} placeholder="0" data-testid="zumba-field-amount" />
+                      <Input type="number" value={form.fee_amount} onChange={(e) => setForm({ ...form, fee_amount: e.target.value, package_id: "", package_name: "", package_sessions: "" })} placeholder="0" data-testid="zumba-field-amount" />
                     </div>
                   </div>
                   {/* A payment can arrive more than one way — half in cash, the rest by
