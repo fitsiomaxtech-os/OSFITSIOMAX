@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { hpReviews, hpCompleteReview, physioSessions } from "@/lib/api";
+import { LeadDocuments } from "@/components/LeadDocuments";
 
 // Treatment days per review. Mirrors REVIEW_AFTER_DAYS in backend/routers/v3_reviews.py,
 // which is what decides when a review is raised — this only decides how many days the
@@ -59,6 +60,7 @@ export const HeadPhysioReviewTab = ({ selectedDate, dateRange = null, compact = 
   const [draft, setDraft] = useState(null); // { review, head_physio_notes, head_physio_suggestions }
   const [draftTab, setDraftTab] = useState("write");
   const [sessionState, setSessionState] = useState({ loading: false, failed: false, sessions: [] });
+  const [docCount, setDocCount] = useState(0);
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
@@ -69,6 +71,11 @@ export const HeadPhysioReviewTab = ({ selectedDate, dateRange = null, compact = 
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // Cleared when the popup moves to another patient: the panel refetches and reports the
+  // new figure, but until it answers the label would still be carrying the last one's.
+  const draftLeadId = draft?.review?.lead_id || null;
+  useEffect(() => { setDocCount(0); }, [draftLeadId]);
 
   // The board's Refresh reaching this tab's data. The first value is skipped — the mount
   // effect above has already fetched, and firing here too would double every open.
@@ -324,6 +331,7 @@ export const HeadPhysioReviewTab = ({ selectedDate, dateRange = null, compact = 
               {[
                 { key: "write", label: "Write Review" },
                 { key: "days", label: `Treatment Days${windowDays.length ? ` (${windowDays.length})` : ""}` },
+                { key: "documents", label: `Documents${docCount ? ` (${docCount})` : ""}` },
               ].map((t) => (
                 <button
                   key={t.key}
@@ -429,6 +437,20 @@ export const HeadPhysioReviewTab = ({ selectedDate, dateRange = null, compact = 
                   </div>
                 </>
               )}
+            </div>
+
+            {/* Scans, reports and prescriptions on the same patient, alongside the days
+                and the notes. A review is a judgement on how someone is responding, and
+                the x-ray that prompted the referral was a board away from the person
+                writing it.
+
+                Mounted rather than rendered on click, so the tab can carry its count
+                before anyone opens it — and left listing every kind, because a document
+                worth reading before writing a review is not only the ones filed as
+                general. Editable: this board is only ever on screen for the Consultant,
+                who is one of the three roles the documents API takes writes from. */}
+            <div className={`flex-1 overflow-y-auto p-5 ${draftTab === "documents" ? "" : "hidden"}`} data-testid="hp-review-documents">
+              <LeadDocuments leadId={draft.review.lead_id} kind="" canEdit onChanged={setDocCount} />
             </div>
 
             <div className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-6 py-3.5">

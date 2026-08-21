@@ -151,7 +151,11 @@ export const LeadDocuments = ({ leadId, canEdit = true, kind = "general", fixedL
       // A fixed label names the pages for you — the consultation form is always the
       // consultation form, and asking someone to type that on every page is a field
       // they will leave blank.
-      await uploadLeadDocument(leadId, sent, fixedLabel || label, kind);
+      // `kind` doubles as the filter on what this panel lists, and an empty one means
+      // "everything on file" rather than a kind of its own. New pages still have to be
+      // filed as something, so they land under general — passing the empty string
+      // through would store documents under a kind nothing ever asks for.
+      await uploadLeadDocument(leadId, sent, fixedLabel || label, kind || "general");
       toast.success(
         sent.size < file.size
           ? `Uploaded · ${fmtSize(file.size)} shrunk to ${fmtSize(sent.size)}`
