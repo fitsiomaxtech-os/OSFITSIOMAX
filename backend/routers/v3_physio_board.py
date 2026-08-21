@@ -267,15 +267,15 @@ async def physio_consultations(physio_id: Optional[str] = None, user: V3UserOut 
     if not doctor:
         return {"leads": []}
 
+    # The same set the Patients and Review tabs read. This is what the Treatment list
+    # matches its day rows against, so a rehab patient missing here left the row drawn from
+    # a name-and-id stub with no phone — and the list decides a row is clickable by asking
+    # whether the lead has one. It was the third place reading the stamp alone.
+    lead_ids = await physio_lead_ids(doctor["id"])
     leads = await v3_col("leads").find(
-        {"assigned_physio_id": doctor["id"]},
+        {"id": {"$in": lead_ids}},
         {"_id": 0},
     ).sort("appointment_datetime", -1).to_list(500)
-
-    # Treatment-day tallies, so the board can show "3 of 8 days" per patient without
-    # a follow-up request for each one. Carried alongside the lead's own fields
-    # (V3LeadOut ignores extras, so these are attached after dumping).
-    lead_ids = [l["id"] for l in leads]
     day_rows = await v3_col("sessions").find(
         {"physio_id": doctor["id"], "lead_id": {"$in": lead_ids}},
         {"_id": 0, "lead_id": 1, "status": 1, "week_number": 1},
@@ -359,6 +359,24 @@ async def physio_lead_sessions(lead_id: str, _: V3UserOut = Depends(v3_require_r
     sessions = await v3_col("sessions").find(
         {"lead_id": lead_id}, {"_id": 0}
     ).sort("slot_time", 1).to_list(500)
+    for row in sessions:
+        row.setdefault("track", "treatment")
+
+    # A rehab patient's days live in their own collection, so this popup opened empty for
+    # them — the row on the list said Day 1 of 26 and the days behind it were nowhere.
+    # Merged in tagged, shaped the way the popup already reads a day, so the list needs no
+    # second shape and a rehab day can still say what it is rather than passing as a day of
+    # a treatment package the patient may not be on.
+    rehab = await v3_col("rehab_sessions").find(
+        {"lead_id": lead_id}, {"_id": 0}
+    ).sort("slot_time", 1).to_list(500)
+    for row in rehab:
+        row["track"] = "rehab"
+        row["session_number"] = row.get("day_number")
+        row["total_sessions"] = row.get("total_days")
+        # Rehab courses are not cut into weeks; leaving this unset would read as week 0.
+        row.setdefault("week_number", None)
+    sessions = sorted(sessions + rehab, key=lambda r: r.get("slot_time") or "")
 
     assessments = await v3_col("weekly_assessments").find(
         {"lead_id": lead_id}, {"_id": 0}

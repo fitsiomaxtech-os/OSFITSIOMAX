@@ -1810,7 +1810,12 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
                       </div>
                       <div className="min-w-0 flex-1">
                         <p className="flex flex-wrap items-center gap-1.5 text-xs font-semibold text-slate-700">
-                          Day {s.session_number} of {s.total_sessions} · Week {s.week_number}
+                          {/* A rehab day says so, and carries no week: a rehab course is
+                              not cut into weeks, and printing "Week 0" over one is worse
+                              than printing nothing. Same wording the day list outside
+                              this popup uses, so one patient reads the same either way. */}
+                          {s.track === "rehab" ? "Rehab " : ""}Day {s.session_number} of {s.total_sessions}
+                          {s.track !== "rehab" && s.week_number ? ` · Week ${s.week_number}` : ""}
                           {/* Says why this row is at the top, which is not obvious once it
                               has been completed and every pending day sits below it. */}
                           {isActiveDay && activeDate && (
