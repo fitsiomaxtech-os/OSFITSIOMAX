@@ -190,9 +190,22 @@ const planLabel = (item) => {
   const months = classes && classes % CLASSES_PER_MONTH === 0 ? classes / CLASSES_PER_MONTH : null;
   return months ? `${months} Month${months > 1 ? "s" : ""}` : item.name;
 };
-const planTotal = (item) => Math.round(
-  (Number(item.price_offline ?? item.price_online) || 0) * (item.sessions_offline || item.sessions_online || 0),
-);
+/** What a package costs, in the terms its own shelf is priced in.
+ *
+ * A course shelf — Rehab, Fitness — holds the whole fee exactly as it was typed, so it is
+ * read straight back. Every other shelf holds a per-session rate and the total is that
+ * rate times the count.
+ *
+ * `price_is_total` is read off the item rather than inferred from its category, which is
+ * what lets a row the startup conversion has not reached yet still be read the way it was
+ * written. Kept in step with packageTotal in PackagesBoard.jsx, which prices the shelf,
+ * and PRICE_IS_TOTAL_CATEGORIES in backend/routers/v3_store.py, which marks it.
+ */
+const planTotal = (item) => {
+  const price = Number(item?.price_offline ?? item?.price_online) || 0;
+  if (item?.price_is_total) return Math.round(price);
+  return Math.round(price * (item?.sessions_offline || item?.sessions_online || 0));
+};
 
 /**
  * Money against a balance already owed.
