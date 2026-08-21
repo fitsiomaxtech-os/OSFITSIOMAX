@@ -646,6 +646,46 @@ async def backfill_patient_numbers() -> None:
             await v3_col("leads").update_one({"id": lead["id"]}, {"$set": {"patient_number": patient_number}})
 
 
+async def backfill_zumba_package_sessions() -> None:
+    """Give a Zumba registration back the class count its package always had.
+
+    The branch's form learned to record package_sessions after these rows were written, so
+    a membership sold before then names a package and says nothing about its length. The
+    master's board reads that count for two columns -- how many classes, and the finish
+    date it works out from them -- and both have been printing a dash for every one of
+    them.
+
+    Read off the catalogue item the row already points at, so nothing is inferred: a row
+    with no package_id, or one naming an item since deleted, is left alone rather than
+    guessed at. Only ever fills a missing count, never corrects one somebody set, so it is
+    safe to re-run.
+    """
+    rows = await v3_col("zumba_registrations").find(
+        {"package_id": {"$nin": [None, ""]},
+         "$or": [{"package_sessions": None}, {"package_sessions": {"$exists": False}}]},
+        {"_id": 0, "id": 1, "package_id": 1},
+    ).to_list(5000)
+    if not rows:
+        return
+
+    items = await v3_col("store_items").find(
+        {"id": {"$in": sorted({r["package_id"] for r in rows})}},
+        {"_id": 0, "id": 1, "sessions_offline": 1, "sessions_online": 1},
+    ).to_list(1000)
+    sessions_of = {}
+    for item in items:
+        count = item.get("sessions_offline") or item.get("sessions_online")
+        if isinstance(count, int) and count > 0:
+            sessions_of[item["id"]] = count
+
+    for row in rows:
+        count = sessions_of.get(row["package_id"])
+        if count:
+            await v3_col("zumba_registrations").update_one(
+                {"id": row["id"]}, {"$set": {"package_sessions": count}}
+            )
+
+
 async def deactivate_legacy_demo_admin() -> None:
     """Disable the old demo super_admin account (admin@fitsiomax.com / admin123).
     Replaced by a real Super Admin login; kept as a record for audit, not deleted. Safe to re-run."""

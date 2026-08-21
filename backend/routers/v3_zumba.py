@@ -556,7 +556,14 @@ def _visible_query(user: V3UserOut, branch_id: Optional[str]) -> Optional[dict]:
     Everyone else -- Branch Admin, Super Admin -- is read by branch, unchanged.
     """
     if _is_master_account(user):
-        return {"assigned_master_id": user.id}
+        # A discontinued student is off the roll, not greyed out on it: the master is being
+        # told who is in their class, and somebody who has left is not. Matched with $ne so
+        # a row written before statuses existed -- which carries no status at all -- still
+        # reads as on the roll rather than silently vanishing from it.
+        #
+        # Putting them back is the branch's PATCH .../status with active, and this query
+        # picks them up again on the next load with nothing else to undo.
+        return {"assigned_master_id": user.id, "status": {"$ne": STATUS_DISCONTINUED}}
     if branch_id:
         return {"branch_id": branch_id}
     # Super Admin asking for every branch at once. Anyone else with nothing to scope by
