@@ -535,7 +535,7 @@ export const recruitmentReorderStages = async (ids) => (await api.post("/recruit
 // The bell's number is the New column rather than a flag of its own, so what it counts and
 // what the board shows can never disagree.
 export const listBranchFeedback = async (branchId) => (await api.get("/branch/feedback", { params: branchId ? { branch_id: branchId } : {} })).data;
-export const moveBranchFeedback = async (feedbackId, status, note) => (await api.patch(`/branch/feedback/${feedbackId}`, { status, note })).data;
+export const moveBranchFeedback = async (feedbackId, status, reply, note) => (await api.patch(`/branch/feedback/${feedbackId}`, { status, reply, note })).data;
 
 // ---- Zumba (Branch Admin's own tab) ----
 // Not a clinical journey and so not a lead: no stage, no consultation, no discharge. The

@@ -812,7 +812,20 @@ const MyFeedbackList = ({ mine }) => {
                 {f.message ? (
                   <p className="mt-1.5 whitespace-pre-wrap break-words text-xs leading-5 text-slate-600">{f.message}</p>
                 ) : null}
-                <p className="mt-1.5 text-[10px] text-slate-400">{state.note}</p>
+                {/* What was done about it, in their words. Closing something without saying
+                    why is how somebody learns that writing here achieves nothing, so the
+                    reply sits with the status rather than behind it. */}
+                {f.reply ? (
+                  <div className="mt-2 rounded-lg border border-emerald-100 bg-emerald-50/70 p-2.5">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">
+                      {f.audience === "super_admin" ? "Head office replied" : "Your branch replied"}
+                      {f.replied_at ? <span className="ml-1 font-normal normal-case tracking-normal text-emerald-600/70">{feedbackSentOn(f.replied_at)}</span> : null}
+                    </p>
+                    <p className="mt-1 whitespace-pre-wrap break-words text-xs leading-5 text-emerald-900">{f.reply}</p>
+                  </div>
+                ) : (
+                  <p className="mt-1.5 text-[10px] text-slate-400">{state.note}</p>
+                )}
               </div>
             );
           })}

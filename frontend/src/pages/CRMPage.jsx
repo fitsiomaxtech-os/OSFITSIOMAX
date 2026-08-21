@@ -24,6 +24,7 @@ import {
   Users,
   Workflow,
   X,
+  Bell,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -42,6 +43,7 @@ import {
   createVertical,
   getAvailableDoctors,
   getBranches,
+  listBranchFeedback,
   qualifyLead,
   saveSheetMapping,
   syncSheetConnection,
@@ -65,6 +67,7 @@ import { PackagesBoard } from "@/components/PackagesBoard";
 import { OperationsBoard } from "@/components/OperationsBoard";
 import { AccountantBoard } from "@/components/finance/AccountantBoard";
 import { ZumbaMasterBoard } from "@/components/ZumbaMasterBoard";
+import { FeedbackBoard } from "@/components/branch/FeedbackBoard";
 
 const ROLE_META = {
   super_admin: { label: "Super Admin", icon: ShieldCheck },
@@ -436,6 +439,8 @@ export const CRMPage = ({ auth, onLogout }) => {
   // not. So the header only carries them where the whole page is this board and there is
   // no nav above it.
   const [presalesView, setPresalesView] = useState("leads");
+  const [showFeedback, setShowFeedback] = useState(false);
+  const [feedbackUnread, setFeedbackUnread] = useState(0);
 
   const [superAdminView, setSuperAdminView] = useState(() => {
     if (typeof window === "undefined") return "dashboard";
@@ -786,6 +791,21 @@ export const CRMPage = ({ auth, onLogout }) => {
   const showDietBoard = isDietRole(role);
   const showAccountantBoard = role === "accountant";
   const showZumbaBoard = isZumbaRole(role);
+
+  // What patients have sent past their branch, waiting to be read. Asked once when the
+  // board opens rather than polled: feedback arrives at the pace people write it, and a
+  // request every half minute to learn that nothing changed is paid for all day.
+  //
+  // Only for Super Admin. Everybody else either has this bell on their own board already
+  // or has nothing addressed to them.
+  useEffect(() => {
+    if (!showSuperAdminBoard) return undefined;
+    let live = true;
+    listBranchFeedback()
+      .then((data) => { if (live) setFeedbackUnread(data?.unread || 0); })
+      .catch(() => { /* the bell carries no count; the board says why when opened */ });
+    return () => { live = false; };
+  }, [showSuperAdminBoard]);
   const showHumanResourceBoard = isHumanResourceRole(role);
 
   const filteredAppointmentsForPhysioBoards = appointments;
@@ -912,6 +932,30 @@ export const CRMPage = ({ auth, onLogout }) => {
                   <span className="hidden sm:inline">Calendar</span>
                 </button>
               )}
+              {/* The same bell a Branch Admin has, in the same place, reading the same
+                  board -- what differs is what reaches it. A branch sees its own patients'
+                  feedback; this one collects what was addressed to head office, which is
+                  the half no branch is shown. */}
+              {showSuperAdminBoard && (
+                <button
+                  type="button"
+                  onClick={() => setShowFeedback(true)}
+                  className="relative shrink-0 rounded-md p-2 text-slate-400 transition hover:bg-amber-50 hover:text-amber-600"
+                  title={feedbackUnread > 0 ? `${feedbackUnread} new client feedback` : "Client feedback"}
+                  aria-label={feedbackUnread > 0 ? `${feedbackUnread} new client feedback` : "Client feedback"}
+                  data-testid="super-admin-feedback-bell"
+                >
+                  <Bell className="h-4 w-4" />
+                  {feedbackUnread > 0 && (
+                    <span
+                      className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white"
+                      data-testid="super-admin-feedback-count"
+                    >
+                      {feedbackUnread > 99 ? "99+" : feedbackUnread}
+                    </span>
+                  )}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setShowProfile(true)}
@@ -943,6 +987,13 @@ export const CRMPage = ({ auth, onLogout }) => {
 
         {showProfile && (
           <MyProfileModal user={auth.user} roleLabel={roleLabel} branchName={myBranchName} onClose={() => setShowProfile(false)} />
+        )}
+
+        {showFeedback && (
+          <FeedbackBoard
+            onClose={() => setShowFeedback(false)}
+            onCounts={(data) => setFeedbackUnread(data?.unread || 0)}
+          />
         )}
 
         {showPhysioBoard && showPhysioCalendar && (

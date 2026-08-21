@@ -131,12 +131,76 @@ const FeedbackCard = ({ row, onMove, moving }) => (
  * Moved by buttons rather than by dragging. A drag needs a mouse and a steady hand, and a
  * branch reading this on a tablet at the desk has neither.
  */
+/**
+ * What is being told to the patient, before the card is closed.
+ *
+ * Its own dialog rather than a field on the card: this is the one thing here a patient
+ * reads, and typing it into a row among nine others invites the sentence that gets typed to
+ * get past a form. On screen it shows what they said, so the reply is written to the words
+ * it answers rather than from memory of them.
+ */
+const ReplyDialog = ({ row, saving, onCancel, onSend }) => {
+  const [reply, setReply] = useState("");
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }} data-testid="feedback-reply-dialog">
+      <div className="w-full max-w-md overflow-hidden rounded-xl bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-3 border-b p-5">
+          <div className="min-w-0">
+            <h3 className="text-base font-semibold text-slate-800">Close this feedback</h3>
+            <p className="mt-0.5 text-[11px] text-slate-500">{row.patient_name || "A patient"} reads what you write here.</p>
+          </div>
+          <button onClick={onCancel} className="text-slate-400 hover:text-slate-600" aria-label="Cancel" data-testid="feedback-reply-close">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="space-y-3 p-5">
+          {row.message ? (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">They said</p>
+              <p className="mt-1 whitespace-pre-wrap break-words text-xs leading-5 text-slate-600">{row.message}</p>
+            </div>
+          ) : null}
+          <div>
+            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">What was done *</label>
+            <textarea
+              rows={4}
+              autoFocus
+              maxLength={2000}
+              value={reply}
+              onChange={(e) => setReply(e.target.value)}
+              placeholder="We spoke to the physio and moved your Friday session to the earlier slot."
+              className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400"
+              data-testid="feedback-reply-message"
+            />
+            <p className="mt-1 text-right text-[10px] text-slate-400">{reply.length}/2000</p>
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2 border-t p-4">
+          <Button variant="outline" size="sm" onClick={onCancel} data-testid="feedback-reply-cancel">Cancel</Button>
+          <Button
+            size="sm"
+            className="bg-emerald-600 text-white hover:bg-emerald-700"
+            disabled={saving || !reply.trim()}
+            onClick={() => onSend(reply.trim())}
+            data-testid="feedback-reply-send"
+          >
+            {saving ? "Sending…" : "Send & resolve"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export const FeedbackBoard = ({ branchId, onClose, onCounts }) => {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [moving, setMoving] = useState(null);
   const [error, setError] = useState("");
   const [filter, setFilter] = useState("all"); // "all" | one of COLUMNS
+  const [replying, setReplying] = useState(null); // the row being closed, awaiting its words
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -158,10 +222,15 @@ export const FeedbackBoard = ({ branchId, onClose, onCounts }) => {
 
   const visible = filter === "all" ? rows : rows.filter((r) => (r.status || "new") === filter);
 
-  const move = async (row, to) => {
+  // Resolving is the one move that says something to the patient, so it asks for the words
+  // first. The rest move straight away: making somebody type a sentence to say "I have seen
+  // this" fills the field with "ok".
+  const move = async (row, to, reply = "") => {
+    if (to === "resolved" && !reply) { setReplying(row); return; }
     setMoving(row.id);
     try {
-      await moveBranchFeedback(row.id, to, "");
+      await moveBranchFeedback(row.id, to, reply, "");
+      setReplying(null);
       await load();
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Could not move that");
@@ -172,6 +241,14 @@ export const FeedbackBoard = ({ branchId, onClose, onCounts }) => {
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4" data-testid="feedback-board">
+      {replying && (
+        <ReplyDialog
+          row={replying}
+          saving={moving === replying.id}
+          onCancel={() => setReplying(null)}
+          onSend={(reply) => move(replying, "resolved", reply)}
+        />
+      )}
       <div className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
         <div className="flex shrink-0 items-center justify-between gap-3 border-b bg-slate-50/60 px-5 py-4">
           <div className="flex items-center gap-2">
