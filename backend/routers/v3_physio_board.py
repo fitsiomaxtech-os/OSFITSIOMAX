@@ -423,12 +423,18 @@ async def _first_incomplete_before(session: dict):
     absence carries a later date than the day after it until the shift is applied, and
     comparing dates would then call the sequence broken when it is not.
     """
-    number = session.get("session_number") or 0
-    rows = await v3_col("sessions").find(
+    # Against the day's own course. A rehab course and a treatment package are separate
+    # runs of days for the same patient, so judging one by the other has Rehab Day 2 blocked
+    # by Treatment Day 1 — two courses that never had an order between them.
+    rehab = session.get("track") == "rehab"
+    collection = "rehab_sessions" if rehab else "sessions"
+    field = "day_number" if rehab else "session_number"
+    number = session.get(field) or session.get("session_number") or 0
+    rows = await v3_col(collection).find(
         {"lead_id": session.get("lead_id"), "status": {"$ne": "completed"}},
-        {"_id": 0, "session_number": 1},
+        {"_id": 0, field: 1},
     ).to_list(1000)
-    earlier = [r.get("session_number") or 0 for r in rows if (r.get("session_number") or 0) < number]
+    earlier = [r.get(field) or 0 for r in rows if (r.get(field) or 0) < number]
     return min(earlier) if earlier else None
 
 
@@ -462,9 +468,22 @@ async def physio_mark_absent(
     would otherwise be the only trace, and that reads as an admin error rather than a
     patient who did not arrive.
     """
+    # A rehab day is a day of its own course, in its own collection. The popup lists both
+    # tracks together, so Complete is pressed on either — and this looked only in `sessions`
+    # and answered "Session not found" for every rehab day on the board. Marking one absent
+    # was the same story.
     session = await v3_col("sessions").find_one({"id": session_id}, {"_id": 0})
+    collection = "sessions"
+    if not session:
+        session = await v3_col("rehab_sessions").find_one({"id": session_id}, {"_id": 0})
+        if session:
+            collection = "rehab_sessions"
+            session["track"] = "rehab"
+            # Named the way the rest of this function reads a day, so one body serves both.
+            session["session_number"] = session.get("day_number")
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+    is_rehab = collection == "rehab_sessions"
     if session["status"] == "completed":
         raise HTTPException(status_code=400, detail="This day is already completed")
 
@@ -480,13 +499,18 @@ async def physio_mark_absent(
 
     # This day and everything after it that has not been done. Completed days keep the date
     # they actually happened on.
-    to_move = await v3_col("sessions").find(
+    # A rehab course numbers its days day_number, not session_number. Read under the wrong
+    # name every row came back as day 0, nothing sorted after the missed day, and the
+    # absence was recorded while the dates it was supposed to move stayed exactly as they
+    # were — the quietest possible failure.
+    num_field = "day_number" if is_rehab else "session_number"
+    to_move = await v3_col(collection).find(
         {"lead_id": session["lead_id"], "status": {"$ne": "completed"}},
-        {"_id": 0, "id": 1, "session_number": 1, "slot_time": 1},
+        {"_id": 0, "id": 1, num_field: 1, "slot_time": 1},
     ).to_list(1000)
     later = sorted(
-        (r for r in to_move if (r.get("session_number") or 0) >= number),
-        key=lambda r: r.get("session_number") or 0,
+        (r for r in to_move if (r.get(num_field) or 0) >= number),
+        key=lambda r: r.get(num_field) or 0,
     )
 
     # Only the days that still hold a slot take part. A day already waiting on the Branch
@@ -498,7 +522,7 @@ async def physio_mark_absent(
     moved = 0
     for i, row in enumerate(dated):
         next_slot = dated[i + 1]["slot_time"] if i + 1 < len(dated) else ""
-        await v3_col("sessions").update_one(
+        await v3_col(collection).update_one(
             {"id": row["id"]},
             {"$set": {
                 "slot_time": next_slot,
@@ -509,7 +533,7 @@ async def physio_mark_absent(
         )
         moved += 1
 
-    await v3_col("sessions").update_one(
+    await v3_col(collection).update_one(
         {"id": session_id},
         {"$push": {"absences": {
             "date": missed_on,
@@ -527,7 +551,7 @@ async def physio_mark_absent(
             f"Day {number} marked absent on {missed_on or 'an unknown date'} by {user.full_name}."
             f" That day and {max(moved - 1, 0)} later day(s) moved down one slot."
             + (
-                f" Day {dated[-1].get('session_number')} now needs a date from the Branch Admin."
+                f" Day {dated[-1].get(num_field)} now needs a date from the Branch Admin."
                 if dated else ""
             )
             + (f" Remarks: {payload.remarks.strip()}" if (payload.remarks or "").strip() else "")
@@ -537,9 +561,9 @@ async def physio_mark_absent(
         "created_at": now_iso(),
     })
 
-    updated = await v3_col("sessions").find_one({"id": session_id}, {"_id": 0})
+    updated = await v3_col(collection).find_one({"id": session_id}, {"_id": 0})
     landed = ((updated or {}).get("slot_time") or "").split("T")[0]
-    unscheduled_day = dated[-1].get("session_number") if dated else None
+    unscheduled_day = dated[-1].get(num_field) if dated else None
     return {
         "session": updated,
         "moved": moved,
@@ -560,9 +584,22 @@ async def physio_complete_session(
     payload: V3CompleteSessionInput,
     user: V3UserOut = Depends(v3_require_roles("physio", "super_admin")),
 ):
+    # A rehab day is a day of its own course, in its own collection. The popup lists both
+    # tracks together, so Complete is pressed on either — and this looked only in `sessions`
+    # and answered "Session not found" for every rehab day on the board. Marking one absent
+    # was the same story.
     session = await v3_col("sessions").find_one({"id": session_id}, {"_id": 0})
+    collection = "sessions"
+    if not session:
+        session = await v3_col("rehab_sessions").find_one({"id": session_id}, {"_id": 0})
+        if session:
+            collection = "rehab_sessions"
+            session["track"] = "rehab"
+            # Named the way the rest of this function reads a day, so one body serves both.
+            session["session_number"] = session.get("day_number")
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+    is_rehab = collection == "rehab_sessions"
     if session["status"] == "completed":
         raise HTTPException(status_code=400, detail="Session already completed")
 
@@ -573,7 +610,7 @@ async def physio_complete_session(
     if blocking is not None:
         raise HTTPException(
             status_code=400,
-            detail=f"Day {blocking} has not been completed yet — treatment days are completed in order",
+            detail=f"Day {blocking} has not been completed yet — days are completed in order",
         )
 
     # One of the two is the report. Checked here and not only in the popup: this is what
@@ -581,10 +618,15 @@ async def physio_complete_session(
     # off, and a session completed through the API with neither would read as the latter.
     treatment_remarks = (payload.remarks or "").strip()
     rehab_remarks = (payload.rehab_remarks or "").strip()
-    if not treatment_remarks and not rehab_remarks:
+    # A rehab day has no treatment half to write about, so only the rehab note counts —
+    # otherwise it could be signed off with a note about treatment that did not happen and
+    # the one thing the day exists to record left blank.
+    if is_rehab and not rehab_remarks:
+        raise HTTPException(status_code=400, detail="Rehab Remarks is required")
+    if not is_rehab and not treatment_remarks and not rehab_remarks:
         raise HTTPException(status_code=400, detail="Treatment Remarks or Rehab Remarks is required")
 
-    await v3_col("sessions").update_one(
+    await v3_col(collection).update_one(
         {"id": session_id},
         {"$set": {
             "status": "completed",
@@ -615,14 +657,17 @@ async def physio_complete_session(
         "id": str(uuid.uuid4()),
         "lead_id": session["lead_id"],
         "action": "session_completed",
-        "details": f"Session #{session.get('session_number', '?')} completed by {user.full_name}. {log_remarks}",
+        "details": (
+            f"{'Rehab Day' if is_rehab else 'Session'} #{session.get('session_number', '?')}"
+            f" completed by {user.full_name}. {log_remarks}"
+        ),
         "created_by": user.full_name,
         "created_by_role": user.role,
         "created_at": now_iso(),
     }
     await v3_col("lead_activity").insert_one(activity.copy())
 
-    updated = await v3_col("sessions").find_one({"id": session_id}, {"_id": 0})
+    updated = await v3_col(collection).find_one({"id": session_id}, {"_id": 0})
     return updated
 
 
