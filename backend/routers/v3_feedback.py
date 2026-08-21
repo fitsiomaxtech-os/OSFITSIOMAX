@@ -72,6 +72,10 @@ def _rating(value) -> Optional[int]:
 class FeedbackStatusIn(BaseModel):
     status: str
     note: Optional[str] = ""
+    # What the branch is telling the patient. Required to resolve, and the patient reads it
+    # in their portal -- which is why it is its own field and not the note: the note is the
+    # branch's working record, written to be read by colleagues.
+    reply: Optional[str] = ""
 
 
 @router.get("/branch/feedback")
@@ -117,8 +121,13 @@ async def move_feedback(
 ):
     """Move a piece of feedback to another column, and record who moved it.
 
-    The note is optional on purpose. Requiring one to pick something up would mean typing a
-    sentence to say "I have seen this", and a field that has to be filled to get past it
+    Resolving takes a reply and will not go through without one. Closing a complaint is the
+    branch saying it is dealt with, and the person who raised it is told what was done --
+    a status changing under them with no words attached is how somebody learns that saying
+    something here achieves nothing.
+
+    The other moves ask for nothing. Requiring a sentence to pick something up would mean
+    typing one to say "I have seen this", and a field that has to be filled to get past it
     fills with "ok".
     """
     existing = await v3_col("patient_feedback").find_one({"id": feedback_id}, {"_id": 0})
@@ -131,11 +140,22 @@ async def move_feedback(
     if status not in STATUSES:
         raise HTTPException(status_code=400, detail=f"Status must be one of: {', '.join(STATUSES)}")
 
+    reply = (payload.reply or "").strip()[:MAX_MESSAGE]
+    if status == STATUS_RESOLVED and not reply:
+        raise HTTPException(status_code=400, detail="Say what was done — the patient reads this")
+
     changes = {
         "status": status,
-        "note": (payload.note or "").strip(),
         "handled_by": user.full_name or user.email,
         "handled_at": now_iso(),
     }
+    # Only written when something was said, so walking a card back to In Progress and
+    # resolving it again replaces the reply rather than the second move blanking it.
+    if reply:
+        changes["reply"] = reply
+        changes["replied_by"] = user.full_name or user.email
+        changes["replied_at"] = now_iso()
+    if (payload.note or "").strip():
+        changes["note"] = (payload.note or "").strip()
     await v3_col("patient_feedback").update_one({"id": feedback_id}, {"$set": changes})
     return {**existing, **changes}

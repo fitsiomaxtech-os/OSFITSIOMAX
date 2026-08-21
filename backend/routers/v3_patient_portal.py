@@ -432,13 +432,15 @@ async def patient_portal_my_feedback(lead_id: str = Depends(_current_patient_lea
     finished -- is the smallest honest answer: it does not promise a reply, it says
     somebody has it.
 
-    What the branch wrote on it stays with the branch. The note is their working record of
-    what they did about it, written to be read by colleagues, and putting it in front of
+    The reply comes back with it -- what the branch said when they closed it, which they
+    wrote knowing the patient would read it. The note does not: that is the branch's working
+    record of what they did, written to be read by colleagues, and putting it in front of
     the person it is about would change what gets written there.
     """
     rows = await v3_col("patient_feedback").find(
         {"lead_id": lead_id},
-        {"_id": 0, "id": 1, "rating": 1, "message": 1, "status": 1, "created_at": 1, "audience": 1},
+        {"_id": 0, "id": 1, "rating": 1, "message": 1, "status": 1, "created_at": 1,
+         "audience": 1, "reply": 1, "replied_at": 1},
     ).sort("created_at", -1).to_list(200)
     return {"feedback": rows}
 
