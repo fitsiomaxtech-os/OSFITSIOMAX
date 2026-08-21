@@ -528,13 +528,17 @@ async def _course_priced_item_ids() -> set:
     return {r["id"] for r in rows}
 
 
-async def migrate_rehab_prices_to_totals() -> None:
-    """Move Rehab packages from a per-session rate to the course total they were typed as.
+async def migrate_course_prices_to_totals() -> None:
+    """Move course-priced packages from a per-session rate to the total they were typed as.
 
-    Rehab is entered by hand now: what the Super Admin types is what is stored, shown and
-    charged, with nothing in between. Rows written before that hold the total divided by
-    the session count — 31,200 kept as 1,200 — so they are multiplied back out once and
-    marked, and the readers use the figure as it stands from then on.
+    Rehab and Fitness are both entered by hand now: what the Super Admin types is what is
+    stored, shown and charged, with nothing in between. Rows written before that hold the
+    total divided by the session count — 31,200 kept as 1,200 — so they are multiplied back
+    out once and marked, and the readers use the figure as it stands from then on.
+
+    Kept in step with PRICE_IS_TOTAL_CATEGORIES in routers/v3_store.py, which decides the
+    same thing for rows written from now on. A shelf added there and not here would leave
+    its existing rows reading as course totals while still holding rates.
 
     Idempotent by the mark rather than by the value: an already-converted row is
     indistinguishable from an unconverted one by price alone, and a second pass would
@@ -544,7 +548,7 @@ async def migrate_rehab_prices_to_totals() -> None:
     and inventing a multiplier here would be putting a number on a course nobody quoted.
     """
     items = await v3_col("store_items").find(
-        {"item_type": "session", "category": "rehab", "price_is_total": {"$ne": True}},
+        {"item_type": "session", "category": {"$in": ["rehab", "fitness"]}, "price_is_total": {"$ne": True}},
         {"_id": 0},
     ).to_list(500)
     for item in items:

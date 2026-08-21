@@ -51,12 +51,12 @@ VALID_DURATIONS_MINUTES = {15, 30, 45, 60, 120}
 ITEM_TYPES = ("consultation", "session", "diet", "diet_package")
 
 # Shelves whose price is the course, entered and kept exactly as typed with no arithmetic
-# between the box and the bill. Rehab is sold as one programme at one agreed figure, so
-# there is no rate to derive and no reason to derive one.
+# between the box and the bill. Rehab and Fitness are both sold as one programme at one
+# agreed figure, so there is no rate to derive and no reason to derive one.
 #
-# A property of the shelf, not of the row: a new Rehab package is entered this way the
+# A property of the shelf, not of the row: a new package on either is entered this way the
 # moment it is created, without anyone remembering to mark it.
-PRICE_IS_TOTAL_CATEGORIES = ("rehab",)
+PRICE_IS_TOTAL_CATEGORIES = ("rehab", "fitness")
 TIMED_ITEM_TYPES = ("consultation", "diet")
 
 

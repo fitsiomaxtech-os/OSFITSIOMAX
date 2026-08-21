@@ -410,7 +410,7 @@ async def hp_consultation_decision(
     # back a rupee off what was agreed.
     #
     # The rate x sessions path below it is for rows written before that, which still hold
-    # the total divided down. Startup converts them (migrate_rehab_prices_to_totals) and
+    # the total divided down. Startup converts them (migrate_course_prices_to_totals) and
     # the flag says which is which; keeping both means the order of a deploy and a restart
     # cannot decide what a patient is charged.
     #

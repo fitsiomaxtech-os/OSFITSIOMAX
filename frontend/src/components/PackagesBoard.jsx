@@ -381,9 +381,9 @@ const CreateConsultationModal = ({ item, onClose, onSaved, kind = "consultation"
 // price does — no dropdown to configure it, it's fixed per catalogue.
 const FIXED_SESSIONS = 7;
 
-// Rehab runs a longer course than the rest, so its shelf is fixed at its own length.
-// Anything not named here keeps the standard count.
-const FIXED_SESSIONS_BY_CATEGORY = { rehab: 26, zumba: 12 };
+// Rehab and Fitness both run a longer course than the rest, so their shelves are fixed at
+// their own length. Anything not named here keeps the standard count.
+const FIXED_SESSIONS_BY_CATEGORY = { rehab: 26, fitness: 26, zumba: 12 };
 const fixedSessionsFor = (category) => FIXED_SESSIONS_BY_CATEGORY[category] ?? FIXED_SESSIONS;
 
 /**
@@ -441,7 +441,11 @@ const packageTotal = (item, mode) => {
  * nobody agreed, that every screen had to be taught not to show, and that would have been
  * charged as the whole course by any reader that forgot to multiply.
  */
-const COURSE_TOTAL_CATEGORIES = new Set(["rehab"]);
+// Kept in step with PRICE_IS_TOTAL_CATEGORIES in backend/routers/v3_store.py, which marks
+// what is written from here, and with migrate_course_prices_to_totals in seed.py, which
+// converts what was written before. A shelf added to one and not the others reads its own
+// prices two different ways.
+const COURSE_TOTAL_CATEGORIES = new Set(["rehab", "fitness"]);
 const COURSE_TOTAL_DEFAULTS = { rehab: { online: 14000, offline: 18000 } };
 
 // Only a whole number of months is a plan. Anything else is a Zumba row saved before this
