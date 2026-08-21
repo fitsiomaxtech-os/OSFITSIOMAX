@@ -16,23 +16,10 @@ const MONTHS = [
   "July", "August", "September", "October", "November", "December",
 ];
 
-// Where a registration came from. Kept in step with SOURCES in branch/ZumbaPanel.jsx,
-// which is the tab that writes most of them; a master's own referral is "master" and
-// carries the master's name, which is worth more on the row than the word Master.
-const SOURCE_LABELS = {
-  board: "Board",
-  consultations: "Consultations",
-  branch: "Branch",
-  social_media: "Social Media",
-  personal: "Personal",
-  fitsiomax: "Fitsiomax",
-};
+// The source a referral from this board is filed under. The rest of the vocabulary went
+// with the Source column: where a lead came from is the branch's question, answered before
+// this roll ever saw them, and a master reads a class rather than a pipeline.
 const MASTER = "master";
-const sourceLabel = (row) => (
-  row.source === MASTER
-    ? (row.master_name || "Master")
-    : (SOURCE_LABELS[row.source] || SOURCE_LABELS.personal)
-);
 
 const rupees = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 
@@ -44,6 +31,33 @@ const shortDate = (iso) => {
 };
 
 const EMPTY_REFERRAL = { name: "", phone: "", age: "" };
+
+// The two the class is taught in, in the words the branch stores them by -- kept in step
+// with TIME_SLOTS in backend/routers/v3_zumba.py, which drops anything else.
+const SESSIONS = [
+  { key: "10:00 am - 11:00 am", label: "1st Session", when: "10:00 am - 11:00 am" },
+  { key: "11:00 am - 12:00 pm", label: "2nd Session", when: "11:00 am - 12:00 pm" },
+];
+
+const CLASSES_PER_MONTH = 12;
+
+/** When the membership runs out: the day they joined, plus a month for every twelve
+ *  classes it holds. Nothing stores an end date -- it is the package's length counted
+ *  forward, which is the same answer without a second field to keep true.
+ *
+ *  A short month clamps rather than spilling: joining on the 31st and finishing on the 3rd
+ *  of the month after next is arithmetic nobody recognises as their own membership. */
+const finishOn = (row) => {
+  const classes = Number(row?.package_sessions || 0);
+  if (!classes || classes % CLASSES_PER_MONTH !== 0 || !row?.created_at) return "—";
+  const start = new Date(row.created_at);
+  if (Number.isNaN(start.getTime())) return "—";
+  const months = classes / CLASSES_PER_MONTH;
+  const end = new Date(start);
+  end.setMonth(end.getMonth() + months);
+  if (end.getDate() !== start.getDate()) end.setDate(0);
+  return shortDate(end.toISOString());
+};
 
 /** What the roll below is showing, so the header names the open card rather than
  *  always saying "Customers" over a list that has been narrowed. */
@@ -282,6 +296,7 @@ export const ZumbaMasterBoard = ({ currentUser }) => {
   const [card, setCard] = useState("all"); // "all" | "today" | "payment"
   const [referring, setReferring] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
+  const [session, setSession] = useState(""); // "" = both slots, else the time_slot chosen
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -300,18 +315,24 @@ export const ZumbaMasterBoard = ({ currentUser }) => {
   useEffect(() => { load(); }, [load]);
 
   const isClassDay = Boolean(summary.is_class_day);
+  // How many of today's class are in each slot, counted off the roll rather than asked for
+  // separately, so a tab and the list behind it cannot disagree.
+  const bookedIn = (slot) => (isClassDay ? rows.filter((r) => r.time_slot === slot).length : 0);
 
   const visible = useMemo(() => {
     // Today's card is the whole roll on a class day and nobody on any other day, matching
     // what the figure itself counts: a membership books all three evenings, so there is no
-    // per-day list to draw — only a class, or no class.
+    // per-day list to draw — only a class, or no class. What it does split by is the hour,
+    // because the two sessions are two rooms of people and a master teaches one at a time.
     let list = rows;
-    if (card === "today") list = isClassDay ? rows : [];
-    else if (card === "payment") list = rows.filter((r) => Number(r.fee_paid || 0) > 0);
+    if (card === "today") {
+      list = isClassDay ? rows : [];
+      if (session) list = list.filter((r) => r.time_slot === session);
+    } else if (card === "payment") list = rows.filter((r) => Number(r.fee_paid || 0) > 0);
     const q = search.trim().toLowerCase();
     if (!q) return list;
     return list.filter((r) => (r.name || "").toLowerCase().includes(q) || (r.phone || "").includes(q));
-  }, [rows, search, card, isClassDay]);
+  }, [rows, search, card, isClassDay, session]);
 
   return (
     <div className="flex flex-col gap-4" data-testid="zumba-master-board">
@@ -346,12 +367,12 @@ export const ZumbaMasterBoard = ({ currentUser }) => {
             does not, on purpose — a referral says who brought them in, which is a claim on
             the lead, not a seat in your class. */}
         <SummaryCard
-          label="All Customers"
+          label="All Students"
           value={summary.all ?? 0}
           caption="Assigned to your class by the branch"
           tone="border-violet-200 bg-violet-50 text-violet-900"
           active={card === "all"}
-          onClick={() => setCard("all")}
+          onClick={() => { setCard("all"); setSession(""); }}
           testid="zumba-card-all"
         />
         <SummaryCard
@@ -372,10 +393,41 @@ export const ZumbaMasterBoard = ({ currentUser }) => {
           caption={`Your 50% of ${rupees(summary.fee_total)} from ${summary.fee_collected ?? 0} of ${summary.all ?? 0}`}
           tone="border-emerald-200 bg-emerald-50 text-emerald-900"
           active={card === "payment"}
-          onClick={() => setCard("payment")}
+          onClick={() => { setCard("payment"); setSession(""); }}
           testid="zumba-card-payment"
         />
       </div>
+
+      {/* Under today's card, and only there: the two slots are how one class day divides,
+          not a way to read the whole roll. Each says how many are in it, so choosing is
+          done from the numbers rather than by trying one. */}
+      {card === "today" && (
+        <div className="flex flex-wrap items-center gap-2" data-testid="zumba-master-sessions">
+          <button
+            type="button"
+            onClick={() => setSession("")}
+            className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition ${session === "" ? "border-sky-600 bg-sky-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"}`}
+            data-testid="zumba-master-session-all"
+          >
+            Both sessions
+          </button>
+          {SESSIONS.map((slot) => (
+            <button
+              key={slot.key}
+              type="button"
+              onClick={() => setSession(session === slot.key ? "" : slot.key)}
+              className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition ${session === slot.key ? "border-sky-600 bg-sky-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"}`}
+              title={slot.when}
+              data-testid={`zumba-master-session-${slot.key.startsWith("10") ? "1" : "2"}`}
+            >
+              {slot.label}
+              <span className={`ml-1.5 font-normal ${session === slot.key ? "text-white/80" : "text-slate-400"}`}>
+                {slot.when} · {bookedIn(slot.key)}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
 
       <Card>
         <CardContent className="p-0">
@@ -406,37 +458,42 @@ export const ZumbaMasterBoard = ({ currentUser }) => {
             <div className="overflow-x-auto">
               <table className="w-full min-w-[40rem] text-left text-sm">
                 <thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                  {/* What a master needs of a student: who they are, how to reach them,
+                      when their membership started and ends, and how much of it they
+                      bought. The money is the branch's business and has gone with the
+                      source, which said where a lead came from -- a question answered
+                      before this roll ever saw them. */}
                   <tr>
-                    <th className="w-[6%] px-3 py-2.5">S.No</th>
-                    <th className="w-[28%] px-3 py-2.5">Name</th>
-                    <th className="w-[18%] px-3 py-2.5">Phone</th>
-                    <th className="w-[16%] px-3 py-2.5">Source</th>
-                    <th className="w-[16%] px-3 py-2.5">Fee</th>
-                    <th className="w-[16%] px-3 py-2.5">Registered</th>
+                    <th className="w-[5%] px-3 py-2.5">S.No</th>
+                    <th className="w-[22%] px-3 py-2.5">Name</th>
+                    <th className="w-[15%] px-3 py-2.5">Phone</th>
+                    <th className="w-[20%] px-3 py-2.5">Email</th>
+                    <th className="w-[13%] px-3 py-2.5">Joined</th>
+                    <th className="w-[13%] px-3 py-2.5">Finishes</th>
+                    <th className="w-[12%] px-3 py-2.5">Classes</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {visible.map((r, i) => {
-                    const paid = Number(r.fee_paid || 0);
-                    const due = Number(r.fee_amount || 0) - paid;
-                    return (
-                      <tr key={r.id} className="align-middle hover:bg-slate-50/60" data-testid={`zumba-master-row-${r.id}`}>
-                        <td className="px-3 py-2.5 text-slate-400">{i + 1}</td>
-                        <td className="px-3 py-2.5 font-semibold text-slate-800">{r.name}</td>
-                        <td className="px-3 py-2.5 text-slate-600">{r.phone || "—"}</td>
-                        <td className="px-3 py-2.5">
-                          <span className="rounded bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
-                            {sourceLabel(r)}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2.5">
-                          <span className="font-semibold text-emerald-700">{rupees(paid)}</span>
-                          {due > 0 && <span className="ml-1 text-[11px] font-medium text-amber-600">{rupees(due)} due</span>}
-                        </td>
-                        <td className="px-3 py-2.5 text-slate-500">{shortDate(r.created_at)}</td>
-                      </tr>
-                    );
-                  })}
+                  {visible.map((r, i) => (
+                    <tr key={r.id} className="align-middle hover:bg-slate-50/60" data-testid={`zumba-master-row-${r.id}`}>
+                      <td className="px-3 py-2.5 text-slate-400">{i + 1}</td>
+                      <td className="px-3 py-2.5">
+                        <p className="font-semibold text-slate-800">{r.name || "—"}</p>
+                        {/* Which of the two they are in, under the name — on the roll as a
+                            whole it is the only place the hour is said at all. */}
+                        {r.time_slot ? <p className="text-[11px] text-slate-400">{r.time_slot}</p> : null}
+                      </td>
+                      <td className="px-3 py-2.5 text-slate-600">{r.phone || "—"}</td>
+                      <td className="px-3 py-2.5 text-slate-600">
+                        <span className="block max-w-[16rem] truncate" title={r.email || ""}>{r.email || "—"}</span>
+                      </td>
+                      <td className="px-3 py-2.5 text-slate-500">{shortDate(r.created_at)}</td>
+                      <td className="px-3 py-2.5 text-slate-500" data-testid={`zumba-master-finish-${r.id}`}>{finishOn(r)}</td>
+                      <td className="px-3 py-2.5 text-slate-600">
+                        {r.package_sessions ? `${r.package_sessions} classes` : "—"}
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
