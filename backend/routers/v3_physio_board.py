@@ -249,6 +249,10 @@ async def physio_patients(physio_id: Optional[str] = None, user: V3UserOut = Dep
         # Physio recommended a package, so the Review tab falls back to this to know how
         # many weeks it can offer an assessment for.
         weeks = max((s.get("week_number") or 1) for s in patient_sessions) if patient_sessions else 0
+        # Which course this patient is on, read off the days they actually have rather
+        # than off a package field: rehab is booked without one, and a patient can be
+        # running both at once — so this is a list, not a label.
+        tracks = sorted({(s.get("track") or "treatment") for s in patient_sessions})
 
         patients.append({
             "lead_id": lead["id"],
@@ -266,6 +270,7 @@ async def physio_patients(physio_id: Optional[str] = None, user: V3UserOut = Dep
             "next_session": next_session,
             "package_weeks": lead.get("package_weeks"),
             "weeks": weeks,
+            "tracks": tracks,
             "physio_stage": lead.get("physio_stage"),
             "consultation_stage": lead.get("consultation_stage"),
             "updated_at": lead.get("updated_at"),

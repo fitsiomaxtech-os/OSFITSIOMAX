@@ -926,6 +926,23 @@ const REVIEW_TABS = [
   { key: "completed", label: "Completed", icon: CheckCircle2, color: TILE.done },
 ];
 
+/**
+ * What a patient's course is called on their card.
+ *
+ * A rehab course is not cut into weeks, so the weeks line read "? weeks program" for
+ * every rehab patient — a question mark standing in for a number that was never going
+ * to exist. Says days for those, and falls back to the weeks the booked sessions
+ * actually span when no package recommended a figure.
+ */
+const courseLine = (p) => {
+  const tracks = p.tracks || [];
+  if (tracks.length === 1 && tracks[0] === "rehab") {
+    return p.total_sessions ? `${p.total_sessions} day course` : "";
+  }
+  const weeks = p.package_weeks || p.weeks;
+  return weeks ? `${weeks} week${weeks === 1 ? "" : "s"} program` : "";
+};
+
 const ordinal = (n) => {
   const v = n % 100;
   const suffix = v >= 11 && v <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10] || "th";
@@ -2224,7 +2241,22 @@ function PatientsTab({ physioId, onCountChange, toolbarSlot }) {
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold text-slate-800">{p.lead_name}</p>
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <p className="truncate text-[10px] text-slate-400">{p.phone} · {p.package_weeks || "?"} weeks program</p>
+                    <p className="truncate text-[10px] text-slate-400">
+                      {[p.phone, courseLine(p)].filter(Boolean).join(" · ")}
+                    </p>
+                    {/* Which course this patient is on, in the same two words the
+                        Treatment table and the day rows use. One badge each rather than a
+                        single label: a patient can be running both at once, and naming
+                        only one of them would hide the other. */}
+                    {(p.tracks || []).map((t) => (
+                      <span
+                        key={t}
+                        className={`shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-semibold ${t === "rehab" ? "bg-cyan-100 text-cyan-700" : "bg-sky-100 text-sky-700"}`}
+                        data-testid={`physio-patient-track-${p.lead_id}-${t}`}
+                      >
+                        {t === "rehab" ? "Rehab" : "Treatment"}
+                      </span>
+                    ))}
                     {p.review_number > 0 && (
                       <span className="shrink-0 rounded-full bg-violet-100 px-1.5 py-0.5 text-[9px] font-semibold text-violet-700">
                         {ordinal(p.review_number)} Review
