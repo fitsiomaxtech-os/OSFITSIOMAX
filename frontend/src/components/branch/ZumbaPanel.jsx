@@ -428,16 +428,12 @@ const planMonths = (item) => {
 };
 
 /**
- * The shelf, priced and spelled out.
+ * The shelf, priced.
  *
- * A pill saying "6 Months · ₹15,000" is the headline of the plan and not the plan: a desk
- * quoting it is asked how many classes that is, what it works out to a month, and whether
- * it beats the shorter one. All of that is arithmetic on two numbers already here, so it
- * is printed rather than left to be done at the counter.
- *
- * The per-month and per-class figures are what the plan divides down to, not prices in
- * their own right — nothing can be bought at that rate, which is why they are set below
- * the total rather than beside it.
+ * The term, what it costs, and how many classes that buys — the three things a desk is
+ * asked when it quotes one. What the plan divides down to a month and a class used to sit
+ * under that; it is gone, because nothing can be bought at those rates and a card offering
+ * four figures where three are for sale reads as a price list with two prices on it.
  */
 const PackagePicker = ({ packages, selectedId, onPick, prefix }) => {
   if (packages.length === 0) {
@@ -472,15 +468,6 @@ const PackagePicker = ({ packages, selectedId, onPick, prefix }) => {
             {classes ? (
               <span className={`mt-1.5 block text-[11px] ${on ? "text-white/80" : "text-emerald-700/70"}`}>
                 {classes} classes{months ? ` · ${CLASSES_PER_MONTH} a month` : ""}
-              </span>
-            ) : null}
-            {/* What it divides down to. Nothing can be bought at these rates — they are
-                here because "is the six-month one better value" is the question the row is
-                actually being read to answer. */}
-            {classes && total ? (
-              <span className={`mt-0.5 block text-[10px] ${on ? "text-white/70" : "text-emerald-700/60"}`}>
-                {months ? `${rupees(Math.round(total / months))} a month · ` : ""}
-                {rupees(Math.round(total / classes))} a class
               </span>
             ) : null}
           </button>
