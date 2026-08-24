@@ -51,7 +51,10 @@ V3_CONSULTATION_STAGES = [
     "Consultation Visit",
     "Fee Collected",
     "Physio Assign",
-    "Consultation Completed",
+    # "Consultation Completed" was here. It is still written to a lead -- it is how a
+    # Consultation Only patient is closed out -- but it has no pill of its own any more:
+    # the Completed stage takes those patients in beside everybody who finished a course.
+    # See retire_consultation_completed_stage in seed.py.
     "Cancel",
 ]
 

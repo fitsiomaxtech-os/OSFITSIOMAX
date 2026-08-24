@@ -929,6 +929,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     // sets. Kept in step with matchesConsultationStage in BranchAdminBoard, which the
     // Branch Leads bar reads the same rows through.
     if (!isConsultant && stageName === "Completed") {
+      if (lead.consultation_stage === "Consultation Completed") return true;
       return (lead.total_sessions || 0) > 0 && (lead.completed_sessions || 0) >= lead.total_sessions;
     }
     return lead[stageField] === stageName;

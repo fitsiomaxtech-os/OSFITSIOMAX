@@ -252,6 +252,25 @@ async def ensure_diet_and_completed_stages() -> None:
         })
 
 
+async def retire_consultation_completed_stage() -> None:
+    """Take the Consultation Completed pill off the Branch consultation pipeline.
+
+    Not a deletion of what it meant. A Consultation Only patient -- fee paid, no treatment
+    -- is still marked done through the same route and still carries the same
+    consultation_stage; the dashboard's Patient count still reads it. What goes is the pill,
+    because Completed beside it now takes those patients in along with everybody who
+    finished a course, and two stages for "there is nothing left to attend" is one more
+    than a branch can act on.
+
+    The stage value is left on every lead that holds it. It is data about what happened,
+    and rewriting it would lose the difference between a patient who finished treatment and
+    one who never had any.
+    """
+    await v3_col("pipeline_stages").delete_one(
+        {"type": "consultation", "name": "Consultation Completed"}
+    )
+
+
 async def ensure_branch_admin_stages() -> None:
     """Give the Branch pipeline its Branch-Admin-only opening: Branch Assign, then RNR.
 

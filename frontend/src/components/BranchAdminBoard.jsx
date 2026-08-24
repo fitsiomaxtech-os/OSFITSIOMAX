@@ -353,6 +353,11 @@ export const matchesConsultationStage = (lead, stageName) => {
   // remembers to set, and gated on there having been days at all: a patient with none
   // booked has not finished a course, they have not started one.
   if (stageName === "Completed") {
+    // A Consultation Only patient finishes without ever having a treatment day, and the
+    // branch marks them done on the Consultations board. They belong here for the same
+    // reason everybody else does — there is nothing left for them to attend — and the
+    // stage they carry is still written, it just no longer has a pill of its own.
+    if (lead.consultation_stage === "Consultation Completed") return true;
     return (lead.total_sessions || 0) > 0 && (lead.completed_sessions || 0) >= lead.total_sessions;
   }
   return lead.consultation_stage === stageName;
