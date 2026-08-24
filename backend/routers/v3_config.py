@@ -443,6 +443,14 @@ async def v3_delete_branch(branch_id: str, _: V3UserOut = Depends(v3_require_rol
     return {"message": "Branch deleted"}
 
 
+# The desks whose records may legitimately carry no branch, and so are offered at every
+# one. A CONSULTANT takes consultations across the organisation; a Nutritionist covers
+# every branch here. Every other desk is somewhere — a Physio treats at their own branch,
+# and rehab is delivered where the patient comes — so a missing branch on one of those is
+# a gap to fix rather than a reach to honour.
+ORG_WIDE_PROFILES = ["head_physio", "nutrition_coach"]
+
+
 @router.get("/doctors", response_model=List[V3DoctorOut])
 async def v3_get_doctors(
     branch_id: Optional[str] = None,
@@ -455,19 +463,18 @@ async def v3_get_doctors(
     elif branch_id:
         scope_branch = branch_id
     if scope_branch:
-        # An expert with no branch on their record belongs to all of them, and must not be
-        # filtered out by a branch scope or that branch's calendar comes back empty.
+        # An expert with no branch on their record belongs to all of them — but only where
+        # that desk can genuinely hold none. A CONSULTANT is org-wide by definition, and a
+        # Nutritionist here covers every branch; both are recorded branchless and must not
+        # be filtered out, or those calendars come back empty at every branch.
         #
-        # Head Physios are the original case — they take consultations across the whole
-        # organisation — but they are not the only one: a Nutritionist covering every
-        # branch is recorded the same way, and was appearing on none of them. The rule is
-        # the record's own, not the role's: branchless means everywhere, whoever it is.
-        # An expert who does carry a branch stays scoped to it, as a Physio does.
+        # A Physio is not: they treat at the branch they belong to. A physio record with no
+        # branch on it is a gap in the data, not a licence to appear on every calendar, and
+        # reading it as one would put every physio in the organisation on every branch's
+        # list. Rehab is the same, being delivered where the patient comes.
         query["$or"] = [
             {"branch_id": scope_branch},
-            {"branch_id": None},
-            {"branch_id": {"$exists": False}},
-            {"branch_id": ""},
+            {"profile_type": {"$in": ORG_WIDE_PROFILES}, "branch_id": {"$in": [None, ""]}},
             # Kept alongside the rule rather than replaced by it: a Head Physio record
             # written before branchless was the convention may still carry a branch, and
             # dropping this clause would hide them from every other branch's calendar.

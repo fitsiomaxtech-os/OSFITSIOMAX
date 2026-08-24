@@ -712,7 +712,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   // all three now live here alongside the two calendars.
   const MANAGEMENT_SUB_TABS = [
     { key: "head_physio", label: "Consultant Calendar", icon: Calendar },
-    { key: "physio", label: "Physio Calendar", icon: Activity },
+    { key: "physio", label: "Physiotherapist Calendar", icon: Activity },
     // Between the two it sits between in practice: a rehab course is delivered after
     // treatment and alongside diet, and the branch publishes all three the same way.
     { key: "rehab", label: "Rehab Calendar", icon: HeartPulse },
