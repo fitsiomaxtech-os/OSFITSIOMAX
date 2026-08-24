@@ -1177,97 +1177,18 @@ const RoleFilterDropdown = ({ value, options, onChange }) => {
  * near the bottom of the window, and closes on any scroll, since a list fixed to the
  * viewport would otherwise sit on while the button it belongs to slides away.
  */
-const RoleCellDropdown = ({ value, options, onChange, testid }) => {
-  const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState(null);
-  const btnRef = useRef(null);
-  const listRef = useRef(null);
-
-  const place = useCallback(() => {
-    const b = btnRef.current?.getBoundingClientRect();
-    if (!b) return;
-    const MAX = 256;
-    const below = window.innerHeight - b.bottom;
-    const up = below < 200 && b.top > below;
-    setPos({
-      left: b.left,
-      width: Math.max(b.width, 176),
-      top: up ? undefined : b.bottom + 4,
-      bottom: up ? window.innerHeight - b.top + 4 : undefined,
-      maxHeight: Math.max(120, Math.min(MAX, (up ? b.top : below) - 12)),
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!open) return;
-    place();
-    const onDown = (e) => {
-      if (btnRef.current?.contains(e.target) || listRef.current?.contains(e.target)) return;
-      setOpen(false);
-    };
-    const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
-    const onMove = () => setOpen(false);
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    // Captured, so the table's own scroller counts and not just the page.
-    window.addEventListener("scroll", onMove, true);
-    window.addEventListener("resize", onMove);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-      window.removeEventListener("scroll", onMove, true);
-      window.removeEventListener("resize", onMove);
-    };
-  }, [open, place]);
-
-  return (
-    <>
-      <button
-        ref={btnRef}
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="flex h-7 w-full items-center justify-between gap-2 rounded border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700"
-        data-testid={testid}
-      >
-        <span className="truncate">{roleLabel(value)}</span>
-        <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
-      </button>
-      {open && pos && createPortal(
-        <div
-          ref={listRef}
-          style={{ position: "fixed", left: pos.left, width: pos.width, top: pos.top, bottom: pos.bottom, maxHeight: pos.maxHeight }}
-          className="z-[80] space-y-1 overflow-y-auto rounded-md border border-slate-200 bg-white p-1.5 shadow-lg"
-          data-testid={`${testid}-list`}
-        >
-          {options.map((r) => (
-            <button
-              key={r}
-              type="button"
-              onClick={() => { onChange(r); setOpen(false); }}
-              className={`block w-full rounded-md border px-3 py-1.5 text-left text-xs font-semibold ${
-                r === value ? "border-sky-300 bg-sky-50 text-sky-700" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-              }`}
-              data-testid={`${testid}-option-${r}`}
-            >
-              {roleLabel(r)}
-            </button>
-          ))}
-        </div>,
-        document.body,
-      )}
-    </>
-  );
-};
-
-// ---------- New Structure ----------
-
 /**
- * A branch picker, opened as a dialog.
+ * A picker, opened as a dialog. Used for a branch and for a role.
  *
- * A dialog rather than a panel hanging off the control: this sits deep inside a card, in a
+ * A dialog rather than a panel hanging off the control: these sit deep inside a card, in a
  * row, inside a list that scrolls — any one of which can clip a panel or stack over it. A
- * dialog answers to none of them, and it has room to say whose branch is being changed,
- * which a strip of options beside a button never did.
+ * dialog answers to none of them, and it has room to say whose branch or role is being
+ * changed, which a strip of options beside a button never did.
+ *
+ * It is also the only shape that can be scrolled. A panel pinned to the viewport has to
+ * close when the page moves under it, and a scroll listener that notices the page moving
+ * cannot tell that apart from the list being scrolled — so the list shut the moment it was
+ * used. A dialog has nothing to keep up with and simply scrolls.
  *
  * Portalled to the body for the same reason, so no ancestor's overflow or stacking context
  * can crop it.
@@ -1276,7 +1197,7 @@ const RoleCellDropdown = ({ value, options, onChange, testid }) => {
  * place: white card, slate text, a grey wash on hover, and the current choice marked by
  * weight and a tick rather than by hue.
  */
-const BranchPickerModal = ({ title, value, options, onPick, onClose }) => {
+const PickerModal = ({ title, value, options, onPick, onClose }) => {
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape") onClose(); };
     document.addEventListener("keydown", onKey);
@@ -1331,6 +1252,49 @@ const BranchPickerModal = ({ title, value, options, onPick, onClose }) => {
     document.body,
   );
 };
+
+/**
+ * The ROLE cell's picker.
+ *
+ * A dialog, like the branch picker it shares — and for a reason this one learned the hard
+ * way. It used to be a panel pinned to the button's own rect, which had to close whenever
+ * the page moved beneath it; the listener that noticed the page moving could not tell that
+ * apart from the list itself being scrolled, so a list too long to fit shut the instant
+ * anyone tried to reach the bottom of it. There are more roles than fit on a screen, so
+ * that was every use of it.
+ *
+ * The dialog has nothing to keep up with. It scrolls, it cannot be clipped by the table it
+ * sits in, and it has room to name the role being changed.
+ */
+const RoleCellDropdown = ({ value, options, onChange, testid, subject }) => {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="flex h-7 w-full items-center justify-between gap-2 rounded border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+        data-testid={testid}
+      >
+        <span className="truncate">{roleLabel(value)}</span>
+        <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
+      </button>
+      {open && (
+        <PickerModal
+          title={subject ? `Role for ${subject}` : "Role"}
+          value={value}
+          options={options.map((r) => ({ value: r, label: roleLabel(r) }))}
+          onPick={(v) => { setOpen(false); if (v !== value) onChange(v); }}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </>
+  );
+};
+
+// ---------- New Structure ----------
+
 
 
 const StructureTab = ({ meta, reloadMeta }) => {
@@ -1668,7 +1632,7 @@ const StructureTab = ({ meta, reloadMeta }) => {
       )}
 
       {branchPickerFor && (
-        <BranchPickerModal
+        <PickerModal
           title={`Branch for ${branchPickerFor.full_name}`}
           value={branchPickerFor.branch_id || ""}
           options={branchOptions}
@@ -2529,6 +2493,7 @@ const RolesTab = ({ meta, reloadMeta }) => {
                   value={u.role}
                   options={meta.roles}
                   onChange={(r) => changeRole(u, r)}
+                  subject={u.full_name}
                   testid={`hr-user-card-role-${u.id}`}
                 />
               </div>
@@ -2574,6 +2539,7 @@ const RolesTab = ({ meta, reloadMeta }) => {
                           value={u.role}
                           options={meta.roles}
                           onChange={(r) => changeRole(u, r)}
+                          subject={u.full_name}
                           testid={`hr-user-role-${u.id}`}
                         />
                       </div>
