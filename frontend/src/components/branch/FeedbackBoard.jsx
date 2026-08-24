@@ -75,14 +75,6 @@ const FeedbackCard = ({ row, onMove, moving }) => (
         >
           {(STATUS_CHIP[row.status] || STATUS_CHIP.new).label}
         </span>
-        {/* Only Super Admin ever sees one of these: the branch board filters them out. It
-            says the patient chose to write past the branch, which is context the words
-            underneath are read in. */}
-        {row.audience === "super_admin" ? (
-          <span className="whitespace-nowrap rounded border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-700" title="Sent to head office rather than the branch" data-testid={`feedback-to-super-${row.id}`}>
-            To head office
-          </span>
-        ) : null}
         <Stars rating={row.rating} />
       </div>
     </div>

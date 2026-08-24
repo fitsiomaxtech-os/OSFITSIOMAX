@@ -83,10 +83,14 @@ async def list_feedback(
     branch_id: Optional[str] = Query(None),
     user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
 ):
-    """A branch's feedback, and the count the bell reads.
+    """The feedback addressed to whoever is asking, and the count their bell reads.
 
-    Scoped the way every other branch board is: a Branch Admin reads their own branch and
-    only Super Admin may ask for another or for all of them.
+    Scoped by who it was sent to before it is scoped by branch. A patient picks their
+    branch or head office, and each reads their own post: the branch does not see what went
+    over their head, and head office does not see what was meant for the branch. Sending
+    everything to both would make the choice the portal offers a decoration.
+
+    A Branch Admin is further held to their own branch; Super Admin may narrow to one.
 
     unread is the New column rather than a flag of its own. A bell counting things nobody
     has picked up is the same question the first column already answers, and a second
@@ -101,8 +105,18 @@ async def list_feedback(
         # patient did not want the branch to be the one who read it, and half of those are
         # about the Branch Admin themselves.
         query["audience"] = {"$ne": AUDIENCE_SUPER}
-    elif branch_id:
-        query["branch_id"] = branch_id
+    else:
+        # And the other half of the same rule: head office reads what was addressed to head
+        # office, and nothing else. Without this the branch's own feedback surfaced up here
+        # too, so a patient who wrote to their branch found their words on a second desk
+        # they never sent them to -- and Super Admin worked through a board mostly made of
+        # other people's post.
+        #
+        # Matched exactly rather than by exclusion, so a row written before audiences
+        # existed -- which carries no field at all -- stays with the branch it was sent to.
+        query["audience"] = AUDIENCE_SUPER
+        if branch_id:
+            query["branch_id"] = branch_id
 
     rows = await v3_col("patient_feedback").find(query, {"_id": 0}).sort("created_at", -1).to_list(2000)
     counts = {s: 0 for s in STATUSES}
