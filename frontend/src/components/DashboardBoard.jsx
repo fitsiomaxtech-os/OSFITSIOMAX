@@ -1068,13 +1068,16 @@ const BranchRevenueCards = ({ branch, dateFilter, onClose }) => {
       ) : !data ? (
         <p className="py-8 text-center text-sm text-slate-400">Couldn't load this branch's transactions.</p>
       ) : (
-        // Horizontal, wrapping. A fixed grid would leave the last row's cards stretched
-        // across columns they don't fill; flowing them keeps every card the same size
-        // whatever the screen does with the row.
-        <div className="flex flex-wrap gap-3">
-          {cards.map((c) => (
-            <div key={c.key} className="min-w-[150px] flex-1 sm:min-w-[170px] sm:max-w-[220px]">
-              <StatTile label={c.label} value={c.value} sub={c.sub} icon={c.icon} color={c.color} testid={`branch-revenue-${c.key}`} />
+        <div className="space-y-3">
+          {[cards.slice(0, 6), cards.slice(6)].map((row, i) => (
+            <div
+              key={i}
+              className={`grid gap-3 grid-cols-2 sm:grid-cols-3 ${i === 0 ? "lg:grid-cols-6" : "lg:grid-cols-5"}`}
+              data-testid={`branch-revenue-row-${i + 1}`}
+            >
+              {row.map((c) => (
+                <StatTile key={c.key} label={c.label} value={c.value} sub={c.sub} icon={c.icon} color={c.color} testid={`branch-revenue-${c.key}`} />
+              ))}
             </div>
           ))}
         </div>
