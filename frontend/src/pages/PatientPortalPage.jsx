@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Calendar, Check, ClipboardCheck, ClipboardList, Clock, Eye, EyeOff, IndianRupee, LogOut, MessageSquareHeart, PhoneCall, Salad, Star, UserRound } from "lucide-react";
+import { Calendar, Check, ClipboardCheck, ClipboardList, Clock, Eye, EyeOff, IndianRupee, LogOut, MessageSquareHeart, PhoneCall, Salad, UserRound } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -724,13 +724,13 @@ const PORTAL_TABS = [
 /**
  * What the patient made of it.
  *
- * A rating and some words, both optional on their own and refused only when neither is
- * there — a patient who taps four stars and closes the app has said something useful, and
- * one who writes a paragraph without rating anything has said more.
+ * Their words, and who reads them. There is no rating: a star out of five says something
+ * happened without saying what, and a branch cannot act on four stars. The words are the
+ * part somebody can do something about, so they are the part asked for -- and the only
+ * part refused when empty.
  *
- * Sent and then done with. There is no thread here and no reply: what happens next is the
- * branch reading it on their board, and pretending otherwise would promise a conversation
- * nothing in the OS can hold up.
+ * Not a thread, but not a shout into a well either: the history tab says where each one
+ * got to, and a branch closing one has to say what was done, which the patient reads there.
  */
 // The two people a patient can write to, and the difference between them in the words a
 // patient would use. Named rather than described as "escalation": somebody unhappy enough
@@ -802,13 +802,6 @@ const MyFeedbackList = ({ mine }) => {
                   </div>
                   <span className="text-[10px] text-slate-400">{feedbackSentOn(f.created_at)}</span>
                 </div>
-                {f.rating ? (
-                  <span className="mt-2 inline-flex items-center gap-0.5" aria-label={`${f.rating} out of 5`}>
-                    {[1, 2, 3, 4, 5].map((n) => (
-                      <Star key={n} className={`h-3 w-3 ${n <= f.rating ? "fill-amber-400 text-amber-400" : "text-slate-200"}`} aria-hidden="true" />
-                    ))}
-                  </span>
-                ) : null}
                 {f.message ? (
                   <p className="mt-1.5 whitespace-pre-wrap break-words text-xs leading-5 text-slate-600">{f.message}</p>
                 ) : null}
@@ -836,7 +829,6 @@ const MyFeedbackList = ({ mine }) => {
 };
 
 function FeedbackTab() {
-  const [rating, setRating] = useState(0);
   const [message, setMessage] = useState("");
   const [audience, setAudience] = useState("branch_admin");
   const [sending, setSending] = useState(false);
@@ -857,13 +849,13 @@ function FeedbackTab() {
   useEffect(() => { loadMine(); }, [loadMine]);
 
   const submit = async () => {
-    if (!rating && !message.trim()) {
-      toast.error("Leave a rating or tell us how it went");
+    if (!message.trim()) {
+      toast.error("Tell us how it went");
       return;
     }
     setSending(true);
     try {
-      const res = await patientPortalSubmitFeedback({ rating: rating || null, message: message.trim(), audience });
+      const res = await patientPortalSubmitFeedback({ message: message.trim(), audience });
       toast.success(res?.message || "Thank you");
       setSent(true);
       loadMine();
@@ -885,10 +877,10 @@ function FeedbackTab() {
           </p>
           <p className="text-xs text-slate-500">Somebody there will read it. You can send more any time.</p>
           <div className="flex flex-wrap items-center justify-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => { setSent(false); setRating(0); setMessage(""); }} data-testid="portal-feedback-again">
+            <Button variant="outline" size="sm" onClick={() => { setSent(false); setMessage(""); }} data-testid="portal-feedback-again">
               Send more feedback
             </Button>
-            <Button variant="outline" size="sm" onClick={() => { setSent(false); setRating(0); setMessage(""); setView("history"); }} data-testid="portal-feedback-see-history">
+            <Button variant="outline" size="sm" onClick={() => { setSent(false); setMessage(""); setView("history"); }} data-testid="portal-feedback-see-history">
               See what happened to it
             </Button>
           </div>
@@ -939,7 +931,7 @@ function FeedbackTab() {
           <p className="mt-0.5 text-xs text-slate-500">Tell us anything — what went well, or what did not.</p>
         </div>
 
-        {/* Asked before the rating rather than under the Send button: who is reading it
+        {/* Asked before the box rather than under the Send button: who is reading it
             changes what somebody is willing to write, and finding that out afterwards is
             finding it out too late. */}
         <div>
@@ -966,30 +958,6 @@ function FeedbackTab() {
         </div>
 
         <div>
-          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Rating</p>
-          <div className="flex items-center gap-1">
-            {[1, 2, 3, 4, 5].map((n) => (
-              <button
-                key={n}
-                type="button"
-                onClick={() => setRating(rating === n ? 0 : n)}
-                className="rounded p-1 transition hover:scale-110"
-                aria-label={`${n} out of 5`}
-                aria-pressed={rating === n}
-                data-testid={`portal-feedback-star-${n}`}
-              >
-                <Star className={`h-7 w-7 ${n <= rating ? "fill-amber-400 text-amber-400" : "text-slate-300"}`} />
-              </button>
-            ))}
-            {rating > 0 && (
-              <button type="button" onClick={() => setRating(0)} className="ml-2 text-[11px] text-slate-400 underline" data-testid="portal-feedback-clear">
-                clear
-              </button>
-            )}
-          </div>
-        </div>
-
-        <div>
           <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">In your words</p>
           <textarea
             rows={5}
@@ -1005,7 +973,7 @@ function FeedbackTab() {
 
         <Button
           className="w-full"
-          disabled={sending || (!rating && !message.trim())}
+          disabled={sending || !message.trim()}
           onClick={submit}
           data-testid="portal-feedback-submit"
         >

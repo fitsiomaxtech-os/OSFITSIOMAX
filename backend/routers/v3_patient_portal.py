@@ -397,8 +397,12 @@ async def patient_portal_feedback(
     message = (payload.message or "").strip()[:MAX_MESSAGE]
     rating = _rating(payload.rating)
     audience = _audience(payload.audience)
-    if not message and rating is None:
-        raise HTTPException(status_code=400, detail="Tell us how it went, or leave a rating")
+    # The words are the whole of it now: the portal stopped asking for a rating, because a
+    # star out of five says something happened without saying what and a branch cannot act on
+    # four stars. The field is still read for anything sent by an older app, and a row that
+    # carries one keeps it.
+    if not message:
+        raise HTTPException(status_code=400, detail="Tell us how it went")
 
     lead = await _lead_or_404(lead_id)
     row = {
