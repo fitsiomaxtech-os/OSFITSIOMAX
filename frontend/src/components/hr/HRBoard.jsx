@@ -26,10 +26,13 @@ const TABS = [
   { key: "dashboard", label: "Dashboard", icon: BarChart3 },
   { key: "employees", label: "Employees", icon: Users },
   { key: "roles", label: "Roles & Credentials", icon: ShieldCheck },
-  // Departments & Designation is gone: New Structure reads the same list and now creates,
-  // renames and deletes in it, so keeping both meant two screens over one set of records
-  // and a standing question about which was authoritative.
-  { key: "structure", label: "New Structure", short: "Structure", icon: Network },
+  // One screen over one set of records. The tab that used to carry this name was a second
+  // view of the same departments, which left a standing question about which of the two was
+  // authoritative; this one reads the list and creates, renames and deletes in it.
+  //
+  // The key stays "structure": it is internal state, and renaming it would only invalidate
+  // the tab somebody happens to have open.
+  { key: "structure", label: "Department & Designation", short: "Depts", icon: Network },
 ];
 
 // Every default vertical is named "online_.../offline_..." — same helper as
@@ -373,6 +376,27 @@ const dedupeNames = (names) => {
   return out.sort((a, b) => titleCase(a).localeCompare(titleCase(b)));
 };
 
+/**
+ * The designations configured under a department — or under all of them.
+ *
+ * The configured list, not the one read back off whoever happens to hold a job today. Those
+ * two answer different questions: Department & Designation says what the org has, and the
+ * records say what is currently filled. A filter built from the records cannot offer a designation
+ * nobody holds yet, which is exactly the one somebody is about to hire into.
+ *
+ * With no department chosen it is every department's list, so the row on Roles &
+ * Credentials with All Departments selected is the whole structure rather than a sample
+ * of it.
+ *
+ * Returns nothing when the structure has not been set up, which lets the caller fall back
+ * to deriving from its own records rather than showing an empty row.
+ */
+const configuredDesignations = (meta, department) => {
+  const groups = meta?.department_designations || {};
+  if (department && department !== "Unassigned") return dedupeNames(groups[department] || []);
+  return dedupeNames(Object.values(groups).flat());
+};
+
 const TabPill = ({ active, onClick, children, testid }) => (
   <button
     type="button"
@@ -522,13 +546,11 @@ const EmployeesTab = ({ meta, initialFilter }) => {
   // Falls back to deriving from employees when no single department is selected (there's no
   // one department's list to scope "All Departments" or "Unassigned" to).
   const designationOptions = useMemo(() => {
-    if (department && department !== "Unassigned") {
-      const configured = (meta.department_designations || {})[department] || [];
-      if (configured.length > 0) return configured;
-    }
+    const configured = configuredDesignations(meta, department);
+    if (configured.length > 0) return configured;
     const pool = department ? employees.filter((e) => (e.department || "Unassigned") === department) : employees;
     return dedupeNames(pool.map((e) => e.designation));
-  }, [employees, department, meta.department_designations]);
+  }, [employees, department, meta]);
 
   const filtered = employees.filter((e) => {
     // "Unassigned" is what the Dashboard calls an employee with no department, so it has
@@ -1355,7 +1377,7 @@ const RoleCellDropdown = ({ value, options, onChange, testid, subject }) => {
   );
 };
 
-// ---------- New Structure ----------
+// ---------- Department & Designation ----------
 
 
 
@@ -1544,7 +1566,7 @@ const StructureTab = ({ meta, reloadMeta }) => {
   if (depts.length === 0) {
     return (
       <p className="rounded-xl border border-dashed border-slate-200 py-10 text-center text-sm text-slate-400" data-testid="hr-structure-empty">
-        No departments yet. Add them under Departments &amp; Designation.
+        No departments yet. Add one with the Department button above.
       </p>
     );
   }
@@ -2526,9 +2548,13 @@ const RolesTab = ({ meta, reloadMeta }) => {
   // scoped to users actually linked to an employee, so a pill never offers a combination
   // that would filter the list to nothing.
   const designationOptions = useMemo(() => {
+    const configured = configuredDesignations(meta, deptFilter);
+    if (configured.length > 0) return configured;
+    // Only where nothing is configured at all: an install that has not set the structure
+    // up still gets a working filter off whoever is on the books.
     const pool = deptFilter ? users.filter((u) => u.linked_employee?.department === deptFilter) : users;
     return dedupeNames(pool.map((u) => u.linked_employee?.designation));
-  }, [users, deptFilter]);
+  }, [users, deptFilter, meta]);
 
   // Matched on the shared key rather than the exact string. One pill now stands for every
   // spelling of a job, so picking Consultant finds the people filed under CONSULTANT too
