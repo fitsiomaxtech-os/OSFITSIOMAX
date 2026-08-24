@@ -2404,11 +2404,11 @@ export function PatientDetailPage({ patient, physioId, onClose, onRefresh }) {
   const TABS = [
     { key: "sessions", label: "Sessions" },
     { key: "treatment", label: "Treatment" },
-    { key: "profile", label: "Profile" },
-    // Last, because it is the end of the course: the clips are gathered as the treatment
-    // runs and the case sheet closes on them. See ProgressionTab for why uploading and
-    // verifying are two different jobs.
+    // Beside Treatment rather than after Profile: the clips are gathered as the course
+    // runs, so it belongs with the work. Profile is the reference page you check, and
+    // reads last for the same reason.
     { key: "progression", label: "Progression" },
+    { key: "profile", label: "Profile" },
   ];
 
   return (
@@ -2575,6 +2575,14 @@ export function PatientDetailPage({ patient, physioId, onClose, onRefresh }) {
                 <p className="whitespace-pre-wrap text-xs text-violet-900">{lead.treatment_summary}</p>
               </div>
             )}
+            {/* What is on file for this patient, under the treatment it belongs to. The
+                physio reads the scans and letters while working the course, and sending
+                them to a tab of its own put the paperwork one screen away from the thing
+                it is paperwork about. */}
+            <div className="rounded-lg border border-slate-200 bg-white p-3" data-testid="physio-treatment-documents">
+              <p className="mb-2 text-[9px] font-semibold uppercase tracking-wide text-slate-400">Documents</p>
+              <DocumentsPanel leadId={patient.lead_id} />
+            </div>
             {lead && !lead.physio_diagnosis_report && !lead.treatment_summary && (
               <p className="rounded-xl border border-dashed border-slate-200 bg-white p-8 text-center text-xs text-slate-400">
                 No treatment details submitted by the CONSULTANT yet.

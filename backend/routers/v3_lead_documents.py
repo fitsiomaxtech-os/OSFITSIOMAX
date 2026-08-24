@@ -50,13 +50,20 @@ GENERAL = "general"
 # and after is cut at the end of it, and the testimonial and the review come from the
 # patient once they are happy. A screen showing them in any other order would be asking
 # for the last one first.
+#
+# The last one is text, not a file: a Google review is a link or the words themselves, and
+# asking for a screenshot of it made the branch photograph a web page to satisfy a form.
+# It is stored on the lead rather than as a document, and `input` is what lets one screen
+# render both kinds off this list instead of special-casing the last row by name.
 PROGRESSION_KINDS = [
-    ("progress_weekly", "Weekly Progression Videos", True),
-    ("progress_final", "Before & After Video", True),
-    ("progress_testimonial", "Client Testimonial Video", True),
-    ("progress_review", "Google Review", True),
+    ("progress_weekly", "Weekly Progression Videos", True, "file"),
+    ("progress_final", "Before & After Video", True, "file"),
+    ("progress_testimonial", "Client Testimonial Video", True, "file"),
+    ("progress_review", "Google Review", True, "text"),
 ]
-PROGRESSION_KEYS = [k for k, _, _ in PROGRESSION_KINDS]
+PROGRESSION_KEYS = [k for k, _, _, kind_input in PROGRESSION_KINDS if kind_input == "file"]
+# Where the typed one lives on the lead.
+REVIEW_FIELD = "google_review"
 
 # Three of the four are video, which the general document rules never had to allow: a scan
 # or a letter is an image or a PDF. Widened only for these kinds, so a consultation form is
@@ -264,6 +271,60 @@ async def verify_lead_document(
     return await v3_col("lead_documents").find_one({"id": doc_id}, {"_id": 0, "stored_name": 0})
 
 
+class ReviewInput(BaseModel):
+    text: str = ""
+
+
+@router.put("/leads/{lead_id}/google-review")
+async def set_google_review(
+    lead_id: str,
+    payload: ReviewInput,
+    user: V3UserOut = Depends(v3_require_roles(*WRITE_ROLES)),
+):
+    """The patient's Google review — the link, or the words themselves.
+
+    Typed rather than filed. Asking for a screenshot made the branch photograph a web page
+    to satisfy a form, and a picture of a review cannot be followed back to the review.
+
+    Editing it clears the verification with it. Whoever checked it checked what was there
+    at the time, and carrying that tick over to text nobody has read is how a case sheet
+    closes on something that was never seen.
+    """
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0, "id": 1})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    text = (payload.text or "").strip()
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": {
+        REVIEW_FIELD: text,
+        f"{REVIEW_FIELD}_verified": False,
+        f"{REVIEW_FIELD}_verified_by": None,
+        f"{REVIEW_FIELD}_verified_at": None,
+        "updated_at": now_iso(),
+    }})
+    return {"text": text, "verified": False}
+
+
+@router.patch("/leads/{lead_id}/google-review/verify")
+async def verify_google_review(
+    lead_id: str,
+    payload: VerifyInput,
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio")),
+):
+    """Confirm the review is real — the same second pair of eyes the uploads get."""
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    if payload.verified and not (lead.get(REVIEW_FIELD) or "").strip():
+        raise HTTPException(status_code=400, detail="There is no review to verify yet")
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": {
+        f"{REVIEW_FIELD}_verified": bool(payload.verified),
+        f"{REVIEW_FIELD}_verified_by": user.full_name if payload.verified else None,
+        f"{REVIEW_FIELD}_verified_at": now_iso() if payload.verified else None,
+        "updated_at": now_iso(),
+    }})
+    return {"verified": bool(payload.verified)}
+
+
 @router.get("/leads/{lead_id}/progression")
 async def progression_status(
     lead_id: str,
@@ -289,13 +350,32 @@ async def progression_status(
         by_kind.setdefault(d.get("kind"), []).append(d)
 
     requirements = []
-    for key, label, required in PROGRESSION_KINDS:
+    for key, label, required, kind_input in PROGRESSION_KINDS:
+        if kind_input == "text":
+            # Typed straight onto the lead. Same three states as a filed one, read off the
+            # text being there and the check having been made.
+            text = (lead.get(REVIEW_FIELD) or "").strip()
+            done = bool(lead.get(f"{REVIEW_FIELD}_verified"))
+            requirements.append({
+                "kind": key,
+                "label": label,
+                "required": required,
+                "input": "text",
+                "text": text,
+                "verified_by": lead.get(f"{REVIEW_FIELD}_verified_by"),
+                "uploaded": 1 if text else 0,
+                "verified": 1 if done else 0,
+                "status": "completed" if (text and done) else ("uploaded" if text else "pending"),
+                "documents": [],
+            })
+            continue
         filed = by_kind.get(key, [])
         verified = [d for d in filed if d.get("verified")]
         requirements.append({
             "kind": key,
             "label": label,
             "required": required,
+            "input": "file",
             "uploaded": len(filed),
             "verified": len(verified),
             # Three states, not two: "uploaded but not checked" is the one a branch has to
@@ -342,7 +422,11 @@ async def close_case_sheet(
         {"_id": 0, "kind": 1},
     ).to_list(500)
     have = {d.get("kind") for d in docs}
-    missing = [label for key, label, required in PROGRESSION_KINDS if required and key not in have]
+    review_done = bool((lead.get(REVIEW_FIELD) or "").strip()) and bool(lead.get(f"{REVIEW_FIELD}_verified"))
+    missing = [
+        label for key, label, required, kind_input in PROGRESSION_KINDS
+        if required and not (review_done if kind_input == "text" else key in have)
+    ]
     if missing:
         raise HTTPException(
             status_code=400,

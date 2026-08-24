@@ -266,6 +266,11 @@ export const uploadLeadDocument = async (leadId, file, label = "", kind = "gener
 // clips, the branch or the consultant confirms them.
 export const leadProgression = async (leadId) => (await api.get(`/leads/${leadId}/progression`)).data;
 export const verifyLeadDocument = async (leadId, docId, verified = true) => (await api.patch(`/leads/${leadId}/documents/${docId}/verify`, { verified })).data;
+// The Google review is typed, not filed — a picture of a review cannot be followed back
+// to the review. Saving it clears any previous verification, since the tick belonged to the
+// words that were there when it was made.
+export const setGoogleReview = async (leadId, text) => (await api.put(`/leads/${leadId}/google-review`, { text })).data;
+export const verifyGoogleReview = async (leadId, verified = true) => (await api.patch(`/leads/${leadId}/google-review/verify`, { verified })).data;
 export const closeCaseSheet = async (leadId) => (await api.post(`/leads/${leadId}/close-case-sheet`)).data;
 export const deleteLeadDocument = async (leadId, docId) => (await api.delete(`/leads/${leadId}/documents/${docId}`)).data;
 export const openLeadDocument = async (leadId, docId) => {

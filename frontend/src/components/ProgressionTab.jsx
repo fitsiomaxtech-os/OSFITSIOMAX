@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AlertCircle, CheckCircle2, Clock, Lock, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
-import { closeCaseSheet, leadProgression, uploadLeadDocument, verifyLeadDocument } from "@/lib/api";
+import { closeCaseSheet, leadProgression, setGoogleReview, uploadLeadDocument, verifyGoogleReview, verifyLeadDocument } from "@/lib/api";
 
 /**
  * PROGRESSION — the proof a course of treatment actually delivered something.
@@ -32,17 +32,27 @@ export function ProgressionTab({ leadId, canUpload = true, canVerify = false }) 
   const [loading, setLoading] = useState(true);
   const [busyKind, setBusyKind] = useState(null);
   const [closing, setClosing] = useState(false);
+  // The typed requirement is held locally until Save. Writing on every keystroke would
+  // clear the verification on every keystroke too — see setGoogleReview.
+  const [reviewDraft, setReviewDraft] = useState("");
+  const [reviewLoaded, setReviewLoaded] = useState(false);
 
   const load = useCallback(async () => {
     if (!leadId) return;
     setLoading(true);
     try {
-      setData(await leadProgression(leadId));
+      const next = await leadProgression(leadId);
+      setData(next);
+      // Seeded once from the server, then left alone: re-seeding on every reload would
+      // wipe what someone was part-way through typing.
+      const review = (next.requirements || []).find((r) => r.input === "text");
+      setReviewDraft((cur) => (reviewLoaded ? cur : (review?.text || "")));
+      setReviewLoaded(true);
     } catch {
       setData(null);
     }
     setLoading(false);
-  }, [leadId]);
+  }, [leadId, reviewLoaded]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -63,6 +73,29 @@ export function ProgressionTab({ leadId, canUpload = true, canVerify = false }) 
     setBusyKind(docId);
     try {
       await verifyLeadDocument(leadId, docId, verified);
+      await load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Couldn't change that");
+    }
+    setBusyKind(null);
+  };
+
+  const saveReview = async () => {
+    setBusyKind("progress_review");
+    try {
+      await setGoogleReview(leadId, reviewDraft);
+      toast.success("Review saved — it needs checking before it counts");
+      await load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Couldn't save the review");
+    }
+    setBusyKind(null);
+  };
+
+  const verifyReview = async (verified) => {
+    setBusyKind("progress_review");
+    try {
+      await verifyGoogleReview(leadId, verified);
       await load();
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Couldn't change that");
@@ -140,7 +173,54 @@ export function ProgressionTab({ leadId, canUpload = true, canVerify = false }) 
               <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${meta.chip}`}>{meta.label}</span>
             </div>
 
-            {req.documents?.length > 0 && (
+            {/* Typed, not filed. The list of documents and the upload control below are for
+                the three that are actually files; this one is the review itself. */}
+            {req.input === "text" ? (
+              <div className="mt-2">
+                <textarea
+                  value={reviewDraft}
+                  onChange={(e) => setReviewDraft(e.target.value)}
+                  disabled={closed}
+                  rows={3}
+                  placeholder="Paste the Google review link, or type the review the patient left"
+                  className="w-full rounded-lg border border-slate-200 p-2.5 text-xs text-slate-700 focus:border-sky-400 focus:outline-none disabled:bg-slate-50"
+                  data-testid="progression-review-text"
+                />
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  {!closed && (
+                    <Button
+                      size="sm"
+                      disabled={busyKind === "progress_review" || reviewDraft.trim() === (req.text || "").trim()}
+                      onClick={saveReview}
+                      className="bg-sky-600 text-xs text-white hover:bg-sky-700"
+                      data-testid="progression-review-save"
+                    >
+                      {busyKind === "progress_review" ? "Saving…" : "Save Review"}
+                    </Button>
+                  )}
+                  {req.verified > 0 ? (
+                    <span className="flex items-center gap-1 text-[11px] font-medium text-emerald-600">
+                      <CheckCircle2 className="h-3 w-3" /> Verified{req.verified_by ? ` · ${req.verified_by}` : ""}
+                    </span>
+                  ) : req.text ? (
+                    <span className="text-[11px] text-amber-600">Not checked</span>
+                  ) : null}
+                  {canVerify && !closed && req.text && (
+                    <button
+                      type="button"
+                      onClick={() => verifyReview(!req.verified)}
+                      disabled={busyKind === "progress_review"}
+                      className={`rounded px-2 py-0.5 text-[11px] font-medium ${req.verified ? "text-slate-500 hover:bg-slate-200" : "bg-emerald-600 text-white hover:bg-emerald-700"}`}
+                      data-testid="progression-review-verify"
+                    >
+                      {req.verified ? "Undo" : "Verify"}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : null}
+
+            {req.input !== "text" && req.documents?.length > 0 && (
               <ul className="mt-2 space-y-1">
                 {req.documents.map((d) => (
                   <li key={d.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-100 bg-slate-50/60 px-2.5 py-1.5">
@@ -174,7 +254,7 @@ export function ProgressionTab({ leadId, canUpload = true, canVerify = false }) 
 
             {/* Closed means closed: nothing more is filed against a case sheet that has
                 been signed off, or the thing it was signed off against changes afterwards. */}
-            {canUpload && !closed && (
+            {req.input !== "text" && canUpload && !closed && (
               <label className="mt-2 inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50">
                 <Upload className="h-3.5 w-3.5" />
                 {busyKind === req.kind ? "Uploading…" : req.documents?.length ? "Add another" : "Upload"}
