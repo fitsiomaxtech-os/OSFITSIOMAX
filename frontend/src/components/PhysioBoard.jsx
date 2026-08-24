@@ -2662,8 +2662,8 @@ function CompleteSessionModal({ session, onClose, onDone }) {
               clicked and the only field underneath it. */}
           <h3 className="text-base font-semibold text-slate-800">
             {isDone
-              ? `${isRehab ? "Rehab Day" : "Session"} Summary`
-              : `Complete ${isRehab ? "Rehab Day" : "Session"}`} #{session.session_number}
+              ? `${isRehab ? "Rehab Day" : "Session"} ${session.session_number} Summary`
+              : `Complete ${isRehab ? "Rehab Day" : "Session"} ${session.session_number}`}
           </h3>
           <p className="text-[10px] text-slate-400">{session.lead_name} · {session.slot_time ? `${session.slot_time.split("T")[0]} at ${slotTo12h(session.slot_time)}` : "—"}</p>
         </div>
