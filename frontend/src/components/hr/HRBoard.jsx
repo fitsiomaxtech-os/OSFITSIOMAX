@@ -1195,7 +1195,13 @@ const RoleFilterDropdown = ({ value, options, onChange }) => {
  * place: white card, slate text, a grey wash on hover, and the current choice marked by
  * weight and a tick rather than by hue.
  */
-const PickerModal = ({ title, value, options, onPick, onClose }) => {
+const PickerModal = ({ title, value, options, onPick, onClose, searchable = false, searchPlaceholder = "Search..." }) => {
+  // Opt-in, because most of these lists are five or six rows and a search box over six
+  // rows is furniture. The employee list is seventy-odd and unusable without one.
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const shown = q ? options.filter((o) => String(o.search || o.label).toLowerCase().includes(q)) : options;
+
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape") onClose(); };
     document.addEventListener("keydown", onKey);
@@ -1222,8 +1228,24 @@ const PickerModal = ({ title, value, options, onPick, onClose }) => {
           </button>
         </div>
 
+        {searchable && (
+          <div className="shrink-0 border-b border-slate-100 p-2">
+            <Input
+              value={query}
+              autoFocus
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={searchPlaceholder}
+              className="h-8 text-xs"
+              data-testid="hr-picker-search"
+            />
+          </div>
+        )}
+
         <div className="min-h-0 flex-1 overflow-y-auto py-1">
-          {options.map((o) => {
+          {shown.length === 0 && (
+            <p className="px-4 py-6 text-center text-xs text-slate-400">Nothing matches that.</p>
+          )}
+          {shown.map((o) => {
             const on = o.value === value;
             return (
               <button
@@ -1285,6 +1307,8 @@ const RoleCellDropdown = ({ value, options, onChange, testid, subject }) => {
           options={options.map((r) => ({ value: r, label: roleLabel(r) }))}
           onPick={(v) => { setOpen(false); if (v !== value) onChange(v); }}
           onClose={() => setOpen(false)}
+          searchable
+          searchPlaceholder="Search role..."
         />
       )}
     </>
@@ -2975,51 +2999,39 @@ const UserActionsModal = ({ user, onClose, onDone }) => {
   );
 };
 
-// Picks a designation (from Departments & Designation), not a raw role slug — the caller
-// resolves that pick to an actual access role. Plain, not colored per-row: the closed box
-// and every row in the open list share one neutral style, and the one row matching the
-// current value is the only thing highlighted, so "which one is picked" reads from the
-// highlight rather than from memorizing a palette.
+/**
+ * Picks a designation (from Departments & Designation), not a raw role slug — the caller
+ * resolves that pick to an actual access role.
+ *
+ * A dialog rather than a panel: this sits inside a modal that already scrolls, and a list
+ * hanging off a field within it was cropped by the dialog's own overflow. The list is also
+ * long enough to want the whole screen rather than the gap under one field.
+ */
 const RoleSelectDropdown = ({ value, options, onChange }) => {
   const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-
-  useEffect(() => {
-    const onDocClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, []);
-
   return (
-    <div className="relative" ref={ref}>
+    <>
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
-        className={`flex h-10 w-full items-center justify-between gap-2 rounded-md border px-3 text-sm font-semibold ${value ? "border-sky-300 bg-sky-50 text-sky-700" : "border-slate-200 bg-white text-slate-700"}`}
+        onClick={() => setOpen(true)}
+        className="flex h-10 w-full items-center justify-between gap-2 rounded-md border border-slate-200 bg-white px-3 text-left text-sm text-slate-700"
         data-testid="hr-create-user-role"
       >
-        {value || "Select role"}
-        <ChevronDown className="h-3.5 w-3.5 opacity-60" />
+        <span className={`truncate ${value ? "" : "text-slate-400"}`}>{value || "Select role"}</span>
+        <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
       </button>
       {open && (
-        <div className="absolute left-0 right-0 z-20 mt-1 max-h-64 space-y-1 overflow-y-auto rounded-md border border-slate-200 bg-white p-1.5 shadow-lg" data-testid="hr-create-user-role-list">
-          {options.map((label) => (
-            <button
-              key={label}
-              type="button"
-              onClick={() => { onChange(label); setOpen(false); }}
-              className={`block w-full rounded-md border px-3 py-1.5 text-left text-xs font-semibold ${
-                label === value ? "border-sky-300 bg-sky-50 text-sky-700" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-              }`}
-              data-testid={`hr-create-user-role-option-${label}`}
-            >
-              {label}
-            </button>
-          ))}
-          {options.length === 0 && <p className="px-3 py-2 text-xs text-slate-400">No designations yet — add one on the Designation tab first.</p>}
-        </div>
+        <PickerModal
+          title="Select role"
+          value={value || ""}
+          options={options.map((o) => ({ value: o, label: o }))}
+          onPick={(v) => { setOpen(false); onChange(v); }}
+          onClose={() => setOpen(false)}
+          searchable
+          searchPlaceholder="Search role..."
+        />
       )}
-    </div>
+    </>
   );
 };
 
@@ -3027,147 +3039,80 @@ const RoleSelectDropdown = ({ value, options, onChange }) => {
 // roleClasses/roleLabel by converting it back to a role slug ("head_physio").
 const designationSlug = (designation) => (designation || "").trim().toLowerCase().replace(/\s+/g, "_");
 
+/**
+ * Picks the employee a login belongs to. Searchable, because this list runs to the whole
+ * payroll and scrolling seventy rows to find one name is the slow way to do it.
+ *
+ * The code, the name and the designation are all searched, since any of the three is what
+ * somebody happens to know when they come looking.
+ */
 const EmployeeSelectDropdown = ({ value, employees, onChange }) => {
   const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const ref = useRef(null);
-
-  useEffect(() => {
-    const onDocClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, []);
-
-  // Cleared on close, not on every selection — closing (by picking one or clicking away)
-  // is the one moment a stale query would otherwise sit there for the next time this opens.
-  useEffect(() => { if (!open) setQuery(""); }, [open]);
-
   const selected = employees.find((e) => e.id === value);
-  const currentClasses = selected ? roleClasses(designationSlug(selected.designation)) : "border-slate-200 bg-white text-slate-700";
-  const currentLabel = selected ? `${selected.employee_code} — ${selected.full_name} (${selected.designation || "—"})` : "Select employee...";
-
-  const q = query.trim().toLowerCase();
-  const filteredEmployees = q
-    ? employees.filter((e) => `${e.employee_code || ""} ${e.full_name || ""} ${e.designation || ""}`.toLowerCase().includes(q))
-    : employees;
-
+  const label = (e) => `${e.employee_code} — ${e.full_name} (${e.designation || "—"})`;
   return (
-    <div className="relative" ref={ref}>
+    <>
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
-        className={`flex h-10 w-full items-center justify-between gap-2 rounded-md border px-3 text-left text-sm font-semibold ${currentClasses}`}
+        onClick={() => setOpen(true)}
+        className="flex h-10 w-full items-center justify-between gap-2 rounded-md border border-slate-200 bg-white px-3 text-left text-sm text-slate-700"
         data-testid="hr-create-user-emp"
       >
-        <span className="truncate">{currentLabel}</span>
+        <span className={`truncate ${selected ? "" : "text-slate-400"}`}>
+          {selected ? label(selected) : "Select employee..."}
+        </span>
         <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
       </button>
       {open && (
-        <div className="absolute left-0 right-0 z-20 mt-1 max-h-72 overflow-hidden rounded-md border border-slate-200 bg-white shadow-lg" data-testid="hr-create-user-emp-list">
-          <div className="relative border-b border-slate-100 p-1.5">
-            <Search className="pointer-events-none absolute left-4 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
-            <input
-              autoFocus
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search employee..."
-              className="h-8 w-full rounded-md border border-slate-200 pl-8 pr-2 text-xs font-normal text-slate-700 outline-none focus:border-sky-400"
-              data-testid="hr-create-user-emp-search"
-            />
-          </div>
-          <div className="max-h-60 space-y-1 overflow-y-auto p-1.5">
-            <button
-              type="button"
-              onClick={() => { onChange(""); setOpen(false); }}
-              className="block w-full rounded-md border border-slate-200 bg-white px-3 py-1.5 text-left text-xs font-semibold text-slate-700"
-              data-testid="hr-create-user-emp-option-none"
-            >
-              Select employee...
-            </button>
-            {filteredEmployees.map((e) => (
-              <button
-                key={e.id}
-                type="button"
-                onClick={() => { onChange(e.id); setOpen(false); }}
-                className={`block w-full rounded-md border px-3 py-1.5 text-left text-xs font-semibold ${roleClasses(designationSlug(e.designation))}`}
-                data-testid={`hr-create-user-emp-option-${e.id}`}
-              >
-                {e.employee_code} — {e.full_name} ({e.designation || "—"})
-              </button>
-            ))}
-            {filteredEmployees.length === 0 && (
-              <p className="px-2 py-3 text-center text-xs text-slate-400">No employees match.</p>
-            )}
-          </div>
-        </div>
+        <PickerModal
+          title="Link to Employee"
+          value={value || ""}
+          options={[
+            { value: "", label: "Select employee..." },
+            ...employees.map((e) => ({
+              value: e.id,
+              label: label(e),
+              search: `${e.employee_code || ""} ${e.full_name || ""} ${e.designation || ""}`,
+            })),
+          ]}
+          onPick={(v) => { setOpen(false); onChange(v); }}
+          onClose={() => setOpen(false)}
+          searchable
+          searchPlaceholder="Search employee..."
+        />
       )}
-    </div>
+    </>
   );
 };
 
-// A fixed color per branch would need a stable id->color map that survives
-// the branch list changing; cycling a palette by list position is simpler and
-// still gives each branch its own distinct color in the open dropdown.
-const BRANCH_COLOR_PALETTE = [
-  "border-purple-300 bg-purple-50 text-purple-700",
-  "border-indigo-300 bg-indigo-50 text-indigo-700",
-  "border-emerald-300 bg-emerald-50 text-emerald-700",
-  "border-amber-300 bg-amber-50 text-amber-700",
-  "border-cyan-300 bg-cyan-50 text-cyan-700",
-  "border-pink-300 bg-pink-50 text-pink-700",
-  "border-orange-300 bg-orange-50 text-orange-700",
-  "border-sky-300 bg-sky-50 text-sky-700",
-];
-
+/** Picks the branch a login is scoped to, in the same dialog the other two use. */
 const BranchSelectDropdown = ({ value, branches, onChange }) => {
   const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-
-  useEffect(() => {
-    const onDocClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, []);
-
-  const idx = branches.findIndex((b) => b.id === value);
-  const currentClasses = idx >= 0 ? BRANCH_COLOR_PALETTE[idx % BRANCH_COLOR_PALETTE.length] : "border-slate-200 bg-white text-slate-700";
-  const currentLabel = idx >= 0 ? branches[idx].branch_name : "No branch";
-
+  const selected = branches.find((b) => b.id === value);
   return (
-    <div className="relative" ref={ref}>
+    <>
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
-        className={`flex h-10 w-full items-center justify-between gap-2 rounded-md border px-3 text-left text-sm font-semibold ${currentClasses}`}
+        onClick={() => setOpen(true)}
+        className="flex h-10 w-full items-center justify-between gap-2 rounded-md border border-slate-200 bg-white px-3 text-left text-sm text-slate-700"
         data-testid="hr-create-user-branch"
       >
-        <span className="truncate">{currentLabel}</span>
+        <span className={`truncate ${selected ? "" : "text-slate-400"}`}>{selected ? selected.branch_name : "No branch"}</span>
         <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
       </button>
       {open && (
-        <div className="absolute left-0 right-0 z-20 mt-1 max-h-64 space-y-1 overflow-y-auto rounded-md border border-slate-200 bg-white p-1.5 shadow-lg" data-testid="hr-create-user-branch-list">
-          <button
-            type="button"
-            onClick={() => { onChange(""); setOpen(false); }}
-            className="block w-full rounded-md border border-slate-200 bg-white px-3 py-1.5 text-left text-xs font-semibold text-slate-700"
-            data-testid="hr-create-user-branch-option-none"
-          >
-            No branch
-          </button>
-          {branches.map((b, i) => (
-            <button
-              key={b.id}
-              type="button"
-              onClick={() => { onChange(b.id); setOpen(false); }}
-              className={`block w-full rounded-md border px-3 py-1.5 text-left text-xs font-semibold ${BRANCH_COLOR_PALETTE[i % BRANCH_COLOR_PALETTE.length]}`}
-              data-testid={`hr-create-user-branch-option-${b.id}`}
-            >
-              {b.branch_name}
-            </button>
-          ))}
-        </div>
+        <PickerModal
+          title="Select branch"
+          value={value || ""}
+          options={[
+            { value: "", label: "No branch" },
+            ...branches.map((b) => ({ value: b.id, label: b.branch_name })),
+          ]}
+          onPick={(v) => { setOpen(false); onChange(v); }}
+          onClose={() => setOpen(false)}
+        />
       )}
-    </div>
+    </>
   );
 };
 
@@ -3295,11 +3240,10 @@ const CreateUserModal = ({ meta, reloadMeta, onClose, onSaved }) => {
             options={designationOptions}
             onChange={pickDesignation}
           />
-          <p className="mt-1 text-[10px] text-slate-400">
-            {resolvingRole
-              ? "Setting up that role..."
-              : "Roles come from Create Role, and job titles from Departments & Designation. A title that isn't already a role gets created as one automatically — either way, page access for a new role still has to be built separately."}
-          </p>
+          {/* Only the in-progress line is left. The paragraph that stood here explained
+              where roles come from and what happens to a new one — background a reader of
+              this form does not need at the moment they are filling it in. */}
+          {resolvingRole && <p className="mt-1 text-[10px] text-slate-400">Setting up that role...</p>}
         </Field>
         {isMultiBranchRole ? (
           <Field label={`Branches (${roleLabelForMulti} can cover more than one)`}>
