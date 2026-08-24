@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Users, ShieldCheck, BarChart3, Plus, Pencil, Trash2, Eye, EyeOff, KeyRound, X, UserPlus, MoreVertical, CheckCircle2, XCircle, AlertOctagon, CalendarOff, ChevronDown, ChevronUp, GripVertical, FolderTree, Search, Camera, ImageOff, Download, Network } from "lucide-react";
+import { Users, ShieldCheck, BarChart3, Plus, Pencil, Trash2, Eye, EyeOff, KeyRound, X, UserPlus, MoreVertical, CheckCircle2, XCircle, AlertOctagon, CalendarOff, ChevronDown, ChevronUp, GripVertical, Search, Camera, ImageOff, Download, Network } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,7 +8,7 @@ import { toast } from "@/components/ui/sonner";
 import {
   hrDashboard, hrEmployees, hrCreateEmployee, hrUpdateEmployee, hrDeleteEmployee, uploadEmployeePhoto,
   hrUsers, hrCreateUser, hrUpdateUser, hrResetPassword, hrDeactivateUser, hrActivateUser, hrDeleteUserPermanent, hrUpdateUserRole, hrMeta, hrAddCustomRole,
-  hrDepartments, hrCreateDepartment, hrRenameDepartment, hrDeleteDepartment, hrAddDesignation, hrRenameDesignation, hrReorderDesignations,
+  hrDepartments, hrCreateDepartment, hrRenameDepartment, hrDeleteDepartment, hrAddDesignation, hrRenameDesignation, hrDeleteDesignation, hrReorderDesignations,
   getBranches, getVerticals,
 } from "@/lib/api";
 import { MilkDateInput } from "@/components/ui/milk-calendar";
@@ -24,7 +24,9 @@ const TABS = [
   { key: "dashboard", label: "Dashboard", icon: BarChart3 },
   { key: "employees", label: "Employees", icon: Users },
   { key: "roles", label: "Roles & Credentials", icon: ShieldCheck },
-  { key: "departments", label: "Departments & Designation", short: "Depts", icon: FolderTree },
+  // Departments & Designation is gone: New Structure reads the same list and now creates,
+  // renames and deletes in it, so keeping both meant two screens over one set of records
+  // and a standing question about which was authoritative.
   { key: "structure", label: "New Structure", short: "Structure", icon: Network },
 ];
 
@@ -173,14 +175,10 @@ export const HRBoard = () => {
   return (
     <div className="flex flex-col gap-5" data-testid="hr-board">
       {/* No heading. The nav tab above already reads HR Admin. */}
-      {/* Three, not five: SegmentedTabs only draws 2, 3 or 4 and anything else falls
-          through to one unstyled column on a phone. Five tabs across 3 is 3 + 2, which
-          is the balance its own note argues for over a row too narrow to read. */}
-      <SegmentedTabs tabs={TABS} value={tab} onChange={setTab} testid="hr-subtab" mobileCols={3} />
+      <SegmentedTabs tabs={TABS} value={tab} onChange={setTab} testid="hr-subtab" mobileCols={4} />
       {tab === "dashboard" && <DashboardTab onNavigate={(t, f) => { setEmpFilter(f || null); setTab(t); }} />}
       {tab === "employees" && <EmployeesTab meta={meta} initialFilter={empFilter} />}
       {tab === "roles" && <RolesTab meta={meta} reloadMeta={reloadMeta} />}
-      {tab === "departments" && <DepartmentsDesignationTab meta={meta} reloadMeta={reloadMeta} />}
       {tab === "structure" && <StructureTab meta={meta} reloadMeta={reloadMeta} />}
     </div>
   );
@@ -1312,9 +1310,15 @@ const StructureTab = ({ meta, reloadMeta }) => {
   const [branchPickerFor, setBranchPickerFor] = useState(null);
   // null | "department" | "designation" — which of the two is being named, and the name so
   // far. One dialog serves both: the two differ by a title and where the name is sent.
-  const [creating, setCreating] = useState(null);
+  // { kind: "department" | "designation", target } — target null means create, a name or a
+  // department means rename that one. One piece of state for all four jobs: four separate
+  // flags could contradict each other, and only ever one dialog is open.
+  const [naming, setNaming] = useState(null);
   const [newName, setNewName] = useState("");
   const [savingName, setSavingName] = useState(false);
+  // What is about to be deleted, and whether the request is in flight.
+  const [deleting, setDeleting] = useState(null);
+  const [deletingBusy, setDeletingBusy] = useState(false);
   // Which designation is open. One at a time, so the department's shape stays readable
   // while a designation's people are being looked at.
   const [openDesignation, setOpenDesignation] = useState("");
@@ -1385,35 +1389,75 @@ const StructureTab = ({ meta, reloadMeta }) => {
     }
   };
 
-  const openCreate = (what) => { setNewName(""); setCreating(what); };
+  const openNaming = (kind, target = null) => { setNewName(target || ""); setNaming({ kind, target }); };
 
-  const submitCreate = async () => {
+  const submitName = async () => {
     const name = newName.trim();
-    if (!name) return;
+    if (!name || !naming) return;
+    const { kind, target } = naming;
     setSavingName(true);
     try {
-      if (creating === "department") {
+      if (kind === "department" && !target) {
         await hrCreateDepartment(name);
         await load();
         // Opened on what was just made: somebody creating a department is about to fill
         // it, and leaving them on the one they were reading would hide the thing they
         // asked for behind a tab they now have to find.
         setSelected(name);
-      } else {
+      } else if (kind === "department") {
+        await hrRenameDepartment(current.id, name);
+        await load();
+        // Followed to the new name, or the tab somebody was standing on would stop
+        // matching anything and the card beneath would empty itself.
+        setSelected(name);
+      } else if (!target) {
         await hrAddDesignation(current.id, name);
         // Selection and open row both kept: the new designation appears in the list
         // already being looked at rather than closing it to say so.
         await load(true);
+      } else {
+        await hrRenameDesignation(current.id, target, name);
+        await load(true);
+        // The open row is keyed by name, so a rename has to move the key with it or the
+        // row somebody had open would silently close.
+        setOpenDesignation((prev) => (prev === target ? name : prev));
       }
-      toast.success(`${name} added`);
-      setCreating(null);
+      toast.success(target ? `Renamed to ${name}` : `${name} added`);
+      setNaming(null);
       setNewName("");
-      // Departments & Designation reads the same list off meta, so it has to be told.
+      // Employees and Roles read the same lists off meta, so they have to be told.
       reloadMeta();
     } catch (e) {
-      toast.error(e?.response?.data?.detail || "Could not add it");
+      toast.error(e?.response?.data?.detail || "Could not save it");
     } finally {
       setSavingName(false);
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!deleting) return;
+    setDeletingBusy(true);
+    try {
+      if (deleting.kind === "department") {
+        await hrDeleteDepartment(deleting.dept.id);
+        await load();
+        // Whatever is left, or nothing. Standing on a tab that no longer exists shows an
+        // empty card and no way back to a real one.
+        setSelected((prev) => (prev === deleting.dept.name ? "" : prev));
+      } else {
+        await hrDeleteDesignation(current.id, deleting.name);
+        await load(true);
+        setOpenDesignation((prev) => (prev === deleting.name ? "" : prev));
+      }
+      toast.success(`${deleting.kind === "department" ? deleting.dept.name : deleting.name} deleted`);
+      setDeleting(null);
+      reloadMeta();
+    } catch (e) {
+      // The server refuses one that is still in use and says by how many. That message is
+      // the whole answer, so it is shown rather than replaced with a generic failure.
+      toast.error(e?.response?.data?.detail || "Could not delete it");
+    } finally {
+      setDeletingBusy(false);
     }
   };
 
@@ -1464,7 +1508,7 @@ const StructureTab = ({ meta, reloadMeta }) => {
           size="sm"
           variant="outline"
           className="h-9 shrink-0 border-slate-200 text-xs text-slate-600 hover:bg-slate-50"
-          onClick={() => openCreate("department")}
+          onClick={() => openNaming("department")}
           data-testid="hr-structure-add-department"
         >
           <Plus className="mr-1 h-3.5 w-3.5" /> Department
@@ -1476,7 +1520,7 @@ const StructureTab = ({ meta, reloadMeta }) => {
           size="sm"
           className="h-9 shrink-0 bg-sky-600 text-xs text-white hover:bg-sky-700"
           disabled={!current}
-          onClick={() => openCreate("designation")}
+          onClick={() => openNaming("designation")}
           title={current ? `Add a designation to ${current.name}` : "Pick a department first"}
           data-testid="hr-structure-add-designation"
         >
@@ -1486,10 +1530,24 @@ const StructureTab = ({ meta, reloadMeta }) => {
 
       <Card data-testid="hr-structure-designations">
         <CardHeader className="flex flex-row items-center justify-between gap-2 py-3">
-          <CardTitle className="text-sm font-semibold text-slate-800">{current?.name || "—"}</CardTitle>
-          <span className="shrink-0 rounded bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
-            {designations.length} {designations.length === 1 ? "designation" : "designations"}
-          </span>
+          <CardTitle className="min-w-0 truncate text-sm font-semibold text-slate-800">{current?.name || "—"}</CardTitle>
+          <div className="flex shrink-0 items-center gap-2">
+            <span className="rounded bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
+              {designations.length} {designations.length === 1 ? "designation" : "designations"}
+            </span>
+            {/* On the header rather than on the tab: the tab is how a department is chosen
+                and an edit control there would be hit while reaching for the next one. */}
+            {current && (
+              <>
+                <Button size="sm" variant="outline" className="h-7 w-7 p-0" onClick={() => openNaming("department", current.name)} title={`Rename ${current.name}`} aria-label={`Rename ${current.name}`} data-testid="hr-structure-dept-edit">
+                  <Pencil className="h-3 w-3" />
+                </Button>
+                <Button size="sm" variant="outline" className="h-7 w-7 border-rose-200 p-0 text-rose-700 hover:bg-rose-50" onClick={() => setDeleting({ kind: "department", dept: current })} title={`Delete ${current.name}`} aria-label={`Delete ${current.name}`} data-testid="hr-structure-dept-delete">
+                  <Trash2 className="h-3 w-3" />
+                </Button>
+              </>
+            )}
+          </div>
         </CardHeader>
         <CardContent className="pb-4">
           {designations.length === 0 ? (
@@ -1505,25 +1563,53 @@ const StructureTab = ({ meta, reloadMeta }) => {
                 const open = openDesignation === name;
                 return (
                   <li key={name} className="overflow-hidden rounded-lg border border-slate-100" data-testid={`hr-structure-designation-${name}`}>
-                    {/* The whole row opens it, not a chevron off to one side: the row is
-                        what somebody is looking at when they want to know who holds this. */}
-                    <button
-                      type="button"
-                      onClick={() => setOpenDesignation(open ? "" : name)}
-                      className={`flex w-full items-center gap-3 px-3 py-2 text-left transition ${open ? "bg-sky-50" : "bg-slate-50/60 hover:bg-slate-100"}`}
-                      aria-expanded={open}
-                      data-testid={`hr-structure-designation-open-${name}`}
-                    >
-                      <span className="w-5 shrink-0 text-right text-[11px] font-bold text-slate-400">{i + 1}</span>
-                      <span className={`min-w-0 flex-1 truncate text-sm font-medium ${open ? "text-sky-800" : "text-slate-700"}`} title={name}>{name}</span>
-                      {/* Counted whether it is open or not, so the row says how many people
-                          are behind it before anybody clicks. Nought reads as nought rather
-                          than as a missing badge. */}
-                      <span className={`shrink-0 rounded px-2 py-0.5 text-[10px] font-bold ${holders.length > 0 ? "bg-slate-200 text-slate-600" : "bg-slate-100 text-slate-400"}`}>
-                        {holders.length}
-                      </span>
-                      <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} />
-                    </button>
+                    {/* A row of siblings, not one button wrapping the others. A button
+                        inside a button is invalid markup that browsers unnest, and the
+                        inner one stops receiving its clicks — so Edit and Delete sit
+                        beside the opener rather than inside it. */}
+                    <div className={`flex items-center gap-1 px-3 py-2 transition ${open ? "bg-sky-50" : "bg-slate-50/60 hover:bg-slate-100"}`}>
+                      {/* Most of the row still opens it: that is what somebody is aiming at
+                          when they want to know who holds this. */}
+                      <button
+                        type="button"
+                        onClick={() => setOpenDesignation(open ? "" : name)}
+                        className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                        aria-expanded={open}
+                        data-testid={`hr-structure-designation-open-${name}`}
+                      >
+                        <span className="w-5 shrink-0 text-right text-[11px] font-bold text-slate-400">{i + 1}</span>
+                        <span className={`min-w-0 flex-1 truncate text-sm font-medium ${open ? "text-sky-800" : "text-slate-700"}`} title={name}>{name}</span>
+                        {/* Counted whether it is open or not, so the row says how many
+                            people are behind it before anybody clicks. Nought reads as
+                            nought rather than as a missing badge. */}
+                        <span className={`shrink-0 rounded px-2 py-0.5 text-[10px] font-bold ${holders.length > 0 ? "bg-slate-200 text-slate-600" : "bg-slate-100 text-slate-400"}`}>
+                          {holders.length}
+                        </span>
+                        <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} />
+                      </button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 w-7 shrink-0 p-0"
+                        onClick={() => openNaming("designation", name)}
+                        title={`Rename ${name}`}
+                        aria-label={`Rename ${name}`}
+                        data-testid={`hr-structure-designation-edit-${name}`}
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 w-7 shrink-0 border-rose-200 p-0 text-rose-700 hover:bg-rose-50"
+                        onClick={() => setDeleting({ kind: "designation", name })}
+                        title={`Delete ${name}`}
+                        aria-label={`Delete ${name}`}
+                        data-testid={`hr-structure-designation-delete-${name}`}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
 
                     {open && (
                       <div className="space-y-1.5 border-t border-slate-100 bg-white px-3 py-2" data-testid={`hr-structure-holders-${name}`}>
@@ -1592,15 +1678,17 @@ const StructureTab = ({ meta, reloadMeta }) => {
         </CardContent>
       </Card>
 
-      {creating && (
+      {naming && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-          onClick={(e) => { if (e.target === e.currentTarget) setCreating(null); }}
-          data-testid="hr-structure-create-modal"
+          onClick={(e) => { if (e.target === e.currentTarget) setNaming(null); }}
+          data-testid="hr-structure-name-modal"
         >
           <div className="w-full max-w-sm space-y-3 rounded-lg bg-white p-5 shadow-xl">
             <h3 className="text-sm font-semibold text-slate-900">
-              {creating === "department" ? "New Department" : `New Designation in ${current?.name}`}
+              {naming.target
+                ? `Rename ${naming.target}`
+                : (naming.kind === "department" ? "New Department" : `New Designation in ${current?.name}`)}
             </h3>
             <Input
               value={newName}
@@ -1609,22 +1697,66 @@ const StructureTab = ({ meta, reloadMeta }) => {
               // Enter to save, Escape to leave: this is one field, and reaching for the
               // mouse to commit a single word is the slower half of the job.
               onKeyDown={(e) => {
-                if (e.key === "Enter") submitCreate();
-                if (e.key === "Escape") setCreating(null);
+                if (e.key === "Enter") submitName();
+                if (e.key === "Escape") setNaming(null);
               }}
-              placeholder={creating === "department" ? "Department name" : "Designation name"}
-              data-testid="hr-structure-create-input"
+              placeholder={naming.kind === "department" ? "Department name" : "Designation name"}
+              data-testid="hr-structure-name-input"
             />
             <div className="flex justify-end gap-2 pt-1">
-              <Button variant="outline" size="sm" onClick={() => setCreating(null)} data-testid="hr-structure-create-cancel">Cancel</Button>
+              <Button variant="outline" size="sm" onClick={() => setNaming(null)} data-testid="hr-structure-name-cancel">Cancel</Button>
               <Button
                 size="sm"
                 className="bg-sky-600 hover:bg-sky-700"
-                disabled={savingName || !newName.trim()}
-                onClick={submitCreate}
-                data-testid="hr-structure-create-save"
+                // Unchanged is not a save: renaming something to what it is already called
+                // would spend a request to tell the user nothing happened.
+                disabled={savingName || !newName.trim() || newName.trim() === naming.target}
+                onClick={submitName}
+                data-testid="hr-structure-name-save"
               >
-                {savingName ? "Adding…" : "Add"}
+                {savingName ? "Saving…" : naming.target ? "Rename" : "Add"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleting && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={(e) => { if (e.target === e.currentTarget) setDeleting(null); }}
+          data-testid="hr-structure-delete-modal"
+        >
+          <div className="w-full max-w-sm space-y-4 rounded-lg bg-white p-5 shadow-xl">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-rose-100">
+                <Trash2 className="h-5 w-5 text-rose-600" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-base font-semibold text-slate-900">
+                  Delete {deleting.kind === "department" ? "this department?" : "this designation?"}
+                </h3>
+                {/* Named, not "this one". Two rows apart look identical in a confirmation
+                    that does not say which was clicked. */}
+                <p className="mt-1 text-xs text-slate-500">
+                  <b className="text-slate-700">{deleting.kind === "department" ? deleting.dept.name : deleting.name}</b>
+                  {deleting.kind === "department"
+                    ? " and every designation under it come off the structure."
+                    : ` comes off ${current?.name}.`}
+                  {" "}Anybody still filed under it will be refused, and the message says how many.
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="outline" size="sm" onClick={() => setDeleting(null)} data-testid="hr-structure-delete-cancel">Cancel</Button>
+              <Button
+                size="sm"
+                className="bg-rose-600 hover:bg-rose-700"
+                disabled={deletingBusy}
+                onClick={confirmDelete}
+                data-testid="hr-structure-delete-confirm"
+              >
+                {deletingBusy ? "Deleting…" : "Yes, Delete"}
               </Button>
             </div>
           </div>
