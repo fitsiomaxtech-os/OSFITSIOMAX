@@ -364,12 +364,35 @@ async def list_employees(status: Optional[str] = None, _: V3UserOut = Depends(v3
     # a matching pass over every employee that points at it.
     branch_docs = await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1}).to_list(500)
     bmap = {b["id"]: b.get("branch_name", "") for b in branch_docs}
+
+    # Where the employee record carries no branch, the linked account is asked. The two
+    # halves are one person, and the account is the half that decides what they can
+    # actually see — an employee row reading "No branch" above an account scoped to Anna
+    # Nagar is the record disagreeing with itself, not a fact about the person.
+    #
+    # Read-time rather than a migration: the write-time cascades keep the two in step from
+    # here on, and this covers everyone who was already out of step without rewriting
+    # records to say something nobody typed.
+    blank = [r["id"] for r in rows if not r.get("branch_id")]
+    from_account: Dict[str, str] = {}
+    if blank:
+        accounts = await v3_col("users").find(
+            {"employee_id": {"$in": blank}}, {"_id": 0, "employee_id": 1, "branch_id": 1, "branch_ids": 1},
+        ).to_list(2000)
+        for a in accounts:
+            picked = a.get("branch_id") or next(iter(a.get("branch_ids") or []), "")
+            if picked:
+                from_account.setdefault(a["employee_id"], picked)
+
     for r in rows:
-        bid = r.get("branch_id")
+        bid = r.get("branch_id") or from_account.get(r["id"], "")
         if bid == ALL_BRANCHES:
             r["branch_name"] = ALL_BRANCHES_LABEL
         else:
             r["branch_name"] = bmap.get(bid, "") if bid else ""
+        # Reported as the branch it is, so the row and its Change control agree on what is
+        # being changed. The stored record is left untouched.
+        r["branch_id"] = bid
     return rows
 
 
@@ -673,6 +696,22 @@ async def update_user_account(user_id: str, payload: UserAccountUpdate, caller: 
         await v3_col("doctors").update_many({"user_id": user_id}, {"$set": {"full_name": updates["full_name"]}})
         if user and user.get("employee_id"):
             await v3_col("employees").update_one({"id": user["employee_id"]}, {"$set": {"full_name": updates["full_name"], "updated_at": now_iso()}})
+
+    # The account's branch, written through to the employee record. The reverse of this has
+    # existed since an employee could be moved — update_employee moves the login with them —
+    # but this half was missing, which is why an account carrying a branch could sit above an
+    # employee row in New Structure reading "No branch". The two are one person and must not
+    # disagree about where they work.
+    #
+    # An employee holds one branch where an account may hold several, so it takes the
+    # primary: branch_ids[0], which is the same branch_id every single-branch filter in the
+    # OS already reads. An account covering nothing clears it rather than being left on a
+    # branch it no longer has — the same direction the reverse cascade fails in.
+    if user and user.get("employee_id") and "branch_id" in updates:
+        await v3_col("employees").update_one(
+            {"id": user["employee_id"]},
+            {"$set": {"branch_id": updates["branch_id"] or "", "updated_at": now_iso()}},
+        )
 
     if branch_ids is not None and user and is_multi_branch_role(user.get("role")):
         # Add a doctors record for any newly-assigned branch that doesn't already have
