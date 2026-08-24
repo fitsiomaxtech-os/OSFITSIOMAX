@@ -455,10 +455,24 @@ async def v3_get_doctors(
     elif branch_id:
         scope_branch = branch_id
     if scope_branch:
-        # Head Physios belong to no branch — they take consultations across the whole
-        # organisation — so branch scoping must not filter them out, or a branch's own
-        # HEAD PHYSIO CALENDAR comes back empty. Physios stay scoped to their branch.
-        query["$or"] = [{"branch_id": scope_branch}, {"profile_type": "head_physio"}]
+        # An expert with no branch on their record belongs to all of them, and must not be
+        # filtered out by a branch scope or that branch's calendar comes back empty.
+        #
+        # Head Physios are the original case — they take consultations across the whole
+        # organisation — but they are not the only one: a Nutritionist covering every
+        # branch is recorded the same way, and was appearing on none of them. The rule is
+        # the record's own, not the role's: branchless means everywhere, whoever it is.
+        # An expert who does carry a branch stays scoped to it, as a Physio does.
+        query["$or"] = [
+            {"branch_id": scope_branch},
+            {"branch_id": None},
+            {"branch_id": {"$exists": False}},
+            {"branch_id": ""},
+            # Kept alongside the rule rather than replaced by it: a Head Physio record
+            # written before branchless was the convention may still carry a branch, and
+            # dropping this clause would hide them from every other branch's calendar.
+            {"profile_type": "head_physio"},
+        ]
     rows = await v3_col("doctors").find(active_doctor_query(query), {"_id": 0}).sort("created_at", -1).to_list(1000)
     # Their rostered working window, so a list that offers an expert also says which hours
     # that expert actually works. Resolved here rather than by each caller because every

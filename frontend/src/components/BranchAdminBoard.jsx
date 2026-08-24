@@ -719,7 +719,7 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
     // Diet is the third vertical, so its calendar sits beside the other two rather than
     // anywhere new — the Branch Admin publishes a Nutrition Coach's days exactly the way
     // they publish a Physio's.
-    { key: "diet", label: "Diet Calendar", icon: Salad },
+    { key: "diet", label: "Nutritionists Calendar", icon: Salad },
     // Sits next to PHYSIO CALENDAR because that is where its slots come from: a day an
     // absence left dateless is re-booked onto exactly the calendar published one tab over.
     { key: "missed", label: "Missed Classes", icon: UserX },
