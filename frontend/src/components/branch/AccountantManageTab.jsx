@@ -67,6 +67,12 @@ const REVENUE_VIEWS = [
   { key: "rehab", label: "Rehab Revenue", color: "#0891b2", icon: HeartPulse },
 ];
 
+// What the server calls money it cannot put under a branch -- see _branch_label in
+// v3_finance.py. One is a client who was never given a branch, the other a branch id
+// nothing answers to any more. Neither can be picked from the dropdown above, which is
+// exactly why going through it one branch at a time never adds up to the total.
+const UNPLACED = ["Unassigned", "Former branch"];
+
 // "All" first and the default — this page had no date filter before, so opening it
 // scoped to Today would silently hide every collection older than that. Today/This
 // Week/This Month/Custom are the same presets Branches & Verticals' own Overview and AC
@@ -244,6 +250,32 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
     return { totals, counts };
   }, [filteredTxns]);
 
+  // The same rows the cards above were summed from, grouped by branch -- deliberately
+  // not the payload's own by_branch, which ignores the approval view and the payment
+  // mode pills and would part company with the cards the moment either was touched.
+  //
+  // Here because the cards and the branches did not agree and this page gave no way to
+  // see why. Money whose client was deleted, never given a branch, or left pointing at
+  // a branch that no longer exists counts in every total and belongs to no branch that
+  // can be selected, so switching the dropdown branch by branch could never find it.
+  const branchRows = useMemo(() => {
+    const acc = new Map();
+    filteredTxns.forEach((t) => {
+      const name = t.branch_name || UNPLACED[0];
+      const row = acc.get(name) || { name, total: 0, consultation: 0, session: 0, diet: 0, store: 0, zumba: 0, rehab: 0 };
+      const amt = Number(t.gross) || 0;
+      row.total += amt;
+      if (row[t.source] !== undefined) row[t.source] += amt;
+      acc.set(name, row);
+    });
+    return [...acc.values()].sort((a, b) => b.total - a.total);
+  }, [filteredTxns]);
+
+  const unplacedTotal = useMemo(
+    () => branchRows.filter((r) => UNPLACED.includes(r.name)).reduce((sum, r) => sum + r.total, 0),
+    [branchRows],
+  );
+
   // Every collection taken below its listed price, biggest concession first — not run
   // through the Collected/Approved/Pending filter above, since a discount is a fact about
   // the collection itself, independent of whether it's since been signed off.
@@ -389,6 +421,60 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
               />
             ))}
           </div>
+
+          {!branchId && branchRows.length > 1 && (
+            <div className="rounded-md border border-slate-200 bg-white" data-testid="accountant-manage-by-branch">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-4 py-2.5">
+                <h3 className="text-sm font-semibold text-slate-700">Revenue by branch</h3>
+                {unplacedTotal > 0 && (
+                  <p className="text-[11px] text-amber-700" data-testid="accountant-manage-unplaced-note">
+                    {fmt(unplacedTotal)} belongs to no branch that can be selected
+                  </p>
+                )}
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[760px] text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-200 bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
+                      <th className="px-4 py-2 text-left font-semibold">Branch</th>
+                      {REVENUE_VIEWS.filter((v) => v.key !== "collected").map((v) => (
+                        <th key={v.key} className="whitespace-nowrap px-3 py-2 text-right font-semibold">
+                          {v.label.replace(" Revenue", "")}
+                        </th>
+                      ))}
+                      <th className="px-4 py-2 text-right font-semibold">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {branchRows.map((r) => (
+                      <tr
+                        key={r.name}
+                        className={`border-b border-slate-100 ${UNPLACED.includes(r.name) ? "bg-amber-50" : ""}`}
+                        data-testid={`accountant-manage-branch-row-${r.name}`}
+                      >
+                        <td className="whitespace-nowrap px-4 py-2 font-medium text-slate-700">{r.name}</td>
+                        {REVENUE_VIEWS.filter((v) => v.key !== "collected").map((v) => (
+                          <td key={v.key} className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-slate-600">
+                            {r[v.key] ? fmt(r[v.key]) : "—"}
+                          </td>
+                        ))}
+                        <td className="whitespace-nowrap px-4 py-2 text-right font-semibold tabular-nums text-slate-800">{fmt(r.total)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-slate-300 bg-slate-50 font-semibold text-slate-800">
+                      <td className="px-4 py-2">All branches</td>
+                      {REVENUE_VIEWS.filter((v) => v.key !== "collected").map((v) => (
+                        <td key={v.key} className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{fmt(sums.totals[v.key])}</td>
+                      ))}
+                      <td className="whitespace-nowrap px-4 py-2 text-right tabular-nums">{fmt(sums.totals.collected)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+          )}
 
           <RevenueDetailTable
             title={REVENUE_VIEWS.find((v) => v.key === revenueView)?.label}
