@@ -308,6 +308,9 @@ export const getRevenueOverview = async (params = {}) => (await api.get("/financ
 export const getClientTransactionHistory = async (leadId) => (await api.get(`/finance/client/${leadId}`)).data;
 export const markInstallmentPaid = async (leadId, installmentNumber, payload) => (await api.post(`/finance/installment/${leadId}/${installmentNumber}/mark-paid`, payload)).data;
 
+// Whose consultant book the board will show, and whether it belongs to the caller. My
+// Consultation reads it so it can never present somebody else's appointments as your own.
+export const hpResolvedConsultant = async () => (await api.get("/head-physio/resolved")).data;
 export const getHPMyCalendar = async (branchId) => (await api.get("/head-physio/my-calendar", { params: branchId ? { branch_id: branchId } : {} })).data;
 export const getHPMyPatients = async (branchId) => (await api.get("/head-physio/my-patients", { params: branchId ? { branch_id: branchId } : {} })).data;
 export const hpRecommendPackage = async (payload) => (await api.post("/head-physio/recommend-package", payload)).data;

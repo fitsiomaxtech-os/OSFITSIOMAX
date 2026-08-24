@@ -65,6 +65,7 @@ import { HRBoard } from "@/components/hr/HRBoard";
 import { HumanResourceBoard } from "@/components/hr/HumanResourceBoard";
 import { FinanceWiseBoard } from "@/components/branch/FinanceWiseBoard";
 import { PackagesBoard } from "@/components/PackagesBoard";
+import { MyConsultationBoard } from "@/components/MyConsultationBoard";
 import { OperationsBoard } from "@/components/OperationsBoard";
 import { AccountantBoard } from "@/components/finance/AccountantBoard";
 import { ZumbaMasterBoard } from "@/components/ZumbaMasterBoard";
@@ -222,6 +223,9 @@ const SUPER_ADMIN_TABS = [
   // Marketing Source and CI/CD ROOTS live inside here now, as its own sub-tab pair — two
   // configuration screens, not two peers of Dashboard/HR/Pre-Sales on the main strip.
   { key: "settings", label: "Settings", icon: Settings },
+  // Last, because it is the only tab here that is about the signed-in person rather than
+  // about the organisation — everything to its left is a view over somebody else's work.
+  { key: "my_consultation", label: "My Consultation", icon: Stethoscope },
 ];
 
 // Marketing Source and CI/CD ROOTS still resolve through the same superAdminView values
@@ -1155,6 +1159,15 @@ export const CRMPage = ({ auth, onLogout }) => {
 
         {showSuperAdminBoard && superAdminView === "packages" && (
           <PackagesBoard />
+        )}
+
+        {showSuperAdminBoard && superAdminView === "my_consultation" && (
+          <MyConsultationBoard
+            user={auth?.user}
+            branches={branches}
+            search={hpSearch}
+            onSearchChange={setHpSearch}
+          />
         )}
 
         {showSuperAdminBoard && SETTINGS_SUB_VIEWS.includes(superAdminView) && (

@@ -61,6 +61,34 @@ async def _resolve_hp_doctor(user: V3UserOut, branch_id: Optional[str] = None) -
     return doctor
 
 
+@router.get("/head-physio/resolved")
+async def hp_resolved_consultant(user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin"))):
+    """Whose consultant book the board is about to show, and whether it is the caller's own.
+
+    _resolve_hp_doctor falls back to any consultant record for a Super Admin, which is right
+    for driving somebody else's branch board and wrong for a page called My Consultation —
+    a Super Admin with no consultant record of their own would be shown a stranger's
+    appointments under their own name, with nothing on screen saying so.
+
+    Read-only and additive: it changes no existing resolution, it only reports it, so the
+    caller can say plainly whose book this is.
+    """
+    own = await v3_col("doctors").find_one(
+        {"user_id": user.id, "profile_type": "head_physio"}, {"_id": 0, "id": 1, "full_name": 1},
+    )
+    if own:
+        return {"consultant_id": own["id"], "consultant_name": own.get("full_name") or "", "is_mine": True}
+
+    fallback = await _resolve_hp_doctor(user)
+    if not fallback:
+        return {"consultant_id": "", "consultant_name": "", "is_mine": False}
+    return {
+        "consultant_id": fallback.get("id", ""),
+        "consultant_name": fallback.get("full_name") or "",
+        "is_mine": False,
+    }
+
+
 @router.get("/head-physio/my-calendar")
 async def hp_my_calendar(branch_id: Optional[str] = None, user: V3UserOut = Depends(v3_require_roles("head_physio", "super_admin"))):
     """Read-only view of the logged-in consultant's own booked slots (branch admin manages slot availability)."""
