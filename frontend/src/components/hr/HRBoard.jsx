@@ -13,6 +13,7 @@ import {
 } from "@/lib/api";
 import { MilkDateInput } from "@/components/ui/milk-calendar";
 import { SegmentedTabs } from "@/components/ui/segmented-tabs";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { downloadCsv } from "@/lib/printable";
 
 // Matches ALL_BRANCHES in backend/routers/v3_hr.py, which resolves it to a name on the way
@@ -1105,57 +1106,80 @@ const UserBranch = ({ user }) => {
   );
 };
 
-// Native <select> can't reliably color individual dropdown-list items across
-// browsers — only the closed box. This renders each role as its own colored,
-// rounded row in a custom open list instead.
+/**
+ * Filters the user list by role, in the same popover the date filter uses.
+ *
+ * The rows used to be painted one colour per role, which read as a palette to memorise
+ * rather than a list to choose from — and a filter is a list. Neutral now: the chosen row
+ * is the only thing marked, by weight and a tick, exactly as the pickers elsewhere do it.
+ *
+ * Searchable because this install has fourteen roles and counting, and a filter you have to
+ * scroll is slower than the table it was meant to narrow.
+ */
 const RoleFilterDropdown = ({ value, options, onChange }) => {
   const [open, setOpen] = useState(false);
-  const ref = useRef(null);
+  const [query, setQuery] = useState("");
+  // Cleared on close rather than on pick, which is the one moment a stale query would
+  // otherwise be sitting there the next time this opens.
+  useEffect(() => { if (!open) setQuery(""); }, [open]);
 
-  useEffect(() => {
-    const onDocClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, []);
-
-  const currentClasses = value === "all" ? "border-slate-200 bg-white text-slate-700" : roleClasses(value);
-  const currentLabel = value === "all" ? "ALL" : roleLabel(value);
+  const q = query.trim().toLowerCase();
+  const rows = [{ value: "all", label: "ALL" }, ...options.map((r) => ({ value: r, label: roleLabel(r) }))];
+  const shown = q ? rows.filter((r) => r.label.toLowerCase().includes(q)) : rows;
 
   return (
-    <div className="relative" ref={ref}>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className={`flex h-10 items-center gap-2 rounded-md border px-3 text-sm font-semibold ${currentClasses}`}
-        data-testid="hr-roles-role-filter"
-      >
-        {currentLabel}
-        <ChevronDown className="h-3.5 w-3.5 opacity-60" />
-      </button>
-      {open && (
-        <div className="absolute right-0 z-20 mt-1 min-w-[170px] space-y-1 rounded-md border border-slate-200 bg-white p-1.5 shadow-lg" data-testid="hr-roles-role-filter-list">
-          <button
-            type="button"
-            onClick={() => { onChange("all"); setOpen(false); }}
-            className="block w-full rounded-md border border-slate-200 bg-white px-3 py-1.5 text-left text-xs font-semibold text-slate-700"
-            data-testid="hr-roles-role-filter-option-all"
-          >
-            ALL
-          </button>
-          {options.map((r) => (
-            <button
-              key={r}
-              type="button"
-              onClick={() => { onChange(r); setOpen(false); }}
-              className={`block w-full rounded-md border px-3 py-1.5 text-left text-xs font-semibold ${roleClasses(r)}`}
-              data-testid={`hr-roles-role-filter-option-${r}`}
-            >
-              {roleLabel(r)}
-            </button>
-          ))}
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          className={`h-10 ${value === "all" ? "" : "border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100"}`}
+          data-testid="hr-roles-role-filter"
+        >
+          {value === "all" ? "ALL" : roleLabel(value)}
+          <ChevronDown className="ml-2 h-3.5 w-3.5 opacity-60" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="relative w-56 p-0" align="end" data-testid="hr-roles-role-filter-list">
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          className="absolute right-2 top-2 z-10 rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+          aria-label="Close"
+          data-testid="hr-roles-role-filter-close"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+        <div className="border-b border-slate-100 p-2 pr-9">
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search role..."
+            className="h-8 text-xs"
+            data-testid="hr-roles-role-filter-search"
+          />
         </div>
-      )}
-    </div>
+        <div className="max-h-64 overflow-y-auto py-1">
+          {shown.length === 0 && <p className="px-3 py-6 text-center text-xs text-slate-400">Nothing matches that.</p>}
+          {shown.map((r) => {
+            const on = r.value === value;
+            return (
+              <button
+                key={r.value}
+                type="button"
+                onClick={() => { onChange(r.value); setOpen(false); }}
+                className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs transition hover:bg-slate-100 ${
+                  on ? "font-bold text-slate-900" : "text-slate-600"
+                }`}
+                data-testid={`hr-roles-role-filter-option-${r.value}`}
+              >
+                <span className="truncate">{r.label}</span>
+                {on && <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-slate-500" />}
+              </button>
+            );
+          })}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 };
 
