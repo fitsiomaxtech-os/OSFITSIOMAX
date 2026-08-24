@@ -7,7 +7,7 @@ import uuid
 
 from database import v3_col
 from utils import now_iso
-from deps import v3_require_roles, is_diet_role, is_physio_role, is_rehab_role, BRANCH_ADMIN_ROLES
+from deps import v3_require_roles, is_diet_role, is_physio_role, is_rehab_role, is_head_physio_role, BRANCH_ADMIN_ROLES
 from security import hash_password
 from schemas.v3 import V3UserOut
 
@@ -45,7 +45,7 @@ DEFAULT_ROLES = [
     "super_admin", "business_dev", "pre_sales", "sales_head",
     "branch_admin", "branch_admin_physio", "branch_admin_fitness", "branch_admin_physio_fitness",
     "online_physio_admin", "online_fitness_admin",
-    "head_physio", "physio", "online_physio", "marketing_head", "accountant",
+    "head_physio", "online_head_physio", "physio", "online_physio", "marketing_head", "accountant",
 ]
 
 # Both consultant roles can be assigned to more than one branch (a linked `doctors`
@@ -57,7 +57,9 @@ DEFAULT_ROLES = [
 # so hiring one has to create the matching `doctors` record or they log in to a board with
 # no calendar behind it and nothing explains why.
 MULTI_BRANCH_ROLES = {"physio", "online_physio", "nutrition_coach"}
-ORG_WIDE_ROLES = {"head_physio"}
+# Both take consultations across the whole organisation, so both get one branchless
+# expert record rather than one per branch.
+ORG_WIDE_ROLES = {"head_physio", "online_head_physio"}
 
 
 def is_multi_branch_role(role: str) -> bool:
@@ -104,6 +106,12 @@ def expert_profile_type(role: str) -> str:
     """
     if is_physio_role(role):
         return "physio"
+    # Every consultation query looks for profile_type "head_physio" — the Consultant
+    # calendar lists on it, and the board resolves its own expert by it — so an Online
+    # Consultant is stamped with the type, not with their own slug. Same reason
+    # online_physio is stamped "physio".
+    if is_head_physio_role(role):
+        return "head_physio"
     if (role or "").strip().lower() == "super_admin":
         return role
     if is_diet_role(role):

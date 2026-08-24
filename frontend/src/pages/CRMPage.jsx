@@ -84,6 +84,9 @@ const ROLE_META = {
   online_physio_admin: { label: "Online Physio Admin", icon: Building2 },
   online_fitness_admin: { label: "Online Fitness Admin", icon: Building2 },
   head_physio: { label: "Consultant", icon: Stethoscope },
+  // The same board and the same reach, over video. Named for the room, not for a
+  // different job — see HEAD_PHYSIO_ROLES in backend/deps.py.
+  online_head_physio: { label: "Online Consultant", icon: Stethoscope },
   physio: { label: "Physio", icon: Activity },
   online_physio: { label: "Online Physio", icon: Activity },
   accountant: { label: "Accountant", icon: BadgeIndianRupee },
@@ -155,6 +158,14 @@ const isBranchAdminRole = (role) => BRANCH_ADMIN_ROLES.includes(String(role || "
  * fails there would render the whole board and 403 every call in it.
  */
 const isPhysioRole = (role) => ["physio", "online_physio"].includes(String(role || "").trim().toLowerCase());
+
+/** Whether a role takes consultations — in the room or over video.
+ *
+ * Matched exactly, like isPhysioRole: both slugs are fixed, and a loose match on the
+ * "physio" token inside head_physio is exactly the confusion those two predicates
+ * exist to keep apart. Kept in step with HEAD_PHYSIO_ROLES in backend/deps.py.
+ */
+const isHeadPhysioRole = (role) => ["head_physio", "online_head_physio"].includes(String(role || "").trim().toLowerCase());
 
 /** Whether a role gets the Pre-Sales board.
  *
@@ -424,7 +435,7 @@ export const CRMPage = ({ auth, onLogout }) => {
   //
   // All three are printed as they are written — a board title in full caps reads as
   // shouting where every other board is sentence case.
-  const isPlainTitle = role === "head_physio" || isDietRole(role) || isBranchAdminRole(role);
+  const isPlainTitle = isHeadPhysioRole(role) || isDietRole(role) || isBranchAdminRole(role);
   const boardTitle = isPlainTitle
     ? roleLabel
     // Sales Head gets the same title as Pre-Sales, not "Sales Head Master View" — it's the
@@ -794,7 +805,7 @@ export const CRMPage = ({ auth, onLogout }) => {
   // "Marketing Head", not "Pre Sales".
   const showMarketingHeadBoard = role === "marketing_head";
   const showBranchBoard = isBranchAdminRole(role);
-  const showHeadPhysioBoard = role === "head_physio";
+  const showHeadPhysioBoard = isHeadPhysioRole(role);
   const showPhysioBoard = isPhysioRole(role);
   const showDietBoard = isDietRole(role);
   const showAccountantBoard = role === "accountant";

@@ -112,6 +112,17 @@ def is_branch_admin_role(role: str) -> bool:
 #
 # Exact match, for the same reason: a loose rule on the "physio" token would also catch
 # `head_physio` and hand a treating physio the CONSULTANT's pipeline.
+# A CONSULTANT who takes their consultations over video. The same board, the same
+# pipeline, the same org-wide reach — only the room differs — so it is an alias of
+# head_physio rather than a role of its own, exactly as online_physio is of physio.
+HEAD_PHYSIO_ROLES = frozenset({"head_physio", "online_head_physio"})
+
+
+def is_head_physio_role(role: str) -> bool:
+    """Whether a role takes consultations — in the room or over video."""
+    return (role or "").strip().lower() in HEAD_PHYSIO_ROLES
+
+
 PHYSIO_ROLES = frozenset({"physio", "online_physio"})
 
 
@@ -145,13 +156,15 @@ def is_pre_sales_role(role: str) -> bool:
 
 def v3_require_roles(*roles: str):
     async def checker(user: V3UserOut = Depends(v3_current_user)) -> V3UserOut:
-        # Anywhere branch_admin, physio or pre_sales is allowed, its aliases are allowed.
+        # Anywhere branch_admin, physio, head_physio or pre_sales is allowed, its aliases
+        # are allowed.
         # Done here rather than at the 80-odd call sites so the next endpoint added is
         # covered by default instead of being one someone remembered to list the second
         # role on.
         allowed = (
             ("branch_admin" in roles and is_branch_admin_role(user.role))
             or ("physio" in roles and is_physio_role(user.role))
+            or ("head_physio" in roles and is_head_physio_role(user.role))
             or ("pre_sales" in roles and is_pre_sales_role(user.role))
         )
         if user.role not in roles and not allowed:
