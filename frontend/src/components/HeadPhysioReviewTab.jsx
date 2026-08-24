@@ -58,6 +58,11 @@ export const HeadPhysioReviewTab = ({ selectedDate, dateRange = null, compact = 
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [draft, setDraft] = useState(null); // { review, head_physio_notes, head_physio_suggestions }
+  // A review that has already been written opens to be read, not rewritten. The board's
+  // All list has a View on every row including the finished ones, and it used to open the
+  // same empty write form the queue uses — so a Consultant checking what they had said was
+  // shown a blank page and a Complete Review button over a review already complete.
+  const reviewDone = draft?.review?.status === "completed";
   const [draftTab, setDraftTab] = useState("write");
   const [sessionState, setSessionState] = useState({ loading: false, failed: false, sessions: [] });
   const [docCount, setDocCount] = useState(0);
@@ -130,9 +135,10 @@ export const HeadPhysioReviewTab = ({ selectedDate, dateRange = null, compact = 
     if (onRowsChange) onRowsChange(rows);
   }, [rows, onRowsChange]);
 
-  // View on the board's All list names a review; open its write-up here once the rows
-  // this tab owns have actually loaded. A completed review opens read-only-ish the same
-  // way the row's own button does — same drawer, so nothing new to keep in step.
+  // View on the board's All list names a review; open it here once the rows this tab owns
+  // have actually loaded. The same drawer serves both, and reads which it is off the
+  // review: this list gives a finished one no button at all, so View is the only way one
+  // is ever opened and it has to open as something to read.
   useEffect(() => {
     if (!autoOpenReviewId || !rows.length) return;
     const match = rows.find((r) => r.id === autoOpenReviewId);
@@ -329,7 +335,7 @@ export const HeadPhysioReviewTab = ({ selectedDate, dateRange = null, compact = 
                 The days themselves — what was done each session — sat on another board. */}
             <div className="flex shrink-0 gap-1 border-b border-slate-200 px-5 py-2" data-testid="hp-review-modal-tabs">
               {[
-                { key: "write", label: "Write Review" },
+                { key: "write", label: reviewDone ? "The Review" : "Write Review" },
                 { key: "days", label: `Treatment Days${windowDays.length ? ` (${windowDays.length})` : ""}` },
                 { key: "documents", label: `Documents${docCount ? ` (${docCount})` : ""}` },
               ].map((t) => (
@@ -369,17 +375,44 @@ export const HeadPhysioReviewTab = ({ selectedDate, dateRange = null, compact = 
                   <p className="mt-1 text-sm italic text-slate-400">The physio raised this review without notes.</p>
                 )}
               </div>
-              <div>
-                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">Review Notes *</label>
-                <textarea
-                  rows={5}
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400"
-                  placeholder="How is the patient responding after a week of treatment?"
-                  value={draft.head_physio_notes}
-                  onChange={(e) => setDraft({ ...draft, head_physio_notes: e.target.value })}
-                  data-testid="hp-review-notes"
-                />
-              </div>
+              {reviewDone ? (
+                <>
+                  {/* What was written, read back. An empty textarea over a finished review
+                      says nothing was written and invites somebody to write it again. */}
+                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3" data-testid="hp-review-written-notes">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">Review Notes</p>
+                    {draft.review.head_physio_notes ? (
+                      <p className="mt-1 whitespace-pre-wrap text-sm text-slate-800">{draft.review.head_physio_notes}</p>
+                    ) : (
+                      <p className="mt-1 text-sm italic text-slate-400">Completed without notes.</p>
+                    )}
+                  </div>
+                  {draft.review.head_physio_suggestions && (
+                    <div className="rounded-lg border border-slate-200 bg-white p-3" data-testid="hp-review-written-suggestions">
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Suggestions</p>
+                      <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{draft.review.head_physio_suggestions}</p>
+                    </div>
+                  )}
+                  {/* Who signed it and when, because a review read weeks later is a
+                      judgement somebody made on a day and not a standing fact. */}
+                  <p className="text-[11px] text-slate-400" data-testid="hp-review-written-by">
+                    {draft.review.head_physio_name ? `Written by ${draft.review.head_physio_name}` : "Written"}
+                    {draft.review.completed_at ? ` · ${dmy(draft.review.completed_at)}` : ""}
+                  </p>
+                </>
+              ) : (
+                <div>
+                  <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">Review Notes *</label>
+                  <textarea
+                    rows={5}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400"
+                    placeholder="How is the patient responding after a week of treatment?"
+                    value={draft.head_physio_notes}
+                    onChange={(e) => setDraft({ ...draft, head_physio_notes: e.target.value })}
+                    data-testid="hp-review-notes"
+                  />
+                </div>
+              )}
             </div>
 
             <div className={`flex-1 overflow-y-auto p-5 ${draftTab === "days" ? "" : "hidden"}`} data-testid="hp-review-days">
@@ -454,10 +487,16 @@ export const HeadPhysioReviewTab = ({ selectedDate, dateRange = null, compact = 
             </div>
 
             <div className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-6 py-3.5">
-              <Button variant="outline" onClick={() => setDraft(null)} data-testid="hp-review-cancel">Cancel</Button>
-              <Button className="bg-emerald-600 text-white hover:bg-emerald-700" onClick={submit} disabled={saving} data-testid="hp-review-submit">
-                {saving ? "Saving..." : "Complete Review"}
-              </Button>
+              {reviewDone ? (
+                <Button variant="outline" onClick={() => setDraft(null)} data-testid="hp-review-cancel">Close</Button>
+              ) : (
+                <>
+                  <Button variant="outline" onClick={() => setDraft(null)} data-testid="hp-review-cancel">Cancel</Button>
+                  <Button className="bg-emerald-600 text-white hover:bg-emerald-700" onClick={submit} disabled={saving} data-testid="hp-review-submit">
+                    {saving ? "Saving..." : "Complete Review"}
+                  </Button>
+                </>
+              )}
             </div>
           </div>
         </div>
