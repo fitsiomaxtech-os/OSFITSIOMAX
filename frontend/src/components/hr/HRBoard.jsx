@@ -73,7 +73,10 @@ const ROLE_META = {
   online_physio_admin: { label: "ONLINE PHYSIO ADMIN", classes: "border-teal-300 bg-teal-50 text-teal-700" },
   online_fitness_admin: { label: "ONLINE FITNESS ADMIN", classes: "border-teal-300 bg-teal-50 text-teal-700" },
   head_physio: { label: "CONSULTANT", classes: "border-amber-300 bg-amber-50 text-amber-700" },
-  physio: { label: "PHYSIO", classes: "border-cyan-300 bg-cyan-50 text-cyan-700" },
+  // Called what the clinic calls them. "Physio" is the slug's own shorthand and was
+  // reaching the screen unchanged, so the role filter said PHYSIO while every list of
+  // designations beside it said Physiotherapist.
+  physio: { label: "PHYSIOTHERAPIST", classes: "border-cyan-300 bg-cyan-50 text-cyan-700" },
   // Blue against Physio's cyan is the same shift the family above makes from emerald to
   // teal: the base hue says which kind of role this is, and the neighbouring one says it
   // is the online arm of it.

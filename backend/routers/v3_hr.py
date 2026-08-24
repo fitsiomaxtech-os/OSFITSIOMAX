@@ -125,7 +125,26 @@ async def _custom_roles() -> list:
 
 
 async def _all_role_names() -> list:
-    return DEFAULT_ROLES + [r["name"] for r in await _custom_roles()]
+    """Every role that can be assigned, each one once.
+
+    A custom role created under a name a built-in already uses came back twice — the same
+    role listed as two, which is what put two ONLINE PHYSIO rows in the role filter with no
+    way to tell them apart. Nothing broke, but a filter offering the same answer twice makes
+    the reader look for a difference that is not there.
+
+    Matched case- and space-insensitively, since a custom role is typed by hand and
+    "Online Physio" is not a second role from "online_physio". The built-in spelling wins
+    where both exist: it is the one the rest of the OS branches on.
+    """
+    seen = set()
+    names = []
+    for name in DEFAULT_ROLES + [r["name"] for r in await _custom_roles()]:
+        key = str(name or "").strip().lower().replace(" ", "_")
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        names.append(name)
+    return names
 
 
 async def _seeded_departments() -> list:
