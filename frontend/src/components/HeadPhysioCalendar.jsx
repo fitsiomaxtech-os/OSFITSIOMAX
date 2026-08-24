@@ -148,16 +148,22 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
   const loadDoctors = useCallback(async () => {
     if (!branchId) return;
     try {
-      if (profileType !== "head_physio") {
-        const all = await getDoctors({ branch_id: branchId });
-        setDoctors(all.filter((d) => d.profile_type === profileType));
-        return;
-      }
-      const all = await getDoctors();
-      const heads = (all || []).filter((d) => d.profile_type === "head_physio");
+      const all = profileType === "head_physio"
+        ? await getDoctors()
+        : await getDoctors({ branch_id: branchId });
+      const mine = (all || []).filter((d) => d.profile_type === profileType);
+      // One row per person, not per record. An expert covering several branches holds one
+      // doctors record per branch by design, and several paths can add one — so the raw
+      // list repeats the same person once per record they have ever been given. This
+      // collapsed the Head Physio list from the day it was written; every other calendar
+      // listed the records raw, which is how two Nutritionists came to fill a column with
+      // twenty-one identical rows.
+      //
+      // The record kept is the one with slots on it, so collapsing never hides the
+      // calendar somebody has actually published.
       const best = new Map();
-      heads.forEach((d) => {
-        const key = d.user_id || d.full_name || d.id;
+      mine.forEach((d) => {
+        const key = d.user_id || d.employee_id || d.full_name || d.id;
         const seen = best.get(key);
         if (!seen || (d.slots || []).length > (seen.slots || []).length) best.set(key, d);
       });
