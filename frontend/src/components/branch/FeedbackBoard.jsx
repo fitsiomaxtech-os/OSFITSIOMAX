@@ -249,7 +249,7 @@ export const FeedbackBoard = ({ branchId, onClose, onCounts }) => {
           onSend={(reply) => move(replying, "resolved", reply)}
         />
       )}
-      <div className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
+      <div className="flex max-h-[90vh] w-full max-w-[92rem] flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
         <div className="flex shrink-0 items-center justify-between gap-3 border-b bg-slate-50/60 px-5 py-4">
           <div className="flex items-center gap-2">
             <Bell className="h-4 w-4 text-amber-500" />
@@ -315,15 +315,15 @@ export const FeedbackBoard = ({ branchId, onClose, onCounts }) => {
                 ))}
               </div>
 
-              {/* Underneath, the feedback itself. Two across on a wide screen because the
-                  message is the point and a third of a modal is a narrow column to read a
-                  paragraph in. */}
+              {/* Underneath, the feedback itself, four across on a wide screen and stepping
+                  down with the width rather than at one breakpoint — at 1024px four
+                  columns of a paragraph are four columns of two words. */}
               {visible.length === 0 ? (
                 <p className="py-12 text-center text-sm text-slate-400" data-testid="feedback-none-here">
                   {(COLUMNS.find((c) => c.key === filter) || {}).empty || "Nothing here."}
                 </p>
               ) : (
-                <div className="grid gap-3 lg:grid-cols-2" data-testid="feedback-list">
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4" data-testid="feedback-list">
                   {visible.map((r) => <FeedbackCard key={r.id} row={r} onMove={move} moving={moving === r.id} />)}
                 </div>
               )}
