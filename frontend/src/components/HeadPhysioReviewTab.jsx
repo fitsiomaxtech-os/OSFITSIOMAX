@@ -370,7 +370,7 @@ export const HeadPhysioReviewTab = ({ selectedDate, dateRange = null, compact = 
                   {draft.review.physio_name && <span className="ml-1 font-semibold normal-case tracking-normal text-slate-500">· {draft.review.physio_name}</span>}
                 </p>
                 {draft.review.physio_notes ? (
-                  <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{draft.review.physio_notes}</p>
+                  <p className="mt-1 whitespace-pre-wrap break-words text-sm text-slate-700">{draft.review.physio_notes}</p>
                 ) : (
                   <p className="mt-1 text-sm italic text-slate-400">The physio raised this review without notes.</p>
                 )}
@@ -382,7 +382,7 @@ export const HeadPhysioReviewTab = ({ selectedDate, dateRange = null, compact = 
                   <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3" data-testid="hp-review-written-notes">
                     <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">Review Notes</p>
                     {draft.review.head_physio_notes ? (
-                      <p className="mt-1 whitespace-pre-wrap text-sm text-slate-800">{draft.review.head_physio_notes}</p>
+                      <p className="mt-1 whitespace-pre-wrap break-words text-sm text-slate-800">{draft.review.head_physio_notes}</p>
                     ) : (
                       <p className="mt-1 text-sm italic text-slate-400">Completed without notes.</p>
                     )}
@@ -390,7 +390,7 @@ export const HeadPhysioReviewTab = ({ selectedDate, dateRange = null, compact = 
                   {draft.review.head_physio_suggestions && (
                     <div className="rounded-lg border border-slate-200 bg-white p-3" data-testid="hp-review-written-suggestions">
                       <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Suggestions</p>
-                      <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{draft.review.head_physio_suggestions}</p>
+                      <p className="mt-1 whitespace-pre-wrap break-words text-sm text-slate-700">{draft.review.head_physio_suggestions}</p>
                     </div>
                   )}
                   {/* Who signed it and when, because a review read weeks later is a
@@ -447,10 +447,10 @@ export const HeadPhysioReviewTab = ({ selectedDate, dateRange = null, compact = 
                         {s.jr_physio_remarks || s.rehab_remarks ? (
                           <>
                             {s.jr_physio_remarks && (
-                              <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{s.jr_physio_remarks}</p>
+                              <p className="mt-1 whitespace-pre-wrap break-words text-sm text-slate-700">{s.jr_physio_remarks}</p>
                             )}
                             {s.rehab_remarks && (
-                              <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">
+                              <p className="mt-1 whitespace-pre-wrap break-words text-sm text-slate-700">
                                 <span className="font-semibold text-slate-500">Rehab: </span>{s.rehab_remarks}
                               </p>
                             )}
