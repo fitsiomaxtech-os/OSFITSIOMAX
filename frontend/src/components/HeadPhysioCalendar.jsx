@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Calendar as CalendarIcon,
+  CheckCircle2,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Clock,
@@ -24,6 +26,7 @@ import {
   setDoctorService,
 } from "@/lib/api";
 import { to12h } from "@/lib/time";
+import { CenteredPicker } from "@/components/ui/milk-calendar";
 
 const CONSULTATION_TYPES = [
   { value: "initial", label: "Initial Consultation", color: "bg-blue-100 text-blue-700 border-blue-300" },
@@ -213,6 +216,10 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
   // closer. Silent on failure: the picker just doesn't appear.
   const [shifts, setShifts] = useState([]);
   const [savingShift, setSavingShift] = useState(false);
+  // The shift picker, opened as the calendar's own dialog rather than dropped from the
+  // control. A native list here is unstyleable and reads as a browser widget beside a
+  // calendar that is anything but.
+  const [shiftPicker, setShiftPicker] = useState(false);
   const [savingDayShift, setSavingDayShift] = useState(false);
 
   const loadShifts = useCallback(async () => {
@@ -665,28 +672,21 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
                     it sits first. The list is the branch's own — edit the hours themselves
                     in MANAGEMENT → TIME MANAGEMENT. */}
                 {shifts.length > 0 && (
-                  <label className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-1" title="The working window this expert's day is opened across">
+                  <button
+                    type="button"
+                    onClick={() => setShiftPicker(true)}
+                    disabled={savingShift}
+                    className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-1 hover:bg-slate-50 disabled:opacity-60"
+                    title="The working window this expert's day is opened across"
+                    data-testid="doctor-shift-select"
+                  >
                     <Clock className="h-3.5 w-3.5 text-slate-400" />
                     <span className="text-[11px] font-medium text-slate-500">Shift</span>
-                    <select
-                      value={shift?.shift_id || ""}
-                      onChange={(e) => saveShift(e.target.value)}
-                      disabled={savingShift}
-                      className="max-w-[13rem] rounded border border-slate-200 bg-white px-1 py-0.5 text-xs font-semibold text-slate-700"
-                      data-testid="doctor-shift-select"
-                    >
-                      <option value="">No shift — full day</option>
-                      {shifts.map((s) => (
-                        <option key={s.id} value={s.id}>{s.name} · {to12h(s.start_time)} – {to12h(s.end_time)}</option>
-                      ))}
-                      {/* A CONSULTANT is org-wide, so the shift on them can be one another
-                          branch defined. Offered as-is rather than leaving the dropdown
-                          sitting on a value it has no option for. */}
-                      {shift?.shift_id && !shifts.some((s) => s.id === shift.shift_id) && (
-                        <option value={shift.shift_id}>{shift.shift_name} · {to12h(shift.start_time)} – {to12h(shift.end_time)} (another branch)</option>
-                      )}
-                    </select>
-                  </label>
+                    <span className="max-w-[13rem] truncate text-xs font-semibold text-slate-700">
+                      {shiftLabel || "No shift — full day"}
+                    </span>
+                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                  </button>
                 )}
                 {/* A physio runs a floor — two or three patients in the same hour. Set
                     here rather than assumed, because it varies by physio and by room.
@@ -959,6 +959,60 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
         )}
       </div>
 
+      {/* The shift, picked in the calendar's own dialog. Its clothes come from the date
+          picker beside it rather than a copy of them, so the two cannot drift apart.
+
+          A dialog and not a dropdown: this control sits in a header above a grid, inside a
+          card, and a native list opening over the calendar reads as a browser widget in
+          the middle of something that is anything but. */}
+      {shiftPicker && (
+        <CenteredPicker
+          title={`Shift for ${selectedDoctor?.full_name || "this expert"}`}
+          onClose={() => setShiftPicker(false)}
+          testid="doctor-shift-modal"
+        >
+          <div className="space-y-1">
+            {[
+              { id: "", label: "No shift — full day", hint: "The whole working day is offered" },
+              ...shifts.map((sh) => ({
+                id: sh.id,
+                label: sh.name,
+                hint: `${to12h(sh.start_time)} – ${to12h(sh.end_time)}`,
+              })),
+              // A CONSULTANT is org-wide, so the shift on them can be one another branch
+              // defined. Offered as it stands rather than leaving the control naming
+              // something the list cannot show.
+              ...(shift?.shift_id && !shifts.some((sh) => sh.id === shift.shift_id)
+                ? [{
+                    id: shift.shift_id,
+                    label: `${shift.shift_name} (another branch)`,
+                    hint: `${to12h(shift.start_time)} – ${to12h(shift.end_time)}`,
+                  }]
+                : []),
+            ].map((opt) => {
+              const on = (shift?.shift_id || "") === opt.id;
+              return (
+                <button
+                  key={opt.id || "none"}
+                  type="button"
+                  disabled={savingShift}
+                  onClick={() => { setShiftPicker(false); if (!on) saveShift(opt.id); }}
+                  className={`flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-left transition disabled:opacity-60 ${
+                    on ? "bg-[#F3EFE6]" : "hover:bg-[#F3EFE6]"
+                  }`}
+                  data-testid={`doctor-shift-option-${opt.id || "none"}`}
+                >
+                  <span className="min-w-0">
+                    <span className={`block truncate text-sm ${on ? "font-bold text-slate-900" : "text-slate-700"}`}>{opt.label}</span>
+                    <span className="block truncate text-[11px] text-slate-500">{opt.hint}</span>
+                  </span>
+                  {on && <CheckCircle2 className="h-4 w-4 shrink-0 text-amber-600" />}
+                </button>
+              );
+            })}
+          </div>
+        </CenteredPicker>
+      )}
     </div>
   );
 };

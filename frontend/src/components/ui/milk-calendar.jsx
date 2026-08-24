@@ -126,7 +126,10 @@ export default MilkCalendar;
  * opened it. A panel anchored to the field is clipped by the `overflow-hidden` on a modal
  * card, which swallows the last week of the month and the Today link.
  */
-const CenteredPicker = ({ title, onClose, testid, children }) => (
+/** The calendar's own dialog — cream card, soft border, blurred ground. Exported so a
+  * control that belongs beside a calendar can wear the same clothes rather than a
+  * second copy of them drifting away from these. */
+export const CenteredPicker = ({ title, onClose, testid, children }) => (
   <div
     className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/50 p-3 backdrop-blur-sm sm:p-4"
     onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
