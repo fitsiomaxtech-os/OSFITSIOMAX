@@ -7,11 +7,17 @@ import { getFinanceApprovals, getBranches, approveTransaction, unapproveTransact
 
 const fmt = (n) => `Rs.${(Number(n) || 0).toLocaleString("en-IN")}`;
 
+// Every category the backend can return, which is not what this list held: Rehab and
+// Zumba were both missing, so a rehab course fee or a class fee could be seen only
+// under "All" and vanished the moment any pill was picked. Zumba could not be seen at
+// all until finance_approvals started reading the registrations it lives on.
 const CATEGORIES = [
   ["all", "All"],
   ["consultation", "Consultations"],
   ["session", "Treatments"],
   ["diet", "Diet"],
+  ["rehab", "Rehab"],
+  ["zumba", "Zumba"],
   ["store", "Fitsio Store"],
   ["other", "Others"],
 ];

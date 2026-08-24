@@ -237,6 +237,8 @@ async def approve_transaction(
     if res.matched_count == 0:
         res = await v3_col("inventory_movements").update_one({"id": activity_id}, {"$set": update})
     if res.matched_count == 0:
+        res = await v3_col("zumba_registrations").update_one({"id": activity_id}, {"$set": update})
+    if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Transaction not found")
     return {"message": "Approved"}
 
@@ -253,6 +255,8 @@ async def unapprove_transaction(
     res = await v3_col("lead_activity").update_one({"id": activity_id}, update)
     if res.matched_count == 0:
         res = await v3_col("inventory_movements").update_one({"id": activity_id}, update)
+    if res.matched_count == 0:
+        res = await v3_col("zumba_registrations").update_one({"id": activity_id}, update)
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Transaction not found")
     return {"message": "Approval removed"}
@@ -379,6 +383,54 @@ async def finance_approvals(
                 "approved": is_approved,
                 "approved_by": sale.get("approved_by") or "",
                 "approved_at": sale.get("approved_at") or "",
+            })
+
+    # Zumba class fees. Collected onto the registration rather than through the lead
+    # fee machinery -- see revenue_overview's own zumba loop for why -- and this tab
+    # reads lead_activity and store sales, so until now every rupee of class money was
+    # counted as revenue that nobody could sign off: it appeared in the Total and in
+    # no approval queue, approved or pending.
+    if category in (None, "", "all", "zumba"):
+        zumba_query = {}
+        if branch_id:
+            zumba_query["branch_id"] = branch_id
+        if date_query:
+            zumba_query["created_at"] = date_query
+        regs = await v3_col("zumba_registrations").find(zumba_query, {"_id": 0}).to_list(5000)
+        for reg in regs:
+            bid = reg.get("branch_id")
+            if mode_branch_ids is not None and bid not in mode_branch_ids:
+                continue
+            # fee_paid, not fee_amount, and nothing to review when it is zero: a
+            # registration with no money on it yet is the Zumba tab's business, not
+            # this one's. Same rule revenue_overview counts by.
+            amount = float(reg.get("fee_paid") or 0)
+            if amount <= 0:
+                continue
+            is_approved = bool(reg.get("approved"))
+            if approved is not None and is_approved != approved:
+                continue
+            pm = reg.get("payment_mode") or "unknown"
+            if payment_mode and payment_mode not in ("all", "") and pm != payment_mode:
+                continue
+            rows.append({
+                "id": reg.get("id", ""),
+                # No lead behind a class fee -- the dancer is a registration, not a
+                # patient -- so this stays empty rather than faked, the same way a
+                # counter sale's does.
+                "lead_id": "",
+                "patient_name": (reg.get("name") or "").strip() or "Zumba registration",
+                "patient_phone": reg.get("phone") or "",
+                "branch_id": bid,
+                "branch_name": branch_map.get(bid, {}).get("branch_name", ""),
+                "category": "zumba",
+                "amount": amount,
+                "payment_mode": pm,
+                "collected_by": reg.get("created_by", ""),
+                "collected_at": reg.get("created_at", ""),
+                "approved": is_approved,
+                "approved_by": reg.get("approved_by") or "",
+                "approved_at": reg.get("approved_at") or "",
             })
 
     rows.sort(key=lambda r: r["collected_at"], reverse=True)
@@ -748,6 +800,22 @@ def _empty_day(day: str) -> dict:
     return {"date": day, "consultation": 0.0, "session": 0.0, "diet": 0.0, "store": 0.0, "zumba": 0.0, "rehab": 0.0}
 
 
+def _branch_label(bid, names: dict) -> str:
+    """What to call a payment's branch when it has none to call.
+
+    "Unknown" read as a lookup that failed. Two different things end up here and both
+    are real: money on a lead that was never given a branch, and money pointing at a
+    branch id nothing answers to any more -- a branch deleted and recreated leaves its
+    clients behind on the old one. Neither can appear under any branch anybody can pick
+    from the dropdown, so All Branches comes out larger than its branches add up to.
+    Naming them is the difference between that gap being on the page and being a
+    discrepancy somebody has to find by hand.
+    """
+    if bid in names:
+        return names[bid]
+    return "Unassigned" if bid in (None, "") else "Former branch"
+
+
 def _empty_branch(bid, bname: str) -> dict:
     return {
         "branch_id": bid, "branch_name": bname,
@@ -833,7 +901,7 @@ async def revenue_overview(
                 amount = first_amount
         day = (act.get("created_at") or "")[:10]
         bid = lead_branch_map.get(act.get("lead_id"))
-        bname = branch_name_map.get(bid, "Unknown")
+        bname = _branch_label(bid, branch_name_map)
 
         if category == "session":
             session_total += amount
@@ -920,7 +988,7 @@ async def revenue_overview(
         amount = float(sale.get("amount") or 0)
         store_total += amount
         bid = sale.get("branch_id")
-        bname = branch_name_map.get(bid, "Unknown")
+        bname = _branch_label(bid, branch_name_map)
         day = (sale.get("created_at") or "")[:10]
         mode = sale.get("payment_mode") or "unknown"
 
@@ -994,11 +1062,14 @@ async def revenue_overview(
             continue  # registered but not paid — counted by the Zumba tab, not by revenue
         zumba_total += amount
         bid = reg.get("branch_id")
-        bname = branch_name_map.get(bid, "Unknown")
+        bname = _branch_label(bid, branch_name_map)
         day = (reg.get("created_at") or "")[:10]
-        # A registration records no payment mode, so these land under "unknown" and the
-        # Cash/UPI/Card pills simply never match them.
-        mode = "unknown"
+        # Off the registration, which does record it: the single mode when the fee
+        # arrived in one piece, "split" when it came in several. This was hardcoded to
+        # "unknown", which put every rupee of class money in a bucket the Cash/UPI/Card
+        # pills can never match -- so picking any mode dropped Zumba from the total
+        # even though the mode was sitting on the record all along.
+        mode = reg.get("payment_mode") or "unknown"
 
         d = by_day.setdefault(day, _empty_day(day))
         d["zumba"] = d.get("zumba", 0.0) + amount
@@ -1030,9 +1101,13 @@ async def revenue_overview(
             "phone": reg.get("phone", ""),
             "payment_mode": mode,
             "client_balance": max(float(reg.get("fee_amount") or 0) - amount, 0.0),
-            "approved": False,
-            "approved_by": "",
-            "approved_at": "",
+            # Read off the registration now that a class fee can actually be approved.
+            # Hardcoded False was true while the Approvals tab could not see Zumba at
+            # all; leaving it would have shown every signed-off class fee as still
+            # pending on this page, for good.
+            "approved": bool(reg.get("approved")),
+            "approved_by": reg.get("approved_by") or "",
+            "approved_at": reg.get("approved_at") or "",
         })
 
     total_collected = consultation_total + session_total + diet_total + store_total + zumba_total + rehab_total

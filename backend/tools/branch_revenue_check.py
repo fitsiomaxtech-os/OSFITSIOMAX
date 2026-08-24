@@ -50,7 +50,8 @@ async def main(needle=""):
     lead_branch = {l["id"]: l.get("branch_id") for l in leads}
 
     acts = await v3_col("lead_activity").find(
-        {"action": {"$in": REVENUE_ACTIONS}}, {"_id": 0, "lead_id": 1, "details": 1},
+        {"action": {"$in": REVENUE_ACTIONS}},
+        {"_id": 0, "lead_id": 1, "details": 1, "action": 1, "created_at": 1},
     ).to_list(50000)
     store = await v3_col("inventory_movements").find(
         {"kind": "sale"}, {"_id": 0, "branch_id": 1, "amount": 1},
@@ -142,7 +143,8 @@ async def main(needle=""):
         print()
         print("What the unreachable money is:")
         for key, r in sorted(stranded, key=lambda kv: -total(kv[1])):
-            print("  " + key.ljust(26) + str(r["n"]).rjust(5) + " rows"
+            print("  " + key.ljust(26) + str(r["n"]).rjust(5)
+                  + (" row " if r["n"] == 1 else " rows")
                   + rs(total(r)).rjust(14) + "   ("
                   + str(r["leads"]) + (" lead)" if r["leads"] == 1 else " leads)"))
         if dangling:
@@ -152,15 +154,54 @@ async def main(needle=""):
             for d in sorted(dangling)[:10]:
                 print("  - " + str(d))
 
-    # Zumba fees are collected on the registration and never enter lead_activity,
-    # which is the only thing the Approvals tab reads -- so this much money is
-    # counted as revenue but can never be signed off by anyone.
+    # Two ways one sum can be counted twice in the payment trail. Both are counted as
+    # revenue right now. Printed rather than corrected, because correcting them takes
+    # money off a total somebody has been reading as the truth, and the size of that
+    # deduction should be known before it happens rather than discovered after.
+    sold, collected = {}, {}
+    for a in acts:
+        if a.get("action") == "package_sold":
+            sold.setdefault(a.get("lead_id"), []).append(a)
+        elif a.get("action") == "package_payment_collected":
+            collected.setdefault(a.get("lead_id"), []).append(a)
+
+    # sell-package assigns a package at a negotiated price and writes package_paid;
+    # collecting the fee overwrites that same field. One sum, two records, both summed.
+    dup_leads = [lid for lid in sold if lid in collected]
+    dup_total = sum(_parse_rs_amount(a.get("details", ""))
+                    for lid in dup_leads for a in sold[lid])
+
+    # A second collection on one lead is a correction, not a second payment -- the
+    # endpoint writes "Updated" and overwrites package_paid rather than adding to it --
+    # so every one but the latest is a figure that was replaced.
+    stale_total, stale_rows = 0.0, 0
+    for rows_ in collected.values():
+        if len(rows_) < 2:
+            continue
+        for a in sorted(rows_, key=lambda r: r.get("created_at") or "")[:-1]:
+            stale_total += _parse_rs_amount(a.get("details", ""))
+            stale_rows += 1
+
+    if dup_total or stale_total:
+        print()
+        print("Counted twice in the payment trail:")
+        if dup_total:
+            print("  sold, then collected".ljust(30) + rs(dup_total).rjust(14)
+                  + "   (" + str(len(dup_leads))
+                  + (" lead)" if len(dup_leads) == 1 else " leads)"))
+        if stale_total:
+            print("  collections later corrected".ljust(30) + rs(stale_total).rjust(14)
+                  + "   (" + str(stale_rows)
+                  + (" row)" if stale_rows == 1 else " rows)"))
+
+    # Zumba fees are collected onto the registration and never enter lead_activity,
+    # which was the only thing the Approvals tab read.
     zumba_sum = sum(v["zumba"] for v in tally.values())
     if zumba_sum:
         print()
-        print(rs(zumba_sum) + " of the company total is Zumba, which the Approvals")
-        print("tab never sees:")
-        print("it reads lead_activity and store sales, and a class fee is neither.")
+        print(rs(zumba_sum) + " of the company total is Zumba, collected onto the")
+        print("registration rather than the lead trail. The Approvals tab reads those")
+        print("now; anything collected before it did was never signed off by anyone.")
 
 
 if __name__ == "__main__":
