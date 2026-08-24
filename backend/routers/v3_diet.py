@@ -465,11 +465,15 @@ async def branch_diet_patients(user: V3UserOut = Depends(v3_require_roles("branc
 async def diet_consultations(coach_id: Optional[str] = None, user: V3UserOut = Depends(v3_require_diet)):
     """Patients coming in for a Diet Consultation.
 
-    The list is everyone the Head Physio referred — `diet_recommended` set on their
-    consultation decision — at this coach's branch. That flag IS the referral: it is set
-    at the moment the Head Physio decides, and nothing else in the OS records the
-    intention, so reading anything else here would mean the coach's queue disagreeing
-    with the decision that filled it.
+    Two things, and only two: the patients assigned to this coach, and the ones nobody has
+    been assigned yet. `diet_recommended` IS the referral — it is set at the moment the
+    Head Physio decides, and nothing else in the OS records the intention — so the waiting
+    half is read off that flag and the taken half off `diet_coach_id`.
+
+    It used to be every referral at the branch, which meant two coaches at one branch each
+    saw the other's patients and neither could tell which were theirs. Scoped strictly to
+    the coach it would be worse: a new referral belongs to nobody yet, so it would be
+    invisible to everybody and there would be no way to pick one up.
 
     Already-assigned patients stay in the list rather than disappearing, marked as such.
     A coach needs to see who they have seen as well as who is waiting, and a queue that
@@ -479,7 +483,16 @@ async def diet_consultations(coach_id: Optional[str] = None, user: V3UserOut = D
     if not coach:
         return {"patients": []}
 
-    query = {"diet_recommended": True}
+    query = {
+        "diet_recommended": True,
+        # Unassigned is written three ways across records of different ages — absent, null,
+        # or empty — so all three count as "nobody has taken this one".
+        "$or": [
+            {"diet_coach_id": coach["id"]},
+            {"diet_coach_id": {"$in": [None, ""]}},
+            {"diet_coach_id": {"$exists": False}},
+        ],
+    }
     if coach.get("branch_id"):
         query["branch_id"] = coach["branch_id"]
     leads = await v3_col("leads").find(query, {"_id": 0}).sort("updated_at", -1).to_list(500)
