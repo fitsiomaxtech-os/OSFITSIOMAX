@@ -751,16 +751,6 @@ const FEEDBACK_TO = [
   },
 ];
 
-// What became of a piece of feedback, in the patient's words rather than the branch's.
-// "In Progress" is what the board calls it; "Being looked at" is what it means to the
-// person waiting, and they are the one reading this.
-const MY_FEEDBACK_STATUS = {
-  new: { label: "Sent", classes: "border-amber-200 bg-amber-50 text-amber-700", note: "Waiting to be picked up." },
-  in_progress: { label: "Being looked at", classes: "border-sky-200 bg-sky-50 text-sky-700", note: "Somebody has it." },
-  awaiting_patient: { label: "Over to you", classes: "border-violet-200 bg-violet-50 text-violet-700", note: "They have asked whether this is sorted." },
-  resolved: { label: "Closed", classes: "border-emerald-200 bg-emerald-50 text-emerald-700", note: "Finished with." },
-};
-
 const feedbackSentOn = (iso) => {
   if (!iso) return "";
   const d = new Date(iso);
@@ -779,186 +769,70 @@ const feedbackSentOn = (iso) => {
  *  message, one reply, and anything further meant opening a second piece of feedback about
  *  the same thing. Both sides can write here, and it keeps its order.
  */
-const FeedbackThread = ({ f, onSend, busy }) => {
-  const [draft, setDraft] = useState("");
-  const state = MY_FEEDBACK_STATUS[f.status || "new"] || MY_FEEDBACK_STATUS.new;
-  const thread = f.messages || [];
-  const asked = (f.status || "new") === "awaiting_patient";
-  const closed = (f.status || "new") === "resolved";
-
-  const send = (resolved) => {
-    const body = draft.trim();
-    if (!body && resolved === undefined) return;
-    onSend(f, { body, resolved }, () => setDraft(""));
-  };
-
-  return (
-    <div className="rounded-lg border border-slate-200 p-3" data-testid={`portal-feedback-mine-${f.id}`}>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className={`rounded border px-2 py-0.5 text-[10px] font-bold ${state.classes}`}>{state.label}</span>
-          <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
-            {f.audience === "super_admin" ? "Head office" : "My branch"}
-          </span>
-        </div>
-        <span className="text-[10px] text-slate-400">{feedbackSentOn(f.created_at)}</span>
-      </div>
-
-      <div className="mt-2 space-y-2">
-        {thread.length === 0 ? (
-          <p className="text-[10px] text-slate-400">{state.note}</p>
-        ) : thread.map((m) => {
-          const mine = m.author === "patient";
-          return (
-            <div key={m.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
-              <div className={`max-w-[85%] rounded-lg px-2.5 py-1.5 ${mine ? "bg-sky-50 text-sky-900" : "bg-slate-100 text-slate-700"}`}>
-                <p className="whitespace-pre-wrap break-words text-xs leading-5">{m.body}</p>
-                <p className={`mt-0.5 text-[10px] ${mine ? "text-sky-500" : "text-slate-400"}`}>
-                  {[mine ? "You" : (f.audience === "super_admin" ? "Head office" : "Your branch"), feedbackSentOn(m.created_at)].filter(Boolean).join(" · ")}
-                </p>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Being asked, rather than being told. Whether what they did was enough is the
-          patient's to say — a complaint marked dealt with by the people complained about
-          is how somebody learns not to bother saying anything. */}
-      {asked && (
-        <div className="mt-2 rounded-lg border border-violet-200 bg-violet-50/70 p-2.5" data-testid={`portal-feedback-asked-${f.id}`}>
-          <p className="text-[11px] font-semibold text-violet-900">Has this sorted it?</p>
-          <div className="mt-1.5 flex flex-wrap gap-1.5">
-            <Button
-              size="sm"
-              className="h-7 bg-emerald-600 px-2 text-[11px] text-white hover:bg-emerald-700"
-              disabled={busy}
-              onClick={() => send(true)}
-              data-testid={`portal-feedback-yes-${f.id}`}
-            >
-              Yes, all sorted
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 border-slate-200 px-2 text-[11px]"
-              disabled={busy}
-              onClick={() => send(false)}
-              data-testid={`portal-feedback-no-${f.id}`}
-            >
-              Not yet
-            </Button>
-          </div>
-          <p className="mt-1 text-[10px] text-violet-700/70">Add a line below first if you want to say why.</p>
-        </div>
-      )}
-
-      {closed ? (
-        <p className="mt-2 text-[10px] text-emerald-600">You marked this sorted. Writing again opens it back up.</p>
-      ) : null}
-
-      <div className="mt-2">
-        <textarea
-          rows={2}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder={closed ? "Something else about this?" : "Write back…"}
-          className="w-full resize-none rounded-lg border border-slate-200 px-2.5 py-2 text-xs focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400"
-          data-testid={`portal-feedback-compose-${f.id}`}
-        />
-        <Button
-          size="sm"
-          className="mt-1.5 h-7 bg-sky-600 px-2 text-[11px] text-white hover:bg-sky-700"
-          disabled={busy || !draft.trim()}
-          onClick={() => send(undefined)}
-          data-testid={`portal-feedback-send-${f.id}`}
-        >
-          Send
-        </Button>
-      </div>
-    </div>
-  );
-};
-
-/** What this patient has sent, and where each one has got to.
+/** Everything said to one of the two, oldest first.
  *
- * A patient who says something and hears nothing assumes it went nowhere, and either sends
- * it again or stops sending. This does not promise a reply — it says somebody has it, which
- * is the smallest honest thing to say.
+ *  A patient talks to their branch, or to head office. They do not hold it as a stack of
+ *  numbered complaints, and the portal used to make them: separate items, one reply each,
+ *  and a Feedback History tab to go and look them up in. The records underneath are
+ *  unchanged — a branch still works through them one at a time — but they are read here
+ *  the way the person who wrote them holds it, as one conversation with each side.
  */
-const MyFeedbackList = ({ mine, onSend, busy }) => {
-  if (!mine || mine.length === 0) {
-    return (
-      <Card data-testid="portal-feedback-mine-empty">
-        <CardContent className="p-8 text-center">
-          <p className="text-sm font-semibold text-slate-800">Nothing sent yet</p>
-          <p className="mt-1 text-xs text-slate-500">
-            Anything you send shows up here with where it got to — waiting, being looked at, or closed.
-          </p>
-        </CardContent>
-      </Card>
-    );
-  }
-  return (
-    <Card data-testid="portal-feedback-mine">
-      <CardContent className="p-5">
-        <p className="text-sm font-semibold text-slate-800">What you have sent</p>
-        <div className="mt-3 space-y-3">
-          {mine.map((f) => <FeedbackThread key={f.id} f={f} onSend={onSend} busy={busy === f.id} />)}
-        </div>
-      </CardContent>
-    </Card>
-  );
-};
+const channelMessages = (rows) => rows
+  .flatMap((f) => (f.messages || []).map((m) => ({ ...m, thread_id: f.id })))
+  .sort((a, b) => String(a.created_at || "").localeCompare(String(b.created_at || "")));
+
+/** The thread a new message belongs to, or nothing if it starts one.
+ *
+ *  The most recent one still open. Writing into a conversation should carry on where it
+ *  left off rather than opening a second complaint about the same thing beside the first,
+ *  which is what the old form did every time somebody had more to say.
+ */
+const openThreadOf = (rows) => rows.find((f) => (f.status || "new") !== "resolved") || null;
 
 function FeedbackTab() {
-  const [message, setMessage] = useState("");
+  const [draft, setDraft] = useState("");
   const [audience, setAudience] = useState("branch_admin");
   const [sending, setSending] = useState(false);
-  const [sent, setSent] = useState(false);
   const [mine, setMine] = useState([]);
-  // Writing and checking are two errands, not one page: somebody coming back to see what
-  // happened to last week's complaint should not have to scroll past a blank form to find
-  // it. Opens on the form, which is what most visits are for.
-  const [view, setView] = useState("send"); // "send" | "history"
-  const [replying, setReplying] = useState(null);
+  const endRef = useRef(null);
 
-  // Reloaded after a send as well as on open, so what was just written appears in the list
-  // below rather than only after leaving the tab and coming back.
   const loadMine = useCallback(() => {
     patientPortalMyFeedback()
       .then((data) => setMine(data?.feedback || []))
-      .catch(() => { /* the history is a courtesy; the form works without it */ });
+      .catch(() => { /* the conversation is a courtesy; sending works without it */ });
   }, []);
   useEffect(() => { loadMine(); }, [loadMine]);
 
-  // Answering on a thread the patient already opened. Reloaded rather than patched in
-  // place: the status moves with the message — saying it is sorted closes it, saying it
-  // is not hands it back — and only the server knows which.
-  const replyOnThread = async (f, { body, resolved }, done) => {
-    setReplying(f.id);
-    try {
-      await patientPortalReplyFeedback(f.id, { body, resolved });
-      done?.();
-      loadMine();
-    } catch (e) {
-      toast.error(e?.response?.data?.detail || "Could not send that");
-    } finally {
-      setReplying(null);
-    }
-  };
+  // Rows arrive newest first, which is right for a list and backwards for a conversation.
+  const channelRows = mine.filter((f) => (f.audience || "branch_admin") === audience);
+  const messages = channelMessages([...channelRows].reverse());
+  const asked = channelRows.find((f) => (f.status || "new") === "awaiting_patient") || null;
+  const open = openThreadOf(channelRows);
+  const them = audience === "super_admin" ? "Head office" : "Your branch";
 
+  // The newest message, not the top of the history. A conversation that opens scrolled to
+  // a paragraph from three weeks ago hides the answer somebody came back to read.
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ block: "end" });
+  }, [messages.length, audience]);
 
-  const submit = async () => {
-    if (!message.trim()) {
-      toast.error("Tell us how it went");
-      return;
-    }
+  const waiting = (key) => mine.some(
+    (f) => (f.audience || "branch_admin") === key && (f.status || "new") === "awaiting_patient",
+  );
+
+  const send = async (resolved) => {
+    const body = draft.trim();
+    if (!body && resolved === undefined) { toast.error("Tell us how it went"); return; }
     setSending(true);
     try {
-      const res = await patientPortalSubmitFeedback({ message: message.trim(), audience });
-      toast.success(res?.message || "Thank you");
-      setSent(true);
+      if (resolved === undefined && !open) {
+        // Nothing open on this side, so this starts the conversation off again.
+        await patientPortalSubmitFeedback({ message: body, audience });
+      } else {
+        const target = resolved === undefined ? open : asked;
+        await patientPortalReplyFeedback(target.id, { body, resolved });
+      }
+      setDraft("");
       loadMine();
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Could not send that. Please try again.");
@@ -967,65 +841,8 @@ function FeedbackTab() {
     }
   };
 
-  if (sent) {
-    return (
-      <>
-        <Card data-testid="portal-feedback-sent">
-        <CardContent className="space-y-3 p-8 text-center">
-          <Check className="mx-auto h-8 w-8 text-emerald-600" />
-          <p className="text-sm font-semibold text-slate-800">
-            Thank you — {audience === "super_admin" ? "head office has it." : "your branch has it."}
-          </p>
-          <p className="text-xs text-slate-500">Somebody there will read it. You can send more any time.</p>
-          <div className="flex flex-wrap items-center justify-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => { setSent(false); setMessage(""); }} data-testid="portal-feedback-again">
-              Send more feedback
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => { setSent(false); setMessage(""); setView("history"); }} data-testid="portal-feedback-see-history">
-              See what happened to it
-            </Button>
-          </div>
-        </CardContent>
-        </Card>
-      </>
-    );
-  }
-
   return (
-    <>
-      {/* Two tabs rather than a form with a list under it: one of them is for saying
-          something, the other for finding out what came of it, and a patient arrives
-          wanting one or the other. The count says there is something to come back to. */}
-      <div className="mb-3 flex gap-1 rounded-lg border border-slate-200 bg-white p-1" data-testid="portal-feedback-tabs">
-        {[
-          { key: "send", label: "Feedback" },
-          { key: "history", label: "Feedback History" },
-        ].map((t) => {
-          const on = view === t.key;
-          return (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => setView(t.key)}
-              aria-pressed={on}
-              className={`flex-1 rounded-md px-3 py-2 text-xs font-semibold transition ${on ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}
-              data-testid={`portal-feedback-tab-${t.key}`}
-            >
-              {t.label}
-              {t.key === "history" && mine.length > 0 && (
-                <span className={`ml-1.5 rounded px-1.5 py-px text-[10px] font-bold ${on ? "bg-white/25" : "bg-slate-100 text-slate-500"}`}>
-                  {mine.length}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
-
-      {view === "history" ? (
-        <MyFeedbackList mine={mine} onSend={replyOnThread} busy={replying} />
-      ) : (
-      <Card data-testid="portal-feedback">
+    <Card data-testid="portal-feedback">
       <CardContent className="space-y-4 p-5">
         <div>
           <p className="text-sm font-semibold text-slate-800">How has it been?</p>
@@ -1034,7 +851,8 @@ function FeedbackTab() {
 
         {/* Asked before the box rather than under the Send button: who is reading it
             changes what somebody is willing to write, and finding that out afterwards is
-            finding it out too late. */}
+            finding it out too late. It now also picks which conversation is on screen, and
+            the two are separate — what goes to head office the branch never sees. */}
         <div>
           <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Send to</p>
           <div className="grid gap-2 sm:grid-cols-2" data-testid="portal-feedback-audience">
@@ -1046,9 +864,14 @@ function FeedbackTab() {
                   type="button"
                   onClick={() => setAudience(a.key)}
                   aria-pressed={on}
-                  className={`rounded-lg border p-3 text-left transition ${on ? "border-sky-500 bg-sky-50 ring-1 ring-sky-500" : "border-slate-200 bg-white hover:border-sky-300"}`}
+                  className={`relative rounded-lg border p-3 text-left transition ${on ? "border-sky-500 bg-sky-50 ring-1 ring-sky-500" : "border-slate-200 bg-white hover:border-sky-300"}`}
                   data-testid={`portal-feedback-to-${a.key}`}
                 >
+                  {/* Says the other side is waiting on an answer while you are not looking
+                      at it. Without it the only way to find out is to go and check. */}
+                  {waiting(a.key) && !on && (
+                    <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-violet-500" data-testid={`portal-feedback-dot-${a.key}`} />
+                  )}
                   <p className={`text-xs font-bold ${on ? "text-sky-700" : "text-slate-700"}`}>{a.label}</p>
                   <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{a.who}</p>
                   <p className="mt-1 text-[11px] leading-snug text-slate-500">{a.blurb}</p>
@@ -1059,31 +882,88 @@ function FeedbackTab() {
         </div>
 
         <div>
-          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">In your words</p>
+          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            {messages.length > 0 ? `With ${them.toLowerCase()}` : "In your words"}
+          </p>
+          <div
+            className="max-h-80 space-y-2 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50/60 p-3"
+            data-testid={`portal-feedback-chat-${audience}`}
+          >
+            {messages.length === 0 ? (
+              <p className="py-6 text-center text-xs text-slate-400">
+                Nothing sent to {them.toLowerCase()} yet. Whatever you write below starts it off.
+              </p>
+            ) : messages.map((m) => {
+              const own = m.author === "patient";
+              return (
+                <div key={m.id} className={`flex ${own ? "justify-end" : "justify-start"}`}>
+                  <div className={`max-w-[85%] rounded-lg px-2.5 py-1.5 ${own ? "bg-sky-600 text-white" : "bg-white text-slate-700 shadow-sm"}`}>
+                    <p className="whitespace-pre-wrap break-words text-xs leading-5">{m.body}</p>
+                    <p className={`mt-0.5 text-[10px] ${own ? "text-sky-100" : "text-slate-400"}`}>
+                      {[own ? "You" : them, feedbackSentOn(m.created_at)].filter(Boolean).join(" · ")}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+            <div ref={endRef} />
+          </div>
+        </div>
+
+        {/* Being asked, rather than being told. Whether what they did was enough is the
+            patient's to say — a complaint marked dealt with by the people complained about
+            is how somebody learns not to bother saying anything. */}
+        {asked && (
+          <div className="rounded-lg border border-violet-200 bg-violet-50/70 p-3" data-testid="portal-feedback-asked">
+            <p className="text-[11px] font-semibold text-violet-900">{them} asked: has this sorted it?</p>
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              <Button
+                size="sm"
+                className="h-7 bg-emerald-600 px-2 text-[11px] text-white hover:bg-emerald-700"
+                disabled={sending}
+                onClick={() => send(true)}
+                data-testid="portal-feedback-yes"
+              >
+                Yes, all sorted
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 border-slate-200 px-2 text-[11px]"
+                disabled={sending}
+                onClick={() => send(false)}
+                data-testid="portal-feedback-no"
+              >
+                Not yet
+              </Button>
+            </div>
+            <p className="mt-1 text-[10px] text-violet-700/70">Write a line below first if you want to say why.</p>
+          </div>
+        )}
+
+        <div>
           <textarea
-            rows={5}
-            value={message}
+            rows={4}
+            value={draft}
             maxLength={2000}
-            onChange={(e) => setMessage(e.target.value)}
-            placeholder="Optional — but it is the part a branch can act on."
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder={messages.length > 0 ? "Write back…" : "Optional — but it is the part a branch can act on."}
             className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400"
             data-testid="portal-feedback-message"
           />
-          <p className="mt-1 text-right text-[10px] text-slate-400">{message.length}/2000</p>
+          <p className="mt-1 text-right text-[10px] text-slate-400">{draft.length}/2000</p>
         </div>
 
         <Button
           className="w-full"
-          disabled={sending || !message.trim()}
-          onClick={submit}
+          disabled={sending || !draft.trim()}
+          onClick={() => send(undefined)}
           data-testid="portal-feedback-submit"
         >
           {sending ? "Sending…" : audience === "super_admin" ? "Send to head office" : "Send to my branch"}
         </Button>
       </CardContent>
-      </Card>
-      )}
-    </>
+    </Card>
   );
 }
 
