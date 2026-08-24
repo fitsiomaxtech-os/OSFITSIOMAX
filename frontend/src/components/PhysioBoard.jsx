@@ -1626,33 +1626,64 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
             child defaults to shrink:1 — with a long day list the tab row was squeezed
             shorter than its own text, so the sky underline rode up through the labels and
             "Treatment Days" came out struck through. */}
-        <div className="shrink-0 overflow-x-auto border-b border-slate-200 px-3 py-2 sm:px-5" data-testid="physio-detail-tabs">
-          {/* w-max + mx-auto rather than justify-center: centred while the four fit, but
-              if they ever overflow the row starts at its left edge and scrolls properly.
-              A centred flex row in a scroll container puts its first item off the left
-              with no way to scroll back to it. With the short labels below they fit on a
-              phone, so this is a backstop rather than the normal case. */}
-          <div className="mx-auto flex w-max gap-1">
-            {MODAL_TABS.map((t) => (
-              <button
-                key={t.key}
-                type="button"
-                onClick={() => setTab(t.key)}
-                className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1.5 text-[11px] font-medium transition sm:px-3 sm:py-2 sm:text-xs ${
-                  tab === t.key ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-100"
-                }`}
-                data-testid={`physio-detail-tab-${t.key}`}
-              >
-                <span className="sm:hidden">{t.short}</span>
-                <span className="hidden sm:inline">{t.label}</span>
-                {t.key === "days" && sessions.length > 0 && (
-                  <span className={`text-[10px] font-semibold ${tab === t.key ? "text-white/70" : "text-slate-400"}`}>
-                    {completedSessions.length}/{sessions.length}
-                  </span>
-                )}
-              </button>
-            ))}
+        {/* Tabs down one side, Mark Treatment Complete down the other. The button used to
+            sit at the foot of the Treatment Days list, which meant the one action that
+            closes out a course of treatment was reachable from one tab of three and only
+            after scrolling past every day in it. It reads as what it is up here: an
+            action on this patient, not on the list.
+
+            The scroll lives on the tabs alone rather than on this row. Put it on the row
+            and the button is part of the scrolled content -- it would slide off the right
+            edge on a narrow screen, which is the one place it must not go. */}
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 px-3 py-2 sm:px-5" data-testid="physio-detail-tabs">
+          {/* w-max inside min-w-0 + overflow-x-auto: the tabs keep their natural width and
+              scroll within whatever the button leaves them, rather than being squeezed
+              narrower than their own labels. */}
+          <div className="min-w-0 overflow-x-auto">
+            <div className="flex w-max gap-1">
+              {MODAL_TABS.map((t) => (
+                <button
+                  key={t.key}
+                  type="button"
+                  onClick={() => setTab(t.key)}
+                  className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1.5 text-[11px] font-medium transition sm:px-3 sm:py-2 sm:text-xs ${
+                    tab === t.key ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-100"
+                  }`}
+                  data-testid={`physio-detail-tab-${t.key}`}
+                >
+                  <span className="sm:hidden">{t.short}</span>
+                  <span className="hidden sm:inline">{t.label}</span>
+                  {t.key === "days" && sessions.length > 0 && (
+                    <span className={`text-[10px] font-semibold ${tab === t.key ? "text-white/70" : "text-slate-400"}`}>
+                      {completedSessions.length}/{sessions.length}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
           </div>
+
+          <button
+            type="button"
+            onClick={markComplete}
+            disabled={isComplete || submitting}
+            className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold transition sm:px-3.5 sm:py-2 sm:text-xs ${
+              isComplete
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                : "border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100"
+            }`}
+            data-testid="physio-consultation-complete"
+          >
+            <Check className="h-3.5 w-3.5" />
+            {isComplete ? "Complete" : submitting ? "Marking..." : (
+              // "Mark Treatment Complete" alongside three tabs overruns a phone. Shortened
+              // there rather than allowed to push the tabs into a scroll they don't need.
+              <>
+                <span className="sm:hidden">Mark Done</span>
+                <span className="hidden sm:inline">Mark Treatment Complete</span>
+              </>
+            )}
+          </button>
         </div>
         <div className="flex-1 space-y-5 overflow-y-auto p-4 sm:p-5">
           {tab === "overview" && (
@@ -1956,30 +1987,15 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
               </div>
             )}
 
-            {/* Was the popup's footer bar. "Mark Treatment Complete" is not the per-day
-                Complete above — it calls physioCompleteConsultation and closes out the
-                whole course of treatment, and this popup is the only place a physio can
-                do it, so it moved here rather than going away with the footer. Treatment
-                Days is where it belongs anyway: it is the end of this list. */}
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-3">
+            {/* The note stays; the button that stood beside it has gone up to the tab
+                row. Both sentences describe the per-day Complete buttons in the list
+                above, never the whole-treatment one, so this is where they belong. */}
+            <div className="mt-4 border-t border-slate-200 pt-3">
               <p className="text-[11px] text-slate-500">
                 {activeDate
                   ? "Only the day you opened can be completed — pick another date in the strip to complete that one."
                   : "Completing a day sends that week's session to Review for a weekly write-up."}
               </p>
-              <button
-                type="button"
-                onClick={markComplete}
-                disabled={isComplete || submitting}
-                className={`flex items-center gap-1.5 rounded-lg border px-4 py-2 text-xs font-semibold transition ${
-                  isComplete
-                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                    : "border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100"
-                }`}
-                data-testid="physio-consultation-complete"
-              >
-                <Check className="h-3.5 w-3.5" /> {isComplete ? "Complete" : submitting ? "Marking..." : "Mark Treatment Complete"}
-              </button>
             </div>
           </div>
           )}
