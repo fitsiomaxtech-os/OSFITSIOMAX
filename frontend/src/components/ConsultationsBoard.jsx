@@ -9,6 +9,7 @@ import { StageTabBar } from "@/components/ui/stage-tab";
 import { WhatsAppIcon } from "@/components/ui/whatsapp-icon";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { LeadDocuments } from "@/components/LeadDocuments";
+import { ProgressionTab } from "@/components/ProgressionTab";
 import { LeadMarks } from "@/components/ui/lead-marks";
 import {
   getConsultationsBoard, moveConsultationStage, listStoreItems, collectRehabFee,
@@ -2690,6 +2691,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 { key: "overview", label: "Overview" },
                 { key: "followup", label: "Follow up" },
                 { key: "documents", label: "Documents" },
+                // The four uploads a case sheet closes on, and the only screen that can
+                // verify them: the physio delivering the course gathers the clips, and
+                // checking their own work would make the requirement prove nothing.
+                { key: "progression", label: "Progression" },
                 { key: "timeline", label: "Timeline" },
                 { key: "profile", label: "Profile" },
               ].map((t) => (
@@ -4173,6 +4178,17 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               <LeadDocuments
                 leadId={selectedLead.id}
                 canEdit={["branch_admin", "super_admin", "head_physio"].includes(viewerRole)}
+              />
+            )}
+
+            {/* canVerify carries the same list the backend gates on, so a role that cannot
+                verify is not shown a button that would come back refused. The physio's own
+                page renders this tab with canVerify off for the same reason. */}
+            {detailTab === "progression" && (
+              <ProgressionTab
+                leadId={selectedLead.id}
+                canUpload={["branch_admin", "super_admin", "head_physio"].includes(viewerRole)}
+                canVerify={["branch_admin", "super_admin", "head_physio"].includes(viewerRole)}
               />
             )}
 
