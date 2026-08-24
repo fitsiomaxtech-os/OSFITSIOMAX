@@ -333,11 +333,50 @@ const SearchIconInput = ({ value, onChange, placeholder = "Search...", testid })
 /** A pill tab for switching between departments (and "All Department"). Not built from
  *  SegmentedTabs — that component splits its track evenly across a fixed tab count, which
  *  doesn't fit a list that grows every time someone adds a department. */
+/**
+ * A department or designation as it should read.
+ *
+ * These are entered by hand over months by different people, so the same job arrives as
+ * "CONSULTANT" from one and "Consultant" from another. Shouting one pill among a row of
+ * ordinary ones reads as emphasis nobody meant.
+ *
+ * Only a name that is entirely upper case is touched. Anything with a lower-case letter in
+ * it was written deliberately and is left alone — which is what keeps "HR Admin" from
+ * becoming "Hr Admin", and is the whole reason this is not a blanket title-casing.
+ *
+ * Punctuation is untouched either way, so "BRANCH ADMIN (PHYSIO & FITNESS)" keeps its
+ * brackets and its ampersand.
+ */
+const titleCase = (name) => {
+  const text = String(name || "");
+  if (text !== text.toUpperCase()) return text;
+  return text.replace(/[A-Za-zÀ-ɏ]+/g, (w) => w.charAt(0) + w.slice(1).toLowerCase());
+};
+
+/** The key two spellings of one name share. */
+const nameKey = (name) => String(name || "").trim().toLowerCase().replace(/\s+/g, " ");
+
+/**
+ * One entry per name, whichever case each was typed in.
+ *
+ * Without this the same job is offered twice and each pill filters to half the people who
+ * hold it, which reads as a list that has lost some of them.
+ */
+const dedupeNames = (names) => {
+  const seen = new Set();
+  const out = [];
+  names.filter(Boolean).forEach((n) => {
+    const key = nameKey(n);
+    if (key && !seen.has(key)) { seen.add(key); out.push(n); }
+  });
+  return out.sort((a, b) => titleCase(a).localeCompare(titleCase(b)));
+};
+
 const TabPill = ({ active, onClick, children, testid }) => (
   <button
     type="button"
     onClick={onClick}
-    className={`shrink-0 rounded-full border px-3.5 py-1.5 text-sm font-medium transition ${
+    className={`shrink-0 border px-3.5 py-1.5 text-sm font-medium transition ${
       active ? "border-sky-600 bg-sky-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"
     }`}
     data-testid={testid}
@@ -526,14 +565,16 @@ const EmployeesTab = ({ meta, initialFilter }) => {
       if (configured.length > 0) return configured;
     }
     const pool = department ? employees.filter((e) => (e.department || "Unassigned") === department) : employees;
-    return [...new Set(pool.map((e) => e.designation).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+    return dedupeNames(pool.map((e) => e.designation));
   }, [employees, department, meta.department_designations]);
 
   const filtered = employees.filter((e) => {
     // "Unassigned" is what the Dashboard calls an employee with no department, so it has
     // to match the empty field here or that bar would open an empty list.
     if (department && (e.department || "Unassigned") !== department) return false;
-    if (designation && e.designation !== designation) return false;
+    // Folded, so the one pill standing for a job finds everyone filed under any spelling
+    // of it rather than the half that happen to match its capitals.
+    if (designation && nameKey(e.designation) !== nameKey(designation)) return false;
     if (workType && e.work_type !== workType) return false;
     if (!search) return true;
     const q = search.toLowerCase();
@@ -569,7 +610,7 @@ const EmployeesTab = ({ meta, initialFilter }) => {
         </TabPill>
         {meta.departments.map((d) => (
           <TabPill key={d} active={department === d} onClick={() => { setDepartment(d); setDesignation(""); }} testid={`hr-emp-dept-filter-${d}`}>
-            {d}
+            {titleCase(d)}
           </TabPill>
         ))}
         {hasUnassigned && (
@@ -586,7 +627,7 @@ const EmployeesTab = ({ meta, initialFilter }) => {
         </TabPill>
         {designationOptions.map((d) => (
           <TabPill key={d} active={designation === d} onClick={() => setDesignation(d)} testid={`hr-emp-designation-filter-${d}`}>
-            {d}
+            {titleCase(d)}
           </TabPill>
         ))}
       </div>
@@ -2524,12 +2565,15 @@ const RolesTab = ({ meta, reloadMeta }) => {
   // that would filter the list to nothing.
   const designationOptions = useMemo(() => {
     const pool = deptFilter ? users.filter((u) => u.linked_employee?.department === deptFilter) : users;
-    return [...new Set(pool.map((u) => u.linked_employee?.designation).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+    return dedupeNames(pool.map((u) => u.linked_employee?.designation));
   }, [users, deptFilter]);
 
+  // Matched on the shared key rather than the exact string. One pill now stands for every
+  // spelling of a job, so picking Consultant finds the people filed under CONSULTANT too
+  // — which is what a reader expects of a list that shows the job once.
   const filteredUsers = users.filter((u) => {
-    if (deptFilter && u.linked_employee?.department !== deptFilter) return false;
-    if (designationFilter && u.linked_employee?.designation !== designationFilter) return false;
+    if (deptFilter && nameKey(u.linked_employee?.department) !== nameKey(deptFilter)) return false;
+    if (designationFilter && nameKey(u.linked_employee?.designation) !== nameKey(designationFilter)) return false;
     return true;
   });
 
@@ -2604,7 +2648,7 @@ const RolesTab = ({ meta, reloadMeta }) => {
         </TabPill>
         {meta.departments.map((d) => (
           <TabPill key={d} active={deptFilter === d} onClick={() => selectDept(d)} testid={`hr-roles-dept-filter-${d}`}>
-            {d}
+            {titleCase(d)}
           </TabPill>
         ))}
       </div>
@@ -2614,7 +2658,7 @@ const RolesTab = ({ meta, reloadMeta }) => {
         </TabPill>
         {designationOptions.map((d) => (
           <TabPill key={d} active={designationFilter === d} onClick={() => setDesignationFilter(d)} testid={`hr-roles-designation-filter-${d}`}>
-            {d}
+            {titleCase(d)}
           </TabPill>
         ))}
       </div>
