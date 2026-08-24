@@ -534,6 +534,9 @@ export const recruitmentReorderStages = async (ids) => (await api.post("/recruit
 // ---- Patient feedback (the bell on the branch's header) ----
 // The bell's number is the New column rather than a flag of its own, so what it counts and
 // what the board shows can never disagree.
+// The starred and the flagged, both lists in one request so the cards and the rows they
+// count cannot arrive a moment apart.
+export const getDashboardClients = async (branchId) => (await api.get("/dashboard/clients", { params: branchId ? { branch_id: branchId } : {} })).data;
 export const listBranchFeedback = async (branchId) => (await api.get("/branch/feedback", { params: branchId ? { branch_id: branchId } : {} })).data;
 export const moveBranchFeedback = async (feedbackId, status, reply, note) => (await api.patch(`/branch/feedback/${feedbackId}`, { status, reply, note })).data;
 

@@ -1340,3 +1340,68 @@ async def dashboard_lead_metric_detail(
             for l in rows[:limit]
         ],
     }
+
+# --------------------------------------------------------------- Clients: the two flags a
+# --------------------------------------------------------------- lead can carry
+
+# What the two lists are, and the field behind each. Both are marks somebody put on a lead
+# by hand -- a star for the ones to treat especially well, a flag for the ones something is
+# wrong with -- and neither is derived from a stage. That is the point of them: a lead can
+# be sitting in a perfectly ordinary stage and still be either.
+CLIENT_FLAGS = {
+    "premium": "is_vip",
+    "attention": "needs_attention",
+}
+
+
+@router.get("/dashboard/clients")
+async def dashboard_clients(
+    branch_id: Optional[str] = Query(None),
+    user: V3UserOut = Depends(v3_require_roles("super_admin", "marketing_head")),
+):
+    """The starred and the flagged, with what it takes to act on either.
+
+    One request for both lists rather than one each: they are read side by side, their
+    counts sit on cards above them, and two requests would let the numbers arrive a moment
+    apart from the rows they count.
+
+    Only the fields the table shows are asked for. A lead document carries a hundred of
+    them, and pulling the whole thing across for seven columns is a cost paid on every row
+    of both lists.
+    """
+    query: dict = {"$or": [{"is_vip": True}, {"needs_attention": True}]}
+    if branch_id:
+        query["branch_id"] = branch_id
+
+    rows = await v3_col("leads").find(query, {
+        "_id": 0, "id": 1, "name": 1, "phone": 1, "email": 1, "branch_id": 1,
+        "stage": 1, "branch_stage": 1, "consultation_stage": 1,
+        "assigned_physio_name": 1, "appointment_date": 1, "appointment_time": 1,
+        "is_vip": 1, "needs_attention": 1, "updated_at": 1, "created_at": 1,
+    }).sort("updated_at", -1).to_list(4000)
+
+    branches = await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1}).to_list(500)
+    names = {b["id"]: b.get("branch_name", "") for b in branches}
+
+    def shape(lead: dict) -> dict:
+        return {
+            "id": lead.get("id"),
+            "name": lead.get("name") or "",
+            "phone": lead.get("phone") or "",
+            "email": lead.get("email") or "",
+            # The furthest stage this lead has reached. A patient in treatment is past the
+            # sales pipeline, and printing where they entered it says nothing about them now.
+            "stage": lead.get("consultation_stage") or lead.get("branch_stage") or lead.get("stage") or "",
+            "assigned_physio_name": lead.get("assigned_physio_name") or "",
+            "appointment_date": lead.get("appointment_date") or "",
+            "appointment_time": lead.get("appointment_time") or "",
+            "branch_name": names.get(lead.get("branch_id"), ""),
+            "updated_at": lead.get("updated_at") or lead.get("created_at") or "",
+        }
+
+    # A lead can carry both marks at once, and belongs on both lists when it does: a VIP
+    # something is wrong with is exactly the row somebody wants to find under either.
+    return {
+        "premium": [shape(l) for l in rows if l.get("is_vip")],
+        "attention": [shape(l) for l in rows if l.get("needs_attention")],
+    }

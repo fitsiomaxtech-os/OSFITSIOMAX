@@ -2,15 +2,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Users, CalendarCheck, Activity, IndianRupee, X, RefreshCw,
   Megaphone, Headphones, BarChart3, Wallet, Stethoscope, ShoppingBag, Salad, Clock,
-  AlertCircle, CalendarClock, CheckCircle2, XCircle,
+  AlertCircle, CalendarClock, CheckCircle2, XCircle, Star, AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { StatTile } from "@/components/ui/stat-tile";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { SegmentedTabs } from "@/components/ui/segmented-tabs";
 import { toast } from "@/components/ui/sonner";
-import { getDashboardOverview, getDashboardLeadsTrend, getLeadsAnalytics, getRevenueOverview, mkGetTeam } from "@/lib/api";
+import { getDashboardOverview, getDashboardLeadsTrend, getLeadsAnalytics, getRevenueOverview, mkGetTeam, getDashboardClients } from "@/lib/api";
 import { TeamCard } from "@/components/marketing/TeamCard";
 import { LeadsAnalyticsDashboard } from "@/components/marketing/LeadsAnalyticsDashboard";
 
@@ -25,7 +26,33 @@ const DASH_TABS = [
   { key: "sales", label: "Sales", icon: Headphones },
   { key: "revenue", label: "Revenue", icon: IndianRupee },
   { key: "team", label: "Team", icon: Users },
+  // After Team, because it is the same kind of question one rung in: Team is who works
+  // here, this is who they are working on and which of them cannot be left to the ordinary
+  // run of the pipeline.
+  { key: "clients", label: "Clients", icon: Star },
   { key: "analytics", label: "Analytics", icon: BarChart3 },
+];
+
+// The two marks a lead can carry, in the words the board uses for them. Both are put on by
+// hand and neither follows from a stage, which is exactly why they are worth a tab: a lead
+// sitting in a perfectly ordinary stage can be either.
+const CLIENT_VIEWS = [
+  {
+    key: "premium",
+    label: "Premium (VIP Client)",
+    icon: Star,
+    color: "#d97706",
+    sub: "starred to be treated especially well",
+    empty: "Nobody is starred yet. Star a client from their lead to bring them here.",
+  },
+  {
+    key: "attention",
+    label: "Need Attention",
+    icon: AlertTriangle,
+    color: "#dc2626",
+    sub: "flagged as needing looking at",
+    empty: "Nothing is flagged. Flag a client from their lead when something needs looking at.",
+  },
 ];
 
 const TEAM_PANELS = {
@@ -471,9 +498,158 @@ export const DashboardBoard = () => {
         <RevenueTab data={data} loading={loading} dateFilter={dateFilter} />
       ) : activeTab === "team" ? (
         <TeamTab team={team} loading={teamLoading} branches={branches} />
+      ) : activeTab === "clients" ? (
+        <ClientsTab />
       ) : (
         <AnalyticsTab data={data} dateFilter={dateFilter} />
       )}
+    </div>
+  );
+};
+
+/** "21 Aug 2026" off a stored date or timestamp; a dash rather than "Invalid Date". */
+const shortDate = (value) => {
+  if (!value) return "—";
+  const d = new Date(String(value).length <= 10 ? `${value}T00:00:00` : value);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+};
+
+/**
+ * Dashboard > Clients — the two lists that are not a stage.
+ *
+ * Every other tab on this board reads a pipeline: how many arrived, how many booked, what
+ * they were worth. These two are the leads somebody has marked by hand, and they cut across
+ * all of it -- a starred client can be anywhere in the pipeline, and so can one something is
+ * wrong with. That is why they are worth their own tab rather than a filter on somebody
+ * else's list.
+ *
+ * A lead carrying both marks appears on both lists, because it is the row somebody wants to
+ * find under either.
+ */
+const ClientsTab = () => {
+  const [view, setView] = useState("premium");
+  const [data, setData] = useState({ premium: [], attention: [] });
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    let live = true;
+    setLoading(true);
+    getDashboardClients()
+      .then((res) => { if (live) setData({ premium: res?.premium || [], attention: res?.attention || [] }); })
+      .catch(() => { if (live) setData({ premium: [], attention: [] }); })
+      .finally(() => { if (live) setLoading(false); });
+    return () => { live = false; };
+  }, []);
+
+  const current = CLIENT_VIEWS.find((v) => v.key === view) || CLIENT_VIEWS[0];
+  const rows = data[view] || [];
+  const q = search.trim().toLowerCase();
+  const visible = q
+    ? rows.filter((r) => `${r.name} ${r.phone} ${r.email}`.toLowerCase().includes(q))
+    : rows;
+
+  return (
+    <div className="space-y-4" data-testid="dashboard-clients">
+      {/* The two counts as cards, and each one opens its own list -- a figure you cannot
+          open is a figure somebody has to take on trust. */}
+      <div className="grid grid-cols-2 gap-3">
+        {CLIENT_VIEWS.map((v) => (
+          <StatTile
+            key={v.key}
+            label={v.label}
+            value={(data[v.key] || []).length}
+            sub={v.sub}
+            icon={v.icon}
+            color={v.color}
+            active={view === v.key}
+            onClick={() => setView(v.key)}
+            testid={`dashboard-clients-card-${v.key}`}
+          />
+        ))}
+      </div>
+
+      <div className="rounded-xl border border-slate-200 bg-white">
+        <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 p-3">
+          <p className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+            <current.icon className="h-4 w-4" style={{ color: current.color }} />
+            {current.label}
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">{visible.length}</span>
+          </p>
+          <div className="relative ml-auto min-w-0 flex-1 sm:max-w-xs">
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search name, phone or email..."
+              className="h-9"
+              data-testid="dashboard-clients-search"
+            />
+          </div>
+        </div>
+
+        {loading ? (
+          <p className="px-4 py-12 text-center text-sm text-slate-400">Loading…</p>
+        ) : visible.length === 0 ? (
+          <p className="px-4 py-12 text-center text-sm text-slate-400" data-testid="dashboard-clients-empty">
+            {rows.length === 0 ? current.empty : "Nobody matches that search."}
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[64rem] table-fixed text-left text-sm">
+              <thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                <tr>
+                  <th className="w-[4%] px-3 py-2.5">S.No</th>
+                  <th className="w-[18%] px-3 py-2.5">Name</th>
+                  <th className="w-[12%] px-3 py-2.5">Phone Number</th>
+                  <th className="w-[18%] px-3 py-2.5">Mail</th>
+                  <th className="w-[14%] px-3 py-2.5">Stage</th>
+                  <th className="w-[14%] px-3 py-2.5">Assigned Physio</th>
+                  <th className="w-[10%] px-3 py-2.5">Appointment</th>
+                  <th className="w-[10%] px-3 py-2.5">Last Updated</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {visible.map((r, i) => (
+                  <tr key={r.id} className="align-top hover:bg-slate-50/60" data-testid={`dashboard-client-${r.id}`}>
+                    <td className="px-3 py-3 text-xs leading-5 text-slate-400">{i + 1}</td>
+                    <td className="px-3 py-3">
+                      <div className="flex flex-col items-start gap-0.5">
+                        <p className="max-w-full truncate text-sm font-semibold leading-5 text-slate-800" title={r.name}>{r.name || "—"}</p>
+                        {/* Which branch they belong to, under the name: these lists run
+                            across every branch, so a row without one is a row somebody has
+                            to go looking for. */}
+                        {r.branch_name ? <p className="max-w-full truncate text-[11px] leading-4 text-slate-400">{r.branch_name}</p> : null}
+                      </div>
+                    </td>
+                    <td className="px-3 py-3 text-xs leading-5 text-slate-600">{r.phone || "—"}</td>
+                    <td className="px-3 py-3 text-xs leading-5 text-slate-600">
+                      <span className="block max-w-full truncate" title={r.email || ""}>{r.email || "—"}</span>
+                    </td>
+                    <td className="px-3 py-3">
+                      {r.stage ? (
+                        <span className="inline-block max-w-full truncate whitespace-nowrap rounded bg-slate-100 px-2 py-0.5 text-[10px] font-semibold leading-4 text-slate-600" title={r.stage}>
+                          {r.stage}
+                        </span>
+                      ) : <span className="text-xs leading-5 text-slate-300">—</span>}
+                    </td>
+                    <td className="px-3 py-3 text-xs leading-5 text-slate-600">
+                      <span className="block max-w-full truncate" title={r.assigned_physio_name || ""}>{r.assigned_physio_name || "—"}</span>
+                    </td>
+                    <td className="px-3 py-3">
+                      <div className="flex flex-col items-start gap-0.5">
+                        <p className="text-xs leading-5 text-slate-600">{r.appointment_date ? shortDate(r.appointment_date) : "—"}</p>
+                        {r.appointment_time ? <p className="text-[10px] leading-4 text-slate-400">{r.appointment_time}</p> : null}
+                      </div>
+                    </td>
+                    <td className="px-3 py-3 text-xs leading-5 text-slate-500">{r.updated_at ? shortDate(r.updated_at) : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
