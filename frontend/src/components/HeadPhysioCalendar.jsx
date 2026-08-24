@@ -88,8 +88,10 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
   // slot-type vocabulary and the per-slot capacity control; only the Head Physio's
   // one-per-lead consultation flow differs.
   const isRecurring = isPhysio || isCoach || isRehab;
-  const roleLabel = isCoach ? "Nutritionist" : isRehab ? "Rehab Therapist" : isPhysio ? "Physio" : "CONSULTANT";
-  const roleLabelPlural = isCoach ? "Nutritionists" : isRehab ? "Rehab Therapists" : isPhysio ? "Physios" : "CONSULTANTS";
+  // Physiotherapist, not Physio: the tab above this panel says Physiotherapist Calendar,
+  // and the shorthand only ever came from the slug.
+  const roleLabel = isCoach ? "Nutritionist" : isRehab ? "Rehab Therapist" : isPhysio ? "Physiotherapist" : "CONSULTANT";
+  const roleLabelPlural = isCoach ? "Nutritionists" : isRehab ? "Rehab Therapists" : isPhysio ? "Physiotherapists" : "CONSULTANTS";
   const SLOT_TYPES = isRecurring ? SESSION_TYPES : CONSULTATION_TYPES;
   // The three calendars schedule different things and must not be read as interchangeable:
   // a Head Physio's day holds consultations (booked from Branch Leads → Appointment);
@@ -595,7 +597,7 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
                   <p className="truncate text-[10px] text-slate-400">
                     {doc.shift_name
                       ? `${doc.shift_name} · ${to12h(doc.shift_start)} – ${to12h(doc.shift_end)}`
-                      : doc.service_type || doc.specialization || "Physiotherapist"}
+                      : doc.service_type || doc.specialization || roleLabel}
                   </p>
                 </div>
                 <div className="flex shrink-0 flex-col items-end">
