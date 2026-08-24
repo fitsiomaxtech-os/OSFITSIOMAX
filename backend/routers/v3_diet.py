@@ -88,6 +88,32 @@ async def _resolve_coach(user: V3UserOut, coach_id: Optional[str] = None) -> Opt
     return doctor
 
 
+async def _coach_branch_ids(coach: dict) -> list:
+    """Every branch this coach covers, or an empty list meaning all of them.
+
+    Read off the user rather than off the doctors record they were resolved through. A
+    coach who covers several branches holds one `doctors` row per branch, and
+    _resolve_coach returns whichever one it found first — so that row's branch_id is one
+    of their branches arbitrarily, not the set of them. Filtering a queue on it showed an
+    all-branches Nutritionist a single branch, and not reliably the same one.
+
+    Empty means unrestricted, which is what a Nutritionist covering everything carries: no
+    branch_ids to narrow by, so nothing is narrowed.
+    """
+    user_id = coach.get("user_id")
+    if user_id:
+        u = await v3_col("users").find_one({"id": user_id}, {"_id": 0, "branch_ids": 1, "branch_id": 1})
+        if u:
+            ids = [b for b in (u.get("branch_ids") or []) if b]
+            if ids:
+                return ids
+            # Older accounts predate branch_ids and carry the single field only.
+            if u.get("branch_id"):
+                return [u["branch_id"]]
+            return []
+    return [coach["branch_id"]] if coach.get("branch_id") else []
+
+
 # ============ Branch Admin: staffing ============
 
 class CreateCoachInput(BaseModel):
@@ -475,6 +501,10 @@ async def diet_consultations(coach_id: Optional[str] = None, user: V3UserOut = D
     the coach it would be worse: a new referral belongs to nobody yet, so it would be
     invisible to everybody and there would be no way to pick one up.
 
+    The branch half is every branch the coach covers, not the one branch of whichever
+    doctors row they were resolved through — a Nutritionist here covers all of them, and
+    that row names only one.
+
     Already-assigned patients stay in the list rather than disappearing, marked as such.
     A coach needs to see who they have seen as well as who is waiting, and a queue that
     empties itself gives no way to check the day's work.
@@ -493,8 +523,9 @@ async def diet_consultations(coach_id: Optional[str] = None, user: V3UserOut = D
             {"diet_coach_id": {"$exists": False}},
         ],
     }
-    if coach.get("branch_id"):
-        query["branch_id"] = coach["branch_id"]
+    branch_ids = await _coach_branch_ids(coach)
+    if branch_ids:
+        query["branch_id"] = {"$in": branch_ids}
     leads = await v3_col("leads").find(query, {"_id": 0}).sort("updated_at", -1).to_list(500)
 
     lead_ids = [l["id"] for l in leads]
