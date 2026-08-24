@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Eye, Wallet, Stethoscope, Activity, ShoppingBag, Salad, RefreshCw, CalendarDays, X, Music2, HeartPulse } from "lucide-react";
+import { Eye, Wallet, Stethoscope, Activity, ShoppingBag, Salad, RefreshCw, CalendarDays, X, Music2, HeartPulse, Dumbbell } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { StatTile } from "@/components/ui/stat-tile";
@@ -65,6 +65,11 @@ const REVENUE_VIEWS = [
   // Real now that a rehab fee can be collected: rehab_fee_collected is its own revenue
   // category, so these transactions arrive carrying source "rehab".
   { key: "rehab", label: "Rehab Revenue", color: "#0891b2", icon: HeartPulse },
+  // Gym memberships, reaching this row the same way Zumba's do: v3_fitness.py keeps the
+  // fee on the registration, so it arrives as a transaction carrying source "fitness"
+  // rather than through the leads' fee trail. Until it was counted, this was the one desk
+  // taking money that never appeared on the page an accountant reads.
+  { key: "fitness", label: "Fitness Revenue", color: "#65a30d", icon: Dumbbell },
 ];
 
 // What the server calls money it cannot put under a branch -- see _branch_label in
@@ -236,8 +241,8 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
   // Every card's figure and the count under it, from one pass over whichever set the
   // filters above left standing.
   const sums = useMemo(() => {
-    const totals = { collected: 0, consultation: 0, session: 0, diet: 0, store: 0, zumba: 0, rehab: 0 };
-    const counts = { collected: 0, consultation: 0, session: 0, diet: 0, store: 0, zumba: 0, rehab: 0 };
+    const totals = { collected: 0, consultation: 0, session: 0, diet: 0, store: 0, zumba: 0, rehab: 0, fitness: 0 };
+    const counts = { collected: 0, consultation: 0, session: 0, diet: 0, store: 0, zumba: 0, rehab: 0, fitness: 0 };
     filteredTxns.forEach((t) => {
       const amt = Number(t.gross) || 0;
       totals.collected += amt;
@@ -262,7 +267,7 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
     const acc = new Map();
     filteredTxns.forEach((t) => {
       const name = t.branch_name || UNPLACED[0];
-      const row = acc.get(name) || { name, total: 0, consultation: 0, session: 0, diet: 0, store: 0, zumba: 0, rehab: 0 };
+      const row = acc.get(name) || { name, total: 0, consultation: 0, session: 0, diet: 0, store: 0, zumba: 0, rehab: 0, fitness: 0 };
       const amt = Number(t.gross) || 0;
       row.total += amt;
       if (row[t.source] !== undefined) row[t.source] += amt;
@@ -412,7 +417,7 @@ export const AccountantManageTab = ({ branchId: fixedBranchId, mode }) => {
                 key={v.key}
                 label={v.label}
                 value={fmt(sums.totals[v.key])}
-                sub={countLabel(sums.counts[v.key], v.key === "store" ? "sale" : v.key === "zumba" ? "registration" : "payment")}
+                sub={countLabel(sums.counts[v.key], v.key === "store" ? "sale" : (v.key === "zumba" || v.key === "fitness") ? "registration" : "payment")}
                 icon={v.icon}
                 color={v.color}
                 active={revenueView === v.key}

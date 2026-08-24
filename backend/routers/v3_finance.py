@@ -239,6 +239,11 @@ async def approve_transaction(
     if res.matched_count == 0:
         res = await v3_col("zumba_registrations").update_one({"id": activity_id}, {"$set": update})
     if res.matched_count == 0:
+        # Fitness keeps its money on the registration exactly as Zumba does, so a gym fee
+        # reaches the approvals list from its own collection and has to be signed off in
+        # it. Without this line the row appears with a button that 404s.
+        res = await v3_col("fitness_registrations").update_one({"id": activity_id}, {"$set": update})
+    if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Transaction not found")
     return {"message": "Approved"}
 
@@ -249,7 +254,8 @@ async def unapprove_transaction(
     user: V3UserOut = Depends(v3_require_roles("super_admin", "accountant")),
 ):
     """Undoes an approval taken by mistake. Clears who/when/confirmation rather than
-    leaving them on a row that is, again, unreviewed. Same two-collection try as approve."""
+    leaving them on a row that is, again, unreviewed. Same collections as approve, tried in
+    the same order."""
     unset = {"approved_by": "", "approved_at": "", "approval_confirmed_amount": "", "approval_transaction_ref": "", "approval_cheque_number": ""}
     update = {"$set": {"approved": False}, "$unset": unset}
     res = await v3_col("lead_activity").update_one({"id": activity_id}, update)
@@ -257,6 +263,8 @@ async def unapprove_transaction(
         res = await v3_col("inventory_movements").update_one({"id": activity_id}, update)
     if res.matched_count == 0:
         res = await v3_col("zumba_registrations").update_one({"id": activity_id}, update)
+    if res.matched_count == 0:
+        res = await v3_col("fitness_registrations").update_one({"id": activity_id}, update)
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Transaction not found")
     return {"message": "Approval removed"}
@@ -424,6 +432,53 @@ async def finance_approvals(
                 "branch_id": bid,
                 "branch_name": branch_map.get(bid, {}).get("branch_name", ""),
                 "category": "zumba",
+                "amount": amount,
+                "payment_mode": pm,
+                "collected_by": reg.get("created_by", ""),
+                "collected_at": reg.get("created_at", ""),
+                "approved": is_approved,
+                "approved_by": reg.get("approved_by") or "",
+                "approved_at": reg.get("approved_at") or "",
+            })
+
+    # Gym memberships, on the same footing as the class fees above: v3_fitness.py keeps the
+    # money on the registration, so this tab — which reads the lead activity trail and store
+    # sales — never saw a rupee of it. Same consequence as Zumba had: counted in the Total
+    # and present in no approval queue, so nobody could sign it off or query it.
+    if category in (None, "", "all", "fitness"):
+        fitness_query = {}
+        if branch_id:
+            fitness_query["branch_id"] = branch_id
+        if date_query:
+            fitness_query["created_at"] = date_query
+        regs = await v3_col("fitness_registrations").find(fitness_query, {"_id": 0}).to_list(5000)
+        for reg in regs:
+            bid = reg.get("branch_id")
+            if mode_branch_ids is not None and bid not in mode_branch_ids:
+                continue
+            # fee_paid, not fee_amount, and nothing to review when it is zero: a
+            # membership with no money on it yet is the Fitness tab's business, not
+            # this one's. Same rule revenue_overview counts by.
+            amount = float(reg.get("fee_paid") or 0)
+            if amount <= 0:
+                continue
+            is_approved = bool(reg.get("approved"))
+            if approved is not None and is_approved != approved:
+                continue
+            pm = reg.get("payment_mode") or "unknown"
+            if payment_mode and payment_mode not in ("all", "") and pm != payment_mode:
+                continue
+            rows.append({
+                "id": reg.get("id", ""),
+                # No lead behind a membership -- the member is a registration, not a
+                # patient -- so this stays empty rather than faked, the same way a
+                # counter sale's does.
+                "lead_id": "",
+                "patient_name": (reg.get("name") or "").strip() or "Fitness registration",
+                "patient_phone": reg.get("phone") or "",
+                "branch_id": bid,
+                "branch_name": branch_map.get(bid, {}).get("branch_name", ""),
+                "category": "fitness",
                 "amount": amount,
                 "payment_mode": pm,
                 "collected_by": reg.get("created_by", ""),
@@ -797,7 +852,7 @@ def _lead_session_summary(lead: dict) -> dict:
 def _empty_day(day: str) -> dict:
     """One day's revenue row, with every line seeded. Both loops that build these use it,
     so a row can never be missing the key the other loop is about to add to."""
-    return {"date": day, "consultation": 0.0, "session": 0.0, "diet": 0.0, "store": 0.0, "zumba": 0.0, "rehab": 0.0}
+    return {"date": day, "consultation": 0.0, "session": 0.0, "diet": 0.0, "store": 0.0, "zumba": 0.0, "rehab": 0.0, "fitness": 0.0}
 
 
 def _branch_label(bid, names: dict) -> str:
@@ -820,7 +875,7 @@ def _empty_branch(bid, bname: str) -> dict:
     return {
         "branch_id": bid, "branch_name": bname,
         "consultation_total": 0.0, "session_total": 0.0, "diet_total": 0.0, "store_total": 0.0,
-        "zumba_total": 0.0, "rehab_total": 0.0,
+        "zumba_total": 0.0, "rehab_total": 0.0, "fitness_total": 0.0,
     }
 
 
@@ -1110,12 +1165,78 @@ async def revenue_overview(
             "approved_at": reg.get("approved_at") or "",
         })
 
-    total_collected = consultation_total + session_total + diet_total + store_total + zumba_total + rehab_total
+    # Gym memberships, on exactly the terms Zumba's are above: v3_fitness.py keeps the
+    # money on the registration because a membership is a flat fee with no package or
+    # installments behind it, so there is no lead-fee trail for this loop to have found it
+    # in. It was the one desk taking money that never reached this page — collected at the
+    # branch, counted by the Fitness tab, and invisible to every figure an accountant looks
+    # at.
+    #
+    # fee_paid, never fee_amount, like every other figure on this payload: what was agreed
+    # is not what is in the drawer.
+    fitness_query = {}
+    if branch_id:
+        fitness_query["branch_id"] = branch_id
+    if date_query:
+        fitness_query["created_at"] = date_query
+    fitness_rows = await v3_col("fitness_registrations").find(fitness_query, {"_id": 0}).sort("created_at", -1).to_list(5000)
+    if vertical_mode in ("online", "offline"):
+        fitness_rows = [f for f in fitness_rows if (f.get("branch_id") in online_branch_ids) == (vertical_mode == "online")]
+
+    fitness_total = 0.0
+    for reg in fitness_rows:
+        amount = float(reg.get("fee_paid") or 0)
+        if amount <= 0:
+            continue  # signed up but not paid — the Fitness tab's question, not revenue's
+        fitness_total += amount
+        bid = reg.get("branch_id")
+        bname = _branch_label(bid, branch_name_map)
+        day = (reg.get("created_at") or "")[:10]
+        # Read off the record rather than hardcoded, so the Cash/UPI/Card pills can match
+        # it — the mistake Zumba's loop above had to be corrected for.
+        mode = reg.get("payment_mode") or "unknown"
+
+        d = by_day.setdefault(day, _empty_day(day))
+        d["fitness"] = d.get("fitness", 0.0) + amount
+
+        b = by_branch_acc.setdefault(bid or "unknown", _empty_branch(bid, bname))
+        b["fitness_total"] = b.get("fitness_total", 0.0) + amount
+
+        payment_modes[mode] = payment_modes.get(mode, 0.0) + amount
+
+        transactions.append({
+            "id": reg.get("id", ""),
+            "transaction_id": "",
+            "date": reg.get("created_at", ""),
+            "branch_name": bname,
+            "source": "fitness",
+            "gross": amount,
+            # A membership is a flat price, so there is no listed-versus-collected gap to
+            # discount against. Carried anyway so every row in this list is one shape.
+            "discount": 0.0,
+            "original_amount": None,
+            "discount_reason": None,
+            "tax": 0.0,
+            "net": amount,
+            "collected_by": reg.get("created_by", ""),
+            # No lead behind a gym member, same as a counter sale — left empty rather than
+            # faked, so the client-history eye skips these instead of opening on nothing.
+            "lead_id": "",
+            "client_name": (reg.get("name") or "").strip() or "Fitness registration",
+            "phone": reg.get("phone", ""),
+            "payment_mode": mode,
+            "client_balance": max(float(reg.get("fee_amount") or 0) - amount, 0.0),
+            "approved": bool(reg.get("approved")),
+            "approved_by": reg.get("approved_by") or "",
+            "approved_at": reg.get("approved_at") or "",
+        })
+
+    total_collected = consultation_total + session_total + diet_total + store_total + zumba_total + rehab_total + fitness_total
     trend = sorted(by_day.values(), key=lambda r: r["date"])
     for r in trend:
-        r["total"] = r["consultation"] + r["session"] + r["diet"] + r["store"] + r.get("zumba", 0.0) + r.get("rehab", 0.0)
+        r["total"] = r["consultation"] + r["session"] + r["diet"] + r["store"] + r.get("zumba", 0.0) + r.get("rehab", 0.0) + r.get("fitness", 0.0)
     for r in by_branch_acc.values():
-        r["total_revenue"] = r["consultation_total"] + r["session_total"] + r["diet_total"] + r["store_total"] + r.get("zumba_total", 0.0) + r.get("rehab_total", 0.0)
+        r["total_revenue"] = r["consultation_total"] + r["session_total"] + r["diet_total"] + r["store_total"] + r.get("zumba_total", 0.0) + r.get("rehab_total", 0.0) + r.get("fitness_total", 0.0)
     by_branch = sorted(by_branch_acc.values(), key=lambda r: -r["total_revenue"])
 
     untouched_stages = {None} | await entry_branch_stage_names()
@@ -1201,11 +1322,13 @@ async def revenue_overview(
             "store_revenue": store_total,
             "zumba_revenue": zumba_total,
             "rehab_revenue": rehab_total,
+            "fitness_revenue": fitness_total,
             "consultation_pct": round(consultation_total / total_collected * 100, 1) if total_collected else 0,
             "session_pct": round(session_total / total_collected * 100, 1) if total_collected else 0,
             "diet_pct": round(diet_total / total_collected * 100, 1) if total_collected else 0,
             "store_pct": round(store_total / total_collected * 100, 1) if total_collected else 0,
             "zumba_pct": round(zumba_total / total_collected * 100, 1) if total_collected else 0,
+            "fitness_pct": round(fitness_total / total_collected * 100, 1) if total_collected else 0,
             "rehab_pct": round(rehab_total / total_collected * 100, 1) if total_collected else 0,
         },
         "trend": trend,
