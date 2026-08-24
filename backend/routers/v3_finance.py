@@ -113,7 +113,12 @@ async def get_branch_finance(
     # otherwise count in the cards above and never appear as a row below.
     activity_query = {"action": {"$in": ["consultation_paid", "package_payment_collected", "package_sold"]}}
     lead_ids = [l["id"] for l in all_branch_leads]
-    if lead_ids:
+    # Applied whenever a branch or a mode was asked for, empty list included. Guarding this
+    # on "if lead_ids" dropped the filter for a scope with nobody in it instead of matching
+    # nothing -- so a branch with no leads reported every payment in the company as its own.
+    # The guard existed to skip a needless $in over every lead when nothing was scoped,
+    # which is the one case it should still skip.
+    if base_query:
         activity_query["lead_id"] = {"$in": lead_ids}
 
     activities = await v3_col("lead_activity").find(activity_query, {"_id": 0}).sort("created_at", -1).to_list(2000)
@@ -489,7 +494,8 @@ async def finance_profit(
     lead_ids = [l["id"] for l in leads]
 
     activity_query = {"action": {"$in": REVENUE_ACTIONS}}
-    if lead_ids:
+    # See get_branch_finance above: scoped means scoped, even to nobody.
+    if lead_query:
         activity_query["lead_id"] = {"$in": lead_ids}
     date_query = {}
     if start_date:
@@ -789,7 +795,8 @@ async def revenue_overview(
     online_branch_ids = {b["id"] for b in branch_docs if _is_online_vertical(b.get("vertical"))}
 
     activity_query = {"action": {"$in": REVENUE_ACTIONS}}
-    if lead_ids:
+    # See get_branch_finance above: scoped means scoped, even to nobody.
+    if lead_query:
         activity_query["lead_id"] = {"$in": lead_ids}
     date_query = {}
     if start_date:
