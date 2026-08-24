@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Users, ShieldCheck, BarChart3, Plus, Pencil, Trash2, Eye, EyeOff, KeyRound, X, UserPlus, MoreVertical, CheckCircle2, XCircle, AlertOctagon, CalendarOff, ChevronDown, ChevronUp, GripVertical, Search, Camera, ImageOff, Download, Network } from "lucide-react";
+import { Users, ShieldCheck, BarChart3, Plus, Pencil, Trash2, Eye, EyeOff, KeyRound, X, UserPlus, MoreVertical, Check, CheckCircle2, XCircle, AlertOctagon, CalendarOff, ChevronDown, ChevronUp, GripVertical, Search, Camera, ImageOff, Download, Network } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1195,7 +1195,7 @@ const RoleFilterDropdown = ({ value, options, onChange }) => {
  * place: white card, slate text, a grey wash on hover, and the current choice marked by
  * weight and a tick rather than by hue.
  */
-const PickerModal = ({ title, value, options, onPick, onClose, searchable = false, searchPlaceholder = "Search..." }) => {
+const PickerModal = ({ title, value, options, onPick, onClose, searchable = false, searchPlaceholder = "Search...", checkbox = false }) => {
   // Opt-in, because most of these lists are five or six rows and a search box over six
   // rows is furniture. The employee list is seventy-odd and unusable without one.
   const [query, setQuery] = useState("");
@@ -1252,13 +1252,23 @@ const PickerModal = ({ title, value, options, onPick, onClose, searchable = fals
                 key={o.value || "none"}
                 type="button"
                 onClick={() => onPick(o.value)}
-                className={`flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left text-sm transition hover:bg-slate-100 ${
+                className={`flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm transition hover:bg-slate-100 ${
                   on ? "font-bold text-slate-900" : "text-slate-600"
                 }`}
                 data-testid={`hr-branch-picker-option-${o.value || "none"}`}
               >
-                <span className="truncate">{o.label}</span>
-                {on && <CheckCircle2 className="h-4 w-4 shrink-0 text-slate-500" />}
+                {/* A box, but one answer at a time — a list where two could be ticked would
+                    be promising something the field behind it cannot hold. */}
+                {checkbox && (
+                  <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${on ? "border-slate-700 bg-slate-700" : "border-slate-300 bg-white"}`}>
+                    {on && <Check className="h-3 w-3 text-white" />}
+                  </span>
+                )}
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate">{o.label}</span>
+                  {o.hint && <span className="block truncate text-[11px] font-normal text-slate-400">{o.hint}</span>}
+                </span>
+                {!checkbox && on && <CheckCircle2 className="h-4 w-4 shrink-0 text-slate-500" />}
               </button>
             );
           })}
@@ -3105,11 +3115,12 @@ const BranchSelectDropdown = ({ value, branches, onChange }) => {
           title="Select branch"
           value={value || ""}
           options={[
-            { value: "", label: "No branch" },
+            { value: "", label: "No branch", hint: "Not tied to a branch" },
             ...branches.map((b) => ({ value: b.id, label: b.branch_name })),
           ]}
           onPick={(v) => { setOpen(false); onChange(v); }}
           onClose={() => setOpen(false)}
+          checkbox
         />
       )}
     </>
@@ -3248,6 +3259,26 @@ const CreateUserModal = ({ meta, reloadMeta, onClose, onSaved }) => {
         {isMultiBranchRole ? (
           <Field label={`Branches (${roleLabelForMulti} can cover more than one)`}>
             <div className="space-y-1.5 rounded-md border border-slate-200 p-2" data-testid="hr-create-user-branch-ids">
+              {/* All Branches, said out loud.
+                  Covering everything has always been how this OS stores it — an org-wide
+                  role holding no branches — but the only way to reach it was to leave every
+                  box unticked and know that meant "all" rather than "none unset yet". The
+                  table two clicks away has been printing "All branches" for exactly that
+                  state all along, so the two now use one word for one thing.
+                  Ticking it clears the individual picks, because "all" and "these three"
+                  cannot both be true and leaving stale ticks underneath would suggest they
+                  were. */}
+              {BRANCHLESS_OK_ROLES.has(form.role) && (
+                <label className="flex items-center gap-2 rounded px-1.5 py-1 text-sm font-semibold text-sky-700 hover:bg-sky-50" data-testid="hr-create-user-branch-all-label">
+                  <input
+                    type="checkbox"
+                    checked={form.branch_ids.length === 0}
+                    onChange={(e) => { if (e.target.checked) setForm({ ...form, branch_ids: [] }); }}
+                    data-testid="hr-create-user-branch-all"
+                  />
+                  All Branches
+                </label>
+              )}
               {branches.map((b) => {
                 const checked = form.branch_ids.includes(b.id);
                 return (
