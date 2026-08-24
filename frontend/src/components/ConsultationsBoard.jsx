@@ -3237,17 +3237,26 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                   </div>
                   {/* The fee first and the nutritionist after it, because that is the order
                       the backend enforces — assign-diet refuses an unpaid patient, so
-                      offering assignment first would be offering a dead end. */}
+                      offering assignment first would be offering a dead end.
+
+                      Once it is collected the fee button goes rather than turning into
+                      "Update Diet Fee". Collecting is a step in that sequence and it is
+                      done; what is left on this card is the appointment. The compact Diet
+                      button above has always worked this way — it moves on to Assign and
+                      then Reschedule — so this card was the one place still offering to
+                      reopen a settled fee, next to a badge saying it was collected. */}
                   <div className="mt-3 flex flex-wrap items-center gap-2 [&>*]:shrink-0">
-                    <Button
-                      size="sm"
-                      className={`${dietFeePaid ? "bg-white text-orange-700 shadow-sm ring-1 ring-orange-200 hover:bg-orange-50" : "bg-orange-500 text-white shadow-sm hover:bg-orange-600"} ${ACT_BTN}`}
-                      onClick={openDietFeeDraft}
-                      data-testid="cons-diet-detail-fee"
-                    >
-                      <IndianRupee className="mr-1 h-3.5 w-3.5" />
-                      {dietFeePaid ? "Update Diet Fee" : "Collect Diet Fee"}
-                    </Button>
+                    {!dietFeePaid && (
+                      <Button
+                        size="sm"
+                        className={`bg-orange-500 text-white shadow-sm hover:bg-orange-600 ${ACT_BTN}`}
+                        onClick={openDietFeeDraft}
+                        data-testid="cons-diet-detail-fee"
+                      >
+                        <IndianRupee className="mr-1 h-3.5 w-3.5" />
+                        Collect Diet Fee
+                      </Button>
+                    )}
                     <Button
                       size="sm"
                       disabled={!dietFeePaid}
