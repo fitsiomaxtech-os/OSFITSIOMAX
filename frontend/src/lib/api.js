@@ -261,6 +261,12 @@ export const uploadLeadDocument = async (leadId, file, label = "", kind = "gener
   // naming the header strips it and the request arrives unparseable.
   return (await api.post(`/leads/${leadId}/documents`, body)).data;
 };
+// Progression — the four things a case sheet cannot close without, and the check on them.
+// Verifying is deliberately a different endpoint from uploading: the physio gathers the
+// clips, the branch or the consultant confirms them.
+export const leadProgression = async (leadId) => (await api.get(`/leads/${leadId}/progression`)).data;
+export const verifyLeadDocument = async (leadId, docId, verified = true) => (await api.patch(`/leads/${leadId}/documents/${docId}/verify`, { verified })).data;
+export const closeCaseSheet = async (leadId) => (await api.post(`/leads/${leadId}/close-case-sheet`)).data;
 export const deleteLeadDocument = async (leadId, docId) => (await api.delete(`/leads/${leadId}/documents/${docId}`)).data;
 export const openLeadDocument = async (leadId, docId) => {
   const res = await api.get(`/leads/${leadId}/documents/${docId}/download`, { responseType: "blob" });

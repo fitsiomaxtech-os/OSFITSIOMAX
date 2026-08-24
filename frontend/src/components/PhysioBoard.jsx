@@ -25,6 +25,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
+import { ProgressionTab } from "@/components/ProgressionTab";
 import { LeadMarks } from "@/components/ui/lead-marks";
 import { DateFilterPopover } from "@/components/DateFilterPopover";
 import { StatTile } from "@/components/ui/stat-tile";
@@ -2388,6 +2389,10 @@ export function PatientDetailPage({ patient, physioId, onClose, onRefresh }) {
     { key: "sessions", label: "Sessions" },
     { key: "treatment", label: "Treatment" },
     { key: "profile", label: "Profile" },
+    // Last, because it is the end of the course: the clips are gathered as the treatment
+    // runs and the case sheet closes on them. See ProgressionTab for why uploading and
+    // verifying are two different jobs.
+    { key: "progression", label: "Progression" },
   ];
 
   return (
@@ -2594,6 +2599,13 @@ export function PatientDetailPage({ patient, physioId, onClose, onRefresh }) {
             <Row label="Condition" value={lead.condition} />
             <Row label="Months of Pain" value={lead.months_of_pain} />
           </div>
+        )}
+
+        {/* The physio gathers the clips; verifying them and closing the case sheet is the
+            branch's or the consultant's job, which is why canVerify is not simply true.
+            The backend holds the same line — see close_case_sheet. */}
+        {detailTab === "progression" && (
+          <ProgressionTab leadId={patient.lead_id} canUpload canVerify={false} />
         )}
         </div>
       </div>

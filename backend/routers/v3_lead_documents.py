@@ -18,6 +18,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 from database import v3_col
 from utils import now_iso
@@ -41,6 +42,32 @@ CHUNK = 1024 * 1024
 # lifecycle, and only the screen that lists them cares about the difference.
 CONSULTATION_FORM = "consultation_form"
 GENERAL = "general"
+
+# The proof a course of treatment actually delivered something, gathered as it goes. These
+# four are what a case sheet cannot be closed without — see progression_status below.
+#
+# Ordered as they are collected: the weekly clips run alongside the treatment, the before
+# and after is cut at the end of it, and the testimonial and the review come from the
+# patient once they are happy. A screen showing them in any other order would be asking
+# for the last one first.
+PROGRESSION_KINDS = [
+    ("progress_weekly", "Weekly Progression Videos", True),
+    ("progress_final", "Before & After Video", True),
+    ("progress_testimonial", "Client Testimonial Video", True),
+    ("progress_review", "Google Review", True),
+]
+PROGRESSION_KEYS = [k for k, _, _ in PROGRESSION_KINDS]
+
+# Three of the four are video, which the general document rules never had to allow: a scan
+# or a letter is an image or a PDF. Widened only for these kinds, so a consultation form is
+# still refused if someone tries to file a film as one.
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv"}
+
+
+def allowed_extensions_for(kind: str) -> set:
+    """What may be filed under this kind. Progression takes video as well as stills —
+    a Google Review arrives as a screenshot, the other three as clips."""
+    return ALLOWED_EXTENSIONS | VIDEO_EXTENSIONS if kind in PROGRESSION_KEYS else ALLOWED_EXTENSIONS
 
 
 def default_shared_with_patient(kind: str) -> bool:
@@ -138,8 +165,13 @@ async def upload_lead_document(
         raise HTTPException(status_code=404, detail="Lead not found")
 
     ext = os.path.splitext(file.filename or "")[1].lower()
-    if ext not in ALLOWED_EXTENSIONS:
-        raise HTTPException(status_code=400, detail="Only JPG, PNG, WEBP or PDF files are allowed")
+    if ext not in allowed_extensions_for(kind or GENERAL):
+        detail = (
+            "Only JPG, PNG, WEBP, PDF or video files (MP4, MOV, WEBM) are allowed"
+            if (kind or GENERAL) in PROGRESSION_KEYS
+            else "Only JPG, PNG, WEBP or PDF files are allowed"
+        )
+        raise HTTPException(status_code=400, detail=detail)
 
     # The name on disk is generated, never taken from the upload. A filename is attacker
     # controlled — "../../server.py" would otherwise be written wherever that resolves to.
@@ -198,6 +230,142 @@ async def upload_lead_document(
     })
     doc.pop("stored_name", None)
     return doc
+
+
+class VerifyInput(BaseModel):
+    verified: bool = True
+
+
+@router.patch("/leads/{lead_id}/documents/{doc_id}/verify")
+async def verify_lead_document(
+    lead_id: str,
+    doc_id: str,
+    payload: VerifyInput,
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio")),
+):
+    """Confirm that an uploaded file is what it claims to be.
+
+    Deliberately not open to the person who uploaded it. The physio delivering the course
+    gathers the clips; the branch or the consultant checks them. A case sheet that could be
+    closed by one person uploading four files and ticking them off themselves would prove
+    nothing, which is the whole point of asking for them.
+    """
+    doc = await v3_col("lead_documents").find_one({"id": doc_id, "lead_id": lead_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    await v3_col("lead_documents").update_one(
+        {"id": doc_id},
+        {"$set": {
+            "verified": bool(payload.verified),
+            "verified_by": user.full_name if payload.verified else None,
+            "verified_at": now_iso() if payload.verified else None,
+        }},
+    )
+    return await v3_col("lead_documents").find_one({"id": doc_id}, {"_id": 0, "stored_name": 0})
+
+
+@router.get("/leads/{lead_id}/progression")
+async def progression_status(
+    lead_id: str,
+    _: V3UserOut = Depends(v3_require_roles(*READ_ROLES)),
+):
+    """Where this patient's case sheet stands against the four things it needs.
+
+    One requirement is Pending until at least one file is filed under it, Uploaded once one
+    is, and Completed only once one of them has been verified by someone other than whoever
+    filed it. Reported per requirement rather than as a single figure so the screen can say
+    which one is missing — "3 of 4" tells a physio to go hunting.
+    """
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    docs = await v3_col("lead_documents").find(
+        {"lead_id": lead_id, "kind": {"$in": PROGRESSION_KEYS}}, {"_id": 0, "stored_name": 0}
+    ).sort("created_at", 1).to_list(500)
+
+    by_kind: dict = {}
+    for d in docs:
+        by_kind.setdefault(d.get("kind"), []).append(d)
+
+    requirements = []
+    for key, label, required in PROGRESSION_KINDS:
+        filed = by_kind.get(key, [])
+        verified = [d for d in filed if d.get("verified")]
+        requirements.append({
+            "kind": key,
+            "label": label,
+            "required": required,
+            "uploaded": len(filed),
+            "verified": len(verified),
+            # Three states, not two: "uploaded but not checked" is the one a branch has to
+            # act on, and folding it into Pending would hide the work that is waiting.
+            "status": "completed" if verified else ("uploaded" if filed else "pending"),
+            "documents": filed,
+        })
+
+    outstanding = [r["label"] for r in requirements if r["required"] and r["status"] != "completed"]
+    return {
+        "lead_id": lead_id,
+        "lead_name": lead.get("name", ""),
+        "requirements": requirements,
+        "completed": sum(1 for r in requirements if r["status"] == "completed"),
+        "total": sum(1 for r in requirements if r["required"]),
+        "outstanding": outstanding,
+        "can_close": not outstanding,
+        "case_sheet_closed": bool(lead.get("case_sheet_closed")),
+        "case_sheet_closed_at": lead.get("case_sheet_closed_at"),
+        "case_sheet_closed_by": lead.get("case_sheet_closed_by"),
+    }
+
+
+@router.post("/leads/{lead_id}/close-case-sheet")
+async def close_case_sheet(
+    lead_id: str,
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "head_physio")),
+):
+    """Close the case sheet, once every mandatory upload is in and verified.
+
+    The check is here rather than only on the button, because a rule enforced only by a
+    disabled button is not a rule — it is a suggestion that anyone with the endpoint can
+    decline. The refusal names what is missing: "not allowed" sends a physio back to a
+    screen of four rows to work out which one it meant.
+    """
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    if lead.get("case_sheet_closed"):
+        raise HTTPException(status_code=400, detail="This case sheet is already closed")
+
+    docs = await v3_col("lead_documents").find(
+        {"lead_id": lead_id, "kind": {"$in": PROGRESSION_KEYS}, "verified": True},
+        {"_id": 0, "kind": 1},
+    ).to_list(500)
+    have = {d.get("kind") for d in docs}
+    missing = [label for key, label, required in PROGRESSION_KINDS if required and key not in have]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Still waiting on: {', '.join(missing)}. Each has to be uploaded and verified before the case sheet can close.",
+        )
+
+    now = now_iso()
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": {
+        "case_sheet_closed": True,
+        "case_sheet_closed_at": now,
+        "case_sheet_closed_by": user.full_name,
+        "updated_at": now,
+    }})
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": lead_id,
+        "action": "case_sheet_closed",
+        "details": "Case sheet closed — all four progression uploads verified",
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": now,
+    })
+    return {"closed": True, "closed_at": now, "closed_by": user.full_name}
 
 
 @router.get("/leads/{lead_id}/documents/{doc_id}/download")
