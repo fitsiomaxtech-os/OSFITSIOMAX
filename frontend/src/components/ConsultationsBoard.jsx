@@ -3671,7 +3671,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         </>
                       }
                     >
-                      {detailBody || (
+                      {/* Diet and Rehab still take the whole panel — they are other programmes, and
+                          reading one means leaving this one. Documents is not: it is a step of
+                          the payment being blocked here, so it opens underneath rather than in
+                          place of the fees and the rule that sent you to it. */}
+                      {(programmeDetail === "diet" || programmeDetail === "rehab") ? detailBody : (
                         <>
                           {/* Everything this patient has been quoted, on the one screen the
                               Branch Admin reads before taking money. Each line is gated on
@@ -3777,6 +3781,34 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                                   Paperwork on file
                                 </span>
                               )}
+                            </div>
+                          )}
+                          {/* Where the Upload Documents button opens to. Under the panel that
+                              asked for it, with the fees and the rule still on screen above:
+                              somebody uploading a scan here is in the middle of taking a
+                              payment, and swapping the screen out from under them loses the
+                              figure they were about to collect. */}
+                          {programmeDetail === "documents" && (
+                            <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3" data-testid="cons-inline-documents">
+                              <div className="mb-2 flex items-center justify-between gap-2">
+                                <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-500">
+                                  <FileText className="h-3.5 w-3.5" /> Consultation Paperwork
+                                </p>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className={`border-slate-200 text-slate-600 hover:bg-slate-50 ${ACT_BTN}`}
+                                  onClick={() => openDetail("own")}
+                                  data-testid="cons-inline-documents-close"
+                                >
+                                  Done
+                                </Button>
+                              </div>
+                              <LeadDocuments
+                                leadId={selectedLead.id}
+                                canEdit={["branch_admin", "super_admin", "head_physio"].includes(viewerRole)}
+                                onChanged={(n) => setLeadDocCount(n)}
+                              />
                             </div>
                           )}
                         </>
