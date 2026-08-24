@@ -574,7 +574,26 @@ async def v3_dashboard_overview(
     # Seeded AND defaulted: the seeding keeps the reported lines explicit, and the default
     # means the next category added somewhere else costs a figure nobody labelled rather
     # than the entire board. A dashboard that cannot name a payment should still count it.
-    revenue_split = {"consultation": 0.0, "session": 0.0, "diet": 0.0, "rehab": 0.0, "spot_joining": 0.0}
+    revenue_split = {"consultation": 0.0, "session": 0.0, "diet": 0.0, "rehab": 0.0, "spot_joining": 0.0, "zumba": 0.0}
+    zumba_revenue_bucket = new_bucket()
+    rehab_revenue_bucket = new_bucket()
+    zumba_query: dict = {}
+    zumba_query.update(_date_range_query("created_at", start_date, end_date))
+    zumba_rows = await v3_col("zumba_registrations").find(
+        zumba_query, {"_id": 0, "branch_id": 1, "fee_paid": 1},
+    ).to_list(5000)
+    for reg in zumba_rows:
+        try:
+            amount = float(reg.get("fee_paid") or 0)
+        except (TypeError, ValueError):
+            continue
+        if amount <= 0:
+            continue
+        bid = reg.get("branch_id")
+        add_to_bucket(zumba_revenue_bucket, bid, branch_vertical(bid), amount)
+        add_to_bucket(revenue_bucket, bid, branch_vertical(bid), amount)
+        revenue_split["zumba"] += amount
+
     activity_query = {"action": {"$in": REVENUE_ACTIONS}}
     activity_query.update(_date_range_query("created_at", start_date, end_date))
     activities = await v3_col("lead_activity").find(
@@ -612,6 +631,8 @@ async def v3_dashboard_overview(
         revenue_split[category] = revenue_split.get(category, 0.0) + amount
         if category == "consultation":
             add_to_bucket(consultation_revenue_bucket, bid, vertical, amount)
+        elif category == "rehab":
+            add_to_bucket(rehab_revenue_bucket, bid, vertical, amount)
         elif category == "session":
             add_to_bucket(session_revenue_bucket, bid, vertical, amount)
             purchase_lead = a.get("lead_id")
@@ -656,6 +677,8 @@ async def v3_dashboard_overview(
         "treatments": format_bucket(treat_bucket),
         "sessions_booked": format_bucket(sessions_booked_bucket),
         "treatment_purchases": format_bucket(treatment_purchase_bucket),
+        "zumba_revenue": format_bucket(zumba_revenue_bucket, currency=True),
+        "rehab_revenue": format_bucket(rehab_revenue_bucket, currency=True),
         "consultation_revenue": format_bucket(consultation_revenue_bucket, currency=True),
         "session_revenue": format_bucket(session_revenue_bucket, currency=True),
         "pending_session_amount": format_bucket(pending_bucket, currency=True),
@@ -667,6 +690,7 @@ async def v3_dashboard_overview(
             "session": round(revenue_split["session"], 2),
             "diet": round(revenue_split["diet"], 2),
             "rehab": round(revenue_split["rehab"], 2),
+            "zumba": round(revenue_split["zumba"], 2),
             "spot_joining": round(revenue_split["spot_joining"], 2),
         },
     }

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Users, CalendarCheck, Activity, IndianRupee, X, RefreshCw,
   Megaphone, Headphones, BarChart3, Wallet, Stethoscope, ShoppingBag, Salad, Clock,
-  AlertCircle, CalendarClock, CheckCircle2, XCircle, Star, AlertTriangle,
+  AlertCircle, CalendarClock, CheckCircle2, XCircle, Star, AlertTriangle, Music, HeartPulse,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -299,12 +299,19 @@ const RevenueTab = ({ data, loading, dateFilter }) => {
     { key: "consultation", label: "Consultations Revenue", value: scopedBucketValue(data.consultation_revenue, group, branchId), color: "#0284c7", icon: Stethoscope },
     { key: "session", label: "Session Amount Collected", value: scopedBucketValue(data.session_revenue, group, branchId), color: "#7c3aed", icon: Activity },
     { key: "pending", label: "Pending Session Amount", value: scopedBucketValue(data.pending_session_amount, group, branchId), color: "#d97706", icon: Clock },
+    // The two shelves the headline was built without a line for. Zumba lives on its own
+    // roll rather than in the lead trail, so it was missing from Total Revenue entirely
+    // until the server started reading it; Rehab was inside Session all along, and a
+    // course sold at 18,000 a time is worth naming rather than leaving somebody to work
+    // out which part of Sessions it was.
+    { key: "zumba", label: "Zumba Revenue", value: scopedBucketValue(data.zumba_revenue, group, branchId), color: "#c026d3", icon: Music },
+    { key: "rehab", label: "Rehab Revenue", value: scopedBucketValue(data.rehab_revenue, group, branchId), color: "#0891b2", icon: HeartPulse },
   ];
 
   return (
     <div className="space-y-4" data-testid="dashboard-revenue-tab">
       <ModeBranchFilter branches={branches} group={group} onGroup={setGroup} branchId={branchId} onBranch={setBranchId} testid="dashboard-revenue-filter" />
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" data-testid="dashboard-revenue-cards">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6" data-testid="dashboard-revenue-cards">
         {cards.map((c) => (
           <StatTile key={c.key} label={c.label} value={fmtValue("revenue", c.value)} icon={c.icon} color={c.color} testid={`dashboard-revenue-${c.key}`} />
         ))}
