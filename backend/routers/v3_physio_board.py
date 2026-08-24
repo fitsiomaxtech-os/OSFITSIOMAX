@@ -18,7 +18,7 @@ from routers.v3_reviews import REVIEW_AFTER_DAYS
 # Which leads belong to a physio. In its own module because both this board and the
 # reviews router need it, and this one already imports from that one — a helper living
 # in either would close the loop.
-from physio_scope import physio_lead_ids
+from physio_scope import physio_lead_ids, physio_owns_lead
 
 router = APIRouter(prefix="/api/v3")
 
@@ -334,7 +334,10 @@ async def physio_patient_detail(lead_id: str, physio_id: Optional[str] = None, u
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    if lead.get("assigned_physio_id") != doctor["id"]:
+    # Assignment is only one of the two ways a patient becomes this physio's — see
+    # physio_owns_lead. Read off the field alone, this refused the record of a rehab
+    # patient the physio's own Patients list had just offered them.
+    if not await physio_owns_lead(doctor["id"], lead_id):
         raise HTTPException(status_code=403, detail="This lead is not assigned to you")
 
     return V3LeadOut(**lead).model_dump()
@@ -350,7 +353,7 @@ async def physio_complete_consultation(lead_id: str, physio_id: Optional[str] = 
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    if lead.get("assigned_physio_id") != doctor["id"]:
+    if not await physio_owns_lead(doctor["id"], lead_id):
         raise HTTPException(status_code=403, detail="This lead is not assigned to you")
 
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {

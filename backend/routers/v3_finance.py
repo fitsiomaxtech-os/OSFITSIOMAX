@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from database import v3_col
+from physio_scope import physio_owns_lead
 from deps import v3_require_roles, is_branch_admin_role, is_physio_role
 from schemas.v3 import V3UserOut, V3MarkInstallmentPaidInput
 from stage_utils import entry_branch_stage_names
@@ -1159,7 +1160,8 @@ async def client_transaction_history(
         raise HTTPException(status_code=404, detail="Client not found")
     if is_physio_role(user.role):
         doctor = await v3_col("doctors").find_one({"user_id": user.id, "profile_type": "physio"}, {"_id": 0, "id": 1})
-        if not doctor or lead.get("assigned_physio_id") != doctor["id"]:
+        # Rehab counts as theirs here too, for the reason physio_owns_lead sets out.
+        if not doctor or not await physio_owns_lead(doctor["id"], lead_id):
             raise HTTPException(status_code=404, detail="Client not found")
 
     branch_name = ""
