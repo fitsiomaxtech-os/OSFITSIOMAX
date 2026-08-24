@@ -65,6 +65,20 @@ export const patientPortalMyFeedback = async () => {
   return data;
 };
 
+/** The patient's next word on a thread they already opened.
+ *
+ *  `resolved` answers the clinic's "did that settle it?" — true closes the thread, false
+ *  hands it back. Left out for an ordinary message, which answers nothing.
+ */
+export const patientPortalReplyFeedback = async (feedbackId, { body, resolved } = {}) => {
+  const { data } = await portalApi.post(
+    `/patient-portal/feedback/${feedbackId}/message`,
+    { body: body || "", ...(resolved === undefined ? {} : { resolved }) },
+    { headers: authHeaders() },
+  );
+  return data;
+};
+
 export const patientPortalDocuments = async () => {
   const { data } = await portalApi.get("/patient-portal/documents", { headers: authHeaders() });
   return data;

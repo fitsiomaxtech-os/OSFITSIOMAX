@@ -12,6 +12,7 @@ with, and sorting by sentiment leaves an unhappy patient sitting in a column nob
 through.
 """
 
+import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -29,8 +30,18 @@ router = APIRouter(prefix="/api/v3")
 # is no branch that runs those differently.
 STATUS_NEW = "new"
 STATUS_IN_PROGRESS = "in_progress"
+# Asked, not closed. A branch that has done something says so and asks whether it settled
+# it; the thread waits here until the patient answers. Nobody but the patient moves it on
+# from here — see move_feedback.
+STATUS_AWAITING = "awaiting_patient"
 STATUS_RESOLVED = "resolved"
-STATUSES = (STATUS_NEW, STATUS_IN_PROGRESS, STATUS_RESOLVED)
+STATUSES = (STATUS_NEW, STATUS_IN_PROGRESS, STATUS_AWAITING, STATUS_RESOLVED)
+
+# Who wrote a message in the thread. Two sides, whatever the staff member's role: to the
+# patient there is no difference between a Branch Admin and head office answering, and the
+# thread reads as a conversation rather than a case file.
+AUTHOR_PATIENT = "patient"
+AUTHOR_STAFF = "staff"
 
 MAX_MESSAGE = 2000
 
@@ -67,6 +78,46 @@ def _rating(value) -> Optional[int]:
     except (TypeError, ValueError):
         return None
     return rating if 1 <= rating <= 5 else None
+
+
+def _thread(row: dict) -> list:
+    """The conversation on one piece of feedback, oldest first.
+
+    Synthesised for rows written before it was a conversation rather than migrated: the
+    original message is the patient's first line and the single stored reply is the
+    branch's answer to it, which is exactly what those two fields were. Doing it on read
+    means no backfill can miss a row, and a thread that has never been added to costs
+    nothing to keep in the old shape.
+    """
+    thread = row.get("messages")
+    if isinstance(thread, list) and thread:
+        return thread
+    built = []
+    if (row.get("message") or "").strip():
+        built.append({
+            "id": f"{row.get('id')}-open",
+            "author": AUTHOR_PATIENT,
+            "author_name": row.get("patient_name") or "",
+            "body": row["message"],
+            "created_at": row.get("created_at") or "",
+        })
+    if (row.get("reply") or "").strip():
+        built.append({
+            "id": f"{row.get('id')}-reply",
+            "author": AUTHOR_STAFF,
+            "author_name": row.get("replied_by") or "",
+            "body": row["reply"],
+            "created_at": row.get("replied_at") or row.get("handled_at") or "",
+        })
+    return built
+
+
+class FeedbackMessageIn(BaseModel):
+    body: str
+    # Sent with the message that asks. The branch does not close its own complaint: it
+    # says what it did and asks whether that settled it, and the patient's answer is what
+    # moves the thread to resolved.
+    ask_resolved: bool = False
 
 
 class FeedbackStatusIn(BaseModel):
@@ -125,12 +176,36 @@ async def list_feedback(
             query["branch_id"] = branch_id
 
     rows = await v3_col("patient_feedback").find(query, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    # Named, not just identified. Head office reads this branch by branch, and a heading
+    # of "5f2c…" is an id rather than a branch. Looked up here rather than copied onto the
+    # row when it was written: a branch that is renamed should read by its name now, and
+    # unlike the patient's own name this is not part of what somebody said on a day.
+    branch_ids = {r.get("branch_id") for r in rows if r.get("branch_id")}
+    names = {
+        b["id"]: b.get("branch_name") or ""
+        for b in await v3_col("branches").find(
+            {"id": {"$in": list(branch_ids)}}, {"_id": 0, "id": 1, "branch_name": 1}
+        ).to_list(500)
+    } if branch_ids else {}
     counts = {s: 0 for s in STATUSES}
     for row in rows:
         row["status"] = _status(row.get("status"))
         row["audience"] = _audience(row.get("audience"))
+        row["branch_name"] = names.get(row.get("branch_id"), "")
+        row["messages"] = _thread(row)
+        # What is waiting on this side. A thread the patient has answered since anyone
+        # here last wrote is the one somebody has to pick back up, and without this it
+        # looked identical to one still sitting where the branch left it.
+        last = row["messages"][-1] if row["messages"] else None
+        row["awaiting_staff"] = bool(last and last.get("author") == AUTHOR_PATIENT)
         counts[row["status"]] += 1
-    return {"feedback": rows, "counts": counts, "unread": counts[STATUS_NEW]}
+    # The bell counts what nobody has picked up and what somebody has written back into.
+    # A patient replying to an answer is a thing to read, and counting only the New column
+    # left those arriving silently in a column already worked through.
+    unread = counts[STATUS_NEW] + sum(
+        1 for r in rows if r["awaiting_staff"] and r["status"] != STATUS_NEW
+    )
+    return {"feedback": rows, "counts": counts, "unread": unread}
 
 
 @router.patch("/branch/feedback/{feedback_id}")
@@ -161,7 +236,16 @@ async def move_feedback(
         raise HTTPException(status_code=400, detail=f"Status must be one of: {', '.join(STATUSES)}")
 
     reply = (payload.reply or "").strip()[:MAX_MESSAGE]
-    if status == STATUS_RESOLVED and not reply:
+    # Resolved is the patient's word, not this side's. A branch saying "dealt with" over a
+    # complaint the patient still has is how somebody learns that saying something here
+    # achieves nothing — so the branch says what it did and asks, and the patient's answer
+    # closes it. POST .../message with ask_resolved is that door.
+    if status == STATUS_RESOLVED:
+        raise HTTPException(
+            status_code=400,
+            detail="Ask the patient whether it is settled — their answer is what resolves it",
+        )
+    if status == STATUS_AWAITING and not reply:
         raise HTTPException(status_code=400, detail="Say what was done — the patient reads this")
 
     changes = {
@@ -179,3 +263,64 @@ async def move_feedback(
         changes["note"] = (payload.note or "").strip()
     await v3_col("patient_feedback").update_one({"id": feedback_id}, {"$set": changes})
     return {**existing, **changes}
+
+
+@router.post("/branch/feedback/{feedback_id}/message")
+async def reply_to_feedback(
+    feedback_id: str,
+    payload: FeedbackMessageIn,
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin")),
+):
+    """Write back to the patient on their own thread.
+
+    Feedback used to be one message and one closing reply, which meant a patient whose
+    answer raised another question had nowhere to put it and opened a second piece of
+    feedback about the same thing. This is the same exchange as a conversation: either
+    side can write, and the thread keeps its order.
+
+    Answering picks the thread up if nobody had. Someone writing a reply has plainly
+    started on it, and leaving it in New so it could be picked up later is a column saying
+    something untrue about work already done.
+
+    ask_resolved is how a branch closes one: it says what was done and asks whether that
+    settled it. The thread then waits on the patient, and nothing this side does moves it
+    to resolved.
+    """
+    body = (payload.body or "").strip()[:MAX_MESSAGE]
+    if not body:
+        raise HTTPException(status_code=400, detail="Write something to send")
+
+    existing = await v3_col("patient_feedback").find_one({"id": feedback_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="No such feedback")
+    if is_branch_admin_role(user.role):
+        if existing.get("branch_id") != user.branch_id:
+            raise HTTPException(status_code=403, detail="Not your branch")
+        # The same wall the board is built on: what a patient sent past their branch is
+        # not theirs to answer, and half of it is about the Branch Admin themselves.
+        if _audience(existing.get("audience")) == AUDIENCE_SUPER:
+            raise HTTPException(status_code=403, detail="Not your branch")
+
+    now = now_iso()
+    message = {
+        "id": str(uuid.uuid4()),
+        "author": AUTHOR_STAFF,
+        "author_name": user.full_name or user.email,
+        "body": body,
+        "created_at": now,
+    }
+    # Materialised from the old two fields before appending, or the first answer on a row
+    # written before threads would drop the patient's own words off the front of it.
+    thread = [*_thread(existing), message]
+    status = STATUS_AWAITING if payload.ask_resolved else STATUS_IN_PROGRESS
+    changes = {
+        "messages": thread,
+        "status": status,
+        "handled_by": user.full_name or user.email,
+        "handled_at": now,
+        "reply": body,
+        "replied_by": message["author_name"],
+        "replied_at": now,
+    }
+    await v3_col("patient_feedback").update_one({"id": feedback_id}, {"$set": changes})
+    return {**existing, **changes, "awaiting_staff": False}

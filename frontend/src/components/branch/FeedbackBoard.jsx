@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, Bell, CheckCircle2, Clock, Inbox, RefreshCw, Star, X } from "lucide-react";
+import { ArrowLeft, Bell, Building2, CheckCircle2, Clock, Inbox, MessageCircle, RefreshCw, Send, Star, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatTile } from "@/components/ui/stat-tile";
 import { toast } from "@/components/ui/sonner";
-import { listBranchFeedback, moveBranchFeedback } from "@/lib/api";
+import { listBranchFeedback, moveBranchFeedback, replyBranchFeedback } from "@/lib/api";
 
 // The three columns, left to right in the order they are worked through. A piece of
 // feedback arrives New, somebody picks it up, somebody finishes with it — which is what a
@@ -11,6 +11,7 @@ import { listBranchFeedback, moveBranchFeedback } from "@/lib/api";
 const COLUMNS = [
   { key: "new", label: "New", icon: Inbox, color: "#d97706", sub: "waiting to be picked up", empty: "Nothing waiting." },
   { key: "in_progress", label: "In Progress", icon: Clock, color: "#0284c7", sub: "being dealt with", empty: "Nothing being dealt with." },
+  { key: "awaiting_patient", label: "Asked", icon: MessageCircle, color: "#7c3aed", sub: "waiting on the patient", empty: "Nobody has been asked." },
   { key: "resolved", label: "Resolved", icon: CheckCircle2, color: "#059669", sub: "finished with", empty: "Nothing finished yet." },
 ];
 
@@ -20,14 +21,22 @@ const COLUMNS = [
 const STATUS_CHIP = {
   new: { label: "New", classes: "border-amber-200 bg-amber-50 text-amber-700" },
   in_progress: { label: "In Progress", classes: "border-sky-200 bg-sky-50 text-sky-700" },
+  awaiting_patient: { label: "Asked", classes: "border-violet-200 bg-violet-50 text-violet-700" },
   resolved: { label: "Resolved", classes: "border-emerald-200 bg-emerald-50 text-emerald-700" },
 };
 
 // Where a card can go from where it is. Both directions, because picking something up by
 // mistake is ordinary and a board you cannot walk backwards on gets worked around.
+// Where a card can go from where it is. Both directions, because picking something up by
+// mistake is ordinary and a board you cannot walk backwards on gets worked around.
+//
+// Resolve is not among them any more. Closing a complaint is not this side's to do: the
+// branch says what it did and asks whether that settled it, and the patient's answer is
+// what moves it. The button that asks lives on the composer, because asking is a message.
 const MOVES = {
   new: [{ to: "in_progress", label: "Pick up" }],
-  in_progress: [{ to: "resolved", label: "Resolve" }, { to: "new", label: "Put back" }],
+  in_progress: [{ to: "new", label: "Put back" }],
+  awaiting_patient: [{ to: "in_progress", label: "Still working on it" }],
   resolved: [{ to: "in_progress", label: "Reopen" }],
 };
 
@@ -59,58 +68,123 @@ const Stars = ({ rating }) => {
   );
 };
 
-const FeedbackCard = ({ row, onMove, moving }) => (
-  <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm" data-testid={`feedback-card-${row.id}`}>
-    <div className="flex items-start justify-between gap-2">
-      <div className="min-w-0">
-        <p className="truncate text-sm font-semibold text-slate-800" title={row.patient_name}>{row.patient_name || "A patient"}</p>
-        {row.patient_phone ? <p className="truncate text-[11px] text-slate-400">{row.patient_phone}</p> : null}
+const FeedbackCard = ({ row, onMove, onSend, moving, sending }) => {
+  const [draft, setDraft] = useState("");
+  const thread = row.messages || [];
+  const chip = STATUS_CHIP[row.status] || STATUS_CHIP.new;
+
+  const send = (askResolved) => {
+    const body = draft.trim();
+    if (!body) { toast.error("Write something to send"); return; }
+    onSend(row, body, askResolved, () => setDraft(""));
+  };
+
+  return (
+    <div
+      className={`flex flex-col rounded-lg border bg-white shadow-sm ${row.awaiting_staff ? "border-amber-300" : "border-slate-200"}`}
+      data-testid={`feedback-card-${row.id}`}
+    >
+      <div className="flex items-start justify-between gap-2 border-b border-slate-100 p-3">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold text-slate-800" title={row.patient_name}>{row.patient_name || "A patient"}</p>
+          {row.patient_phone ? <p className="truncate text-[11px] text-slate-400">{row.patient_phone}</p> : null}
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5">
+          {/* Says the thread has been written into since anyone here last answered. The
+              status cannot say this: it is still In Progress either way, and without it a
+              patient's reply arrived in a column somebody had already worked through. */}
+          {row.awaiting_staff && (
+            <span className="whitespace-nowrap rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-700" data-testid={`feedback-awaiting-${row.id}`}>
+              Your turn
+            </span>
+          )}
+          <span
+            className={`whitespace-nowrap rounded border px-1.5 py-0.5 text-[10px] font-bold ${chip.classes}`}
+            data-testid={`feedback-status-${row.id}`}
+          >
+            {chip.label}
+          </span>
+          <Stars rating={row.rating} />
+        </div>
       </div>
-      <div className="flex shrink-0 items-center gap-1.5">
-        {/* Where it stands, on the card. The three columns used to say this by holding it,
-            and a single list has to say it outright. */}
-        <span
-          className={`whitespace-nowrap rounded border px-1.5 py-0.5 text-[10px] font-bold ${(STATUS_CHIP[row.status] || STATUS_CHIP.new).classes}`}
-          data-testid={`feedback-status-${row.id}`}
-        >
-          {(STATUS_CHIP[row.status] || STATUS_CHIP.new).label}
-        </span>
-        <Stars rating={row.rating} />
+
+      {/* The exchange, oldest first, each side on its own. A branch answering has to see
+          what it is answering, and the one message and one reply this used to hold meant a
+          patient whose answer raised another question opened a second piece of feedback
+          about the same thing. */}
+      <div className="max-h-72 space-y-2 overflow-y-auto p-3" data-testid={`feedback-thread-${row.id}`}>
+        {thread.length === 0 ? (
+          <p className="text-xs italic text-slate-400">Rating only — nothing written.</p>
+        ) : thread.map((m) => {
+          const mine = m.author === "staff";
+          return (
+            <div key={m.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
+              <div className={`max-w-[85%] rounded-lg px-2.5 py-1.5 ${mine ? "bg-sky-50 text-sky-900" : "bg-slate-100 text-slate-700"}`}>
+                <p className="whitespace-pre-wrap break-words text-xs leading-5">{m.body}</p>
+                <p className={`mt-0.5 text-[10px] ${mine ? "text-sky-500" : "text-slate-400"}`}>
+                  {[mine ? (m.author_name || "Branch") : (row.patient_name || "Patient"), shortDateTime(m.created_at)].filter(Boolean).join(" · ")}
+                </p>
+              </div>
+            </div>
+          );
+        })}
       </div>
+
+      {row.status === "resolved" ? (
+        <p className="border-t border-slate-100 px-3 py-2 text-[11px] text-emerald-600" data-testid={`feedback-closed-${row.id}`}>
+          The patient said this was settled.
+        </p>
+      ) : (
+        <div className="border-t border-slate-100 p-3">
+          <textarea
+            rows={2}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="Write back to the patient…"
+            className="w-full resize-none rounded-lg border border-slate-200 px-2.5 py-2 text-xs focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400"
+            data-testid={`feedback-compose-${row.id}`}
+          />
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <Button
+              size="sm"
+              className="h-7 bg-sky-600 px-2 text-[11px] text-white hover:bg-sky-700"
+              disabled={sending}
+              onClick={() => send(false)}
+              data-testid={`feedback-send-${row.id}`}
+            >
+              <Send className="mr-1 h-3 w-3" /> Send
+            </Button>
+            {/* Closing one is asking a question, so it is a way of sending rather than a
+                column to drag to. The patient's answer is what moves it. */}
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 border-emerald-200 px-2 text-[11px] text-emerald-700 hover:bg-emerald-50"
+              disabled={sending}
+              onClick={() => send(true)}
+              data-testid={`feedback-ask-resolved-${row.id}`}
+            >
+              Send &amp; ask if it is sorted
+            </Button>
+            {(MOVES[row.status] || []).map((m) => (
+              <Button
+                key={m.to}
+                size="sm"
+                variant="outline"
+                className="h-7 px-2 text-[11px]"
+                disabled={moving}
+                onClick={() => onMove(row, m.to)}
+                data-testid={`feedback-move-${row.id}-${m.to}`}
+              >
+                {m.label}
+              </Button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
-
-    {/* Their words, whole. A feedback card that truncates is one somebody has to open to
-        read, and there is nothing behind this card to open. */}
-    {row.message ? (
-      <p className="mt-2 whitespace-pre-wrap break-words text-xs leading-5 text-slate-600">{row.message}</p>
-    ) : (
-      <p className="mt-2 text-xs italic text-slate-400">Rating only — nothing written.</p>
-    )}
-
-    <p className="mt-2 text-[10px] text-slate-400">{shortDateTime(row.created_at)}</p>
-
-    {/* Who moved it last, so the column is not the only record of what happened. */}
-    {row.handled_by && row.status !== "new" ? (
-      <p className="mt-0.5 text-[10px] text-slate-400">{row.handled_by} · {shortDateTime(row.handled_at)}</p>
-    ) : null}
-
-    <div className="mt-2 flex flex-wrap gap-1.5">
-      {(MOVES[row.status] || []).map((m) => (
-        <Button
-          key={m.to}
-          size="sm"
-          variant="outline"
-          className="h-7 px-2 text-[11px]"
-          disabled={moving}
-          onClick={() => onMove(row, m.to)}
-          data-testid={`feedback-move-${row.id}-${m.to}`}
-        >
-          {m.label}
-        </Button>
-      ))}
-    </div>
-  </div>
-);
+  );
+};
 
 /**
  * What patients have said about a branch, as a board.
@@ -123,76 +197,16 @@ const FeedbackCard = ({ row, onMove, moving }) => (
  * Moved by buttons rather than by dragging. A drag needs a mouse and a steady hand, and a
  * branch reading this on a tablet at the desk has neither.
  */
-/**
- * What is being told to the patient, before the card is closed.
- *
- * Its own dialog rather than a field on the card: this is the one thing here a patient
- * reads, and typing it into a row among nine others invites the sentence that gets typed to
- * get past a form. On screen it shows what they said, so the reply is written to the words
- * it answers rather than from memory of them.
- */
-const ReplyDialog = ({ row, saving, onCancel, onSend }) => {
-  const [reply, setReply] = useState("");
-  return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }} data-testid="feedback-reply-dialog">
-      <div className="w-full max-w-md overflow-hidden rounded-xl bg-white shadow-2xl">
-        <div className="flex items-start justify-between gap-3 border-b p-5">
-          <div className="min-w-0">
-            <h3 className="text-base font-semibold text-slate-800">Close this feedback</h3>
-            <p className="mt-0.5 text-[11px] text-slate-500">{row.patient_name || "A patient"} reads what you write here.</p>
-          </div>
-          <button onClick={onCancel} className="text-slate-400 hover:text-slate-600" aria-label="Cancel" data-testid="feedback-reply-close">
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="space-y-3 p-5">
-          {row.message ? (
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">They said</p>
-              <p className="mt-1 whitespace-pre-wrap break-words text-xs leading-5 text-slate-600">{row.message}</p>
-            </div>
-          ) : null}
-          <div>
-            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">What was done *</label>
-            <textarea
-              rows={4}
-              autoFocus
-              maxLength={2000}
-              value={reply}
-              onChange={(e) => setReply(e.target.value)}
-              placeholder="We spoke to the physio and moved your Friday session to the earlier slot."
-              className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400"
-              data-testid="feedback-reply-message"
-            />
-            <p className="mt-1 text-right text-[10px] text-slate-400">{reply.length}/2000</p>
-          </div>
-        </div>
-
-        <div className="flex justify-end gap-2 border-t p-4">
-          <Button variant="outline" size="sm" onClick={onCancel} data-testid="feedback-reply-cancel">Cancel</Button>
-          <Button
-            size="sm"
-            className="bg-emerald-600 text-white hover:bg-emerald-700"
-            disabled={saving || !reply.trim()}
-            onClick={() => onSend(reply.trim())}
-            data-testid="feedback-reply-send"
-          >
-            {saving ? "Sending…" : "Send & resolve"}
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
 export const FeedbackBoard = ({ branchId, onClose, onCounts }) => {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [moving, setMoving] = useState(null);
   const [error, setError] = useState("");
   const [filter, setFilter] = useState("all"); // "all" | one of COLUMNS
-  const [replying, setReplying] = useState(null); // the row being closed, awaiting its words
+  const [sending, setSending] = useState(null);
+  // Head office reads two different post-bags and they are not the same job. Only shown to
+  // them: a branch has one, its own, and a tab strip over a single thing is furniture.
+  const [audience, setAudience] = useState("all"); // "all" | "super_admin" | "branch_admin"
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -212,17 +226,40 @@ export const FeedbackBoard = ({ branchId, onClose, onCounts }) => {
 
   useEffect(() => { load(); }, [load]);
 
-  const visible = filter === "all" ? rows : rows.filter((r) => (r.status || "new") === filter);
+  // Only head office ever sees both kinds, so the strip only exists for them. A branch is
+  // already held to its own by the server and would be choosing between one thing and it.
+  const isHeadOffice = !branchId && rows.some((r) => (r.audience || "branch_admin") === "super_admin");
+  const byAudience = audience === "all" ? rows : rows.filter((r) => (r.audience || "branch_admin") === audience);
+  const visible = filter === "all" ? byAudience : byAudience.filter((r) => (r.status || "new") === filter);
 
-  // Resolving is the one move that says something to the patient, so it asks for the words
-  // first. The rest move straight away: making somebody type a sentence to say "I have seen
-  // this" fills the field with "ok".
-  const move = async (row, to, reply = "") => {
-    if (to === "resolved" && !reply) { setReplying(row); return; }
+  // What head office is looking at, and how many of each. Counted off every row rather
+  // than off what is on screen, or the tab you are standing on would always read as all
+  // of them.
+  const AUDIENCE_TABS = [
+    { key: "all", label: "Everything", icon: Bell, count: rows.length },
+    { key: "super_admin", label: "Direct to head office", icon: Bell, count: rows.filter((r) => (r.audience || "branch_admin") === "super_admin").length },
+    { key: "branch_admin", label: "Branch-wise", icon: Building2, count: rows.filter((r) => (r.audience || "branch_admin") !== "super_admin").length },
+  ];
+
+  // Branch by branch, for the tab that is about the branches rather than about head
+  // office's own post. Sorted by what is waiting: a branch with unanswered feedback is
+  // the one head office is looking for, and alphabetical order buries it.
+  const branchGroups = (() => {
+    const groups = new Map();
+    for (const r of visible) {
+      const key = r.branch_id || "";
+      const name = r.branch_name || "Unknown branch";
+      if (!groups.has(key)) groups.set(key, { key, name, rows: [] });
+      groups.get(key).rows.push(r);
+    }
+    const waiting = (g) => g.rows.filter((r) => r.awaiting_staff || (r.status || "new") === "new").length;
+    return [...groups.values()].sort((a, b) => waiting(b) - waiting(a) || a.name.localeCompare(b.name));
+  })();
+
+  const move = async (row, to) => {
     setMoving(row.id);
     try {
-      await moveBranchFeedback(row.id, to, reply, "");
-      setReplying(null);
+      await moveBranchFeedback(row.id, to, "", "");
       await load();
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Could not move that");
@@ -231,16 +268,24 @@ export const FeedbackBoard = ({ branchId, onClose, onCounts }) => {
     }
   };
 
+  // Answering is the whole of the work now, so it lives on the card rather than behind a
+  // dialog. Asking whether it is settled is the same call with a flag: closing one is a
+  // question put to the patient, and their answer is what resolves it.
+  const send = async (row, body, askResolved, done) => {
+    setSending(row.id);
+    try {
+      await replyBranchFeedback(row.id, body, askResolved);
+      done?.();
+      await load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not send that");
+    } finally {
+      setSending(null);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-[70] flex flex-col bg-slate-50" data-testid="feedback-board">
-      {replying && (
-        <ReplyDialog
-          row={replying}
-          saving={moving === replying.id}
-          onCancel={() => setReplying(null)}
-          onSend={(reply) => move(replying, "resolved", reply)}
-        />
-      )}
       {/* A page of its own rather than a card laid over the board behind it. There can be
           dozens of these, each a paragraph somebody wrote about their care, and working
           through them is the job for as long as it takes — not a glance at a dialog with
@@ -291,6 +336,32 @@ export const FeedbackBoard = ({ branchId, onClose, onCounts }) => {
                   to read and, pressed, the rows behind it. They were column headings, which
                   meant the only way to see just the resolved ones was to look at a third of
                   the screen and ignore the rest. */}
+              {/* Two post-bags, and they are not the same job. What a patient sent past
+                  their branch is head office's own to answer — half of it is about the
+                  Branch Admin. What the branches received is head office watching over
+                  them, which reads branch by branch rather than as one pile. */}
+              {isHeadOffice && (
+                <div className="flex flex-wrap gap-1 rounded-lg border border-slate-200 bg-white p-1" data-testid="feedback-audience-tabs">
+                  {AUDIENCE_TABS.map((t) => {
+                    const Icon = t.icon;
+                    return (
+                      <button
+                        key={t.key}
+                        type="button"
+                        onClick={() => { setAudience(t.key); setFilter("all"); }}
+                        className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition ${
+                          audience === t.key ? "bg-sky-100 text-sky-700" : "text-slate-500 hover:bg-slate-50"
+                        }`}
+                        data-testid={`feedback-audience-${t.key}`}
+                      >
+                        <Icon className="h-3.5 w-3.5" /> {t.label}
+                        <span className="text-[10px] text-slate-400">({t.count})</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4" data-testid="feedback-summary">
                 <StatTile
                   label="All"
@@ -325,9 +396,41 @@ export const FeedbackBoard = ({ branchId, onClose, onCounts }) => {
                   {(COLUMNS.find((c) => c.key === filter) || {}).empty || "Nothing here."}
                 </p>
               ) : (
-                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4" data-testid="feedback-list">
-                  {visible.map((r) => <FeedbackCard key={r.id} row={r} onMove={move} moving={moving === r.id} />)}
-                </div>
+                audience === "branch_admin" ? (
+                  /* Under the branch it belongs to, because on this tab the branch is the
+                     unit head office is looking at. One flat grid of every branch's post
+                     answers "how much is there" and never "which branch is behind". */
+                  <div className="space-y-6" data-testid="feedback-by-branch">
+                    {branchGroups.map((g) => {
+                      const waiting = g.rows.filter((r) => r.awaiting_staff || (r.status || "new") === "new").length;
+                      return (
+                        <div key={g.key || "unknown"} data-testid={`feedback-branch-${g.key || "unknown"}`}>
+                          <div className="mb-2 flex items-center gap-2 border-b border-slate-200 pb-1.5">
+                            <Building2 className="h-4 w-4 shrink-0 text-slate-400" />
+                            <h3 className="truncate text-sm font-semibold text-slate-700">{g.name}</h3>
+                            <span className="text-[11px] text-slate-400">{g.rows.length}</span>
+                            {waiting > 0 && (
+                              <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">
+                                {waiting} waiting
+                              </span>
+                            )}
+                          </div>
+                          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+                            {g.rows.map((r) => (
+                              <FeedbackCard key={r.id} row={r} onMove={move} onSend={send} moving={moving === r.id} sending={sending === r.id} />
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4" data-testid="feedback-list">
+                    {visible.map((r) => (
+                      <FeedbackCard key={r.id} row={r} onMove={move} onSend={send} moving={moving === r.id} sending={sending === r.id} />
+                    ))}
+                  </div>
+                )
               )}
             </div>
           )}

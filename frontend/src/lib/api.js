@@ -552,6 +552,10 @@ export const recruitmentReorderStages = async (ids) => (await api.post("/recruit
 export const getDashboardClients = async (branchId) => (await api.get("/dashboard/clients", { params: branchId ? { branch_id: branchId } : {} })).data;
 export const listBranchFeedback = async (branchId) => (await api.get("/branch/feedback", { params: branchId ? { branch_id: branchId } : {} })).data;
 export const moveBranchFeedback = async (feedbackId, status, reply, note) => (await api.patch(`/branch/feedback/${feedbackId}`, { status, reply, note })).data;
+// Writing back to the patient on their own thread. ask_resolved is how a branch closes one
+// — it says what was done and asks whether that settled it; the patient's answer resolves
+// it, and nothing on this side can.
+export const replyBranchFeedback = async (feedbackId, body, askResolved = false) => (await api.post(`/branch/feedback/${feedbackId}/message`, { body, ask_resolved: askResolved })).data;
 
 // ---- Zumba (Branch Admin's own tab) ----
 // Not a clinical journey and so not a lead: no stage, no consultation, no discharge. The

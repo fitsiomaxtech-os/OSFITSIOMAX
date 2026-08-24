@@ -26,7 +26,11 @@ from utils import now_iso
 from security import hash_password, verify_password
 from deps import v3_require_roles, is_branch_admin_role
 from routers.v3_lead_documents import DOC_DIR, is_shared_with_patient
-from routers.v3_feedback import AUDIENCE_SUPER, MAX_MESSAGE, STATUS_NEW, _audience, _rating
+from routers.v3_feedback import (
+    AUDIENCE_SUPER, AUTHOR_PATIENT, AUTHOR_STAFF, MAX_MESSAGE,
+    STATUS_AWAITING, STATUS_IN_PROGRESS, STATUS_NEW, STATUS_RESOLVED,
+    _audience, _rating, _thread,
+)
 from schemas.v3 import V3UserOut, V3PortalAccountInput, V3PatientPortalLogin, V3PatientPortalGoogleLogin
 
 router = APIRouter(prefix="/api/v3")
@@ -418,6 +422,16 @@ async def patient_portal_feedback(
         "note": "",
         "created_at": now_iso(),
     }
+    # The first line of the conversation, not a field beside it. `message` stays written
+    # as well: it is what every existing reader of this collection looks for, and the
+    # thread is the same words rather than a second copy of a different truth.
+    row["messages"] = [{
+        "id": str(uuid.uuid4()),
+        "author": AUTHOR_PATIENT,
+        "author_name": row["patient_name"],
+        "body": message,
+        "created_at": row["created_at"],
+    }]
     await v3_col("patient_feedback").insert_one(dict(row))
     # Says who has it, because the patient chose. "Your branch has it" over a complaint the
     # patient deliberately sent past the branch would be the one thing they were avoiding.
@@ -444,9 +458,78 @@ async def patient_portal_my_feedback(lead_id: str = Depends(_current_patient_lea
     rows = await v3_col("patient_feedback").find(
         {"lead_id": lead_id},
         {"_id": 0, "id": 1, "rating": 1, "message": 1, "status": 1, "created_at": 1,
-         "audience": 1, "reply": 1, "replied_at": 1},
+         "audience": 1, "reply": 1, "replied_at": 1, "replied_by": 1, "patient_name": 1,
+         "messages": 1},
     ).sort("created_at", -1).to_list(200)
+    for row in rows:
+        row["messages"] = _thread(row)
+        # Whether the last word was theirs, so the portal can show which of these is
+        # waiting on the clinic and which is waiting on them.
+        last = row["messages"][-1] if row["messages"] else None
+        row["awaiting_clinic"] = bool(last and last.get("author") == AUTHOR_PATIENT)
     return {"feedback": rows}
+
+
+class PortalFeedbackReplyIn(BaseModel):
+    body: Optional[str] = ""
+    # Answering the clinic's "did that settle it?". True closes the thread, False sends it
+    # back to them. Left unset for an ordinary message that answers nothing.
+    resolved: Optional[bool] = None
+
+
+@router.post("/patient-portal/feedback/{feedback_id}/message")
+async def patient_portal_feedback_reply(
+    feedback_id: str,
+    payload: PortalFeedbackReplyIn,
+    lead_id: str = Depends(_current_patient_lead_id),
+):
+    """The patient's next word on their own thread.
+
+    Their session is the identity here, as everywhere else in this router, and the thread
+    has to be theirs — a feedback id from the body would otherwise let anybody write into
+    anybody's conversation.
+
+    `resolved` is the answer to being asked whether it was settled, and it is the only
+    thing that closes a thread. The branch can say what it did and ask; whether that was
+    enough is not theirs to decide, and a complaint marked dealt with by the person
+    complained about is how somebody learns not to bother saying anything.
+
+    Saying "not yet" hands it straight back rather than leaving it closed-with-a-caveat:
+    In Progress is a column somebody works through, and Awaiting is one that waits.
+    """
+    row = await v3_col("patient_feedback").find_one(
+        {"id": feedback_id, "lead_id": lead_id}, {"_id": 0}
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="No such feedback")
+
+    body = (payload.body or "").strip()[:MAX_MESSAGE]
+    if payload.resolved is None and not body:
+        raise HTTPException(status_code=400, detail="Write something to send")
+
+    now = now_iso()
+    thread = _thread(row)
+    if body:
+        thread = [*thread, {
+            "id": str(uuid.uuid4()),
+            "author": AUTHOR_PATIENT,
+            "author_name": row.get("patient_name") or "",
+            "body": body,
+            "created_at": now,
+        }]
+
+    changes = {"messages": thread}
+    if payload.resolved is True:
+        changes.update({"status": STATUS_RESOLVED, "resolved_by_patient_at": now})
+    elif payload.resolved is False:
+        changes["status"] = STATUS_IN_PROGRESS
+    elif row.get("status") == STATUS_RESOLVED:
+        # Writing again on something closed opens it back up. The alternative is a message
+        # nobody is looking at, in a column nobody works through.
+        changes["status"] = STATUS_IN_PROGRESS
+
+    await v3_col("patient_feedback").update_one({"id": feedback_id}, {"$set": changes})
+    return {**row, **changes}
 
 
 # --------------------------------------------------------------- Staff: preview a patient's

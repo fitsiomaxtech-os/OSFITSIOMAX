@@ -9,6 +9,7 @@ import {
   loadPortalSession, savePortalSession, clearPortalSession,
   patientPortalLogin, patientPortalLogout, patientPortalMe, patientPortalGoogleLogin,
   patientPortalDocuments, patientPortalDocumentUrl, patientPortalSubmitFeedback, patientPortalMyFeedback,
+  patientPortalReplyFeedback,
 } from "@/lib/patientPortalApi";
 
 const LOGO_URL =
@@ -756,6 +757,7 @@ const FEEDBACK_TO = [
 const MY_FEEDBACK_STATUS = {
   new: { label: "Sent", classes: "border-amber-200 bg-amber-50 text-amber-700", note: "Waiting to be picked up." },
   in_progress: { label: "Being looked at", classes: "border-sky-200 bg-sky-50 text-sky-700", note: "Somebody has it." },
+  awaiting_patient: { label: "Over to you", classes: "border-violet-200 bg-violet-50 text-violet-700", note: "They have asked whether this is sorted." },
   resolved: { label: "Closed", classes: "border-emerald-200 bg-emerald-50 text-emerald-700", note: "Finished with." },
 };
 
@@ -771,7 +773,120 @@ const feedbackSentOn = (iso) => {
  * it again or stops sending. This does not promise a reply — it says somebody has it, which
  * is the smallest honest thing to say.
  */
-const MyFeedbackList = ({ mine }) => {
+/** One conversation, and the box to answer it in.
+ *
+ *  A patient whose answer raises another question had nowhere to put it before — one
+ *  message, one reply, and anything further meant opening a second piece of feedback about
+ *  the same thing. Both sides can write here, and it keeps its order.
+ */
+const FeedbackThread = ({ f, onSend, busy }) => {
+  const [draft, setDraft] = useState("");
+  const state = MY_FEEDBACK_STATUS[f.status || "new"] || MY_FEEDBACK_STATUS.new;
+  const thread = f.messages || [];
+  const asked = (f.status || "new") === "awaiting_patient";
+  const closed = (f.status || "new") === "resolved";
+
+  const send = (resolved) => {
+    const body = draft.trim();
+    if (!body && resolved === undefined) return;
+    onSend(f, { body, resolved }, () => setDraft(""));
+  };
+
+  return (
+    <div className="rounded-lg border border-slate-200 p-3" data-testid={`portal-feedback-mine-${f.id}`}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className={`rounded border px-2 py-0.5 text-[10px] font-bold ${state.classes}`}>{state.label}</span>
+          <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
+            {f.audience === "super_admin" ? "Head office" : "My branch"}
+          </span>
+        </div>
+        <span className="text-[10px] text-slate-400">{feedbackSentOn(f.created_at)}</span>
+      </div>
+
+      <div className="mt-2 space-y-2">
+        {thread.length === 0 ? (
+          <p className="text-[10px] text-slate-400">{state.note}</p>
+        ) : thread.map((m) => {
+          const mine = m.author === "patient";
+          return (
+            <div key={m.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
+              <div className={`max-w-[85%] rounded-lg px-2.5 py-1.5 ${mine ? "bg-sky-50 text-sky-900" : "bg-slate-100 text-slate-700"}`}>
+                <p className="whitespace-pre-wrap break-words text-xs leading-5">{m.body}</p>
+                <p className={`mt-0.5 text-[10px] ${mine ? "text-sky-500" : "text-slate-400"}`}>
+                  {[mine ? "You" : (f.audience === "super_admin" ? "Head office" : "Your branch"), feedbackSentOn(m.created_at)].filter(Boolean).join(" · ")}
+                </p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Being asked, rather than being told. Whether what they did was enough is the
+          patient's to say — a complaint marked dealt with by the people complained about
+          is how somebody learns not to bother saying anything. */}
+      {asked && (
+        <div className="mt-2 rounded-lg border border-violet-200 bg-violet-50/70 p-2.5" data-testid={`portal-feedback-asked-${f.id}`}>
+          <p className="text-[11px] font-semibold text-violet-900">Has this sorted it?</p>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            <Button
+              size="sm"
+              className="h-7 bg-emerald-600 px-2 text-[11px] text-white hover:bg-emerald-700"
+              disabled={busy}
+              onClick={() => send(true)}
+              data-testid={`portal-feedback-yes-${f.id}`}
+            >
+              Yes, all sorted
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 border-slate-200 px-2 text-[11px]"
+              disabled={busy}
+              onClick={() => send(false)}
+              data-testid={`portal-feedback-no-${f.id}`}
+            >
+              Not yet
+            </Button>
+          </div>
+          <p className="mt-1 text-[10px] text-violet-700/70">Add a line below first if you want to say why.</p>
+        </div>
+      )}
+
+      {closed ? (
+        <p className="mt-2 text-[10px] text-emerald-600">You marked this sorted. Writing again opens it back up.</p>
+      ) : null}
+
+      <div className="mt-2">
+        <textarea
+          rows={2}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder={closed ? "Something else about this?" : "Write back…"}
+          className="w-full resize-none rounded-lg border border-slate-200 px-2.5 py-2 text-xs focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400"
+          data-testid={`portal-feedback-compose-${f.id}`}
+        />
+        <Button
+          size="sm"
+          className="mt-1.5 h-7 bg-sky-600 px-2 text-[11px] text-white hover:bg-sky-700"
+          disabled={busy || !draft.trim()}
+          onClick={() => send(undefined)}
+          data-testid={`portal-feedback-send-${f.id}`}
+        >
+          Send
+        </Button>
+      </div>
+    </div>
+  );
+};
+
+/** What this patient has sent, and where each one has got to.
+ *
+ * A patient who says something and hears nothing assumes it went nowhere, and either sends
+ * it again or stops sending. This does not promise a reply — it says somebody has it, which
+ * is the smallest honest thing to say.
+ */
+const MyFeedbackList = ({ mine, onSend, busy }) => {
   if (!mine || mine.length === 0) {
     return (
       <Card data-testid="portal-feedback-mine-empty">
@@ -789,39 +904,7 @@ const MyFeedbackList = ({ mine }) => {
       <CardContent className="p-5">
         <p className="text-sm font-semibold text-slate-800">What you have sent</p>
         <div className="mt-3 space-y-3">
-          {mine.map((f) => {
-            const state = MY_FEEDBACK_STATUS[f.status || "new"] || MY_FEEDBACK_STATUS.new;
-            return (
-              <div key={f.id} className="rounded-lg border border-slate-200 p-3" data-testid={`portal-feedback-mine-${f.id}`}>
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className={`rounded border px-2 py-0.5 text-[10px] font-bold ${state.classes}`}>{state.label}</span>
-                    <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
-                      {f.audience === "super_admin" ? "Head office" : "My branch"}
-                    </span>
-                  </div>
-                  <span className="text-[10px] text-slate-400">{feedbackSentOn(f.created_at)}</span>
-                </div>
-                {f.message ? (
-                  <p className="mt-1.5 whitespace-pre-wrap break-words text-xs leading-5 text-slate-600">{f.message}</p>
-                ) : null}
-                {/* What was done about it, in their words. Closing something without saying
-                    why is how somebody learns that writing here achieves nothing, so the
-                    reply sits with the status rather than behind it. */}
-                {f.reply ? (
-                  <div className="mt-2 rounded-lg border border-emerald-100 bg-emerald-50/70 p-2.5">
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">
-                      {f.audience === "super_admin" ? "Head office replied" : "Your branch replied"}
-                      {f.replied_at ? <span className="ml-1 font-normal normal-case tracking-normal text-emerald-600/70">{feedbackSentOn(f.replied_at)}</span> : null}
-                    </p>
-                    <p className="mt-1 whitespace-pre-wrap break-words text-xs leading-5 text-emerald-900">{f.reply}</p>
-                  </div>
-                ) : (
-                  <p className="mt-1.5 text-[10px] text-slate-400">{state.note}</p>
-                )}
-              </div>
-            );
-          })}
+          {mine.map((f) => <FeedbackThread key={f.id} f={f} onSend={onSend} busy={busy === f.id} />)}
         </div>
       </CardContent>
     </Card>
@@ -838,6 +921,7 @@ function FeedbackTab() {
   // happened to last week's complaint should not have to scroll past a blank form to find
   // it. Opens on the form, which is what most visits are for.
   const [view, setView] = useState("send"); // "send" | "history"
+  const [replying, setReplying] = useState(null);
 
   // Reloaded after a send as well as on open, so what was just written appears in the list
   // below rather than only after leaving the tab and coming back.
@@ -847,6 +931,23 @@ function FeedbackTab() {
       .catch(() => { /* the history is a courtesy; the form works without it */ });
   }, []);
   useEffect(() => { loadMine(); }, [loadMine]);
+
+  // Answering on a thread the patient already opened. Reloaded rather than patched in
+  // place: the status moves with the message — saying it is sorted closes it, saying it
+  // is not hands it back — and only the server knows which.
+  const replyOnThread = async (f, { body, resolved }, done) => {
+    setReplying(f.id);
+    try {
+      await patientPortalReplyFeedback(f.id, { body, resolved });
+      done?.();
+      loadMine();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not send that");
+    } finally {
+      setReplying(null);
+    }
+  };
+
 
   const submit = async () => {
     if (!message.trim()) {
@@ -922,7 +1023,7 @@ function FeedbackTab() {
       </div>
 
       {view === "history" ? (
-        <MyFeedbackList mine={mine} />
+        <MyFeedbackList mine={mine} onSend={replyOnThread} busy={replying} />
       ) : (
       <Card data-testid="portal-feedback">
       <CardContent className="space-y-4 p-5">
