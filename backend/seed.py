@@ -198,6 +198,60 @@ async def ensure_rehab_stage() -> None:
     })
 
 
+# The two stages that close out a patient's course, in the order they are worked through.
+# Both are read off the lead rather than written to it, like Rehab beside them: a patient
+# is on the diet list because their diet fee is in and a Nutrition Coach has them, and on
+# the completed list because there are no treatment days left. Nothing moves them there.
+DIET_STAGE = ("Diet Consultation", "#f97316")
+COMPLETED_STAGE = ("Completed", "#059669")
+
+
+async def ensure_diet_and_completed_stages() -> None:
+    """Put Diet Consultation and Completed on the Branch consultation pipeline, after Rehab.
+
+    Two more stages nothing ever writes -- see matchesConsultationStage on the frontend for
+    what puts a lead under each. They sit between Rehab and Cancel because that is the order
+    a course actually ends in: the physio work finishes, the diet side runs on beside it,
+    and Cancel stays last as the thing that is not an ending but an abandonment.
+
+    Positioned against Rehab rather than at a fixed index, since Pipeline Stage Management
+    may have moved things. Each is inserted on its own and skipped if already there, so a
+    Super Admin who deletes one does not get the other recreated alongside it.
+    """
+    after = await v3_col("pipeline_stages").find_one(
+        {"type": "consultation", "name": "Rehab"}, {"_id": 0, "order": 1}
+    )
+    if not after:
+        return  # Rehab is seeded first; nothing to position against yet.
+    order = after["order"]
+    for name, colour in (DIET_STAGE, COMPLETED_STAGE):
+        exists = await v3_col("pipeline_stages").find_one(
+            {"type": "consultation", "name": name}, {"_id": 0, "id": 1}
+        )
+        if exists:
+            # Still step past it, so the second stage lands after the first rather than
+            # on top of it when only one of the two is missing.
+            order += 1
+            continue
+        order += 1
+        await v3_col("pipeline_stages").update_many(
+            {"type": "consultation", "order": {"$gte": order}},
+            {"$inc": {"order": 1}},
+        )
+        await v3_col("pipeline_stages").insert_one({
+            "id": str(uuid.uuid4()),
+            "name": name,
+            "color": colour,
+            "type": "consultation",
+            "order": order,
+            # Completed is where a patient stops, but it is not final in the pipeline's
+            # sense: is_final closes a lead out of the working lists, and a finished course
+            # is still a patient the branch may sell another one to.
+            "is_final": False,
+            "created_at": now_iso(),
+        })
+
+
 async def ensure_branch_admin_stages() -> None:
     """Give the Branch pipeline its Branch-Admin-only opening: Branch Assign, then RNR.
 

@@ -320,10 +320,46 @@ async def v3_public_appointment(share_token: str):
     }))
 
 
+async def _stamp_session_progress(leads: list) -> None:
+    """Put each lead's treatment-day count on it: how many were booked, how many are done.
+
+    Derived rather than stored. The days live in the sessions collection and are completed
+    one at a time by whoever ran them, so a count kept on the lead would be a second copy
+    of that to keep true — and the one that goes stale is the one the board reads.
+
+    One aggregation for the whole branch rather than a query per lead: a branch with two
+    thousand patients would otherwise open its board with two thousand round trips.
+
+    Leads with no days booked are left without the fields entirely, which is not the same
+    as zero: nobody has sold them treatment, so they are not partway through any.
+    """
+    ids = [lead["id"] for lead in leads if lead.get("id")]
+    if not ids:
+        return
+    rows = await v3_col("sessions").aggregate([
+        # lead_id is what a treatment day carries; an auth token in the same collection has
+        # none, which is what this first stage keeps out.
+        {"$match": {"lead_id": {"$in": ids}}},
+        {"$group": {
+            "_id": "$lead_id",
+            "total": {"$sum": 1},
+            "done": {"$sum": {"$cond": [{"$eq": ["$status", "completed"]}, 1, 0]}},
+        }},
+    ]).to_list(20000)
+    progress = {r["_id"]: r for r in rows}
+    for lead in leads:
+        found = progress.get(lead.get("id"))
+        if not found:
+            continue
+        lead["total_sessions"] = found["total"]
+        lead["completed_sessions"] = found["done"]
+
+
 @router.get("/branch-board/{branch_id}")
 async def v3_branch_board_new(branch_id: str, _: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", "business_dev"))):
     try:
         leads = await v3_col("leads").find({"branch_id": branch_id}, {"_id": 0}).sort("updated_at", -1).to_list(20000)
+        await _stamp_session_progress(leads)
         stage_counts = {}
         branch_stages = await _branch_stages(branch_id)
         for stage in branch_stages:

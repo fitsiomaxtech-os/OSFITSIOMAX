@@ -919,10 +919,18 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     // BranchAdminBoard for why it is read off the lead's diet flag instead. Gated to the
     // branch pipeline: the Head Physio's own board runs on head_consultation_stage and has
     // no such stage, so this must not fire there.
-    if (!isConsultant && stageName === "Diet Consultation") return !!lead.diet_recommended;
-    // Rehab reads off the fee for the same reason Diet reads off its flag — nothing ever
+    if (!isConsultant && stageName === "Diet Consultation") {
+      return lead.diet_fee_paid != null && !!lead.diet_coach_id;
+    }
+    // Rehab reads off the fee for the same reason Diet reads off its own — nothing ever
     // writes the stage. Branch pipeline only: the Consultant's own board has no such stage.
     if (!isConsultant && stageName === "Rehab") return lead.rehab_fee_paid != null;
+    // Nothing left to attend, counted off the treatment days rather than a stage somebody
+    // sets. Kept in step with matchesConsultationStage in BranchAdminBoard, which the
+    // Branch Leads bar reads the same rows through.
+    if (!isConsultant && stageName === "Completed") {
+      return (lead.total_sessions || 0) > 0 && (lead.completed_sessions || 0) >= lead.total_sessions;
+    }
     return lead[stageField] === stageName;
   }, [isConsultant, stageField]);
 

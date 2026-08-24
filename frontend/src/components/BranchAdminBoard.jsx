@@ -340,11 +340,21 @@ const BOTTOM_NAV_KEYS = ["pipeline", "review", "consultations"];
  * Mirrors the "Treatments" virtual stage ConsultationsBoard already matches this way.
  */
 export const matchesConsultationStage = (lead, stageName) => {
-  if (stageName === "Diet Consultation") return !!lead.diet_recommended;
-  // Rehab, on the same footing as Diet Consultation: a stage nothing writes. A patient is
-  // on the rehab list because their Rehab Fee is in, and they keep whatever position they
-  // actually hold in the physio pipeline — rehab runs beside it, not inside it.
+  // Recommending diet is not being on the diet programme. A consultation that ticks the box
+  // starts the conversation; the patient is on it once the branch has taken the fee and a
+  // Nutrition Coach has them. Reading the flag alone filled this stage with everybody who
+  // had ever been offered it, which is a list nobody can work.
+  if (stageName === "Diet Consultation") return lead.diet_fee_paid != null && !!lead.diet_coach_id;
+  // Rehab, on the same footing: a stage nothing writes. A patient is on the rehab list
+  // because their Rehab Fee is in, and they keep whatever position they actually hold in
+  // the physio pipeline — rehab runs beside it, not inside it.
   if (stageName === "Rehab") return lead.rehab_fee_paid != null;
+  // Nothing left to attend. Counted off the days themselves rather than a stage somebody
+  // remembers to set, and gated on there having been days at all: a patient with none
+  // booked has not finished a course, they have not started one.
+  if (stageName === "Completed") {
+    return (lead.total_sessions || 0) > 0 && (lead.completed_sessions || 0) >= lead.total_sessions;
+  }
   return lead.consultation_stage === stageName;
 };
 
