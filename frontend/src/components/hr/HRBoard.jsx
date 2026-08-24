@@ -1346,6 +1346,11 @@ const StructureTab = ({ meta, reloadMeta }) => {
   // row: only ever one is open, and a hundred mounted copies would be a hundred Escape
   // listeners waiting on a key nobody has pressed.
   const [branchPickerFor, setBranchPickerFor] = useState(null);
+  // null | "department" | "designation" — which of the two is being named, and the name so
+  // far. One dialog serves both: the two differ by a title and where the name is sent.
+  const [creating, setCreating] = useState(null);
+  const [newName, setNewName] = useState("");
+  const [savingName, setSavingName] = useState(false);
   // Which designation is open. One at a time, so the department's shape stays readable
   // while a designation's people are being looked at.
   const [openDesignation, setOpenDesignation] = useState("");
@@ -1416,6 +1421,38 @@ const StructureTab = ({ meta, reloadMeta }) => {
     }
   };
 
+  const openCreate = (what) => { setNewName(""); setCreating(what); };
+
+  const submitCreate = async () => {
+    const name = newName.trim();
+    if (!name) return;
+    setSavingName(true);
+    try {
+      if (creating === "department") {
+        await hrCreateDepartment(name);
+        await load();
+        // Opened on what was just made: somebody creating a department is about to fill
+        // it, and leaving them on the one they were reading would hide the thing they
+        // asked for behind a tab they now have to find.
+        setSelected(name);
+      } else {
+        await hrAddDesignation(current.id, name);
+        // Selection and open row both kept: the new designation appears in the list
+        // already being looked at rather than closing it to say so.
+        await load(true);
+      }
+      toast.success(`${name} added`);
+      setCreating(null);
+      setNewName("");
+      // Departments & Designation reads the same list off meta, so it has to be told.
+      reloadMeta();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not add it");
+    } finally {
+      setSavingName(false);
+    }
+  };
+
   if (loading) return <p className="py-12 text-center text-sm text-slate-400">Loading…</p>;
   if (depts.length === 0) {
     return (
@@ -1427,10 +1464,14 @@ const StructureTab = ({ meta, reloadMeta }) => {
 
   return (
     <div className="flex flex-col gap-4" data-testid="hr-structure-tab">
+      {/* The strip scrolls; the two create buttons do not. They sit outside the scrolling
+          box, pinned right, or they would slide off with the departments and be unreachable
+          exactly when there are enough of them to want another. */}
+      <div className="flex items-center gap-2">
       {/* One row, scrolling sideways rather than wrapping: a department's place in the row
           is how it is found again, and a row that reflows every time one is added moves
           them all. min-w-0 so the strip scrolls inside the page instead of widening it. */}
-      <div className="min-w-0 overflow-x-auto">
+      <div className="min-w-0 flex-1 overflow-x-auto">
         <div className="flex w-max items-center gap-1.5 rounded-lg border border-slate-200 bg-white p-1" data-testid="hr-structure-depts">
           {depts.map((d) => {
             const on = d.name === selected;
@@ -1453,6 +1494,30 @@ const StructureTab = ({ meta, reloadMeta }) => {
             );
           })}
         </div>
+      </div>
+
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-9 shrink-0 border-slate-200 text-xs text-slate-600 hover:bg-slate-50"
+          onClick={() => openCreate("department")}
+          data-testid="hr-structure-add-department"
+        >
+          <Plus className="mr-1 h-3.5 w-3.5" /> Department
+        </Button>
+        {/* Disabled rather than hidden while nothing is selected: the button is what says
+            a designation belongs to a department, and hiding it would only raise the
+            question of where designations are made. */}
+        <Button
+          size="sm"
+          className="h-9 shrink-0 bg-sky-600 text-xs text-white hover:bg-sky-700"
+          disabled={!current}
+          onClick={() => openCreate("designation")}
+          title={current ? `Add a designation to ${current.name}` : "Pick a department first"}
+          data-testid="hr-structure-add-designation"
+        >
+          <Plus className="mr-1 h-3.5 w-3.5" /> Designation
+        </Button>
       </div>
 
       <Card data-testid="hr-structure-designations">
@@ -1562,6 +1627,45 @@ const StructureTab = ({ meta, reloadMeta }) => {
           )}
         </CardContent>
       </Card>
+
+      {creating && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={(e) => { if (e.target === e.currentTarget) setCreating(null); }}
+          data-testid="hr-structure-create-modal"
+        >
+          <div className="w-full max-w-sm space-y-3 rounded-lg bg-white p-5 shadow-xl">
+            <h3 className="text-sm font-semibold text-slate-900">
+              {creating === "department" ? "New Department" : `New Designation in ${current?.name}`}
+            </h3>
+            <Input
+              value={newName}
+              autoFocus
+              onChange={(e) => setNewName(e.target.value)}
+              // Enter to save, Escape to leave: this is one field, and reaching for the
+              // mouse to commit a single word is the slower half of the job.
+              onKeyDown={(e) => {
+                if (e.key === "Enter") submitCreate();
+                if (e.key === "Escape") setCreating(null);
+              }}
+              placeholder={creating === "department" ? "Department name" : "Designation name"}
+              data-testid="hr-structure-create-input"
+            />
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="outline" size="sm" onClick={() => setCreating(null)} data-testid="hr-structure-create-cancel">Cancel</Button>
+              <Button
+                size="sm"
+                className="bg-sky-600 hover:bg-sky-700"
+                disabled={savingName || !newName.trim()}
+                onClick={submitCreate}
+                data-testid="hr-structure-create-save"
+              >
+                {savingName ? "Adding…" : "Add"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {branchPickerFor && (
         <BranchPickerModal
