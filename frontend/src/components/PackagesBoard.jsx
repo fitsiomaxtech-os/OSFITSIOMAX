@@ -1604,6 +1604,14 @@ export const PackagesBoard = () => {
     if (!MODE_TAB_KEYS[key].has(tab)) setTab("consultations");
   };
 
+  // The Dashboard's own date-filter strip, to the class: a squared button, bordered and
+  // white while idle, solid blue when it is the one selected. Written once here because
+  // History sits in this row as a peer of the three modes, and two copies of the styling
+  // is how the row ends up with three buttons of one shape and a fourth of another.
+  const scopeBtn = (on) => `h-10 shrink-0 rounded-md px-3 text-sm font-medium transition ${
+    on ? "bg-sky-600 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+  }`;
+
   return (
     <div className="space-y-4" data-testid="packages-board">
       {/* No heading. The nav tab above already reads Services and Products, and the line
@@ -1614,9 +1622,7 @@ export const PackagesBoard = () => {
             key={m.key}
             type="button"
             onClick={() => selectMode(m.key)}
-            className={`shrink-0 rounded-full border px-3.5 py-1.5 text-sm font-medium transition ${
-              view === "catalog" && modeFilter === m.key ? "border-sky-600 bg-sky-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"
-            }`}
+            className={scopeBtn(view === "catalog" && modeFilter === m.key)}
             data-testid={`packages-mode-filter-${m.key}`}
           >
             {m.label}
@@ -1625,9 +1631,7 @@ export const PackagesBoard = () => {
         <button
           type="button"
           onClick={() => setView("history")}
-          className={`shrink-0 rounded-full border px-3.5 py-1.5 text-sm font-medium transition ${
-            view === "history" ? "border-sky-600 bg-sky-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:text-sky-600"
-          }`}
+          className={scopeBtn(view === "history")}
           data-testid="packages-view-history"
         >
           History
