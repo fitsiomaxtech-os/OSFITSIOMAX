@@ -1463,6 +1463,7 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
   const [reviewEvery, setReviewEvery] = useState(REVIEW_EVERY);
   const [completeTarget, setCompleteTarget] = useState(null);
   const [absentTarget, setAbsentTarget] = useState(null);
+  const [confirmingComplete, setConfirmingComplete] = useState(false);
   // Opens on Treatment Days. The physio reaches this dialog from the day's list in order
   // to mark someone present or absent, and Overview first meant a tab change before every
   // single one of those. Overview is reference; this is the work.
@@ -1487,6 +1488,7 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
     try {
       const updated = await physioCompleteConsultation(lead.id, physioId);
       toast.success("Marked complete");
+      setConfirmingComplete(false);
       onDone(updated);
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed to mark complete");
@@ -1502,6 +1504,19 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
   const overdue = paymentDue && paymentDue.due_date < todayIso;
 
   const completedSessions = sessions.filter((s) => s.status === "completed");
+  // Closing out a course of treatment is offered only once there is a finished course to
+  // close. It was offered from the first day onwards, which put the end of the treatment
+  // one press away throughout the whole of it -- on a 26-day rehab course, 25 days before
+  // it could be true.
+  //
+  // A day awaiting a date from the Branch Admin is not completed, so it holds this shut
+  // too, which is right: the course is not over while a day of it is unscheduled. An
+  // absence never lands here at all -- v3_physio_board moves that day down the slots
+  // rather than closing it -- so no day is completed by not happening.
+  //
+  // Nothing booked is the exception. Those patients have no day list to finish, and
+  // without this they could never be marked complete from the only screen that can do it.
+  const allDaysDone = sessions.length === 0 || completedSessions.length === sessions.length;
   const upcomingSession = sessions.find((s) => s.status === "upcoming") || null;
   const lastCompleted = completedSessions[completedSessions.length - 1] || null;
 
@@ -1663,9 +1678,10 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
             </div>
           </div>
 
+          {allDaysDone && (
           <button
             type="button"
-            onClick={markComplete}
+            onClick={() => setConfirmingComplete(true)}
             disabled={isComplete || submitting}
             className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold transition sm:px-3.5 sm:py-2 sm:text-xs ${
               isComplete
@@ -1684,6 +1700,7 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
               </>
             )}
           </button>
+          )}
         </div>
         <div className="flex-1 space-y-5 overflow-y-auto p-4 sm:p-5">
           {tab === "overview" && (
@@ -2009,6 +2026,16 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
             session={completeTarget}
             onClose={() => setCompleteTarget(null)}
             onDone={() => { setCompleteTarget(null); loadSessions(); }}
+          />
+        )}
+
+        {confirmingComplete && (
+          <ConfirmTreatmentCompleteModal
+            lead={lead}
+            days={sessions.length}
+            submitting={submitting}
+            onCancel={() => setConfirmingComplete(false)}
+            onConfirm={markComplete}
           />
         )}
 
@@ -2803,6 +2830,56 @@ function CompleteSessionModal({ session, onClose, onDone }) {
  * names the day that comes off the end, because that one stops being the physio's to work
  * until the Branch Admin has given it a date.
  */
+/**
+ * Asked before a course of treatment is closed out.
+ *
+ * There is no undo on this screen: physioCompleteConsultation moves the patient to
+ * Complete, and a physio has no way back from here. It also used to be a single press on
+ * a button sitting a few pixels from the per-day Complete, which is pressed dozens of
+ * times over a course -- the two are one slip apart, and only one of them is reversible.
+ *
+ * Says what will happen rather than "Are you sure?", which asks a question the answer to
+ * depends on knowing what the button does.
+ */
+function ConfirmTreatmentCompleteModal({ lead, days, submitting, onCancel, onConfirm }) {
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
+      <div className="w-full max-w-md rounded-xl bg-white shadow-2xl" data-testid="confirm-treatment-complete-modal">
+        <div className="border-b p-5">
+          <h3 className="text-base font-semibold text-slate-800">Mark treatment complete?</h3>
+          <p className="text-[10px] text-slate-400">{lead.name}{lead.phone ? ` · ${lead.phone}` : ""}</p>
+        </div>
+        <div className="space-y-3 p-5">
+          <div className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-[11px] text-emerald-800">
+            <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>
+              {days > 0
+                ? <>All {days} day{days === 1 ? "" : "s"} of this treatment are finished. </>
+                : null}
+              {lead.name} moves to Complete and comes off your active list.
+            </span>
+          </div>
+          <p className="text-[11px] text-slate-500">
+            This cannot be undone from here — reopening the treatment is a Branch Admin's to do.
+          </p>
+        </div>
+        <div className="flex justify-end gap-2 border-t p-4">
+          <Button variant="outline" size="sm" onClick={onCancel} data-testid="confirm-treatment-complete-cancel">Cancel</Button>
+          <Button
+            size="sm"
+            onClick={onConfirm}
+            disabled={submitting}
+            className="bg-emerald-600 text-white hover:bg-emerald-700"
+            data-testid="confirm-treatment-complete-submit"
+          >
+            {submitting ? "Marking..." : "Yes, mark complete"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function MarkAbsentModal({ session, lastDated, onClose, onDone }) {
   const [remarks, setRemarks] = useState("");
   const [submitting, setSubmitting] = useState(false);
