@@ -85,12 +85,16 @@ async def list_feedback(
 ):
     """The feedback addressed to whoever is asking, and the count their bell reads.
 
-    Scoped by who it was sent to before it is scoped by branch. A patient picks their
-    branch or head office, and each reads their own post: the branch does not see what went
-    over their head, and head office does not see what was meant for the branch. Sending
-    everything to both would make the choice the portal offers a decoration.
+    A branch reads its own post and nothing else: what its patients sent it, for its branch
+    only. What a patient addressed to head office is kept off that board deliberately — it
+    was sent that way because the patient did not want the branch reading it, and half of
+    those are about the Branch Admin themselves.
 
-    A Branch Admin is further held to their own branch; Super Admin may narrow to one.
+    Head office reads all of it, its own and every branch's. It owns the branches, and
+    feedback about a branch it cannot see is oversight it cannot do. The asymmetry is the
+    point rather than an oversight: confidentiality runs upward, not down.
+
+    Super Admin may narrow to one branch; a Branch Admin is always held to theirs.
 
     unread is the New column rather than a flag of its own. A bell counting things nobody
     has picked up is the same question the first column already answers, and a second
@@ -106,15 +110,17 @@ async def list_feedback(
         # about the Branch Admin themselves.
         query["audience"] = {"$ne": AUDIENCE_SUPER}
     else:
-        # And the other half of the same rule: head office reads what was addressed to head
-        # office, and nothing else. Without this the branch's own feedback surfaced up here
-        # too, so a patient who wrote to their branch found their words on a second desk
-        # they never sent them to -- and Super Admin worked through a board mostly made of
-        # other people's post.
+        # Head office reads everything: what was addressed to it, and what every branch
+        # received. It owns the branches, and feedback about a branch it cannot see is
+        # oversight it cannot do.
         #
-        # Matched exactly rather than by exclusion, so a row written before audiences
-        # existed -- which carries no field at all -- stays with the branch it was sent to.
-        query["audience"] = AUDIENCE_SUPER
+        # The rule does NOT run the other way, and must not. A patient who wrote to head
+        # office chose not to have the branch read it, and half of those are about the
+        # Branch Admin themselves — the branch query above still excludes them. What is
+        # asymmetric here is the relationship, not an oversight.
+        #
+        # `audience` is returned on every row so this board can still tell them apart, and
+        # narrowing to one branch stays available.
         if branch_id:
             query["branch_id"] = branch_id
 

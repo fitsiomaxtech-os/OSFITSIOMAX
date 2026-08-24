@@ -779,6 +779,9 @@ export const CRMPage = ({ auth, onLogout }) => {
   };
 
   const showSuperAdminBoard = role === "super_admin";
+  // Who /branch/feedback answers for. A branch reads its own patients' feedback; head
+  // office reads that and its own. Anyone else has no board behind the bell.
+  const canReadFeedback = showSuperAdminBoard || isBranchAdminRole(role);
   const showBusinessDevBoard = role === "business_dev";
   const showPreSalesBoard = isPreSalesRole(role);
   // Its own flag rather than folded into isPreSalesRole/PRE_SALES_ROLES — it mounts the
@@ -796,16 +799,17 @@ export const CRMPage = ({ auth, onLogout }) => {
   // board opens rather than polled: feedback arrives at the pace people write it, and a
   // request every half minute to learn that nothing changed is paid for all day.
   //
-  // Only for Super Admin. Everybody else either has this bell on their own board already
-  // or has nothing addressed to them.
+  // For everyone the bell is shown to. A Branch Admin is scoped to their own branch, which
+  // the backend does from their login anyway — passed here so the count and the board that
+  // opens behind it are asking the same question.
   useEffect(() => {
-    if (!showSuperAdminBoard) return undefined;
+    if (!canReadFeedback) return undefined;
     let live = true;
-    listBranchFeedback()
+    listBranchFeedback(isBranchAdminRole(role) ? auth?.user?.branch_id : undefined)
       .then((data) => { if (live) setFeedbackUnread(data?.unread || 0); })
       .catch(() => { /* the bell carries no count; the board says why when opened */ });
     return () => { live = false; };
-  }, [showSuperAdminBoard]);
+  }, [canReadFeedback, role, auth?.user?.branch_id]);
   const showHumanResourceBoard = isHumanResourceRole(role);
 
   const filteredAppointmentsForPhysioBoards = appointments;
@@ -932,11 +936,14 @@ export const CRMPage = ({ auth, onLogout }) => {
                   <span className="hidden sm:inline">Calendar</span>
                 </button>
               )}
-              {/* The same bell a Branch Admin has, in the same place, reading the same
-                  board -- what differs is what reaches it. A branch sees its own patients'
-                  feedback; this one collects what was addressed to head office, which is
-                  the half no branch is shown. */}
-              {showSuperAdminBoard && (
+              {/* One bell, one place, for everyone who has post to read. It used to sit in
+                  the header for Super Admin and down inside the tab strip on the Branch
+                  Admin board, so the same thing lived in two places and only one of them
+                  was where a person looks for it.
+
+                  Only the roles the endpoint answers for: a bell shown to a physio would
+                  count nothing and open a 403. */}
+              {canReadFeedback && (
                 <button
                   type="button"
                   onClick={() => setShowFeedback(true)}
@@ -991,6 +998,9 @@ export const CRMPage = ({ auth, onLogout }) => {
 
         {showFeedback && (
           <FeedbackBoard
+            // Only a Branch Admin is pinned to a branch. Super Admin opens it unscoped and
+            // narrows from inside, which is what reading every branch's post requires.
+            branchId={isBranchAdminRole(role) ? auth?.user?.branch_id : undefined}
             onClose={() => setShowFeedback(false)}
             onCounts={(data) => setFeedbackUnread(data?.unread || 0)}
           />
