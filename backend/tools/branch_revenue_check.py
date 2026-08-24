@@ -1,20 +1,27 @@
-"""Why does a branch's Revenue read zero?
+"""Where a branch's revenue went, and why the branches do not add up to the total.
 
-Read-only. Answers the one question the cards cannot: whether a branch showing
-Rs.0 has no money in it, or has money that is not reachable under its branch id.
+Read-only. Answers two questions the cards cannot:
+
+  1. A branch reads Rs.0 -- does it have no money, or money not reachable
+     under its branch id?
+  2. All Branches reads more than the branches add up to -- what is the
+     difference made of?
+
+Both have the same answer. Revenue-overview scopes a branch by finding that
+branch's leads and filtering the payment trail to them; store sales and Zumba
+fees it reads off their own branch_id. Pick All Branches and there is no scope,
+so every payment counts -- including ones whose lead was deleted, whose lead
+never got a branch, or whose branch id belongs to a branch that no longer
+exists. None of those can appear under any branch you can select, so they show
+up in the company total and nowhere else.
+
+This walks the same three sources the endpoint does and sorts every rupee into
+either a real branch or one of those three strandings.
 
 Run on the server, where backend/.env is:
 
     cd backend && python tools/branch_revenue_check.py
     cd backend && python tools/branch_revenue_check.py "ECR"
-
-The revenue-overview endpoint scopes a branch by finding that branch's leads and
-filtering the payment trail to them, and reads store sales and Zumba fees off
-their own branch_id directly. This walks the same three sources the same way, and
-then does the part the endpoint has no reason to do: counts the money whose lead
-carries a branch id belonging to no branch, or none at all. That money is in the
-org-wide total and in no branch's, which is what a branch reading zero next to a
-company that clearly took something looks like from the other side.
 """
 import asyncio
 import sys
@@ -25,17 +32,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from database import v3_col  # noqa: E402
 from routers.v3_finance import REVENUE_ACTIONS, _parse_rs_amount  # noqa: E402
 
+# The three ways money ends up in the company total and in no branch's own.
+NO_LEAD = "lead was deleted"
+NO_BRANCH = "lead has no branch"
+DEAD_BRANCH = "branch no longer exists"
 
-def rs(n: float) -> str:
-    return f"Rs.{n:,.0f}"
+
+def rs(n):
+    return "Rs." + format(n, ",.0f")
 
 
-async def main(needle: str = "") -> None:
+async def main(needle=""):
     branches = await v3_col("branches").find({}, {"_id": 0, "id": 1, "branch_name": 1}).to_list(500)
     names = {b["id"]: b.get("branch_name") or "(unnamed)" for b in branches}
 
     leads = await v3_col("leads").find({}, {"_id": 0, "id": 1, "branch_id": 1}).to_list(50000)
-    branch_of_lead = {l["id"]: l.get("branch_id") for l in leads}
+    lead_branch = {l["id"]: l.get("branch_id") for l in leads}
 
     acts = await v3_col("lead_activity").find(
         {"action": {"$in": REVENUE_ACTIONS}}, {"_id": 0, "lead_id": 1, "details": 1},
@@ -47,63 +59,108 @@ async def main(needle: str = "") -> None:
         {}, {"_id": 0, "branch_id": 1, "fee_paid": 1},
     ).to_list(50000)
 
-    # Keyed the way the endpoint keys them: whatever is on the lead, matched or not.
     tally = {}
+    dangling = set()
 
-    def row(bid):
-        return tally.setdefault(bid, {"leads": 0, "payments": 0, "trail": 0.0, "store": 0.0, "zumba": 0.0})
+    def bucket(key):
+        return tally.setdefault(key, {"leads": 0, "n": 0, "trail": 0.0, "store": 0.0, "zumba": 0.0})
+
+    def classify_branch(bid):
+        """A branch id straight off a store sale or a registration."""
+        if bid in names:
+            return bid
+        if bid in (None, ""):
+            return NO_BRANCH
+        dangling.add(bid)
+        return DEAD_BRANCH
+
+    def classify_lead(lead_id):
+        """A payment in the lead trail, one step further removed: the lead itself
+        may be gone, which is not the same problem as a lead with no branch."""
+        if lead_id not in lead_branch:
+            return NO_LEAD
+        return classify_branch(lead_branch[lead_id])
 
     for l in leads:
-        row(l.get("branch_id"))["leads"] += 1
+        bucket(classify_branch(l.get("branch_id")))["leads"] += 1
     for a in acts:
-        r = row(branch_of_lead.get(a.get("lead_id")))
-        r["trail"] += _parse_rs_amount(a.get("details", ""))
-        r["payments"] += 1
+        b = bucket(classify_lead(a.get("lead_id")))
+        b["trail"] += _parse_rs_amount(a.get("details", ""))
+        b["n"] += 1
     for s in store:
-        row(s.get("branch_id"))["store"] += float(s.get("amount") or 0)
+        b = bucket(classify_branch(s.get("branch_id")))
+        b["store"] += float(s.get("amount") or 0)
+        b["n"] += 1
     for z in zumba:
-        row(z.get("branch_id"))["zumba"] += float(z.get("fee_paid") or 0)
-
-    print(f"{len(branches)} branches, {len(leads)} leads, {len(acts)} revenue activities\n")
-    print(f"{'branch':<28}{'leads':>7}{'pays':>7}{'trail':>14}{'store':>12}{'zumba':>12}")
-    print("-" * 80)
-
-    orphan_ids = []
-    for bid, r in sorted(tally.items(), key=lambda kv: -(kv[1]["trail"] + kv[1]["store"] + kv[1]["zumba"])):
-        if bid in names:
-            label = names[bid]
-        elif bid in (None, ""):
-            label = "** no branch on lead **"
-        else:
-            label = f"** unknown id {str(bid)[:8]} **"
-            orphan_ids.append(bid)
-        if needle and needle.lower() not in label.lower():
+        amount = float(z.get("fee_paid") or 0)
+        if amount <= 0:
             continue
-        print(f"{label:<28}{r['leads']:>7}{r['payments']:>7}{rs(r['trail']):>14}{rs(r['store']):>12}{rs(r['zumba']):>12}")
+        b = bucket(classify_branch(z.get("branch_id")))
+        b["zumba"] += amount
+        b["n"] += 1
+
+    def total(r):
+        return r["trail"] + r["store"] + r["zumba"]
+
+    print(str(len(branches)) + " branches, " + str(len(leads)) + " leads, "
+          + str(len(acts)) + " revenue activities")
+    print()
+    head = "branch".ljust(30) + "leads".rjust(7) + "rows".rjust(6) + "trail".rjust(14) \
+        + "store".rjust(11) + "zumba".rjust(11) + "total".rjust(14)
+    print(head)
+    print("-" * len(head))
+
+    real = [(k, v) for k, v in tally.items() if k in names]
+    for bid, r in sorted(real, key=lambda kv: -total(kv[1])):
+        if needle and needle.lower() not in names[bid].lower():
+            continue
+        print(names[bid][:29].ljust(30) + str(r["leads"]).rjust(7) + str(r["n"]).rjust(6)
+              + rs(r["trail"]).rjust(14) + rs(r["store"]).rjust(11)
+              + rs(r["zumba"]).rjust(11) + rs(total(r)).rjust(14))
 
     # Named even when a branch was asked for by name: a branch with nothing in it
-    # matches no row above, so without this the one question the run was for -- "what
-    # about ECR?" -- gets answered with an empty table and no sentence at all.
-    empty = [
-        n for b, n in names.items()
-        if b not in tally and (not needle or needle.lower() in n.lower())
-    ]
+    # matches no row above, so the one question the run was for -- "what about
+    # ECR?" -- would otherwise be answered by an empty table and no sentence.
+    empty = [n for b, n in names.items()
+             if b not in tally and (not needle or needle.lower() in n.lower())]
     if empty:
-        print("\nNothing at all -- no leads, no store sales, no Zumba registrations:")
-        for n in empty:
-            print(f"  - {n}")
+        print()
+        print("Nothing at all -- no leads, no store sales, no Zumba registrations:")
+        for n in sorted(empty):
+            print("  - " + n)
 
-    stranded = sum(
-        r["trail"] + r["store"] + r["zumba"]
-        for b, r in tally.items()
-        if b not in names
-    )
+    stranded = [(k, v) for k, v in tally.items() if k not in names]
+    branch_sum = sum(total(v) for _, v in real)
+    stranded_sum = sum(total(v) for _, v in stranded)
+
+    print()
+    print("The branches add up to    " + rs(branch_sum))
+    print("Unreachable under any     " + rs(stranded_sum))
+    print("All Branches shows        " + rs(branch_sum + stranded_sum))
+
     if stranded:
-        print(f"\n{rs(stranded)} sits under no branch: it counts in the company total and in")
-        print("no branch's own. Leads with a null branch_id, or pointing at a branch id that")
-        print("no longer exists: a branch deleted and recreated leaves its clients behind.")
-        if orphan_ids:
-            print(f"Dangling branch ids: {', '.join(str(o) for o in orphan_ids[:10])}")
+        print()
+        print("What the unreachable money is:")
+        for key, r in sorted(stranded, key=lambda kv: -total(kv[1])):
+            print("  " + key.ljust(26) + str(r["n"]).rjust(5) + " rows"
+                  + rs(total(r)).rjust(14) + "   ("
+                  + str(r["leads"]) + (" lead)" if r["leads"] == 1 else " leads)"))
+        if dangling:
+            print()
+            print("Branch ids on records that match no branch -- a branch deleted and")
+            print("recreated leaves its clients pointing at the old id:")
+            for d in sorted(dangling)[:10]:
+                print("  - " + str(d))
+
+    # Zumba fees are collected on the registration and never enter lead_activity,
+    # which is the only thing the Approvals tab reads -- so this much money is
+    # counted as revenue but can never be signed off by anyone.
+    zumba_sum = sum(v["zumba"] for v in tally.values())
+    if zumba_sum:
+        print()
+        print(rs(zumba_sum) + " of the company total is Zumba, which the Approvals")
+        print("tab never sees:")
+        print("it reads lead_activity and store sales, and a class fee is neither.")
 
 
 if __name__ == "__main__":
