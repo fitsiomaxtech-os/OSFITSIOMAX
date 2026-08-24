@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Bell, CheckCircle2, Clock, Inbox, RefreshCw, Star, X } from "lucide-react";
+import { ArrowLeft, Bell, CheckCircle2, Clock, Inbox, RefreshCw, Star, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatTile } from "@/components/ui/stat-tile";
 import { toast } from "@/components/ui/sonner";
@@ -232,7 +232,7 @@ export const FeedbackBoard = ({ branchId, onClose, onCounts }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4" data-testid="feedback-board">
+    <div className="fixed inset-0 z-[70] flex flex-col bg-slate-50" data-testid="feedback-board">
       {replying && (
         <ReplyDialog
           row={replying}
@@ -241,29 +241,39 @@ export const FeedbackBoard = ({ branchId, onClose, onCounts }) => {
           onSend={(reply) => move(replying, "resolved", reply)}
         />
       )}
-      <div className="flex max-h-[90vh] w-full max-w-[92rem] flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
-        <div className="flex shrink-0 items-center justify-between gap-3 border-b bg-slate-50/60 px-5 py-4">
-          <div className="flex items-center gap-2">
-            <Bell className="h-4 w-4 text-amber-500" />
-            <h3 className="text-base font-semibold text-slate-800">Patient Feedback</h3>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={load} disabled={loading} data-testid="feedback-refresh">
-              <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-            </Button>
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-md p-1.5 text-slate-400 transition hover:bg-rose-50 hover:text-rose-600"
-              aria-label="Close"
-              data-testid="feedback-close"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
+      {/* A page of its own rather than a card laid over the board behind it. There can be
+          dozens of these, each a paragraph somebody wrote about their care, and working
+          through them is the job for as long as it takes — not a glance at a dialog with
+          the rest of the branch still showing round the edges.
 
-        <div className="flex-1 overflow-y-auto p-5">
+          Header, tiles and cards all hang off one centred column of the same width, so a
+          wide monitor does not leave the title at one end and the refresh at the other. */}
+      <header className="shrink-0 border-b border-slate-200 bg-white">
+        <div className="mx-auto flex w-full max-w-[92rem] items-center gap-3 px-4 py-3 sm:px-6">
+          <button
+            type="button"
+            onClick={onClose}
+            className="shrink-0 rounded-lg p-2 text-slate-500 transition hover:bg-slate-100"
+            aria-label="Back"
+            data-testid="feedback-close"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-100">
+            <Bell className="h-5 w-5 text-amber-600" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 className="truncate text-base font-semibold text-slate-800">Patient Feedback</h2>
+            <p className="truncate text-xs text-slate-400">What patients have written about their care</p>
+          </div>
+          <Button variant="outline" size="sm" onClick={load} disabled={loading} className="shrink-0" data-testid="feedback-refresh">
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+          </Button>
+        </div>
+      </header>
+
+      <div className="flex-1 overflow-y-auto">
+        <div className="mx-auto w-full max-w-[92rem] px-4 py-5 sm:px-6">
           {error ? (
             <div className="space-y-2 py-12 text-center text-sm">
               <p className="font-medium text-rose-600" data-testid="feedback-error">{error}</p>

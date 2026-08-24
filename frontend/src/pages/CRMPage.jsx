@@ -53,6 +53,7 @@ import { toast, Toaster } from "@/components/ui/sonner";
 import { BusinessLeadsDashboard } from "@/components/BusinessLeadsDashboard";
 import { PreSalesBoard } from "@/components/PreSalesBoard";
 import { BranchAdminBoard } from "@/components/BranchAdminBoard";
+import { EmployeeAvatar } from "@/components/ui/employee-avatar";
 import { HeadPhysioBoard, HeadPhysioCalendarModal } from "@/components/HeadPhysioBoard";
 import { PhysioBoard, CalendarPage as PhysioCalendarPage } from "@/components/PhysioBoard";
 import { DietBoard } from "@/components/DietBoard";
@@ -969,7 +970,12 @@ export const CRMPage = ({ auth, onLogout }) => {
                 className="flex items-center gap-2 rounded-md px-1 py-1 text-left hover:bg-slate-50"
                 data-testid="role-board-profile-button"
               >
-                <UserCircle className="h-7 w-7 shrink-0 text-slate-300 sm:h-8 sm:w-8" />
+                {/* Whoever is signed in, by their own face. The same component the HR
+                    directory draws with, so the picture HR uploaded when they were taken
+                    on is the picture here, and a missing file falls back to their initial
+                    rather than a broken image. */}
+                <EmployeeAvatar employee={auth.user} size={32} className="hidden sm:flex" />
+                <EmployeeAvatar employee={auth.user} size={28} className="flex sm:hidden" />
                 <span className="hidden sm:block">
                   <span className="block text-sm font-semibold leading-tight text-slate-900" data-testid="role-board-user-greeting">
                     {auth.user.full_name}
@@ -1270,9 +1276,9 @@ const MyProfileModal = ({ user, roleLabel, branchName, onClose }) => {
         </div>
 
         <div className="mb-5 flex items-center gap-3">
-          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-sky-100 text-xl font-bold text-sky-700">
-            {user.full_name?.charAt(0)?.toUpperCase() || "?"}
-          </div>
+          {/* The face from the header, larger. Clicking your own picture and being shown
+              a letter instead reads as the wrong profile having opened. */}
+          <EmployeeAvatar employee={user} size={56} className="text-xl" />
           <div>
             <p className="text-base font-semibold text-slate-800">{user.full_name}</p>
             <p className="flex items-center gap-1 text-xs text-slate-400"><Mail className="h-3 w-3" />{user.email}</p>

@@ -20,6 +20,25 @@ async def v3_root():
     return {"message": "FITSIOMAX OS API v3"}
 
 
+async def _employee_photo(user: dict) -> str:
+    """The headshot on this person's employee record, if they have one.
+
+    Resolved here rather than in v3_current_user, which runs on every authenticated
+    request in the app — a second query on all of them to paint one avatar is not a trade
+    worth making. Sign-in and /auth/me are the two places the frontend takes its copy of
+    the user from, so filling it there is enough for it to have one.
+
+    The picture belongs to the employee record and the login is a separate document; they
+    are joined by users.employee_id, which is absent on every account created without an
+    employee behind it.
+    """
+    emp_id = (user or {}).get("employee_id")
+    if not emp_id:
+        return ""
+    emp = await v3_col("employees").find_one({"id": emp_id}, {"_id": 0, "photo_url": 1})
+    return (emp or {}).get("photo_url") or ""
+
+
 @router.post("/auth/login", response_model=V3LoginResponse)
 async def v3_login(payload: V3LoginRequest):
     # Case-insensitive match: some accounts were created with mixed-case emails
@@ -63,12 +82,16 @@ async def v3_login(payload: V3LoginRequest):
         "created_at": now_iso(),
     })
     user_public = {k: v for k, v in user.items() if k != "password"}
+    user_public["photo_url"] = await _employee_photo(user)
     return V3LoginResponse(token=token, user=V3UserOut(**user_public))
 
 
 @router.get("/auth/me", response_model=V3UserOut)
 async def v3_me(user: V3UserOut = Depends(v3_current_user)):
-    return user
+    # employee_id is not on V3UserOut, and v3_current_user drops everything the model does
+    # not name, so the link has to be read again rather than carried through.
+    row = await v3_col("users").find_one({"id": user.id}, {"_id": 0, "employee_id": 1})
+    return user.model_copy(update={"photo_url": await _employee_photo(row)})
 
 
 @router.post("/auth/logout")

@@ -17,6 +17,12 @@ class V3UserOut(BaseModel):
     # "primary"/first branch for every existing single-branch filter elsewhere);
     # this is the additional set consulted for branch-switching on their own board.
     branch_ids: Optional[List[str]] = None
+    # The headshot HR uploaded when this person was taken on, so a board can show who is
+    # signed in rather than the same grey outline for everybody. Stored on the employee
+    # record, not the login — filled in at sign-in and on /auth/me, which is where the
+    # frontend takes its copy of the user from. Empty for an account with no employee
+    # behind it, which every seeded and shared login is.
+    photo_url: Optional[str] = ""
     created_at: str
 
     @field_validator("role", mode="before")
