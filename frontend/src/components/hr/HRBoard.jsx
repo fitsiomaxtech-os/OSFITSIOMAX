@@ -1314,6 +1314,9 @@ const StructureTab = ({ meta, reloadMeta }) => {
   // department means rename that one. One piece of state for all four jobs: four separate
   // flags could contradict each other, and only ever one dialog is open.
   const [naming, setNaming] = useState(null);
+  // The name a rename collided with, held while the merge is confirmed. Cleared either
+  // way, so a second rename never inherits the first one's answer.
+  const [mergeInto, setMergeInto] = useState("");
   const [newName, setNewName] = useState("");
   const [savingName, setSavingName] = useState(false);
   // What is about to be deleted, and whether the request is in flight.
@@ -1389,7 +1392,7 @@ const StructureTab = ({ meta, reloadMeta }) => {
     }
   };
 
-  const openNaming = (kind, target = null) => { setNewName(target || ""); setNaming({ kind, target }); };
+  const openNaming = (kind, target = null) => { setNewName(target || ""); setMergeInto(""); setNaming({ kind, target }); };
 
   const submitName = async () => {
     const name = newName.trim();
@@ -1416,19 +1419,31 @@ const StructureTab = ({ meta, reloadMeta }) => {
         // already being looked at rather than closing it to say so.
         await load(true);
       } else {
-        await hrRenameDesignation(current.id, target, name);
+        await hrRenameDesignation(current.id, target, name, mergeInto === name);
         await load(true);
         // The open row is keyed by name, so a rename has to move the key with it or the
         // row somebody had open would silently close.
         setOpenDesignation((prev) => (prev === target ? name : prev));
       }
-      toast.success(target ? `Renamed to ${name}` : `${name} added`);
+      toast.success(
+        mergeInto === name ? `Merged into ${name}` : target ? `Renamed to ${name}` : `${name} added`
+      );
       setNaming(null);
       setNewName("");
+      setMergeInto("");
       // Employees and Roles read the same lists off meta, so they have to be told.
       reloadMeta();
     } catch (e) {
-      toast.error(e?.response?.data?.detail || "Could not save it");
+      const detail = e?.response?.data?.detail || "Could not save it";
+      // The server refuses a rename onto a name this department already has, and says
+      // what merging would do. Offered rather than just reported: two spellings of one
+      // job — "Consultants" beside "CONSULTANT" — is exactly what a rename here is for,
+      // and the answer is to fold one into the other.
+      if (e?.response?.status === 409 && detail.includes("already a designation here")) {
+        setMergeInto(name);
+      } else {
+        toast.error(detail);
+      }
     } finally {
       setSavingName(false);
     }
@@ -1703,18 +1718,27 @@ const StructureTab = ({ meta, reloadMeta }) => {
               placeholder={naming.kind === "department" ? "Department name" : "Designation name"}
               data-testid="hr-structure-name-input"
             />
+            {/* The rename came back saying that name is already here. Says plainly what
+                pressing Merge does, because it drops a designation and moves everybody
+                under it — neither of which should be a surprise. */}
+            {mergeInto === newName.trim() && (
+              <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800" data-testid="hr-structure-merge-notice">
+                <b>{mergeInto}</b> is already a designation here. Merging moves everyone under{" "}
+                <b>{naming.target}</b> into it and removes <b>{naming.target}</b>.
+              </p>
+            )}
             <div className="flex justify-end gap-2 pt-1">
               <Button variant="outline" size="sm" onClick={() => setNaming(null)} data-testid="hr-structure-name-cancel">Cancel</Button>
               <Button
                 size="sm"
-                className="bg-sky-600 hover:bg-sky-700"
+                className={mergeInto === newName.trim() ? "bg-amber-600 hover:bg-amber-700" : "bg-sky-600 hover:bg-sky-700"}
                 // Unchanged is not a save: renaming something to what it is already called
                 // would spend a request to tell the user nothing happened.
                 disabled={savingName || !newName.trim() || newName.trim() === naming.target}
                 onClick={submitName}
                 data-testid="hr-structure-name-save"
               >
-                {savingName ? "Saving…" : naming.target ? "Rename" : "Add"}
+                {savingName ? "Saving…" : mergeInto === newName.trim() ? `Merge into ${mergeInto}` : naming.target ? "Rename" : "Add"}
               </Button>
             </div>
           </div>

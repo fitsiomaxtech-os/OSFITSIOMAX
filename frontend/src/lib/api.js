@@ -373,7 +373,9 @@ export const hrRenameDepartment = async (id, name) => (await api.patch(`/hr/depa
 export const hrDeleteDepartment = async (id) => (await api.delete(`/hr/departments/${id}`)).data;
 export const hrAddDesignation = async (deptId, name) => (await api.post(`/hr/departments/${deptId}/designations`, { name })).data;
 export const hrDeleteDesignation = async (deptId, name) => (await api.delete(`/hr/departments/${deptId}/designations`, { params: { name } })).data;
-export const hrRenameDesignation = async (deptId, oldName, newName) => (await api.patch(`/hr/departments/${deptId}/designations`, { old_name: oldName, new_name: newName })).data;
+// `merge` folds this designation into one the department already has, rather than the
+// rename being refused as a clash. See rename_designation for why it is opt-in.
+export const hrRenameDesignation = async (deptId, oldName, newName, merge = false) => (await api.patch(`/hr/departments/${deptId}/designations`, { old_name: oldName, new_name: newName, merge })).data;
 export const hrReorderDesignations = async (deptId, designations) => (await api.put(`/hr/departments/${deptId}/designations/order`, { designations })).data;
 export const hrEmployees = async (params = {}) => {
   const q = new URLSearchParams();

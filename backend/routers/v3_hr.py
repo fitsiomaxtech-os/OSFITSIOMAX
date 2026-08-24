@@ -168,6 +168,11 @@ class DesignationCreate(BaseModel):
 class DesignationRename(BaseModel):
     old_name: str
     new_name: str
+    # Renaming onto a name the department already has is a merge, not a clash: the two are
+    # the same job spelled twice — "Consultants" beside "CONSULTANT" — and what is wanted
+    # is one of them holding everybody. Refused unless asked for, because it drops a
+    # designation and moves people, and neither should happen from a typo.
+    merge: bool = False
 
 
 class DesignationReorder(BaseModel):
@@ -944,10 +949,30 @@ async def rename_designation(dept_id: str, payload: DesignationRename, _: V3User
         raise HTTPException(status_code=404, detail="That designation isn't in this department")
     if new_name.lower() != old_name.lower():
         clash = await v3_col("hr_departments").find_one(
-            {"designations": {"$regex": f"^{re.escape(new_name)}$", "$options": "i"}}, {"_id": 0, "name": 1},
+            {"designations": {"$regex": f"^{re.escape(new_name)}$", "$options": "i"}}, {"_id": 0, "id": 1, "name": 1},
         )
-        if clash:
+        if clash and clash["id"] != dept_id:
+            # Across departments it is not a merge but a move, and the people carrying it
+            # would end up with a designation belonging to a department they are not in.
             raise HTTPException(status_code=409, detail=f'"{new_name}" already belongs to {clash["name"]}')
+        if clash and not payload.merge:
+            raise HTTPException(
+                status_code=409,
+                detail=f'"{new_name}" is already a designation here. Merging would move everyone under "{old_name}" into it.',
+            )
+        if clash:
+            # The spelling already on the list wins, so the survivor is the one every other
+            # record already agrees on rather than whatever case was typed just now.
+            kept = next(
+                (d for d in dept.get("designations", []) if d.lower() == new_name.lower()),
+                new_name,
+            )
+            await v3_col("employees").update_many(
+                {"designation": old_name}, {"$set": {"designation": kept}}
+            )
+            remaining = [d for d in dept.get("designations", []) if d != old_name]
+            await v3_col("hr_departments").update_one({"id": dept_id}, {"$set": {"designations": remaining}})
+            return await v3_col("hr_departments").find_one({"id": dept_id}, {"_id": 0})
     designations = [new_name if d == old_name else d for d in dept.get("designations", [])]
     await v3_col("hr_departments").update_one({"id": dept_id}, {"$set": {"designations": designations}})
     # Every employee's `designation` is a plain string, not a reference, so the rename has
