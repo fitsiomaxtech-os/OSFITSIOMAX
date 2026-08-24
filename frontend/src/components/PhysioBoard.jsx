@@ -2217,7 +2217,15 @@ function PatientsTab({ physioId, onCountChange, toolbarSlot }) {
 
   useEffect(() => { load(); }, [load]);
 
-  const isCompleted = (p) => p.physio_stage === "Complete";
+  // Finished means the course is finished: every booked day done, 26 of 26. Read off
+  // physio_stage, this said something else entirely — that flag is set when the physio
+  // signs off their *initial consultation* of a lead (physio_complete_consultation), so a
+  // patient was filed under Completed on the day they were taken on, with twelve days
+  // still to run, and Ongoing stood empty while three people were mid-course.
+  //
+  // Nobody with no days booked counts as finished either: nothing has been completed,
+  // so they wait in Ongoing until their course exists.
+  const isCompleted = (p) => (p.total_sessions || 0) > 0 && (p.completed_sessions || 0) >= p.total_sessions;
   const ongoingCount = patients.filter((p) => !isCompleted(p)).length;
   const completedCount = patients.filter(isCompleted).length;
   const visiblePatients = patients.filter((p) => (historyTab === "completed" ? isCompleted(p) : !isCompleted(p)));
