@@ -295,22 +295,19 @@ export const LeadDocuments = ({ leadId, canEdit = true, kind = "general", fixedL
     }
   };
 
-  // Defined once and placed twice — beside Choose File for whoever is uploading, and over
-  // the list for a physio or coach who can read the file but not add to it.
-  const viewButton = (
-    <Button
-      size="sm"
-      variant="outline"
-      disabled={images.length === 0}
-      title={images.length ? "Look through the uploaded images here" : "Nothing to view yet — no images uploaded"}
-      className="border-sky-200 bg-white text-sky-700 hover:bg-sky-50 disabled:opacity-60"
-      onClick={() => setViewing(0)}
-      data-testid="lead-doc-view"
-    >
-      <Eye className="mr-1.5 h-4 w-4" />
-      View{images.length ? ` (${images.length})` : ""}
-    </Button>
-  );
+  // Opening a document, from the row or from the eye on it. An image opens in the viewer
+  // here at its own page; a PDF has no viewer of ours, so it goes to a tab.
+  //
+  // There was a View button above the list as well, next to Choose File. It opened the
+  // viewer at the first image whichever document you were looking at, which is not what
+  // is wanted from a list of them -- and next to an uploader it read as part of
+  // uploading. Each document carries its own now, so the thing you press is on the thing
+  // you want to see.
+  const openDoc = (d) => {
+    const at = images.findIndex((i) => i.id === d.id);
+    if (at >= 0) setViewing(at);
+    else open(d);
+  };
 
   return (
     <div className="space-y-3" data-testid="lead-documents">
@@ -371,13 +368,8 @@ export const LeadDocuments = ({ leadId, canEdit = true, kind = "general", fixedL
               <Upload className="mr-1.5 h-4 w-4" />
               {busy ? "Uploading…" : "Choose File"}
             </Button>
-            {viewButton}
           </div>
         </div>
-      )}
-
-      {!canEdit && images.length > 0 && (
-        <div className="flex justify-end">{viewButton}</div>
       )}
 
       {loading ? (
@@ -403,14 +395,7 @@ export const LeadDocuments = ({ leadId, canEdit = true, kind = "general", fixedL
                 </span>
                 <button
                   type="button"
-                  onClick={() => {
-                    // The row and the View button lead to the same place for an image, so
-                    // clicking a page shows it here rather than throwing a tab at the
-                    // reader. A PDF has no viewer of ours to open in.
-                    const at = images.findIndex((i) => i.id === d.id);
-                    if (at >= 0) setViewing(at);
-                    else open(d);
-                  }}
+                  onClick={() => openDoc(d)}
                   className="min-w-0 flex-1 text-left"
                   data-testid={`lead-doc-open-${d.id}`}
                 >
@@ -445,6 +430,19 @@ export const LeadDocuments = ({ leadId, canEdit = true, kind = "general", fixedL
                     {d.shared_with_patient ? "SHARED" : "PRIVATE"}
                   </button>
                 )}
+                {/* After the badge, before the bin. Not gated on canEdit like its two
+                    neighbours: a physio or coach who cannot upload or delete still has to
+                    be able to read the file, and this is now the only button that opens
+                    one. */}
+                <button
+                  type="button"
+                  onClick={() => openDoc(d)}
+                  className="shrink-0 rounded-md p-1.5 text-slate-400 hover:bg-sky-50 hover:text-sky-600"
+                  title={isImage(d.content_type) ? "View" : "Open"}
+                  data-testid={`lead-doc-view-${d.id}`}
+                >
+                  <Eye className="h-4 w-4" />
+                </button>
                 {canEdit && (
                   <button
                     type="button"
