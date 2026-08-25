@@ -451,34 +451,104 @@ async def v3_delete_branch(branch_id: str, _: V3UserOut = Depends(v3_require_rol
 ORG_WIDE_PROFILES = ["head_physio", "nutrition_coach"]
 
 
+def _names_the_online_arm(text) -> bool:
+    """Whether a role slug or a job title says "online" — both are read the same way.
+
+    A designation and a role are one thing to this clinic, so ONLINE CONSULTANT the title
+    and online_consultant the slug are the same answer written twice, and splitting them
+    into two rules is how they would come apart again. Tokenised rather than searched, so
+    a word merely containing the letters cannot pass for the arm.
+    """
+    return "online" in re.split(r"[^a-z0-9]+", str(text or "").strip().lower())
+
+
 async def _consultants_for_vertical(rows: list, online: bool) -> list:
     """Keep the consultants who belong to an online branch, or the ones who do not.
 
-    A consultation over video and one in the room are the same desk, so both roles are
-    stamped profile_type "head_physio" and the expert records are indistinguishable. The
-    only thing that says which is which is the role on the login behind the record, so that
-    is what this reads.
+    A consultation over video and one in the room are the same desk, so every consultant
+    role is stamped profile_type "head_physio" and the expert records are indistinguishable.
+    Which arm a consultant works is on the login behind the record, and on the job title HR
+    gave them — and either saying "online" is enough.
 
-    An expert record with no login — Fitsiomax Experts creates those, profile only — counts
-    as offline. That is where every consultant sat before the online role existed, so
-    reading a missing answer as "in the room" leaves those calendars exactly as they were
-    rather than emptying them.
+    Both, because either alone is wrong on this install. The role is: three people are
+    ONLINE CONSULTANT in the structure and were hired before an online consultant role
+    existed to give them, so their logins still read head_physio and reading only that
+    leaves the online branch with nobody. The title is: it is HR's word for the job, not a
+    statement about permissions, and somebody deliberately given the online role must not
+    be pulled back offline because their title was typed without it. Neither can veto the
+    other, so a consultant counts as online when either says so, and that is a rule with no
+    contradiction to resolve rather than a precedence order to remember.
+
+    A consultant with neither — no login at all, as the profile-only records Fitsiomax
+    Experts creates have, or a title with no online in it — counts as in the room. That is
+    where every consultant sat before the online arm existed, so reading silence as "in the
+    room" leaves those calendars exactly as they were rather than emptying them.
+
+    Symmetric on purpose: an online consultant stops being offered by offline branches.
 
     Only consultants are touched. Every other desk belongs to a branch already and is
     filtered by it above.
     """
-    user_ids = [r.get("user_id") for r in rows if r.get("profile_type") == "head_physio" and r.get("user_id")]
-    role_by_user = {}
+    consultants = [r for r in rows if r.get("profile_type") == "head_physio"]
+    if not consultants:
+        return list(rows)
+
+    user_ids = [r["user_id"] for r in consultants if r.get("user_id")]
+    role_by_user, emp_by_user = {}, {}
     if user_ids:
-        async for u in v3_col("users").find({"id": {"$in": user_ids}}, {"_id": 0, "id": 1, "role": 1}):
+        async for u in v3_col("users").find(
+            {"id": {"$in": user_ids}}, {"_id": 0, "id": 1, "role": 1, "employee_id": 1}
+        ):
             role_by_user[u["id"]] = u.get("role")
+            if u.get("employee_id"):
+                emp_by_user[u["id"]] = u["employee_id"]
+
+    # An expert reaches their employee record two ways — the login links one, and a record
+    # created through Fitsiomax Experts carries the id itself — and neither is guaranteed,
+    # since Create User's link to an employee is optional. Both are read, so a title is
+    # found wherever it is written down.
+    emp_ids = set(emp_by_user.values()) | {r["employee_id"] for r in consultants if r.get("employee_id")}
+    designation_by_emp, title_by_name = {}, {}
+    if emp_ids:
+        async for e in v3_col("employees").find(
+            {"id": {"$in": list(emp_ids)}}, {"_id": 0, "id": 1, "designation": 1}
+        ):
+            designation_by_emp[e["id"]] = e.get("designation")
+
+    # Last resort, by name, for a consultant whose login was created without ticking the
+    # employee link — the common case, since that field is optional and the two screens are
+    # filled in months apart. The same fallback consolidate_head_physio_doctors already uses
+    # to pair records that lost their user_id.
+    #
+    # Only where the name resolves to exactly one employee. A name shared by two people says
+    # nothing about which desk this record is, so an ambiguous match is dropped rather than
+    # guessed — and the consultant stays where they have always been, in the room.
+    unlinked = [
+        r for r in consultants
+        if not r.get("employee_id") and not emp_by_user.get(r.get("user_id")) and r.get("full_name")
+    ]
+    if unlinked:
+        wanted = {str(r["full_name"]).strip().lower() for r in unlinked}
+        seen = {}
+        async for e in v3_col("employees").find({}, {"_id": 0, "full_name": 1, "designation": 1}):
+            key = str(e.get("full_name") or "").strip().lower()
+            if key in wanted:
+                seen[key] = None if key in seen else e.get("designation")
+        title_by_name = {k: v for k, v in seen.items() if v}
+
+    def title_for(r) -> str:
+        emp_id = r.get("employee_id") or emp_by_user.get(r.get("user_id"))
+        if emp_id:
+            return designation_by_emp.get(emp_id) or ""
+        return title_by_name.get(str(r.get("full_name") or "").strip().lower()) or ""
+
     kept = []
     for r in rows:
         if r.get("profile_type") != "head_physio":
             kept.append(r)
             continue
-        role = (role_by_user.get(r.get("user_id")) or "").strip().lower()
-        if (role == "online_head_physio") == online:
+        is_online = _names_the_online_arm(role_by_user.get(r.get("user_id"))) or _names_the_online_arm(title_for(r))
+        if is_online == online:
             kept.append(r)
     return kept
 
@@ -528,7 +598,10 @@ async def v3_get_doctors(
     if want is None and scope_branch:
         b = await v3_col("branches").find_one({"id": scope_branch}, {"_id": 0, "vertical": 1})
         if b:
-            want = "online" if str(b.get("vertical") or "").startswith("online_") else "offline"
+            # A branch recorded with no vertical says nothing either way, so the asker's own
+            # role answers instead: an Online Physio Admin is asking about the online arm
+            # whatever their branch record happens to be missing.
+            want = "online" if _names_the_online_arm(b.get("vertical") or user.role) else "offline"
     if want:
         rows = await _consultants_for_vertical(rows, want == "online")
     rows = await attach_shifts(rows)

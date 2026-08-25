@@ -92,6 +92,15 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
   // and the shorthand only ever came from the slug.
   const roleLabel = isCoach ? "Nutritionist" : isRehab ? "Rehab Therapist" : isPhysio ? "Physiotherapist" : "CONSULTANT";
   const roleLabelPlural = isCoach ? "Nutritionists" : isRehab ? "Rehab Therapists" : isPhysio ? "Physiotherapists" : "CONSULTANTS";
+  // An empty consultant list is a narrowing, not an absence: consultants are org-wide, so
+  // the ones missing here are the ones who work the other arm. Saying "none created yet"
+  // sends the reader to HR to create somebody who is already there.
+  const emptyLine =
+    isCoach || isPhysio
+      ? `No ${roleLabelPlural} assigned to this branch yet — ask HR Admin to add one.`
+      : isRehab
+      ? `No ${roleLabelPlural} created yet — ask HR Admin to add one.`
+      : `No ${roleLabelPlural} work this branch's side yet — ask HR Admin for the matching designation, online or in the room.`;
   const SLOT_TYPES = isRecurring ? SESSION_TYPES : CONSULTATION_TYPES;
   // The three calendars schedule different things and must not be read as interchangeable:
   // a Head Physio's day holds consultations (booked from Branch Leads → Appointment);
@@ -571,7 +580,7 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
         <div className="flex gap-1.5 overflow-x-auto p-2 lg:flex-1 lg:flex-col lg:overflow-y-auto lg:overflow-x-visible" data-testid="doctor-list">
           {doctors.length === 0 && (
             <p className="text-xs text-slate-400 text-center py-6">
-              {`No ${roleLabelPlural} ${isCoach || isPhysio ? "assigned to this branch" : "created"} yet — ask HR Admin to add one.`}
+              {emptyLine}
             </p>
           )}
           {doctors.map((doc) => {

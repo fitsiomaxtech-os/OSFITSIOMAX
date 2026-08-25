@@ -115,7 +115,17 @@ def is_branch_admin_role(role: str) -> bool:
 # A CONSULTANT who takes their consultations over video. The same board, the same
 # pipeline, the same org-wide reach — only the room differs — so it is an alias of
 # head_physio rather than a role of its own, exactly as online_physio is of physio.
-HEAD_PHYSIO_ROLES = frozenset({"head_physio", "online_head_physio"})
+#
+# "consultant" and "online_consultant" are the same two roles under the names this clinic
+# actually uses. A designation is a role here, so the job titles in HR's structure are
+# minted as roles — and the title for this desk is CONSULTANT, not "head physio", which is
+# a slug nobody outside the code says. Listed rather than matched loosely for the reason
+# above: "sales_consultant" is a different job, and a rule on the bare token would hand it
+# the consultation pipeline.
+HEAD_PHYSIO_ROLES = frozenset({
+    "head_physio", "online_head_physio",
+    "consultant", "online_consultant",
+})
 
 
 def is_head_physio_role(role: str) -> bool:

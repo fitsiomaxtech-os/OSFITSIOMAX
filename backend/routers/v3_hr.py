@@ -7,7 +7,7 @@ import uuid
 
 from database import v3_col
 from utils import now_iso
-from deps import v3_require_roles, is_diet_role, is_physio_role, is_rehab_role, is_head_physio_role, BRANCH_ADMIN_ROLES
+from deps import v3_require_roles, is_diet_role, is_physio_role, is_rehab_role, is_head_physio_role, BRANCH_ADMIN_ROLES, HEAD_PHYSIO_ROLES
 from security import hash_password
 from schemas.v3 import V3UserOut
 
@@ -57,9 +57,11 @@ DEFAULT_ROLES = [
 # so hiring one has to create the matching `doctors` record or they log in to a board with
 # no calendar behind it and nothing explains why.
 MULTI_BRANCH_ROLES = {"physio", "online_physio", "nutrition_coach"}
-# Both take consultations across the whole organisation, so both get one branchless
-# expert record rather than one per branch.
-ORG_WIDE_ROLES = {"head_physio", "online_head_physio"}
+# Every consultant role takes consultations across the whole organisation, so each gets one
+# branchless expert record rather than one per branch. Taken from the family in deps.py
+# rather than restated, so a role added there is hired correctly here without a second edit
+# — restating it is how `consultant` came to be a role nobody could be hired into as one.
+ORG_WIDE_ROLES = set(HEAD_PHYSIO_ROLES)
 
 
 def is_multi_branch_role(role: str) -> bool:
@@ -307,6 +309,12 @@ class EmployeeUpdate(BaseModel):
     designation: Optional[str] = None
     work_type: Optional[str] = None
     branch_id: Optional[str] = None
+    # Only meaningful for a role that holds a calendar at each of several branches — a
+    # Nutritionist or a Physio. Sent instead of branch_id, never alongside it: update_employee
+    # derives the single branch_id from this list so every single-branch filter in the OS
+    # keeps reading the field it always has. An empty list is "no branch"; the one-element
+    # list [ALL_BRANCHES] is "covers every branch", which is stored branchless downstream.
+    branch_ids: Optional[List[str]] = None
     joining_date: Optional[str] = None
     reporting_to: Optional[str] = None
     employee_code: Optional[str] = None
@@ -442,8 +450,16 @@ async def list_employees(status: Optional[str] = None, _: V3UserOut = Depends(v3
 
     for r in rows:
         bid = r.get("branch_id") or from_account.get(r["id"], "")
+        # A multi-branch desk can hold several, and the row has one line to say so. Named
+        # while there are two, counted past that: "Anna Nagar + T Nagar" is the answer
+        # somebody wants and still fits, where five names do not and would be truncated to
+        # something that reads like one branch.
+        covered = [b for b in (r.get("branch_ids") or []) if b and b != ALL_BRANCHES]
         if bid == ALL_BRANCHES:
             r["branch_name"] = ALL_BRANCHES_LABEL
+        elif len(covered) > 1:
+            names = [bmap.get(b, "") for b in covered if bmap.get(b)]
+            r["branch_name"] = " + ".join(names) if len(names) == 2 else f"{len(covered)} branches"
         else:
             r["branch_name"] = bmap.get(bid, "") if bid else ""
         # Reported as the branch it is, so the row and its Change control agree on what is
@@ -522,17 +538,40 @@ async def update_employee(emp_id: str, payload: EmployeeUpdate, _: V3UserOut = D
     for field, label in (("department", "Department"), ("designation", "Designation")):
         if field in updates and not str(updates[field]).strip():
             raise HTTPException(status_code=400, detail=f"{label} is required")
+
+    # A Nutritionist or a Physio holds a calendar at each branch they work, so the branch
+    # picker sends a list. Every other filter in the OS still reads the single branch_id,
+    # so the list is reduced to a primary here and the two are written together — the
+    # record can never hold a list its own branch_id disagrees with.
+    #
+    # ALL_BRANCHES swallows the rest of the selection rather than sitting alongside it:
+    # "everywhere" and "these three" cannot both be true, and keeping the narrower ticks
+    # underneath would suggest the wider answer was somehow limited by them.
+    branch_ids = updates.get("branch_ids")
+    if branch_ids is not None:
+        branch_ids = [b for b in branch_ids if b]
+        if ALL_BRANCHES in branch_ids:
+            branch_ids = [ALL_BRANCHES]
+        updates["branch_ids"] = branch_ids
+        updates["branch_id"] = branch_ids[0] if branch_ids else ""
+
     updates["updated_at"] = now_iso()
     res = await v3_col("employees").update_one({"id": emp_id}, {"$set": updates})
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Employee not found")
     # Both cascades want the same list, so it is fetched once and only when one of them
     # actually has something to do.
-    linked_user_ids = (
-        await v3_col("users").distinct("id", {"employee_id": emp_id})
+    # The role comes back with them: what a branch change has to do to the expert records
+    # depends on whether this person is a desk that holds calendars, and if so which
+    # profile_type those records carry.
+    linked_users = (
+        await v3_col("users").find(
+            {"employee_id": emp_id}, {"_id": 0, "id": 1, "role": 1, "full_name": 1},
+        ).to_list(20)
         if ("full_name" in updates or "branch_id" in updates)
         else []
     )
+    linked_user_ids = [u["id"] for u in linked_users]
 
     if "full_name" in updates and linked_user_ids:
         # Cascade the rename to any linked User account, and from there to their doctors
@@ -551,20 +590,64 @@ async def update_employee(emp_id: str, payload: EmployeeUpdate, _: V3UserOut = D
         # account with no branch reads nothing rather than being handed somebody else's,
         # which is the safe direction for this to fail in.
         target = "" if updates["branch_id"] in (ALL_BRANCHES, "") else updates["branch_id"]
-        await v3_col("users").update_many({"employee_id": emp_id}, {"$set": {"branch_id": target}})
+        account: Dict[str, Any] = {"branch_id": target}
 
-        # branch_ids is deliberately left alone. A CONSULTANT or Physio can cover several
-        # branches, chosen on the user form, and an employee record holds one — flattening a
-        # considered selection down to it would lose what somebody set on purpose. Where a
-        # list exists it is what the OS reads, so this cascade is correctly a no-op there.
+        # branch_ids is written through only when a list was actually posted. A single
+        # branch_id arriving on its own still leaves it alone, for the reason it always
+        # has: a CONSULTANT or Physio can cover several branches, chosen on the user form,
+        # and flattening that considered selection down to the one field an employee row
+        # holds would lose what somebody set on purpose.
         #
+        # A posted list is not that case — it IS the considered selection, made in the
+        # branch picker rather than on the user form — so it is what the account should
+        # read. ALL_BRANCHES has no equivalent on a user: covering everything is said
+        # there by holding no branches at all, which is how list_users and the expert
+        # queries both already read org-wide.
+        if branch_ids is not None:
+            account["branch_ids"] = [] if branch_ids == [ALL_BRANCHES] else branch_ids
+        await v3_col("users").update_many({"employee_id": emp_id}, {"$set": account})
+
         # The expert record moves only if it was posted to a branch to begin with. A Head
         # Physio's is branchless by design (see consolidate_head_physio_doctors), and giving
         # it a branch would undo that and hide them from every other one.
+        #
+        # Branchless is also what ALL_BRANCHES resolves to, and for the desks that may hold
+        # none — a CONSULTANT, a Nutritionist — that is not a record with a gap in it but
+        # the way this OS spells "every branch": ORG_WIDE_PROFILES in routers/v3_config.py
+        # and _coach_branch_ids in routers/v3_diet.py both read it that way.
         await v3_col("doctors").update_many(
             {"user_id": {"$in": linked_user_ids}, "branch_id": {"$nin": ["", None]}},
             {"$set": {"branch_id": target}},
         )
+
+        # Several branches ticked needs a calendar at each of them, or the coach is offered
+        # at a branch whose Diet Calendar has nowhere to publish days. Same shape as the
+        # sync in update_user, and it only adds: a branch dropped from the list keeps its
+        # existing record so an accidental untick cannot destroy published slots and the
+        # appointments already sitting on them.
+        if branch_ids not in (None, [], [ALL_BRANCHES]):
+            for u in linked_users:
+                if not is_multi_branch_role(u.get("role")):
+                    continue
+                profile = expert_profile_type(u["role"])
+                existing = await v3_col("doctors").find(
+                    {"user_id": u["id"], "profile_type": profile}, {"_id": 0, "branch_id": 1},
+                ).to_list(50)
+                have = {d.get("branch_id") for d in existing}
+                for b_id in branch_ids:
+                    if b_id in have:
+                        continue
+                    await v3_col("doctors").insert_one({
+                        "id": str(uuid.uuid4()),
+                        "full_name": u.get("full_name") or "",
+                        "profile_type": profile,
+                        "branch_id": b_id,
+                        "specialization": "",
+                        "slots": [],
+                        "slot_details": [],
+                        "user_id": u["id"],
+                        "created_at": now_iso(),
+                    })
 
     return await v3_col("employees").find_one({"id": emp_id}, {"_id": 0})
 

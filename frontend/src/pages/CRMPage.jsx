@@ -87,6 +87,11 @@ const ROLE_META = {
   // The same board and the same reach, over video. Named for the room, not for a
   // different job — see HEAD_PHYSIO_ROLES in backend/deps.py.
   online_head_physio: { label: "Online Consultant", icon: Stethoscope },
+  // The same two roles under the names this clinic uses. A designation is a role here, so
+  // the titles in HR's structure are minted as roles, and the title for this desk is
+  // CONSULTANT.
+  consultant: { label: "Consultant", icon: Stethoscope },
+  online_consultant: { label: "Online Consultant", icon: Stethoscope },
   physio: { label: "Physio", icon: Activity },
   online_physio: { label: "Online Physio", icon: Activity },
   accountant: { label: "Accountant", icon: BadgeIndianRupee },
@@ -161,11 +166,16 @@ const isPhysioRole = (role) => ["physio", "online_physio"].includes(String(role 
 
 /** Whether a role takes consultations — in the room or over video.
  *
- * Matched exactly, like isPhysioRole: both slugs are fixed, and a loose match on the
- * "physio" token inside head_physio is exactly the confusion those two predicates
- * exist to keep apart. Kept in step with HEAD_PHYSIO_ROLES in backend/deps.py.
+ * Matched exactly, like isPhysioRole: every slug is fixed, and a loose match would be
+ * wrong twice over — on the "physio" token inside head_physio, which is the confusion
+ * those two predicates exist to keep apart, and on the "consultant" token, which
+ * sales_consultant would also answer to. Kept in step with HEAD_PHYSIO_ROLES in
+ * backend/deps.py: a role that passes there and fails here logs in to no board at all.
  */
-const isHeadPhysioRole = (role) => ["head_physio", "online_head_physio"].includes(String(role || "").trim().toLowerCase());
+const isHeadPhysioRole = (role) =>
+  ["head_physio", "online_head_physio", "consultant", "online_consultant"].includes(
+    String(role || "").trim().toLowerCase()
+  );
 
 /** Whether a role gets the Pre-Sales board.
  *
