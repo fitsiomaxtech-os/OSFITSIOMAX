@@ -3746,17 +3746,19 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             <FileText className="mr-1 h-3.5 w-3.5" />
                             <Lbl full={hasDocs ? `Documents (${leadDocCount})` : "Documents — required"} short="Docs" />
                           </Button>
-                          {/* Shut until the scan is filed. This tab used to open on a
-                              payment it would not take, which is a screen that asks for
-                              something and refuses it in the same breath. */}
-                          {showOwnTab && <OwnTab
+                          {/* Always on screen, and shut until the scan is filed. This panel
+                              is a sequence — paperwork, money, or out — so a step that
+                              disappears once you reach it takes the shape of the sequence
+                              with it, and one that opens on a payment it will not take asks
+                              for something and refuses it in the same breath. */}
+                          <OwnTab
                             label={alreadyPaid ? "Payment" : "Collect Fees"}
                             short="Fees"
                             icon={IndianRupee}
                             active={TAB_ON}
                             locked={docsRequired && !hasDocs && !alreadyPaid}
                             lockedTitle="Upload the consultation paperwork first"
-                          />}
+                          />
                           {DietDetailButton}
                           {RehabDetailButton}
                           {CancelButton}
@@ -3772,42 +3774,100 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                               Branch Admin reads before taking money. Each line is gated on
                               the patient actually being on that programme — quoting diet or
                               rehab to everyone would overstate what is owed. */}
-                          <PanelCard testid="cons-consultation-visit-summary">
-                            <PanelRow
-                              label="Consultation Fee"
-                              value={selectedLead.package_price != null ? `Rs.${Number(selectedLead.package_price).toLocaleString("en-IN")}` : "—"}
-                              strong
-                            />
-                            {hasTreatment && (
-                              <PanelRow
-                                label="Treatment Fee"
-                                value={selectedLead.session_package_price != null ? `Rs.${Number(selectedLead.session_package_price).toLocaleString("en-IN")}` : "—"}
-                              />
-                            )}
-                            {selectedLead.diet_recommended && (
-                              <PanelRow
-                                label="Diet Fee"
-                                value={dietFeeDue != null ? `Rs.${Number(dietFeeDue).toLocaleString("en-IN")}` : "—"}
-                              />
-                            )}
-                            {/* The course is named as well as priced: "Rs.18,000" with no
-                                idea what it buys is not something to ask a patient to pay.
-                                Its own Collect Rehab Fee button lives on the Rehab tab once
-                                the consultation fee is in, which is why this is a quote. */}
-                            {selectedLead.rehab_referred && (
-                              <PanelRow
-                                label="Rehab Fee"
-                                value={`${selectedLead.rehab_package_price != null ? `Rs.${Number(selectedLead.rehab_package_price).toLocaleString("en-IN")}` : "—"}${selectedLead.rehab_package_name ? ` · ${selectedLead.rehab_package_name}` : ""}`}
-                              />
-                            )}
-                            {alreadyPaid && (
-                              <PanelRow
-                                label="Already Paid Via"
-                                value={selectedLead.package_payment_mode || "—"}
-                                tone="text-emerald-700"
-                              />
-                            )}
-                          </PanelCard>
+                          {/* The fees in the order they are taken, each one its own row
+                              with its own state and its own way of being collected. As a
+                              plain list of figures with one button under it, the order was
+                              something the branch had to know rather than something the
+                              screen said, and the treatment and rehab fees looked like
+                              things this button would collect when it never touched them.
+
+                              Consultation leads because everything else waits on it: the
+                              other three are only collectable once it is in, which is the
+                              server's rule and not a habit of this screen. */}
+                          <div className="space-y-2" data-testid="cons-consultation-visit-summary">
+                            {[
+                              {
+                                key: "consultation",
+                                label: "Consultation Fee",
+                                amount: selectedLead.package_price,
+                                paid: alreadyPaid,
+                                note: alreadyPaid ? selectedLead.package_payment_mode : null,
+                                show: true,
+                                act: openCollectFeeDraft,
+                                actLabel: alreadyPaid ? "Update" : "Collect",
+                              },
+                              {
+                                key: "treatment",
+                                label: "Treatment Fee",
+                                amount: selectedLead.session_package_price,
+                                paid: selectedLead.treatment_fee_paid != null,
+                                show: hasTreatment,
+                                act: openTreatmentFeeDraft,
+                                actLabel: "Collect",
+                              },
+                              {
+                                key: "rehab",
+                                label: "Rehab Fee",
+                                sub: selectedLead.rehab_package_name,
+                                amount: selectedLead.rehab_package_price,
+                                paid: selectedLead.rehab_fee_paid != null,
+                                show: !!selectedLead.rehab_referred,
+                                // Collected on the Rehab tab, which carries the course as
+                                // well as the figure — this row is the pointer to it.
+                                act: () => openDetail("rehab"),
+                                actLabel: "Open",
+                              },
+                              {
+                                key: "diet",
+                                label: "Diet Fee",
+                                amount: dietFeeDue,
+                                paid: selectedLead.diet_fee_paid != null,
+                                show: !!selectedLead.diet_recommended,
+                                act: () => openDetail("diet"),
+                                actLabel: "Open",
+                              },
+                            ].filter((f) => f.show).map((f, i) => (
+                              <div
+                                key={f.key}
+                                className={`flex flex-wrap items-center gap-2 rounded-lg border p-2.5 ${
+                                  f.paid ? "border-emerald-200 bg-emerald-50/60" : "border-slate-200 bg-white"
+                                }`}
+                                data-testid={`cons-fee-step-${f.key}`}
+                              >
+                                <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${
+                                  f.paid ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-500"
+                                }`}>
+                                  {f.paid ? <CheckCircle2 className="h-3.5 w-3.5" /> : i + 1}
+                                </span>
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate text-xs font-semibold text-slate-700">{f.label}</p>
+                                  {f.sub ? <p className="truncate text-[11px] text-slate-400">{f.sub}</p> : null}
+                                </div>
+                                <span className="shrink-0 text-sm font-bold text-slate-800">
+                                  {f.amount != null ? `Rs.${Number(f.amount).toLocaleString("en-IN")}` : "—"}
+                                </span>
+                                {f.paid ? (
+                                  <span className="shrink-0 text-[11px] font-medium capitalize text-emerald-700">
+                                    {f.note ? `Paid · ${f.note}` : "Paid"}
+                                  </span>
+                                ) : (
+                                  <Button
+                                    size="sm"
+                                    variant={f.key === "consultation" ? undefined : "outline"}
+                                    // Everything after the consultation fee waits on it,
+                                    // and says so rather than failing when pressed.
+                                    disabled={f.key !== "consultation" && !alreadyPaid}
+                                    title={f.key !== "consultation" && !alreadyPaid ? "Collect the consultation fee first" : undefined}
+                                    className={`shrink-0 ${f.key === "consultation" ? "bg-sky-600 text-white hover:bg-sky-700" : ""} ${ACT_BTN}`}
+                                    onClick={f.act}
+                                    data-testid={`cons-fee-act-${f.key}`}
+                                  >
+                                    {f.actLabel}
+                                  </Button>
+                                )}
+                              </div>
+                            ))}
+                          </div>
                           {/* No paperwork, no payment. The scan is the record that the
                               consultation happened, and a fee taken against nothing on file
                               is a figure the branch cannot answer for later.
