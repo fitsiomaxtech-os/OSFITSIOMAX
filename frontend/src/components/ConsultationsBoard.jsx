@@ -3622,6 +3622,149 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 </div>
               ) : null;
 
+              // Every fee this patient has been quoted, one card each, in the order the
+              // fees are taken. It lives out here rather than inside a stage branch
+              // because collecting the Consultation Fee moves the lead from Consultation
+              // Visit to Fee Collected, and the Branch Admin who just took that fee is
+              // still standing in front of the person who owes the next one. Fee Collected
+              // used to answer with a panel of a different shape — the same fees as flat
+              // rows, the collect button moved up into the tab row — so taking two fees off
+              // one patient meant reading two screens for the same job. The cards stay put
+              // now: the fee just paid ticks over, and the next one lights up where it
+              // already was.
+              const consultationPaid = selectedLead.package_paid != null;
+              const treatmentFeePaid = selectedLead.treatment_fee_paid != null;
+
+              // Where a Partial Payment plan currently stands — the next installment, what
+              // is still owed, and whether it is late. Worked out once, for the Treatment
+              // Fee card here and for the balance note Fee Collected prints under the grid.
+              const partialPlan = hasPendingInstallments ? (() => {
+                const unpaid = savedInstallments.filter((i) => !i.paid);
+                const nextIdx = savedInstallments.findIndex((i) => !i.paid);
+                const next = savedInstallments[nextIdx] || {};
+                return {
+                  nextIdx,
+                  next,
+                  balance: unpaid.reduce((s, i) => s + (i.amount || 0), 0),
+                  overdue: !!next.due_date && next.due_date < new Date().toISOString().slice(0, 10),
+                };
+              })() : null;
+
+              // Each fee is gated on the patient actually being on that programme —
+              // quoting diet or rehab to everyone would overstate what is owed.
+              const feeSteps = [
+                {
+                  key: "consultation",
+                  label: "Consultation Fee",
+                  amount: selectedLead.package_price,
+                  paid: consultationPaid,
+                  note: consultationPaid ? selectedLead.package_payment_mode : null,
+                  show: true,
+                  act: openCollectFeeDraft,
+                  actLabel: "Collect",
+                },
+                {
+                  key: "treatment",
+                  label: "Treatment Fee",
+                  sub: selectedLead.session_package_name
+                    ? `${selectedLead.session_package_name}${selectedLead.session_package_sessions ? ` · ${selectedLead.session_package_sessions} sessions` : ""}`
+                    : null,
+                  amount: selectedLead.session_package_price,
+                  // A part-paid plan has money in and a balance still owed, so it is
+                  // neither collected nor untouched: the card keeps its button and names
+                  // the installment that is due instead of ticking itself green.
+                  paid: treatmentFeePaid && !partialPlan,
+                  note: treatmentFeePaid ? selectedLead.treatment_fee_payment_mode : null,
+                  pending: partialPlan
+                    ? `${savedInstallments.filter((i) => i.paid).length} of ${savedInstallments.length} in · balance Rs.${Number(partialPlan.balance).toLocaleString("en-IN")}`
+                    : null,
+                  pendingTone: partialPlan && partialPlan.overdue ? "text-rose-600" : "text-amber-600",
+                  show: decision === "consultation_treatment",
+                  act: partialPlan ? () => openPartialCollectPopup(partialPlan.nextIdx) : openTreatmentFeeDraft,
+                  actLabel: partialPlan ? `Collect ${partialInstallmentLabel(partialPlan.nextIdx)}` : "Collect",
+                },
+                {
+                  key: "rehab",
+                  label: "Rehab Fee",
+                  sub: selectedLead.rehab_package_name,
+                  amount: selectedLead.rehab_fee_paid != null ? selectedLead.rehab_fee_paid : selectedLead.rehab_package_price,
+                  paid: selectedLead.rehab_fee_paid != null,
+                  note: selectedLead.rehab_fee_paid != null ? selectedLead.rehab_fee_payment_mode : null,
+                  show: !!selectedLead.rehab_referred,
+                  // Collected on the Rehab tab, which carries the course as well as the
+                  // figure — this card is the pointer to it.
+                  act: () => openDetail("rehab"),
+                  actLabel: "Open",
+                },
+                {
+                  key: "diet",
+                  label: "Diet Fee",
+                  sub: selectedLead.diet_package_name,
+                  amount: selectedLead.diet_fee_paid != null ? selectedLead.diet_fee_paid : dietFeeDue,
+                  paid: selectedLead.diet_fee_paid != null,
+                  note: selectedLead.diet_fee_paid != null ? selectedLead.diet_fee_payment_mode : null,
+                  show: !!selectedLead.diet_recommended,
+                  act: () => openDetail("diet"),
+                  actLabel: "Open",
+                },
+              ].filter((f) => f.show);
+
+              // The one fee that can be taken right now. Everything after the Consultation
+              // Fee waits on it — the server's rule, not a habit of this screen — so only
+              // that card gets the filled button and the rest stay quiet outlines.
+              const nextFeeStep = feeSteps.find((f) => !f.paid && (f.key === "consultation" || consultationPaid));
+
+              const FeeSteps = (
+                <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3" data-testid="cons-fee-steps">
+                  {feeSteps.map((f, i) => (
+                    <div
+                      key={f.key}
+                      className={`flex flex-col gap-2 rounded-lg border p-3 ${
+                        f.paid ? "border-emerald-200 bg-emerald-50/60" : "border-slate-200 bg-white"
+                      }`}
+                      data-testid={`cons-fee-step-${f.key}`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${
+                          f.paid ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-500"
+                        }`}>
+                          {f.paid ? <CheckCircle2 className="h-3 w-3" /> : i + 1}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-xs font-semibold text-slate-700">{f.label}</p>
+                          {f.sub ? <p className="truncate text-[11px] text-slate-400" title={String(f.sub)}>{f.sub}</p> : null}
+                        </div>
+                      </div>
+                      <p className="text-lg font-extrabold leading-none text-slate-800">
+                        {f.amount != null ? `Rs.${Number(f.amount).toLocaleString("en-IN")}` : "—"}
+                      </p>
+                      {f.paid ? (
+                        <span className="text-[11px] font-medium capitalize text-emerald-700">
+                          {f.note ? `Paid · ${f.note}` : "Paid"}
+                        </span>
+                      ) : (
+                        <>
+                          {f.pending ? <span className={`text-[11px] font-medium ${f.pendingTone}`}>{f.pending}</span> : null}
+                          <Button
+                            size="sm"
+                            variant={nextFeeStep && f.key === nextFeeStep.key ? undefined : "outline"}
+                            /* Everything after the consultation fee waits on it, and says
+                               so rather than failing when pressed. */
+                            disabled={f.key !== "consultation" && !consultationPaid}
+                            title={f.key !== "consultation" && !consultationPaid ? "Collect the consultation fee first" : undefined}
+                            className={`w-full ${nextFeeStep && f.key === nextFeeStep.key ? "bg-sky-600 text-white hover:bg-sky-700" : ""} ${ACT_BTN}`}
+                            onClick={f.act}
+                            data-testid={`cons-fee-act-${f.key}`}
+                          >
+                            {f.actLabel}
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              );
+
               const panel = (() => {
                 // FIRST in this chain, deliberately. The Rehab tab is a cross-cutting view
                 // rather than a position in the pipeline: a patient is on it because their
@@ -3809,8 +3952,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 }
 
                 if (stage === "Consultation Visit") {
-                  const alreadyPaid = selectedLead.package_paid != null;
-                  const hasTreatment = decision === "consultation_treatment";
                   return (
                     <StagePanel
                       tone={detailView ? detailView.tone : "sky"}
@@ -3819,7 +3960,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       testid="cons-stage-panel-consultation-visit"
                       chip={detailView ? (
                         <PanelChip tone={detailView.chip.tone} tick={detailView.chip.tick}>{detailView.chip.label}</PanelChip>
-                      ) : alreadyPaid ? (
+                      ) : consultationPaid ? (
                         <PanelChip tone="emerald" tick>Consultation Fee In</PanelChip>
                       ) : (
                         <PanelChip>Payment Due</PanelChip>
@@ -3851,11 +3992,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                               with it, and one that opens on a payment it will not take asks
                               for something and refuses it in the same breath. */}
                           <OwnTab
-                            label={alreadyPaid ? "Payment" : "Collect Fees"}
+                            label={consultationPaid ? "Payment" : "Collect Fees"}
                             short="Fees"
                             icon={IndianRupee}
                             active={TAB_ON}
-                            locked={docsRequired && !hasDocs && !alreadyPaid}
+                            locked={docsRequired && !hasDocs && !consultationPaid}
                             lockedTitle="Upload the consultation paperwork first"
                           />
                           {DietDetailButton}
@@ -3867,130 +4008,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       {/* Each tab is its own step and shows only that step. The fees do not
                           appear over the uploader: somebody filing a scan is filing a scan,
                           and a figure on that screen is a figure they cannot act on yet. */}
-                      {detailBody || (
-                        <>
-                          {/* Everything this patient has been quoted, on the one screen the
-                              Branch Admin reads before taking money. Each line is gated on
-                              the patient actually being on that programme — quoting diet or
-                              rehab to everyone would overstate what is owed. */}
-                          {/* The fees in the order they are taken, each one its own row
-                              with its own state and its own way of being collected. As a
-                              plain list of figures with one button under it, the order was
-                              something the branch had to know rather than something the
-                              screen said, and the treatment and rehab fees looked like
-                              things this button would collect when it never touched them.
-
-                              Consultation leads because everything else waits on it: the
-                              other three are only collectable once it is in, which is the
-                              server's rule and not a habit of this screen. */}
-                          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3" data-testid="cons-consultation-visit-summary">
-                            {[
-                              {
-                                key: "consultation",
-                                label: "Consultation Fee",
-                                amount: selectedLead.package_price,
-                                paid: alreadyPaid,
-                                note: alreadyPaid ? selectedLead.package_payment_mode : null,
-                                show: true,
-                                act: openCollectFeeDraft,
-                                actLabel: alreadyPaid ? "Update" : "Collect",
-                              },
-                              {
-                                key: "treatment",
-                                label: "Treatment Fee",
-                                amount: selectedLead.session_package_price,
-                                paid: selectedLead.treatment_fee_paid != null,
-                                show: hasTreatment,
-                                act: openTreatmentFeeDraft,
-                                actLabel: "Collect",
-                              },
-                              {
-                                key: "rehab",
-                                label: "Rehab Fee",
-                                sub: selectedLead.rehab_package_name,
-                                amount: selectedLead.rehab_package_price,
-                                paid: selectedLead.rehab_fee_paid != null,
-                                show: !!selectedLead.rehab_referred,
-                                // Collected on the Rehab tab, which carries the course as
-                                // well as the figure — this row is the pointer to it.
-                                act: () => openDetail("rehab"),
-                                actLabel: "Open",
-                              },
-                              {
-                                key: "diet",
-                                label: "Diet Fee",
-                                amount: dietFeeDue,
-                                paid: selectedLead.diet_fee_paid != null,
-                                show: !!selectedLead.diet_recommended,
-                                act: () => openDetail("diet"),
-                                actLabel: "Open",
-                              },
-                            ].filter((f) => f.show).map((f, i) => (
-                              <div
-                                key={f.key}
-                                className={`flex flex-col gap-2 rounded-lg border p-3 ${
-                                  f.paid ? "border-emerald-200 bg-emerald-50/60" : "border-slate-200 bg-white"
-                                }`}
-                                data-testid={`cons-fee-step-${f.key}`}
-                              >
-                                <div className="flex items-center gap-2">
-                                  <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${
-                                    f.paid ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-500"
-                                  }`}>
-                                    {f.paid ? <CheckCircle2 className="h-3 w-3" /> : i + 1}
-                                  </span>
-                                  <div className="min-w-0 flex-1">
-                                    <p className="truncate text-xs font-semibold text-slate-700">{f.label}</p>
-                                    {f.sub ? <p className="truncate text-[11px] text-slate-400">{f.sub}</p> : null}
-                                  </div>
-                                </div>
-                                <p className="text-lg font-extrabold leading-none text-slate-800">
-                                  {f.amount != null ? `Rs.${Number(f.amount).toLocaleString("en-IN")}` : "—"}
-                                </p>
-                                {f.paid ? (
-                                  <span className="text-[11px] font-medium capitalize text-emerald-700">
-                                    {f.note ? `Paid · ${f.note}` : "Paid"}
-                                  </span>
-                                ) : (
-                                  <Button
-                                    size="sm"
-                                    variant={f.key === "consultation" ? undefined : "outline"}
-                                    /* Everything after the consultation fee waits on it, and
-                                       says so rather than failing when pressed. */
-                                    disabled={f.key !== "consultation" && !alreadyPaid}
-                                    title={f.key !== "consultation" && !alreadyPaid ? "Collect the consultation fee first" : undefined}
-                                    className={`w-full ${f.key === "consultation" ? "bg-sky-600 text-white hover:bg-sky-700" : ""} ${ACT_BTN}`}
-                                    onClick={f.act}
-                                    data-testid={`cons-fee-act-${f.key}`}
-                                  >
-                                    {f.actLabel}
-                                  </Button>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        </>
-                      )}
+                      {detailBody || FeeSteps}
                     </StagePanel>
                   );
                 }
 
                 if (stage === "Fee Collected") {
-                  const ConsultationFeeSummary = (
-                    <div className="rounded-md border border-slate-200 bg-white p-2.5" data-testid="cons-fee-collected-consultation-summary">
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-xs text-slate-500">Consultation Fee</span>
-                        <span className="font-semibold text-slate-800">
-                          {selectedLead.package_price != null ? `Rs.${selectedLead.package_price}` : "—"}
-                          <span className="ml-1 capitalize text-emerald-600">({selectedLead.package_payment_mode})</span>
-                        </span>
-                      </div>
-                      <p className="mt-1 flex items-center gap-1 text-[11px] font-medium text-emerald-600">
-                        <CheckCircle2 className="h-3 w-3" /> Already Collected
-                      </p>
-                    </div>
-                  );
-
                   if (decision === "consultation_only") {
                     return (
                       <div
@@ -4009,7 +4032,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           </span>
                         </div>
                         <div className="p-4">
-                          {ConsultationFeeSummary}
+                          {FeeSteps}
                           {DietStatus}
                           <p className="mt-3 text-xs leading-relaxed text-slate-600">Consultation Only — no treatment sessions. Mark this consultation as completed to close it out.</p>
                           <div className="mt-3 flex flex-wrap items-center gap-2 [&>*]:shrink-0">
@@ -4025,78 +4048,39 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       </div>
                     );
                   }
-                  const treatmentPaid = selectedLead.treatment_fee_paid != null;
-
-                  // Where a Partial Payment plan currently stands. Computed once here so the
-                  // balance card and the Collect button can be rendered in two different
-                  // places — the card with the Treatment Fee it describes, the button down
-                  // in the action row — without working the numbers out twice.
-                  const partial = hasPendingInstallments ? (() => {
-                    const unpaid = savedInstallments.filter((i) => !i.paid);
-                    const nextIdx = savedInstallments.findIndex((i) => !i.paid);
-                    const next = savedInstallments[nextIdx] || {};
-                    return {
-                      nextIdx,
-                      next,
-                      balance: unpaid.reduce((s, i) => s + (i.amount || 0), 0),
-                      overdue: !!next.due_date && next.due_date < new Date().toISOString().slice(0, 10),
-                    };
-                  })() : null;
-
-                  // The next thing to do about money, whatever state the Treatment Fee is
-                  // in: collect the next installment, collect the lot, or nothing at all.
-                  // Reopening a partially-paid patient is exactly when the rest gets taken,
-                  // so Collect stays one click away rather than behind the schedule.
-                  const FeeActions = partial ? (
-                    <>
-                      <Button size="sm" className="bg-emerald-600 text-xs hover:bg-emerald-700" onClick={() => openPartialCollectPopup(partial.nextIdx)} data-testid="cons-collect-next-installment">
-                        Collect Rs.{partial.next.amount ?? partial.balance}
-                      </Button>
-                      <Button size="sm" variant="outline" className="text-xs" onClick={openPartialScheduleDraft} data-testid="cons-open-partial-schedule-sidebar">
-                        View Payment Schedule
-                      </Button>
-                    </>
-                  ) : !treatmentPaid ? (
-                    <Button size="sm" className="bg-indigo-600 text-xs hover:bg-indigo-700" onClick={openTreatmentFeeDraft} data-testid="cons-open-treatment-fee">
-                      Collect Payment
+                  // Money is taken on the cards below, each fee on its own. What is left
+                  // for the tab row is the schedule behind a part-paid Treatment Fee —
+                  // a view of what was agreed, not another way to collect it.
+                  const FeeActions = partialPlan ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className={`border-slate-200 bg-white/70 text-slate-600 hover:bg-white ${ACT_BTN}`}
+                      onClick={openPartialScheduleDraft}
+                      data-testid="cons-open-partial-schedule-sidebar"
+                    >
+                      <Calendar className="mr-1 h-3.5 w-3.5" />
+                      <Lbl full="Payment Schedule" short="Schedule" />
                     </Button>
                   ) : null;
 
-                  // The three money facts as one divided card, the way the Rehab panel
-                  // states its own. They used to be a card for the consultation fee and
-                  // then loose rows for treatment under a second heading, so one panel
-                  // carried two different shapes for the same kind of fact.
-                  const feeRows = [
-                    {
-                      label: "Consultation Fee",
-                      value: selectedLead.package_price != null ? `Rs.${Number(selectedLead.package_price).toLocaleString("en-IN")}` : "—",
-                      note: selectedLead.package_payment_mode || "",
-                      noteTone: "text-emerald-600",
-                    },
-                    {
-                      label: "Treatment Package",
-                      value: `${selectedLead.session_package_name || "—"}${selectedLead.session_package_sessions ? ` · ${selectedLead.session_package_sessions} sessions` : ""}`,
-                    },
-                    {
-                      label: "Treatment Fee",
-                      value: selectedLead.session_package_price != null ? `Rs.${Number(selectedLead.session_package_price).toLocaleString("en-IN")}` : "—",
-                      note: hasPendingInstallments ? "partial" : (treatmentPaid ? (selectedLead.treatment_fee_payment_mode || "") : ""),
-                      noteTone: hasPendingInstallments ? "text-indigo-600" : "text-emerald-600",
-                      strong: true,
-                    },
-                  ];
-
                   return (
                     <StagePanel
-                      tone={detailView ? detailView.tone : "indigo"}
-                      icon={detailView ? detailView.icon : ClipboardCheck}
-                      title={detailView ? detailView.title : "Fee Collected"}
+                      /* The heading follows the work rather than the stage name. A lead
+                         lands here the moment the Consultation Fee is taken, usually with
+                         the Treatment Fee still to come — and the Branch Admin taking it
+                         is mid-job, not looking at a receipt. While a fee is still due
+                         this stays the payment screen it was a click ago; once the last
+                         one is in it becomes what the pipeline calls it. */
+                      tone={detailView ? detailView.tone : nextFeeStep ? "sky" : "indigo"}
+                      icon={detailView ? detailView.icon : nextFeeStep ? IndianRupee : ClipboardCheck}
+                      title={detailView ? detailView.title : nextFeeStep ? "Collect a Payment" : "Fee Collected"}
                       testid="cons-stage-panel-fee-collected"
                       chip={detailView ? (
                         <PanelChip tone={detailView.chip.tone} tick={detailView.chip.tick}>{detailView.chip.label}</PanelChip>
-                      ) : partial ? (
-                        <PanelChip tone={partial.overdue ? "rose" : "amber"}>{partial.overdue ? "Balance Overdue" : "Part-paid"}</PanelChip>
-                      ) : treatmentPaid ? (
+                      ) : partialPlan ? (
+                        <PanelChip tone={partialPlan.overdue ? "rose" : "amber"}>{partialPlan.overdue ? "Balance Overdue" : "Part-paid"}</PanelChip>
+                      ) : treatmentFeePaid ? (
                         <PanelChip tone="emerald" tick>Both Fees Collected</PanelChip>
                       ) : (
                         <PanelChip>Treatment Fee Due</PanelChip>
@@ -4104,7 +4088,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       tabs={
                         <>
                           {FeeActions}
-                          {treatmentPaid && showOwnTab && <OwnTab label="Assign Physio" short="Physio" icon={Users} active="border-violet-600 bg-violet-600 text-white shadow-sm hover:bg-violet-700 hover:text-white" />}
+                          {treatmentFeePaid && showOwnTab && <OwnTab label="Assign Physio" short="Physio" icon={Users} active="border-violet-600 bg-violet-600 text-white shadow-sm hover:bg-violet-700 hover:text-white" />}
                           {DietDetailButton}
                           {RehabDetailButton}
                           {CancelButton}
@@ -4113,51 +4097,35 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     >
                       {detailBody || (
                         <>
-                          <PanelCard
-                            testid="cons-fee-collected-summary"
-                            footer={!partial && treatmentPaid ? (
-                              <p className="flex items-center gap-1 border-t border-slate-100 px-3 py-2 text-[11px] font-medium text-emerald-600" data-testid="cons-treatment-fee-already-collected">
-                                <CheckCircle2 className="h-3 w-3" /> Already Collected
-                              </p>
-                            ) : null}
-                          >
-                            {feeRows.map((row) => (
-                              <PanelRow key={row.label} label={row.label} value={row.value} note={row.note} noteTone={row.noteTone} strong={row.strong} />
-                            ))}
-                          </PanelCard>
+                          {FeeSteps}
 
-                          {/* What is still owed and when it is due. The button that acts on
-                              it sits in the row above with everything else. */}
-                          {partial && (
-                            <>
-                              <p className="mt-2 text-[11px] text-slate-500">
-                                {savedInstallments.filter((i) => i.paid).length} of {savedInstallments.length} installments collected.
-                              </p>
-                              <div className={`mt-2 rounded-lg border px-3 py-2 ${partial.overdue ? "border-rose-200 bg-rose-50" : "border-amber-200 bg-amber-50"}`} data-testid="cons-partial-balance-summary">
-                                <div className="flex items-center justify-between">
-                                  <span className={`text-[11px] font-semibold ${partial.overdue ? "text-rose-700" : "text-amber-700"}`}>Balance Amount</span>
-                                  <span className={`text-sm font-bold ${partial.overdue ? "text-rose-700" : "text-amber-700"}`}>Rs.{Number(partial.balance).toLocaleString("en-IN")}</span>
-                                </div>
-                                <p className={`mt-0.5 text-[10px] ${partial.overdue ? "text-rose-600" : "text-amber-600"}`}>
-                                  Next · {partialInstallmentLabel(partial.nextIdx)}
-                                  {partial.next.sessions ? ` · ${partial.next.sessions} sessions` : ""}
-                                  {partial.next.amount != null ? ` · Rs.${partial.next.amount}` : ""}
-                                  {partial.next.due_date ? ` · due ${partial.next.due_date}` : ""}
-                                  {partial.overdue ? " · OVERDUE" : ""}
-                                </p>
+                          {/* What is still owed and when it is due. The Treatment Fee
+                              card above is what collects it. */}
+                          {partialPlan && (
+                            <div className={`mt-2 rounded-lg border px-3 py-2 ${partialPlan.overdue ? "border-rose-200 bg-rose-50" : "border-amber-200 bg-amber-50"}`} data-testid="cons-partial-balance-summary">
+                              <div className="flex items-center justify-between">
+                                <span className={`text-[11px] font-semibold ${partialPlan.overdue ? "text-rose-700" : "text-amber-700"}`}>Balance Amount</span>
+                                <span className={`text-sm font-bold ${partialPlan.overdue ? "text-rose-700" : "text-amber-700"}`}>Rs.{Number(partialPlan.balance).toLocaleString("en-IN")}</span>
                               </div>
-                            </>
+                              <p className={`mt-0.5 text-[10px] ${partialPlan.overdue ? "text-rose-600" : "text-amber-600"}`}>
+                                Next · {partialInstallmentLabel(partialPlan.nextIdx)}
+                                {partialPlan.next.sessions ? ` · ${partialPlan.next.sessions} sessions` : ""}
+                                {partialPlan.next.amount != null ? ` · Rs.${partialPlan.next.amount}` : ""}
+                                {partialPlan.next.due_date ? ` · due ${partialPlan.next.due_date}` : ""}
+                                {partialPlan.overdue ? " · OVERDUE" : ""}
+                              </p>
+                            </div>
                           )}
 
                           {DietStatus}
 
-                          {treatmentPaid && (
+                          {treatmentFeePaid && (
                             <>
                               <p className="mt-3 text-xs leading-relaxed text-slate-600">
                                 {/* A Partial Payment plan reaches here with money in but a
                                     balance still owed, and this line read "Both fees
                                     collected" over a Balance Amount card saying otherwise. */}
-                                {partial
+                                {partialPlan
                                   ? "Consultation Fee collected, Treatment Fee part-paid. The physiotherapist can be assigned now."
                                   : "Both fees collected. Choose the physiotherapist who will deliver the sessions."}
                               </p>
