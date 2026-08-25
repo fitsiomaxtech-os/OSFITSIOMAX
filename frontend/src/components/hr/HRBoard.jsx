@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import {
   hrDashboard, hrEmployees, hrCreateEmployee, hrUpdateEmployee, hrDeleteEmployee, uploadEmployeePhoto,
-  hrUsers, hrCreateUser, hrUpdateUser, hrResetPassword, hrDeactivateUser, hrActivateUser, hrDeleteUserPermanent, hrUpdateUserRole, hrMeta, hrAddCustomRole,
+  hrUsers, hrCreateUser, hrUpdateUser, hrResetPassword, hrDeactivateUser, hrActivateUser, hrDeleteUserPermanent, hrMeta, hrAddCustomRole,
   hrDepartments, hrCreateDepartment, hrRenameDepartment, hrDeleteDepartment, hrAddDesignation, hrRenameDesignation, hrDeleteDesignation, hrReorderDesignations,
   getBranches, getVerticals,
 } from "@/lib/api";
@@ -1497,48 +1497,6 @@ const PickerModal = ({
   );
 };
 
-/**
- * The ROLE cell's picker.
- *
- * A dialog, like the branch picker it shares — and for a reason this one learned the hard
- * way. It used to be a panel pinned to the button's own rect, which had to close whenever
- * the page moved beneath it; the listener that noticed the page moving could not tell that
- * apart from the list itself being scrolled, so a list too long to fit shut the instant
- * anyone tried to reach the bottom of it. There are more roles than fit on a screen, so
- * that was every use of it.
- *
- * The dialog has nothing to keep up with. It scrolls, it cannot be clipped by the table it
- * sits in, and it has room to name the role being changed.
- */
-const RoleCellDropdown = ({ value, options, onChange, testid, subject }) => {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="flex h-7 w-full items-center justify-between gap-2 rounded border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-        data-testid={testid}
-      >
-        <span className="truncate">{roleLabel(value)}</span>
-        <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
-      </button>
-      {open && (
-        <PickerModal
-          title={subject ? `Role for ${subject}` : "Role"}
-          value={value}
-          options={options.map((r) => ({ value: r, label: roleLabel(r) }))}
-          onPick={(v) => { setOpen(false); if (v !== value) onChange(v); }}
-          onClose={() => setOpen(false)}
-          searchable
-          searchPlaceholder="Search role..."
-        />
-      )}
-    </>
-  );
-};
-
 // ---------- Department & Designation ----------
 
 
@@ -2942,11 +2900,6 @@ const RolesTab = ({ meta, reloadMeta }) => {
       .sort((a, b) => rank(a.branch) - rank(b.branch) || a.branch.localeCompare(b.branch));
   }, [sortedUsers]);
 
-  const changeRole = async (u, role) => {
-    try { await hrUpdateUserRole(u.id, role); toast.success("Role updated"); load(); }
-    catch (e) { toast.error(e?.response?.data?.detail || "Failed"); }
-  };
-
   // flex+gap, not space-y — the mobile-only toolbar/cards and the desktop table are
   // each hidden by class depending on breakpoint, not the hidden attribute.
   return (
@@ -3060,15 +3013,6 @@ const RolesTab = ({ meta, reloadMeta }) => {
               </button>
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-2">
-              <div className="w-40">
-                <RoleCellDropdown
-                  value={u.role}
-                  options={meta.roles}
-                  onChange={(r) => changeRole(u, r)}
-                  subject={u.full_name}
-                  testid={`hr-user-card-role-${u.id}`}
-                />
-              </div>
               <span className={`rounded px-2 py-0.5 text-xs ${u.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}`}>{u.is_active ? "Active" : "Inactive"}</span>
             </div>
             {u.linked_employee && (
@@ -3097,30 +3041,21 @@ const RolesTab = ({ meta, reloadMeta }) => {
         <CardContent className="p-0">
           <div className="overflow-auto">
             <table className="min-w-full text-sm">
-              {/* Role and Branch are unlabelled. Both say what they are by what they hold —
-                  a dropdown of role names, a branch name — so the word above was repeating
-                  the column. Linked Employee and Status keep their headings: an employee
-                  code and a status pill are not self-evident in the same way.
-                  The cells are still there; only the two headings are dropped, and the
-                  empty th keeps the column count aligned with the body rows. */}
-              <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th className="px-3 py-2">S.No</th><th className="px-3 py-2">User</th><th className="px-3 py-2">Email</th><th className="px-3 py-2" /><th className="px-3 py-2">Linked Employee</th><th className="px-3 py-2">Status</th><th className="px-3 py-2" /><th className="px-3 py-2">Actions</th></tr></thead>
+              {/* No Role column. The role is the designation, and Linked Employee already
+                  prints it beside the employee code — "EMP0078 - Branch Admin" — so a
+                  column of dropdowns beside it was a second copy of the same fact, and the
+                  only one of the two that could be edited into disagreeing with the other.
+                  A role is changed by changing the designation, in Department & Designation.
+
+                  Branch keeps its column and loses only its heading: a branch name says what
+                  it is, where an employee code and a status pill do not. */}
+              <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th className="px-3 py-2">S.No</th><th className="px-3 py-2">User</th><th className="px-3 py-2">Email</th><th className="px-3 py-2">Linked Employee</th><th className="px-3 py-2">Status</th><th className="px-3 py-2" /><th className="px-3 py-2">Actions</th></tr></thead>
               <tbody>
                 {sortedUsers.map((u, i) => (
                   <tr key={u.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`hr-user-row-${u.id}`}>
                     <td className="px-3 py-2 text-slate-500">{i + 1}</td>
                     <td className="px-3 py-2 font-medium text-slate-800">{u.full_name}</td>
                     <td className="px-3 py-2 text-slate-600">{u.email}</td>
-                    <td className="px-3 py-2">
-                      <div className="w-44">
-                        <RoleCellDropdown
-                          value={u.role}
-                          options={meta.roles}
-                          onChange={(r) => changeRole(u, r)}
-                          subject={u.full_name}
-                          testid={`hr-user-role-${u.id}`}
-                        />
-                      </div>
-                    </td>
                     <td className="px-3 py-2 text-xs text-emerald-600">{u.linked_employee ? `${u.linked_employee.employee_code} - ${u.linked_employee.designation || u.linked_employee.full_name}` : "—"}</td>
                     <td className="px-3 py-2"><span className={`rounded px-2 py-0.5 text-xs ${u.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}`}>{u.is_active ? "Active" : "Inactive"}</span></td>
                     <td className="px-3 py-2"><UserBranch user={u} /></td>
@@ -3136,7 +3071,7 @@ const RolesTab = ({ meta, reloadMeta }) => {
                     </td>
                   </tr>
                 ))}
-                {sortedUsers.length === 0 && <tr><td colSpan="8" className="px-3 py-6 text-center text-slate-400">No users.</td></tr>}
+                {sortedUsers.length === 0 && <tr><td colSpan="7" className="px-3 py-6 text-center text-slate-400">No users.</td></tr>}
               </tbody>
             </table>
           </div>
