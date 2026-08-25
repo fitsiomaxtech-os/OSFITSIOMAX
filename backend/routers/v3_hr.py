@@ -819,7 +819,15 @@ async def update_employee(emp_id: str, payload: EmployeeUpdate, _: V3UserOut = D
         # with a Nutritionist that has no calendar there any more.
         if branch_ids is not None and branch_ids != [ALL_BRANCHES] and branch_ids:
             for u in linked_users:
-                if not is_multi_branch_role(u.get("role")):
+                # holds_calendar_per_branch, not is_multi_branch_role. The two answered the
+                # same for every role until a Consultant became branch-selective, and this
+                # line was written while they still did: posting a Consultant to a branch
+                # then minted a per-branch record beside the single branchless one they are
+                # meant to have, and the calendar listed them twice — once per record —
+                # while the booking popup offered the empty duplicate as a second choice.
+                #
+                # A Consultant is posted by branch_ids alone; their diary does not move.
+                if not holds_calendar_per_branch(u.get("role")):
                     continue
                 await _sync_expert_branches(u, branch_ids)
         else:
