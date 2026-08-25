@@ -153,9 +153,12 @@ export const HeadPhysioCalendar = ({ branchId, profileType = "head_physio" }) =>
   const loadDoctors = useCallback(async () => {
     if (!branchId) return;
     try {
-      const all = profileType === "head_physio"
-        ? await getDoctors()
-        : await getDoctors({ branch_id: branchId });
+      // The branch is named for consultants too now. It does not narrow them to that
+      // branch — they are org-wide and the endpoint keeps them regardless — but it is what
+      // tells the server which vertical this calendar is, so an online branch is offered
+      // the consultants who take video appointments and an offline one those who take them
+      // in the room. Before this every branch was offered all of them.
+      const all = await getDoctors({ branch_id: branchId });
       const mine = (all || []).filter((d) => d.profile_type === profileType);
       // One row per person, not per record. An expert covering several branches holds one
       // doctors record per branch by design, and several paths can add one — so the raw

@@ -451,9 +451,45 @@ async def v3_delete_branch(branch_id: str, _: V3UserOut = Depends(v3_require_rol
 ORG_WIDE_PROFILES = ["head_physio", "nutrition_coach"]
 
 
+async def _consultants_for_vertical(rows: list, online: bool) -> list:
+    """Keep the consultants who belong to an online branch, or the ones who do not.
+
+    A consultation over video and one in the room are the same desk, so both roles are
+    stamped profile_type "head_physio" and the expert records are indistinguishable. The
+    only thing that says which is which is the role on the login behind the record, so that
+    is what this reads.
+
+    An expert record with no login — Fitsiomax Experts creates those, profile only — counts
+    as offline. That is where every consultant sat before the online role existed, so
+    reading a missing answer as "in the room" leaves those calendars exactly as they were
+    rather than emptying them.
+
+    Only consultants are touched. Every other desk belongs to a branch already and is
+    filtered by it above.
+    """
+    user_ids = [r.get("user_id") for r in rows if r.get("profile_type") == "head_physio" and r.get("user_id")]
+    role_by_user = {}
+    if user_ids:
+        async for u in v3_col("users").find({"id": {"$in": user_ids}}, {"_id": 0, "id": 1, "role": 1}):
+            role_by_user[u["id"]] = u.get("role")
+    kept = []
+    for r in rows:
+        if r.get("profile_type") != "head_physio":
+            kept.append(r)
+            continue
+        role = (role_by_user.get(r.get("user_id")) or "").strip().lower()
+        if (role == "online_head_physio") == online:
+            kept.append(r)
+    return kept
+
+
 @router.get("/doctors", response_model=List[V3DoctorOut])
 async def v3_get_doctors(
     branch_id: Optional[str] = None,
+    # "online" | "offline". Narrows the consultants to the ones who take that kind of
+    # appointment; anything else is ignored, so an unset or misspelt value leaves the list
+    # as it has always been rather than emptying a calendar.
+    vertical: Optional[str] = None,
     user: V3UserOut = Depends(v3_current_user),
 ):
     query: Dict[str, object] = {}
@@ -484,6 +520,17 @@ async def v3_get_doctors(
     # Their rostered working window, so a list that offers an expert also says which hours
     # that expert actually works. Resolved here rather than by each caller because every
     # calendar and picker reads this one endpoint.
+    # Asked for outright, or read off the branch being listed for. Deriving it means a
+    # caller that already names a branch does not have to know its vertical as well, and
+    # the rule about which consultants belong to an online branch lives in one place
+    # instead of at every calendar that asks.
+    want = vertical if vertical in ("online", "offline") else None
+    if want is None and scope_branch:
+        b = await v3_col("branches").find_one({"id": scope_branch}, {"_id": 0, "vertical": 1})
+        if b:
+            want = "online" if str(b.get("vertical") or "").startswith("online_") else "offline"
+    if want:
+        rows = await _consultants_for_vertical(rows, want == "online")
     rows = await attach_shifts(rows)
     out = []
     for row in rows:

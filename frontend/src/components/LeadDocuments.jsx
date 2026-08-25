@@ -208,7 +208,7 @@ export const LeadDocuments = ({ leadId, canEdit = true, kind = "general", fixedL
   };
 
   /** Everything that happens to a file once there is one, whichever way it arrived. */
-  const take = async (file) => {
+  async function take(file) {
     if (!file) return;
     // Checked here as well as on the server, so an oversized file fails in the moment
     // rather than after however long it takes to push it up and be told no.
@@ -241,7 +241,7 @@ export const LeadDocuments = ({ leadId, canEdit = true, kind = "general", fixedL
       toast.error(uploadError(err, sent));
     }
     setBusy(false);
-  };
+  }
 
   const open = async (doc) => {
     try {
