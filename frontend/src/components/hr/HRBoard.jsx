@@ -3466,6 +3466,46 @@ const EmployeeSelectDropdown = ({ value, employees, onChange }) => {
 };
 
 /** Picks the branch a login is scoped to, in the same dialog the other two use. */
+/** Branches for a desk that can work more than one, as one line.
+ *
+ * A button rather than the checkbox list this form used to carry. The list was nine rows
+ * tall in a dialog already scaled down to fit the window, and every one of them was on
+ * screen whether or not anybody was going to change what the employee record already said.
+ * The button says what is chosen and opens the same ticking dialog the branch picker in
+ * Department & Designation uses, so the two screens answer this question the same way.
+ */
+const BranchesSelectDropdown = ({ values, branches, onChange }) => {
+  const [open, setOpen] = useState(false);
+  const picked = (values || []).filter(Boolean);
+  const names = picked.map((id) => branches.find((b) => b.id === id)?.branch_name).filter(Boolean);
+  const label = names.length === 0
+    ? "No branch"
+    : names.length <= 2 ? names.join(" + ") : `${names.length} branches`;
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="flex h-10 w-full items-center justify-between gap-2 rounded-md border border-slate-200 bg-white px-3 text-left text-sm text-slate-700"
+        data-testid="hr-create-user-branches"
+      >
+        <span className={`truncate ${names.length ? "" : "text-slate-400"}`}>{label}</span>
+        <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
+      </button>
+      {open && (
+        <PickerModal
+          title="Branches"
+          multi
+          values={picked}
+          options={branches.map((b) => ({ value: b.id, label: b.branch_name }))}
+          onSave={(ids) => { setOpen(false); onChange(ids); }}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </>
+  );
+};
+
 const BranchSelectDropdown = ({ value, branches, onChange }) => {
   const [open, setOpen] = useState(false);
   const selected = branches.find((b) => b.id === value);
@@ -3499,10 +3539,13 @@ const BranchSelectDropdown = ({ value, branches, onChange }) => {
 
 const CreateUserModal = ({ meta, reloadMeta, onClose, onSaved }) => {
   const [employees, setEmployees] = useState([]);
+  const [branches, setBranches] = useState([]);
   const [form, setForm] = useState({ employee_id: "", full_name: "", email: "", role: "", branch_id: "", branch_ids: [], password: "", confirm: "" });
-  const isMultiBranchRole = Boolean(multiBranchLabel(form.role));
+  const roleLabelForMulti = multiBranchLabel(form.role);
+  const isMultiBranchRole = Boolean(roleLabelForMulti);
   const [resolvingRole, setResolvingRole] = useState(false);
   useEffect(() => { hrEmployees({ status: "active" }).then(setEmployees).catch((e) => console.warn("[load failed]", e?.message || e)); }, []);
+  useEffect(() => { getBranches().then(setBranches).catch((e) => console.warn("[load failed]", e?.message || e)); }, []);
 
   // Letters only, so "Online Physio Admin" and "ONLINE PHYSIO ADMIN" both normalize the
   // same way — matching a Departments & Designation title back to whichever real access
@@ -3631,6 +3674,27 @@ const CreateUserModal = ({ meta, reloadMeta, onClose, onSaved }) => {
         </Field>
         <Field label="Name"><Input placeholder="Full name" value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} data-testid="hr-create-user-name" /></Field>
         <Field label="Username (Email) *"><Input placeholder="user@company.com" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} data-testid="hr-create-user-email" /></Field>
+        {/* Filled in by the employee pick, and editable after it.
+            Role is not offered beside it and this is not a step back towards that: a role
+            has exactly one right answer, the designation, so asking was inviting the two to
+            disagree. A branch does not — somebody can be hired onto a record naming one
+            branch and given a login that reaches another, or a second one — so the answer
+            the employee gives is a starting point rather than the whole of it. */}
+        <Field label={isMultiBranchRole ? `Branch (${roleLabelForMulti} can cover more than one)` : "Branch"}>
+          {isMultiBranchRole ? (
+            <BranchesSelectDropdown
+              values={form.branch_ids}
+              branches={branches}
+              onChange={(ids) => setForm({ ...form, branch_ids: ids, branch_id: ids[0] || "" })}
+            />
+          ) : (
+            <BranchSelectDropdown
+              value={form.branch_id}
+              branches={branches}
+              onChange={(id) => setForm({ ...form, branch_id: id, branch_ids: id ? [id] : [] })}
+            />
+          )}
+        </Field>
         <Field label="Password *"><PasswordInput placeholder="Min 6 characters" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} testid="hr-create-user-pwd" /></Field>
         <Field label="Confirm Password *"><PasswordInput placeholder="Confirm password" value={form.confirm} onChange={(e) => setForm({ ...form, confirm: e.target.value })} testid="hr-create-user-confirm" /></Field>
         <div className="flex gap-2 pt-2"><Button variant="outline" onClick={onClose} className="flex-1" data-testid="hr-create-user-cancel">Cancel</Button><Button onClick={submit} className="flex-1 bg-sky-600 hover:bg-sky-700" data-testid="hr-create-user-submit">Create User</Button></div>

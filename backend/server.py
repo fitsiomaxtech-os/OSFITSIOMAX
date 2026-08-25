@@ -5,7 +5,7 @@ import os
 import logging
 
 from database import client
-from seed import ensure_v1_seed_data, v2_seed, v3_seed, migrate_branch_stages, migrate_consultation_stages, migrate_head_consultation_stages, deactivate_legacy_demo_admin, migrate_consultant_roles, migrate_branch_admin_roles, migrate_designation_roles, retire_aliased_designation_roles, ensure_structure_departments, sync_head_physio_doctors, consolidate_head_physio_doctors, retire_experts_without_a_login, backfill_login_history_from_sessions, normalize_session_item_prices, normalize_lead_session_package_prices, migrate_course_prices_to_totals, ensure_fitness_packages, backfill_branch_codes, backfill_patient_numbers, backfill_zumba_package_sessions, ensure_rnr_stage, ensure_branch_admin_stages, ensure_rehab_stage, ensure_diet_and_completed_stages, retire_consultation_completed_stage, undo_branch_leads_stage
+from seed import ensure_v1_seed_data, v2_seed, v3_seed, migrate_branch_stages, migrate_consultation_stages, migrate_head_consultation_stages, deactivate_legacy_demo_admin, migrate_consultant_roles, migrate_branch_admin_roles, backfill_consultant_branches_from_employees, migrate_designation_roles, retire_aliased_designation_roles, ensure_structure_departments, sync_head_physio_doctors, consolidate_head_physio_doctors, retire_experts_without_a_login, backfill_login_history_from_sessions, normalize_session_item_prices, normalize_lead_session_package_prices, migrate_course_prices_to_totals, ensure_fitness_packages, backfill_branch_codes, backfill_patient_numbers, backfill_zumba_package_sessions, ensure_rnr_stage, ensure_branch_admin_stages, ensure_rehab_stage, ensure_diet_and_completed_stages, retire_consultation_completed_stage, undo_branch_leads_stage
 from routers.v3_google_sheets import start_auto_sync_scheduler
 from routers import v1, v2, v3_auth, v3_config, v3_leads, v3_branch_admin, v3_appointments, v3_sheets, v3_dashboard, v3_head_physio, v3_finance, v3_head_physio_board, v3_physio_board, v3_session_assign, v3_patient_view, v3_marketing, v3_stages, v3_hr, v3_lead_fields, v3_branch_mgmt, v3_google_sheets, v3_packages, v3_public_super_admin, v3_password_reset, v3_store, v3_consult_appointments, v3_reviews, v3_patient_portal, v3_testimonials, v3_recruitment, v3_diet, v3_lead_documents, v3_inventory, v3_text_presets, v3_shifts, v3_zumba, v3_rehab, v3_fitness, v3_feedback
 
@@ -117,6 +117,11 @@ async def startup_seed_data():
     # EXECUTIVE beside BUSINESS DEV, and the two physiotherapist titles beside their own.
     await retire_aliased_designation_roles()
     await ensure_structure_departments()
+    # After the role renames above, because it reads the consultant family off users.role
+    # and the retired slugs have only just been rewritten into it. Before the expert syncs
+    # below, so a Consultant whose branches are restored here is already posted by the time
+    # anything reads them.
+    await backfill_consultant_branches_from_employees()
     await sync_head_physio_doctors()
     # Must follow the sync above: that one creates any missing record, this one collapses
     # every CONSULTANT's records down to the single branchless one they should have.

@@ -932,6 +932,76 @@ async def consolidate_head_physio_doctors() -> None:
     # across two branches in the same hour. Only their reach is selective, not their diary.
 
 
+async def backfill_consultant_branches_from_employees() -> None:
+    """Give a Consultant's login back the branches their employee record already names.
+
+    The other half of making a Consultant branch-selective, and the half that had nothing
+    to read. Where a Consultant works is decided on their employee record and cascaded to
+    the login, which is what every branch-scoped list reads. But consolidate_head_physio_
+    doctors cleared those logins at every startup for as long as Consultants were org-wide,
+    so on an install upgrading into selective branches every Consultant login is blank
+    while their employee row still says Anna Nagar or Tirchy.
+
+    The result was a Consultant Calendar, a booking popup and a Team roster that were all
+    empty at every branch, with the branch plainly printed two screens away in HR. Nothing
+    was lost — the answer was on the employee all along — and this copies it back across.
+
+    Only ever fills a login that has NO branches at all. A Consultant somebody has since
+    posted, or deliberately taken off every branch by clearing it on the employee record
+    (which cascades, so both halves go blank together), is left exactly as it is. That is
+    what keeps this safe to run at every startup rather than once: after the first pass
+    there is nothing blank left to fill, and it can never re-post somebody who was unposted
+    on purpose, because unposting clears the employee too.
+
+    ALL_BRANCHES is expanded rather than copied. An employee covering everything carries
+    that marker; a Consultant covering everything now has to name the branches, because an
+    empty list on a login means nowhere and no longer means everywhere. A branch added
+    later will not be picked up — that is the honest consequence of a selective model,
+    and it is visible and fixable on the row rather than silent.
+
+    Consultants only. They are the one desk whose branches were being erased; every other
+    role's login has carried its own all along.
+    """
+    from routers.v3_hr import ALL_BRANCHES
+
+    blank = []
+    async for u in v3_col("users").find(
+        {"role": {"$in": sorted(HEAD_PHYSIO_ROLES)}},
+        {"_id": 0, "id": 1, "employee_id": 1, "branch_id": 1, "branch_ids": 1},
+    ):
+        if [b for b in (u.get("branch_ids") or []) if b] or u.get("branch_id"):
+            continue
+        if u.get("employee_id"):
+            blank.append(u)
+    if not blank:
+        return
+
+    emps = {}
+    async for e in v3_col("employees").find(
+        {"id": {"$in": [u["employee_id"] for u in blank]}},
+        {"_id": 0, "id": 1, "branch_id": 1, "branch_ids": 1},
+    ):
+        emps[e["id"]] = e
+
+    every = None
+    for u in blank:
+        emp = emps.get(u["employee_id"])
+        if not emp:
+            continue
+        at = [b for b in (emp.get("branch_ids") or []) if b and b != ALL_BRANCHES]
+        if not at and emp.get("branch_id") == ALL_BRANCHES:
+            if every is None:
+                every = await v3_col("branches").distinct("id", {})
+            at = list(every)
+        elif not at and emp.get("branch_id"):
+            at = [emp["branch_id"]]
+        if not at:
+            continue
+        await v3_col("users").update_one(
+            {"id": u["id"]}, {"$set": {"branch_ids": at, "branch_id": at[0]}}
+        )
+
+
 # The slug each retired consultation role is rewritten to. Same desk, same board, same
 # pipeline — only the name changes, so the mapping is one-to-one and nothing about the
 # workflow moves with it.
