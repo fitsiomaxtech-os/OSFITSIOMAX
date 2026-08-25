@@ -1480,6 +1480,27 @@ const StructureTab = ({ meta, reloadMeta }) => {
 
   const openNaming = (kind, target = null) => { setNewName(target || ""); setMergeInto(""); setNaming({ kind, target }); };
 
+  /** Make sure a job title is also a role somebody can be given.
+   *
+   * A designation and a role are the same thing to this clinic — the title somebody holds
+   * IS what their login is — but they lived in two places that only met when a user was
+   * created: Create User resolved a designation to a role and minted one where there was
+   * none. So a designation added here stayed unknown to Roles & Credentials until somebody
+   * happened to hire into it, which is how the two lists drifted apart in the first place.
+   *
+   * A role that already exists is the end state being asked for, so its 409 is success.
+   * Anything else is worth saying out loud but never worth failing over: the designation is
+   * what was being created, and it is already saved by the time this runs.
+   */
+  const ensureRoleFor = async (label) => {
+    try {
+      await hrAddCustomRole(label);
+    } catch (e) {
+      if (e?.response?.status === 409) return;
+      toast.error(`${label} was added, but making it a role failed — add it under Roles & Credentials.`);
+    }
+  };
+
   const submitName = async () => {
     const name = newName.trim();
     if (!name || !naming) return;
@@ -1501,6 +1522,8 @@ const StructureTab = ({ meta, reloadMeta }) => {
         setSelected(name);
       } else if (!target) {
         await hrAddDesignation(current.id, name);
+        // In the same breath, or the two lists start drifting again from the next title on.
+        await ensureRoleFor(name);
         // Selection and open row both kept: the new designation appears in the list
         // already being looked at rather than closing it to say so.
         await load(true);

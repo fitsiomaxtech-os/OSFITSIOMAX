@@ -93,6 +93,12 @@ async def startup_seed_data():
     await backfill_branch_codes()
     await backfill_patient_numbers()
     await backfill_zumba_package_sessions()
+    # Every job title in the structure becomes a role somebody can be given, which is what
+    # makes Designation and Role one list rather than two that only met when a user
+    # happened to be created. Imported here rather than at module scope: it is the only
+    # thing startup needs from that router, and the router imports plenty startup does not.
+    from routers.v3_hr import ensure_roles_for_designations
+    await ensure_roles_for_designations()
     await sync_head_physio_doctors()
     # Must follow the sync above: that one creates any missing record, this one collapses
     # every Head Physio's records down to the single branchless one they should have.

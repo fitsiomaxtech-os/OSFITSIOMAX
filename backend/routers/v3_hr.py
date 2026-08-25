@@ -155,6 +155,54 @@ async def _all_role_names() -> list:
     return names
 
 
+async def ensure_roles_for_designations() -> None:
+    """Every job title in the structure is also a role somebody can be given.
+
+    A designation and a role are the same thing here — the title a person holds is what
+    their login is — but they were stored in two places that only met when a user was
+    created: Create User resolved a designation to a role and minted one if there was none.
+    So a title nobody had been hired into yet existed on one screen and not the other, and
+    the two lists drifted apart a title at a time.
+
+    Runs at startup and is safe to repeat: it skips any slug that is already a role, whether
+    built-in or custom, so a second pass writes nothing. It never removes or renames
+    anything — a role that no designation matches is left alone, because roles like
+    branch_admin_physio_fitness are access levels rather than job titles and belong to
+    nobody's department.
+
+    Creating the role grants no page access on its own, exactly as creating one by hand
+    does not. It makes the title assignable, which is the thing that was missing.
+    """
+    departments = await v3_col("hr_departments").find({}, {"_id": 0, "designations": 1}).to_list(500)
+    titles = []
+    for d in departments:
+        for name in (d.get("designations") or []):
+            if isinstance(name, str) and name.strip():
+                titles.append(name.strip())
+    if not titles:
+        return
+
+    existing = {str(n).strip().lower() for n in await _all_role_names()}
+    now = now_iso()
+    fresh = []
+    for title in titles:
+        slug = _slugify_role(title)
+        # Checked against what has been added in this pass too, or two departments holding
+        # the same title would each try to create it.
+        if not slug or slug in existing:
+            continue
+        existing.add(slug)
+        fresh.append({
+            "id": str(uuid.uuid4()),
+            "name": slug,
+            "label": title.upper(),
+            "color": "slate",
+            "created_at": now,
+        })
+    if fresh:
+        await v3_col("custom_roles").insert_many(fresh)
+
+
 async def _seeded_departments() -> list:
     """The 7 departments this app already shipped with (previously a hardcoded
     constant, never a real collection) — seeded once so "Add Department" grows this
