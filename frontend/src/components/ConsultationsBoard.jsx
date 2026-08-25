@@ -3388,7 +3388,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 <Button
                   size="sm"
                   variant="outline"
-                  className={`${programmeDetail === "diet" ? "border-orange-300 bg-orange-50 text-orange-700" : "border-slate-200 bg-white/70 text-slate-600 hover:bg-white"} ${ACT_BTN}`}
+                  className={`${programmeDetail === "diet" ? "border-orange-600 bg-orange-600 text-white shadow-sm hover:bg-orange-700 hover:text-white" : "border-slate-200 bg-white/70 text-slate-600 hover:bg-white"} ${ACT_BTN}`}
                   onClick={() => openDetail("diet")}
                   data-testid="cons-open-diet-detail"
                 >
@@ -3401,7 +3401,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 <Button
                   size="sm"
                   variant="outline"
-                  className={`${programmeDetail === "rehab" ? "border-cyan-300 bg-cyan-50 text-cyan-700" : "border-slate-200 bg-white/70 text-slate-600 hover:bg-white"} ${ACT_BTN}`}
+                  className={`${programmeDetail === "rehab" ? "border-cyan-600 bg-cyan-600 text-white shadow-sm hover:bg-cyan-700 hover:text-white" : "border-slate-200 bg-white/70 text-slate-600 hover:bg-white"} ${ACT_BTN}`}
                   onClick={() => openDetail("rehab")}
                   data-testid="cons-open-rehab-detail"
                 >
@@ -3413,7 +3413,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               // The tab for a panel's own stage. Each panel names it for what it holds —
               // "Assign Physio" on Fee Collected — because "Overview" would tell the reader
               // nothing about which of the three views they are on.
-              const OwnTab = ({ label, short, icon: TabIcon, active }) => (
+              // Filled, so which step is open is read at a glance rather than found. Used by every
+  // tab on this row so the selected one always looks the same, whichever it is.
+  const TAB_ON = "border-sky-600 bg-sky-600 text-white shadow-sm hover:bg-sky-700 hover:text-white";
+
+  const OwnTab = ({ label, short, icon: TabIcon, active }) => (
                 <Button
                   size="sm"
                   variant="outline"
@@ -3604,13 +3608,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       tabs={
                         programmeDetail === "rehab" ? (
                           <>
-                            <OwnTab label="Rehab Details" short="Rehab" icon={Activity} active="border-cyan-300 bg-cyan-50 text-cyan-700" />
+                            <OwnTab label="Rehab Details" short="Rehab" icon={Activity} active="border-cyan-600 bg-cyan-600 text-white shadow-sm hover:bg-cyan-700 hover:text-white" />
                             {DietDetailButton}
                             {CancelButton}
                           </>
                         ) : (
                           <>
-                            <OwnTab label="Diet Details" short="Diet" icon={Salad} active="border-orange-300 bg-orange-50 text-orange-700" />
+                            <OwnTab label="Diet Details" short="Diet" icon={Salad} active="border-orange-600 bg-orange-600 text-white shadow-sm hover:bg-orange-700 hover:text-white" />
                             {RehabDetailButton}
                             {CancelButton}
                           </>
@@ -3697,7 +3701,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             size="sm"
                             variant="outline"
                             className={`${programmeDetail === "documents"
-                              ? "border-sky-300 bg-sky-50 text-sky-700"
+                              ? TAB_ON
                               : hasDocs
                               ? "border-slate-200 bg-white/70 text-slate-600 hover:bg-white"
                               : "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100"} ${ACT_BTN}`}
@@ -3705,9 +3709,9 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             data-testid="cons-open-documents"
                           >
                             <FileText className="mr-1 h-3.5 w-3.5" />
-                            <Lbl full={hasDocs ? `1 · Documents (${leadDocCount})` : "1 · Documents — required"} short="Docs" />
+                            <Lbl full={hasDocs ? `Documents (${leadDocCount})` : "Documents — required"} short="Docs" />
                           </Button>
-                          <OwnTab label={alreadyPaid ? "2 · Payment" : "2 · Collect Fees"} short="Fees" icon={IndianRupee} active="border-sky-300 bg-sky-50 text-sky-700" />
+                          <OwnTab label={alreadyPaid ? "Payment" : "Collect Fees"} short="Fees" icon={IndianRupee} active={TAB_ON} />
                           {DietDetailButton}
                           {RehabDetailButton}
                           {CancelButton}
@@ -3960,7 +3964,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       tabs={
                         <>
                           {FeeActions}
-                          {treatmentPaid && <OwnTab label="Assign Physio" short="Physio" icon={Users} active="border-violet-300 bg-violet-50 text-violet-700" />}
+                          {treatmentPaid && <OwnTab label="Assign Physio" short="Physio" icon={Users} active="border-violet-600 bg-violet-600 text-white shadow-sm hover:bg-violet-700 hover:text-white" />}
                           {DietDetailButton}
                           {RehabDetailButton}
                           {CancelButton}
@@ -4056,7 +4060,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       )}
                       tabs={
                         <>
-                          <OwnTab label={assigned ? "Treatment" : "Assign Physio"} short="Physio" icon={Users} active="border-violet-300 bg-violet-50 text-violet-700" />
+                          <OwnTab label={assigned ? "Treatment" : "Assign Physio"} short="Physio" icon={Users} active="border-violet-600 bg-violet-600 text-white shadow-sm hover:bg-violet-700 hover:text-white" />
                           {DietDetailButton}
                           {RehabDetailButton}
                           {CancelButton}
@@ -5348,7 +5352,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                                   isFocused
                                     ? "bg-orange-500 text-white shadow-md ring-2 ring-orange-200 ring-offset-1"
                                     : planned
-                                    ? "border border-orange-300 bg-orange-50 text-orange-700"
+                                    ? "border border-orange-600 bg-orange-600 text-white shadow-sm hover:bg-orange-700 hover:text-white"
                                     : dayOpen > 0
                                     ? "text-slate-600 hover:bg-slate-100"
                                     : "cursor-not-allowed text-slate-300"

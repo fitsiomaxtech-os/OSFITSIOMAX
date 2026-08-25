@@ -106,6 +106,8 @@ export const LeadDocuments = ({ leadId, canEdit = true, kind = "general", fixedL
   const [sharing, setSharing] = useState(null); // the doc whose share flag is in flight
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  // Whether a file is being dragged over the panel, so it can say it will take it.
+  const [dragging, setDragging] = useState(false);
   const [label, setLabel] = useState("");
   const fileRef = useRef(null);
 
@@ -202,6 +204,11 @@ export const LeadDocuments = ({ leadId, canEdit = true, kind = "general", fixedL
     // Cleared straight away so choosing the same file twice still fires a change event —
     // re-uploading a corrected scan under the same name is a normal thing to do.
     e.target.value = "";
+    take(file);
+  };
+
+  /** Everything that happens to a file once there is one, whichever way it arrived. */
+  const take = async (file) => {
     if (!file) return;
     // Checked here as well as on the server, so an oversized file fails in the moment
     // rather than after however long it takes to push it up and be told no.
@@ -295,9 +302,14 @@ export const LeadDocuments = ({ leadId, canEdit = true, kind = "general", fixedL
   return (
     <div className="space-y-3" data-testid="lead-documents">
       {canEdit && (
-        <div className="rounded-xl border border-sky-100 bg-sky-50/60 p-3">
+        <div
+          onDragOver={(e) => { e.preventDefault(); if (!busy) setDragging(true); }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={(e) => { e.preventDefault(); setDragging(false); if (!busy) take(e.dataTransfer?.files?.[0]); }}
+          className={`rounded-xl border p-3 transition ${dragging ? "border-sky-400 bg-sky-100/70 ring-2 ring-sky-200" : "border-sky-100 bg-sky-50/60"}`}
+        >
           <p className="text-[11px] font-bold uppercase tracking-wider text-sky-700">{fixedLabel ? `Upload ${fixedLabel.toLowerCase()} pages` : "Upload a document"}</p>
-          <p className="mt-0.5 text-[11px] text-slate-500">{hint || "Scans, reports, prescriptions · JPG, PNG, WEBP or PDF"}</p>
+          <p className="mt-0.5 text-[11px] text-slate-500">{dragging ? "Drop it to file it." : (hint || "Drop a file here, or choose one · JPG, PNG, WEBP or PDF")}</p>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {!fixedLabel && (
               <Input
@@ -336,11 +348,17 @@ export const LeadDocuments = ({ leadId, canEdit = true, kind = "general", fixedL
       )}
 
       {loading ? (
-        <p className="py-8 text-center text-sm text-slate-400">Loading documents…</p>
+        <p className="py-4 text-center text-sm text-slate-400">Loading documents…</p>
       ) : docs.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">
-          {fixedLabel ? `No ${fixedLabel.toLowerCase()} pages uploaded yet.` : "No documents yet."}
-        </p>
+        // Nothing at all when there is a way to add one on screen: the panel above is both
+        // the instruction and the action, and a box under it repeating that the list is
+        // empty is a hole in the middle of the step. Read-only callers still get a line,
+        // since for them an empty list is the whole answer.
+        canEdit ? null : (
+          <p className="py-3 text-center text-xs text-slate-400">
+            {fixedLabel ? `No ${fixedLabel.toLowerCase()} pages uploaded yet.` : "No documents yet."}
+          </p>
+        )
       ) : (
         <ul className="space-y-2" data-testid="lead-doc-list">
           {docs.map((d) => {
