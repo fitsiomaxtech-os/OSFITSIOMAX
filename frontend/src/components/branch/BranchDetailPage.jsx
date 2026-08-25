@@ -592,7 +592,7 @@ const TeamTab = ({ staff, branchId, onChanged, readOnly = false }) => {
                   this only ends a posting — the login and its role are untouched. */}
               <p className="mt-1 text-[11px] text-slate-500">
                 They come off this branch's {active?.label} desk. Their login and role stay as they are —
-                switch an account off in HR Admin → Roles &amp; Credentials.
+                switch an account off in HR Admin → Credentials.
               </p>
             </div>
             <div className="flex justify-end gap-2 border-t p-4">
@@ -688,7 +688,7 @@ const TeamAddDialog = ({ desk, branchId, onClose, onSaved }) => {
               {state.candidates.length === 0
                 // Two different empties: nobody holds the role anywhere, versus the search
                 // matching nothing. The first one needs HR, the second needs a backspace.
-                ? <>No other {desk.label.toLowerCase()} accounts exist. Create one in HR Admin → Roles &amp; Credentials, then add them here.</>
+                ? <>No other {desk.label.toLowerCase()} accounts exist. Create one in HR Admin → Credentials, then add them here.</>
                 : "Nobody matches that search."}
             </p>
           ) : (
@@ -733,7 +733,7 @@ const TeamAddDialog = ({ desk, branchId, onClose, onSaved }) => {
 /**
  * Correct a member's own details — name, email, phone.
  *
- * Goes through HR's user endpoint, so this is the same account Roles & Credentials manages
+ * Goes through HR's user endpoint, so this is the same account Credentials manages
  * rather than a second kind of user only this page understands.
  *
  * Role and branch are not here. Which branch somebody works at is what Add and Remove on
@@ -773,7 +773,7 @@ const TeamMemberDialog = ({ user, onClose, onSaved }) => {
         <div className="border-b p-5">
           <h3 className="text-base font-semibold text-slate-800">Edit {user.full_name || "member"}</h3>
           <p className="mt-0.5 text-[11px] text-slate-500">
-            Name, email and phone. Their role is changed in HR Admin → Roles &amp; Credentials.
+            Name, email and phone. Their role is changed in HR Admin → Credentials.
           </p>
         </div>
 
@@ -922,7 +922,7 @@ const HeadPhysioTab = ({ hp, branchId, onChanged, readOnly = false }) => {
           {!readOnly && <button onClick={() => setShowAssign(true)} className="text-sky-600 hover:text-sky-700 p-1" title="Assign a CONSULTANT" data-testid="branch-hp-assign-btn"><UserCog className="h-4 w-4" /></button>}
         </CardHeader>
         <CardContent>
-          {hp.calendars.length === 0 ? <p className="text-sm text-slate-400">No CONSULTANT assigned yet. Click the assign icon above to link an unassigned CONSULTANT from HR → Roles &amp; Credentials.</p> : (
+          {hp.calendars.length === 0 ? <p className="text-sm text-slate-400">No CONSULTANT assigned yet. Click the assign icon above to link an unassigned CONSULTANT from HR → Credentials.</p> : (
             <div className="space-y-2">
               {hp.calendars.map((d) => (
                 <div key={d.id} className="flex items-center justify-between rounded-md border border-slate-200 p-3" data-testid={`branch-hp-cal-${d.id}`}>
@@ -1003,7 +1003,7 @@ const AssignHeadPhysioDialog = ({ branchId, onClose, onSaved }) => {
           <h3 className="text-base font-semibold">Assign CONSULTANT</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600" data-testid="branch-hp-assign-close"><X className="h-4 w-4" /></button>
         </div>
-        <p className="text-xs text-slate-500">Showing all CONSULTANTS from HR → Roles &amp; Credentials. Picking one already assigned elsewhere moves them here.</p>
+        <p className="text-xs text-slate-500">Showing all CONSULTANTS from HR → Credentials. Picking one already assigned elsewhere moves them here.</p>
         <select className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm" value={pick} onChange={(e) => setPick(e.target.value)} data-testid="branch-hp-assign-select">
           <option value="">— Select CONSULTANT —</option>
           {available.length === 0 && <option disabled>No other CONSULTANTS — create one in HR</option>}
@@ -1114,7 +1114,7 @@ const EditAdminContactDialog = ({ branch, onClose, onSaved }) => {
           <h3 className="text-base font-semibold">Edit Branch Admin Contact</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600" data-testid="branch-admin-edit-close"><X className="h-4 w-4" /></button>
         </div>
-        <p className="text-xs text-slate-500">Updates the contact info shown on this branch (does not change the user's login credentials — manage those in HR → Roles & Credentials).</p>
+        <p className="text-xs text-slate-500">Updates the contact info shown on this branch (does not change the user's login credentials — manage those in HR → Credentials).</p>
         <Field label="Display Name"><Input value={form.admin_name} onChange={(e) => setForm({ ...form, admin_name: e.target.value })} data-testid="branch-admin-edit-name" /></Field>
         <Field label="Email"><Input value={form.admin_email} onChange={(e) => setForm({ ...form, admin_email: e.target.value })} placeholder="admin@example.com" data-testid="branch-admin-edit-email" /></Field>
         <Field label="Phone"><Input value={form.admin_phone} onChange={(e) => setForm({ ...form, admin_phone: e.target.value })} placeholder="+91 …" data-testid="branch-admin-edit-phone" /></Field>
@@ -1144,7 +1144,7 @@ const ReassignAdminDialog = ({ branchId, currentAdminId, onClose, onSaved }) => 
           <h3 className="text-base font-semibold">Reassign Branch Admin</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600" data-testid="branch-admin-reassign-close"><X className="h-4 w-4" /></button>
         </div>
-        <p className="text-xs text-slate-500">Only users with role <span className="font-semibold">branch_admin</span> who aren't already running another branch can be picked. Create more in HR → Roles & Credentials.</p>
+        <p className="text-xs text-slate-500">Only users with role <span className="font-semibold">branch_admin</span> who aren't already running another branch can be picked. Create more in HR → Credentials.</p>
         <select className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm" value={pick} onChange={(e) => setPick(e.target.value)} data-testid="branch-admin-reassign-select">
           <option value="">— Select branch admin —</option>
           {available.length === 0 && <option disabled>No available branch_admin users</option>}

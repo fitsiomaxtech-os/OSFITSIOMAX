@@ -1447,7 +1447,7 @@ export const ZumbaPanel = ({ branchId }) => {
                 : branch?.name
                   ? `No Zumba registrations at ${branch.name} yet. A registration is filed against the branch it was taken at — a master's referral lands on the branch their own account belongs to.`
                   : branch
-                    ? "This account has no branch assigned, so there is no Zumba list to read. Assign one in HR Admin → Roles & Credentials."
+                    ? "This account has no branch assigned, so there is no Zumba list to read. Assign one in HR Admin → Credentials."
                     : "No Zumba registrations yet."}
             </p>
           ) : (

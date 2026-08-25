@@ -659,7 +659,7 @@ async def v3_delete_doctor(doctor_id: str, user: V3UserOut = Depends(v3_require_
     if doctor.get("user_id"):
         owner = await v3_col("users").find_one({"id": doctor["user_id"]}, {"_id": 0, "id": 1})
         if owner:
-            raise HTTPException(status_code=400, detail="This expert is linked to a login account — remove the login in Roles & Credentials instead")
+            raise HTTPException(status_code=400, detail="This expert is linked to a login account — remove the login in Credentials instead")
     if await v3_col("appointments").find_one({"doctor_id": doctor_id}, {"_id": 0, "id": 1}):
         raise HTTPException(status_code=400, detail="This expert has appointment history and can't be deleted")
     if await v3_col("sessions").find_one({"physio_id": doctor_id}, {"_id": 0, "id": 1}):

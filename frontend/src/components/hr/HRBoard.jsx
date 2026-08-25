@@ -25,7 +25,7 @@ const ALL_BRANCHES = "__all__";
 const TABS = [
   { key: "dashboard", label: "Dashboard", icon: BarChart3 },
   { key: "employees", label: "Employees", icon: Users },
-  { key: "roles", label: "Roles & Credentials", icon: ShieldCheck },
+  { key: "roles", label: "Credentials", icon: ShieldCheck },
   // One screen over one set of records. The tab that used to carry this name was a second
   // view of the same departments, which left a standing question about which of the two was
   // authoritative; this one reads the list and creates, renames and deletes in it.
@@ -1628,7 +1628,7 @@ const StructureTab = ({ meta, reloadMeta }) => {
       await hrAddCustomRole(label);
     } catch (e) {
       if (e?.response?.status === 409) return;
-      toast.error(`${label} was added, but making it a role failed — add it under Roles & Credentials.`);
+      toast.error(`${label} was added, but making it a role failed — add it under Credentials.`);
     }
   };
 
@@ -2935,7 +2935,7 @@ const RolesTab = ({ meta, reloadMeta }) => {
 
       <Card className={`hidden ${view === "branch" ? "" : "md:block"}`}>
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="text-base">User Roles & Credentials</CardTitle>
+          <CardTitle className="text-base">User Credentials</CardTitle>
           <div className="flex gap-2">
             <button
               onClick={() => setSortAZ((s) => (s === "asc" ? "desc" : "asc"))}

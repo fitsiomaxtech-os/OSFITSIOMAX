@@ -815,7 +815,7 @@ const BranchFormDialog = ({ branch, candidates, onClose, onSaved }) => {
                 {available.length === 0 && <option disabled>No available branch_admin users — create one in HR</option>}
                 {available.map((c) => <option key={c.id} value={c.id}>{c.full_name} · {c.email}</option>)}
               </select>
-              <p className="mt-1 text-[11px] text-slate-400">Only users with role=branch_admin (not yet assigned to a branch) appear here. Create more in HR → Roles & Credentials.</p>
+              <p className="mt-1 text-[11px] text-slate-400">Only users with role=branch_admin (not yet assigned to a branch) appear here. Create more in HR → Credentials.</p>
             </Field>
           )}
           <Field label="Admin Phone"><Input value={form.admin_phone} onChange={(e) => setForm({ ...form, admin_phone: e.target.value })} placeholder="+91 …" data-testid="bm-form-phone" /></Field>

@@ -213,7 +213,7 @@ export const BranchFormDialogV2 = ({ branch, onClose, onSaved }) => {
                 {/* Any Admins-department role (Physio-only, Fitness-only, both, or either
                     online arm), not just the plain branch_admin slug — see
                     deps.BRANCH_ADMIN_ROLES for the full set. */}
-                <p className="mt-1 text-[11px] text-slate-400">Shows every unassigned Branch Admin role from HR → Roles &amp; Credentials.</p>
+                <p className="mt-1 text-[11px] text-slate-400">Shows every unassigned Branch Admin role from HR → Credentials.</p>
               </Field>
               <Field label="Admin Phone"><Input value={form.admin_phone} onChange={(e) => set("admin_phone", e.target.value)} placeholder="+91 …" data-testid="bf2-admin-phone" /></Field>
               <Field label="Branch Phone"><Input value={form.phone} onChange={(e) => set("phone", e.target.value)} placeholder="Front-desk phone" data-testid="bf2-phone" /></Field>
