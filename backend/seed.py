@@ -1250,6 +1250,56 @@ async def ensure_structure_departments() -> None:
             )
 
 
+async def dedupe_department_designations() -> None:
+    """One entry per job title in a department, whichever case each was typed in.
+
+    A department is a list of designations, and the same title reached that list twice —
+    "Consultant" beside "CONSULTANT", "Online Consultant" beside "Online  Consultant". The
+    guards that were meant to stop it compared the names literally with only their case
+    folded, so any difference in spacing or punctuation slipped through, and PUT
+    .../designations/order compared the submitted list with the stored one as SETS, which
+    cannot see a repeat at all. Both are tightened in routers/v3_hr.py; this is the sweep
+    for the lists that already carry the repeats.
+
+    The first spelling wins, because it is the one every earlier record was written
+    against. Employees holding a dropped spelling are rewritten to the survivor in the same
+    pass — dropping the name without moving the people would leave an employee pointing at
+    a designation the department no longer lists, which is a record that filters to nothing
+    on the Employees tab and counts toward no designation on the Dashboard.
+
+    Only ever removes a repeat of a title the department already holds. A title held once
+    is never touched, and no title moves between departments — where a job belongs is a
+    decision about the org, not one a migration should take.
+
+    Safe to re-run: the second pass finds every list already unique.
+    """
+    from routers.v3_hr import structure_key
+
+    for dept in await v3_col("hr_departments").find({}, {"_id": 0}).to_list(500):
+        names = [n for n in (dept.get("designations") or []) if isinstance(n, str) and n.strip()]
+        kept: list = []
+        seen: dict = {}
+        # old spelling -> the spelling that survives it, for the employees carrying it.
+        rewrites: dict = {}
+        for name in names:
+            key = structure_key(name)
+            if not key:
+                continue
+            if key in seen:
+                if name != seen[key]:
+                    rewrites[name] = seen[key]
+                continue
+            seen[key] = name
+            kept.append(name)
+        if len(kept) == len(names):
+            continue
+        await v3_col("hr_departments").update_one({"id": dept["id"]}, {"$set": {"designations": kept}})
+        for old, survivor in rewrites.items():
+            await v3_col("employees").update_many(
+                {"designation": old}, {"$set": {"designation": survivor}}
+            )
+
+
 def _slug_of_role(label) -> str:
     """A role label reduced to the slug the OS branches on ("Head Physio" -> head_physio)."""
     return re.sub(r"[^a-z0-9]+", "_", str(label or "").strip().lower()).strip("_")

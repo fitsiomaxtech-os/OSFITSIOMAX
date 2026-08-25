@@ -506,6 +506,25 @@ const dedupeNames = (names) => {
 };
 
 /**
+ * One entry per job, in the order given — the counterpart to dedupeNames for a list whose
+ * order was chosen rather than alphabetical.
+ *
+ * A department's designations are drag-ordered on the Departments & Designation tab, so
+ * the picker that offers them should read in that order rather than re-sorted. Keyed on
+ * jobKey, the same letters-only comparison unique_designations() in backend/routers/v3_hr.py
+ * uses, so the two agree on what counts as the same title.
+ */
+const uniqueDesignations = (names) => {
+  const seen = new Set();
+  const out = [];
+  (names || []).filter(Boolean).forEach((n) => {
+    const key = jobKey(n);
+    if (key && !seen.has(key)) { seen.add(key); out.push(n); }
+  });
+  return out;
+};
+
+/**
  * The designations configured under a department — or under all of them.
  *
  * The configured list, not the one read back off whoever happens to hold a job today. Those
@@ -522,8 +541,27 @@ const dedupeNames = (names) => {
  */
 const configuredDesignations = (meta, department) => {
   const groups = meta?.department_designations || {};
-  if (department && department !== "Unassigned") return dedupeNames(groups[department] || []);
+  if (department && department !== "Unassigned") return dedupeNames(designationsUnder(groups, department));
   return dedupeNames(Object.values(groups).flat());
+};
+
+/**
+ * One department's configured designations, found by jobKey rather than by exact string.
+ *
+ * The department a form holds and the key the structure is grouped under are the same
+ * name, until they aren't: these are typed by hand, so "Doctors ( Dr.'s )" on one screen
+ * and "Doctors (Dr.'s)" in the structure are the same department read two ways. A literal
+ * lookup misses on that difference and returns nothing — and "nothing configured" is what
+ * every caller here treats as "fall back to the whole role list", so a stray bracket
+ * silently unscopes the picker and offers Management's titles under Doctors.
+ */
+const designationsUnder = (groups, department) => {
+  const wanted = jobKey(department);
+  if (!wanted) return [];
+  const exact = groups[department];
+  if (exact) return exact;
+  const hit = Object.keys(groups).find((k) => jobKey(k) === wanted);
+  return hit ? groups[hit] : [];
 };
 
 const TabPill = ({ active, onClick, children, testid }) => (
@@ -1140,14 +1178,40 @@ const AddEmployeeModal = ({ employee, meta, initialDepartment, initialDesignatio
   // full role list, so the form stays usable while that grouping is still in progress.
   // An employee whose designation predates this list keeps it as an option so editing
   // them never silently blanks the field.
+  //
+  // Read through designationsUnder rather than indexing department_designations directly,
+  // and passed through uniqueDesignations on the way out. That buys two things this one was
+  // missing. The lookup now survives a department name written with different punctuation:
+  // a miss there returns nothing, and "nothing configured" is exactly what the line below
+  // treats as "fall back to the whole role list", so a stray bracket was silently unscoping
+  // the picker and offering Management's titles under Doctors. And the list comes back with
+  // one entry per job — both the department's stored list and the role list could hold the
+  // same title twice, CONSULTANT beside Consultant, which this Select's uppercase styling
+  // renders identically, so the picker was showing options nothing could tell apart.
+  //
+  // Order is the department's own, not alphabetical: it is what the drag handles on
+  // Departments & Designation write, and this picker is where it should read.
   const designationOptions = useMemo(() => {
-    const grouped = (meta.department_designations || {})[form.department] || [];
-    const fromRoles = (meta.roles || []).map(roleLabel);
-    const base = grouped.length > 0 ? grouped : fromRoles;
+    const scoped = uniqueDesignations(designationsUnder(meta.department_designations || {}, form.department));
+    const base = scoped.length > 0 ? scoped : uniqueDesignations((meta.roles || []).map(roleLabel));
     const current = (form.designation || "").trim();
-    const all = current && !base.includes(current) ? [...base, current] : base;
+    // Compared on jobKey, not with includes: a record holding "CONSULTANT" against a list
+    // holding "Consultant" was appending a second option that read the same as the first.
+    const known = base.some((d) => jobKey(d) === jobKey(current));
+    const all = current && !known ? [...base, current] : base;
     return ["", ...all];
-  }, [meta.department_designations, meta.roles, form.department, form.designation]);
+  }, [meta, form.department, form.designation]);
+
+  // Changing Department drops a Designation that doesn't belong to the new one. Without
+  // this the old title stays selected and the memo above re-offers it as an extra option,
+  // so the field could be saved holding a Doctors title under Management — which is the
+  // department-wise scoping defeated at the one moment it matters. A title the new
+  // department also lists is kept: that is the same job, not a stale one.
+  const changeDepartment = (v) => setForm((p) => {
+    const valid = designationsUnder(meta.department_designations || {}, v);
+    const keep = valid.some((d) => jobKey(d) === jobKey(p.designation));
+    return { ...p, department: v, designation: keep ? p.designation : "" };
+  });
 
   const submit = async () => {
     if (!form.full_name.trim()) { toast.error("Full name required"); setTab("personal"); return; }
@@ -1263,7 +1327,7 @@ const AddEmployeeModal = ({ employee, meta, initialDepartment, initialDesignatio
           {tab === "employment" && (
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Employee Code"><Input value={form.employee_code} onChange={(e) => set("employee_code", e.target.value)} placeholder="Auto-generated" data-testid="hr-emp-code" /></Field>
-              <Field label="Department *"><Select value={form.department} onChange={(v) => set("department", v)} options={["", ...meta.departments]} testid="hr-emp-dept" uppercase /></Field>
+              <Field label="Department *"><Select value={form.department} onChange={changeDepartment} options={["", ...meta.departments]} testid="hr-emp-dept" uppercase /></Field>
               <Field label="Designation *"><Select value={form.designation} onChange={(v) => set("designation", v)} options={designationOptions} testid="hr-emp-designation" uppercase /></Field>
               <Field label="Joining Date"><MilkDateInput centered title="Joining Date" value={form.joining_date} onChange={(e) => set("joining_date", e.target.value)} data-testid="hr-emp-joining" /></Field>
               <Field label="Reporting To"><Input value={form.reporting_to} onChange={(e) => set("reporting_to", e.target.value)} data-testid="hr-emp-reporting" /></Field>

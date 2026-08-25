@@ -106,6 +106,33 @@ def structure_key(name) -> str:
     """
     return re.sub(r"[^a-z0-9]+", "", str(name or "").strip().lower())
 
+
+def unique_designations(names) -> list:
+    """A department's designation list with one entry per job, order kept.
+
+    The stored list is the authority on order — it is what the Structure tab's drag handles
+    write — so the first spelling of a repeated title stays where it is and the later one
+    is dropped rather than the list being re-sorted.
+
+    Read-side only, and deliberately: dedupe_department_designations() in seed.py is what
+    repairs the stored list, and it also moves the employees carrying a dropped spelling.
+    This is here so a list that has picked up a repeat since — or on an install that has not
+    booted the migration yet — still reaches the Designation picker as one option per job
+    instead of the same title rendered twice with no way to tell them apart.
+    """
+    seen = set()
+    out = []
+    for name in (names or []):
+        if not isinstance(name, str) or not name.strip():
+            continue
+        key = structure_key(name)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(name)
+    return out
+
+
 # Both consultant roles can be assigned to more than one branch (a linked `doctors`
 # record is kept in sync per branch) — every other role stays pinned to a single branch.
 # Physios are assigned to branches — they deliver treatment where they work, and may cover
@@ -1278,7 +1305,10 @@ async def list_departments(_: V3UserOut = Depends(v3_require_roles("super_admin"
         {"$group": {"_id": "$department", "n": {"$sum": 1}}},
     ]).to_list(500):
         counts[row["_id"]] = row["n"]
-    return [{**d, "employee_count": counts.get(d["name"], 0)} for d in depts]
+    return [
+        {**d, "designations": unique_designations(d.get("designations")), "employee_count": counts.get(d["name"], 0)}
+        for d in depts
+    ]
 
 
 @router.post("/departments")
@@ -1333,16 +1363,21 @@ async def add_designation(dept_id: str, payload: DesignationCreate, _: V3UserOut
     dept = await v3_col("hr_departments").find_one({"id": dept_id}, {"_id": 0})
     if not dept:
         raise HTTPException(status_code=404, detail="Department not found")
-    if any(d.lower() == name.lower() for d in dept.get("designations", [])):
+    # Matched through structure_key rather than a case-folded compare of the whole string,
+    # which is what let "Online  Consultant" onto a list already holding "Online Consultant".
+    # The two are one job to every reader, and to the Designation picker they were two
+    # options rendering identically.
+    key = structure_key(name)
+    if any(structure_key(d) == key for d in dept.get("designations", [])):
         raise HTTPException(status_code=409, detail="This designation is already in this department")
     # A designation belongs to exactly one department — the picker disables options
     # already claimed elsewhere, but that's a UI-level guard; this is the real boundary.
-    other = await v3_col("hr_departments").find_one(
-        {"id": {"$ne": dept_id}, "designations": {"$regex": f"^{re.escape(name)}$", "$options": "i"}},
-        {"_id": 0, "name": 1},
-    )
-    if other:
-        raise HTTPException(status_code=409, detail=f'"{name}" already belongs to {other["name"]}')
+    # Scanned in Python for the same reason: a regex can only compare the literal name.
+    for other in await v3_col("hr_departments").find(
+        {"id": {"$ne": dept_id}}, {"_id": 0, "name": 1, "designations": 1}
+    ).to_list(500):
+        if any(structure_key(d) == key for d in (other.get("designations") or [])):
+            raise HTTPException(status_code=409, detail=f'"{name}" already belongs to {other["name"]}')
     await v3_col("hr_departments").update_one({"id": dept_id}, {"$push": {"designations": name}})
     return await v3_col("hr_departments").find_one({"id": dept_id}, {"_id": 0})
 
@@ -1406,9 +1441,14 @@ async def reorder_designations(dept_id: str, payload: DesignationReorder, _: V3U
     dept = await v3_col("hr_departments").find_one({"id": dept_id}, {"_id": 0})
     if not dept:
         raise HTTPException(status_code=404, detail="Department not found")
-    # Reorders only — never adds or drops one, so a stale client can't silently lose a
-    # designation someone else just added to this department.
-    if set(payload.designations) != set(dept.get("designations", [])):
+    # Reorders only — never adds, drops or repeats one, so a stale client can't silently
+    # lose a designation someone else just added to this department, and a client that
+    # sends the same title twice can't write a list holding it twice.
+    #
+    # Compared sorted rather than as sets, which is what this used to do: a set cannot see
+    # a repeat, so ["Consultant", "Consultant", "Physiotherapist"] compared equal to
+    # ["Consultant", "Physiotherapist"] and a reorder could duplicate a designation.
+    if sorted(payload.designations) != sorted(dept.get("designations", [])):
         raise HTTPException(status_code=400, detail="Reordered list must contain exactly the designations already in this department")
     await v3_col("hr_departments").update_one({"id": dept_id}, {"$set": {"designations": payload.designations}})
     return await v3_col("hr_departments").find_one({"id": dept_id}, {"_id": 0})
@@ -1420,7 +1460,7 @@ async def hr_meta(_: V3UserOut = Depends(v3_require_roles("super_admin", "market
     depts = await _seeded_departments()
     return {
         "departments": [d["name"] for d in depts],
-        "department_designations": {d["name"]: d.get("designations", []) for d in depts},
+        "department_designations": {d["name"]: unique_designations(d.get("designations")) for d in depts},
         "roles": DEFAULT_ROLES + [r["name"] for r in custom],
         "custom_roles": custom,
     }
