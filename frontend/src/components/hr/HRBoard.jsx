@@ -62,6 +62,24 @@ const MODE_LABELS = { [MODE_ONLINE]: "Online", [MODE_OFFLINE]: "Offline", [MODE_
  */
 const modeBadge = (mode) => (mode === MODE_ONLINE || mode === MODE_BOTH ? MODE_LABELS[mode] : null);
 
+/** Whether this mode belongs to a branch at all.
+ *
+ * Online does not. Somebody who works only over video is not AT one, so a branch on them
+ * is an address nobody attends, and every list that reads branches would go on offering
+ * them in a room they never enter. Choosing Online clears the branch rather than hiding
+ * it, so the record says what is true rather than carrying an answer the screen declines
+ * to show.
+ *
+ * Both does, and keeps it: half that week is in a room, and the room has an address.
+ * Offline plainly does.
+ */
+const modeHasBranch = (mode) => mode !== MODE_ONLINE;
+
+// What the branch column reads for somebody who has no branch by virtue of their mode.
+// A word rather than an empty cell: blank is what an unposted employee looks like, and
+// this is the opposite — not a gap to fill, but a posting that does not apply.
+const ONLINE_MODE_LABEL = "Online Mode";
+
 // Every default vertical is named "online_.../offline_..." — same helper as
 // Branches & Verticals' own mode tag, read off that prefix.
 const isOnlineVertical = (v) => String(v || "").startsWith("online_");
@@ -545,7 +563,11 @@ const WorkTypeCell = ({ e }) => {
           {SERVICE_LABELS[e.service] || e.service}
         </span>
       )}
-      <p className="mt-0.5 text-[11px] text-slate-500">{e.branch_name || "—"}</p>
+      {/* An online employee is not at a branch, so the line says the mode instead of an
+          address. See modeHasBranch. */}
+      <p className="mt-0.5 text-[11px] text-slate-500">
+        {modeHasBranch(e.work_type) ? (e.branch_name || "—") : ONLINE_MODE_LABEL}
+      </p>
     </div>
   );
 };
@@ -1091,6 +1113,10 @@ const AddEmployeeModal = ({ employee, meta, initialDepartment, initialDesignatio
   // Switching either axis clears any branch already picked — a branch left set after the
   // filter moves under it would silently tag the employee to one that no longer matches
   // the Work Type and Service shown beside it.
+  // Switching mode always clears the branch already picked, because the filter beneath it
+  // moves and a branch left set would tag the employee to one that no longer matches. For
+  // Online it is not merely cleared but not asked for at all: an online employee is not at
+  // a branch, and the field is gone rather than left empty for somebody to fill back in.
   const changeWorkType = (v) => setForm((p) => ({ ...p, work_type: v, branch_id: "" }));
   const changeService = (v) => setForm((p) => ({ ...p, service: v, branch_id: "" }));
 
@@ -1241,7 +1267,7 @@ const AddEmployeeModal = ({ employee, meta, initialDepartment, initialDesignatio
                   testid="hr-emp-service"
                 />
               </Field>
-              {form.work_type && (
+              {form.work_type && modeHasBranch(form.work_type) && (
                 <Field label="Branch">
                   <select
                     value={form.branch_id}
@@ -1617,19 +1643,30 @@ const StructureTab = ({ meta, reloadMeta }) => {
    * nothing else on the record is restated, so nothing else can be flattened by a copy of
    * it that this screen has been holding since the page loaded.
    *
-   * The branch is deliberately NOT cleared when the mode changes, though the Employment
-   * form narrows its branch list by mode and would no longer offer this one. Somebody
-   * marking an existing employee Online is saying what they do, not asking for their
-   * posting to be thrown away — and a branch silently emptied here would be noticed a week
-   * later by whoever could not find them.
+   * Going Online clears the branch, because an online employee is not at one — see
+   * modeHasBranch. The empty list is sent rather than an empty branch_id: the endpoint
+   * derives branch_id from the list and cascades the list to the linked account, so
+   * sending only the single field would leave the account still holding branches the
+   * employee no longer has.
+   *
+   * Every other mode leaves the branch alone. Somebody marked Offline or Both is saying
+   * where they work, not asking for their posting to be thrown away, and a branch silently
+   * emptied there would be noticed a week later by whoever could not find them.
    */
   const setWorkMode = async (emp, mode) => {
     if (mode === (emp.work_type || "")) return;
+    const clearing = !modeHasBranch(mode);
     setMovingEmployee(emp.id);
     try {
-      await hrUpdateEmployee(emp.id, { work_type: mode });
-      setEmployees((prev) => prev.map((e) => (e.id === emp.id ? { ...e, work_type: mode } : e)));
-      toast.success(`${emp.full_name} → ${MODE_LABELS[mode]}`);
+      await hrUpdateEmployee(emp.id, { work_type: mode, ...(clearing ? { branch_ids: [] } : {}) });
+      setEmployees((prev) => prev.map((e) => (e.id === emp.id ? {
+        ...e,
+        work_type: mode,
+        ...(clearing ? { branch_ids: [], branch_id: "", branch_name: "" } : {}),
+      } : e)));
+      toast.success(clearing
+        ? `${emp.full_name} → ${MODE_LABELS[mode]}, taken off their branch`
+        : `${emp.full_name} → ${MODE_LABELS[mode]}`);
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Could not change the work mode");
     } finally {
@@ -1948,15 +1985,16 @@ const StructureTab = ({ meta, reloadMeta }) => {
                               onPick={(m) => setWorkMode(emp, m)}
                               testid={`hr-structure-mode-${emp.id}`}
                             />
-                            {/* Online and Both are said here; Offline is not — see modeBadge.
+                            {/* Both is said here. Online is not, though modeBadge names it:
+                                the branch slot beside this one already reads "Online Mode"
+                                for them, and saying it twice in one row is one badge doing
+                                no work. Offline is not said at all — see modeBadge.
                                 A fixed slot either way, so the badge beside it does not shift
                                 left and right down the column depending on who is online. */}
                             <span className="w-14 shrink-0 text-right" data-testid={`hr-structure-mode-badge-${emp.id}`}>
-                              {modeBadge(emp.work_type) && (
-                                <span className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-semibold ${
-                                  emp.work_type === MODE_BOTH ? "bg-indigo-50 text-indigo-600" : "bg-violet-50 text-violet-600"
-                                }`}>
-                                  {modeBadge(emp.work_type)}
+                              {emp.work_type === MODE_BOTH && (
+                                <span className="inline-flex rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-600">
+                                  {MODE_LABELS[MODE_BOTH]}
                                 </span>
                               )}
                             </span>
@@ -1973,24 +2011,34 @@ const StructureTab = ({ meta, reloadMeta }) => {
                                 two columns rather than one. */}
                             <span
                               className={`w-40 shrink-0 truncate rounded px-2 py-0.5 text-center text-[11px] font-semibold ${
-                                emp.branch_name ? "bg-sky-50 text-sky-700" : "bg-amber-50 text-amber-700"
+                                !modeHasBranch(emp.work_type)
+                                  ? "bg-violet-50 text-violet-600"
+                                  : emp.branch_name ? "bg-sky-50 text-sky-700" : "bg-amber-50 text-amber-700"
                               }`}
-                              title={emp.branch_name || "No branch"}
+                              title={!modeHasBranch(emp.work_type) ? "Works online, so not posted to a branch" : (emp.branch_name || "No branch")}
                               data-testid={`hr-structure-branch-${emp.id}`}
                             >
-                              {emp.branch_name || "No branch"}
+                              {!modeHasBranch(emp.work_type) ? ONLINE_MODE_LABEL : (emp.branch_name || "No branch")}
                             </span>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-7 shrink-0 text-[11px] font-medium text-slate-600"
-                              disabled={movingEmployee === emp.id}
-                              onClick={() => setBranchPickerFor(emp)}
-                              aria-label={`Change branch for ${emp.full_name}`}
-                              data-testid={`hr-structure-branch-change-${emp.id}`}
-                            >
-                              Change
-                            </Button>
+                            {/* Nothing to change where the mode has no branch. A control that
+                                opened a picker whose every answer would be cleared again on
+                                the next save would be offering a choice that does not exist.
+                                A fixed slot so the Edit button stays in its column either way. */}
+                            <span className="w-[4.75rem] shrink-0">
+                              {modeHasBranch(emp.work_type) && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 w-full text-[11px] font-medium text-slate-600"
+                                  disabled={movingEmployee === emp.id}
+                                  onClick={() => setBranchPickerFor(emp)}
+                                  aria-label={`Change branch for ${emp.full_name}`}
+                                  data-testid={`hr-structure-branch-change-${emp.id}`}
+                                >
+                                  Change
+                                </Button>
+                              )}
+                            </span>
                             <Button
                               size="sm"
                               variant="outline"
