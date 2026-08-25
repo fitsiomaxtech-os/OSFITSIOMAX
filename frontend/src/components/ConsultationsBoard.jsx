@@ -291,6 +291,109 @@ const round2 = (n) => Math.round(n * 100) / 100;
 // Admin's call to make; the popup's job is to make sure they meant it.
 const STEEP_DISCOUNT_PCT = 25;
 
+// What identifies a tender, per mode. Cash has nothing to quote, so it asks for nothing.
+const SPLIT_REFERENCE_LABEL = {
+  upi: "UPI Transaction ID",
+  card: "Card / Approval Reference",
+  account_transfer: "Reference / UTR No.",
+  cheque: "Cheque Number",
+};
+
+/**
+ * The fee as it actually arrived, when it arrived in more than one piece -- Rs.600 in
+ * cash and Rs.600 by UPI is two tenders, not one payment under a mode that is half true.
+ *
+ * The fee above stays the authority and these have to add up to it. Driving the fee from
+ * the lines instead would let a mistyped part silently rewrite the amount being
+ * collected, and the discount worked out above it with it.
+ *
+ * One reference box per line rather than the four-field bank block the single-payment
+ * path collects. A split is typed at the desk with the patient standing there, and the
+ * full block per line is more than anyone will fill in -- so a split records what each
+ * tender was and what identifies it, and the bank's own details stay with the
+ * single-payment flow that has room to ask for them.
+ */
+const SplitPaymentLines = ({ lines, modes, expected, onChange, testPrefix }) => {
+  const total = lines.reduce((sum, l) => sum + (parseFloat(l.amount) || 0), 0);
+  const target = parseFloat(expected);
+  const matches = Number.isFinite(target) && Math.abs(total - target) < 0.01;
+  const setLine = (i, patch) => onChange(lines.map((l, n) => (n === i ? { ...l, ...patch } : l)));
+
+  return (
+    <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/70 p-2.5" data-testid={`${testPrefix}-split`}>
+      <div className="flex items-center justify-between">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Paid in parts</p>
+        <button
+          type="button"
+          onClick={() => onChange(null)}
+          className="text-[11px] font-medium text-slate-500 underline hover:text-slate-700"
+          data-testid={`${testPrefix}-split-off`}
+        >
+          Single payment
+        </button>
+      </div>
+
+      {lines.map((line, i) => (
+        <div key={i} className="space-y-1.5 rounded-md border border-slate-200 bg-white p-2">
+          <div className="flex items-center gap-1.5">
+            <select
+              value={line.mode}
+              onChange={(e) => setLine(i, { mode: e.target.value, reference: "" })}
+              className="h-9 min-w-0 flex-1 rounded-md border border-slate-200 px-2 text-xs"
+              data-testid={`${testPrefix}-split-mode-${i}`}
+            >
+              {modes.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+            </select>
+            <Input
+              value={line.amount}
+              onChange={(e) => setLine(i, { amount: e.target.value })}
+              inputMode="decimal"
+              placeholder="0"
+              className="h-9 w-24 text-xs"
+              data-testid={`${testPrefix}-split-amount-${i}`}
+            />
+            {/* Never below two. One tender in a split is a single payment, and the way
+                back to one is the link above, which keeps whichever mode was chosen. */}
+            {lines.length > 2 && (
+              <button
+                type="button"
+                onClick={() => onChange(lines.filter((_, n) => n !== i))}
+                className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-rose-600"
+                title="Remove this payment"
+                data-testid={`${testPrefix}-split-remove-${i}`}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+          {SPLIT_REFERENCE_LABEL[line.mode] && (
+            <Input
+              value={line.reference}
+              onChange={(e) => setLine(i, { reference: e.target.value })}
+              placeholder={SPLIT_REFERENCE_LABEL[line.mode]}
+              className="h-8 text-xs"
+              data-testid={`${testPrefix}-split-reference-${i}`}
+            />
+          )}
+        </div>
+      ))}
+
+      <div
+        className={`flex items-center justify-between rounded-md px-2 py-1.5 text-xs font-semibold ${
+          matches ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
+        }`}
+        data-testid={`${testPrefix}-split-total`}
+      >
+        <span>{matches ? "Adds up" : "Does not add up yet"}</span>
+        <span>
+          Rs.{total.toLocaleString("en-IN")}
+          {Number.isFinite(target) ? ` of Rs.${target.toLocaleString("en-IN")}` : ""}
+        </span>
+      </div>
+    </div>
+  );
+};
+
 /**
  * Amount-to-collect with its discount worked out both ways: type a percentage or a rupee
  * discount and the amount follows; type the amount and the discount follows it.
@@ -1483,7 +1586,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       toast.error("Enter a valid Consultation Fee amount");
       return;
     }
-    setPackageConfirmDraft({ upi_transaction_id: "", account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "", transfer_reference: "" });
+    setPackageConfirmDraft({ upi_transaction_id: "", account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "", transfer_reference: "", payment_lines: null });
   };
 
   // Card and Account Transfer share the same four bank fields; Account Transfer also
@@ -1512,6 +1615,18 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     const amount = parseFloat(collectFeeDraft.amount);
     const mode = collectFeeDraft.payment_mode;
     const payload = { payment_mode: mode, amount, confirmed: true };
+    // A split carries its own modes, so none of the single-mode detail blocks below
+    // apply. amount still rides along: the server checks the parts against it rather
+    // than trusting either on its own.
+    if (packageConfirmDraft.payment_lines) {
+      payload.payment_lines = packageConfirmDraft.payment_lines.map((l) => ({
+        mode: l.mode,
+        amount: parseFloat(l.amount),
+        reference: (l.reference || "").trim(),
+      }));
+      submitConsultationFee(payload);
+      return;
+    }
     if (mode === "upi") {
       payload.upi_transaction_id = packageConfirmDraft.upi_transaction_id.trim();
     } else if (BANK_DETAIL_MODES.includes(mode)) {
@@ -4548,7 +4663,52 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       testPrefix="cons-collect-fee-confirm"
                     />
 
-                    {mode === "upi" && (
+                    {/* Started from whatever was already chosen: the mode picked on the
+                        popup behind this one becomes the first tender, carrying the full
+                        amount, and the second opens empty for the rest. Nothing typed is
+                        thrown away by pressing it, and "Single payment" inside comes
+                        straight back. */}
+                    {!packageConfirmDraft.payment_lines && (
+                      <button
+                        type="button"
+                        onClick={() => setPackageConfirmDraft({
+                          ...packageConfirmDraft,
+                          payment_lines: [
+                            { mode, amount: collectFeeDraft.amount, reference: mode === "upi" ? packageConfirmDraft.upi_transaction_id : "" },
+                            { mode: mode === "cash" ? "upi" : "cash", amount: "", reference: "" },
+                          ],
+                        })}
+                        className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-300 py-2 text-xs font-semibold text-slate-600 transition hover:border-sky-400 hover:text-sky-700"
+                        data-testid="cons-collect-fee-split-add"
+                      >
+                        <Plus className="h-3.5 w-3.5" /> Add another payment
+                      </button>
+                    )}
+
+                    {packageConfirmDraft.payment_lines && (
+                      <>
+                        <SplitPaymentLines
+                          lines={packageConfirmDraft.payment_lines}
+                          modes={CONSULTATION_FEE_PAYMENT_MODES}
+                          expected={collectFeeDraft.amount}
+                          onChange={(next) => setPackageConfirmDraft({ ...packageConfirmDraft, payment_lines: next })}
+                          testPrefix="cons-collect-fee"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setPackageConfirmDraft({
+                            ...packageConfirmDraft,
+                            payment_lines: [...packageConfirmDraft.payment_lines, { mode: "cash", amount: "", reference: "" }],
+                          })}
+                          className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-300 py-2 text-xs font-semibold text-slate-600 transition hover:border-sky-400 hover:text-sky-700"
+                          data-testid="cons-collect-fee-split-more"
+                        >
+                          <Plus className="h-3.5 w-3.5" /> Add another payment
+                        </button>
+                      </>
+                    )}
+
+                    {!packageConfirmDraft.payment_lines && mode === "upi" && (
                       <div>
                         <label className="mb-1 block text-[11px] font-medium text-slate-500">UPI Transaction ID</label>
                         <Input
@@ -4560,7 +4720,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       </div>
                     )}
 
-                    {BANK_DETAIL_MODES.includes(mode) && (
+                    {!packageConfirmDraft.payment_lines && BANK_DETAIL_MODES.includes(mode) && (
                       <>
                         <div>
                           <label className="mb-1 block text-[11px] font-medium text-slate-500">Account Number</label>
@@ -4628,8 +4788,14 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         disabled={
                           collectingFee ||
                           !(parseFloat(collectFeeDraft.amount) > 0) ||
-                          (BANK_DETAIL_MODES.includes(mode) && (!packageConfirmDraft.account_number.trim() || !packageConfirmDraft.account_holder_name.trim() || !packageConfirmDraft.bank_name.trim() || !packageConfirmDraft.ifsc_code.trim())) ||
-                          (mode === "account_transfer" && !packageConfirmDraft.transfer_reference.trim())
+                          // A split answers for itself: every part above zero, and the
+                          // parts adding up to the fee. The single-mode requirements
+                          // below are not its to satisfy.
+                          (packageConfirmDraft.payment_lines
+                            ? (packageConfirmDraft.payment_lines.some((l) => !(parseFloat(l.amount) > 0)) ||
+                               Math.abs(packageConfirmDraft.payment_lines.reduce((sum, l) => sum + (parseFloat(l.amount) || 0), 0) - parseFloat(collectFeeDraft.amount)) > 0.01)
+                            : ((BANK_DETAIL_MODES.includes(mode) && (!packageConfirmDraft.account_number.trim() || !packageConfirmDraft.account_holder_name.trim() || !packageConfirmDraft.bank_name.trim() || !packageConfirmDraft.ifsc_code.trim())) ||
+                               (mode === "account_transfer" && !packageConfirmDraft.transfer_reference.trim())))
                         }
                         data-testid="cons-collect-fee-confirm-submit"
                       >

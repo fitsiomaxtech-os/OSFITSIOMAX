@@ -421,8 +421,28 @@ class V3SellStoreItemInput(BaseModel):
     notes: Optional[str] = ""
 
 
+class V3PaymentLineInput(BaseModel):
+    """One tender in a split payment: a mode and how much arrived that way.
+
+    A patient paying Rs.1200 as Rs.600 cash and Rs.600 UPI is one collection made of
+    two of these. Recording it as a single payment means picking a mode that is only
+    half true and losing the other half.
+
+    `reference` is whatever identifies that tender -- a UPI transaction id, a UTR, a
+    cheque number. One field rather than the four the single-payment path collects for
+    a card or a transfer: a split is entered at the desk with the patient waiting, and
+    the full bank block per line is more than anyone will type.
+    """
+    mode: str
+    amount: float
+    reference: Optional[str] = None
+
+
 class V3CollectPackagePaymentInput(BaseModel):
     payment_mode: str = "cash"
+    # Set when the fee arrived in more than one tender. Present, it settles both the
+    # amount (their sum) and the mode ("split"), and payment_mode above is ignored.
+    payment_lines: Optional[List[V3PaymentLineInput]] = None
     # Manual entry — defaults to the assigned package_price if omitted, but Branch
     # Admin can override it (discount, rounding, partial cash collected, etc).
     amount: Optional[float] = None

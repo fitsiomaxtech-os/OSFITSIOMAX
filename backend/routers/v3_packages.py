@@ -333,8 +333,14 @@ async def collect_package_payment(lead_id: str, payload: V3CollectPackagePayment
     a deliberate double-check, not a single click. Callable while the lead is at
     'Consultation Visit' (first collection) or already at 'Fee Collected' (correcting/
     updating a payment already on file)."""
-    if payload.payment_mode not in CONSULTATION_FEE_PAYMENT_MODES:
+    lines = payload.payment_lines or []
+    if not lines and payload.payment_mode not in CONSULTATION_FEE_PAYMENT_MODES:
         raise HTTPException(status_code=400, detail=f"Consultation Fee only accepts: {sorted(CONSULTATION_FEE_PAYMENT_MODES)}")
+    for line in lines:
+        if line.mode not in CONSULTATION_FEE_PAYMENT_MODES:
+            raise HTTPException(status_code=400, detail=f"Consultation Fee only accepts: {sorted(CONSULTATION_FEE_PAYMENT_MODES)}")
+        if line.amount is None or line.amount <= 0:
+            raise HTTPException(status_code=400, detail="Every payment in a split must be more than zero")
     if not payload.confirmed:
         raise HTTPException(status_code=400, detail="Please confirm the payment before submitting")
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
@@ -346,7 +352,20 @@ async def collect_package_payment(lead_id: str, payload: V3CollectPackagePayment
         raise HTTPException(status_code=400, detail="No consultation package assigned yet")
 
     original_price = lead["package_price"]
-    amount = payload.amount if payload.amount is not None else original_price
+    if lines:
+        # Summed from the tenders rather than taken alongside them. Two numbers for one
+        # sum is one number too many: the total and its parts can only ever disagree,
+        # and the parts are what was actually handed over.
+        amount = round(sum(line.amount for line in lines), 2)
+        # Still checked against what the screen said, so a total that drifted from the
+        # fee being collected is refused rather than quietly banked.
+        if payload.amount is not None and abs(payload.amount - amount) > 0.01:
+            raise HTTPException(
+                status_code=400,
+                detail=f"The payments add up to Rs.{amount:g}, but the fee being collected is Rs.{payload.amount:g}",
+            )
+    else:
+        amount = payload.amount if payload.amount is not None else original_price
     if amount <= 0:
         raise HTTPException(status_code=400, detail="Amount must be greater than zero")
 
@@ -366,7 +385,18 @@ async def collect_package_payment(lead_id: str, payload: V3CollectPackagePayment
 
     payment_details = {}
     detail_suffix = ""
-    if payload.payment_mode == "upi":
+    if lines:
+        # Each tender kept whole, in the order it was entered, so a receipt or a query
+        # months later can say which half came in which way.
+        payment_details = {"payment_lines": [
+            {"mode": ln.mode, "amount": ln.amount, "reference": (ln.reference or "").strip()}
+            for ln in lines
+        ]}
+        detail_suffix = " · Split: " + ", ".join(
+            f"Rs.{ln.amount:g} {ln.mode}" + (f" ({ln.reference.strip()})" if (ln.reference or "").strip() else "")
+            for ln in lines
+        )
+    elif payload.payment_mode == "upi":
         # Transaction id alone -- see the note in collect_treatment_fee below. The popup
         # that posts here stopped asking for a UTR, so requiring one would 400 every UPI
         # collection; it is still stored whenever a caller sends one.
@@ -411,9 +441,13 @@ async def collect_package_payment(lead_id: str, payload: V3CollectPackagePayment
     # transaction, so it gets its own id rather than overwriting the original's.
     transaction_id = await generate_transaction_id(lead.get("branch_id"))
     payment_details["transaction_id"] = transaction_id
+    # "split" rather than one of the four, for the same reason the lines exist: naming
+    # either half would make the record say something that is only half true. Finance
+    # reads the breakdown off payment_details and off the activity line below.
+    settled_mode = "split" if lines else payload.payment_mode
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {
         "package_paid": amount,
-        "package_payment_mode": payload.payment_mode,
+        "package_payment_mode": settled_mode,
         "package_payment_details": payment_details,
         "consultation_stage": "Fee Collected",
         "updated_at": _now(),
@@ -423,7 +457,7 @@ async def collect_package_payment(lead_id: str, payload: V3CollectPackagePayment
         "transaction_id": transaction_id,
         "lead_id": lead_id,
         "action": "package_payment_collected",
-        "details": f"{'Updated' if is_update else 'Collected'} Consultation Fee Rs.{amount} for package '{lead.get('package_name')}' via {payload.payment_mode}{detail_suffix}{discount_suffix} · Txn {transaction_id}",
+        "details": f"{'Updated' if is_update else 'Collected'} Consultation Fee Rs.{amount} for package '{lead.get('package_name')}' via {settled_mode}{detail_suffix}{discount_suffix} · Txn {transaction_id}",
         "original_amount": original_price,
         "collected_amount": amount,
         "discount_amount": discount_amount if discount_amount != 0 else None,
