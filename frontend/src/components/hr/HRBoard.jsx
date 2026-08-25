@@ -3097,7 +3097,13 @@ const RolesTab = ({ meta, reloadMeta }) => {
         <CardContent className="p-0">
           <div className="overflow-auto">
             <table className="min-w-full text-sm">
-              <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th className="px-3 py-2">S.No</th><th className="px-3 py-2">User</th><th className="px-3 py-2">Email</th><th className="px-3 py-2">Role</th><th className="px-3 py-2">Linked Employee</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Branch</th><th className="px-3 py-2">Actions</th></tr></thead>
+              {/* Role and Branch are unlabelled. Both say what they are by what they hold —
+                  a dropdown of role names, a branch name — so the word above was repeating
+                  the column. Linked Employee and Status keep their headings: an employee
+                  code and a status pill are not self-evident in the same way.
+                  The cells are still there; only the two headings are dropped, and the
+                  empty th keeps the column count aligned with the body rows. */}
+              <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th className="px-3 py-2">S.No</th><th className="px-3 py-2">User</th><th className="px-3 py-2">Email</th><th className="px-3 py-2" /><th className="px-3 py-2">Linked Employee</th><th className="px-3 py-2">Status</th><th className="px-3 py-2" /><th className="px-3 py-2">Actions</th></tr></thead>
               <tbody>
                 {sortedUsers.map((u, i) => (
                   <tr key={u.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`hr-user-row-${u.id}`}>
@@ -3510,22 +3516,10 @@ const BranchSelectDropdown = ({ value, branches, onChange }) => {
 
 const CreateUserModal = ({ meta, reloadMeta, onClose, onSaved }) => {
   const [employees, setEmployees] = useState([]);
-  const [branches, setBranches] = useState([]);
   const [form, setForm] = useState({ employee_id: "", full_name: "", email: "", role: "", branch_id: "", branch_ids: [], password: "", confirm: "" });
-  const roleLabelForMulti = multiBranchLabel(form.role);
-  const isMultiBranchRole = Boolean(roleLabelForMulti);
-  // What was actually clicked in the dropdown — kept separate from form.role (which always
-  // ends up holding a real access-role slug) purely so the dropdown can show and highlight
-  // the designation text the account was set up from.
-  const [selectedDesignation, setSelectedDesignation] = useState("");
+  const isMultiBranchRole = Boolean(multiBranchLabel(form.role));
   const [resolvingRole, setResolvingRole] = useState(false);
   useEffect(() => { hrEmployees({ status: "active" }).then(setEmployees).catch((e) => console.warn("[load failed]", e?.message || e)); }, []);
-  useEffect(() => { getBranches().then(setBranches).catch((e) => console.warn("[load failed]", e?.message || e)); }, []);
-
-  const pickEmployee = (id) => {
-    const emp = employees.find((e) => e.id === id);
-    setForm((p) => ({ ...p, employee_id: id, full_name: emp?.full_name || p.full_name, email: emp?.email || p.email }));
-  };
 
   // Letters only, so "Online Physio Admin" and "ONLINE PHYSIO ADMIN" both normalize the
   // same way — matching a Departments & Designation title back to whichever real access
@@ -3548,37 +3542,12 @@ const CreateUserModal = ({ meta, reloadMeta, onClose, onSaved }) => {
     return map;
   }, [meta.custom_roles]);
 
-  // Every designation across every department, plus every role added under Create Role.
-  //
-  // The roles were the half that was missing. A role is created in order to be given to
-  // somebody, and listing designations alone meant the only way to reach a freshly created
-  // one was to type its title a second time as a designation — the picker offering no
-  // trace of the role that had just been made.
-  //
-  // Deduped on the same letters-only key the resolver matches by, so a designation and a
-  // role of the same name ("Zumba Master" and ZUMBA MASTER) are one row, not two that pick
-  // the same account role. Super Admin never shows: that account can only be created via
-  // the OTP-approved Super Admin creation page.
-  const designationOptions = useMemo(() => {
-    const seen = new Set();
-    const labels = [];
-    const add = (label) => {
-      const k = key(label);
-      if (!k || seen.has(k) || roleLabelToSlug[k] === "super_admin") return;
-      seen.add(k);
-      labels.push(label);
-    };
-    Object.values(meta.department_designations || {}).forEach((list) => (list || []).forEach(add));
-    (meta.custom_roles || []).forEach((r) => add(r.label || r.name));
-    return labels.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
-  }, [meta.department_designations, meta.custom_roles, roleLabelToSlug]);
-
   // A designation that already matches a real access role (built-in or previously created)
   // is used as-is. One that doesn't is created as a new role from that exact title — the
-  // same thing "+ Add New Role" used to do by typing, just always sourced from a job title
-  // that already exists in HR. Either way the field a moment later holds a real role slug.
-  const pickDesignation = async (label) => {
-    setSelectedDesignation(label);
+  // same thing "+ Add New Role" used to do by typing, just now always sourced from the job
+  // title the employee already holds. Either way form.role a moment later holds a real slug.
+  const resolveRoleFrom = async (label) => {
+    if (!label) { setForm((p) => ({ ...p, role: "" })); return; }
     const existingSlug = roleLabelToSlug[key(label)];
     if (existingSlug) { setForm((p) => ({ ...p, role: existingSlug })); return; }
     setResolvingRole(true);
@@ -3588,18 +3557,56 @@ const CreateUserModal = ({ meta, reloadMeta, onClose, onSaved }) => {
       setForm((p) => ({ ...p, role: created.name }));
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Failed to set role");
-      setSelectedDesignation("");
+      setForm((p) => ({ ...p, role: "" }));
     }
     setResolvingRole(false);
   };
 
+  /** Everything this form used to ask twice, taken from the person it is creating a login for.
+   *
+   * Role and Branch were their own fields, and both were already answered on the employee
+   * record by the time anybody reached this form: the designation IS the role in this OS,
+   * and the branches were set when the employee was posted. Asking again invited the two
+   * to disagree — a login filed under one designation and a Consultant record under
+   * another — and nothing downstream could tell which of them was meant.
+   *
+   * ALL_BRANCHES does not survive the copy. An employee covering everything is stored with
+   * that marker; an account covering everything is stored holding no branches, which is how
+   * list_users and the expert queries both read org-wide. Passing the marker through would
+   * put a literal "__all__" where a branch id belongs.
+   */
+  const pickEmployee = async (id) => {
+    const emp = employees.find((e) => e.id === id);
+    const posted = (emp?.branch_ids || []).filter((b) => b && b !== ALL_BRANCHES);
+    const single = emp?.branch_id && emp.branch_id !== ALL_BRANCHES ? [emp.branch_id] : [];
+    const at = posted.length ? posted : single;
+    setForm((p) => ({
+      ...p,
+      employee_id: id,
+      full_name: emp?.full_name || p.full_name,
+      email: emp?.email || p.email,
+      branch_ids: at,
+      branch_id: at[0] || "",
+    }));
+    await resolveRoleFrom(emp?.designation || "");
+  };
+
   const submit = async () => {
     if (resolvingRole) { toast.error("Still setting up that role — one moment"); return; }
-    if (!form.email || !form.password || !form.role) { toast.error("Email, role, password required"); return; }
+    // The employee is where the role comes from now, so there is no account to create
+    // without one. Named rather than implied: "employee required" is the whole fix.
+    if (!form.employee_id) { toast.error("Pick the employee this login is for"); return; }
+    if (!form.role) { toast.error("That employee has no designation — set one on their record first"); return; }
+    if (!form.email || !form.password) { toast.error("Email and password required"); return; }
     if (form.password.length < 6) { toast.error("Min 6 characters"); return; }
     if (form.password !== form.confirm) { toast.error("Passwords do not match"); return; }
+    // A desk that holds a calendar and is posted nowhere is offered nowhere — a Consultant
+    // with no branches cannot be booked at any of them. Refused here rather than created
+    // and quietly useless, and the message says where the answer actually lives, since this
+    // form no longer asks for it.
     if (isMultiBranchRole && !BRANCHLESS_OK_ROLES.has(form.role) && form.branch_ids.length === 0) {
-      toast.error("Select at least one branch"); return;
+      toast.error(`${form.full_name || "That employee"} has no branch yet — set it on their employee record first`);
+      return;
     }
     try {
       await hrCreateUser({
@@ -3618,84 +3625,29 @@ const CreateUserModal = ({ meta, reloadMeta, onClose, onSaved }) => {
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" data-testid="hr-create-user-modal">
-      {/* Scaled to 80% so the whole form — heading through Create User — is on screen at
+      {/* Scaled to 90% so the whole form — heading through Create User — is on screen at
           once. This panel had no height limit at all, which is why it ran off the top
           and bottom and cut its own header and buttons off.
           The max-height reads oddly on purpose: `zoom` scales the computed box, so a vh
-          limit set here is multiplied by 0.8 before it lands. 110vh is what leaves the
-          panel occupying ~88% of the screen, and the overflow is the safety net for a
-          window short enough that even 80% doesn't fit. */}
-      <div className="max-h-[110vh] w-full max-w-md space-y-3 overflow-y-auto rounded-lg bg-white p-5 shadow-xl" style={{ zoom: 0.8 }}>
+          limit set here is multiplied by 0.9 before it lands. 100vh is what leaves the
+          panel occupying ~90% of the screen, and the overflow is the safety net for a
+          window short enough that even 90% doesn't fit.
+          0.9 rather than the 0.8 this started at: two fields have come out of the form, so
+          there is room to read the rest at a size closer to the page around it. */}
+      <div className="max-h-[100vh] w-full max-w-md space-y-3 overflow-y-auto rounded-lg bg-white p-5 shadow-xl" style={{ zoom: 0.9 }}>
         <div className="flex items-center justify-between">
           <div><h3 className="text-base font-semibold">Create User Account</h3><p className="text-xs text-slate-500">Create login credentials for an employee.</p></div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600" data-testid="hr-create-user-close"><X className="h-4 w-4" /></button>
         </div>
-        <Field label="Link to Employee (optional)">
+        {/* Required now, and first for the same reason: it answers Name, Email, Role and
+            Branch in one pick, so everything below it is either already filled in or a
+            password. */}
+        <Field label="Employee *">
           <EmployeeSelectDropdown value={form.employee_id} employees={employees} onChange={pickEmployee} />
+          {resolvingRole && <p className="mt-1 text-[10px] text-slate-400">Setting up their role...</p>}
         </Field>
         <Field label="Name"><Input placeholder="Full name" value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} data-testid="hr-create-user-name" /></Field>
         <Field label="Username (Email) *"><Input placeholder="user@company.com" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} data-testid="hr-create-user-email" /></Field>
-        <Field label="Role *">
-          <RoleSelectDropdown
-            value={selectedDesignation}
-            options={designationOptions}
-            onChange={pickDesignation}
-          />
-          {/* Only the in-progress line is left. The paragraph that stood here explained
-              where roles come from and what happens to a new one — background a reader of
-              this form does not need at the moment they are filling it in. */}
-          {resolvingRole && <p className="mt-1 text-[10px] text-slate-400">Setting up that role...</p>}
-        </Field>
-        {isMultiBranchRole ? (
-          <Field label={`Branches (${roleLabelForMulti} can cover more than one)`}>
-            <div className="space-y-1.5 rounded-md border border-slate-200 p-2" data-testid="hr-create-user-branch-ids">
-              {/* All Branches, said out loud.
-                  Covering everything has always been how this OS stores it — an org-wide
-                  role holding no branches — but the only way to reach it was to leave every
-                  box unticked and know that meant "all" rather than "none unset yet". The
-                  table two clicks away has been printing "All branches" for exactly that
-                  state all along, so the two now use one word for one thing.
-                  Ticking it clears the individual picks, because "all" and "these three"
-                  cannot both be true and leaving stale ticks underneath would suggest they
-                  were. */}
-              {BRANCHLESS_OK_ROLES.has(form.role) && (
-                <label className="flex items-center gap-2 rounded px-1.5 py-1 text-sm font-semibold text-sky-700 hover:bg-sky-50" data-testid="hr-create-user-branch-all-label">
-                  <input
-                    type="checkbox"
-                    checked={form.branch_ids.length === 0}
-                    onChange={(e) => { if (e.target.checked) setForm({ ...form, branch_ids: [] }); }}
-                    data-testid="hr-create-user-branch-all"
-                  />
-                  All Branches
-                </label>
-              )}
-              {branches.map((b) => {
-                const checked = form.branch_ids.includes(b.id);
-                return (
-                  <label key={b.id} className="flex items-center gap-2 rounded px-1.5 py-1 text-sm hover:bg-slate-50">
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={(e) => setForm({
-                        ...form,
-                        branch_ids: e.target.checked
-                          ? [...form.branch_ids, b.id]
-                          : form.branch_ids.filter((id) => id !== b.id),
-                      })}
-                      data-testid={`hr-create-user-branch-ids-${b.id}`}
-                    />
-                    {b.branch_name}
-                  </label>
-                );
-              })}
-              {branches.length === 0 && <p className="px-1.5 py-1 text-xs text-slate-400">No branches yet</p>}
-            </div>
-          </Field>
-        ) : (
-          <Field label="Branch (optional)">
-            <BranchSelectDropdown value={form.branch_id} branches={branches} onChange={(id) => setForm({ ...form, branch_id: id })} />
-          </Field>
-        )}
         <Field label="Password *"><PasswordInput placeholder="Min 6 characters" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} testid="hr-create-user-pwd" /></Field>
         <Field label="Confirm Password *"><PasswordInput placeholder="Confirm password" value={form.confirm} onChange={(e) => setForm({ ...form, confirm: e.target.value })} testid="hr-create-user-confirm" /></Field>
         <div className="flex gap-2 pt-2"><Button variant="outline" onClick={onClose} className="flex-1" data-testid="hr-create-user-cancel">Cancel</Button><Button onClick={submit} className="flex-1 bg-sky-600 hover:bg-sky-700" data-testid="hr-create-user-submit">Create User</Button></div>
