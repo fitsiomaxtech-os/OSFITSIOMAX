@@ -4077,7 +4077,21 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                                   data-testid="cons-open-physio-assign-from-fee-collected"
                                 >
                                   <Users className="mr-1 h-3.5 w-3.5" />
-                                  {selectedLead.assigned_physio_name ? "Reassign Physio" : "Assign Physio & Book Sessions"}
+                                  {/* Never "Reassign" here. assigned_physio_name is written
+                                      when the appointment is booked -- it is the physio who
+                                      took the consultation, set by the Branch Admin long
+                                      before anyone picks who delivers the treatment -- so
+                                      reading it as "a physio is already assigned" made this
+                                      button say Reassign for every patient who ever had a
+                                      consultation, which is all of them.
+
+                                      The stage is the honest test and it needs no field:
+                                      assign-consultation-physio is what moves a lead off
+                                      Fee Collected, so a lead sitting on this panel has no
+                                      treatment physio yet. Reassigning belongs to the
+                                      Physio Assign panel below, where the name does mean
+                                      what it says. */}
+                                  Assign Physio
                                 </Button>
                               </div>
                             </>
