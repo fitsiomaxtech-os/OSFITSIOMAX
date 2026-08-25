@@ -159,8 +159,13 @@ const OperationsConsultantTab = ({ branches, actingUser }) => {
       .catch(() => setAllConsultants([]));
   }, []);
 
-  // Relevant to the picked branch: given specific branches that include it, or given none
-  // at all (org-wide, covers every branch by default).
+  // Relevant to the picked branch: posted to it.
+  //
+  // A Consultant covering every branch by default used to be the other half of this, and
+  // org_wide was how the row said so. It is always false now — a Consultant is posted to
+  // chosen branches like every other desk — so what is left is the branch match, and an
+  // unposted Consultant appears under no branch rather than under all of them. The flag is
+  // still read so a row from a server mid-deploy is not misfiled.
   const consultants = selectedId
     ? allConsultants.filter((u) => u.org_wide || (u.branches || []).some((b) => b.id === selectedId))
     : [];

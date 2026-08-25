@@ -1,4 +1,5 @@
 from fastapi import Depends, Header, HTTPException
+from typing import Dict
 from database import db, v2_col, v3_col
 from schemas.v1 import AuthUser
 from schemas.v2 import V2UserOut
@@ -290,3 +291,57 @@ def v3_require_diet(user: V3UserOut = Depends(v3_current_user)) -> V3UserOut:
     if not is_diet_role(user.role):
         raise HTTPException(status_code=403, detail="Not allowed")
     return user
+
+
+async def consultants_serving_branch(rows: list, branch_id: str) -> list:
+    """Keep the consultants posted to this branch, and every other desk untouched.
+
+    A Consultant is branch-selective now. They were not: their record was branchless, every
+    branch's query matched it, and consolidate_head_physio_doctors cleared their login's
+    branches at every startup to keep it that way. Lifting that rule is what this filter is.
+
+    Read off the LOGIN, not off the record. The record stays branchless on purpose — one
+    person has one set of published hours, and splitting it per branch would let the same
+    Consultant be booked into the same hour at two of them with nothing to catch it — so
+    the record cannot carry the answer. The branches live in branch_ids on the account,
+    which is where every other multi-branch desk already keeps them.
+
+    An empty list means NOWHERE. That is the reversal, and it is the whole point: a
+    Consultant nobody has posted yet is offered at no branch rather than at all of them.
+
+    A record with no login is a profile-only entry from Fitsiomax Experts, which requires a
+    branch when it is created, so its own branch_id is its posting and is read directly.
+    One that is also branchless has no answer anywhere and is offered nowhere — the same
+    result as an unposted Consultant, and recoverable the same way.
+
+    Only consultants are touched. Every other desk is filtered by branch in the query that
+    produced these rows, and re-deciding them here would be a second rule to keep in step
+    with the first.
+
+    Lives here rather than beside any one caller because there are three of them — the
+    expert list, the booking popup's experts and its available dates — and a caller that
+    forgets it offers a Consultant at a branch they do not work.
+    """
+    user_ids = [r.get("user_id") for r in rows if r.get("profile_type") == "head_physio" and r.get("user_id")]
+    posted_by_user: Dict[str, list] = {}
+    if user_ids:
+        async for u in v3_col("users").find(
+            {"id": {"$in": user_ids}}, {"_id": 0, "id": 1, "branch_id": 1, "branch_ids": 1},
+        ):
+            at = [b for b in (u.get("branch_ids") or []) if b]
+            if not at and u.get("branch_id"):
+                at = [u["branch_id"]]
+            posted_by_user[u["id"]] = at
+
+    kept = []
+    for r in rows:
+        if r.get("profile_type") != "head_physio":
+            kept.append(r)
+            continue
+        uid = r.get("user_id")
+        if uid:
+            if branch_id in posted_by_user.get(uid, []):
+                kept.append(r)
+        elif r.get("branch_id") == branch_id:
+            kept.append(r)
+    return kept

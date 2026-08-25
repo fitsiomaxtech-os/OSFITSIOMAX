@@ -860,12 +860,17 @@ async def sync_head_physio_doctors() -> None:
 
 
 async def consolidate_head_physio_doctors() -> None:
-    """Collapse each Head Physio down to one branchless expert record.
+    """Collapse each Consultant down to one branchless expert record.
 
-    Head Physios cover every branch, but the old model gave them one `doctors` record per
-    assigned branch. That left duplicates in every expert picker, and split their published
-    availability across records — which is why a branch could show a Head Physio as having
-    published nothing while their real slots sat on a sibling record.
+    One record per assigned branch left duplicates in every expert picker, and split their
+    published availability across records — which is why a branch could show a Consultant
+    as having published nothing while their real slots sat on a sibling record.
+
+    Still wanted now that a Consultant is branch-selective, and for a sharper reason than
+    tidiness: two records for one person means two independent clash checks, so the same
+    Consultant could be booked into the same hour at two branches with nothing to notice.
+    Where they are OFFERED is narrowed by the branches on their login instead, which this
+    no longer touches.
 
     Slots are merged rather than picked, so no published availability is lost, and the
     surviving record keeps the id that appointments already point at wherever possible.
@@ -914,14 +919,17 @@ async def consolidate_head_physio_doctors() -> None:
             )
             await v3_col("doctors").delete_many({"id": {"$in": drop}})
 
-    # Their login carries no branch either — a CONSULTANT isn't "at" one. Every slug in
-    # the family, not the one it used to be: after migrate_consultant_roles() the same
-    # people read `consultant`/`online_consultant`, and naming only the old slug here
-    # would quietly stop clearing the branch for everybody.
-    await v3_col("users").update_many(
-        {"role": {"$in": sorted(HEAD_PHYSIO_ROLES)}},
-        {"$set": {"branch_id": None, "branch_ids": []}},
-    )
+    # Their login's branches are NOT cleared any more.
+    #
+    # This is where "a Consultant works across every branch" was actually enforced: the
+    # branches were wiped at every startup, so any selection made in Roles & Credentials
+    # survived until the next restart and then silently vanished. A Consultant is now
+    # posted to chosen branches like every other desk, and consultants_serving_branch in
+    # deps.py reads that selection to decide where they are offered.
+    #
+    # The record consolidation above stays, and still matters: one person keeps one
+    # branchless calendar, which is what makes a Consultant impossible to double-book
+    # across two branches in the same hour. Only their reach is selective, not their diary.
 
 
 # The slug each retired consultation role is rewritten to. Same desk, same board, same

@@ -203,13 +203,15 @@ const multiBranchLabel = (role) => {
   if (r.includes("nutrition_coach") || r.split("_").some((t) => DIET_ROLE_TOKENS.includes(t))) return "Nutritionist";
   return null;
 };
-// Roles allowed to cover everything by leaving the selection empty. Every consultant
-// role: a CONSULTANT takes consultations across the whole organisation whichever arm they
-// work, and the retired slugs are here for an account the migration has not reached. Kept
-// in step with ORG_WIDE_ROLES in backend/routers/v3_hr.py.
-const BRANCHLESS_OK_ROLES = new Set([
-  "consultant", "online_consultant", "head_physio", "online_head_physio",
-]);
+// Roles allowed to cover everything by leaving the selection empty.
+//
+// Empty, and the set is kept rather than deleted because the rule it encodes still has to
+// be asked. It held the consultant family until Consultants became branch-selective: they
+// are posted to chosen branches now, so an empty selection means nobody has said where
+// they work rather than "everywhere", and the form asks for at least one branch like it
+// does for a Physio. See consultants_serving_branch in backend/deps.py, which is what
+// reads that selection.
+const BRANCHLESS_OK_ROLES = new Set([]);
 
 export const HRBoard = () => {
   const [tab, setTab] = useState("dashboard");
@@ -2830,8 +2832,10 @@ const RolesTab = ({ meta, reloadMeta }) => {
       .filter((u) => u.role !== "super_admin")
       .forEach((u) => {
         const named = (u.branches || []).map((b) => b.name).filter(Boolean);
-        // A role that covers every branch is said once, under its own heading, rather
-        // than repeated into every branch as though it were posted to each.
+        // "All branches" is a heading nothing lands under any more: no role covers every
+        // branch since Consultants became branch-selective, so org_wide always reads false
+        // and a Consultant appears under each branch they are posted to. Kept for a row
+        // served by a backend that has not restarted into the change yet.
         if (u.org_wide) place("All branches", u);
         else if (named.length) named.forEach((n) => place(n, u));
         // Kept rather than dropped: an account belonging to no branch is nearly always

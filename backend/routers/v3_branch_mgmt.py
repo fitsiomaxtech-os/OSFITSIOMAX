@@ -5,11 +5,11 @@ import uuid
 
 from database import v3_col
 from utils import now_iso, derive_branch_code, active_doctor_query
-from deps import v3_require_roles, is_branch_admin_role, is_physio_role, is_head_physio_role, is_diet_role, is_pre_sales_role, is_zumba_role, PHYSIO_ROLES, HEAD_PHYSIO_ROLES
+from deps import v3_require_roles, is_branch_admin_role, is_physio_role, is_head_physio_role, is_diet_role, is_pre_sales_role, is_zumba_role, consultants_serving_branch, PHYSIO_ROLES, HEAD_PHYSIO_ROLES
 # The desks a Physio or Nutritionist can hold several of, and the doctors profile_type
 # each role keeps its calendar under. Imported from HR rather than restated so posting
 # somebody to a branch here builds the same record HR's own assign builds.
-from routers.v3_hr import is_multi_branch_role, expert_profile_type
+from routers.v3_hr import is_multi_branch_role, holds_calendar_per_branch, expert_profile_type
 from security import verify_password
 import lead_control
 from schemas.v3 import V3UserOut
@@ -233,11 +233,11 @@ async def branch_performance(branch_id: str, _: V3UserOut = Depends(v3_require_r
     doctors = await v3_col("doctors").count_documents({"branch_id": branch_id})
     # Both physio slugs — an Online Physio is one of the branch's physios, and counting
     # only the floor ones understates the team on every branch that runs online.
-    physios = await v3_col("users").count_documents({"branch_id": branch_id, "role": {"$in": list(PHYSIO_ROLES)}, "is_active": True})
+    physios = await v3_col("users").count_documents({"$or": [{"branch_id": branch_id}, {"branch_ids": branch_id}], "role": {"$in": list(PHYSIO_ROLES)}, "is_active": True})
     # Every consultant slug, for the same reason both physio slugs are counted above: an
     # Online Consultant is one of this branch's consultants, and the desk moved off
     # `head_physio` onto `consultant`, so the literal counted nobody at all.
-    head_physios = await v3_col("users").count_documents({"branch_id": branch_id, "role": {"$in": sorted(HEAD_PHYSIO_ROLES)}, "is_active": True})
+    head_physios = await v3_col("users").count_documents({"$or": [{"branch_id": branch_id}, {"branch_ids": branch_id}], "role": {"$in": sorted(HEAD_PHYSIO_ROLES)}, "is_active": True})
 
     return {
         "branch": branch,
@@ -308,7 +308,13 @@ async def branch_detail(branch_id: str, user: V3UserOut = Depends(v3_require_rol
     # on deactivate with nothing left to switch back on. Each row carries is_active so the
     # list can say which is which. Only `staff` below reads these, so nothing else sees
     # an inactive person appear.
-    staff_rows = await v3_col("users").find({"branch_id": branch_id}, {"_id": 0, "password": 0}).to_list(500)
+    # Either field, because a desk that works several branches carries the list and holds
+    # branch_id as no more than the first of them. Matching only the primary showed such a
+    # person on their first branch's Team and nowhere else — a Consultant posted to two
+    # branches appearing on one of them, which is exactly what this tab is for saying.
+    staff_rows = await v3_col("users").find(
+        {"$or": [{"branch_id": branch_id}, {"branch_ids": branch_id}]}, {"_id": 0, "password": 0},
+    ).to_list(500)
     head_physios = [u for u in staff_rows if is_head_physio_role(u.get("role"))]
     physios = [u for u in staff_rows if is_physio_role(u.get("role"))]
     # Off the predicate, not the literal: a Branch Admin (Physio), (Fitness) or an Online
@@ -327,6 +333,16 @@ async def branch_detail(branch_id: str, user: V3UserOut = Depends(v3_require_rol
     zumba = [u for u in staff_rows if u.get("role") != "super_admin" and is_zumba_role(u.get("role"))]
 
     doctors = await v3_col("doctors").find(active_doctor_query({"branch_id": branch_id}), {"_id": 0}).to_list(500)
+    # A Consultant's calendar is branchless — one person, one set of hours — so it never
+    # matched the branch query above and this branch's Consultant Calendars card came back
+    # empty. Fetched separately and narrowed to the Consultants actually posted here, which
+    # is the same rule the booking popup and the expert list read.
+    consultant_rows = await v3_col("doctors").find(
+        active_doctor_query({"profile_type": "head_physio"}), {"_id": 0},
+    ).to_list(500)
+    serving = await consultants_serving_branch(consultant_rows, branch_id)
+    seen = {d["id"] for d in doctors}
+    doctors += [d for d in serving if d["id"] not in seen]
 
     appointments = await v3_col("appointments").find({"branch_id": branch_id}, {"_id": 0}).sort("appointment_time", -1).to_list(500)
     appt_completed = len([a for a in appointments if a.get("status") == "completed"])
@@ -427,6 +443,8 @@ def _desk_holds(desk: str):
         return lambda r: is_branch_admin_role(r)
     if desk == "physios":
         return lambda r: is_physio_role(r)
+    if desk == "head_physios":
+        return lambda r: is_head_physio_role(r)
     if desk == "diet":
         return lambda r: r != "super_admin" and is_diet_role(r)
     if desk == "zumba":
@@ -440,14 +458,11 @@ async def _team_desk_or_400(branch_id: str, desk: str):
     )
     if not branch:
         raise HTTPException(status_code=404, detail="Branch not found")
-    # Consultants are org-wide by design: consolidate_head_physio_doctors clears their
-    # branch on every startup, so posting one to a branch here would be undone by the next
-    # restart. Refused rather than accepted and then quietly reverted.
-    if desk == "head_physios":
-        raise HTTPException(
-            status_code=400,
-            detail="A Consultant works across every branch. Use the Experts tab to give them a calendar here.",
-        )
+    # The Consultants desk used to be refused here. It had to be: their branches were
+    # cleared at every startup, so a posting made on this screen would have been accepted
+    # and then quietly reverted by the next restart. That startup wipe is gone — see
+    # consolidate_head_physio_doctors in seed.py — and a Consultant is now posted to chosen
+    # branches like every other desk on this tab.
     holds = _desk_holds(desk)
     if holds is None:
         raise HTTPException(status_code=400, detail="Unknown team desk")
@@ -515,7 +530,11 @@ async def team_add_member(branch_id: str, user_id: str, desk: str, _: V3UserOut 
         await v3_col("users").update_one({"id": user_id}, {"$set": {"branch_ids": at, "branch_id": at[0]}})
         # The calendar they hold at this branch. Without it they log in to a board with no
         # calendar behind it and nothing explains why.
-        profile = expert_profile_type(user["role"])
+        #
+        # Not for a Consultant, who holds ONE branchless calendar however many branches they
+        # are posted to — minting a second here is what would let the same person be booked
+        # into the same hour at two of them, each record clash-checking only itself.
+        profile = expert_profile_type(user["role"]) if holds_calendar_per_branch(user["role"]) else None
         if profile:
             exists = await v3_col("doctors").find_one(
                 {"user_id": user_id, "profile_type": profile, "branch_id": branch_id}, {"_id": 0, "id": 1}

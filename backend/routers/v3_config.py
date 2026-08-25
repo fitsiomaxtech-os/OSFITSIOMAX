@@ -7,7 +7,7 @@ import uuid
 from database import v3_col
 from utils import now_iso, normalize_slot_time, derive_branch_code, active_doctor_query
 from security import hash_password
-from deps import v3_current_user, v3_require_roles, is_branch_admin_role, is_head_physio_role, is_physio_role
+from deps import v3_current_user, v3_require_roles, is_branch_admin_role, is_head_physio_role, is_physio_role, consultants_serving_branch
 from stage_utils import get_first_stage_name, realign_branch_stage_leads
 from shift_utils import attach_shifts
 import lead_control
@@ -443,11 +443,20 @@ async def v3_delete_branch(branch_id: str, _: V3UserOut = Depends(v3_require_rol
     return {"message": "Branch deleted"}
 
 
-# The desks whose records may legitimately carry no branch, and so are offered at every
-# one. A CONSULTANT takes consultations across the organisation; a Nutritionist covers
-# every branch here. Every other desk is somewhere — a Physio treats at their own branch,
-# and rehab is delivered where the patient comes — so a missing branch on one of those is
-# a gap to fix rather than a reach to honour.
+# The desks whose records may legitimately carry no branch.
+#
+# For a Nutritionist that still means offered at every one: branchless is how this OS spells
+# "All Branches" for them, and _coach_branch_ids in routers/v3_diet.py reads it that way.
+#
+# For a CONSULTANT it no longer means that. Their record is still branchless — one person
+# has one set of hours, so the calendar is single and does not split per branch — but WHERE
+# they are offered is now read off the branches on their login, by consultants_serving_branch
+# in deps.py. They stay in this list because the record must survive the branch clause of the
+# query to reach that filter at all; the filter is what narrows them.
+#
+# Every other desk is somewhere — a Physio treats at their own branch, and rehab is
+# delivered where the patient comes — so a missing branch on one of those is a gap to fix
+# rather than a reach to honour.
 ORG_WIDE_PROFILES = ["head_physio", "nutrition_coach"]
 
 
@@ -584,12 +593,17 @@ async def v3_get_doctors(
         query["$or"] = [
             {"branch_id": scope_branch},
             {"profile_type": {"$in": ORG_WIDE_PROFILES}, "branch_id": {"$in": [None, ""]}},
-            # Kept alongside the rule rather than replaced by it: a Head Physio record
-            # written before branchless was the convention may still carry a branch, and
-            # dropping this clause would hide them from every other branch's calendar.
+            # Every consultant record reaches the rows below whatever branch it carries,
+            # and consultants_serving_branch then decides which of them belong to this branch.
+            # Two steps rather than one clause because the answer is not on the record: it
+            # is the branch list on the login behind it, which Mongo cannot join to here.
             {"profile_type": "head_physio"},
         ]
     rows = await v3_col("doctors").find(active_doctor_query(query), {"_id": 0}).sort("created_at", -1).to_list(1000)
+    # Which consultants belong to this branch. After the query, because the answer lives on
+    # the login rather than on the expert record — see _consultants_serving.
+    if scope_branch:
+        rows = await consultants_serving_branch(rows, scope_branch)
     # Their rostered working window, so a list that offers an expert also says which hours
     # that expert actually works. Resolved here rather than by each caller because every
     # calendar and picker reads this one endpoint.

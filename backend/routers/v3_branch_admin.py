@@ -9,7 +9,7 @@ import uuid
 
 from database import v3_col
 from utils import now_iso, active_doctor_query
-from deps import v3_require_roles, is_head_physio_role
+from deps import v3_require_roles, is_head_physio_role, consultants_serving_branch
 import lead_control
 from constants import V3_BRANCH_STAGES, V3_CONSULTATION_STAGES, V3_HEAD_CONSULTATION_STAGES
 from stage_utils import branch_stage_names_for_branch, get_first_stage_name
@@ -666,16 +666,22 @@ async def v3_available_experts(
     """Head Physios at this branch who can take a consultation on the given date
     (optionally narrowed to an exact time).
 
-    Consultations are conducted by Head Physios only — regular Physios run treatment
+    Consultations are conducted by Consultants only — regular Physios run treatment
     sessions, which are booked separately once a package is sold — so this never offers
-    a Physio. A Head Physio assigned to several branches has one doctors record per
-    branch, so they appear only in the branches they're actually assigned to.
+    a Physio.
+
+    Only the Consultants posted to this branch. They used to be offered at every branch
+    whatever anybody selected, which is the rule this booking popup existed on the wrong
+    side of: a Branch Admin picking an expert was shown the whole organisation.
     """
     if not date:
         raise HTTPException(status_code=400, detail="date is required")
-    # Head Physios are org-wide: they take consultations for every branch, so this
-    # never narrows by branch_id.
+    # Every consultant record, then narrowed to the ones posted here. Two steps because the
+    # answer is not on the record — it is the branch list on the login behind it, and the
+    # record itself stays branchless so one person keeps one calendar. See
+    # consultants_serving_branch in deps.py.
     branch_experts = await v3_col("doctors").find(active_doctor_query({"profile_type": "head_physio"}), {"_id": 0}).to_list(500)
+    branch_experts = await consultants_serving_branch(branch_experts, branch_id)
 
     # Availability is decided per slot, not per day: an expert with a 9:30 booking is
     # still free at 10:00. So a same-day booking no longer hides them — only being
@@ -773,11 +779,15 @@ async def v3_available_dates(
     endpoint can't be used for this: it ignores the date when reading an expert's slots
     and falls back to a default 09:00-17:30 grid, so it reports every day as open.)
     """
-    # Head Physios are org-wide: they take consultations for every branch, so this
-    # never narrows by branch_id.
+    # Only the Consultants posted to this branch, the same narrowing available-experts
+    # does — the two are read together by the booking calendar, and a day lit up here that
+    # the expert column then cannot fill is worse than the day simply not being offered.
+    # user_id is projected because that is what the narrowing reads.
     branch_experts = await v3_col("doctors").find(
-        active_doctor_query({"profile_type": "head_physio"}), {"_id": 0, "id": 1, "slots": 1}
+        active_doctor_query({"profile_type": "head_physio"}),
+        {"_id": 0, "id": 1, "slots": 1, "user_id": 1, "profile_type": 1, "branch_id": 1},
     ).to_list(500)
+    branch_experts = await consultants_serving_branch(branch_experts, branch_id)
 
     booked_rows = await v3_col("appointments").find(
         {"status": "new_appointment", "slot_time": {"$regex": f"^{month}-"}},

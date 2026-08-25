@@ -71,17 +71,34 @@ DEFAULT_ROLES = [
 # so hiring one has to create the matching `doctors` record or they log in to a board with
 # no calendar behind it and nothing explains why.
 MULTI_BRANCH_ROLES = {"physio", "online_physio", "nutrition_coach"}
-# Every consultant role takes consultations across the whole organisation, so each gets one
-# branchless expert record rather than one per branch. Taken from the family in deps.py
-# rather than restated, so a role added there is hired correctly here without a second edit
-# — restating it is how `consultant` came to be a role nobody could be hired into as one.
-ORG_WIDE_ROLES = set(HEAD_PHYSIO_ROLES)
+# Roles that hold ONE expert record, belonging to no branch.
+#
+# This is a statement about the shape of the record, and it used to be a statement about
+# reach as well: a Consultant held one calendar AND was offered at every branch, with the
+# second following from the first because a branchless record matched every branch's query.
+# Those have come apart. A Consultant is now posted to chosen branches like anybody else —
+# the branches live on their login, in branch_ids — while the calendar stays single and
+# branchless, because one person has one set of hours and cannot be in two rooms at once.
+# See consultants_serving_branch in deps.py, which is what reach is read off now.
+#
+# Taken from the family in deps.py rather than restated, so a role added there is hired
+# correctly here without a second edit — restating it is how `consultant` came to be a role
+# nobody could be hired into as one.
+SINGLE_CALENDAR_ROLES = set(HEAD_PHYSIO_ROLES)
 
 
-def is_multi_branch_role(role: str) -> bool:
-    """Whether a role holds a calendar at each of several branches.
+def holds_calendar_per_branch(role: str) -> bool:
+    """Whether a role holds a SEPARATE calendar at each branch it works.
 
-    A Nutritionist is one, exactly like a Physio: they work a branch and may cover more.
+    A Nutritionist is one, exactly like a Physio: they work a branch and may cover more,
+    and each branch's days are published on that branch's own record.
+
+    A Consultant is deliberately NOT one, though they too can work several branches. Two
+    records for one person means two independent clash checks, so the same Consultant could
+    be booked into the same hour at two branches with nothing to catch it. They keep the
+    single branchless record in SINGLE_CALENDAR_ROLES above; only where they are OFFERED
+    narrows. Ask is_multi_branch_role for that question instead.
+
     Matched through is_diet_role rather than against the set above, because the slug is
     typed by hand in Roles & Credentials — this install has `diet_manage`, not the
     `nutrition_coach` literal, so the set never caught it and editing that user's branches
@@ -90,8 +107,6 @@ def is_multi_branch_role(role: str) -> bool:
     Super Admin is excluded: is_diet_role answers "may this account reach the Diet board",
     which Super Admin may, not "is this person a coach who holds calendars", which they
     are not — hiring already draws that same line.
-
-    Kept in step with multiBranchLabel in frontend/src/components/hr/HRBoard.jsx.
     """
     r = (role or "").strip().lower()
     if r in MULTI_BRANCH_ROLES:
@@ -103,9 +118,30 @@ def is_multi_branch_role(role: str) -> bool:
     return is_diet_role(r) or is_rehab_role(r)
 
 
+def is_multi_branch_role(role: str) -> bool:
+    """Whether a role can be posted to more than one branch at a time.
+
+    The wider of the two questions, and the one that drives branch_ids: everybody who holds
+    a calendar per branch can, and so can a Consultant, who holds one calendar but may take
+    consultations at several branches.
+
+    It used to be the only question, because the two answers were the same for every role.
+    They stopped being the same when a Consultant became branch-selective, and the pair that
+    had to come apart is exactly this one — reach and record shape. Callers that create or
+    stand down per-branch expert records want holds_calendar_per_branch; callers deciding
+    whether a branch list is even meaningful want this.
+
+    Kept in step with multiBranchLabel in frontend/src/components/hr/HRBoard.jsx.
+    """
+    r = (role or "").strip().lower()
+    if r == "super_admin":
+        return False
+    return holds_calendar_per_branch(r) or is_head_physio_role(r)
+
+
 def is_expert_role(role: str) -> bool:
-    """Whether a role holds a `doctors` record at all — per branch, or one org-wide."""
-    return is_multi_branch_role(role) or (role or "").strip().lower() in ORG_WIDE_ROLES
+    """Whether a role holds a `doctors` record at all — per branch, or one branchless."""
+    return holds_calendar_per_branch(role) or (role or "").strip().lower() in SINGLE_CALENDAR_ROLES
 
 
 def expert_profile_type(role: str) -> str:
@@ -797,7 +833,11 @@ async def list_users(search: Optional[str] = None, role: Optional[str] = None, _
         # specific branches, and flagging them org-wide on the role alone printed "All
         # branches" over a selection that said ECR — the column contradicting the form
         # that set it.
-        r["org_wide"] = r.get("role") in ORG_WIDE_ROLES and not r["branches"]
+        # No role is org-wide any more. A Consultant was the last one, and is now posted
+        # to chosen branches like everybody else — so an empty list means nobody has said
+        # where they work yet, which is a gap to fill rather than a reach to report. Left
+        # on the row so every reader keeps its shape.
+        r["org_wide"] = False
     return rows
 
 
@@ -849,9 +889,11 @@ async def create_user_account(payload: UserAccountCreate, _: V3UserOut = Depends
                 "user_id": user["id"],
                 "created_at": now_iso(),
             })
-    elif payload.role in ORG_WIDE_ROLES:
-        # One branchless record — a Head Physio has one calendar the whole organisation
-        # books against, not a separate one per branch.
+    elif payload.role in SINGLE_CALENDAR_ROLES:
+        # One branchless record. Still branchless now that a Consultant is posted to chosen
+        # branches, and deliberately so: the branches are on the login, and the record is
+        # the calendar. One person has one set of hours, so splitting it per branch would
+        # let the same Consultant be booked into the same hour at two of them.
         await v3_col("doctors").insert_one({
             "id": str(uuid.uuid4()),
             "full_name": payload.full_name,
@@ -945,7 +987,13 @@ async def update_user_account(user_id: str, payload: UserAccountUpdate, caller: 
             {"$set": {"branch_id": updates["branch_id"] or "", "updated_at": now_iso()}},
         )
 
-    if branch_ids is not None and user and is_multi_branch_role(user.get("role")):
+    if branch_ids is not None and user and holds_calendar_per_branch(user.get("role")):
+        # holds_calendar_per_branch, not is_multi_branch_role: a Consultant now carries a
+        # branch list too, and running this for them would mint a second, third and fourth
+        # expert record beside the single branchless one they are supposed to have — the
+        # split calendars consolidate_head_physio_doctors exists to clean up, recreated on
+        # every edit. Their reach comes off branch_ids alone; the record does not move.
+        #
         # Add a doctors record for any newly-assigned branch that doesn't already have
         # one. Branches removed from the list are left as-is so their existing calendar
         # slots/appointments aren't destroyed by an accidental unassign.
@@ -987,7 +1035,7 @@ async def update_user_role(user_id: str, role: str, caller: V3UserOut = Depends(
         existing_branch_ids = {d.get("branch_id") for d in existing_docs}
         # A CONSULTANT needs exactly one record and it belongs to no branch; a Physio
         # needs one per branch they cover.
-        wanted = [None] if role in ORG_WIDE_ROLES else (user.get("branch_ids") or [user.get("branch_id")])
+        wanted = [None] if role in SINGLE_CALENDAR_ROLES else (user.get("branch_ids") or [user.get("branch_id")])
         for b_id in wanted:
             if b_id not in existing_branch_ids:
                 await v3_col("doctors").insert_one({
