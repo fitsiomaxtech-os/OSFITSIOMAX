@@ -56,11 +56,55 @@ ALL_BRANCHES_LABEL = "All Branches"
 # Ordered next to the role each is an alias of, because this list is what the Designation
 # and Create User dropdowns render, and a reader picking between them wants the family
 # together.
+# "hr_admin", "nutritionist" and "zumba" are fixed slugs here rather than roles somebody
+# types. All three were created by hand in Credentials, which meant the OS had to guess at
+# the wording — is_hr_role, is_diet_role and is_zumba_role in deps.py each match a bag of
+# tokens because of it, and this install still ended up with `diet_manage`, a slug the Diet
+# board was never written against, whose user logged in to a blank screen. They are
+# permanent desks in HR's structure, so they are named once here and matched exactly like
+# every other desk. The loose predicates stay as the safety net for accounts the migration
+# has not reached; migrate_designation_roles() in seed.py rewrites them.
+#
+# Ordered by the department each belongs to, because this list is what the Designation and
+# Create User dropdowns render, and HR's own structure groups them the same way.
 DEFAULT_ROLES = [
-    "super_admin", "business_dev", "pre_sales", "sales_head",
+    # Management
+    "super_admin", "super_admin_pro", "business_dev", "accountant", "hr_admin", "marketing_head",
+    # Sales Department
+    "sales_head", "pre_sales",
+    # Admins
     "branch_admin", "online_physio_admin", "online_fitness_admin",
-    "consultant", "online_consultant", "physio", "online_physio", "marketing_head", "accountant",
+    # Doctors
+    "consultant", "physio", "nutritionist", "online_consultant", "online_physio", "zumba",
 ]
+
+# The structure HR works to: every department, and the designations under it. Seeded
+# additively — a department already there is left exactly as it is, designations included,
+# because employees reference their department by name and renaming one out from under
+# them would strand the record. See ensure_structure_departments() in seed.py.
+STRUCTURE = {
+    "Management": [
+        "Super Admin", "Super Admin Pro", "Business Development Executive",
+        "Accountant", "HR Admin", "Marketing Head",
+    ],
+    "Admins": ["Branch Admin", "Online Physio Admin", "Online Fitness Admin"],
+    "Sales Department": ["Sales Head", "Pre- Sales"],
+    "Doctors ( Dr.'s )": [
+        "Consultant", "Physiotherapist", "Nutritionist",
+        "Online Consultant", "Online Physiotherapist", "Zumba",
+    ],
+}
+
+
+def structure_key(name) -> str:
+    """A department or designation name reduced to what makes it the same one.
+
+    Compared with punctuation and spacing thrown away, because these names were typed by
+    hand and the same department is "Doctors ( Dr.'s )" on one screen and "Doctors (Dr.'s)"
+    in a constant. Matching them literally is how a second copy of a department that
+    already exists gets created underneath the first.
+    """
+    return re.sub(r"[^a-z0-9]+", "", str(name or "").strip().lower())
 
 # Both consultant roles can be assigned to more than one branch (a linked `doctors`
 # record is kept in sync per branch) — every other role stays pinned to a single branch.
@@ -175,9 +219,27 @@ def expert_profile_type(role: str) -> str:
     return role
 
 
+# Three titles in STRUCTURE do not slugify to the role that already runs their desk:
+# "Business Development Executive" is business_dev, and the two physiotherapist titles are
+# physio and online_physio. Without this, minting a role per designation would create
+# business_development_executive and physiotherapist beside them — a second, permissionless
+# copy of a desk that already exists, offered in the same picker as the real one.
+DESIGNATION_ROLE_ALIASES = {
+    "business_development_executive": "business_dev",
+    "physiotherapist": "physio",
+    "online_physiotherapist": "online_physio",
+}
+
+
 def _slugify_role(label: str) -> str:
+    """The role slug a designation names.
+
+    A designation and a role are one thing here, so this is how a job title becomes the
+    thing an account is gated on. Aliases are resolved on the way out — see
+    DESIGNATION_ROLE_ALIASES for the three titles whose desk already has a shorter name.
+    """
     slug = re.sub(r"[^a-z0-9]+", "_", label.strip().lower()).strip("_")
-    return slug
+    return DESIGNATION_ROLE_ALIASES.get(slug, slug)
 
 
 async def _custom_roles() -> list:
@@ -196,15 +258,24 @@ async def _all_role_names() -> list:
     "Online Physio" is not a second role from "online_physio". The built-in spelling wins
     where both exist: it is the one the rest of the OS branches on.
     """
+    # The built-ins first and in their own order, which is HR's structure read top to
+    # bottom — Management, Sales, Admins, Doctors — because that is the order the person
+    # reading this picker knows the roles in. Anything left over is a role somebody typed,
+    # and those go after, alphabetically: they arrive in creation order otherwise, which is
+    # no order at all to the reader and is why the picker looked shuffled.
     seen = set()
-    names = []
-    for name in DEFAULT_ROLES + [r["name"] for r in await _custom_roles()]:
+    builtin = []
+    custom = []
+    for name, is_builtin in (
+        [(n, True) for n in DEFAULT_ROLES] + [(r["name"], False) for r in await _custom_roles()]
+    ):
         key = str(name or "").strip().lower().replace(" ", "_")
         if not key or key in seen:
             continue
         seen.add(key)
-        names.append(name)
-    return names
+        (builtin if is_builtin else custom).append(name)
+    custom.sort(key=lambda n: str(n or "").strip().lower())
+    return builtin + custom
 
 
 async def ensure_roles_for_designations() -> None:
@@ -331,7 +402,9 @@ class EmployeeCreate(BaseModel):
     designation: Optional[str] = ""
     # Neither is required — an employee can be tagged Online/Offline with no specific
     # branch picked yet, or left unset entirely.
-    work_type: Optional[str] = ""  # "online" | "offline" | ""
+    # "both" is the same kind of answer it is for service below — not a third mode, but
+    # the one that declines to narrow, so every branch of either mode is theirs.
+    work_type: Optional[str] = ""  # "online" | "offline" | "both" | ""
     # Which practice this person works. A branch's vertical is the two answers together —
     # offline_physiotherapy is work_type "offline" and service "physio" — so this is the
     # second axis of the same question, and the Branch picker narrows on both. "both" is

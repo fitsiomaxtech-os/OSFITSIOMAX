@@ -1,7 +1,7 @@
 import re
 import uuid
 from database import db, v2_col, v3_col
-from deps import HEAD_PHYSIO_ROLES, LEGACY_CONSULTANT_ROLES
+from deps import HEAD_PHYSIO_ROLES, LEGACY_CONSULTANT_ROLES, is_hr_role, is_diet_role, is_zumba_role
 from utils import now_iso, derive_branch_code, generate_patient_number
 from security import hash_password
 from constants import (
@@ -1047,6 +1047,137 @@ async def migrate_branch_admin_roles() -> None:
     Safe to re-run: after the first pass nothing matches the old slugs any more.
     """
     await _rename_role_slugs(BRANCH_ADMIN_ROLE_RENAMES)
+
+
+async def migrate_designation_roles() -> None:
+    """Move the desks that were typed by hand onto the fixed slugs HR's structure names.
+
+    HR Admin, Nutritionist and Zumba were never in DEFAULT_ROLES. Each was created by
+    whoever typed its title into Credentials, so the OS could not know the wording and had
+    to guess — is_hr_role, is_diet_role and is_zumba_role in deps.py each match a bag of
+    tokens for that reason. It still went wrong: this install ended up with `diet_manage`,
+    which the Diet board had never been written against, and that user logged in to a blank
+    screen until the predicate was widened to catch them.
+
+    They are permanent desks, so they are now named once in DEFAULT_ROLES and matched
+    exactly. This is the sweep that moves the accounts already holding a typed variant.
+
+    Super Admin is excluded explicitly and that exclusion is the whole safety of this
+    function: is_hr_role and is_diet_role both answer True for super_admin — deliberately,
+    since Super Admin may reach every board — so a rename driven off those predicates alone
+    would quietly demote the owner of the system to a Nutritionist.
+
+    A slug already in DEFAULT_ROLES is left alone for the same reason, or `physio` would be
+    swept up by nothing in particular the day somebody adds a token to a predicate.
+
+    Safe to re-run: after the first pass every account already holds a built-in slug, which
+    is the condition this skips on.
+    """
+    from routers.v3_hr import DEFAULT_ROLES
+
+    # Ordered: the first predicate that claims a slug wins, and they cannot overlap for
+    # anything reaching this point since Super Admin is already excluded.
+    desks = ((is_hr_role, "hr_admin"), (is_diet_role, "nutritionist"), (is_zumba_role, "zumba"))
+
+    def _target(role: str):
+        r = (role or "").strip().lower()
+        if not r or r == "super_admin" or r in DEFAULT_ROLES:
+            return None
+        for predicate, slug in desks:
+            if predicate(r):
+                return slug
+        return None
+
+    for role in await v3_col("users").distinct("role"):
+        target = _target(role)
+        if target:
+            await v3_col("users").update_many({"role": role}, {"$set": {"role": target}})
+
+    # The employee record carries the same slug as a designation on some installs, and the
+    # custom role behind it would otherwise keep offering the old wording in the picker
+    # DEFAULT_ROLES no longer lists it in.
+    for row in await v3_col("custom_roles").find({}, {"_id": 0}).to_list(500):
+        target = _target(_slug_of_role(row.get("name")))
+        if not target:
+            continue
+        await v3_col("employees").update_many(
+            {"designation": row.get("name")}, {"$set": {"designation": target}}
+        )
+        # Built-in now, so the custom row is a duplicate of it rather than a row to rename.
+        await v3_col("custom_roles").delete_one({"id": row["id"]})
+
+
+async def retire_aliased_designation_roles() -> None:
+    """Remove the roles minted for a designation whose desk already had a shorter name.
+
+    Three titles in HR's structure do not reduce to the slug that runs their desk —
+    "Business Development Executive" is business_dev, and the two physiotherapist titles
+    are physio and online_physio. Before DESIGNATION_ROLE_ALIASES existed,
+    ensure_roles_for_designations could not know that, so it minted one role per title and
+    the Credentials picker ended up offering BUSINESS DEVELOPMENT EXECUTIVE beside BUSINESS
+    DEV: the same desk twice, one of them holding no permissions at all, and nothing on
+    screen to say which was which.
+
+    The alias map stops it happening again. This is the sweep for the rows already there.
+
+    Accounts are moved before the role is deleted, not after, so nobody is left holding a
+    slug that no longer exists. They lose nothing — the minted role never carried any
+    permission, and the built-in it collapses onto is the one their board was gated on.
+
+    Safe to re-run: the second pass finds no rows left to move.
+    """
+    from routers.v3_hr import DESIGNATION_ROLE_ALIASES
+
+    for minted, real in DESIGNATION_ROLE_ALIASES.items():
+        await v3_col("users").update_many({"role": minted}, {"$set": {"role": real}})
+        await v3_col("employees").update_many(
+            {"designation": minted}, {"$set": {"designation": real}}
+        )
+        await v3_col("custom_roles").delete_many({"name": minted})
+
+
+async def ensure_structure_departments() -> None:
+    """Make sure HR's structure holds every department and designation the clinic works to.
+
+    Additive on purpose, twice over. A department already there keeps its designations —
+    an employee references their department and designation by name, so rewriting either
+    out from under them strands the record in a group that no longer exists, which is what
+    the Employees tab filters and the Department Strength bars count on.
+
+    So this only ever adds: a department that is missing, and a designation missing from a
+    department that already exists. Nothing is renamed, merged or removed — the old
+    departments stay until somebody empties them by hand and deletes them, which is a
+    decision about where people work rather than one a migration should take.
+
+    Safe to re-run: the second pass finds everything already present.
+    """
+    from routers.v3_hr import STRUCTURE, structure_key
+
+    existing = {
+        structure_key(d.get("name")): d
+        for d in await v3_col("hr_departments").find({}, {"_id": 0}).to_list(500)
+    }
+    now = now_iso()
+    for dept, titles in STRUCTURE.items():
+        row = existing.get(structure_key(dept))
+        if row is None:
+            await v3_col("hr_departments").insert_one({
+                "id": str(uuid.uuid4()),
+                "name": dept,
+                "designations": list(titles),
+                "created_at": now,
+            })
+            continue
+        # Compared case-insensitively: "Consultant" typed here yesterday is not a second
+        # designation from "CONSULTANT" in the list above, and adding it would put the same
+        # job in the department twice with no way to tell the rows apart.
+        have = {structure_key(t) for t in (row.get("designations") or [])}
+        fresh = [t for t in titles if structure_key(t) not in have]
+        if fresh:
+            await v3_col("hr_departments").update_one(
+                {"id": row["id"]},
+                {"$set": {"designations": (row.get("designations") or []) + fresh}},
+            )
 
 
 def _slug_of_role(label) -> str:

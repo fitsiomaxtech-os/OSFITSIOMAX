@@ -42,6 +42,26 @@ const PRACTICE_FITNESS = "fitness";
 const PRACTICE_BOTH = "both";
 const SERVICE_LABELS = { "": "Select", [PRACTICE_PHYSIO]: "Physio", [PRACTICE_FITNESS]: "Fitness", [PRACTICE_BOTH]: "Both" };
 
+// The other axis: which mode somebody works. "both" is the same kind of answer "both" is
+// for practice — not a third mode, but the one that declines to narrow.
+const MODE_ONLINE = "online";
+const MODE_OFFLINE = "offline";
+const MODE_BOTH = "both";
+const MODE_OPTIONS = [MODE_ONLINE, MODE_OFFLINE, MODE_BOTH];
+const MODE_LABELS = { [MODE_ONLINE]: "Online", [MODE_OFFLINE]: "Offline", [MODE_BOTH]: "Both" };
+
+/** The mode worth saying out loud, or null for the one that is not.
+ *
+ * Offline says nothing. It is what almost everybody at a clinic is, so a tag on each of
+ * them is a tag on the whole list — it marks nothing and costs a column. Online and Both
+ * are the exceptions, and an exception is the only thing a badge is any use for.
+ *
+ * Unset says nothing either, and deliberately reads the same as Offline here: both mean
+ * "no reason to flag this row". The difference between them is a question for the
+ * Employment tab, which asks it in a field with a name on it, not for a badge in a list.
+ */
+const modeBadge = (mode) => (mode === MODE_ONLINE || mode === MODE_BOTH ? MODE_LABELS[mode] : null);
+
 // Every default vertical is named "online_.../offline_..." — same helper as
 // Branches & Verticals' own mode tag, read off that prefix.
 const isOnlineVertical = (v) => String(v || "").startsWith("online_");
@@ -84,7 +104,13 @@ const verticalPractice = (v) => {
 
 const ROLE_META = {
   super_admin: { label: "SUPER ADMIN", classes: "border-purple-300 bg-purple-50 text-purple-700" },
-  business_dev: { label: "BUSINESS DEV", classes: "border-indigo-300 bg-indigo-50 text-indigo-700" },
+  // Purple's neighbour, the way every family here shifts one hue for its variant.
+  super_admin_pro: { label: "SUPER ADMIN PRO", classes: "border-violet-300 bg-violet-50 text-violet-700" },
+  hr_admin: { label: "HR ADMIN", classes: "border-rose-300 bg-rose-50 text-rose-700" },
+  // Retired wording. HR Admin is a fixed slug now — migrate_designation_roles in
+  // backend/seed.py rewrites whatever was typed.
+  human_resource: { label: "HR ADMIN", classes: "border-rose-300 bg-rose-50 text-rose-700", retired: true },
+  business_dev: { label: "BUSINESS DEVELOPMENT EXECUTIVE", classes: "border-indigo-300 bg-indigo-50 text-indigo-700" },
   pre_sales: { label: "PRE SALES", classes: "border-sky-300 bg-sky-50 text-sky-700" },
   // Sales Head shares Pre-Sales' own sky — it's the same desk's manager, not a role of
   // its own, so it wears the same hue rather than claiming a fresh one.
@@ -119,7 +145,13 @@ const ROLE_META = {
   // Blue against Physio's cyan is the same shift the family above makes from emerald to
   // teal: the base hue says which kind of role this is, and the neighbouring one says it
   // is the online arm of it.
-  online_physio: { label: "ONLINE PHYSIO", classes: "border-blue-300 bg-blue-50 text-blue-700" },
+  online_physio: { label: "ONLINE PHYSIOTHERAPIST", classes: "border-blue-300 bg-blue-50 text-blue-700" },
+  // Fixed slugs now rather than whatever was typed into Credentials — see DEFAULT_ROLES.
+  nutritionist: { label: "NUTRITIONIST", classes: "border-lime-300 bg-lime-50 text-lime-700" },
+  zumba: { label: "ZUMBA", classes: "border-fuchsia-300 bg-fuchsia-50 text-fuchsia-700" },
+  // Retired wordings, rewritten by migrate_designation_roles in backend/seed.py.
+  nutrition_coach: { label: "NUTRITIONIST", classes: "border-lime-300 bg-lime-50 text-lime-700", retired: true },
+  diet_manage: { label: "NUTRITIONIST", classes: "border-lime-300 bg-lime-50 text-lime-700", retired: true },
   marketing_head: { label: "MARKETING HEAD", classes: "border-pink-300 bg-pink-50 text-pink-700" },
   accountant: { label: "ACCOUNTANT", classes: "border-orange-300 bg-orange-50 text-orange-700" },
 };
@@ -410,6 +442,19 @@ const titleCase = (name) => {
 /** The key two spellings of one name share. */
 const nameKey = (name) => String(name || "").trim().toLowerCase().replace(/\s+/g, " ");
 
+/** The same job whether it arrives as a designation or as a role.
+ *
+ * Punctuation and spacing thrown away, because one side is a title somebody typed and the
+ * other is a slug: "Pre- Sales" and pre_sales are one job, and nameKey above reads them as
+ * two because an underscore is not a space.
+ *
+ * Compared against the role's LABEL rather than its slug, which is what makes the three
+ * aliased desks line up — business_dev is labelled BUSINESS DEVELOPMENT EXECUTIVE and
+ * online_physio is ONLINE PHYSIOTHERAPIST, exactly the titles HR's structure carries, so
+ * no second alias map is needed here to keep in step with the backend's.
+ */
+const jobKey = (name) => String(name || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+
 /**
  * One entry per name, whichever case each was typed in.
  *
@@ -478,20 +523,25 @@ const DesignationFilterSelect = ({ value, onChange, options, testid }) => (
  *  tab on Departments & Designation, so the two never drift into two different tables. */
 // Blank when work_type was never set — not every employee is tagged to a vertical, and an
 // empty cell says that plainly instead of a badge reading "Offline" for someone nobody
-// actually classified.
+// actually classified. Offline now reads the same way, for the reason in modeBadge: it is
+// what most of the list already is, so tagging it marks nobody out.
 const WorkTypeCell = ({ e }) => {
-  if (!e.work_type) return <span className="text-slate-300">—</span>;
-  const online = e.work_type === "online";
+  const badge = modeBadge(e.work_type);
+  if (!e.work_type && !e.service) return <span className="text-slate-300">—</span>;
   return (
     <div className="leading-tight">
-      <span className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-semibold ${online ? "bg-violet-50 text-violet-600" : "bg-emerald-50 text-emerald-600"}`}>
-        {online ? "Online" : "Offline"}
-      </span>
+      {badge && (
+        <span className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+          e.work_type === MODE_BOTH ? "bg-indigo-50 text-indigo-600" : "bg-violet-50 text-violet-600"
+        }`}>
+          {badge}
+        </span>
+      )}
       {/* The practice beside the mode, in the same slate every neutral tag here wears:
           the two together are the vertical, and reading them apart is what the Employment
           tab asks for. Absent for anybody nobody classified, like the mode itself. */}
       {e.service && (
-        <span className="ml-1 inline-flex rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">
+        <span className={`${badge ? "ml-1 " : ""}inline-flex rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600`}>
           {SERVICE_LABELS[e.service] || e.service}
         </span>
       )}
@@ -499,6 +549,45 @@ const WorkTypeCell = ({ e }) => {
     </div>
   );
 };
+
+/** Online / Offline / Both, set in place.
+ *
+ * Three buttons rather than a dropdown, because there are exactly three answers and a
+ * dropdown would hide two of them behind a click to show a value that is already one word
+ * long. Saved the moment it is pressed, like the branch beside it: this is a correction to
+ * a fact, not a form being filled, and an Apply button over one field is furniture.
+ *
+ * The mode that is already set stays pressable and simply does nothing, rather than being
+ * disabled — a disabled control in a row of three reads as unavailable, when what is true
+ * is that it is the current answer.
+ */
+const WorkModeToggle = ({ value, disabled, onPick, testid }) => (
+  <div
+    className="flex shrink-0 overflow-hidden rounded-md border border-slate-200"
+    role="group"
+    aria-label="Work mode"
+    data-testid={testid}
+  >
+    {MODE_OPTIONS.map((m) => {
+      const on = value === m;
+      return (
+        <button
+          key={m}
+          type="button"
+          disabled={disabled}
+          onClick={() => !on && onPick(m)}
+          aria-pressed={on}
+          className={`px-2 py-1 text-[11px] font-semibold transition disabled:opacity-50 ${
+            on ? "bg-slate-700 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
+          }`}
+          data-testid={`${testid}-${m}`}
+        >
+          {MODE_LABELS[m]}
+        </button>
+      );
+    })}
+  </div>
+);
 
 const EmployeeDirectory = ({ employees, onView }) => (
   <>
@@ -617,7 +706,10 @@ const EmployeesTab = ({ meta, initialFilter }) => {
     // Folded, so the one pill standing for a job finds everyone filed under any spelling
     // of it rather than the half that happen to match its capitals.
     if (designation && nameKey(e.designation) !== nameKey(designation)) return false;
-    if (workType && e.work_type !== workType) return false;
+    // Somebody who works both modes belongs to either filter: narrowing to Online is
+    // asking who can be seen online, and they can. Only the two narrow answers exclude
+    // each other.
+    if (workType && e.work_type !== workType && e.work_type !== MODE_BOTH) return false;
     if (!search) return true;
     const q = search.toLowerCase();
     return (e.full_name || "").toLowerCase().includes(q) || (e.email || "").toLowerCase().includes(q) || (e.employee_code || "").toLowerCase().includes(q);
@@ -674,7 +766,10 @@ const EmployeesTab = ({ meta, initialFilter }) => {
         ))}
       </div>
 
-      {/* Work Type row — same Online/Offline split as Branches & Verticals. */}
+      {/* Work Type row — same Online/Offline split as Branches & Verticals.
+          No Both pill, though Both is now an answer: somebody who works the two modes
+          already appears under each of these, so a third pill would list them a second
+          time rather than reach anybody the two cannot. */}
       <div className="flex flex-wrap items-center gap-2" data-testid="hr-emp-worktype-filter">
         <TabPill active={workType === ""} onClick={() => setWorkType("")} testid="hr-emp-worktype-filter-all">
           All
@@ -773,7 +868,7 @@ const EmployeeViewModal = ({ employee: e, onClose, onEdit, onDelete }) => (
             <ViewRow label="Employee Code" value={e.employee_code} />
             <ViewRow label="Department" value={e.department} />
             <ViewRow label="Designation" value={e.designation} />
-            <ViewRow label="Work Type" value={e.work_type ? (e.work_type === "online" ? "Online" : "Offline") : ""} />
+            <ViewRow label="Work Type" value={MODE_LABELS[e.work_type] || ""} />
             <ViewRow label="Service" value={e.service ? (SERVICE_LABELS[e.service] || e.service) : ""} />
             <ViewRow label="Branch" value={e.branch_name} />
             <ViewRow label="Joining Date" value={e.joining_date} />
@@ -981,7 +1076,12 @@ const AddEmployeeModal = ({ employee, meta, initialDepartment, initialDesignatio
   // the same reason — see verticalPractice.
   const branchOptions = useMemo(
     () => branches.filter((b) => {
-      if (isOnlineVertical(b.vertical) !== (form.work_type === "online")) return false;
+      // Mode narrows only when it has been answered narrowly, the same way practice does
+      // below: "both" is somebody who works online and in the room, so every branch of
+      // either mode is theirs and hiding half of them would be the filter answering a
+      // question they declined to narrow.
+      if (form.work_type && form.work_type !== MODE_BOTH
+          && isOnlineVertical(b.vertical) !== (form.work_type === MODE_ONLINE)) return false;
       if (!form.service || form.service === PRACTICE_BOTH) return true;
       const practice = verticalPractice(b.vertical);
       return practice === null || practice === form.service;
@@ -1131,7 +1231,7 @@ const AddEmployeeModal = ({ employee, meta, initialDepartment, initialDesignatio
                   a branch's vertical — mode and practice — and Branch narrows on both, the
                   same split Branches & Verticals itself uses. Branch still waits for a Work
                   Type: it is meaningless before that. */}
-              <Field label="Work Type"><Select value={form.work_type} onChange={changeWorkType} options={["", "online", "offline"]} testid="hr-emp-worktype" /></Field>
+              <Field label="Work Type"><Select value={form.work_type} onChange={changeWorkType} options={["", ...MODE_OPTIONS]} testid="hr-emp-worktype" /></Field>
               <Field label="Service">
                 <Select
                   value={form.service}
@@ -1214,82 +1314,6 @@ const UserBranch = ({ user }) => {
   );
 };
 
-/**
- * Filters the user list by role, in the same popover the date filter uses.
- *
- * The rows used to be painted one colour per role, which read as a palette to memorise
- * rather than a list to choose from — and a filter is a list. Neutral now: the chosen row
- * is the only thing marked, by weight and a tick, exactly as the pickers elsewhere do it.
- *
- * Searchable because this install has fourteen roles and counting, and a filter you have to
- * scroll is slower than the table it was meant to narrow.
- */
-const RoleFilterDropdown = ({ value, options, onChange }) => {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  // Cleared on close rather than on pick, which is the one moment a stale query would
-  // otherwise be sitting there the next time this opens.
-  useEffect(() => { if (!open) setQuery(""); }, [open]);
-
-  const q = query.trim().toLowerCase();
-  const rows = [{ value: "all", label: "ALL" }, ...options.map((r) => ({ value: r, label: roleLabel(r) }))];
-  const shown = q ? rows.filter((r) => r.label.toLowerCase().includes(q)) : rows;
-
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          variant="outline"
-          className={`h-10 ${value === "all" ? "" : "border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100"}`}
-          data-testid="hr-roles-role-filter"
-        >
-          {value === "all" ? "ALL" : roleLabel(value)}
-          <ChevronDown className="ml-2 h-3.5 w-3.5 opacity-60" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent className="relative w-56 p-0" align="end" data-testid="hr-roles-role-filter-list">
-        <button
-          type="button"
-          onClick={() => setOpen(false)}
-          className="absolute right-2 top-2 z-10 rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-          aria-label="Close"
-          data-testid="hr-roles-role-filter-close"
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>
-        <div className="border-b border-slate-100 p-2 pr-9">
-          <Input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search role..."
-            className="h-8 text-xs"
-            data-testid="hr-roles-role-filter-search"
-          />
-        </div>
-        <div className="max-h-64 overflow-y-auto py-1">
-          {shown.length === 0 && <p className="px-3 py-6 text-center text-xs text-slate-400">Nothing matches that.</p>}
-          {shown.map((r) => {
-            const on = r.value === value;
-            return (
-              <button
-                key={r.value}
-                type="button"
-                onClick={() => { onChange(r.value); setOpen(false); }}
-                className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs transition hover:bg-slate-100 ${
-                  on ? "font-bold text-slate-900" : "text-slate-600"
-                }`}
-                data-testid={`hr-roles-role-filter-option-${r.value}`}
-              >
-                <span className="truncate">{r.label}</span>
-                {on && <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-slate-500" />}
-              </button>
-            );
-          })}
-        </div>
-      </PopoverContent>
-    </Popover>
-  );
-};
 
 /**
  * The ROLE cell's picker: one neutral style for the closed box and every row, with the
@@ -1629,6 +1653,32 @@ const StructureTab = ({ meta, reloadMeta }) => {
     }
   };
 
+  /** Set which mode somebody works, from the row itself.
+   *
+   * The same PATCH-one-field shape as the branch controls above, and for the same reason:
+   * nothing else on the record is restated, so nothing else can be flattened by a copy of
+   * it that this screen has been holding since the page loaded.
+   *
+   * The branch is deliberately NOT cleared when the mode changes, though the Employment
+   * form narrows its branch list by mode and would no longer offer this one. Somebody
+   * marking an existing employee Online is saying what they do, not asking for their
+   * posting to be thrown away — and a branch silently emptied here would be noticed a week
+   * later by whoever could not find them.
+   */
+  const setWorkMode = async (emp, mode) => {
+    if (mode === (emp.work_type || "")) return;
+    setMovingEmployee(emp.id);
+    try {
+      await hrUpdateEmployee(emp.id, { work_type: mode });
+      setEmployees((prev) => prev.map((e) => (e.id === emp.id ? { ...e, work_type: mode } : e)));
+      toast.success(`${emp.full_name} → ${MODE_LABELS[mode]}`);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not change the work mode");
+    } finally {
+      setMovingEmployee("");
+    }
+  };
+
   /** How a set of branches reads on one line. Kept in step with list_employees in
    *  backend/routers/v3_hr.py, which builds the same label for the same set — the row is
    *  written here optimistically and read back from there on the next load, and the two
@@ -1934,15 +1984,40 @@ const StructureTab = ({ meta, reloadMeta }) => {
                               <p className="truncate text-sm font-medium text-slate-800">{emp.full_name}</p>
                               <p className="truncate text-[11px] text-slate-500">{emp.employee_code || "—"}</p>
                             </div>
+                            <WorkModeToggle
+                              value={emp.work_type}
+                              disabled={movingEmployee === emp.id}
+                              onPick={(m) => setWorkMode(emp, m)}
+                              testid={`hr-structure-mode-${emp.id}`}
+                            />
+                            {/* Online and Both are said here; Offline is not — see modeBadge.
+                                A fixed slot either way, so the badge beside it does not shift
+                                left and right down the column depending on who is online. */}
+                            <span className="w-14 shrink-0 text-right" data-testid={`hr-structure-mode-badge-${emp.id}`}>
+                              {modeBadge(emp.work_type) && (
+                                <span className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                                  emp.work_type === MODE_BOTH ? "bg-indigo-50 text-indigo-600" : "bg-violet-50 text-violet-600"
+                                }`}>
+                                  {modeBadge(emp.work_type)}
+                                </span>
+                              )}
+                            </span>
                             {/* Said as a word before it is offered as a control: the branch
                                 is the fact being read, and a bare dropdown makes somebody
                                 open it to find out what it already says. Amber when there
                                 is none, because an unposted employee is a gap rather than a
-                                neutral state. */}
+                                neutral state.
+
+                                One width for every row. These are right-aligned against the
+                                buttons, so a badge sized to its own text left a ragged edge
+                                running down the list — "ECR Branch" starting an inch further
+                                right than "Anna Nagar Branch" — and the eye reads that as
+                                two columns rather than one. */}
                             <span
-                              className={`shrink-0 rounded px-2 py-0.5 text-[11px] font-semibold ${
+                              className={`w-40 shrink-0 truncate rounded px-2 py-0.5 text-center text-[11px] font-semibold ${
                                 emp.branch_name ? "bg-sky-50 text-sky-700" : "bg-amber-50 text-amber-700"
                               }`}
+                              title={emp.branch_name || "No branch"}
                               data-testid={`hr-structure-branch-${emp.id}`}
                             >
                               {emp.branch_name || "No branch"}
@@ -2765,7 +2840,6 @@ const DesignationEmployeesModal = ({ designation, employees, departmentNames, on
 const RolesTab = ({ meta, reloadMeta }) => {
   const [users, setUsers] = useState([]);
   const [search, setSearch] = useState("");
-  const [roleFilter, setRoleFilter] = useState("all");
   // Same pill filters as the Employees tab, reading off each user's linked employee
   // record — a user with no linked employee (most Branch Admin/Pre-Sales accounts
   // still without one) simply won't match either filter.
@@ -2776,7 +2850,10 @@ const RolesTab = ({ meta, reloadMeta }) => {
   const [actionTarget, setActionTarget] = useState(null);
   const [view, setView] = useState("list"); // "list" | "branch"
 
-  const load = useCallback(() => hrUsers({ search, role: roleFilter !== "all" ? roleFilter : undefined }).then(setUsers).catch((e) => console.warn("[load failed]", e?.message || e)), [search, roleFilter]);
+  // No role parameter any more: the Designation pills do that job, and they narrow the rows
+  // already loaded rather than re-fetching. Search stays on the server, where it can reach
+  // a name this page has not loaded.
+  const load = useCallback(() => hrUsers({ search }).then(setUsers).catch((e) => console.warn("[load failed]", e?.message || e)), [search]);
   useEffect(() => { load(); }, [load]);
 
   const selectDept = (d) => { setDeptFilter(d); setDesignationFilter(""); };
@@ -2798,7 +2875,15 @@ const RolesTab = ({ meta, reloadMeta }) => {
   // — which is what a reader expects of a list that shows the job once.
   const filteredUsers = users.filter((u) => {
     if (deptFilter && nameKey(u.linked_employee?.department) !== nameKey(deptFilter)) return false;
-    if (designationFilter && nameKey(u.linked_employee?.designation) !== nameKey(designationFilter)) return false;
+    // Designation OR role. The designation is on the employee record, and plenty of
+    // accounts have no employee behind them — most Branch Admin and Pre-Sales logins still
+    // do not — so reading only that left them matching no pill at all. Their role says the
+    // same thing the designation would have, and a designation IS a role here, so the one
+    // pill answers for both. This is what the separate role filter used to be for.
+    if (designationFilter) {
+      const want = jobKey(designationFilter);
+      if (jobKey(u.linked_employee?.designation) !== want && jobKey(roleLabel(u.role)) !== want) return false;
+    }
     return true;
   });
 
@@ -2953,7 +3038,6 @@ const RolesTab = ({ meta, reloadMeta }) => {
         >
           {sortAZ === "desc" ? "Z → A" : "A → Z"}
         </button>
-        <RoleFilterDropdown value={roleFilter} options={meta.roles} onChange={setRoleFilter} />
         <Input placeholder="Search name or email..." value={search} onChange={(e) => setSearch(e.target.value)} className="w-full" data-testid="hr-roles-search-mobile" />
         <Button onClick={() => setShowCreate(true)} className="flex-1 bg-sky-600 hover:bg-sky-700" data-testid="hr-roles-create-btn-mobile"><UserPlus className="h-4 w-4 mr-1" />Create User</Button>
       </div>
@@ -3007,7 +3091,6 @@ const RolesTab = ({ meta, reloadMeta }) => {
               {sortAZ === "desc" ? "Z → A" : "A → Z"}
             </button>
             <Input placeholder="Search name or email..." value={search} onChange={(e) => setSearch(e.target.value)} className="w-64" data-testid="hr-roles-search" />
-            <RoleFilterDropdown value={roleFilter} options={meta.roles} onChange={setRoleFilter} />
             <Button onClick={() => setShowCreate(true)} className="bg-sky-600 hover:bg-sky-700" data-testid="hr-roles-create-btn"><UserPlus className="h-4 w-4 mr-1" />Create User</Button>
           </div>
         </CardHeader>

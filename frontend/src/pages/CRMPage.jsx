@@ -73,7 +73,11 @@ import { FeedbackBoard } from "@/components/branch/FeedbackBoard";
 
 const ROLE_META = {
   super_admin: { label: "Super Admin", icon: ShieldCheck },
-  business_dev: { label: "Business Development", icon: Briefcase },
+  // Assignable, but gated on nothing yet: what a Pro may not do has still to be decided,
+  // and a permission set guessed at here would be the wrong way round to find out. Until
+  // then it reaches no board — see DEFAULT_ROLES in backend/routers/v3_hr.py.
+  super_admin_pro: { label: "Super Admin Pro", icon: ShieldCheck },
+  business_dev: { label: "Business Development Executive", icon: Briefcase },
   pre_sales: { label: "Pre Sales", icon: Headphones },
   sales_head: { label: "Sales Head", icon: Headphones },
   marketing_head: { label: "Marketing Head", icon: Megaphone },
@@ -99,13 +103,20 @@ const ROLE_META = {
   // reached still renders with a name instead of a raw slug.
   head_physio: { label: "Consultant", icon: Stethoscope },
   online_head_physio: { label: "Online Consultant", icon: Stethoscope },
-  physio: { label: "Physio", icon: Activity },
-  online_physio: { label: "Online Physio", icon: Activity },
+  physio: { label: "Physiotherapist", icon: Activity },
+  online_physio: { label: "Online Physiotherapist", icon: Activity },
   accountant: { label: "Accountant", icon: BadgeIndianRupee },
-  human_resource: { label: "Human Resource", icon: UserPlus },
+  hr_admin: { label: "HR Admin", icon: UserPlus },
+  // Retired wording, rewritten by migrate_designation_roles in backend/seed.py. Kept so an
+  // account the migration has not reached still renders with a name, not a raw slug.
+  human_resource: { label: "HR Admin", icon: UserPlus },
   // Nutritionist names the person; Diet stays the name of the service they run, which
   // is why the Diet Consultation stage, the Diet calendar and the diet fees keep theirs.
+  nutritionist: { label: "Nutritionist", icon: Salad },
+  zumba: { label: "Zumba", icon: Salad },
+  // Retired wordings, same reason as HR Admin above.
   nutrition_coach: { label: "Nutritionist", icon: Salad },
+  diet_manage: { label: "Nutritionist", icon: Salad },
 };
 
 /** Whether a role slug should land on the recruitment board.
