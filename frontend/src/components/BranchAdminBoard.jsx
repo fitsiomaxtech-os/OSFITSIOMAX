@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Calendar,
   CheckCircle2,
+  ArrowLeftRight,
   RefreshCw,
   ClipboardCheck,
   ChevronLeft,
@@ -1507,6 +1508,16 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
   const [activityLog, setActivityLog] = useState([]);
 
   const [apptDraft, setApptDraft] = useState(null); // { appointment_date, appointment_time, physio_id, notes, final_stage, duration } | null
+  // Handing a booked appointment to a different CONSULTANT without moving it.
+  //
+  // The appointment dialog can already do this, but only the long way round: picking an
+  // expert clears the time, and the times it then offers are the ones that expert has
+  // published. So a consultant ringing to say "I am free at 1:45, give me that one" cannot
+  // be obliged unless they happen to have published 1:45 — even though the booking
+  // endpoint has never required a published slot, only that nobody else holds it.
+  //
+  // null | { leadId, date, time, duration, currentId, currentName, options, loading, saving }
+  const [handover, setHandover] = useState(null);
   const [apptExperts, setApptExperts] = useState({ experts: [], available_count: 0, busy_count: 0, loading: false });
   // Month shown by the popup's own calendar. Held apart from the picked date so paging
   // through months doesn't disturb the booking being built.
@@ -1539,6 +1550,59 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
   // "Move to Stage" popup for Follow Up (mirrors Appointment Date & Time's popup pattern)
   const [followUpMoveDraft, setFollowUpMoveDraft] = useState(null); // { date, time, remarks } | null
   const [followUpMoveBusy, setFollowUpMoveBusy] = useState(false);
+
+  /** Who could take this exact slot, and hand it to one of them.
+   *
+   * available-experts is asked with the time, which is the form that returns everyone not
+   * already booked then rather than everyone who has published it — the distinction the
+   * booking endpoint itself has always drawn. lead_id is passed so this lead's own booking
+   * does not read as a clash against the consultant currently holding it.
+   */
+  const openHandover = async (l) => {
+    setHandover({
+      leadId: l.id,
+      date: l.appointment_date,
+      time: l.appointment_time,
+      duration: l.appointment_duration || null,
+      currentId: l.assigned_physio_id || "",
+      currentName: l.assigned_physio_name || "",
+      options: [],
+      loading: true,
+      saving: false,
+    });
+    try {
+      const res = await getAvailableExperts(branchId, l.appointment_date, l.appointment_time, l.id);
+      setHandover((p) => (p ? { ...p, options: res.experts || [], loading: false } : p));
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not load consultants");
+      setHandover((p) => (p ? { ...p, loading: false } : p));
+    }
+  };
+
+  const confirmHandover = async (doc) => {
+    if (!handover || doc.id === handover.currentId) { setHandover(null); return; }
+    setHandover((p) => ({ ...p, saving: true }));
+    try {
+      // The same call that books one, re-posted with the date and time untouched. Its own
+      // clash check is what makes this safe: it refuses if somebody else already holds the
+      // slot with the consultant being handed to.
+      await scheduleBranchAppointment(handover.leadId, {
+        appointment_date: handover.date,
+        appointment_time: handover.time,
+        physio_id: doc.id,
+        final_stage: "Appointment Date & Time",
+        ...(handover.duration ? { duration: handover.duration } : {}),
+      });
+      toast.success(`${handover.time} moved to ${doc.full_name}`);
+      setHandover(null);
+      // The modal's own refresh prop, not the board's handler — that one is not in scope
+      // here and would be a stale closure over a different selectedLead if it were.
+      await onUpdate?.();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not change the consultant");
+      setHandover((p) => (p ? { ...p, saving: false } : p));
+    }
+  };
 
   const fetchAvailableExperts = useCallback(async (branch, dateStr, leadId) => {
     if (!branch || !dateStr) return;
@@ -1787,7 +1851,23 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
                     <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700"><UserPlus className="h-4 w-4" /></span>
                     <p className="text-xs font-bold uppercase tracking-wider text-emerald-700">Assigned Jr. Physio</p>
                   </div>
-                  <p className="px-4 py-3 text-sm font-medium text-slate-800">{lead.assigned_physio_name}</p>
+                  <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
+                    <p className="min-w-0 truncate text-sm font-medium text-slate-800">{lead.assigned_physio_name}</p>
+                    {/* Only where there is a booked slot to hand over. Without a date and a
+                        time this is a reassignment with nothing to reassign, and the
+                        appointment dialog is the right place to make one. */}
+                    {lead.appointment_date && lead.appointment_time && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 shrink-0 text-[11px]"
+                        onClick={() => openHandover(lead)}
+                        data-testid={`appt-handover-open-${lead.id}`}
+                      >
+                        <ArrowLeftRight className="mr-1 h-3 w-3" /> Change
+                      </Button>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -2013,6 +2093,70 @@ function BranchLeadModal({ lead, branchId, stages, consultationStages, onClose, 
       </div>
 
       {/* Appointment Date & Time Popup */}
+      {handover && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
+          onClick={(e) => { if (e.target === e.currentTarget && !handover.saving) setHandover(null); }}
+          data-testid="appt-handover-modal"
+        >
+          <div className="flex max-h-[80vh] w-full max-w-md flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
+            <div className="shrink-0 border-b border-slate-200 px-4 py-3">
+              <h3 className="text-sm font-semibold text-slate-900">Change consultant</h3>
+              {/* The slot is stated and not offered for editing: this hands the same
+                  appointment to somebody else, and moving it is what the appointment
+                  dialog is for. */}
+              <p className="mt-0.5 text-xs text-slate-500">
+                {weekdayLabel(handover.date)} · {to12h(handover.time)}
+                {handover.currentName ? <> — currently <b className="text-slate-700">{handover.currentName}</b></> : null}
+              </p>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto p-2">
+              {handover.loading && <p className="py-8 text-center text-sm text-slate-400">Loading…</p>}
+              {!handover.loading && handover.options.length === 0 && (
+                <p className="px-3 py-8 text-center text-sm text-slate-400">
+                  Every consultant is already booked at this time.
+                </p>
+              )}
+              {!handover.loading && handover.options.map((doc) => {
+                const mine = doc.id === handover.currentId;
+                // Published means they had already opened this time; the rest can still
+                // take it, which is the whole point of asking here rather than in the
+                // slot picker.
+                const published = (doc.free_slots || []).some((sl) => sl.time === handover.time);
+                return (
+                  <button
+                    key={doc.id}
+                    type="button"
+                    disabled={handover.saving || mine}
+                    onClick={() => confirmHandover(doc)}
+                    className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition disabled:opacity-60 ${mine ? "bg-slate-50" : "hover:bg-sky-50"}`}
+                    data-testid={`appt-handover-pick-${doc.id}`}
+                  >
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-600">
+                      {(doc.full_name || "?").charAt(0).toUpperCase()}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium text-slate-800">{doc.full_name}</span>
+                      <span className="block truncate text-[11px] text-slate-500">
+                        {mine ? "Currently holds this appointment" : published ? "Free — this time is on their calendar" : "Free — not on their calendar, but nothing is booked"}
+                      </span>
+                    </span>
+                    {mine && <span className="shrink-0 rounded bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-600">NOW</span>}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="shrink-0 border-t border-slate-200 px-4 py-2.5 text-right">
+              <Button variant="outline" size="sm" disabled={handover.saving} onClick={() => setHandover(null)} data-testid="appt-handover-cancel">
+                {handover.saving ? "Saving…" : "Cancel"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {apptDraft && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-2 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) setApptDraft(null); }} data-testid="branch-appt-modal">
           {/* A card, like every other popup here, but a tall one — three booking steps
