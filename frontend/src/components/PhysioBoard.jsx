@@ -1547,11 +1547,36 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
     // record beyond them — a review raised at day 14 stays on the list if a day is later
     // reopened and the count drops back under it.
     const highest = Math.max(reached, ...[...byNumber.keys()], 0);
-    return Array.from({ length: highest }, (_, i) => {
+    const rows = Array.from({ length: highest }, (_, i) => {
       const number = i + 1;
-      return { number, lastDay: number * reviewEvery, review: byNumber.get(number) || null };
+      return {
+        number,
+        firstDay: (number - 1) * reviewEvery + 1,
+        lastDay: number * reviewEvery,
+        review: byNumber.get(number) || null,
+        isFinal: false,
+      };
     });
-  }, [sessions, reviews, reviewEvery]);
+    // The days a course of whole weeks leaves over. Ten days reaches one milestone, at
+    // day 7, and then stops -- days 8, 9 and 10 belong to no week and had nothing to be
+    // due about, so the course finished with its last days never written up. A course
+    // shorter than a week had no milestone at all and was never reviewed once.
+    //
+    // Only once every day is done: until then those are days still being worked, and the
+    // next whole week is when to read them. Matches _review_eligibility on the server,
+    // which decides whether the review can actually be raised.
+    if (allDaysDone && done > highest * reviewEvery) {
+      const number = highest + 1;
+      rows.push({
+        number,
+        firstDay: highest * reviewEvery + 1,
+        lastDay: done,
+        review: byNumber.get(number) || null,
+        isFinal: true,
+      });
+    }
+    return rows;
+  }, [sessions, reviews, reviewEvery, allDaysDone]);
 
   // The lowest still-open day before a given one, or null when it is next in line. The
   // server refuses out-of-order completion too; this is so the button can say why before
@@ -1827,7 +1852,10 @@ function ConsultationDetailModal({ lead, physioId, activeDate, onClose, onDone }
                       <p className={`flex items-center gap-1.5 text-[11px] font-semibold ${t.text}`}>
                         <look.Icon className="h-3.5 w-3.5 shrink-0" />
                         <span>
-                          Week {m.number} review · days {m.lastDay - reviewEvery + 1}–{m.lastDay}
+                          {/* A closing review covers what is left rather than a week, and
+                              may be a single day, so it is named for what it is and reads
+                              its range off the milestone instead of assuming seven. */}
+                          {m.isFinal ? "Final review" : `Week ${m.number} review`} · day{m.lastDay > m.firstDay ? "s" : ""} {m.firstDay}{m.lastDay > m.firstDay ? `–${m.lastDay}` : ""}
                           <span className={`ml-1 font-normal ${t.soft}`}>
                             {look.line}{on ? ` · ${on}` : ""}
                           </span>

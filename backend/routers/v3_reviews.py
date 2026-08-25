@@ -111,16 +111,49 @@ async def _first_session_date(lead_id: str) -> Optional[str]:
     return min(dates) if dates else None
 
 
+async def _finished_course_ids(lead_ids: List[str]) -> set:
+    """Of these patients, the ones with no day of treatment left to attend.
+
+    Both tracks have to be done, not the further-along one: a patient whose treatment
+    days are all completed while rehab days are still to come has not finished their
+    course, and closing the book then would close one still being written in.
+
+    At least one day has to have existed. A patient with none booked has not finished a
+    course, they have not started one.
+
+    Two aggregations for the whole list rather than two queries per patient -- the Review
+    tab asks this about every patient a physio has, and per-patient counting would open
+    that tab with a round trip each.
+    """
+    booked: dict = {}
+    still_open: set = set()
+    for name in ("sessions", "rehab_sessions"):
+        rows = await v3_col(name).aggregate([
+            {"$match": {"lead_id": {"$in": lead_ids}}},
+            {"$group": {
+                "_id": "$lead_id",
+                "booked": {"$sum": 1},
+                "open": {"$sum": {"$cond": [{"$eq": ["$status", "completed"]}, 0, 1]}},
+            }},
+        ]).to_list(20000)
+        for r in rows:
+            booked[r["_id"]] = booked.get(r["_id"], 0) + r["booked"]
+            if r["open"]:
+                still_open.add(r["_id"])
+    return {lid for lid, n in booked.items() if n > 0 and lid not in still_open}
+
+
 def _shape(rev: dict) -> dict:
     return {k: v for k, v in rev.items() if k != "_id"}
 
 
-def _review_eligibility(existing_for_lead: List[dict], treatment_days: int) -> dict:
+def _review_eligibility(existing_for_lead: List[dict], treatment_days: int, course_finished: bool = False) -> dict:
     """A new review becomes raisable every REVIEW_AFTER_DAYS treatment days — 7, 14, 21,
     28... not just "7 or more" — so a 28-session package gets exactly 4 review points,
     one per completed week of treatment, rather than staying permanently "due" past day 7.
 
-    milestone: the highest 7-multiple reached so far (0 if none yet).
+    milestone: the highest 7-multiple reached so far (0 if none yet), or the final day
+    count once the course is over and its last days fall short of another whole week.
     review_number: which review this is — 1st at day 7, 2nd at day 14, etc.
     eligible: whether a *new* review can be raised right now.
     review: the review relevant to explain the current (non-eligible) state — an open
@@ -129,6 +162,18 @@ def _review_eligibility(existing_for_lead: List[dict], treatment_days: int) -> d
     """
     milestone = (treatment_days // REVIEW_AFTER_DAYS) * REVIEW_AFTER_DAYS
     review_number = milestone // REVIEW_AFTER_DAYS if milestone else 0
+
+    # The days a whole-week rule leaves out. A ten-day course reaches one milestone, at
+    # day 7, and then ends: days 8, 9 and 10 belong to no week, nothing about them was
+    # ever raisable, and the course closed with its last three days never looked at. A
+    # course shorter than a week reached no milestone at all and was never reviewed once.
+    #
+    # Only once the course is over. Mid-course, days past the last milestone are days
+    # still being worked, and the next whole week is the right moment to read them --
+    # this is the closing review, not an early one.
+    if course_finished and treatment_days > milestone:
+        milestone = treatment_days
+        review_number += 1
 
     open_review = next((r for r in existing_for_lead if r.get("status") in (SEND_TO_REVIEW, SENT)), None)
     if open_review:
@@ -171,10 +216,11 @@ async def physio_reviews(
     for r in existing:
         by_lead.setdefault(r["lead_id"], []).append(r)
 
+    finished = await _finished_course_ids(lead_ids)
     patients = []
     for l in leads:
         days = await _treatment_days(l["id"])
-        elig = _review_eligibility(by_lead.get(l["id"], []), days)
+        elig = _review_eligibility(by_lead.get(l["id"], []), days, l["id"] in finished)
         rev = elig["review"]
         patients.append({
             "lead_id": l["id"],
@@ -210,7 +256,7 @@ async def physio_raise_review(
     lead = await _lead_or_404(lead_id)
     existing_for_lead = await v3_col("reviews").find({"lead_id": lead_id}, {"_id": 0}).to_list(50)
     days = await _treatment_days(lead_id)
-    elig = _review_eligibility(existing_for_lead, days)
+    elig = _review_eligibility(existing_for_lead, days, lead_id in await _finished_course_ids([lead_id]))
     if not elig["eligible"]:
         if elig["review"] and elig["review"].get("status") in (SEND_TO_REVIEW, SENT):
             raise HTTPException(status_code=409, detail="This patient already has a review in progress")
