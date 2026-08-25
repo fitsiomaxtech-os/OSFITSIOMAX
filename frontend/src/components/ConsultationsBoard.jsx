@@ -795,6 +795,25 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // Closed whenever a different patient is opened: a Diet card left standing would
   // otherwise read as the new patient's, with the previous one's figures still in it.
   useEffect(() => { setProgrammeDetail("own"); }, [selectedLead?.id]);
+
+  // Whether this patient is at the point where paperwork gates the money, and whether it
+  // is on file. Computed up here rather than inside the stage panel because the panel is
+  // rendered inside a branch, and both the effect below and the tab row need the answer.
+  const docsGateOpen = (
+    selectedLead?.[stageField] === "Consultation Visit"
+    && (leadDocCount || 0) === 0
+    && selectedLead?.package_paid == null
+  );
+
+  // Opens on Documents while that gate is shut. The panel used to open on Collect Fees
+  // with the collect button dead in it, which is a screen that asks for something and
+  // refuses it in the same breath; the first thing on screen should be the thing that can
+  // actually be done. Waits for the count to arrive — leadDocCount is null until then, and
+  // jumping tabs on a guess would move somebody off a step they had already finished.
+  useEffect(() => {
+    if (leadDocCount === null) return;
+    if (docsGateOpen) setProgrammeDetail("documents");
+  }, [selectedLead?.id, leadDocCount, docsGateOpen]);
   const [assignTrack, setAssignTrack] = useState("treatment"); // "treatment" | "rehab"
   const [physioOptions, setPhysioOptions] = useState([]);
   const [physioPick, setPhysioPick] = useState("");
@@ -3429,11 +3448,15 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // tab on this row so the selected one always looks the same, whichever it is.
   const TAB_ON = "border-sky-600 bg-sky-600 text-white shadow-sm hover:bg-sky-700 hover:text-white";
 
-  const OwnTab = ({ label, short, icon: TabIcon, active }) => (
+  const OwnTab = ({ label, short, icon: TabIcon, active, locked = false, lockedTitle }) => (
                 <Button
                   size="sm"
                   variant="outline"
-                  className={`${programmeDetail === "own" ? active : "border-slate-200 bg-white/70 text-slate-600 hover:bg-white"} ${ACT_BTN}`}
+                  disabled={locked}
+                  title={locked ? lockedTitle : undefined}
+                  className={`${locked
+                    ? "border-slate-200 bg-slate-50 text-slate-400"
+                    : programmeDetail === "own" ? active : "border-slate-200 bg-white/70 text-slate-600 hover:bg-white"} ${ACT_BTN}`}
                   onClick={() => openDetail("own")}
                   data-testid="cons-open-own-detail"
                 >
@@ -3723,7 +3746,17 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             <FileText className="mr-1 h-3.5 w-3.5" />
                             <Lbl full={hasDocs ? `Documents (${leadDocCount})` : "Documents — required"} short="Docs" />
                           </Button>
-                          {showOwnTab && <OwnTab label={alreadyPaid ? "Payment" : "Collect Fees"} short="Fees" icon={IndianRupee} active={TAB_ON} />}
+                          {/* Shut until the scan is filed. This tab used to open on a
+                              payment it would not take, which is a screen that asks for
+                              something and refuses it in the same breath. */}
+                          {showOwnTab && <OwnTab
+                            label={alreadyPaid ? "Payment" : "Collect Fees"}
+                            short="Fees"
+                            icon={IndianRupee}
+                            active={TAB_ON}
+                            locked={docsRequired && !hasDocs && !alreadyPaid}
+                            lockedTitle="Upload the consultation paperwork first"
+                          />}
                           {DietDetailButton}
                           {RehabDetailButton}
                           {CancelButton}
