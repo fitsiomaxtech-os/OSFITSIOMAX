@@ -3410,6 +3410,18 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 </Button>
               ) : null;
 
+              // A panel's own tab is only a tab when there is somewhere else to go. On a
+              // patient with no diet and no rehab it was a tab bar of one: a button that
+              // takes you to the view you are already looking at, sitting in the row above
+              // the button that does the panel's actual work -- so Fee Collected showed
+              // "Assign Physio" up top and "Reassign Physio" below, and only one of them
+              // assigned anybody.
+              //
+              // The second half is what keeps it safe. Off the own view -- Documents is
+              // reachable with no diet and no rehab in sight -- this tab is the only way
+              // back, so it returns the moment it is the way back rather than a no-op.
+              const showOwnTab = !!(DietDetailButton || RehabDetailButton) || programmeDetail !== "own";
+
               // The tab for a panel's own stage. Each panel names it for what it holds —
               // "Assign Physio" on Fee Collected — because "Overview" would tell the reader
               // nothing about which of the three views they are on.
@@ -3711,7 +3723,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             <FileText className="mr-1 h-3.5 w-3.5" />
                             <Lbl full={hasDocs ? `Documents (${leadDocCount})` : "Documents — required"} short="Docs" />
                           </Button>
-                          <OwnTab label={alreadyPaid ? "Payment" : "Collect Fees"} short="Fees" icon={IndianRupee} active={TAB_ON} />
+                          {showOwnTab && <OwnTab label={alreadyPaid ? "Payment" : "Collect Fees"} short="Fees" icon={IndianRupee} active={TAB_ON} />}
                           {DietDetailButton}
                           {RehabDetailButton}
                           {CancelButton}
@@ -3964,7 +3976,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       tabs={
                         <>
                           {FeeActions}
-                          {treatmentPaid && <OwnTab label="Assign Physio" short="Physio" icon={Users} active="border-violet-600 bg-violet-600 text-white shadow-sm hover:bg-violet-700 hover:text-white" />}
+                          {treatmentPaid && showOwnTab && <OwnTab label="Assign Physio" short="Physio" icon={Users} active="border-violet-600 bg-violet-600 text-white shadow-sm hover:bg-violet-700 hover:text-white" />}
                           {DietDetailButton}
                           {RehabDetailButton}
                           {CancelButton}
@@ -4060,7 +4072,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       )}
                       tabs={
                         <>
-                          <OwnTab label={assigned ? "Treatment" : "Assign Physio"} short="Physio" icon={Users} active="border-violet-600 bg-violet-600 text-white shadow-sm hover:bg-violet-700 hover:text-white" />
+                          {showOwnTab && <OwnTab label={assigned ? "Treatment" : "Assign Physio"} short="Physio" icon={Users} active="border-violet-600 bg-violet-600 text-white shadow-sm hover:bg-violet-700 hover:text-white" />}
                           {DietDetailButton}
                           {RehabDetailButton}
                           {CancelButton}
