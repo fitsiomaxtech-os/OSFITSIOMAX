@@ -23,6 +23,12 @@ def _is_online_vertical(vertical) -> bool:
     return str(vertical or "").startswith("online_")
 
 
+# What one tender in a split installment is allowed to be. The same four the Treatment
+# Fee itself splits across in v3_packages.py: money that settles today, which a cheque
+# does not.
+SPLIT_TENDER_MODES = ("cash", "upi", "card", "account_transfer")
+
+
 router = APIRouter(prefix="/api/v3")
 
 
@@ -1522,12 +1528,40 @@ async def mark_installment_paid(
     if payload.payment_mode:
         mode = payload.payment_mode
         amount = payload.amount if payload.amount is not None else installments[idx].get("amount", 0)
+        # One installment paid half in cash and half by UPI -- the same split the fee
+        # itself can arrive in, and the same rules: every tender settles today, the
+        # server sums them rather than trusting a total sent beside them, and the mode
+        # on the record reads "split" because naming either half would be half a lie.
+        lines = payload.payment_lines or []
+        if lines:
+            for line in lines:
+                if line.mode not in SPLIT_TENDER_MODES:
+                    raise HTTPException(status_code=400, detail=f"A split payment accepts: {sorted(SPLIT_TENDER_MODES)}")
+                if line.amount is None or line.amount <= 0:
+                    raise HTTPException(status_code=400, detail="Every payment in a split must be more than zero")
+            lines_total = round(sum(line.amount for line in lines), 2)
+            if payload.amount is not None and abs(payload.amount - lines_total) > 0.01:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"The payments add up to Rs.{lines_total:g}, but the installment being collected is Rs.{payload.amount:g}",
+                )
+            amount = lines_total
+            mode = "split"
         if amount <= 0:
             raise HTTPException(status_code=400, detail="Amount must be greater than zero")
 
         mode_fields = {}
         detail_suffix = ""
-        if mode == "upi":
+        if lines:
+            mode_fields = {"payment_lines": [
+                {"mode": ln.mode, "amount": ln.amount, "reference": (ln.reference or "").strip()}
+                for ln in lines
+            ]}
+            detail_suffix = " · Split: " + ", ".join(
+                f"Rs.{ln.amount:g} {ln.mode}" + (f" ({ln.reference.strip()})" if (ln.reference or "").strip() else "")
+                for ln in lines
+            )
+        elif mode == "upi":
             # UTR is named in the log only when there is one. The Collect popups stopped
             # asking for it, so the old unconditional line wrote "UTR " with nothing after
             # it onto every installment collected from here.

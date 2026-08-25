@@ -559,6 +559,18 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
     (assign-consultation-physio), not an automatic side effect of payment."""
     if payload.payment_mode not in TREATMENT_FEE_PAYMENT_MODES:
         raise HTTPException(status_code=400, detail=f"Treatment Fee only accepts: {sorted(TREATMENT_FEE_PAYMENT_MODES)}")
+    # A fee that arrived in more than one piece -- see V3PaymentLineInput. Every tender
+    # has to be money that settles today: a cheque clears when it clears, and Partial
+    # Payment is a plan for later, so neither can be half of what was taken now.
+    lines = payload.payment_lines or []
+    if lines:
+        if payload.payment_mode not in SETTLED_NOW_MODES:
+            raise HTTPException(status_code=400, detail="A split settles now — Cheque and Partial Payment go in as a single payment")
+        for line in lines:
+            if line.mode not in SETTLED_NOW_MODES:
+                raise HTTPException(status_code=400, detail=f"A split payment accepts: {sorted(SETTLED_NOW_MODES)}")
+            if line.amount is None or line.amount <= 0:
+                raise HTTPException(status_code=400, detail="Every payment in a split must be more than zero")
     lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -591,7 +603,21 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
     computed_amount = round(sessions_now * per_session_rate, 2) if total_sessions else original_price
 
     if payload.payment_mode in SETTLED_NOW_MODES:
-        amount = payload.amount if payload.amount is not None else computed_amount
+        if lines:
+            # Summed from the tenders rather than taken alongside them. Two numbers for
+            # one sum is one too many: they can only ever disagree, and the parts are
+            # what was actually handed over.
+            amount = round(sum(line.amount for line in lines), 2)
+            # Still checked against what the screen was collecting, so a total that
+            # drifted from the fee on display is refused rather than quietly banked --
+            # and the discount worked out against that fee stays honest with it.
+            if payload.amount is not None and abs(payload.amount - amount) > 0.01:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"The payments add up to Rs.{amount:g}, but the fee being collected is Rs.{payload.amount:g}",
+                )
+        else:
+            amount = payload.amount if payload.amount is not None else computed_amount
         if amount <= 0:
             raise HTTPException(status_code=400, detail="Amount must be greater than zero")
     elif payload.payment_mode == "cheque":
@@ -622,7 +648,18 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
     payment_details = {}
     detail_suffix = ""
     installments = []
-    if payload.payment_mode == "upi":
+    if lines:
+        # Each tender kept whole, in the order it was entered, so a receipt or a query
+        # months later can still say which part of the fee came in which way.
+        payment_details = {"payment_lines": [
+            {"mode": ln.mode, "amount": ln.amount, "reference": (ln.reference or "").strip()}
+            for ln in lines
+        ]}
+        detail_suffix = " · Split: " + ", ".join(
+            f"Rs.{ln.amount:g} {ln.mode}" + (f" ({ln.reference.strip()})" if (ln.reference or "").strip() else "")
+            for ln in lines
+        )
+    elif payload.payment_mode == "upi":
         # Transaction id alone. The Treatment Fee's UPI popup stopped asking for a UTR,
         # and a required field the form can no longer supply is a 400 on every UPI
         # collection -- the one mode of payment the desk uses most. Still recorded when a
@@ -716,6 +753,10 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
         payment_details["transaction_id"] = transaction_id
 
     is_update = lead.get("treatment_fee_paid") is not None
+    # "split" rather than one of the four, for the same reason the lines exist: naming
+    # any one of them would make the record say something only part true. The breakdown
+    # is in payment_details and spelled out on the activity line below.
+    settled_mode = "split" if lines else payload.payment_mode
     # Rests at 'Fee Collected' on first collection — Physio Assign only happens via
     # the separate assign-consultation-physio action. If this is just a payment-mode
     # correction on a lead that's already past that (physio already assigned), leave
@@ -723,7 +764,7 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
     stage_after = "Physio Assign" if lead.get("consultation_stage") == "Physio Assign" else "Fee Collected"
     await v3_col("leads").update_one({"id": lead_id}, {"$set": {
         "treatment_fee_paid": amount,
-        "treatment_fee_payment_mode": payload.payment_mode,
+        "treatment_fee_payment_mode": settled_mode,
         "treatment_fee_payment_details": payment_details or None,
         "consultation_stage": stage_after,
         "updated_at": _now(),
@@ -734,7 +775,7 @@ async def collect_treatment_fee(lead_id: str, payload: V3CollectTreatmentFeeInpu
     if payload.payment_mode == "partial":
         details = f"{'Updated' if is_update else 'Created'} Payment Schedule for session package '{lead.get('session_package_name')}' ({lead.get('session_package_sessions')} sessions) · Rs.{amount} across {len(installments)} installments{detail_suffix}"
     else:
-        details = f"{'Updated' if is_update else 'Collected'} Treatment Fee for session package '{lead.get('session_package_name')}' ({lead.get('session_package_sessions')} sessions) · Rs.{amount} via {payload.payment_mode}{detail_suffix}{discount_suffix}{balance_suffix} · Txn {transaction_id}"
+        details = f"{'Updated' if is_update else 'Collected'} Treatment Fee for session package '{lead.get('session_package_name')}' ({lead.get('session_package_sessions')} sessions) · Rs.{amount} via {settled_mode}{detail_suffix}{discount_suffix}{balance_suffix} · Txn {transaction_id}"
     await v3_col("lead_activity").insert_one({
         "id": str(uuid.uuid4()),
         "transaction_id": transaction_id,
