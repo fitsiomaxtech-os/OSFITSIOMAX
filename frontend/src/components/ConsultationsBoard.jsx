@@ -3330,6 +3330,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               const docsRequired = stage === "Consultation Visit";
               const hasDocs = (leadDocCount || 0) > 0;
 
+              // Step one, and only step one. No fees on this screen: somebody filing a
+              // scan is filing a scan, and the figures belong to the step that can act on
+              // them. What it does carry is the way on to that step, once there is
+              // something on file to carry them there.
               const DocumentsBody = (
                 <div data-testid="cons-documents-body">
                   {docsRequired && !hasDocs && (
@@ -3343,6 +3347,22 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     canEdit={["branch_admin", "super_admin", "head_physio"].includes(viewerRole)}
                     onChanged={(n) => setLeadDocCount(n)}
                   />
+                  {hasDocs && (
+                    <div className="mt-3 flex items-center justify-between gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
+                      <p className="flex items-center gap-1.5 text-[11px] font-medium text-emerald-700">
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        Paperwork on file. The fee can be collected.
+                      </p>
+                      <Button
+                        size="sm"
+                        className={`bg-sky-600 text-white hover:bg-sky-700 ${ACT_BTN}`}
+                        onClick={() => openDetail("own")}
+                        data-testid="cons-documents-to-fees"
+                      >
+                        Collect Fees
+                      </Button>
+                    </div>
+                  )}
                 </div>
               );
 
@@ -3668,12 +3688,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       )}
                       tabs={
                         <>
-                          <OwnTab label={alreadyPaid ? "Payment" : "Collect Payment"} short="Payment" icon={IndianRupee} active="border-sky-300 bg-sky-50 text-sky-700" />
-                          {/* Required at this stage, so it is a tab here rather than a trip
-                              to the Documents tab at the top of the card: the rule is being
-                              enforced by this panel and has to be satisfiable from it. The
-                              amber ring is the only thing on the row asking to be pressed
-                              when nothing is on file yet. */}
+                          {/* The order is the order it happens in: the paperwork is filed,
+                              then the money is taken against it, and Cancel is the way out
+                              of both. Documents leads because it is the step that gates the
+                              other one — a row that opens on a payment it will not let you
+                              take is a row that reads as broken. */}
                           <Button
                             size="sm"
                             variant="outline"
@@ -3686,19 +3705,19 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             data-testid="cons-open-documents"
                           >
                             <FileText className="mr-1 h-3.5 w-3.5" />
-                            <Lbl full={hasDocs ? `Documents (${leadDocCount})` : "Documents — required"} short="Docs" />
+                            <Lbl full={hasDocs ? `1 · Documents (${leadDocCount})` : "1 · Documents — required"} short="Docs" />
                           </Button>
+                          <OwnTab label={alreadyPaid ? "2 · Payment" : "2 · Collect Fees"} short="Fees" icon={IndianRupee} active="border-sky-300 bg-sky-50 text-sky-700" />
                           {DietDetailButton}
                           {RehabDetailButton}
                           {CancelButton}
                         </>
                       }
                     >
-                      {/* Diet and Rehab still take the whole panel — they are other programmes, and
-                          reading one means leaving this one. Documents is not: it is a step of
-                          the payment being blocked here, so it opens underneath rather than in
-                          place of the fees and the rule that sent you to it. */}
-                      {(programmeDetail === "diet" || programmeDetail === "rehab") ? detailBody : (
+                      {/* Each tab is its own step and shows only that step. The fees do not
+                          appear over the uploader: somebody filing a scan is filing a scan,
+                          and a figure on that screen is a figure they cannot act on yet. */}
+                      {detailBody || (
                         <>
                           {/* Everything this patient has been quoted, on the one screen the
                               Branch Admin reads before taking money. Each line is gated on
@@ -3804,34 +3823,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                                   Paperwork on file
                                 </span>
                               )}
-                            </div>
-                          )}
-                          {/* Where the Upload Documents button opens to. Under the panel that
-                              asked for it, with the fees and the rule still on screen above:
-                              somebody uploading a scan here is in the middle of taking a
-                              payment, and swapping the screen out from under them loses the
-                              figure they were about to collect. */}
-                          {programmeDetail === "documents" && (
-                            <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3" data-testid="cons-inline-documents">
-                              <div className="mb-2 flex items-center justify-between gap-2">
-                                <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-500">
-                                  <FileText className="h-3.5 w-3.5" /> Consultation Paperwork
-                                </p>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  className={`border-slate-200 text-slate-600 hover:bg-slate-50 ${ACT_BTN}`}
-                                  onClick={() => openDetail("own")}
-                                  data-testid="cons-inline-documents-close"
-                                >
-                                  Done
-                                </Button>
-                              </div>
-                              <LeadDocuments
-                                leadId={selectedLead.id}
-                                canEdit={["branch_admin", "super_admin", "head_physio"].includes(viewerRole)}
-                                onChanged={(n) => setLeadDocCount(n)}
-                              />
                             </div>
                           )}
                         </>
