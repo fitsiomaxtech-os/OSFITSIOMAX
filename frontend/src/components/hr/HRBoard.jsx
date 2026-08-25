@@ -42,13 +42,29 @@ const PRACTICE_FITNESS = "fitness";
 const PRACTICE_BOTH = "both";
 const SERVICE_LABELS = { "": "Select", [PRACTICE_PHYSIO]: "Physio", [PRACTICE_FITNESS]: "Fitness", [PRACTICE_BOTH]: "Both" };
 
-// The other axis: which mode somebody works. "both" is the same kind of answer "both" is
-// for practice — not a third mode, but the one that declines to narrow.
+// The other axis: which mode somebody works. Two answers, and only one of them is ever
+// chosen — Online. Not choosing it IS the other answer, so Offline needs no picking and
+// blank is not an unanswered field. Practice below keeps its own "both"; that one is a
+// real third answer, where a third mode was only ever the absence of a decision.
 const MODE_ONLINE = "online";
 const MODE_OFFLINE = "offline";
-const MODE_BOTH = "both";
-const MODE_OPTIONS = [MODE_ONLINE, MODE_OFFLINE, MODE_BOTH];
-const MODE_LABELS = { [MODE_ONLINE]: "Online", [MODE_OFFLINE]: "Offline", [MODE_BOTH]: "Both" };
+const MODE_OPTIONS = [MODE_ONLINE, MODE_OFFLINE];
+const MODE_LABELS = { [MODE_ONLINE]: "Online", [MODE_OFFLINE]: "Offline" };
+/** The mode, as the OS now understands it: online, or not.
+ *
+ * Not-online covers three stored values that all mean the same thing here — "offline",
+ * blank, and "both", which employees classified while a third mode existed still carry.
+ * Nothing writes "both" any more and it reads as Offline: somebody who worked both was in
+ * a room for half of it, and the offline half is the half that decides whether they have a
+ * branch. Blank especially: it is the state almost every employee
+ * is in, because the field was optional for as long as it has existed, and reading it as
+ * anything other than "works in the room" would quietly reclassify the whole directory.
+ *
+ * So the question is only ever asked one way round. Online is the exception that has to be
+ * chosen; everything else is the default, and the default is Offline.
+ */
+const isOnlineMode = (mode) => mode === MODE_ONLINE;
+const modeValue = (mode) => (isOnlineMode(mode) ? MODE_ONLINE : MODE_OFFLINE);
 
 /** The mode worth saying out loud, or null for the one that is not.
  *
@@ -60,7 +76,7 @@ const MODE_LABELS = { [MODE_ONLINE]: "Online", [MODE_OFFLINE]: "Offline", [MODE_
  * "no reason to flag this row". The difference between them is a question for the
  * Employment tab, which asks it in a field with a name on it, not for a badge in a list.
  */
-const modeBadge = (mode) => (mode === MODE_ONLINE || mode === MODE_BOTH ? MODE_LABELS[mode] : null);
+const modeBadge = (mode) => (isOnlineMode(mode) ? MODE_LABELS[MODE_ONLINE] : null);
 
 /** Whether this mode belongs to a branch at all.
  *
@@ -73,7 +89,7 @@ const modeBadge = (mode) => (mode === MODE_ONLINE || mode === MODE_BOTH ? MODE_L
  * Both does, and keeps it: half that week is in a room, and the room has an address.
  * Offline plainly does.
  */
-const modeHasBranch = (mode) => mode !== MODE_ONLINE;
+const modeHasBranch = (mode) => !isOnlineMode(mode);
 
 // What the branch column reads for somebody who has no branch by virtue of their mode.
 // A word rather than an empty cell: blank is what an unposted employee looks like, and
@@ -549,9 +565,7 @@ const WorkTypeCell = ({ e }) => {
   return (
     <div className="leading-tight">
       {badge && (
-        <span className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-semibold ${
-          e.work_type === MODE_BOTH ? "bg-indigo-50 text-indigo-600" : "bg-violet-50 text-violet-600"
-        }`}>
+        <span className="inline-flex rounded bg-violet-50 px-1.5 py-0.5 text-[10px] font-semibold text-violet-600">
           {badge}
         </span>
       )}
@@ -591,7 +605,11 @@ const WorkModeToggle = ({ value, disabled, onPick, testid }) => (
     data-testid={testid}
   >
     {MODE_OPTIONS.map((m) => {
-      const on = value === m;
+      // Offline is lit for everything that is not Online — blank included, since blank is
+      // what most of the directory holds and it means the room. Without this the control
+      // would show neither side pressed for almost everybody, reading as "unanswered" for
+      // a question that has an answer.
+      const on = m === MODE_ONLINE ? isOnlineMode(value) : !isOnlineMode(value);
       return (
         <button
           key={m}
@@ -728,10 +746,9 @@ const EmployeesTab = ({ meta, initialFilter }) => {
     // Folded, so the one pill standing for a job finds everyone filed under any spelling
     // of it rather than the half that happen to match its capitals.
     if (designation && nameKey(e.designation) !== nameKey(designation)) return false;
-    // Somebody who works both modes belongs to either filter: narrowing to Online is
-    // asking who can be seen online, and they can. Only the two narrow answers exclude
-    // each other.
-    if (workType && e.work_type !== workType && e.work_type !== MODE_BOTH) return false;
+    // Compared as the two answers the OS has, not as stored strings: filtering to Offline
+    // has to find everybody blank as well, who are most of them.
+    if (workType && modeValue(e.work_type) !== modeValue(workType)) return false;
     if (!search) return true;
     const q = search.toLowerCase();
     return (e.full_name || "").toLowerCase().includes(q) || (e.email || "").toLowerCase().includes(q) || (e.employee_code || "").toLowerCase().includes(q);
@@ -890,7 +907,7 @@ const EmployeeViewModal = ({ employee: e, onClose, onEdit, onDelete }) => (
             <ViewRow label="Employee Code" value={e.employee_code} />
             <ViewRow label="Department" value={e.department} />
             <ViewRow label="Designation" value={e.designation} />
-            <ViewRow label="Work Type" value={MODE_LABELS[e.work_type] || ""} />
+            <ViewRow label="Work Type" value={MODE_LABELS[modeValue(e.work_type)]} />
             <ViewRow label="Service" value={e.service ? (SERVICE_LABELS[e.service] || e.service) : ""} />
             <ViewRow label="Branch" value={e.branch_name} />
             <ViewRow label="Joining Date" value={e.joining_date} />
@@ -1098,12 +1115,10 @@ const AddEmployeeModal = ({ employee, meta, initialDepartment, initialDesignatio
   // the same reason — see verticalPractice.
   const branchOptions = useMemo(
     () => branches.filter((b) => {
-      // Mode narrows only when it has been answered narrowly, the same way practice does
-      // below: "both" is somebody who works online and in the room, so every branch of
-      // either mode is theirs and hiding half of them would be the filter answering a
-      // question they declined to narrow.
-      if (form.work_type && form.work_type !== MODE_BOTH
-          && isOnlineVertical(b.vertical) !== (form.work_type === MODE_ONLINE)) return false;
+      // Offline is the default, so a blank Work Type narrows to the branches in the room
+      // rather than to all of them. Online never reaches here: the Branch field is not
+      // shown for it at all.
+      if (isOnlineVertical(b.vertical) !== isOnlineMode(form.work_type)) return false;
       if (!form.service || form.service === PRACTICE_BOTH) return true;
       const practice = verticalPractice(b.vertical);
       return practice === null || practice === form.service;
@@ -1257,7 +1272,26 @@ const AddEmployeeModal = ({ employee, meta, initialDepartment, initialDesignatio
                   a branch's vertical — mode and practice — and Branch narrows on both, the
                   same split Branches & Verticals itself uses. Branch still waits for a Work
                   Type: it is meaningless before that. */}
-              <Field label="Work Type"><Select value={form.work_type} onChange={changeWorkType} options={["", ...MODE_OPTIONS]} testid="hr-emp-worktype" /></Field>
+              {/* Only Online is offered. Leaving it on Select is not a gap — it is the
+                  other answer, and the field says so underneath rather than making anybody
+                  guess what blank commits them to. Starred and outlined because it decides
+                  whether the Branch field beside it appears at all, which is worth
+                  answering deliberately even though blank is allowed. */}
+              <Field label="Work Type *">
+                <Select
+                  value={form.work_type}
+                  onChange={changeWorkType}
+                  options={["", MODE_ONLINE]}
+                  labels={{ "": "Select", [MODE_ONLINE]: "Online" }}
+                  className={form.work_type ? "" : "border-amber-300 bg-amber-50"}
+                  testid="hr-emp-worktype"
+                />
+                <p className="mt-1 text-[10px] text-slate-400">
+                  {isOnlineMode(form.work_type)
+                    ? "Works online, so no branch."
+                    : "Left blank means Offline — works in the room, at the branch below."}
+                </p>
+              </Field>
               <Field label="Service">
                 <Select
                   value={form.service}
@@ -1267,7 +1301,7 @@ const AddEmployeeModal = ({ employee, meta, initialDepartment, initialDesignatio
                   testid="hr-emp-service"
                 />
               </Field>
-              {form.work_type && modeHasBranch(form.work_type) && (
+              {modeHasBranch(form.work_type) && (
                 <Field label="Branch">
                   <select
                     value={form.branch_id}
@@ -1985,19 +2019,10 @@ const StructureTab = ({ meta, reloadMeta }) => {
                               onPick={(m) => setWorkMode(emp, m)}
                               testid={`hr-structure-mode-${emp.id}`}
                             />
-                            {/* Both is said here. Online is not, though modeBadge names it:
-                                the branch slot beside this one already reads "Online Mode"
-                                for them, and saying it twice in one row is one badge doing
-                                no work. Offline is not said at all — see modeBadge.
-                                A fixed slot either way, so the badge beside it does not shift
-                                left and right down the column depending on who is online. */}
-                            <span className="w-14 shrink-0 text-right" data-testid={`hr-structure-mode-badge-${emp.id}`}>
-                              {emp.work_type === MODE_BOTH && (
-                                <span className="inline-flex rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-600">
-                                  {MODE_LABELS[MODE_BOTH]}
-                                </span>
-                              )}
-                            </span>
+                            {/* Nothing is said here now that the mode has two answers and the
+                                toggle beside it shows which. The slot stays so the branch
+                                column keeps its position down the list. */}
+                            <span className="w-2 shrink-0" />
                             {/* Said as a word before it is offered as a control: the branch
                                 is the fact being read, and a bare dropdown makes somebody
                                 open it to find out what it already says. Amber when there
@@ -3746,11 +3771,13 @@ const PasswordInput = ({ value, onChange, placeholder, testid }) => {
 // `labels` maps a stored value to what the reader should see, for the fields whose value
 // is a slug rather than a word — "physio" is what the record holds, "Physio" is what the
 // row says. Omitted, every option still reads as its own value, as it always did.
-const Select = ({ value, onChange, options = [], testid, uppercase = false, labels = null }) => (
+// `className` is appended last, so a caller saying something about one particular field —
+// an unanswered one worth looking at — overrides the default border rather than fighting it.
+const Select = ({ value, onChange, options = [], testid, uppercase = false, labels = null, className = "" }) => (
   <select
     value={value}
     onChange={(e) => onChange(e.target.value)}
-    className={`h-10 w-full rounded-md border border-slate-200 px-3 text-sm${uppercase ? " uppercase" : ""}`}
+    className={`h-10 w-full rounded-md border border-slate-200 px-3 text-sm${uppercase ? " uppercase" : ""}${className ? ` ${className}` : ""}`}
     data-testid={testid}
   >
     {options.map((o) => <option key={o} value={o}>{(labels && labels[o]) || o || "Select"}</option>)}
