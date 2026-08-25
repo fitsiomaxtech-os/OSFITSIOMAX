@@ -108,6 +108,8 @@ export const LeadDocuments = ({ leadId, canEdit = true, kind = "general", fixedL
   const [busy, setBusy] = useState(false);
   // Whether a file is being dragged over the panel, so it can say it will take it.
   const [dragging, setDragging] = useState(false);
+  // The file chosen but not yet filed. Null until somebody picks or drops one.
+  const [pending, setPending] = useState(null);
   const [label, setLabel] = useState("");
   const fileRef = useRef(null);
 
@@ -207,15 +209,25 @@ export const LeadDocuments = ({ leadId, canEdit = true, kind = "general", fixedL
     take(file);
   };
 
-  /** Everything that happens to a file once there is one, whichever way it arrived. */
-  async function take(file) {
+  /** Held and shown back before it goes anywhere.
+   *
+   *  Filing was instant, so whatever was under the cursor landed on this patient's record
+   *  before anybody read its name — and the only way back from the wrong scan is a delete
+   *  somebody has to notice is needed. The size check happens here rather than after, so
+   *  an oversized file is refused before it is ever offered for confirmation.
+   */
+  function take(file) {
     if (!file) return;
-    // Checked here as well as on the server, so an oversized file fails in the moment
-    // rather than after however long it takes to push it up and be told no.
     if (file.size > MAX_UPLOAD_BYTES) {
       toast.error(`That file is ${fmtSize(file.size)} — the limit is ${MAX_UPLOAD_MB}MB.`);
       return;
     }
+    setPending(file);
+  }
+
+  /** Everything that happens to the held file once it is confirmed. */
+  async function send(file) {
+    if (!file) return;
     setBusy(true);
     let sent = file;
     try {
@@ -234,6 +246,7 @@ export const LeadDocuments = ({ leadId, canEdit = true, kind = "general", fixedL
           : "Document uploaded",
       );
       setLabel("");
+      setPending(null);
       load();
     } catch (err) {
       // Reports the size actually sent, so a 413 names the number the server refused
@@ -310,6 +323,26 @@ export const LeadDocuments = ({ leadId, canEdit = true, kind = "general", fixedL
         >
           <p className="text-[11px] font-bold uppercase tracking-wider text-sky-700">{fixedLabel ? `Upload ${fixedLabel.toLowerCase()} pages` : "Upload a document"}</p>
           <p className="mt-0.5 text-[11px] text-slate-500">{dragging ? "Drop it to file it." : (hint || "Drop a file here, or choose one · JPG, PNG, WEBP or PDF")}</p>
+          {/* What is about to be filed, before it is. Named rather than counted, because
+              "1 file" is not something anybody can check against the folder they took it
+              from. */}
+          {pending && (
+            <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-sky-300 bg-white p-2.5" data-testid="lead-doc-pending">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-sky-100 text-sky-600">
+                <Upload className="h-4 w-4" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-xs font-semibold text-slate-800" title={pending.name}>{pending.name}</p>
+                <p className="text-[11px] text-slate-500">{fmtSize(pending.size)}{label.trim() ? ` · ${label.trim()}` : ""}</p>
+              </div>
+              <Button size="sm" variant="outline" disabled={busy} onClick={() => setPending(null)} data-testid="lead-doc-pending-cancel">
+                Cancel
+              </Button>
+              <Button size="sm" className="bg-sky-600 hover:bg-sky-700" disabled={busy} onClick={() => send(pending)} data-testid="lead-doc-pending-confirm">
+                {busy ? "Uploading…" : "Upload"}
+              </Button>
+            </div>
+          )}
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {!fixedLabel && (
               <Input
@@ -434,10 +467,17 @@ export const LeadDocuments = ({ leadId, canEdit = true, kind = "general", fixedL
           clipped by it and stacked underneath it. */}
       {viewDoc && createPortal(
         <div
-          className="fixed inset-0 z-[95] flex flex-col bg-slate-950/90 p-3 sm:p-6"
+          className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/70 p-4"
           onMouseDown={(e) => { if (e.target === e.currentTarget) setViewing(null); }}
           data-testid="lead-doc-viewer"
         >
+          {/* A panel rather than the whole screen. This opens from inside a lead card that
+              is itself a dialog, and a sheet edge to edge loses where it was opened from —
+              closing it felt like leaving the patient rather than shutting a picture. */}
+          <div
+            className="flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl bg-slate-900 p-4 shadow-2xl"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
           <div className="flex items-start gap-3 text-white">
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold">{viewDoc.label || viewDoc.original_name}</p>
@@ -483,6 +523,7 @@ export const LeadDocuments = ({ leadId, canEdit = true, kind = "general", fixedL
                 <ChevronRight className="h-6 w-6" />
               </button>
             )}
+          </div>
           </div>
         </div>,
         document.body,

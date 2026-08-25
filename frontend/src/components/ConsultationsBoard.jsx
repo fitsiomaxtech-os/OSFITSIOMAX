@@ -3481,22 +3481,6 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     canEdit={["branch_admin", "super_admin", "head_physio"].includes(viewerRole)}
                     onChanged={(n) => setLeadDocCount(n)}
                   />
-                  {hasDocs && (
-                    <div className="mt-3 flex items-center justify-between gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
-                      <p className="flex items-center gap-1.5 text-[11px] font-medium text-emerald-700">
-                        <CheckCircle2 className="h-3.5 w-3.5" />
-                        Paperwork on file. The fee can be collected.
-                      </p>
-                      <Button
-                        size="sm"
-                        className={`bg-sky-600 text-white hover:bg-sky-700 ${ACT_BTN}`}
-                        onClick={() => openDetail("own")}
-                        data-testid="cons-documents-to-fees"
-                      >
-                        Collect Fees
-                      </Button>
-                    </div>
-                  )}
                 </div>
               );
 
@@ -3899,7 +3883,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                               Consultation leads because everything else waits on it: the
                               other three are only collectable once it is in, which is the
                               server's rule and not a habit of this screen. */}
-                          <div className="space-y-2" data-testid="cons-consultation-visit-summary">
+                          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3" data-testid="cons-consultation-visit-summary">
                             {[
                               {
                                 key: "consultation",
@@ -3944,36 +3928,38 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                             ].filter((f) => f.show).map((f, i) => (
                               <div
                                 key={f.key}
-                                className={`flex flex-wrap items-center gap-2 rounded-lg border p-2.5 ${
+                                className={`flex flex-col gap-2 rounded-lg border p-3 ${
                                   f.paid ? "border-emerald-200 bg-emerald-50/60" : "border-slate-200 bg-white"
                                 }`}
                                 data-testid={`cons-fee-step-${f.key}`}
                               >
-                                <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${
-                                  f.paid ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-500"
-                                }`}>
-                                  {f.paid ? <CheckCircle2 className="h-3.5 w-3.5" /> : i + 1}
-                                </span>
-                                <div className="min-w-0 flex-1">
-                                  <p className="truncate text-xs font-semibold text-slate-700">{f.label}</p>
-                                  {f.sub ? <p className="truncate text-[11px] text-slate-400">{f.sub}</p> : null}
+                                <div className="flex items-center gap-2">
+                                  <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${
+                                    f.paid ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-500"
+                                  }`}>
+                                    {f.paid ? <CheckCircle2 className="h-3 w-3" /> : i + 1}
+                                  </span>
+                                  <div className="min-w-0 flex-1">
+                                    <p className="truncate text-xs font-semibold text-slate-700">{f.label}</p>
+                                    {f.sub ? <p className="truncate text-[11px] text-slate-400">{f.sub}</p> : null}
+                                  </div>
                                 </div>
-                                <span className="shrink-0 text-sm font-bold text-slate-800">
+                                <p className="text-lg font-extrabold leading-none text-slate-800">
                                   {f.amount != null ? `Rs.${Number(f.amount).toLocaleString("en-IN")}` : "—"}
-                                </span>
+                                </p>
                                 {f.paid ? (
-                                  <span className="shrink-0 text-[11px] font-medium capitalize text-emerald-700">
+                                  <span className="text-[11px] font-medium capitalize text-emerald-700">
                                     {f.note ? `Paid · ${f.note}` : "Paid"}
                                   </span>
                                 ) : (
                                   <Button
                                     size="sm"
                                     variant={f.key === "consultation" ? undefined : "outline"}
-                                    // Everything after the consultation fee waits on it,
-                                    // and says so rather than failing when pressed.
+                                    /* Everything after the consultation fee waits on it, and
+                                       says so rather than failing when pressed. */
                                     disabled={f.key !== "consultation" && !alreadyPaid}
                                     title={f.key !== "consultation" && !alreadyPaid ? "Collect the consultation fee first" : undefined}
-                                    className={`shrink-0 ${f.key === "consultation" ? "bg-sky-600 text-white hover:bg-sky-700" : ""} ${ACT_BTN}`}
+                                    className={`w-full ${f.key === "consultation" ? "bg-sky-600 text-white hover:bg-sky-700" : ""} ${ACT_BTN}`}
                                     onClick={f.act}
                                     data-testid={`cons-fee-act-${f.key}`}
                                   >
