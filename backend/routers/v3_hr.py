@@ -528,6 +528,62 @@ async def create_employee(payload: EmployeeCreate, _: V3UserOut = Depends(v3_req
     return doc
 
 
+async def _sync_expert_branches(user: dict, branch_ids: List[str]) -> None:
+    """Make a multi-branch desk's expert records say exactly which branches they cover.
+
+    Three things, because a branch list can change in three ways. A branch newly ticked
+    gets a record, or the coach is offered at a branch whose Diet Calendar has nowhere to
+    publish days. A branch still ticked is made active again, so re-ticking one restores
+    the calendar that was there rather than starting an empty second one beside it.
+
+    And a branch unticked is stood down, not deleted. The published slots and the
+    appointments already sitting on them are real bookings that somebody made — an untick
+    is a statement about where this person works from now on, not permission to throw those
+    away — so the record stays and simply stops being offered, which every list already
+    honours through active_doctor_query. Ticking the branch again brings it back intact.
+    """
+    profile = expert_profile_type(user["role"])
+    existing = await v3_col("doctors").find(
+        {"user_id": user["id"], "profile_type": profile}, {"_id": 0, "id": 1, "branch_id": 1},
+    ).to_list(100)
+    have = {d.get("branch_id") for d in existing}
+
+    for b_id in branch_ids:
+        if b_id not in have:
+            await v3_col("doctors").insert_one({
+                "id": str(uuid.uuid4()),
+                "full_name": user.get("full_name") or "",
+                "profile_type": profile,
+                "branch_id": b_id,
+                "specialization": "",
+                "slots": [],
+                "slot_details": [],
+                "user_id": user["id"],
+                "branch_active": True,
+                "created_at": now_iso(),
+            })
+
+    # branch_active, not is_active: the second belongs to the login and is rewritten at
+    # every startup by retire_experts_without_a_login, which would read a branch untick as
+    # a mistakenly retired expert and put them back. See ACTIVE_DOCTOR in utils.py.
+    keep = [d["id"] for d in existing if d.get("branch_id") in branch_ids]
+    if keep:
+        await v3_col("doctors").update_many(
+            {"id": {"$in": keep}}, {"$set": {"branch_active": True, "updated_at": now_iso()}},
+        )
+
+    # Only records that name a branch. A branchless one belongs to a desk that covers
+    # everything and is not this list's to stand down.
+    drop = [
+        d["id"] for d in existing
+        if d.get("branch_id") and d["branch_id"] not in branch_ids
+    ]
+    if drop:
+        await v3_col("doctors").update_many(
+            {"id": {"$in": drop}}, {"$set": {"branch_active": False, "updated_at": now_iso()}},
+        )
+
+
 @router.patch("/employees/{emp_id}")
 async def update_employee(emp_id: str, payload: EmployeeUpdate, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
     updates = {k: v for k, v in payload.model_dump().items() if v is not None}
@@ -554,6 +610,16 @@ async def update_employee(emp_id: str, payload: EmployeeUpdate, _: V3UserOut = D
             branch_ids = [ALL_BRANCHES]
         updates["branch_ids"] = branch_ids
         updates["branch_id"] = branch_ids[0] if branch_ids else ""
+    elif "branch_id" in updates:
+        # One branch posted on its own is the whole answer, so any list left over from when
+        # this person held a multi-branch desk is cleared with it. Left behind, it would go
+        # on driving the "two branches" the row prints while branch_id says one — the record
+        # contradicting itself, which is the shape of bug this pair keeps producing.
+        #
+        # Only the employee record. `branch_ids` stays None on purpose, so the cascades
+        # below still read this as the plain move it is: the account's own list is chosen
+        # on the user form and is not this control's to empty.
+        updates["branch_ids"] = []
 
     updates["updated_at"] = now_iso()
     res = await v3_col("employees").update_one({"id": emp_id}, {"$set": updates})
@@ -607,47 +673,39 @@ async def update_employee(emp_id: str, payload: EmployeeUpdate, _: V3UserOut = D
             account["branch_ids"] = [] if branch_ids == [ALL_BRANCHES] else branch_ids
         await v3_col("users").update_many({"employee_id": emp_id}, {"$set": account})
 
-        # The expert record moves only if it was posted to a branch to begin with. A Head
-        # Physio's is branchless by design (see consolidate_head_physio_doctors), and giving
-        # it a branch would undo that and hide them from every other one.
-        #
-        # Branchless is also what ALL_BRANCHES resolves to, and for the desks that may hold
-        # none — a CONSULTANT, a Nutritionist — that is not a record with a gap in it but
-        # the way this OS spells "every branch": ORG_WIDE_PROFILES in routers/v3_config.py
-        # and _coach_branch_ids in routers/v3_diet.py both read it that way.
-        await v3_col("doctors").update_many(
-            {"user_id": {"$in": linked_user_ids}, "branch_id": {"$nin": ["", None]}},
-            {"$set": {"branch_id": target}},
-        )
-
-        # Several branches ticked needs a calendar at each of them, or the coach is offered
-        # at a branch whose Diet Calendar has nowhere to publish days. Same shape as the
-        # sync in update_user, and it only adds: a branch dropped from the list keeps its
-        # existing record so an accidental untick cannot destroy published slots and the
-        # appointments already sitting on them.
-        if branch_ids not in (None, [], [ALL_BRANCHES]):
+        # A selection of several branches is a different instruction to the expert records
+        # than a move between two, so the two are handled apart rather than one being made
+        # to stand in for the other. Sharing the move below is what would break here: it
+        # rewrites every branch-carrying record to one branch, which for somebody holding a
+        # calendar at three would collapse all three onto the first and leave two branches
+        # with a Nutritionist that has no calendar there any more.
+        if branch_ids is not None and branch_ids != [ALL_BRANCHES] and branch_ids:
             for u in linked_users:
                 if not is_multi_branch_role(u.get("role")):
                     continue
-                profile = expert_profile_type(u["role"])
-                existing = await v3_col("doctors").find(
-                    {"user_id": u["id"], "profile_type": profile}, {"_id": 0, "branch_id": 1},
-                ).to_list(50)
-                have = {d.get("branch_id") for d in existing}
-                for b_id in branch_ids:
-                    if b_id in have:
-                        continue
-                    await v3_col("doctors").insert_one({
-                        "id": str(uuid.uuid4()),
-                        "full_name": u.get("full_name") or "",
-                        "profile_type": profile,
-                        "branch_id": b_id,
-                        "specialization": "",
-                        "slots": [],
-                        "slot_details": [],
-                        "user_id": u["id"],
-                        "created_at": now_iso(),
-                    })
+                await _sync_expert_branches(u, branch_ids)
+        else:
+            # The expert record moves only if it was posted to a branch to begin with. A Head
+            # Physio's is branchless by design (see consolidate_head_physio_doctors), and giving
+            # it a branch would undo that and hide them from every other one.
+            #
+            # Branchless is also what ALL_BRANCHES resolves to, and for the desks that may hold
+            # none — a CONSULTANT, a Nutritionist — that is not a record with a gap in it but
+            # the way this OS spells "every branch": ORG_WIDE_PROFILES in routers/v3_config.py
+            # and _coach_branch_ids in routers/v3_diet.py both read it that way.
+            await v3_col("doctors").update_many(
+                {"user_id": {"$in": linked_user_ids}, "branch_id": {"$nin": ["", None]}},
+                {"$set": {"branch_id": target}},
+            )
+            # Somebody put back on every branch is offered at every branch again, including
+            # the ones a narrower selection had earlier stood them down from. Only the
+            # posting flag is lifted — a login that is switched off stays switched off, and
+            # this is not the screen that decides that.
+            if branch_ids == [ALL_BRANCHES]:
+                await v3_col("doctors").update_many(
+                    {"user_id": {"$in": linked_user_ids}, "branch_active": False},
+                    {"$set": {"branch_active": True, "updated_at": now_iso()}},
+                )
 
     return await v3_col("employees").find_one({"id": emp_id}, {"_id": 0})
 

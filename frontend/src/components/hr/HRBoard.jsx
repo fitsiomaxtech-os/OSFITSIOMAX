@@ -1247,12 +1247,51 @@ const RoleFilterDropdown = ({ value, options, onChange }) => {
  * place: white card, slate text, a grey wash on hover, and the current choice marked by
  * weight and a tick rather than by hue.
  */
-const PickerModal = ({ title, value, options, onPick, onClose, searchable = false, searchPlaceholder = "Search...", checkbox = false }) => {
+const PickerModal = ({
+  title, value, options, onPick, onClose,
+  searchable = false, searchPlaceholder = "Search...", checkbox = false,
+  // Multi-select. Off by default, because most of what this picker answers has exactly one
+  // answer — a role, a department, the branch a Physio treats at. It is turned on for the
+  // desks that genuinely hold several: a Nutritionist works more than one branch and holds
+  // a calendar at each, and a control that could only say one of them was the reason a
+  // coach covering two had to be recorded as covering neither.
+  //
+  // A different shape of interaction, not just a different tick: single-select answers on
+  // the click, because the click IS the answer. Ticking three boxes is not finished until
+  // the person says it is, so multi keeps its own draft and commits on Save — and Escape
+  // or Cancel throws the draft away rather than leaving half a selection written.
+  multi = false, values = [], onSave,
+  // Options that mean something about the whole set rather than a member of it — "no
+  // branch", "all branches". Ticking one clears the rest and unticks the others, since
+  // "everywhere" and "these three" cannot both be true and leaving the narrower ticks
+  // underneath would suggest the wider answer was somehow limited by them.
+  exclusive = [],
+  // Whether an empty selection is an answer. It is not for a branch: unticking everything
+  // for a desk that covers all of them is stored the same way "All Branches" is, so a save
+  // on nothing would quietly do the opposite of what the empty list looks like it means.
+  // Refused at the button rather than corrected after the fact, so the dialog never says
+  // one thing and the row behind it another.
+  requireOne = false,
+}) => {
   // Opt-in, because most of these lists are five or six rows and a search box over six
   // rows is furniture. The employee list is seventy-odd and unusable without one.
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
   const shown = q ? options.filter((o) => String(o.search || o.label).toLowerCase().includes(q)) : options;
+
+  // The draft selection, seeded once. Deliberately not kept in step with `values` after
+  // that: the parent's copy is what was last saved, and re-syncing to it mid-edit would
+  // undo ticks the moment anything upstream re-rendered.
+  const [picked, setPicked] = useState(() => (values || []).filter(Boolean));
+  const isExclusive = (v) => exclusive.includes(v);
+  const on = (v) => (multi ? picked.includes(v) : v === value);
+  const toggle = (v) => {
+    if (isExclusive(v)) { setPicked(v ? [v] : []); return; }
+    setPicked((prev) => {
+      const kept = prev.filter((x) => !isExclusive(x));
+      return kept.includes(v) ? kept.filter((x) => x !== v) : [...kept, v];
+    });
+  };
 
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape") onClose(); };
@@ -1298,36 +1337,55 @@ const PickerModal = ({ title, value, options, onPick, onClose, searchable = fals
             <p className="px-4 py-6 text-center text-xs text-slate-400">Nothing matches that.</p>
           )}
           {shown.map((o) => {
-            const on = o.value === value;
+            const ticked = on(o.value);
             return (
               <button
                 key={o.value || "none"}
                 type="button"
-                onClick={() => onPick(o.value)}
+                onClick={() => (multi ? toggle(o.value) : onPick(o.value))}
                 className={`flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm transition hover:bg-slate-100 ${
-                  on ? "font-bold text-slate-900" : "text-slate-600"
+                  ticked ? "font-bold text-slate-900" : "text-slate-600"
                 }`}
                 data-testid={`hr-branch-picker-option-${o.value || "none"}`}
               >
-                {/* A box, but one answer at a time — a list where two could be ticked would
-                    be promising something the field behind it cannot hold. */}
-                {checkbox && (
-                  <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${on ? "border-slate-700 bg-slate-700" : "border-slate-300 bg-white"}`}>
-                    {on && <Check className="h-3 w-3 text-white" />}
+                {/* A box, and in single-select still one answer at a time — a list where two
+                    could be ticked would be promising something the field behind it cannot
+                    hold. In multi the field behind it is a list, so it can. */}
+                {(checkbox || multi) && (
+                  <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${ticked ? "border-slate-700 bg-slate-700" : "border-slate-300 bg-white"}`}>
+                    {ticked && <Check className="h-3 w-3 text-white" />}
                   </span>
                 )}
                 <span className="min-w-0 flex-1">
                   <span className="block truncate">{o.label}</span>
                   {o.hint && <span className="block truncate text-[11px] font-normal text-slate-400">{o.hint}</span>}
                 </span>
-                {!checkbox && on && <CheckCircle2 className="h-4 w-4 shrink-0 text-slate-500" />}
+                {!checkbox && !multi && ticked && <CheckCircle2 className="h-4 w-4 shrink-0 text-slate-500" />}
               </button>
             );
           })}
         </div>
 
-        <div className="shrink-0 border-t border-slate-200 px-4 py-2.5 text-right">
+        {multi && requireOne && picked.length === 0 && (
+          <p className="shrink-0 border-t border-slate-100 px-4 pt-2 text-[11px] text-slate-400" data-testid="hr-branch-picker-need-one">
+            Tick at least one branch, or All Branches.
+          </p>
+        )}
+        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-slate-200 px-4 py-2.5">
           <Button variant="outline" size="sm" onClick={onClose} data-testid="hr-branch-picker-cancel">Cancel</Button>
+          {/* Only in multi. A single-select list has already answered by the time anyone
+              could reach a Save button, and offering one would suggest the click before it
+              had not counted. */}
+          {multi && (
+            <Button
+              size="sm"
+              disabled={requireOne && picked.length === 0}
+              onClick={() => onSave(picked)}
+              data-testid="hr-branch-picker-save"
+            >
+              Save
+            </Button>
+          )}
         </div>
       </div>
     </div>,
@@ -1446,6 +1504,19 @@ const StructureTab = ({ meta, reloadMeta }) => {
     ...branches.map((b) => ({ value: b.id, label: b.branch_name })),
   ]), [branches]);
 
+  // The same list without "No branch", for the desks that can cover everything.
+  //
+  // Not an omission for tidiness: for a Nutritionist the two options are the same state.
+  // Covering every branch is stored as an expert record belonging to none — that is what
+  // ORG_WIDE_PROFILES in backend/routers/v3_config.py reads branchless as for this desk —
+  // so taking one off their branches does not withdraw them from anywhere, it publishes
+  // them everywhere. Offering both would be offering a choice that has one outcome, and
+  // the one word for it is already in the list.
+  const coveringBranchOptions = useMemo(() => ([
+    { value: ALL_BRANCHES, label: "All Branches", hint: "Offered at every branch, including ones added later" },
+    ...branches.map((b) => ({ value: b.id, label: b.branch_name })),
+  ]), [branches]);
+
   const holdersOf = (designation) => employees.filter(
     (e) => e.department === current?.name && e.designation === designation,
   );
@@ -1468,11 +1539,51 @@ const StructureTab = ({ meta, reloadMeta }) => {
         ? "All Branches"
         : (branches.find((b) => b.id === branchId)?.branch_name || "");
       setEmployees((prev) => prev.map(
-        (e) => (e.id === emp.id ? { ...e, branch_id: branchId, branch_name: name } : e),
+        (e) => (e.id === emp.id ? { ...e, branch_id: branchId, branch_name: name, branch_ids: [] } : e),
       ));
       toast.success(name ? `${emp.full_name} → ${name}` : `${emp.full_name} taken off their branch`);
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Could not change the branch");
+    } finally {
+      setMovingEmployee("");
+    }
+  };
+
+  /** How a set of branches reads on one line. Kept in step with list_employees in
+   *  backend/routers/v3_hr.py, which builds the same label for the same set — the row is
+   *  written here optimistically and read back from there on the next load, and the two
+   *  saying different words about an unchanged selection would look like a failed save. */
+  const branchesLabel = (ids) => {
+    if (ids.includes(ALL_BRANCHES)) return "All Branches";
+    const names = ids.map((id) => branches.find((b) => b.id === id)?.branch_name).filter(Boolean);
+    if (names.length === 0) return "";
+    if (names.length <= 2) return names.join(" + ");
+    return `${ids.length} branches`;
+  };
+
+  /** Post a multi-branch desk to every branch they cover.
+   *
+   * The list is what is sent; branch_id is not, because the two can contradict each other
+   * and the endpoint derives it from the list. Same PATCH-one-thing shape as moveToBranch
+   * above, and for the same reason: nothing else on the record is restated, so nothing else
+   * can be flattened by an out-of-date copy held on this screen.
+   */
+  const saveBranches = async (emp, ids) => {
+    const before = (emp.branch_ids && emp.branch_ids.length
+      ? emp.branch_ids
+      : (emp.branch_id ? [emp.branch_id] : []));
+    const same = ids.length === before.length && ids.every((id) => before.includes(id));
+    if (same) return;
+    setMovingEmployee(emp.id);
+    try {
+      await hrUpdateEmployee(emp.id, { branch_ids: ids });
+      const label = branchesLabel(ids);
+      setEmployees((prev) => prev.map((e) => (e.id === emp.id ? {
+        ...e, branch_ids: ids, branch_id: ids[0] || "", branch_name: label,
+      } : e)));
+      toast.success(label ? `${emp.full_name} → ${label}` : `${emp.full_name} taken off their branches`);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not change the branches");
     } finally {
       setMovingEmployee("");
     }
@@ -1896,7 +2007,30 @@ const StructureTab = ({ meta, reloadMeta }) => {
         </div>
       )}
 
-      {branchPickerFor && (
+      {/* Two pickers, one control, chosen by the desk being posted.
+          A Physio treats at the branch they belong to and a receptionist sits at one, so
+          for them the question has one answer and the list closes on it. A Nutritionist
+          holds a calendar at each branch they work and may work several — the backend has
+          stored that as a list all along, and this dialog was the last place still asking
+          for exactly one, which is why a coach covering two branches had to be filed under
+          one of them and disappeared from the other. */}
+      {branchPickerFor && (multiBranchLabel(branchPickerFor.designation) ? (
+        <PickerModal
+          key={branchPickerFor.id}
+          title={`Branches for ${branchPickerFor.full_name}`}
+          multi
+          values={
+            branchPickerFor.branch_ids && branchPickerFor.branch_ids.length
+              ? branchPickerFor.branch_ids
+              : (branchPickerFor.branch_id ? [branchPickerFor.branch_id] : [])
+          }
+          exclusive={[ALL_BRANCHES]}
+          requireOne
+          options={coveringBranchOptions}
+          onSave={(ids) => { const emp = branchPickerFor; setBranchPickerFor(null); saveBranches(emp, ids); }}
+          onClose={() => setBranchPickerFor(null)}
+        />
+      ) : (
         <PickerModal
           title={`Branch for ${branchPickerFor.full_name}`}
           value={branchPickerFor.branch_id || ""}
@@ -1904,7 +2038,7 @@ const StructureTab = ({ meta, reloadMeta }) => {
           onPick={(v) => { const emp = branchPickerFor; setBranchPickerFor(null); moveToBranch(emp, v); }}
           onClose={() => setBranchPickerFor(null)}
         />
-      )}
+      ))}
 
       {showAddEmployee && (
         <AddEmployeeModal

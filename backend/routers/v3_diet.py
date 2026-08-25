@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 import uuid
 
 from database import v3_col
-from utils import now_iso, normalize_slot_time, slot_capacity_of, active_doctor_query
+from utils import now_iso, normalize_slot_time, slot_capacity_of, active_doctor_query, ACTIVE_DOCTOR
 from security import hash_password
 from deps import v3_require_roles, v3_require_diet, is_diet_role
 from schemas.v3 import V3UserOut
@@ -59,16 +59,29 @@ async def _resolve_coach(user: V3UserOut, coach_id: Optional[str] = None) -> Opt
         doctor = await v3_col("doctors").find_one({"id": coach_id, "profile_type": COACH}, {"_id": 0})
         if doctor:
             return doctor
-    doctor = await v3_col("doctors").find_one({"user_id": user.id, "profile_type": COACH}, {"_id": 0})
-    if doctor:
-        return doctor
-    raw = await v3_col("users").find_one({"id": user.id}, {"_id": 0, "employee_id": 1, "branch_id": 1, "full_name": 1})
-    if raw and raw.get("employee_id"):
-        doctor = await v3_col("doctors").find_one(
-            {"employee_id": raw["employee_id"], "profile_type": COACH}, {"_id": 0}
-        )
+    # A record for a branch they still work first, then any of them.
+    #
+    # A coach unticked from a branch keeps the record for it, stood down rather than
+    # deleted, so the days already published there and the patients booked into them
+    # survive (see _sync_expert_branches in routers/v3_hr.py). "Any" matched first before
+    # that existed, which would have opened the coach's own board on whichever record came
+    # back first — sometimes a branch they no longer work, whose calendar nobody can see.
+    #
+    # The unfiltered pass is still here and still second, and is what makes this safe to
+    # narrow: it is the coach's OWN board, so returning a stood-down record is better than
+    # returning nothing, and a coach posted nowhere still gets the calendar they had.
+    for scope in (ACTIVE_DOCTOR, {}):
+        doctor = await v3_col("doctors").find_one({"user_id": user.id, "profile_type": COACH, **scope}, {"_id": 0})
         if doctor:
             return doctor
+    raw = await v3_col("users").find_one({"id": user.id}, {"_id": 0, "employee_id": 1, "branch_id": 1, "full_name": 1})
+    if raw and raw.get("employee_id"):
+        for scope in ({"is_active": {"$ne": False}}, {}):
+            doctor = await v3_col("doctors").find_one(
+                {"employee_id": raw["employee_id"], "profile_type": COACH, **scope}, {"_id": 0}
+            )
+            if doctor:
+                return doctor
 
     if not is_diet_role(user.role) or user.role == "super_admin":
         return None
@@ -171,7 +184,20 @@ async def create_nutrition_coach(
 async def list_nutrition_coaches(user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", COACH))):
     query = {"profile_type": COACH}
     if user.branch_id:
-        query["branch_id"] = user.branch_id
+        # A Nutritionist set to All Branches is stored branchless — that is how this OS
+        # spells "every branch" for a desk that may legitimately hold none, and both
+        # ORG_WIDE_PROFILES in routers/v3_config.py and _coach_branch_ids above already
+        # read it that way. This listing did not, so it filtered them out: HR would show
+        # the coach on All Branches while every Branch Admin's Diet Appointment popup said
+        # there was no Nutritionist at this branch at all, with nothing to explain the gap.
+        #
+        # Scoped to this profile_type only, so the reach stays where it is meant to be: a
+        # branchless physio record is a gap in the data, not a licence to appear on every
+        # branch, which is the same line v3_get_doctors draws.
+        query["$or"] = [
+            {"branch_id": user.branch_id},
+            {"branch_id": {"$in": [None, ""]}},
+        ]
     coaches = await v3_col("doctors").find(active_doctor_query(query), {"_id": 0}).sort("full_name", 1).to_list(200)
 
     # One row per person, not one per expert record.
@@ -183,8 +209,10 @@ async def list_nutrition_coaches(user: V3UserOut = Depends(v3_require_roles("bra
     #
     # Collapsed on the name, not on user_id: the pair this exists to merge is exactly one
     # linked row and one legacy row without a user_id, so keying on that id gives them
-    # different keys and merges nothing. The query above is already scoped to one branch,
-    # which is what makes a name safe to key on here.
+    # different keys and merges nothing. The query above reaches one branch and the
+    # branchless rows that cover every branch, which is a narrow enough set for a name to
+    # be safe to key on — and it now also folds a coach who holds both kinds of row into
+    # the single person they are, rather than offering them twice.
     #
     # Two genuinely different coaches sharing a name in one branch would merge — but this
     # picker shows the name and nothing else, so they are already indistinguishable in it;

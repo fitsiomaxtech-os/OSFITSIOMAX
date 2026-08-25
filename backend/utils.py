@@ -107,15 +107,34 @@ def normalize_slot_time(value: str) -> str:
 # Written as "not False" rather than "is True" because every record created before this
 # existed has no such field at all, and those people are still working here. A filter of
 # {"is_active": True} would empty the Experts list on the deploy that introduced it.
-ACTIVE_DOCTOR = {"is_active": {"$ne": False}}
+# Two separate facts, both of which have to be true for a record to be offered, and
+# deliberately not folded into one field.
+#
+# `is_active` is about the person: their login is switched off or gone, so they are not
+# somebody to book at all. It is owned end to end by the account — _set_expert_active
+# writes it when a login is deactivated or reactivated, and retire_experts_without_a_login
+# sweeps it back into line at every startup.
+#
+# `branch_active` is about one posting: the person is still here, still bookable, and has
+# simply been unticked from this branch in HR's branch picker. Their record for it is kept
+# rather than deleted, because the days already published there and the patients booked
+# into them are real (see _sync_expert_branches in routers/v3_hr.py).
+#
+# Written as one field, the startup sweep would read "unticked from Anna Nagar" as "login
+# works, so put them back" and undo the posting change on the next restart.
+#
+# Both are `$ne: False`, so every record written before either field existed still counts
+# as active — a missing answer is not a retirement.
+ACTIVE_DOCTOR = {"is_active": {"$ne": False}, "branch_active": {"$ne": False}}
 
 
 def active_doctor_query(query: dict = None) -> dict:
-    """Add the still-with-us condition to a `doctors` query.
+    """Add the still-with-us conditions to a `doctors` query.
 
     A helper rather than a spelled-out clause at each call site because there are a dozen
     of those — the consultant calendars, the assign pickers, the review dispatcher, the
-    diet coach list — and a list that forgets it offers someone who cannot log in.
+    diet coach list — and a list that forgets it offers someone who cannot log in, or
+    someone at a branch they no longer work.
     """
     return {**(query or {}), **ACTIVE_DOCTOR}
 
