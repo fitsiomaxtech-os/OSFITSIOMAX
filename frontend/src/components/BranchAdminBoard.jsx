@@ -551,8 +551,11 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   const stages = useMemo(() => boardData.stages || [], [boardData.stages]);
 
   const stageColor = useCallback(
-    (name) => stages.find((s) => s.name === name)?.color || "#64748b",
-    [stages],
+    // Both pipelines: a row's chip can now name a consultation stage, and looking only in
+    // the sales list would have found no colour and painted it the grey of a stage nobody
+    // recognises.
+    (name) => (stages.find((s) => s.name === name) || consultationStages.find((s) => s.name === name))?.color || "#64748b",
+    [stages, consultationStages],
   );
 
   // The two ways a lead can open its journey on this board: the mirrored Pre-Sales "Leads"
@@ -562,16 +565,36 @@ export const BranchAdminBoard = ({ branchId, embedded = false, branchPicker = nu
   const mirrorStage = useMemo(() => stages.find((s) => s.mirrors_stage) || null, [stages]);
   const realEntryStage = useMemo(() => stages.find((s) => !s.mirrors_stage) || null, [stages]);
 
-  // What a row's Stage chip should say. Normally the lead's own branch_stage — except under
-  // the Leads pill, where that would read "Branch Assign" on every row of a list the admin
-  // opened by clicking Leads. The lead genuinely is still at the branch's opening; "Leads"
-  // is the name for that position while it is also an unworked Pre-Sales New Lead, and it
-  // is the name the admin is looking at. Every other pill still shows the real stage, so a
-  // lead reads "Branch Assign" under Branch Assign and under All Stages.
+  // What a row's Stage chip should say.
+  //
+  // The consultation stage when the lead has one. This read branch_stage alone, which
+  // stops at Appointment Date & Time the moment the appointment is booked and never moves
+  // again -- so a patient whose consultation was done, whose fee was collected and whose
+  // physio was assigned still read "Appointment" on this board, for good. The stage bar
+  // above already spans both pipelines and counts those leads under Consultation Visit,
+  // Fee Collected and Physio Assign; only the chip was still reading the first half of the
+  // journey.
+  //
+  // Except where the branch stage is a final one. Cancelling an appointment leaves
+  // consultation_stage exactly where it was, and that the lead was cancelled is the more
+  // important thing to say about them than wherever their consultation had reached.
+  //
+  // And except under the Leads pill, where branch_stage would read "Branch Assign" on
+  // every row of a list the admin opened by clicking Leads. The lead genuinely is still at
+  // the branch's opening; "Leads" is the name for that position while it is also an
+  // unworked Pre-Sales New Lead, and it is the name the admin is looking at.
   const showingMirror = !!mirrorStage && stageFilter === mirrorStage.name;
+  const finalBranchStages = useMemo(
+    () => new Set(stages.filter((s) => s.is_final).map((s) => s.name)),
+    [stages],
+  );
   const rowStageName = useCallback(
-    (lead) => (showingMirror && lead.branch_stage ? mirrorStage.name : lead.branch_stage),
-    [showingMirror, mirrorStage],
+    (lead) => {
+      if (showingMirror && lead.branch_stage) return mirrorStage.name;
+      if (lead.branch_stage && finalBranchStages.has(lead.branch_stage)) return lead.branch_stage;
+      return lead.consultation_stage || lead.branch_stage;
+    },
+    [showingMirror, mirrorStage, finalBranchStages],
   );
   const entryStageNames = [mirrorStage?.name, realEntryStage?.name].filter(Boolean);
 
