@@ -961,31 +961,77 @@ async def backfill_consultant_branches_from_employees() -> None:
 
     Consultants only. They are the one desk whose branches were being erased; every other
     role's login has carried its own all along.
+
+    The employee is found by the link where there is one and BY NAME where there is not.
+    That second path is not an edge case: employee_id on a login is optional, the two
+    screens are filled in months apart, and _consultants_for_vertical already carries the
+    same fallback for the same reason. Without it this function skipped exactly the people
+    it was written for — HR printing Parrys Branch on the employee row while the login
+    stayed blank and the Consultant Calendar stayed empty — because the only thing tying
+    the two halves together was the link that was missing.
+
+    A name is only accepted when it resolves to exactly ONE employee whose designation
+    reads as this desk. A name shared by two people says nothing about which of them holds
+    the login, and a namesake in another department is not this person at all, so an
+    ambiguous match is dropped rather than guessed.
+
+    Where a name resolves, the link itself is written back alongside the branches. The
+    branches alone would be a repair with a short life: the next time HR moved that
+    Consultant the cascade would look for the login by employee_id, fail to find it again,
+    and the two halves would part exactly as before.
     """
     from routers.v3_hr import ALL_BRANCHES
 
-    blank = []
+    def name_key(value) -> str:
+        return str(value or "").strip().lower()
+
+    linked, unlinked = [], []
     async for u in v3_col("users").find(
         {"role": {"$in": sorted(HEAD_PHYSIO_ROLES)}},
-        {"_id": 0, "id": 1, "employee_id": 1, "branch_id": 1, "branch_ids": 1},
+        {"_id": 0, "id": 1, "employee_id": 1, "branch_id": 1, "branch_ids": 1, "full_name": 1},
     ):
         if [b for b in (u.get("branch_ids") or []) if b] or u.get("branch_id"):
             continue
         if u.get("employee_id"):
-            blank.append(u)
-    if not blank:
+            linked.append(u)
+        elif name_key(u.get("full_name")):
+            unlinked.append(u)
+    if not linked and not unlinked:
         return
 
     emps = {}
-    async for e in v3_col("employees").find(
-        {"id": {"$in": [u["employee_id"] for u in blank]}},
-        {"_id": 0, "id": 1, "branch_id": 1, "branch_ids": 1},
-    ):
-        emps[e["id"]] = e
+    if linked:
+        async for e in v3_col("employees").find(
+            {"id": {"$in": [u["employee_id"] for u in linked]}},
+            {"_id": 0, "id": 1, "branch_id": 1, "branch_ids": 1},
+        ):
+            emps[e["id"]] = e
+
+    # The same shape _consultants_for_vertical uses to trace an unlinked login: first
+    # sighting of a name keeps the row, a second sighting poisons it to None, and only the
+    # names that survive are read back.
+    by_name = {}
+    if unlinked:
+        wanted = {name_key(u.get("full_name")) for u in unlinked}
+        seen: dict = {}
+        async for e in v3_col("employees").find(
+            {}, {"_id": 0, "id": 1, "full_name": 1, "designation": 1, "branch_id": 1, "branch_ids": 1},
+        ):
+            key = name_key(e.get("full_name"))
+            if key not in wanted:
+                continue
+            # The designation is what says this row is the same desk as the login. Read
+            # through _slug_of_role so "ONLINE CONSULTANT" and online_consultant are the
+            # one answer they are everywhere else, and matched against the same set the
+            # logins were selected on rather than a second list to keep in step.
+            if _slug_of_role(e.get("designation")) not in HEAD_PHYSIO_ROLES:
+                continue
+            seen[key] = None if key in seen else e
+        by_name = {k: e for k, e in seen.items() if e}
 
     every = None
-    for u in blank:
-        emp = emps.get(u["employee_id"])
+    for u in linked + unlinked:
+        emp = emps.get(u["employee_id"]) if u.get("employee_id") else by_name.get(name_key(u.get("full_name")))
         if not emp:
             continue
         at = [b for b in (emp.get("branch_ids") or []) if b and b != ALL_BRANCHES]
@@ -997,9 +1043,13 @@ async def backfill_consultant_branches_from_employees() -> None:
             at = [emp["branch_id"]]
         if not at:
             continue
-        await v3_col("users").update_one(
-            {"id": u["id"]}, {"$set": {"branch_ids": at, "branch_id": at[0]}}
-        )
+        account = {"branch_ids": at, "branch_id": at[0]}
+        # Only where the name found them. A login that already carried the link keeps the
+        # one it has: this function is repairing branches, and rewriting an existing link
+        # off a name match is how the wrong two halves would be joined.
+        if not u.get("employee_id"):
+            account["employee_id"] = emp["id"]
+        await v3_col("users").update_one({"id": u["id"]}, {"$set": account})
 
 
 # The slug each retired consultation role is rewritten to. Same desk, same board, same
