@@ -77,6 +77,7 @@ import { FitnessPanel } from "@/components/branch/FitnessPanel";
 import { CreateLeadModal } from "@/components/CreateLeadModal";
 import { MilkCalendar, MilkDateInput, MilkTimeInput } from "@/components/ui/milk-calendar";
 import { LOGO_URL, PRINTABLE_STYLES, escapeHtml, rowsHtml, openPrintable } from "@/lib/printable";
+import { isCourseComplete } from "@/lib/leadStage";
 
 // ---- Appointment confirmation -------------------------------------------------------
 // What the client walks away with. Built as its own document so it can be opened, printed
@@ -350,17 +351,9 @@ export const matchesConsultationStage = (lead, stageName) => {
   // because their Rehab Fee is in, and they keep whatever position they actually hold in
   // the physio pipeline — rehab runs beside it, not inside it.
   if (stageName === "Rehab") return lead.rehab_fee_paid != null;
-  // Nothing left to attend. Counted off the days themselves rather than a stage somebody
-  // remembers to set, and gated on there having been days at all: a patient with none
-  // booked has not finished a course, they have not started one.
-  if (stageName === "Completed") {
-    // A Consultation Only patient finishes without ever having a treatment day, and the
-    // branch marks them done on the Consultations board. They belong here for the same
-    // reason everybody else does — there is nothing left for them to attend — and the
-    // stage they carry is still written, it just no longer has a pill of its own.
-    if (lead.consultation_stage === "Consultation Completed") return true;
-    return (lead.total_sessions || 0) > 0 && (lead.completed_sessions || 0) >= lead.total_sessions;
-  }
+  // Nothing left to attend — see isCourseComplete, which both boards showing this stage
+  // now read it through.
+  if (stageName === "Completed") return isCourseComplete(lead);
   return lead.consultation_stage === stageName;
 };
 

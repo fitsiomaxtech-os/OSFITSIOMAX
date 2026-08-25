@@ -368,6 +368,16 @@ class V3LeadOut(BaseModel):
     assigned_physio_name: Optional[str] = None
     physio_assigned_at: Optional[str] = None
     physio_stage: Optional[str] = None  # None = "Assigned" (active), "Complete" = physio's consultation review finished
+    # Stamped onto the lead by _stamp_session_progress, never stored: the days live in
+    # the sessions collection and are ticked off one at a time, so a count kept on the
+    # lead would be a second copy of the truth, and the stale one is what a board reads.
+    #
+    # Declared here because this model ignores extras -- so a board returning leads
+    # through it dropped both fields on the way out, and the Completed stage, which is
+    # read off exactly these two numbers, saw nothing to read. None means no days were
+    # ever booked, which is not zero: nobody sold that patient treatment.
+    total_sessions: Optional[int] = None
+    completed_sessions: Optional[int] = None
     location: Optional[str] = None
     expected_consultation_date: Optional[str] = None
     months_of_pain: Optional[int] = None
@@ -508,6 +518,15 @@ class V3CollectTreatmentFeeInput(BaseModel):
     # Branch Admin must explicitly tick a confirmation before Cash/UPI/Card is
     # accepted — a deliberate double-check step, not just clicking Collect once.
     confirmed: bool = False
+    # Set when the fee arrived in more than one tender -- Rs.4000 cash and Rs.4000 UPI
+    # is one collection made of two, not a payment under a mode that is only half true.
+    # Present, it settles both the amount (their sum) and the recorded mode ("split");
+    # payment_mode above then says only which mode the popup happened to open on.
+    #
+    # A split is money settled today, so its tenders are the settled-now modes. A
+    # cheque clears when it clears and Partial Payment is a schedule rather than a
+    # payment -- neither is a piece of money on the desk, so neither is a line in one.
+    payment_lines: Optional[List[V3PaymentLineInput]] = None
     # UPI
     upi_transaction_id: Optional[str] = None
     upi_utr: Optional[str] = None
@@ -544,6 +563,9 @@ class V3MarkInstallmentPaidInput(BaseModel):
     # Collections / Accountant Manage), same as every other Treatment Fee mode.
     payment_mode: Optional[Literal["cash", "upi", "card", "cheque", "account_transfer"]] = None
     amount: Optional[float] = None
+    # One installment can arrive in more than one tender as readily as a whole fee can
+    # -- same shape and the same rules as the split on the collection above.
+    payment_lines: Optional[List[V3PaymentLineInput]] = None
     upi_transaction_id: Optional[str] = None
     upi_utr: Optional[str] = None
     account_number: Optional[str] = None

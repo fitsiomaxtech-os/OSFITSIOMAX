@@ -840,6 +840,13 @@ async def v3_consultations_board(branch_id: str, pipeline: Optional[str] = None,
         stage_counts = {}
         for stage in stage_names:
             stage_counts[stage] = sum(1 for ld in leads_docs if ld.get(field) == stage)
+        # How far through their days each patient is. The branch-board next door has
+        # always stamped this; here it was missing, so total_sessions and
+        # completed_sessions arrived undefined and the Completed stage -- which is read
+        # off exactly those two numbers -- could only ever find the Consultation Only
+        # patients somebody had closed by hand. A patient who finished every day of a
+        # course was not on it.
+        await _stamp_session_progress(leads_docs)
         # One malformed lead document shouldn't 500 the whole board — skip it and keep
         # showing every other lead rather than failing the entire list.
         lead_list = []

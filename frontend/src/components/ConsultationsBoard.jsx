@@ -26,6 +26,7 @@ import {
 import { waNumber } from "@/lib/phone";
 import { endTime12h, to12h } from "@/lib/time";
 import { LOGO_URL, PRINTABLE_STYLES, escapeHtml, openPrintable, downloadPrintable, sharePrintable } from "@/lib/printable";
+import { isCourseComplete } from "@/lib/leadStage";
 import { MilkDateInput, MilkTimeInput } from "@/components/ui/milk-calendar";
 
 const CONSULTATION_FEE_PAYMENT_MODES = [
@@ -64,6 +65,10 @@ const COURSE_DAY_NOUN = { session: "treatment day", rehab: "rehab day", diet: "c
 // sessions today and leave the rest as a scheduled balance.
 const SETTLED_NOW_MODES = ["cash", "upi", "card", "account_transfer"];
 const PART_SESSION_MODES = ["cash", "upi", "card", "cheque", "account_transfer"];
+// What a Treatment Fee split can be made of, for both of its Collect popups. A split
+// is money settled at the desk today, so Cheque (which clears when it clears) and
+// Partial Payment (a plan, not a payment) are not pieces of one.
+const TREATMENT_SPLIT_MODES = TREATMENT_FEE_PAYMENT_MODES.filter((m) => SETTLED_NOW_MODES.includes(m.value));
 const PARTIAL_ORDINALS = ["First", "Second", "Third", "Fourth", "Fifth", "Sixth", "Seventh", "Eighth", "Ninth", "Tenth"];
 const partialInstallmentLabel = (idx) => `${PARTIAL_ORDINALS[idx] || `#${idx + 1}`} Payment`;
 
@@ -788,6 +793,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   /** Every fee path builds its receipt here, so they can't drift apart field by field. */
   const makeReceipt = ({ lead, payload, prefix, paidFor, packageName, assignedPrice, kind = "paid", sessionsCovered, balanceDue, installments, transactionId }) => {
     const amount = payload.amount;
+    const splitLines = payload.payment_lines && payload.payment_lines.length ? payload.payment_lines : null;
     // A Branch-Admin-negotiated amount below the assigned price is a discount, and the
     // receipt has to show both numbers or it reads as though the price was simply lower.
     const discount = assignedPrice != null && assignedPrice > amount
@@ -814,10 +820,18 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       amount,
       originalAmount: assignedPrice != null ? assignedPrice : null,
       discount,
-      modeLabel: ALL_PAYMENT_MODE_LABELS[payload.payment_mode] || payload.payment_mode,
-      reference: paymentReference(payload),
+      // A split is named by its parts. payment_mode still carries whichever mode the
+      // popup opened on, so reading it here printed "Cash" across a receipt for money
+      // that came half by UPI — the one line on the page a patient checks against what
+      // they actually handed over.
+      modeLabel: splitLines
+        ? splitLines.map((l) => `${ALL_PAYMENT_MODE_LABELS[l.mode] || l.mode} Rs.${Number(l.amount).toLocaleString("en-IN")}`).join(" + ")
+        : ALL_PAYMENT_MODE_LABELS[payload.payment_mode] || payload.payment_mode,
+      reference: splitLines
+        ? splitLines.map((l) => (l.reference || "").trim()).filter(Boolean).join(", ")
+        : paymentReference(payload),
       collectedBy: "Branch Admin",
-      isCash: payload.payment_mode === "cash",
+      isCash: splitLines ? splitLines.every((l) => l.mode === "cash") : payload.payment_mode === "cash",
     };
   };
 
@@ -1047,13 +1061,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     // Rehab reads off the fee for the same reason Diet reads off its own — nothing ever
     // writes the stage. Branch pipeline only: the Consultant's own board has no such stage.
     if (!isConsultant && stageName === "Rehab") return lead.rehab_fee_paid != null;
-    // Nothing left to attend, counted off the treatment days rather than a stage somebody
-    // sets. Kept in step with matchesConsultationStage in BranchAdminBoard, which the
-    // Branch Leads bar reads the same rows through.
-    if (!isConsultant && stageName === "Completed") {
-      if (lead.consultation_stage === "Consultation Completed") return true;
-      return (lead.total_sessions || 0) > 0 && (lead.completed_sessions || 0) >= lead.total_sessions;
-    }
+    // Nothing left to attend. Shared with matchesConsultationStage in BranchAdminBoard,
+    // which the Branch Leads bar reads the same rows through, rather than copied and kept
+    // in step by hand. Branch pipeline only: the Consultant's own board has no such stage.
+    if (!isConsultant && stageName === "Completed") return isCourseComplete(lead);
     return lead[stageField] === stageName;
   }, [isConsultant, stageField]);
 
@@ -1491,7 +1502,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // hasPendingInstallments is true.
   const openPartialScheduleDraft = () => {
     openTreatmentFeeDraft();
-    setTreatmentConfirmDraft({ upi_transaction_id: "", account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "" });
+    setTreatmentConfirmDraft({ upi_transaction_id: "", account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "", payment_lines: null });
   };
 
   // Partial Payment is split by session count, not a raw amount — each installment's
@@ -1674,7 +1685,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // "Collect" step there, rather than sharing one form with a mode selector.
   const chooseTreatmentPaymentMode = (mode) => {
     setTreatmentFeeDraft({ ...treatmentFeeDraft, payment_mode: mode });
-    setTreatmentConfirmDraft({ upi_transaction_id: "", account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "", transfer_reference: "" });
+    setTreatmentConfirmDraft({ upi_transaction_id: "", account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "", transfer_reference: "", payment_lines: null });
   };
 
   // The dedicated popup's own submit button — dispatches to whichever path
@@ -1697,7 +1708,16 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     const amount = parseFloat(treatmentFeeDraft.amount);
     const mode = treatmentFeeDraft.payment_mode;
     const payload = { payment_mode: mode, amount, confirmed: true };
-    if (mode === "upi") {
+    // A split carries its own modes, so none of the single-mode detail blocks below
+    // apply to it. amount still rides along: the server sums the parts and refuses them
+    // when they disagree with the fee this popup was collecting.
+    if (treatmentConfirmDraft.payment_lines) {
+      payload.payment_lines = treatmentConfirmDraft.payment_lines.map((l) => ({
+        mode: l.mode,
+        amount: parseFloat(l.amount),
+        reference: (l.reference || "").trim(),
+      }));
+    } else if (mode === "upi") {
       payload.upi_transaction_id = treatmentConfirmDraft.upi_transaction_id.trim();
     } else if (BANK_DETAIL_MODES.includes(mode)) {
       if (!attachBankDetails(payload, treatmentConfirmDraft, mode)) return;
@@ -1787,6 +1807,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       upi_transaction_id: "",
       account_number: "", account_holder_name: "", bank_name: "", ifsc_code: "",
       cheque_number: "", transfer_reference: "",
+      payment_lines: null,
     });
   };
 
@@ -1805,7 +1826,15 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     }
     const mode = draft.payment_mode;
     const payload = { payment_mode: mode, amount };
-    if (mode === "upi") {
+    // Same as the fee itself: a split brings its own modes, so the single-mode blocks
+    // below are not its to fill in.
+    if (draft.payment_lines) {
+      payload.payment_lines = draft.payment_lines.map((l) => ({
+        mode: l.mode,
+        amount: parseFloat(l.amount),
+        reference: (l.reference || "").trim(),
+      }));
+    } else if (mode === "upi") {
       payload.upi_transaction_id = draft.upi_transaction_id.trim();
     } else if (BANK_DETAIL_MODES.includes(mode)) {
       if (!attachBankDetails(payload, draft, mode)) return;
@@ -1833,7 +1862,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       }
       const paidRes = await markInstallmentPaid(lead.id, draft.idx + 1, payload);
       const installments = (lead.treatment_fee_payment_details?.installments || []).map((inst, i) =>
-        i === draft.idx ? { ...inst, paid: true, amount, payment_mode: mode, transaction_id: paidRes?.transaction_id } : inst
+        i === draft.idx ? { ...inst, paid: true, amount, payment_mode: draft.payment_lines ? "split" : mode, transaction_id: paidRes?.transaction_id } : inst
       );
       const updatedLead = { ...lead, treatment_fee_payment_details: { ...lead.treatment_fee_payment_details, installments } };
       toast.success(`Payment #${draft.idx + 1} collected`);
@@ -3291,20 +3320,15 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               // refuses for the same reason. Shows on every path a referred patient can be
               // sitting on, beside the Diet button it is modelled on.
               const rehabFeePaid = selectedLead.rehab_fee_paid != null;
-              const RehabButton = (selectedLead.package_paid != null && selectedLead.rehab_referred && selectedLead.rehab_package_id) ? (
+              const RehabButton = (selectedLead.package_paid != null && selectedLead.rehab_referred && selectedLead.rehab_package_id && !rehabFeePaid) ? (
                 <Button
                   size="sm"
-                  variant={rehabFeePaid ? "outline" : undefined}
-                  className={`${rehabFeePaid
-                    ? "border-cyan-200 text-cyan-700 hover:bg-cyan-50"
-                    : "bg-cyan-600 text-white hover:bg-cyan-700"} ${ACT_BTN}`}
+                  className={`bg-cyan-600 text-white hover:bg-cyan-700 ${ACT_BTN}`}
                   onClick={openRehabFeeDraft}
                   data-testid="cons-open-rehab-fee"
                 >
                   <Activity className="mr-1 h-3.5 w-3.5" />{" "}
-                  {rehabFeePaid
-                    ? <Lbl full="Update Rehab Fee" short="Rehab" />
-                    : <Lbl full="Collect Rehab Fee" short="Rehab Fee" />}
+                  <Lbl full="Collect Rehab Fee" short="Rehab Fee" />
                 </Button>
               ) : null;
 
@@ -3431,15 +3455,22 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                   {/* Same order and the same gate as diet: the days cannot be booked until
                       the course is paid for, which is the rule assign-rehab itself holds. */}
                   <div className="mt-3 flex flex-wrap items-center gap-2 [&>*]:shrink-0">
-                    <Button
-                      size="sm"
-                      className={`${rehabFeePaid ? "bg-white text-cyan-700 shadow-sm ring-1 ring-cyan-200 hover:bg-cyan-50" : "bg-cyan-600 text-white shadow-sm hover:bg-cyan-700"} ${ACT_BTN}`}
-                      onClick={openRehabFeeDraft}
-                      data-testid="cons-rehab-detail-fee"
-                    >
-                      <IndianRupee className="mr-1 h-3.5 w-3.5" />
-                      {rehabFeePaid ? "Update Rehab Fee" : "Collect Rehab Fee"}
-                    </Button>
+                    {/* Only while the course is unpaid. The Rehab Fee is taken in one go —
+                        anything short of the listed price is recorded as a discount, not a
+                        balance — so once it is in there is no rehab money left to collect,
+                        and a button offering to take it again beside a line reading
+                        "Rs.20,800 (cash)" only invites someone to overwrite the record. */}
+                    {!rehabFeePaid && (
+                      <Button
+                        size="sm"
+                        className={`bg-cyan-600 text-white shadow-sm hover:bg-cyan-700 ${ACT_BTN}`}
+                        onClick={openRehabFeeDraft}
+                        data-testid="cons-rehab-detail-fee"
+                      >
+                        <IndianRupee className="mr-1 h-3.5 w-3.5" />
+                        Collect Rehab Fee
+                      </Button>
+                    )}
                     <Button
                       size="sm"
                       disabled={!rehabFeePaid}
@@ -4743,7 +4774,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" data-testid="cons-treatment-fee-confirm-modal">
                   <div className="max-h-[85dvh] w-full max-w-xl space-y-3 overflow-y-auto rounded-xl bg-white p-4 shadow-2xl sm:max-h-[90vh]">
                     <div className="flex items-center justify-between">
-                      <p className="text-sm font-semibold text-slate-800">{mode === "partial" ? "Partial Payment Schedule" : `Collect ${modeLabel} Payment`}</p>
+                      <p className="text-sm font-semibold text-slate-800">{mode === "partial" ? "Partial Payment Schedule" : treatmentConfirmDraft.payment_lines ? "Collect Split Payment" : `Collect ${modeLabel} Payment`}</p>
                       <button onClick={() => setTreatmentConfirmDraft(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-treatment-fee-confirm-close"><X className="h-4 w-4" /></button>
                     </div>
 
@@ -4822,11 +4853,55 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       </div>
                     )}
 
+                    {/* Started from what was already chosen: the mode this popup opened
+                        on becomes the first tender, carrying the whole amount, and the
+                        second opens empty for the rest. Nothing typed is thrown away by
+                        pressing it, and "Single payment" inside comes straight back. */}
+                    {SETTLED_NOW_MODES.includes(mode) && !treatmentConfirmDraft.payment_lines && (
+                      <button
+                        type="button"
+                        onClick={() => setTreatmentConfirmDraft({
+                          ...treatmentConfirmDraft,
+                          payment_lines: [
+                            { mode, amount: treatmentFeeDraft.amount, reference: mode === "upi" ? treatmentConfirmDraft.upi_transaction_id : "" },
+                            { mode: mode === "cash" ? "upi" : "cash", amount: "", reference: "" },
+                          ],
+                        })}
+                        className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-300 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-400 hover:text-indigo-700"
+                        data-testid="cons-treatment-fee-split-add"
+                      >
+                        <Plus className="h-3.5 w-3.5" /> Add another payment
+                      </button>
+                    )}
+
+                    {treatmentConfirmDraft.payment_lines && (
+                      <>
+                        <SplitPaymentLines
+                          lines={treatmentConfirmDraft.payment_lines}
+                          modes={TREATMENT_SPLIT_MODES}
+                          expected={treatmentFeeDraft.amount}
+                          onChange={(next) => setTreatmentConfirmDraft({ ...treatmentConfirmDraft, payment_lines: next })}
+                          testPrefix="cons-treatment-fee"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setTreatmentConfirmDraft({
+                            ...treatmentConfirmDraft,
+                            payment_lines: [...treatmentConfirmDraft.payment_lines, { mode: "cash", amount: "", reference: "" }],
+                          })}
+                          className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-300 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-400 hover:text-indigo-700"
+                          data-testid="cons-treatment-fee-split-more"
+                        >
+                          <Plus className="h-3.5 w-3.5" /> Add another payment
+                        </button>
+                      </>
+                    )}
+
                     {/* Transaction ID alone. A UPI payment was asking for its UTR as
                         well -- a second reference for the same transfer, typed off the
                         same receipt, on the popup a Branch Admin fills at the desk with
                         the patient waiting. */}
-                    {mode === "upi" && (
+                    {!treatmentConfirmDraft.payment_lines && mode === "upi" && (
                       <div>
                         <label className="mb-1 block text-[11px] font-medium text-slate-500">UPI Transaction ID</label>
                         <Input
@@ -4838,7 +4913,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       </div>
                     )}
 
-                    {BANK_DETAIL_MODES.includes(mode) && (
+                    {!treatmentConfirmDraft.payment_lines && BANK_DETAIL_MODES.includes(mode) && (
                       <>
                         <div>
                           <label className="mb-1 block text-[11px] font-medium text-slate-500">Account Number</label>
@@ -4934,12 +5009,18 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                         (mode === "cheque" && (!treatmentFeeDraft.bank_name.trim() || !treatmentFeeDraft.cheque_number.trim())) ||
                         (mode === "partial" && (!partialAllFilled || partialMismatch)) ||
                         (PART_SESSION_MODES.includes(mode) && treatmentIsPartialSessions && !treatmentFeeDraft.balance_due_date) ||
-                        (BANK_DETAIL_MODES.includes(mode) && (!treatmentConfirmDraft.account_number.trim() || !treatmentConfirmDraft.account_holder_name.trim() || !treatmentConfirmDraft.bank_name.trim() || !treatmentConfirmDraft.ifsc_code.trim())) ||
-                        (mode === "account_transfer" && !treatmentConfirmDraft.transfer_reference.trim())
+                        // A split answers for itself: every part above zero, and the parts
+                        // adding up to the fee. The single-mode requirements are not its
+                        // to satisfy.
+                        (treatmentConfirmDraft.payment_lines
+                          ? (treatmentConfirmDraft.payment_lines.some((l) => !(parseFloat(l.amount) > 0)) ||
+                             Math.abs(treatmentConfirmDraft.payment_lines.reduce((sum, l) => sum + (parseFloat(l.amount) || 0), 0) - parseFloat(treatmentFeeDraft.amount)) > 0.01)
+                          : ((BANK_DETAIL_MODES.includes(mode) && (!treatmentConfirmDraft.account_number.trim() || !treatmentConfirmDraft.account_holder_name.trim() || !treatmentConfirmDraft.bank_name.trim() || !treatmentConfirmDraft.ifsc_code.trim())) ||
+                             (mode === "account_transfer" && !treatmentConfirmDraft.transfer_reference.trim())))
                       }
                       data-testid="cons-treatment-fee-confirm-submit"
                     >
-                      {collectingTreatmentFee ? "Saving..." : mode === "partial" ? "Save Payment Schedule" : `Collect ${modeLabel} Payment`}
+                      {collectingTreatmentFee ? "Saving..." : mode === "partial" ? "Save Payment Schedule" : treatmentConfirmDraft.payment_lines ? "Collect Split Payment" : `Collect ${modeLabel} Payment`}
                     </Button>
                   </div>
                 </div>
@@ -4973,17 +5054,65 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       />
                     </div>
 
-                    <div>
-                      <label className="mb-1 block text-[11px] font-medium text-slate-500">Payment Mode</label>
-                      <PaymentModeSelect
-                        value={mode}
-                        options={INSTALLMENT_PAYMENT_MODES}
-                        onChange={(v) => setPartialCollectDraft({ ...partialCollectDraft, payment_mode: v })}
-                        testId="cons-partial-collect-mode"
-                      />
-                    </div>
+                    {/* The one mode this installment came in — replaced by the lines
+                        themselves once it turns out to have come in several. */}
+                    {!partialCollectDraft.payment_lines && (
+                      <div>
+                        <label className="mb-1 block text-[11px] font-medium text-slate-500">Payment Mode</label>
+                        <PaymentModeSelect
+                          value={mode}
+                          options={INSTALLMENT_PAYMENT_MODES}
+                          onChange={(v) => setPartialCollectDraft({ ...partialCollectDraft, payment_mode: v })}
+                          testId="cons-partial-collect-mode"
+                        />
+                      </div>
+                    )}
 
-                    {mode === "upi" && (
+                    {/* Started from what was already chosen: the mode this popup opened
+                        on becomes the first tender, carrying the whole amount, and the
+                        second opens empty for the rest. Nothing typed is thrown away by
+                        pressing it, and "Single payment" inside comes straight back. */}
+                    {SETTLED_NOW_MODES.includes(mode) && !partialCollectDraft.payment_lines && (
+                      <button
+                        type="button"
+                        onClick={() => setPartialCollectDraft({
+                          ...partialCollectDraft,
+                          payment_lines: [
+                            { mode, amount: partialCollectDraft.amount, reference: mode === "upi" ? partialCollectDraft.upi_transaction_id : "" },
+                            { mode: mode === "cash" ? "upi" : "cash", amount: "", reference: "" },
+                          ],
+                        })}
+                        className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-300 py-2 text-xs font-semibold text-slate-600 transition hover:border-emerald-400 hover:text-emerald-700"
+                        data-testid="cons-partial-collect-split-add"
+                      >
+                        <Plus className="h-3.5 w-3.5" /> Add another payment
+                      </button>
+                    )}
+
+                    {partialCollectDraft.payment_lines && (
+                      <>
+                        <SplitPaymentLines
+                          lines={partialCollectDraft.payment_lines}
+                          modes={TREATMENT_SPLIT_MODES}
+                          expected={partialCollectDraft.amount}
+                          onChange={(next) => setPartialCollectDraft({ ...partialCollectDraft, payment_lines: next })}
+                          testPrefix="cons-partial-collect"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setPartialCollectDraft({
+                            ...partialCollectDraft,
+                            payment_lines: [...partialCollectDraft.payment_lines, { mode: "cash", amount: "", reference: "" }],
+                          })}
+                          className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-300 py-2 text-xs font-semibold text-slate-600 transition hover:border-emerald-400 hover:text-emerald-700"
+                          data-testid="cons-partial-collect-split-more"
+                        >
+                          <Plus className="h-3.5 w-3.5" /> Add another payment
+                        </button>
+                      </>
+                    )}
+
+                    {!partialCollectDraft.payment_lines && mode === "upi" && (
                       <div>
                         <label className="mb-1 block text-[11px] font-medium text-slate-500">UPI Transaction ID</label>
                         <Input
@@ -4995,7 +5124,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       </div>
                     )}
 
-                    {BANK_DETAIL_MODES.includes(mode) && (
+                    {!partialCollectDraft.payment_lines && BANK_DETAIL_MODES.includes(mode) && (
                       <>
                         <div>
                           <label className="mb-1 block text-[11px] font-medium text-slate-500">Account Number</label>
@@ -5047,7 +5176,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       </>
                     )}
 
-                    {mode === "cheque" && (
+                    {!partialCollectDraft.payment_lines && mode === "cheque" && (
                       <>
                         <div>
                           <label className="mb-1 block text-[11px] font-medium text-slate-500">Bank Name</label>
@@ -5076,13 +5205,16 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       disabled={
                         collectingTreatmentFee ||
                         !(parseFloat(partialCollectDraft.amount) > 0) ||
-                        (BANK_DETAIL_MODES.includes(mode) && (!partialCollectDraft.account_number.trim() || !partialCollectDraft.account_holder_name.trim() || !partialCollectDraft.bank_name.trim() || !partialCollectDraft.ifsc_code.trim())) ||
-                        (mode === "account_transfer" && !partialCollectDraft.transfer_reference.trim()) ||
-                        (mode === "cheque" && (!partialCollectDraft.bank_name.trim() || !partialCollectDraft.cheque_number.trim()))
+                        (partialCollectDraft.payment_lines
+                          ? (partialCollectDraft.payment_lines.some((l) => !(parseFloat(l.amount) > 0)) ||
+                             Math.abs(partialCollectDraft.payment_lines.reduce((sum, l) => sum + (parseFloat(l.amount) || 0), 0) - parseFloat(partialCollectDraft.amount)) > 0.01)
+                          : ((BANK_DETAIL_MODES.includes(mode) && (!partialCollectDraft.account_number.trim() || !partialCollectDraft.account_holder_name.trim() || !partialCollectDraft.bank_name.trim() || !partialCollectDraft.ifsc_code.trim())) ||
+                             (mode === "account_transfer" && !partialCollectDraft.transfer_reference.trim()) ||
+                             (mode === "cheque" && (!partialCollectDraft.bank_name.trim() || !partialCollectDraft.cheque_number.trim()))))
                       }
                       data-testid="cons-partial-collect-submit"
                     >
-                      {collectingTreatmentFee ? "Saving..." : `Collect ${modeLabel} Payment`}
+                      {collectingTreatmentFee ? "Saving..." : partialCollectDraft.payment_lines ? "Collect Split Payment" : `Collect ${modeLabel} Payment`}
                     </Button>
                   </div>
                 </div>
@@ -5098,9 +5230,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" data-testid="cons-rehab-fee-modal">
                   <div className="max-h-[90vh] w-full max-w-sm space-y-3 overflow-y-auto rounded-xl bg-white p-4 shadow-2xl">
                     <div className="flex items-center justify-between">
-                      <p className="text-sm font-semibold text-slate-800">
-                        {selectedLead.rehab_fee_paid != null ? "Update Rehab Fee" : "Collect Rehab Fee"}
-                      </p>
+                      <p className="text-sm font-semibold text-slate-800">Collect Rehab Fee</p>
                       <button onClick={() => setRehabFeeDraft(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-rehab-fee-close"><X className="h-4 w-4" /></button>
                     </div>
 
