@@ -296,7 +296,14 @@ class EmployeeCreate(BaseModel):
     # Neither is required — an employee can be tagged Online/Offline with no specific
     # branch picked yet, or left unset entirely.
     work_type: Optional[str] = ""  # "online" | "offline" | ""
-    branch_id: Optional[str] = ""  # from Branches & Verticals — filtered client-side by work_type
+    # Which practice this person works. A branch's vertical is the two answers together —
+    # offline_physiotherapy is work_type "offline" and service "physio" — so this is the
+    # second axis of the same question, and the Branch picker narrows on both. "both" is
+    # somebody who covers the two practices and so is offered every branch of their mode.
+    # Recorded on the employee only: what an account may reach still comes from its role,
+    # which already carries the practice for admins (branch_admin_physio, _fitness).
+    service: Optional[str] = ""  # "physio" | "fitness" | "both" | ""
+    branch_id: Optional[str] = ""  # from Branches & Verticals — filtered client-side by work_type and service
     joining_date: Optional[str] = ""
     reporting_to: Optional[str] = ""
     employee_code: Optional[str] = ""
@@ -330,6 +337,7 @@ class EmployeeUpdate(BaseModel):
     department: Optional[str] = None
     designation: Optional[str] = None
     work_type: Optional[str] = None
+    service: Optional[str] = None  # "physio" | "fitness" | "both" | ""
     branch_id: Optional[str] = None
     # Only meaningful for a role that holds a calendar at each of several branches — a
     # Nutritionist or a Physio. Sent instead of branch_id, never alongside it: update_employee

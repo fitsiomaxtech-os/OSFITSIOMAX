@@ -35,9 +35,32 @@ const TABS = [
   { key: "structure", label: "Department & Designation", short: "Depts", icon: Network },
 ];
 
+// The practices a branch can run, and so the services an employee can be tagged to.
+// "both" is not a third practice — it is the answer that declines to narrow.
+const PRACTICE_PHYSIO = "physio";
+const PRACTICE_FITNESS = "fitness";
+const PRACTICE_BOTH = "both";
+const SERVICE_LABELS = { "": "Select", [PRACTICE_PHYSIO]: "Physio", [PRACTICE_FITNESS]: "Fitness", [PRACTICE_BOTH]: "Both" };
+
 // Every default vertical is named "online_.../offline_..." — same helper as
 // Branches & Verticals' own mode tag, read off that prefix.
 const isOnlineVertical = (v) => String(v || "").startsWith("online_");
+
+// The other half of a vertical. Mode and practice together are what a vertical names —
+// offline_physiotherapy is mode "offline" and practice "physio" — so the Employment tab
+// asks the two questions separately and narrows the branch list on both.
+//
+// Matched on whole underscore-separated tokens rather than a substring, like the role
+// predicates in backend/deps.py, and null for anything that answers to neither: a vertical
+// added by hand under a name this doesn't recognise must stay pickable rather than quietly
+// dropping its branches out of the list with nothing on screen to say why.
+const VERTICAL_PRACTICES = { physio: PRACTICE_PHYSIO, physiotherapy: PRACTICE_PHYSIO, fitness: PRACTICE_FITNESS, gym: PRACTICE_FITNESS };
+const verticalPractice = (v) => {
+  for (const token of String(v || "").toLowerCase().split("_")) {
+    if (VERTICAL_PRACTICES[token]) return VERTICAL_PRACTICES[token];
+  }
+  return null;
+};
 
 // Both consultant roles can cover more than one branch — every other role keeps the
 // original single Branch select.
@@ -462,6 +485,14 @@ const WorkTypeCell = ({ e }) => {
       <span className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-semibold ${online ? "bg-violet-50 text-violet-600" : "bg-emerald-50 text-emerald-600"}`}>
         {online ? "Online" : "Offline"}
       </span>
+      {/* The practice beside the mode, in the same slate every neutral tag here wears:
+          the two together are the vertical, and reading them apart is what the Employment
+          tab asks for. Absent for anybody nobody classified, like the mode itself. */}
+      {e.service && (
+        <span className="ml-1 inline-flex rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">
+          {SERVICE_LABELS[e.service] || e.service}
+        </span>
+      )}
       <p className="mt-0.5 text-[11px] text-slate-500">{e.branch_name || "—"}</p>
     </div>
   );
@@ -741,6 +772,7 @@ const EmployeeViewModal = ({ employee: e, onClose, onEdit, onDelete }) => (
             <ViewRow label="Department" value={e.department} />
             <ViewRow label="Designation" value={e.designation} />
             <ViewRow label="Work Type" value={e.work_type ? (e.work_type === "online" ? "Online" : "Offline") : ""} />
+            <ViewRow label="Service" value={e.service ? (SERVICE_LABELS[e.service] || e.service) : ""} />
             <ViewRow label="Branch" value={e.branch_name} />
             <ViewRow label="Joining Date" value={e.joining_date} />
             <ViewRow label="Reporting To" value={e.reporting_to} />
@@ -893,7 +925,7 @@ const blankEmployee = {
   pan: "", aadhar: "",
   address: "", emergency_contact_name: "", emergency_contact_phone: "",
   net_salary: 0, gross_salary: 0, bank_name: "", bank_account: "", ifsc: "",
-  status: "active", notes: "", work_type: "", branch_id: "",
+  status: "active", notes: "", work_type: "", service: "", branch_id: "",
 };
 
 const AddEmployeeModal = ({ employee, meta, initialDepartment, initialDesignation, onClose, onSaved }) => {
@@ -938,16 +970,27 @@ const AddEmployeeModal = ({ employee, meta, initialDepartment, initialDesignatio
 
   const [branches, setBranches] = useState([]);
   useEffect(() => { getBranches().then(setBranches).catch(() => {}); }, []);
-  // Whichever branches match the picked Work Type — same filter Branches & Verticals'
-  // own mode pills use.
+  // Whichever branches match the picked Work Type and Service — mode from the same filter
+  // Branches & Verticals' own pills use, practice from the other half of the vertical.
+  //
+  // Service narrows only when it has been answered and answered narrowly: "" is nobody
+  // having said, and "both" is somebody who works the two practices, and neither is a
+  // reason to hide a branch. A vertical whose practice isn't recognised stays listed for
+  // the same reason — see verticalPractice.
   const branchOptions = useMemo(
-    () => branches.filter((b) => isOnlineVertical(b.vertical) === (form.work_type === "online")),
-    [branches, form.work_type],
+    () => branches.filter((b) => {
+      if (isOnlineVertical(b.vertical) !== (form.work_type === "online")) return false;
+      if (!form.service || form.service === PRACTICE_BOTH) return true;
+      const practice = verticalPractice(b.vertical);
+      return practice === null || practice === form.service;
+    }),
+    [branches, form.work_type, form.service],
   );
-  // Switching Work Type clears any branch already picked — an Offline branch left set
-  // after switching to Online would silently tag the employee to a branch that no longer
-  // matches the mode shown next to it.
+  // Switching either axis clears any branch already picked — a branch left set after the
+  // filter moves under it would silently tag the employee to one that no longer matches
+  // the Work Type and Service shown beside it.
   const changeWorkType = (v) => setForm((p) => ({ ...p, work_type: v, branch_id: "" }));
+  const changeService = (v) => setForm((p) => ({ ...p, service: v, branch_id: "" }));
 
   // Designation options are scoped to whichever Department is selected (grouped from
   // the Departments & Designation tab). Departments not grouped yet fall back to the
@@ -1082,10 +1125,20 @@ const AddEmployeeModal = ({ employee, meta, initialDepartment, initialDesignatio
               <Field label="Joining Date"><MilkDateInput centered title="Joining Date" value={form.joining_date} onChange={(e) => set("joining_date", e.target.value)} data-testid="hr-emp-joining" /></Field>
               <Field label="Reporting To"><Input value={form.reporting_to} onChange={(e) => set("reporting_to", e.target.value)} data-testid="hr-emp-reporting" /></Field>
               <Field label="Status"><Select value={form.status} onChange={(v) => set("status", v)} options={["active", "left", "on_leave"]} testid="hr-emp-status" /></Field>
-              {/* Neither is required. Branch only appears once a Work Type is picked —
-                  it's meaningless before that — and narrows to the branches that actually
-                  match it, same split Branches & Verticals itself uses. */}
+              {/* None of the three is required. Work Type and Service are the two halves of
+                  a branch's vertical — mode and practice — and Branch narrows on both, the
+                  same split Branches & Verticals itself uses. Branch still waits for a Work
+                  Type: it is meaningless before that. */}
               <Field label="Work Type"><Select value={form.work_type} onChange={changeWorkType} options={["", "online", "offline"]} testid="hr-emp-worktype" /></Field>
+              <Field label="Service">
+                <Select
+                  value={form.service}
+                  onChange={changeService}
+                  options={["", PRACTICE_PHYSIO, PRACTICE_FITNESS, PRACTICE_BOTH]}
+                  labels={SERVICE_LABELS}
+                  testid="hr-emp-service"
+                />
+              </Field>
               {form.work_type && (
                 <Field label="Branch">
                   <select
@@ -3604,14 +3657,17 @@ const PasswordInput = ({ value, onChange, placeholder, testid }) => {
 
 // `uppercase` styles the displayed text only — the stored value is untouched, so
 // existing records and the backend's department list keep matching.
-const Select = ({ value, onChange, options = [], testid, uppercase = false }) => (
+// `labels` maps a stored value to what the reader should see, for the fields whose value
+// is a slug rather than a word — "physio" is what the record holds, "Physio" is what the
+// row says. Omitted, every option still reads as its own value, as it always did.
+const Select = ({ value, onChange, options = [], testid, uppercase = false, labels = null }) => (
   <select
     value={value}
     onChange={(e) => onChange(e.target.value)}
     className={`h-10 w-full rounded-md border border-slate-200 px-3 text-sm${uppercase ? " uppercase" : ""}`}
     data-testid={testid}
   >
-    {options.map((o) => <option key={o} value={o}>{o || "Select"}</option>)}
+    {options.map((o) => <option key={o} value={o}>{(labels && labels[o]) || o || "Select"}</option>)}
   </select>
 );
 
