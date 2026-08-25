@@ -7,7 +7,7 @@ import uuid
 
 from database import v3_col
 from utils import now_iso
-from deps import v3_require_roles, is_diet_role, is_physio_role, is_rehab_role, is_head_physio_role, BRANCH_ADMIN_ROLES, HEAD_PHYSIO_ROLES, LEGACY_CONSULTANT_ROLES
+from deps import v3_require_roles, is_diet_role, is_physio_role, is_rehab_role, is_head_physio_role, BRANCH_ADMIN_ROLES, HEAD_PHYSIO_ROLES, LEGACY_CONSULTANT_ROLES, LEGACY_BRANCH_ADMIN_ROLES
 from security import hash_password
 from schemas.v3 import V3UserOut
 
@@ -45,13 +45,20 @@ ALL_BRANCHES_LABEL = "All Branches"
 # "sales_head" is Pre-Sales' own manager: the same board and the same leads, just the
 # org-wide Master View instead of one rep's own book. See PRE_SALES_ROLES in deps.py.
 #
+# Branch Admin is one entry, not four. The three variants naming a practice —
+# branch_admin_physio, _fitness, _physio_fitness — held exactly plain branch_admin's
+# permissions, so all four spellings did was ask whoever was filling this form to pick
+# between names that behaved identically. Existing accounts are rewritten by
+# migrate_branch_admin_roles() in seed.py and the slugs stay recognised in
+# BRANCH_ADMIN_ROLES so nothing is locked out in the meantime. The two online admins stay:
+# those name the arm, and the online branches are a genuinely separate vertical.
+#
 # Ordered next to the role each is an alias of, because this list is what the Designation
 # and Create User dropdowns render, and a reader picking between them wants the family
 # together.
 DEFAULT_ROLES = [
     "super_admin", "business_dev", "pre_sales", "sales_head",
-    "branch_admin", "branch_admin_physio", "branch_admin_fitness", "branch_admin_physio_fitness",
-    "online_physio_admin", "online_fitness_admin",
+    "branch_admin", "online_physio_admin", "online_fitness_admin",
     "consultant", "online_consultant", "physio", "online_physio", "marketing_head", "accountant",
 ]
 
@@ -176,8 +183,7 @@ async def ensure_roles_for_designations() -> None:
     Runs at startup and is safe to repeat: it skips any slug that is already a role, whether
     built-in or custom, so a second pass writes nothing. It never removes or renames
     anything — a role that no designation matches is left alone, because roles like
-    branch_admin_physio_fitness are access levels rather than job titles and belong to
-    nobody's department.
+    super_admin are access levels rather than job titles and belong to nobody's department.
 
     Creating the role grants no page access on its own, exactly as creating one by hand
     does not. It makes the title assignable, which is the thing that was missing.
@@ -197,6 +203,10 @@ async def ensure_roles_for_designations() -> None:
     # Create User picker every boot, one pass behind migrate_consultant_roles renaming it
     # away — a role the OS has retired, reappearing in the one place it is handed out.
     existing |= set(LEGACY_CONSULTANT_ROLES)
+    # And the retired Branch Admin variants, for the same reason. A department still
+    # listing "Branch Admin ( Physio )" would otherwise mint branch_admin_physio again at
+    # every boot, one pass behind migrate_branch_admin_roles collapsing it away.
+    existing |= set(LEGACY_BRANCH_ADMIN_ROLES)
     now = now_iso()
     fresh = []
     for title in titles:

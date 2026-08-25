@@ -78,11 +78,15 @@ const ROLE_META = {
   sales_head: { label: "Sales Head", icon: Headphones },
   marketing_head: { label: "Marketing Head", icon: Megaphone },
   branch_admin: { label: "Branch Admin", icon: Building2 },
-  branch_admin_physio: { label: "Branch Admin (Physio)", icon: Building2 },
-  branch_admin_fitness: { label: "Branch Admin (Fitness)", icon: Building2 },
-  branch_admin_physio_fitness: { label: "Branch Admin (Physio & Fitness)", icon: Building2 },
   online_physio_admin: { label: "Online Physio Admin", icon: Building2 },
   online_fitness_admin: { label: "Online Fitness Admin", icon: Building2 },
+  // Retired. The three named the practice a branch sells rather than the arm it works in,
+  // and held plain Branch Admin's permissions exactly — migrate_branch_admin_roles in
+  // backend/seed.py collapses them onto it. Kept here only so an account the migration has
+  // not reached still renders with a name instead of a raw slug.
+  branch_admin_physio: { label: "Branch Admin", icon: Building2 },
+  branch_admin_fitness: { label: "Branch Admin", icon: Building2 },
+  branch_admin_physio_fitness: { label: "Branch Admin", icon: Building2 },
   // The consultation desk, under the names this clinic uses. A designation is a role
   // here, so the titles in HR's structure are minted as roles, and the title for this
   // desk is CONSULTANT. Online Consultant is the same board and the same reach over
@@ -147,11 +151,16 @@ const isHumanResourceRole = (role) => {
  */
 const BRANCH_ADMIN_ROLES = [
   "branch_admin",
+  "online_physio_admin",
+  "online_fitness_admin",
+  // Retired and no longer assignable, but still listed. This decides which board renders,
+  // and dropping a slug the moment it stops being handed out would blank the board of an
+  // account the migration has not reached yet — locking somebody out of their own branch
+  // over a rename that was never supposed to change anybody's access. Kept in step with
+  // LEGACY_BRANCH_ADMIN_ROLES in backend/deps.py, which keeps them for the same reason.
   "branch_admin_physio",
   "branch_admin_fitness",
   "branch_admin_physio_fitness",
-  "online_physio_admin",
-  "online_fitness_admin",
 ];
 const isBranchAdminRole = (role) => BRANCH_ADMIN_ROLES.includes(String(role || "").trim().toLowerCase());
 

@@ -957,22 +957,37 @@ async def migrate_consultant_roles() -> None:
 
     Safe to re-run: after the first pass there is nothing left matching the old slugs.
     """
+    await _rename_role_slugs(CONSULTANT_ROLE_RENAMES)
+
+
+async def _rename_role_slugs(renames: dict) -> None:
+    """Rewrite a set of retired role slugs to the ones that replace them.
+
+    Shared by every role retirement, because all of them have the same three places to
+    reach and the third is easy to forget. Both callers had the same reasons for each:
+
+    The login's `role` is the slug the whole OS branches on, so it is the one that has to
+    move. HR's employee records carry the same slug as a designation on some installs, so
+    they move with it or the two halves of one person disagree about the job they hold.
+
+    And a custom role typed by hand under a retired name would put the slug straight back
+    into the Designation and Create User dropdowns that DEFAULT_ROLES no longer offers it
+    in — one picker handing out a role the rest of the OS has retired. Renamed rather than
+    deleted, so any custom colour and the row's own history survive.
+
+    Safe to re-run: after the first pass nothing matches the old slugs any more.
+    """
     # Imported here rather than at module scope: it is the only thing this needs from that
     # router, and the router pulls in plenty the rest of seeding does not.
     from routers.v3_hr import DEFAULT_ROLES
 
-    for old, new in CONSULTANT_ROLE_RENAMES.items():
+    for old, new in renames.items():
         await v3_col("users").update_many({"role": old}, {"$set": {"role": new}})
-        # HR's employee records carry the same slug as a designation on some installs.
         await v3_col("employees").update_many(
             {"designation": old}, {"$set": {"designation": new}}
         )
-    # A custom role typed by hand under one of the retired names would put the slug back
-    # in the Designation and Create User dropdowns that DEFAULT_ROLES no longer offers it
-    # in — one picker offering a role the rest of the OS has retired. Renaming rather than
-    # deleting keeps any custom colour and the row's own history.
     async for row in v3_col("custom_roles").find({}, {"_id": 0}):
-        new = CONSULTANT_ROLE_RENAMES.get(_slug_of_role(row.get("name")))
+        new = renames.get(_slug_of_role(row.get("name")))
         if not new:
             continue
         # Unless the replacement already exists — as a built-in, or under its own custom
@@ -985,6 +1000,45 @@ async def migrate_consultant_roles() -> None:
             await v3_col("custom_roles").update_one(
                 {"id": row["id"]}, {"$set": {"name": new}}
             )
+
+
+# The slug each retired Branch Admin variant is rewritten to.
+#
+# All three collapse onto plain `branch_admin`, and nothing about anybody's access changes
+# when they do: the six slugs were always one permission set under several names — see
+# BRANCH_ADMIN_ROLES in deps.py — so the variants were a label saying which practice the
+# person ran, never a different reach into the branch. The label is what is being dropped.
+#
+# The two online admins are NOT here. Those name the arm rather than the practice, the
+# online branches are a real separate vertical, and they stay assignable.
+BRANCH_ADMIN_ROLE_RENAMES = {
+    "branch_admin_physio": "branch_admin",
+    "branch_admin_fitness": "branch_admin",
+    "branch_admin_physio_fitness": "branch_admin",
+}
+
+
+async def migrate_branch_admin_roles() -> None:
+    """Collapse the three Branch Admin practice variants back onto plain Branch Admin.
+
+    A branch is run by one Branch Admin whichever practice it sells, and splitting the
+    title three ways bought nothing: the permissions were identical, so the only thing the
+    variants did was make the Create User and Designation pickers offer four spellings of
+    one job and leave whoever was filling the form to guess which mattered. It did not, and
+    HR's own structure had already settled on the single "Branch Admin" designation.
+
+    Nobody gains or loses anything here. Anyone holding a variant keeps the same reach over
+    the same branch under the name the rest of the OS already used for it, and the three
+    slugs stay recognised in BRANCH_ADMIN_ROLES so an account this has not reached yet is
+    not locked out of its own board in the meantime.
+
+    Which practice a branch actually runs is a fact about the branch, and the branch's own
+    `vertical` is where it is recorded — a far better place for it than a copy on each of
+    its admins that nothing ever read.
+
+    Safe to re-run: after the first pass nothing matches the old slugs any more.
+    """
+    await _rename_role_slugs(BRANCH_ADMIN_ROLE_RENAMES)
 
 
 def _slug_of_role(label) -> str:

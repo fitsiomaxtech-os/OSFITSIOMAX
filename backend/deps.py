@@ -69,14 +69,16 @@ async def v3_current_user(authorization: str = Header(...)) -> V3UserOut:
 
 
 # Roles that are a Branch Admin under another name. A branch is run by one of these whether
-# it sells physiotherapy, fitness, both, or runs online — the job is the same job, over one
-# branch's leads, patients, calendars, store and accounts. So rather than a set of
-# permissions each, this is Branch Admin's one set under several slugs.
+# it works in the room or online — the job is the same job, over one branch's leads,
+# patients, calendars, store and accounts. So rather than a set of permissions each, this
+# is Branch Admin's one set under a few slugs.
 #
-# The distinction they carry is which practice the person runs, and that is a label on the
-# user, not a different reach into the data: a Branch Admin (Fitness) still needs the whole
-# of their branch. Anything that should genuinely differ between them belongs in a check on
-# the branch's vertical, not in a fork of these permissions.
+# It used to carry three more, naming the practice the branch sells rather than the arm it
+# works in — Branch Admin (Physio), (Fitness), (Physio & Fitness). They were dropped: the
+# permissions were identical, so all they did was make the pickers offer four spellings of
+# one job. Which practice a branch runs is a fact about the branch and lives on the
+# branch's own `vertical`, which is also where anything that should genuinely differ
+# between them belongs — not in a fork of these permissions.
 #
 # Matched exactly, unlike the HR and Diet predicates below. Those match loosely because
 # their roles are typed by hand and the wording varies. Doing that here would be dangerous:
@@ -84,14 +86,28 @@ async def v3_current_user(authorization: str = Header(...)) -> V3UserOut:
 # `physio` role and hand a treating physio the branch's finances. So the slugs are fixed,
 # and they are in DEFAULT_ROLES instead, which puts them in the Create User and Designation
 # dropdowns — nobody has to type one.
-BRANCH_ADMIN_ROLES = frozenset({
+CURRENT_BRANCH_ADMIN_ROLES = frozenset({
     "branch_admin",
-    "branch_admin_physio",
-    "branch_admin_fitness",
-    "branch_admin_physio_fitness",
     "online_physio_admin",
     "online_fitness_admin",
 })
+# Retired: the three variants that named the practice a branch sells rather than the arm it
+# works in. They were the same permissions as plain `branch_admin` under three more names,
+# so collapsing them onto it changes nobody's access — migrate_branch_admin_roles() in
+# seed.py rewrites the logins, and DEFAULT_ROLES no longer offers them.
+#
+# Still recognised here, exactly as LEGACY_CONSULTANT_ROLES stays in HEAD_PHYSIO_ROLES
+# below: this set is read for the branch *scoping* checks as well as the gate, so dropping
+# a slug the moment it stops being assignable would not merely fail closed for an account
+# the migration has not reached — is_branch_admin_role returning False is what makes an
+# endpoint skip narrowing its query to one branch, which would show that account every
+# branch in the company.
+LEGACY_BRANCH_ADMIN_ROLES = frozenset({
+    "branch_admin_physio",
+    "branch_admin_fitness",
+    "branch_admin_physio_fitness",
+})
+BRANCH_ADMIN_ROLES = CURRENT_BRANCH_ADMIN_ROLES | LEGACY_BRANCH_ADMIN_ROLES
 
 
 def is_branch_admin_role(role: str) -> bool:

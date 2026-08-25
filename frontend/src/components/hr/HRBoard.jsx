@@ -68,22 +68,27 @@ const ROLE_META = {
   sales_head: { label: "SALES HEAD", classes: "border-sky-300 bg-sky-50 text-sky-700" },
   // The Branch Admin family shares emerald, and the online arm shares teal, on purpose:
   // the hue says which kind of role this is and the label says which practice it runs.
-  // Handing each of the six its own colour would spend the whole palette on one job and
-  // leave the list looking like six unrelated roles rather than two groups of one.
+  // Handing each its own colour would spend the whole palette on one job and leave the
+  // list looking like unrelated roles rather than two groups of one.
   branch_admin: { label: "BRANCH ADMIN", classes: "border-emerald-300 bg-emerald-50 text-emerald-700" },
-  branch_admin_physio: { label: "BRANCH ADMIN ( PHYSIO )", classes: "border-emerald-300 bg-emerald-50 text-emerald-700" },
-  branch_admin_fitness: { label: "BRANCH ADMIN ( FITNESS )", classes: "border-emerald-300 bg-emerald-50 text-emerald-700" },
-  branch_admin_physio_fitness: { label: "BRANCH ADMIN ( PHYSIO & FITNESS )", classes: "border-emerald-300 bg-emerald-50 text-emerald-700" },
   online_physio_admin: { label: "ONLINE PHYSIO ADMIN", classes: "border-teal-300 bg-teal-50 text-teal-700" },
   online_fitness_admin: { label: "ONLINE FITNESS ADMIN", classes: "border-teal-300 bg-teal-50 text-teal-700" },
+  // Retired, and rendered as the plain Branch Admin they now are. The three named a
+  // practice rather than an arm and held identical permissions, so they collapse onto
+  // branch_admin — migrate_branch_admin_roles in backend/seed.py rewrites the logins.
+  // Kept only so an account the migration has not reached still wears a name rather than
+  // a raw slug, exactly as the retired consultation slugs below are.
+  branch_admin_physio: { label: "BRANCH ADMIN", classes: "border-emerald-300 bg-emerald-50 text-emerald-700", retired: true },
+  branch_admin_fitness: { label: "BRANCH ADMIN", classes: "border-emerald-300 bg-emerald-50 text-emerald-700", retired: true },
+  branch_admin_physio_fitness: { label: "BRANCH ADMIN", classes: "border-emerald-300 bg-emerald-50 text-emerald-700", retired: true },
   // The consultation desk. Amber for the room, and — as the Branch Admin family does from
   // emerald to teal — the neighbouring hue for the online arm of it.
   consultant: { label: "CONSULTANT", classes: "border-amber-300 bg-amber-50 text-amber-700" },
   online_consultant: { label: "ONLINE CONSULTANT", classes: "border-yellow-300 bg-yellow-50 text-yellow-700" },
   // Retired slugs, rewritten by migrate_consultant_roles in backend/seed.py. Kept only so
   // an account the migration has not reached still wears a name rather than a raw slug.
-  head_physio: { label: "CONSULTANT", classes: "border-amber-300 bg-amber-50 text-amber-700" },
-  online_head_physio: { label: "ONLINE CONSULTANT", classes: "border-yellow-300 bg-yellow-50 text-yellow-700" },
+  head_physio: { label: "CONSULTANT", classes: "border-amber-300 bg-amber-50 text-amber-700", retired: true },
+  online_head_physio: { label: "ONLINE CONSULTANT", classes: "border-yellow-300 bg-yellow-50 text-yellow-700", retired: true },
   // Called what the clinic calls them. "Physio" is the slug's own shorthand and was
   // reaching the screen unchanged, so the role filter said PHYSIO while every list of
   // designations beside it said Physiotherapist.
@@ -3382,14 +3387,23 @@ const CreateUserModal = ({ meta, reloadMeta, onClose, onSaved }) => {
     setForm((p) => ({ ...p, employee_id: id, full_name: emp?.full_name || p.full_name, email: emp?.email || p.email }));
   };
 
-  // Letters only, so "Branch Admin ( Physio )" and "branch_admin_physio"'s own label both
-  // normalize the same way — matching a Departments & Designation title back to whichever
-  // real access role (built-in or already-created custom) it stands for.
+  // Letters only, so "Online Physio Admin" and "ONLINE PHYSIO ADMIN" both normalize the
+  // same way — matching a Departments & Designation title back to whichever real access
+  // role (built-in or already-created custom) it stands for.
   const key = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 
+  // Retired slugs are skipped, not merely ordered around.
+  //
+  // A retired role wears the label of the role that replaced it — that is the whole point
+  // of keeping it, so a legacy account reads as a name rather than a raw slug — which
+  // means several entries answer to one label and the last one written would win. That is
+  // this map backwards: it exists to turn a job title into the slug to GIVE somebody, and
+  // the one slug it must never hand out is the one the OS has retired. Picking the "Branch
+  // Admin" designation would have created an account on branch_admin_physio_fitness, which
+  // the next restart then had to migrate back off.
   const roleLabelToSlug = useMemo(() => {
     const map = {};
-    Object.entries(ROLE_META).forEach(([slug, m]) => { map[key(m.label)] = slug; });
+    Object.entries(ROLE_META).forEach(([slug, m]) => { if (!m.retired) map[key(m.label)] = slug; });
     (meta.custom_roles || []).forEach((r) => { if (r.name && r.label) map[key(r.label)] = r.name; });
     return map;
   }, [meta.custom_roles]);
