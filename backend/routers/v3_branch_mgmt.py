@@ -5,7 +5,7 @@ import uuid
 
 from database import v3_col
 from utils import now_iso, derive_branch_code, active_doctor_query
-from deps import v3_require_roles, is_branch_admin_role, is_physio_role, is_diet_role, is_pre_sales_role, is_zumba_role, PHYSIO_ROLES
+from deps import v3_require_roles, is_branch_admin_role, is_physio_role, is_head_physio_role, is_diet_role, is_pre_sales_role, is_zumba_role, PHYSIO_ROLES, HEAD_PHYSIO_ROLES
 # The desks a Physio or Nutritionist can hold several of, and the doctors profile_type
 # each role keeps its calendar under. Imported from HR rather than restated so posting
 # somebody to a branch here builds the same record HR's own assign builds.
@@ -234,7 +234,10 @@ async def branch_performance(branch_id: str, _: V3UserOut = Depends(v3_require_r
     # Both physio slugs — an Online Physio is one of the branch's physios, and counting
     # only the floor ones understates the team on every branch that runs online.
     physios = await v3_col("users").count_documents({"branch_id": branch_id, "role": {"$in": list(PHYSIO_ROLES)}, "is_active": True})
-    head_physios = await v3_col("users").count_documents({"branch_id": branch_id, "role": "head_physio", "is_active": True})
+    # Every consultant slug, for the same reason both physio slugs are counted above: an
+    # Online Consultant is one of this branch's consultants, and the desk moved off
+    # `head_physio` onto `consultant`, so the literal counted nobody at all.
+    head_physios = await v3_col("users").count_documents({"branch_id": branch_id, "role": {"$in": sorted(HEAD_PHYSIO_ROLES)}, "is_active": True})
 
     return {
         "branch": branch,
@@ -306,7 +309,7 @@ async def branch_detail(branch_id: str, user: V3UserOut = Depends(v3_require_rol
     # list can say which is which. Only `staff` below reads these, so nothing else sees
     # an inactive person appear.
     staff_rows = await v3_col("users").find({"branch_id": branch_id}, {"_id": 0, "password": 0}).to_list(500)
-    head_physios = [u for u in staff_rows if u.get("role") == "head_physio"]
+    head_physios = [u for u in staff_rows if is_head_physio_role(u.get("role"))]
     physios = [u for u in staff_rows if is_physio_role(u.get("role"))]
     # Off the predicate, not the literal: a Branch Admin (Physio), (Fitness) or an Online
     # Physio Admin runs this branch too, and matching "branch_admin" exactly left them out

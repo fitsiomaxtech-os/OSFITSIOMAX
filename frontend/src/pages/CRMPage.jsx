@@ -83,15 +83,18 @@ const ROLE_META = {
   branch_admin_physio_fitness: { label: "Branch Admin (Physio & Fitness)", icon: Building2 },
   online_physio_admin: { label: "Online Physio Admin", icon: Building2 },
   online_fitness_admin: { label: "Online Fitness Admin", icon: Building2 },
-  head_physio: { label: "Consultant", icon: Stethoscope },
-  // The same board and the same reach, over video. Named for the room, not for a
-  // different job — see HEAD_PHYSIO_ROLES in backend/deps.py.
-  online_head_physio: { label: "Online Consultant", icon: Stethoscope },
-  // The same two roles under the names this clinic uses. A designation is a role here, so
-  // the titles in HR's structure are minted as roles, and the title for this desk is
-  // CONSULTANT.
+  // The consultation desk, under the names this clinic uses. A designation is a role
+  // here, so the titles in HR's structure are minted as roles, and the title for this
+  // desk is CONSULTANT. Online Consultant is the same board and the same reach over
+  // video — named for the room, not for a different job. See HEAD_PHYSIO_ROLES in
+  // backend/deps.py.
   consultant: { label: "Consultant", icon: Stethoscope },
   online_consultant: { label: "Online Consultant", icon: Stethoscope },
+  // Retired. No longer assignable — migrate_consultant_roles in backend/seed.py rewrites
+  // both to the pair above — and kept here only so an account the migration has not
+  // reached still renders with a name instead of a raw slug.
+  head_physio: { label: "Consultant", icon: Stethoscope },
+  online_head_physio: { label: "Online Consultant", icon: Stethoscope },
   physio: { label: "Physio", icon: Activity },
   online_physio: { label: "Online Physio", icon: Activity },
   accountant: { label: "Accountant", icon: BadgeIndianRupee },
@@ -173,7 +176,9 @@ const isPhysioRole = (role) => ["physio", "online_physio"].includes(String(role 
  * backend/deps.py: a role that passes there and fails here logs in to no board at all.
  */
 const isHeadPhysioRole = (role) =>
-  ["head_physio", "online_head_physio", "consultant", "online_consultant"].includes(
+  // The last two are retired slugs, listed for the same reason the backend still accepts
+  // them: an account migrate_consultant_roles has not reached must still reach its board.
+  ["consultant", "online_consultant", "head_physio", "online_head_physio"].includes(
     String(role || "").trim().toLowerCase()
   );
 

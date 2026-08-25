@@ -1,13 +1,13 @@
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel
 import os
 import re
 import uuid
 
 from database import v3_col
 from utils import now_iso
-from deps import v3_require_roles, is_diet_role, is_physio_role, is_rehab_role, is_head_physio_role, BRANCH_ADMIN_ROLES, HEAD_PHYSIO_ROLES
+from deps import v3_require_roles, is_diet_role, is_physio_role, is_rehab_role, is_head_physio_role, BRANCH_ADMIN_ROLES, HEAD_PHYSIO_ROLES, LEGACY_CONSULTANT_ROLES
 from security import hash_password
 from schemas.v3 import V3UserOut
 
@@ -35,6 +35,13 @@ ALL_BRANCHES_LABEL = "All Branches"
 # "online_physio" is the same idea one rung down: a Physio who treats over video, on the
 # Physio board with the Physio's reach. See PHYSIO_ROLES in deps.py.
 #
+# "consultant"/"online_consultant" are the consultation desk. They replaced
+# "head_physio"/"online_head_physio", which are deliberately absent from this list: a
+# designation is a role here and CONSULTANT is the title HR's structure actually carries,
+# so those two slugs can no longer be assigned to anybody. Existing accounts on them are
+# rewritten by migrate_consultant_roles() in seed.py and both slugs stay recognised in
+# HEAD_PHYSIO_ROLES so nothing is locked out in the meantime.
+#
 # "sales_head" is Pre-Sales' own manager: the same board and the same leads, just the
 # org-wide Master View instead of one rep's own book. See PRE_SALES_ROLES in deps.py.
 #
@@ -45,7 +52,7 @@ DEFAULT_ROLES = [
     "super_admin", "business_dev", "pre_sales", "sales_head",
     "branch_admin", "branch_admin_physio", "branch_admin_fitness", "branch_admin_physio_fitness",
     "online_physio_admin", "online_fitness_admin",
-    "head_physio", "online_head_physio", "physio", "online_physio", "marketing_head", "accountant",
+    "consultant", "online_consultant", "physio", "online_physio", "marketing_head", "accountant",
 ]
 
 # Both consultant roles can be assigned to more than one branch (a linked `doctors`
@@ -185,6 +192,11 @@ async def ensure_roles_for_designations() -> None:
         return
 
     existing = {str(n).strip().lower() for n in await _all_role_names()}
+    # The retired consultation slugs are never minted again, however a title is spelled.
+    # A department still listing "Head Physio" would otherwise put head_physio back in the
+    # Create User picker every boot, one pass behind migrate_consultant_roles renaming it
+    # away — a role the OS has retired, reappearing in the one place it is handed out.
+    existing |= set(LEGACY_CONSULTANT_ROLES)
     now = now_iso()
     fresh = []
     for title in titles:
@@ -341,18 +353,17 @@ class UserAccountCreate(BaseModel):
     role: str
     employee_id: Optional[str] = None
     branch_id: Optional[str] = None
-    # Only meaningful for role="head_physio"/"physio" — lets a consultant be assigned
-    # across several branches. branch_id above stays the primary/first branch
-    # so every other single-branch filter in the app keeps working unchanged.
+    # Only meaningful for the consultant and physio roles — lets one be assigned across
+    # several branches. branch_id above stays the primary/first branch so every other
+    # single-branch filter in the app keeps working unchanged.
     branch_ids: Optional[List[str]] = None
     mobile_number: Optional[str] = None
     aadhar_number: Optional[str] = None
 
-    @field_validator("role", mode="before")
-    @classmethod
-    def _normalize_role(cls, v):
-        # "consultant" is a legacy/UI alias for "physio" — same permissions, different label.
-        return "physio" if v == "consultant" else v
+    # No role normalisation here on purpose — see the note on V3UserOut in schemas/v3.py.
+    # "consultant" used to be rewritten to "physio" on the way in, so creating a
+    # CONSULTANT silently created a treating physio instead and the role could never
+    # actually be held by anybody. It is now a real slug and must be stored as typed.
 
 
 class UserAccountUpdate(BaseModel):
@@ -726,7 +737,13 @@ async def delete_employee(emp_id: str, _: V3UserOut = Depends(v3_require_roles("
 async def list_users(search: Optional[str] = None, role: Optional[str] = None, _: V3UserOut = Depends(v3_require_roles("super_admin", "marketing_head"))):
     q: Dict[str, Any] = {}
     if role and role != "all":
-        q["role"] = role
+        # A comma-separated list asks for a family of roles at once. The consultation desk
+        # is spread over four slugs — `consultant` and `online_consultant`, plus the two
+        # legacy ones migrate_consultant_roles() has not necessarily reached — so a caller
+        # that wants "the consultants" cannot name one and be right. HR's own role filter
+        # still passes a single slug and still matches exactly.
+        wanted = [r.strip() for r in str(role).split(",") if r.strip()]
+        q["role"] = wanted[0] if len(wanted) == 1 else {"$in": wanted}
     if search:
         rgx = {"$regex": search, "$options": "i"}
         q["$or"] = [{"full_name": rgx}, {"email": rgx}]

@@ -111,21 +111,29 @@ def is_branch_admin_role(role: str) -> bool:
 # under a second slug rather than a parallel set that would drift.
 #
 # Exact match, for the same reason: a loose rule on the "physio" token would also catch
-# `head_physio` and hand a treating physio the CONSULTANT's pipeline.
-# A CONSULTANT who takes their consultations over video. The same board, the same
-# pipeline, the same org-wide reach — only the room differs — so it is an alias of
-# head_physio rather than a role of its own, exactly as online_physio is of physio.
+# the consultation desk and hand a treating physio the CONSULTANT's pipeline.
+# The consultation desk. CONSULTANT is what this clinic calls the job and what HR's
+# structure lists as the designation, so it is the role slug too — a designation is a role
+# here. ONLINE CONSULTANT is the same desk over video: the same board, the same pipeline,
+# the same org-wide reach, only the room differs, so it is an alias rather than a role of
+# its own, exactly as online_physio is of physio.
 #
-# "consultant" and "online_consultant" are the same two roles under the names this clinic
-# actually uses. A designation is a role here, so the job titles in HR's structure are
-# minted as roles — and the title for this desk is CONSULTANT, not "head physio", which is
-# a slug nobody outside the code says. Listed rather than matched loosely for the reason
-# above: "sales_consultant" is a different job, and a rule on the bare token would hand it
-# the consultation pipeline.
-HEAD_PHYSIO_ROLES = frozenset({
-    "head_physio", "online_head_physio",
-    "consultant", "online_consultant",
-})
+# `head_physio`/`online_head_physio` are the slugs this desk used to carry. They are
+# migrated to the two above by migrate_consultant_roles() in seed.py and are gone from
+# DEFAULT_ROLES, so nobody can be given one again — they stay recognised here only so an
+# account the migration has not reached yet keeps its board instead of logging in to a
+# 403. Nothing new should be written against them.
+#
+# Note this is the ROLE, not the expert record's `profile_type`: every consultation query
+# in the OS keys on profile_type "head_physio" and still does, whichever of these roles
+# the person holds. See expert_profile_type in routers/v3_hr.py.
+#
+# Listed rather than matched loosely for the reason above: "sales_consultant" is a
+# different job, and a rule on the bare "consultant" token would hand it the consultation
+# pipeline.
+CONSULTANT_ROLES = frozenset({"consultant", "online_consultant"})
+LEGACY_CONSULTANT_ROLES = frozenset({"head_physio", "online_head_physio"})
+HEAD_PHYSIO_ROLES = CONSULTANT_ROLES | LEGACY_CONSULTANT_ROLES
 
 
 def is_head_physio_role(role: str) -> bool:

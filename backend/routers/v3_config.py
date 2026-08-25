@@ -7,7 +7,7 @@ import uuid
 from database import v3_col
 from utils import now_iso, normalize_slot_time, derive_branch_code, active_doctor_query
 from security import hash_password
-from deps import v3_current_user, v3_require_roles, is_branch_admin_role
+from deps import v3_current_user, v3_require_roles, is_branch_admin_role, is_head_physio_role, is_physio_role
 from stage_utils import get_first_stage_name, realign_branch_stage_leads
 from shift_utils import attach_shifts
 import lead_control
@@ -564,7 +564,10 @@ async def v3_get_doctors(
 ):
     query: Dict[str, object] = {}
     scope_branch = None
-    if (is_branch_admin_role(user.role) or user.role in ["head_physio", "physio"]) and user.branch_id:
+    # Off the predicates, not the literals. Two things were wrong with the list: the
+    # consultation desk moved off `head_physio` onto `consultant`, and `online_physio` was
+    # never in it — so both were left unscoped and shown every branch's experts.
+    if (is_branch_admin_role(user.role) or is_head_physio_role(user.role) or is_physio_role(user.role)) and user.branch_id:
         scope_branch = user.branch_id
     elif branch_id:
         scope_branch = branch_id

@@ -76,7 +76,14 @@ const ROLE_META = {
   branch_admin_physio_fitness: { label: "BRANCH ADMIN ( PHYSIO & FITNESS )", classes: "border-emerald-300 bg-emerald-50 text-emerald-700" },
   online_physio_admin: { label: "ONLINE PHYSIO ADMIN", classes: "border-teal-300 bg-teal-50 text-teal-700" },
   online_fitness_admin: { label: "ONLINE FITNESS ADMIN", classes: "border-teal-300 bg-teal-50 text-teal-700" },
+  // The consultation desk. Amber for the room, and — as the Branch Admin family does from
+  // emerald to teal — the neighbouring hue for the online arm of it.
+  consultant: { label: "CONSULTANT", classes: "border-amber-300 bg-amber-50 text-amber-700" },
+  online_consultant: { label: "ONLINE CONSULTANT", classes: "border-yellow-300 bg-yellow-50 text-yellow-700" },
+  // Retired slugs, rewritten by migrate_consultant_roles in backend/seed.py. Kept only so
+  // an account the migration has not reached still wears a name rather than a raw slug.
   head_physio: { label: "CONSULTANT", classes: "border-amber-300 bg-amber-50 text-amber-700" },
+  online_head_physio: { label: "ONLINE CONSULTANT", classes: "border-yellow-300 bg-yellow-50 text-yellow-700" },
   // Called what the clinic calls them. "Physio" is the slug's own shorthand and was
   // reaching the screen unchanged, so the role filter said PHYSIO while every list of
   // designations beside it said Physiotherapist.
@@ -139,7 +146,15 @@ const roleClasses = (role) =>
  *   one, or none   the name, or a dash for an account genuinely not attached to a branch.
  */
 
-const MULTI_BRANCH_ROLE_LABELS = { head_physio: "CONSULTANT", physio: "Physio", online_physio: "Online Physio" };
+const MULTI_BRANCH_ROLE_LABELS = {
+  consultant: "CONSULTANT",
+  online_consultant: "ONLINE CONSULTANT",
+  physio: "Physio",
+  online_physio: "Online Physio",
+  // Retired, still mapped for an account migrate_consultant_roles has not reached.
+  head_physio: "CONSULTANT",
+  online_head_physio: "ONLINE CONSULTANT",
+};
 // A Nutritionist picks branches the same way, and for the same reason: they hold a
 // calendar at each branch they work and may work more than one. The backend has accepted
 // a list from them all along — only this form refused to collect it, leaving one Branch
@@ -160,8 +175,13 @@ const multiBranchLabel = (role) => {
   if (r.includes("nutrition_coach") || r.split("_").some((t) => DIET_ROLE_TOKENS.includes(t))) return "Nutritionist";
   return null;
 };
-// Roles allowed to cover everything by leaving the selection empty.
-const BRANCHLESS_OK_ROLES = new Set(["head_physio"]);
+// Roles allowed to cover everything by leaving the selection empty. Every consultant
+// role: a CONSULTANT takes consultations across the whole organisation whichever arm they
+// work, and the retired slugs are here for an account the migration has not reached. Kept
+// in step with ORG_WIDE_ROLES in backend/routers/v3_hr.py.
+const BRANCHLESS_OK_ROLES = new Set([
+  "consultant", "online_consultant", "head_physio", "online_head_physio",
+]);
 
 export const HRBoard = () => {
   const [tab, setTab] = useState("dashboard");
@@ -3262,7 +3282,7 @@ const RoleSelectDropdown = ({ value, options, onChange }) => {
 };
 
 // Designation text (e.g. "HEAD PHYSIO") reuses the same role coloring as
-// roleClasses/roleLabel by converting it back to a role slug ("head_physio").
+// roleClasses/roleLabel by converting it back to a role slug ("consultant").
 const designationSlug = (designation) => (designation || "").trim().toLowerCase().replace(/\s+/g, "_");
 
 /**

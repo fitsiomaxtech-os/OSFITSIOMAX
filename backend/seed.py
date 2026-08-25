@@ -1,6 +1,7 @@
+import re
 import uuid
 from database import db, v2_col, v3_col
-from deps import HEAD_PHYSIO_ROLES
+from deps import HEAD_PHYSIO_ROLES, LEGACY_CONSULTANT_ROLES
 from utils import now_iso, derive_branch_code, generate_patient_number
 from security import hash_password
 from constants import (
@@ -913,10 +914,82 @@ async def consolidate_head_physio_doctors() -> None:
             )
             await v3_col("doctors").delete_many({"id": {"$in": drop}})
 
-    # Their login carries no branch either — a Head Physio isn't "at" one.
+    # Their login carries no branch either — a CONSULTANT isn't "at" one. Every slug in
+    # the family, not the one it used to be: after migrate_consultant_roles() the same
+    # people read `consultant`/`online_consultant`, and naming only the old slug here
+    # would quietly stop clearing the branch for everybody.
     await v3_col("users").update_many(
-        {"role": "head_physio"}, {"$set": {"branch_id": None, "branch_ids": []}}
+        {"role": {"$in": sorted(HEAD_PHYSIO_ROLES)}},
+        {"$set": {"branch_id": None, "branch_ids": []}},
     )
+
+
+# The slug each retired consultation role is rewritten to. Same desk, same board, same
+# pipeline — only the name changes, so the mapping is one-to-one and nothing about the
+# workflow moves with it.
+CONSULTANT_ROLE_RENAMES = {
+    "head_physio": "consultant",
+    "online_head_physio": "online_consultant",
+}
+
+
+async def migrate_consultant_roles() -> None:
+    """Rename the consultation desk's role slugs to the names the clinic actually uses.
+
+    A designation is a role in this OS, and the designation for this desk is CONSULTANT —
+    "head physio" is a word nobody outside the code says. So `head_physio` becomes
+    `consultant` and `online_head_physio` becomes `online_consultant`, and the two old
+    slugs are gone from DEFAULT_ROLES so nobody can be given one again.
+
+    Only the login's `role` is rewritten. The expert record's `profile_type` stays
+    "head_physio" on purpose: every consultation query in the OS keys on it — the
+    Consultant calendar lists on it, the board resolves its own expert by it, the
+    consult-appointment and review endpoints filter on it — so renaming that as well would
+    hide every consultant from every board that looks for them, for no gain the user can
+    see. It is an internal type, exactly as "physio" is the type stamped on an
+    online_physio. See expert_profile_type in routers/v3_hr.py.
+
+    ONLINE CONSULTANTS who were hired before an online role existed still read
+    `head_physio` and so land on `consultant` here, not `online_consultant` — this maps
+    slugs, and does not try to guess the arm from a job title. Nothing breaks: the online
+    branch finds them through their designation, which _names_the_online_arm in
+    routers/v3_config.py already reads alongside the role for exactly that reason.
+
+    Safe to re-run: after the first pass there is nothing left matching the old slugs.
+    """
+    # Imported here rather than at module scope: it is the only thing this needs from that
+    # router, and the router pulls in plenty the rest of seeding does not.
+    from routers.v3_hr import DEFAULT_ROLES
+
+    for old, new in CONSULTANT_ROLE_RENAMES.items():
+        await v3_col("users").update_many({"role": old}, {"$set": {"role": new}})
+        # HR's employee records carry the same slug as a designation on some installs.
+        await v3_col("employees").update_many(
+            {"designation": old}, {"$set": {"designation": new}}
+        )
+    # A custom role typed by hand under one of the retired names would put the slug back
+    # in the Designation and Create User dropdowns that DEFAULT_ROLES no longer offers it
+    # in — one picker offering a role the rest of the OS has retired. Renaming rather than
+    # deleting keeps any custom colour and the row's own history.
+    async for row in v3_col("custom_roles").find({}, {"_id": 0}):
+        new = CONSULTANT_ROLE_RENAMES.get(_slug_of_role(row.get("name")))
+        if not new:
+            continue
+        # Unless the replacement already exists — as a built-in, or under its own custom
+        # row — in which case the duplicate is the thing to remove rather than a second
+        # copy to create: _all_role_names would otherwise list the same desk twice.
+        clash = await v3_col("custom_roles").find_one({"name": new}, {"_id": 0})
+        if new in DEFAULT_ROLES or (clash and clash.get("id") != row.get("id")):
+            await v3_col("custom_roles").delete_one({"id": row["id"]})
+        else:
+            await v3_col("custom_roles").update_one(
+                {"id": row["id"]}, {"$set": {"name": new}}
+            )
+
+
+def _slug_of_role(label) -> str:
+    """A role label reduced to the slug the OS branches on ("Head Physio" -> head_physio)."""
+    return re.sub(r"[^a-z0-9]+", "_", str(label or "").strip().lower()).strip("_")
 
 
 async def retire_experts_without_a_login() -> None:

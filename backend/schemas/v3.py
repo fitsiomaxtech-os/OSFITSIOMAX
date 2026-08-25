@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict
 from typing import List, Optional, Dict, Literal, Any
 
 
@@ -13,7 +13,7 @@ class V3UserOut(BaseModel):
     # deserialize here instead of 500ing every endpoint that returns it.
     role: str
     branch_id: Optional[str] = None
-    # A Head Physio can be assigned to more than one branch (branch_id stays the
+    # A CONSULTANT can be assigned to more than one branch (branch_id stays the
     # "primary"/first branch for every existing single-branch filter elsewhere);
     # this is the additional set consulted for branch-switching on their own board.
     branch_ids: Optional[List[str]] = None
@@ -25,11 +25,12 @@ class V3UserOut(BaseModel):
     photo_url: Optional[str] = ""
     created_at: str
 
-    @field_validator("role", mode="before")
-    @classmethod
-    def _normalize_role(cls, v):
-        # "consultant" is a legacy/UI alias for "physio" — same permissions, different label.
-        return "physio" if v == "consultant" else v
+    # No role normalisation here on purpose. "consultant" used to be rewritten to
+    # "physio" as a legacy UI alias, which is why nobody could ever actually be a
+    # CONSULTANT: the slug was silently turned into a treating physio's on the way out of
+    # every endpoint, board included. `consultant` and `online_consultant` are now the
+    # real slugs for the consultation desk (see HEAD_PHYSIO_ROLES in deps.py), so the
+    # role has to survive this model unchanged.
 
 
 class V3LoginRequest(BaseModel):

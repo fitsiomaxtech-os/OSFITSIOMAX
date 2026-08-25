@@ -147,8 +147,16 @@ const OperationsConsultantTab = ({ branches, actingUser }) => {
     if (!selectedId && branches && branches.length) setSelectedId(findDefaultBranchId(branches));
   }, [branches, selectedId]);
 
+  // Every consultant role, not the one slug: the desk is `consultant`/`online_consultant`
+  // plus the two retired slugs migrate_consultant_roles has not necessarily reached, and
+  // naming any one of them leaves consultants missing from this picker with nothing on
+  // screen to say why. /hr/users reads a comma-separated list as a family — see
+  // list_users in backend/routers/v3_hr.py. Kept in step with HEAD_PHYSIO_ROLES in
+  // backend/deps.py.
   useEffect(() => {
-    hrUsers({ role: "head_physio" }).then(setAllConsultants).catch(() => setAllConsultants([]));
+    hrUsers({ role: "consultant,online_consultant,head_physio,online_head_physio" })
+      .then(setAllConsultants)
+      .catch(() => setAllConsultants([]));
   }, []);
 
   // Relevant to the picked branch: given specific branches that include it, or given none

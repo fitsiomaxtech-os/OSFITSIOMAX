@@ -9,7 +9,7 @@ import uuid
 
 from database import v3_col
 from utils import now_iso, active_doctor_query
-from deps import v3_require_roles
+from deps import v3_require_roles, is_head_physio_role
 import lead_control
 from constants import V3_BRANCH_STAGES, V3_CONSULTATION_STAGES, V3_HEAD_CONSULTATION_STAGES
 from stage_utils import branch_stage_names_for_branch, get_first_stage_name
@@ -817,7 +817,10 @@ async def v3_consultations_board(branch_id: str, pipeline: Optional[str] = None,
     branch of their own; without this their board would ask for a branch it doesn't have and
     come back empty."""
     try:
-        is_hp = user.role == "head_physio" or (user.role == "super_admin" and pipeline == "head_consultation")
+        # Off the predicate, not the literal: the desk is `consultant`/`online_consultant`
+        # now, and matching the retired slug exactly dropped every consultant onto the
+        # Branch Admin's consultation pipeline instead of their own.
+        is_hp = is_head_physio_role(user.role) or (user.role == "super_admin" and pipeline == "head_consultation")
         field = "head_consultation_stage" if is_hp else "consultation_stage"
         query = {field: {"$ne": None}}
         if branch_id and branch_id != "all":

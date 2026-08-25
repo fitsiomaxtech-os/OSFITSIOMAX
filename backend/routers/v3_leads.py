@@ -5,7 +5,7 @@ import uuid
 
 from database import v3_col
 from utils import now_iso, normalize_slot_time, generate_patient_number
-from deps import v3_current_user, v3_require_roles, is_branch_admin_role
+from deps import v3_current_user, v3_require_roles, is_branch_admin_role, is_head_physio_role, is_physio_role
 from constants import V3_STAGES
 from stage_utils import first_branch_stage_for_branch
 import lead_control
@@ -36,7 +36,11 @@ async def v3_get_leads(
     # A Pre-Sales user only gets branch-scoped once a branch is actually assigned to
     # them (Super Admin > Roles & Credentials) — one left unassigned still sees every
     # branch's leads, same as before.
-    if (is_branch_admin_role(user.role) or user.role in ["head_physio", "physio", "pre_sales"]) and user.branch_id:
+    # Off the predicates for the clinical two, not the literals: the consultation desk
+    # moved off `head_physio` onto `consultant`, and `online_physio` was never listed — so
+    # both fell through this branch filter and were shown every branch's leads. pre_sales
+    # stays an exact match; Sales Head is deliberately org-wide and must not be scoped.
+    if (is_branch_admin_role(user.role) or is_head_physio_role(user.role) or is_physio_role(user.role) or user.role == "pre_sales") and user.branch_id:
         query["branch_id"] = user.branch_id
     elif branch_id:
         query["branch_id"] = branch_id
