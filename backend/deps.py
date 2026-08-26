@@ -191,16 +191,31 @@ def is_pre_sales_role(role: str) -> bool:
 
 def v3_require_roles(*roles: str):
     async def checker(user: V3UserOut = Depends(v3_current_user)) -> V3UserOut:
-        # Anywhere branch_admin, physio, head_physio or pre_sales is allowed, its aliases
-        # are allowed.
+        # Anywhere branch_admin, physio, head_physio, pre_sales or the diet desk is
+        # allowed, its aliases are allowed.
         # Done here rather than at the 80-odd call sites so the next endpoint added is
         # covered by default instead of being one someone remembered to list the second
         # role on.
+        #
+        # The diet desk needs this more than the others, because the name the call sites
+        # list is not a role at all: they pass COACH from routers/v3_diet.py, which is
+        # "nutrition_coach", the expert record's PROFILE_TYPE. No login has ever held it —
+        # the role slug is "nutritionist" (see DEFAULT_ROLES in routers/v3_hr.py), and this
+        # install has reached it from "diet_manage" through migrate_designation_roles. So
+        # an exact match on that literal excluded the very desk the route was opened for:
+        # the Nutritionist could list her patients through the endpoints guarded by
+        # v3_require_diet, and was refused the four guarded by the literal — which is why
+        # a chart could be sent and then not opened by the person who sent it.
+        #
+        # is_diet_role is the same predicate v3_require_diet uses, so the two ways into
+        # this router now answer the same question. It cannot widen anything on its own:
+        # the alias only applies where the route already listed the desk.
         allowed = (
             ("branch_admin" in roles and is_branch_admin_role(user.role))
             or ("physio" in roles and is_physio_role(user.role))
             or ("head_physio" in roles and is_head_physio_role(user.role))
             or ("pre_sales" in roles and is_pre_sales_role(user.role))
+            or (("nutrition_coach" in roles or "nutritionist" in roles) and is_diet_role(user.role))
         )
         if user.role not in roles and not allowed:
             raise HTTPException(status_code=403, detail="Not allowed")
