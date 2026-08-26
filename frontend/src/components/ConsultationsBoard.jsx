@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Activity, AlertCircle, FileText, Calendar, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2, Ban, ClipboardCheck, IndianRupee, Printer, Share2, Download, Eye, Salad } from "lucide-react";
+import { Activity, AlertCircle, FileText, Calendar, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, RefreshCw, XCircle, Search, Phone, Stethoscope, ClipboardList, Lock, Pencil, Dumbbell, Users, X, Bell, Plus, Trash2, Ban, ClipboardCheck, IndianRupee, Printer, Share2, Download, Eye, Salad, HeartPulse, Music2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -226,12 +226,16 @@ const FALLBACK_SESSION_MINUTES = 30;
  * `consultation_decision === "consultation_treatment"` / `== "consultation_only"` check
  * in the codebase, where four flags read side by side break nothing.
  */
+// The icons are the ones the rest of the OS already gives these five — see the revenue
+// and category tables in branch/AccountantManageTab.jsx. Picked from there rather than
+// chosen fresh: a Salad meaning Diet on the money board and something else meaning it here
+// is two vocabularies for one clinic, and the icon stops being worth reading.
 const CONSULTATION_ADDONS = [
-  { key: "treatment", label: "Treatment", tone: "#1baf7a" },
-  { key: "diet", label: "Diet", tone: "#eb6834" },
-  { key: "rehab", label: "Rehab", tone: "#0891b2" },
-  { key: "fitness", label: "Fitness", tone: "#7c3aed" },
-  { key: "zumba", label: "Zumba", tone: "#db2777" },
+  { key: "treatment", label: "Treatment", tone: "#1baf7a", icon: Activity },
+  { key: "diet", label: "Diet", tone: "#eb6834", icon: Salad },
+  { key: "rehab", label: "Rehab", tone: "#0891b2", icon: HeartPulse },
+  { key: "fitness", label: "Fitness", tone: "#7c3aed", icon: Dumbbell },
+  { key: "zumba", label: "Zumba", tone: "#db2777", icon: Music2 },
 ];
 
 /**
@@ -3097,25 +3101,38 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               }
 
               return (
-                <div className="rounded-lg border border-sky-200 bg-sky-50 p-3" data-testid="cons-decision-form">
-                  <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-sky-700">
-                    <ClipboardCheck className="h-3.5 w-3.5" /> Treatment
+                <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm" data-testid="cons-decision-form">
+                  <p className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-slate-800">
+                    <ClipboardCheck className="h-4 w-4 text-sky-600" /> Treatment
                   </p>
+                  {/* The thing standing between this form and Save, so it is a block that
+                      stops the eye rather than a coloured line of text among other lines.
+                      Rose over amber for the same reason: amber is the colour half this
+                      panel already uses for asides nobody has to act on. */}
                   {(!diagnosisReady || !summaryReady) && (
-                    <p className="mb-2 text-[11px] font-medium text-amber-600" data-testid="cons-decision-required-hint">
+                    <p
+                      className="mb-3 rounded-md border-l-4 border-rose-500 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700"
+                      data-testid="cons-decision-required-hint"
+                    >
                       Write the Diagnosis Report and Treatment Summary above before Save & Move.
                     </p>
                   )}
                   {/* Consultation itself needs no toggle — writing this form up is the
-                      consultation. These four are what else the patient is going away
-                      with, and any combination is valid, including none of them. One row,
-                      scrolled sideways on a narrow screen rather than wrapped — they read
-                      as one group of choices, and a wrapped row reads as two groups. */}
+                      consultation. These five are what else the patient is going away
+                      with, and any combination is valid, including none of them.
+                      Five equal columns: they are five choices of one kind, and widths that
+                      follow the length of the words rank them by how long their names
+                      happen to be. Never wrapped, for the reason the scrolling row it
+                      replaced was never wrapped either — one row reads as one group of
+                      choices, two rows read as two groups. The icon sits above the label
+                      until there is width for it alongside, so a narrow column shortens
+                      rather than clipping the word. */}
                   <div className="mb-3">
-                    <label className="mb-1 block text-[11px] font-medium text-slate-500">Also Going Away With</label>
-                    <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1" data-testid="cons-decision-plan-options">
+                    <label className="mb-1.5 block text-[11px] font-medium text-slate-500">Also Going Away With</label>
+                    <div className="grid grid-cols-5 gap-2" data-testid="cons-decision-plan-options">
                       {CONSULTATION_ADDONS.map((p) => {
                         const selected = !!decisionDraft[p.key];
+                        const Icon = p.icon;
                         return (
                           <button
                             key={p.key}
@@ -3131,13 +3148,14 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                               ...(p.key === "zumba" && d.zumba ? { zumba_item_id: "" } : {}),
                               ...(p.key === "diet" && d.diet ? { dietConsultation: false, dietChart: false } : {}),
                             }))}
-                            className="shrink-0 whitespace-nowrap rounded-md border px-3 py-1.5 text-xs font-semibold transition hover:brightness-95"
+                            className="flex w-full flex-col items-center justify-center gap-1 rounded-lg border px-1.5 py-2 text-[11px] font-semibold transition hover:brightness-95 sm:flex-row sm:gap-1.5"
                             style={selected
                               ? { background: `${p.tone}22`, color: p.tone, borderColor: p.tone, boxShadow: `inset 0 0 0 1px ${p.tone}` }
                               : { background: `${p.tone}14`, color: p.tone, borderColor: `${p.tone}33` }}
                             data-testid={`cons-decision-plan-${p.key}`}
                           >
-                            {p.label}
+                            <Icon aria-hidden className="h-3.5 w-3.5 shrink-0" />
+                            <span className="truncate">{p.label}</span>
                           </button>
                         );
                       })}
@@ -3162,10 +3180,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                               // Independent of each other, so clicking one never clears the
                               // other; clicking a chosen one again is the way back off it.
                               onClick={() => setDecisionDraft((d) => ({ ...d, [k.key]: !d[k.key] }))}
-                              className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition ${
+                              // bg-slate-50 unpicked rather than white: the card behind these
+                              // is white now, and a white button on it is a label with a
+                              // hairline round it rather than something to press.
+                              className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
                                 selected
                                   ? "border-orange-600 bg-orange-600 text-white"
-                                  : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                                  : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
                               }`}
                               data-testid={`cons-decision-diet-${k.field}`}
                             >
@@ -3179,7 +3200,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           Diagnosis Report and the Summary, so without this the button is
                           disabled with everything it mentions already written. */}
                       {!dietReady && (
-                        <p className="mt-1.5 text-[11px] font-medium text-amber-600" data-testid="cons-decision-diet-required">
+                        <p className="mt-2 rounded-md border-l-4 border-rose-500 bg-rose-50 px-3 py-1.5 text-[11px] font-medium text-rose-700" data-testid="cons-decision-diet-required">
                           Pick Diet Consultation, Diet Chart, or both.
                         </p>
                       )}
@@ -3349,7 +3370,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                   </div>
                   <Button
                     size="sm"
-                    className="mt-3 bg-sky-600 hover:bg-sky-700 text-xs"
+                    className="mt-4 h-9 bg-blue-700 px-5 text-xs font-semibold hover:bg-blue-800"
                     onClick={submitConsultationDecision}
                     disabled={savingDecision || !canSave}
                     data-testid="cons-decision-save"
