@@ -3010,35 +3010,47 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               and nothing beside it to tap to dismiss. Capped height, and tapping the
               backdrop closes — the same behaviour as every other popup on this board. */}
           <div className="max-h-[85dvh] w-full space-y-3 overflow-y-auto rounded-xl bg-white p-4 shadow-2xl sm:max-h-[calc(100vh-1rem)] sm:w-[96vw] sm:max-w-5xl sm:p-5">
-            <div className="flex items-start justify-between">
-              <div>
-                <h3 className="flex items-center gap-2 text-base font-semibold text-slate-900" data-testid="cons-detail-title">
-                  {selectedLead.name || "Lead"}
+            {/* Who this is on the left, where they stand on the right. The expert and the
+                fee badge used to hang below the phone number, which ran the header four
+                lines down the left edge with the whole right half empty — and stacked
+                under the contact line, they read as two more of the patient's details
+                rather than as the state of their consultation. */}
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="flex min-w-0 items-center gap-2 text-base font-semibold text-slate-900" data-testid="cons-detail-title">
+                  <span className="truncate">{selectedLead.name || "Lead"}</span>
                   {selectedLead.patient_number && (
-                    <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-slate-500" data-testid="cons-detail-patient-number">{selectedLead.patient_number}</span>
+                    <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-slate-500" data-testid="cons-detail-patient-number">{selectedLead.patient_number}</span>
                   )}
                 </h3>
-                <p className="mt-0.5 flex items-center gap-2 text-xs text-slate-500">
-                  <Phone className="h-3 w-3" /> {selectedLead.phone || "—"}
+                <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-500">
+                  <span className="flex items-center gap-1.5"><Phone className="h-3 w-3 shrink-0" /> {selectedLead.phone || "—"}</span>
                   {selectedLead.appointment_date && (
-                    <>· <Calendar className="ml-1 h-3 w-3" /> {selectedLead.appointment_date} {to12h(selectedLead.appointment_time)}</>
+                    <span className="flex items-center gap-1.5"><Calendar className="h-3 w-3 shrink-0" /> {selectedLead.appointment_date} {to12h(selectedLead.appointment_time)}</span>
                   )}
                 </p>
-                {selectedLead.assigned_physio_name && (
-                  <p className="mt-0.5 text-xs text-emerald-600">Expert: {selectedLead.assigned_physio_name}</p>
-                )}
-                {isConsultant && (
-                  <span
-                    className={`mt-1.5 inline-flex items-center gap-1 rounded-[5px] px-2 py-0.5 text-[10px] font-semibold ${
-                      selectedLead.consultation_fee ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
-                    }`}
-                    data-testid="cons-consultation-paid-badge"
-                  >
-                    {selectedLead.consultation_fee ? "Consultation Paid" : "Consultation Pending"}
-                  </span>
-                )}
               </div>
-              <button onClick={() => setSelectedLead(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-detail-close"><XCircle className="h-4 w-4" /></button>
+              {/* Right-aligned so the two read as one column against the ragged right edge
+                  of the contact line, and pt-0.5 sits the expert on the name's own line
+                  rather than half a line above it. */}
+              <div className="flex shrink-0 items-start gap-2 pt-0.5">
+                <div className="flex flex-col items-end gap-1">
+                  {selectedLead.assigned_physio_name && (
+                    <p className="text-xs font-medium text-emerald-600" data-testid="cons-detail-expert">Expert: {selectedLead.assigned_physio_name}</p>
+                  )}
+                  {isConsultant && (
+                    <span
+                      className={`inline-flex items-center gap-1 rounded-[5px] px-2 py-0.5 text-[10px] font-semibold ${
+                        selectedLead.consultation_fee ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
+                      }`}
+                      data-testid="cons-consultation-paid-badge"
+                    >
+                      {selectedLead.consultation_fee ? "Consultation Paid" : "Consultation Pending"}
+                    </span>
+                  )}
+                </div>
+                <button onClick={() => setSelectedLead(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-detail-close"><XCircle className="h-4 w-4" /></button>
+              </div>
             </div>
 
             {/* Sub tabs */}
