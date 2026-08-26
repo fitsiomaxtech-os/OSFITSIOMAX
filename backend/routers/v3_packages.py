@@ -11,6 +11,7 @@ from deps import v3_require_roles
 from schemas.v3 import (
     V3UserOut, V3LeadOut, V3DiagnosisInput, V3SellStoreItemInput,
     V3CollectPackagePaymentInput, V3CollectTreatmentFeeInput, V3CollectDietFeeInput,
+    V3CollectDietChartFeeInput,
     V3CollectRehabFeeInput,
     V3PhysioDiagnosisInput, V3TreatmentSummaryInput,
 )
@@ -227,6 +228,20 @@ def build_payment_details(payload) -> tuple:
     return {}, ""
 
 
+# Which shelves a diet fee may be collected against.
+#
+# Both, not one. The catalogue has two places a diet product can sit — "diet", the timed
+# bookable item under Consultations, and "diet_package", the flat-priced one under the Diet
+# Package tab — and branches have priced their Diet Consultation and Diet Chart on either.
+# Pinning collection to a single item_type meant the Collect Diet Fee button telling a
+# branch to go and add a package they had already added, on the other shelf.
+#
+# What the money is for is decided by which ENDPOINT takes it, not by which shelf the item
+# came off: collect_diet_fee writes the Diet Consultation Fee fields and
+# collect_diet_chart_fee the Diet Chart ones, whatever the item's type. The shelf is where
+# the branch keeps a price; it was never the thing that said which product was sold.
+DIET_ITEM_TYPES = ("diet", "diet_package")
+
 DIET_FEE_PAYMENT_MODES = {"cash", "upi", "card", "account_transfer"}
 # The same four. A rehab course is taken in one payment like a diet consultation, so
 # it has no use for Cheque's clearing dance or Partial Payment's schedule.
@@ -264,7 +279,9 @@ async def collect_diet_fee(lead_id: str, payload: V3CollectDietFeeInput, user: V
     if lead.get("package_paid") is None:
         raise HTTPException(status_code=400, detail="Collect the Consultation Fee first")
 
-    item = await v3_col("store_items").find_one({"id": payload.item_id, "item_type": "diet"}, {"_id": 0})
+    item = await v3_col("store_items").find_one(
+        {"id": payload.item_id, "item_type": {"$in": list(DIET_ITEM_TYPES)}}, {"_id": 0}
+    )
     if not item:
         raise HTTPException(status_code=404, detail="Diet Package not found. Add one in FITSIO STORE > Diet Package.")
 
@@ -312,6 +329,106 @@ async def collect_diet_fee(lead_id: str, payload: V3CollectDietFeeInput, user: V
         "lead_id": lead_id,
         "action": "diet_fee_collected",
         "details": f"{'Updated' if is_update else 'Collected'} Diet Consultation Fee Rs.{amount} for '{item['name']}' ({payload.mode}) via {payload.payment_mode}{detail_suffix}{discount_suffix} · Txn {transaction_id}",
+        "original_amount": original_price,
+        "collected_amount": amount,
+        "discount_amount": discount_amount if discount_amount != 0 else None,
+        "discount_reason": discount_reason,
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": _now(),
+    })
+    updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    return {"message": "Payment collected", "transaction_id": transaction_id, "lead": V3LeadOut(**updated).model_dump()}
+
+
+@router.post("/leads/{lead_id}/collect-diet-chart-fee", response_model=dict)
+async def collect_diet_chart_fee(lead_id: str, payload: V3CollectDietChartFeeInput, user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
+    """Branch admin collects the Diet Chart Fee.
+
+    The second of the two things sold under the word "diet", and the one that gates what
+    the patient can see. A Diet Consultation buys time with a Nutrition Coach; a Diet Chart
+    buys the written plan itself, and the Client Portal will not show that plan until this
+    fee is in — see v3_patient_portal._build_portal_payload.
+
+    Its own fields on the lead rather than a second write to diet_fee_paid, because a
+    patient can be sold both on one visit. Sharing one pair of fields would make whichever
+    fee was collected second erase the first, and the branch would have no way to say which
+    of the two products the money on file was actually for.
+
+    Collected in one go, by the same four modes, for the same reason the Diet Consultation
+    Fee is: a chart is one plan at one price, so there is nothing to spread over a schedule.
+
+    Independent of the Diet Consultation Fee, deliberately. They are two products on two
+    shelves and a patient may take a chart home without ever booking a coach, so this
+    requires only what that fee requires — the Consultation Fee, and nothing else. Gating
+    it on the diet consultation would shut a door the branch sells through.
+
+    Does not touch consultation_stage, for the same reason collect_diet_fee does not: diet
+    is a parallel vertical, and moving the physio pipeline as a side effect of a diet
+    payment would misreport where the patient actually is.
+    """
+    if payload.payment_mode not in DIET_FEE_PAYMENT_MODES:
+        raise HTTPException(status_code=400, detail=f"Diet Chart Fee only accepts: {sorted(DIET_FEE_PAYMENT_MODES)}")
+    if not payload.confirmed:
+        raise HTTPException(status_code=400, detail="Please confirm the payment before submitting")
+
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    if lead.get("package_paid") is None:
+        raise HTTPException(status_code=400, detail="Collect the Consultation Fee first")
+
+    item = await v3_col("store_items").find_one(
+        {"id": payload.item_id, "item_type": {"$in": list(DIET_ITEM_TYPES)}}, {"_id": 0}
+    )
+    if not item:
+        raise HTTPException(status_code=404, detail="Diet Package not found. Add one in FITSIO STORE > Diet Package.")
+
+    original_price = item.get("price_online") if payload.mode == "online" else item.get("price_offline")
+    if original_price is None:
+        raise HTTPException(status_code=400, detail=f"This Diet Package has no {payload.mode} price set")
+    amount = payload.amount if payload.amount is not None else original_price
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be greater than zero")
+
+    discount_amount = round(original_price - amount, 2)
+    discount_reason = None
+    discount_suffix = ""
+    if discount_amount > 0:
+        discount_reason = "Discount"
+        discount_suffix = f" · Actual Price Rs.{original_price}, Discount Rs.{discount_amount}"
+    elif discount_amount < 0:
+        discount_reason = "Additional amount collected"
+        discount_suffix = f" · Actual Price Rs.{original_price}, Rs.{abs(discount_amount)} above listed fee"
+
+    payment_details, detail_suffix = build_payment_details(payload)
+    is_update = lead.get("diet_chart_fee_paid") is not None
+    transaction_id = await generate_transaction_id(lead.get("branch_id"))
+    payment_details["transaction_id"] = transaction_id
+
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": {
+        "diet_chart_package_id": item["id"],
+        "diet_chart_package_name": item["name"],
+        "diet_chart_package_price": original_price,
+        "diet_chart_package_mode": payload.mode,
+        "diet_chart_fee_paid": amount,
+        "diet_chart_fee_payment_mode": payload.payment_mode,
+        "diet_chart_fee_payment_details": payment_details,
+        # Paying for a chart IS the referral for one, exactly as the Diet Consultation Fee
+        # is its own — both flags, because /diet/consultations reads diet_recommended to
+        # decide who is in the vertical at all and the coach's chart queue reads
+        # diet_chart to decide who is owed a chart. Without these a patient could pay for a
+        # chart nobody was ever asked to write.
+        "diet_recommended": True,
+        "diet_chart": True,
+        "updated_at": _now(),
+    }})
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "transaction_id": transaction_id,
+        "lead_id": lead_id,
+        "action": "diet_chart_fee_collected",
+        "details": f"{'Updated' if is_update else 'Collected'} Diet Chart Fee Rs.{amount} for '{item['name']}' ({payload.mode}) via {payload.payment_mode}{detail_suffix}{discount_suffix} · Txn {transaction_id}",
         "original_amount": original_price,
         "collected_amount": amount,
         "discount_amount": discount_amount if discount_amount != 0 else None,

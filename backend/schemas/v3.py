@@ -357,6 +357,29 @@ class V3LeadOut(BaseModel):
     diet_fee_paid: Optional[float] = None
     diet_fee_payment_mode: Optional[str] = None
     diet_fee_payment_details: Optional[dict] = None
+    # The Diet Chart Fee and the Diet Package it was sold as. A whole second set rather
+    # than a reuse of diet_package_*/diet_fee_*: a Diet Consultation and a Diet Chart are
+    # two products a patient can be sold on the same visit, so one lead can carry both
+    # fees, and folding them into one pair would make the second collection erase the
+    # first — leaving the branch unable to say which of the two was paid for.
+    diet_chart_package_id: Optional[str] = None
+    diet_chart_package_name: Optional[str] = None
+    diet_chart_package_price: Optional[float] = None
+    diet_chart_package_mode: Optional[str] = None  # "online" | "offline"
+    diet_chart_fee_paid: Optional[float] = None
+    diet_chart_fee_payment_mode: Optional[str] = None
+    diet_chart_fee_payment_details: Optional[dict] = None
+    # The chart itself, once the Nutrition Coach has sent one. The bytes are a row in
+    # `lead_documents`; this is the pointer to the current chart, so a screen asking
+    # "has this patient got their chart" reads one field instead of querying documents.
+    #
+    # Sent is not the same as visible. The coach may prepare and send a chart before the
+    # fee is in — these fields fill either way — and the Client Portal decides what to show
+    # by reading diet_chart_fee_paid at the moment it is asked, never by trusting a flag
+    # written here. See v3_patient_portal._build_portal_payload.
+    diet_chart_document_id: Optional[str] = None
+    diet_chart_sent_at: Optional[str] = None
+    diet_chart_sent_by: Optional[str] = None
     # What the Nutrition Coach concluded at the Diet Consultation — the diet counterpart
     # of physio_diagnosis_report. One current plan, replaced rather than appended to.
     diet_consultation_report: Optional[str] = None
@@ -486,6 +509,24 @@ class V3CollectDietFeeInput(V3CollectPackagePaymentInput):
     Diet Package from FITSIO STORE, and whether it was sold at the online or offline price.
     The Head Physio never picks a diet package the way they pick a treatment one, so it is
     chosen here at the point of collection.
+    """
+    item_id: str
+    mode: Literal["online", "offline"] = "offline"
+
+
+class V3CollectDietChartFeeInput(V3CollectPackagePaymentInput):
+    """The Diet Chart Fee.
+
+    Its own input rather than a `kind` field on V3CollectDietFeeInput, because the two are
+    collected against different lead fields and one patient can be sold both. A shared
+    endpoint discriminating on a string would be one typo away from a Diet Chart payment
+    landing on the Diet Consultation Fee and overwriting it.
+
+    Identical in shape to V3CollectDietFeeInput — same four payment modes, taken in one go,
+    against an item chosen at the point of collection — so it inherits the same payment
+    fields for the same reason V3CollectRehabFeeInput does: build_payment_details validates
+    every one of them, and a hand-written copy that missed ifsc_code would throw on the
+    first card payment.
     """
     item_id: str
     mode: Literal["online", "offline"] = "offline"

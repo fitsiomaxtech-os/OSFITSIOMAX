@@ -43,6 +43,13 @@ CHUNK = 1024 * 1024
 CONSULTATION_FORM = "consultation_form"
 GENERAL = "general"
 
+# The Nutrition Coach's Diet Chart. A kind of its own because it is the one document in the
+# OS whose visibility to the patient is bought rather than granted: it is shown in the
+# Client Portal once the Diet Chart Fee is collected and not before, and that is a fact
+# about the lead's payments, not a flag on the row. See is_shared_with_patient below and
+# the /patient-portal/diet-chart route that serves it.
+DIET_CHART = "diet_chart"
+
 # The proof a course of treatment actually delivered something, gathered as it goes. These
 # four are what a case sheet cannot be closed without — see progression_status below.
 #
@@ -93,7 +100,21 @@ def default_shared_with_patient(kind: str) -> bool:
 
 def is_shared_with_patient(doc: dict) -> bool:
     """Reads the flag, falling back to the same rule for rows saved before it existed —
-    so an old consultation form still reaches the patient and an old report still doesn't."""
+    so an old consultation form still reaches the patient and an old report still doesn't.
+
+    A Diet Chart is never shared through here, whatever its flag says. Its visibility is
+    conditional on the Diet Chart Fee, and this function cannot see the lead's payments —
+    it is handed a document row and nothing else. Answering "yes" for a chart would put it
+    in /patient-portal/documents and its download route, which is a way past the fee gate
+    that nobody would think to check.
+
+    So the chart is fenced out of the generic path entirely and reaches the patient only
+    through /patient-portal/diet-chart, which reads diet_chart_fee_paid off the lead at the
+    moment it is asked. The gate is then a live check against what has actually been paid,
+    rather than a copy of it written down when the chart was sent and never revisited.
+    """
+    if (doc.get("kind") or GENERAL) == DIET_CHART:
+        return False
     value = doc.get("shared_with_patient")
     if value is None:
         return default_shared_with_patient(doc.get("kind") or GENERAL)
@@ -104,6 +125,47 @@ def is_shared_with_patient(doc: dict) -> bool:
 # delete one.
 READ_ROLES = ("branch_admin", "super_admin", "head_physio", "physio", "nutrition_coach")
 WRITE_ROLES = ("branch_admin", "super_admin", "head_physio")
+
+
+async def store_upload(file: UploadFile, doc_id: str, ext: str) -> tuple:
+    """Write one upload to the documents folder under a generated name. Returns
+    (stored_name, size_bytes).
+
+    The name on disk is generated, never taken from the upload. A filename is attacker
+    controlled — "../../server.py" would otherwise be written wherever that resolves to.
+    The original is kept as data by the caller, for display only.
+
+    Streamed to disk a megabyte at a time rather than read whole. At a 500MB ceiling,
+    reading first and checking after would hold half a gigabyte in RAM per concurrent
+    upload before finding out it was too big — enough to take the box down from a request
+    that was always going to be rejected.
+
+    Shared rather than copied because the Diet Chart is uploaded from the diet router, by
+    the Nutrition Coach, and a second copy of this loop is a second place for the path
+    handling and the cleanup to be got wrong.
+    """
+    stored_name = f"{doc_id}{ext}"
+    path = os.path.join(DOC_DIR, stored_name)
+    size = 0
+    try:
+        with open(path, "wb") as f:
+            while True:
+                chunk = await file.read(CHUNK)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > MAX_UPLOAD_BYTES:
+                    raise HTTPException(status_code=400, detail="File must be under 500MB")
+                f.write(chunk)
+        if not size:
+            raise HTTPException(status_code=400, detail="That file is empty")
+    except Exception:
+        # A rejected or failed upload leaves nothing behind. Without this the partial file
+        # stays on disk forever, unreferenced by any row and invisible to every screen.
+        if os.path.exists(path):
+            os.remove(path)
+        raise
+    return stored_name, size
 
 
 @router.get("/leads/{lead_id}/documents")
@@ -139,10 +201,21 @@ async def set_document_shared(
 
     Restricted to WRITE_ROLES rather than everyone who can read: deciding what a patient
     sees is the branch's call, not something a treating clinician does in passing.
+
+    A Diet Chart is refused outright rather than accepted and ignored. Its visibility is not
+    a decision anyone makes on this screen — it is bought, and is_shared_with_patient will
+    keep answering no whatever this row says. Writing the flag anyway would leave a toggle
+    that reads as shared beside a chart the patient cannot open, which is worse than a
+    control that says plainly why it will not move.
     """
     doc = await v3_col("lead_documents").find_one({"id": doc_id, "lead_id": lead_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
+    if (doc.get("kind") or GENERAL) == DIET_CHART:
+        raise HTTPException(
+            status_code=400,
+            detail="A Diet Chart appears in the Client Portal once the Diet Chart Fee is collected — it is not shared by hand",
+        )
     await v3_col("lead_documents").update_one(
         {"id": doc_id}, {"$set": {"shared_with_patient": bool(shared)}}
     )
@@ -180,36 +253,8 @@ async def upload_lead_document(
         )
         raise HTTPException(status_code=400, detail=detail)
 
-    # The name on disk is generated, never taken from the upload. A filename is attacker
-    # controlled — "../../server.py" would otherwise be written wherever that resolves to.
-    # The original is kept as data, for display only.
     doc_id = str(uuid.uuid4())
-    stored_name = f"{doc_id}{ext}"
-    path = os.path.join(DOC_DIR, stored_name)
-
-    # Streamed to disk a megabyte at a time rather than read whole. At a 500MB ceiling,
-    # reading first and checking after would hold half a gigabyte in RAM per concurrent
-    # upload before finding out it was too big — enough to take the box down from a
-    # request that was always going to be rejected.
-    size = 0
-    try:
-        with open(path, "wb") as f:
-            while True:
-                chunk = await file.read(CHUNK)
-                if not chunk:
-                    break
-                size += len(chunk)
-                if size > MAX_UPLOAD_BYTES:
-                    raise HTTPException(status_code=400, detail="File must be under 500MB")
-                f.write(chunk)
-        if not size:
-            raise HTTPException(status_code=400, detail="That file is empty")
-    except Exception:
-        # A rejected or failed upload leaves nothing behind. Without this the partial file
-        # stays on disk forever, unreferenced by any row and invisible to every screen.
-        if os.path.exists(path):
-            os.remove(path)
-        raise
+    stored_name, size = await store_upload(file, doc_id, ext)
 
     doc = {
         "id": doc_id,

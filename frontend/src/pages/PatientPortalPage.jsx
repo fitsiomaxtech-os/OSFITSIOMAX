@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Calendar, Check, ClipboardCheck, ClipboardList, Clock, Eye, EyeOff, IndianRupee, LogOut, MessageSquareHeart, PhoneCall, Salad, UserRound } from "lucide-react";
+import { Calendar, Check, ClipboardCheck, ClipboardList, Clock, Eye, EyeOff, IndianRupee, Lock, LogOut, MessageSquareHeart, PhoneCall, Salad, UserRound } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,8 @@ import { slotTo12h } from "@/lib/time";
 import {
   loadPortalSession, savePortalSession, clearPortalSession,
   patientPortalLogin, patientPortalLogout, patientPortalMe, patientPortalGoogleLogin,
-  patientPortalDocuments, patientPortalDocumentUrl, patientPortalSubmitFeedback, patientPortalMyFeedback,
+  patientPortalDocuments, patientPortalDocumentUrl, patientPortalDietChartUrl,
+  patientPortalSubmitFeedback, patientPortalMyFeedback,
   patientPortalReplyFeedback,
 } from "@/lib/patientPortalApi";
 
@@ -344,10 +345,80 @@ export function SessionsTab({ data }) {
   );
 }
 
+/** The patient's Diet Chart, once it is theirs to read.
+ *
+ *  Three states and they are all different things. No chart: nothing to say, so nothing is
+ *  shown. A chart waiting on the fee: said plainly, because the alternative is a patient
+ *  who was told a chart was coming seeing an empty screen and concluding the Nutritionist
+ *  forgot them — the actual answer is a payment at the desk, and only the clinic can tell
+ *  them that. A chart they have paid for: opened.
+ *
+ *  The server decides which of the three this is; nothing here can promote one to another.
+ *  When a chart is held, the payload carries no document id and no filename, and the
+ *  download route refuses independently — so this component could not reveal it by mistake
+ *  even if it tried to.
+ */
+function DietChartRow({ chart }) {
+  const [opening, setOpening] = useState(false);
+  if (!chart || (!chart.available && !chart.awaiting_payment)) return null;
+
+  if (chart.awaiting_payment) {
+    return (
+      <div className="rounded-lg border border-amber-200 bg-amber-50/70 p-3" data-testid="patient-portal-diet-chart-locked">
+        <p className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-800">
+          <Lock className="h-3.5 w-3.5" /> Your Diet Chart is ready
+        </p>
+        <p className="mt-1 text-[11px] text-amber-700">
+          It will appear here once the Diet Chart fee has been paid. Please speak to your branch.
+        </p>
+      </div>
+    );
+  }
+
+  // A blob and an object URL rather than a link: the route needs the session token in a
+  // header, which a plain <a href> cannot send.
+  const open = async () => {
+    setOpening(true);
+    try {
+      const url = await patientPortalDietChartUrl();
+      window.open(url, "_blank", "noopener");
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch {
+      toast.error("Your Diet Chart couldn't be opened. Please ask your branch.");
+    }
+    setOpening(false);
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={open}
+      disabled={opening}
+      className="flex w-full items-center justify-between gap-3 rounded-lg border border-orange-200 bg-orange-50/60 p-3 text-left transition hover:border-orange-300 hover:bg-orange-50 disabled:opacity-50"
+      data-testid="patient-portal-diet-chart"
+    >
+      <div className="min-w-0">
+        <p className="text-[9px] font-semibold uppercase tracking-wide text-orange-500">Your Diet Chart</p>
+        <p className="truncate text-xs font-semibold text-orange-900">{chart.original_name || "Diet Chart"}</p>
+        <p className="text-[10px] text-orange-400">
+          {chart.sent_by || "Your Nutritionist"}
+          {chart.sent_at ? ` · ${String(chart.sent_at).slice(0, 10)}` : ""}
+        </p>
+      </div>
+      <span className="shrink-0 text-[11px] font-semibold text-orange-600">
+        {opening ? "Opening..." : "View"}
+      </span>
+    </button>
+  );
+}
+
 /** When the patient sees their Nutrition Coach, and how far through the check-ins they
-    are. Renders nothing at all unless a Diet Consultation has been booked. */
+    are. Renders nothing at all unless a Diet Consultation has been booked, or a chart is
+    on its way to them — a patient who bought only a chart never books a thing, and this
+    card was their whole diet screen. */
 function DietCard({ diet }) {
-  if (!diet || (!diet.appointment_at && !diet.total_checkins)) return null;
+  const hasChart = !!(diet?.chart?.available || diet?.chart?.awaiting_payment);
+  if (!diet || (!diet.appointment_at && !diet.total_checkins && !hasChart)) return null;
   const date = (diet.appointment_at || "").split("T")[0];
   const done = diet.completed_checkins || 0;
   const total = diet.total_checkins || 0;
@@ -398,6 +469,10 @@ function DietCard({ diet }) {
             )}
           </div>
         )}
+
+        {/* The chart itself, under the report it follows from. Gated on its own fee by the
+            server, not by this screen — see DietChartRow. */}
+        <DietChartRow chart={diet.chart} />
       </div>
     </div>
   );
@@ -476,8 +551,8 @@ export function PaymentTab({ data }) {
   const p = data.payment || {};
   // All three fees. The diet one was missing, so a patient who paid for a diet
   // consultation was shown a Total that did not include their own money.
-  const totalAll = (p.consultation_fee_total || 0) + (p.treatment_fee_total || 0) + (p.diet_fee_total || 0);
-  const collectedAll = (p.consultation_fee_paid || 0) + (p.treatment_fee_paid || 0) + (p.diet_fee_paid || 0);
+  const totalAll = (p.consultation_fee_total || 0) + (p.treatment_fee_total || 0) + (p.diet_fee_total || 0) + (p.diet_chart_fee_total || 0);
+  const collectedAll = (p.consultation_fee_paid || 0) + (p.treatment_fee_paid || 0) + (p.diet_fee_paid || 0) + (p.diet_chart_fee_paid || 0);
   const pendingAll = Math.max(totalAll - collectedAll, 0);
 
   return (
@@ -557,6 +632,23 @@ export function PaymentTab({ data }) {
             ₹{money(p.diet_fee_paid)} <span className="capitalize text-slate-400">via {p.diet_payment_mode}</span>
           </p>
           {p.diet_package_name && <p className="mt-0.5 text-[11px] text-slate-400">{p.diet_package_name}</p>}
+        </div>
+      )}
+
+      {/* The Diet Chart's own fee. Its own card rather than a figure added into the one
+          above, because a patient sold both would otherwise read a total they cannot match
+          against either receipt — on the screen whose whole job is telling them what they
+          were charged for. */}
+      {p.diet_chart_fee_paid != null && (
+        <div className="rounded-lg border border-slate-200 bg-white p-3" data-testid="patient-portal-diet-chart-fee">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Diet Chart Fee</p>
+            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">Paid</span>
+          </div>
+          <p className="text-xs text-slate-600">
+            ₹{money(p.diet_chart_fee_paid)} <span className="capitalize text-slate-400">via {p.diet_chart_payment_mode}</span>
+          </p>
+          {p.diet_chart_package_name && <p className="mt-0.5 text-[11px] text-slate-400">{p.diet_chart_package_name}</p>}
         </div>
       )}
     </div>

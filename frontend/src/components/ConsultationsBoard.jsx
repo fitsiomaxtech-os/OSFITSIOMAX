@@ -16,7 +16,8 @@ import {
   collectPackagePayment, collectTreatmentFee, markInstallmentPaid, savePhysioDiagnosis, unlockPhysioDiagnosis,
   saveTreatmentSummary, unlockTreatmentSummary, stagesList, getDoctors,
   assignPhysioWithSessions, assignRehab, getDoctorCalendar,
-  listNutritionCoaches, bookDietAppointment, collectDietFee,
+  listNutritionCoaches, bookDietAppointment, collectDietFee, collectDietChartFee,
+  listDietStoreItems,
   scheduleConsultationFollowUp, rescheduleConsultationFollowUp,
   getLeadRemarks, getLeadActivity, leadDocuments,
   saveConsultationDecision, markConsultationCompleted, getBranches,
@@ -261,6 +262,42 @@ const DIET_KINDS = [
   { key: "dietConsultation", field: "diet_consultation", label: "Diet Consultation" },
   { key: "dietChart", field: "diet_chart", label: "Diet Chart" },
 ];
+
+/**
+ * The two diet fees, and every place their wording and their fields differ.
+ *
+ * One table rather than two copies of the collect flow. The popup is the same popup — pick
+ * a package, pick a price, pick a payment mode, confirm — and the only things that actually
+ * differ are which lead fields the money lands on, what the button says, and which endpoint
+ * takes it. Duplicating 180 lines of form to change three words is how the second one drifts
+ * from the first, and a payment form that has drifted is a payment form nobody can audit.
+ *
+ * `paidField` is what makes a kind answer "has this been collected"; everything else hangs
+ * off it. They are separate fields on the lead on purpose — a patient can be sold both on
+ * one visit, so a shared field would have the second collection erase the first.
+ */
+const DIET_FEE_KINDS = {
+  consultation: {
+    label: "Diet Consultation Fee",
+    receiptPrefix: "DIET",
+    paidField: "diet_fee_paid",
+    itemField: "diet_package_id",
+    nameField: "diet_package_name",
+    priceField: "diet_package_price",
+    packageModeField: "diet_package_mode",
+    testid: "diet-fee",
+  },
+  chart: {
+    label: "Diet Chart Fee",
+    receiptPrefix: "DIETCHART",
+    paidField: "diet_chart_fee_paid",
+    itemField: "diet_chart_package_id",
+    nameField: "diet_chart_package_name",
+    priceField: "diet_chart_package_price",
+    packageModeField: "diet_chart_package_mode",
+    testid: "diet-chart-fee",
+  },
+};
 
 // "Consultation" first always, then whichever add-ons are on — same shape read back from
 // a saved lead (decisionSummaryOf) as from the draft mid-edit, so a label built one way
@@ -910,7 +947,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
   // The Diet Package is chosen here, not upstream: the Head Physio picks a treatment
   // package during their decision but never a diet one, because diet is optional and
   // often decided after treatment is under way.
-  const [dietFeeDraft, setDietFeeDraft] = useState(null); // { item_id, mode, payment_mode, amount } | null
+  // `kind` is "consultation" or "chart" — see DIET_FEE_KINDS. One draft for both, because
+  // only one fee is ever being collected at a time and two drafts would be two ways for the
+  // popup to be open.
+  const [dietFeeDraft, setDietFeeDraft] = useState(null); // { kind, item_id, mode, payment_mode, amount } | null
   // The Rehab course fee. One popup rather than the diet fee's two: the course and its
   // price were settled by the Consultant, so there is nothing to choose before
   // confirming — only the amount, which a discount can still move.
@@ -1158,7 +1198,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     listStoreItems().then(setStoreItems).catch(() => setStoreItems([]));
     // Loaded up front, not just when the collect-fee popup opens: the Consultation Visit
     // panel now quotes the Diet Fee before anyone has opened anything.
-    listStoreItems(undefined, "diet").then((d) => setDietItems(d || [])).catch(() => setDietItems([]));
+    listDietStoreItems().then((d) => setDietItems(d || [])).catch(() => setDietItems([]));
     stagesList(isConsultant ? "head_consultation" : "consultation").then(setStages).catch(() => setStages([]));
   }, [isConsultant]);
 
@@ -2264,6 +2304,9 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
 
   // ---- Diet Consultation Fee (Branch Admin) ----
   const dietItemById = (id) => dietItems.find((i) => i.id === id);
+  // Which of the two fees the popup is currently taking. Falls back to the consultation so
+  // a draft saved before `kind` existed still opens as the fee it was.
+  const dietFeeCfg = DIET_FEE_KINDS[dietFeeDraft?.kind] || DIET_FEE_KINDS.consultation;
 
   /**
    * What to quote for the Diet Fee before it has been collected.
@@ -2281,6 +2324,22 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     const price = mode === "online" ? dietItems[0].price_online : dietItems[0].price_offline;
     return price != null ? Number(price) : null;
   }, [selectedLead, dietItems]);
+  /**
+   * What to quote for the Diet Chart Fee before it has been collected.
+   *
+   * Same rule and same reasoning as dietFeeDue above, off the chart's own fields: quoted
+   * from the store only when there is exactly one diet product priced, because with several
+   * any single figure is a guess at which one this patient is getting, and this is the panel
+   * Branch Admin reads to take money.
+   */
+  const dietChartFeeDue = useMemo(() => {
+    if (selectedLead?.diet_chart_package_price != null) return Number(selectedLead.diet_chart_package_price);
+    if (dietItems.length !== 1) return null;
+    const mode = selectedLead?.package_mode || selectedLead?.appointment_mode || "offline";
+    const price = mode === "online" ? dietItems[0].price_online : dietItems[0].price_offline;
+    return price != null ? Number(price) : null;
+  }, [selectedLead, dietItems]);
+
   const dietListPrice = (draft) => {
     const item = dietItemById(draft?.item_id);
     if (!item) return null;
@@ -2326,11 +2385,15 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     setCollectingRehabFee(false);
   };
 
-  const openDietFeeDraft = async () => {
+  const openDietFeeDraft = async (kind = "consultation") => {
+    const cfg = DIET_FEE_KINDS[kind];
     let items = dietItems;
     if (!items.length) {
       try {
-        items = (await listStoreItems(undefined, "diet")) || [];
+        // Both shelves. A branch may have priced its Diet Consultation and its Diet Chart
+        // under either item type and the server takes an item off either, so asking for one
+        // is how this told a branch to add a package they had already added.
+        items = (await listDietStoreItems()) || [];
         setDietItems(items);
       } catch {
         items = [];
@@ -2341,10 +2404,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       return;
     }
     setDietFeeDraft({
+      kind,
       // Re-collecting keeps whatever was chosen last time, so a correction doesn't
-      // silently move the patient onto a different package.
-      item_id: selectedLead.diet_package_id || items[0].id,
-      mode: selectedLead.diet_package_mode || "offline",
+      // silently move the patient onto a different package. Read off this kind's own
+      // fields: the chart and the consultation remember different packages.
+      item_id: selectedLead[cfg.itemField] || items[0].id,
+      mode: selectedLead[cfg.packageModeField] || "offline",
       payment_mode: "cash",
       amount: "",
     });
@@ -2376,18 +2441,21 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
       if (!attachBankDetails(payload, dietFeeConfirmDraft, mode)) return;
     }
 
+    const cfg = DIET_FEE_KINDS[dietFeeDraft.kind] || DIET_FEE_KINDS.consultation;
+    const collect = dietFeeDraft.kind === "chart" ? collectDietChartFee : collectDietFee;
+
     setCollectingDietFee(true);
     // Only the call is guarded: a fault while building the receipt below must never be
     // reported as a failure to collect, because the money is already recorded.
     let res;
     try {
-      res = await collectDietFee(selectedLead.id, payload);
+      res = await collect(selectedLead.id, payload);
     } catch (err) {
-      toast.error(err?.response?.data?.detail || "Failed to collect the Diet Consultation Fee");
+      toast.error(err?.response?.data?.detail || `Failed to collect the ${cfg.label}`);
       setCollectingDietFee(false);
       return;
     }
-    toast.success(`Diet Consultation Fee collected — Rs.${amount}`);
+    toast.success(`${cfg.label} collected — Rs.${amount}`);
     setDietFeeConfirmDraft(null);
     setDietFeeDraft(null);
     setSelectedLead(res.lead);
@@ -2395,10 +2463,10 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
     showReceipt(() => makeReceipt({
       lead: res.lead,
       payload,
-      prefix: "DIET",
-      paidFor: "Diet Consultation Fee",
-      packageName: res.lead.diet_package_name || "",
-      assignedPrice: res.lead.diet_package_price,
+      prefix: cfg.receiptPrefix,
+      paidFor: cfg.label,
+      packageName: res.lead[cfg.nameField] || "",
+      assignedPrice: res.lead[cfg.priceField],
       transactionId: res.transaction_id,
     }));
     setCollectingDietFee(false);
@@ -3422,6 +3490,13 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               const dietFeePaid = selectedLead.diet_fee_paid != null;
               const dietAssigned = !!selectedLead.diet_coach_id;
               const dietBooked = !!selectedLead.diet_appointment_at;
+              // The chart half of the referral. `chartReferred` is what the Consultant
+              // ticked; it also comes on once the fee is taken or the coach sends one, so a
+              // chart sold or written off somebody's own judgement still shows here rather
+              // than hiding behind a box nobody remembered to tick.
+              const chartReferred = !!selectedLead.diet_chart;
+              const dietChartFeePaid = selectedLead.diet_chart_fee_paid != null;
+              const chartSent = !!selectedLead.diet_chart_sent_at;
               const DietButton = selectedLead.package_paid != null ? (
                 <Button
                   size="sm"
@@ -3429,7 +3504,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                   className={`${dietFeePaid && dietBooked
                     ? "border-orange-200 text-orange-700 hover:bg-orange-50"
                     : "bg-orange-500 text-white hover:bg-orange-600"} ${ACT_BTN}`}
-                  onClick={!dietFeePaid ? openDietFeeDraft : openDietModal}
+                  onClick={!dietFeePaid ? () => openDietFeeDraft("consultation") : openDietModal}
                   data-testid="cons-open-diet-assign"
                 >
                   <Salad className="mr-1 h-3.5 w-3.5" />{" "}
@@ -3517,6 +3592,35 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                           : "Not booked"}
                         tone={dietBooked ? "" : "text-amber-700"}
                       />
+                      {/* The chart's own three rows, and only for a patient it was actually
+                          ticked for. A Diet Chart is a second product on a second shelf at a
+                          second price, so it gets its own fee line rather than sharing the
+                          one above — which is also what the lead stores.
+
+                          The last row is the one the desk is actually asked about. A chart
+                          the coach sent is not a chart the patient can see: unpaid, it is
+                          held, and the person who has to say so is standing at this screen. */}
+                      {chartReferred && (
+                        <>
+                          <DetailRow label="Diet Chart Package" value={selectedLead.diet_chart_package_name || "Not chosen yet"} />
+                          <DetailRow
+                            label="Diet Chart Fee"
+                            value={dietChartFeePaid
+                              ? `Rs.${Number(selectedLead.diet_chart_fee_paid).toLocaleString("en-IN")}${selectedLead.diet_chart_fee_payment_mode ? ` (${selectedLead.diet_chart_fee_payment_mode})` : ""}`
+                              : (dietChartFeeDue != null ? `Rs.${Number(dietChartFeeDue).toLocaleString("en-IN")} — not collected` : "Not collected")}
+                            tone={dietChartFeePaid ? "text-emerald-700" : "text-amber-700"}
+                          />
+                          <DetailRow
+                            label="Diet Chart"
+                            value={!chartSent
+                              ? "Not sent yet"
+                              : dietChartFeePaid
+                              ? `Sent${selectedLead.diet_chart_sent_by ? ` by ${selectedLead.diet_chart_sent_by}` : ""}`
+                              : "Sent — held until the fee is collected"}
+                            tone={!chartSent ? "text-slate-500" : dietChartFeePaid ? "text-emerald-700" : "text-amber-700"}
+                          />
+                        </>
+                      )}
                     </dl>
                   </div>
                   {/* The fee first and the nutritionist after it, because that is the order
@@ -3534,11 +3638,30 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       <Button
                         size="sm"
                         className={`bg-orange-500 text-white shadow-sm hover:bg-orange-600 ${ACT_BTN}`}
-                        onClick={openDietFeeDraft}
+                        onClick={() => openDietFeeDraft("consultation")}
                         data-testid="cons-diet-detail-fee"
                       >
                         <IndianRupee className="mr-1 h-3.5 w-3.5" />
                         Collect Diet Fee
+                      </Button>
+                    )}
+                    {/* Offered only where the Consultant ticked Diet Chart, and it goes once
+                        collected — the same way the fee button above does, and for the same
+                        reason: collecting is a step in a sequence and it is done.
+
+                        Beside that button rather than after the appointment, because it
+                        waits on nothing. The chart is its own product: a patient can buy one
+                        without ever booking the coach's hour, so nothing about the
+                        consultation gates it and putting it last would imply otherwise. */}
+                    {chartReferred && !dietChartFeePaid && (
+                      <Button
+                        size="sm"
+                        className={`bg-orange-500 text-white shadow-sm hover:bg-orange-600 ${ACT_BTN}`}
+                        onClick={() => openDietFeeDraft("chart")}
+                        data-testid="cons-diet-detail-chart-fee"
+                      >
+                        <IndianRupee className="mr-1 h-3.5 w-3.5" />
+                        Collect Diet Chart Fee
                       </Button>
                     )}
                     <Button
@@ -3861,6 +3984,23 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                   paid: selectedLead.diet_fee_paid != null,
                   note: selectedLead.diet_fee_paid != null ? selectedLead.diet_fee_payment_mode : null,
                   show: !!selectedLead.diet_recommended,
+                  act: () => openDetail("diet"),
+                  actLabel: "Open",
+                },
+                {
+                  // Its own card rather than a second figure inside the Diet one. A patient
+                  // sold both would otherwise read one total they cannot match against
+                  // either receipt, on the card whose whole job is saying what they owe.
+                  //
+                  // Shown only where the chart was actually ticked, so it stays off every
+                  // patient who was referred for the consultation alone.
+                  key: "diet_chart",
+                  label: "Diet Chart Fee",
+                  sub: selectedLead.diet_chart_package_name,
+                  amount: selectedLead.diet_chart_fee_paid != null ? selectedLead.diet_chart_fee_paid : dietChartFeeDue,
+                  paid: selectedLead.diet_chart_fee_paid != null,
+                  note: selectedLead.diet_chart_fee_paid != null ? selectedLead.diet_chart_fee_payment_mode : null,
+                  show: !!selectedLead.diet_chart,
                   act: () => openDetail("diet"),
                   actLabel: "Open",
                 },
@@ -5439,12 +5579,12 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 because it is taken at a different moment: diet is decided after the
                 consultation, often after treatment has started. */}
             {dietFeeDraft && (
-              <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" data-testid="cons-diet-fee-modal">
+              <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" data-testid={`cons-${dietFeeCfg.testid}-modal`}>
                 <div className="max-h-[85vh] w-full max-w-md space-y-3 overflow-y-auto rounded-xl bg-white p-4 shadow-2xl">
                   <div className="flex items-center justify-between">
                     <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-800">
                       <Salad className="h-4 w-4 text-orange-500" />
-                      {selectedLead.diet_fee_paid != null ? "Update Diet Consultation Fee" : "Collect Diet Consultation Fee"}
+                      {selectedLead[dietFeeCfg.paidField] != null ? `Update ${dietFeeCfg.label}` : `Collect ${dietFeeCfg.label}`}
                     </p>
                     <button onClick={() => setDietFeeDraft(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-diet-fee-close"><X className="h-4 w-4" /></button>
                   </div>
@@ -5521,7 +5661,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                 <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" data-testid="cons-diet-fee-confirm-modal">
                   <div className="max-h-[90vh] w-full max-w-sm space-y-3 overflow-y-auto rounded-xl bg-white p-4 shadow-2xl">
                     <div className="flex items-center justify-between">
-                      <p className="text-sm font-semibold text-slate-800">Confirm Diet Consultation Fee</p>
+                      <p className="text-sm font-semibold text-slate-800">Confirm {dietFeeCfg.label}</p>
                       <button onClick={() => setDietFeeConfirmDraft(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-diet-fee-confirm-close"><X className="h-4 w-4" /></button>
                     </div>
 
@@ -5533,7 +5673,7 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                       assignedPrice={dietListPrice(dietFeeDraft)}
                       amount={dietFeeDraft.amount}
                       onAmountChange={(v) => setDietFeeDraft({ ...dietFeeDraft, amount: v })}
-                      label="Diet Consultation Fee (₹)"
+                      label={`${dietFeeCfg.label} (₹)`}
                       testPrefix="cons-diet-fee-confirm"
                     />
 

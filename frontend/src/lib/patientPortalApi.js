@@ -84,6 +84,22 @@ export const patientPortalDocuments = async () => {
   return data;
 };
 
+/** The patient's Diet Chart, as an object URL.
+ *
+ *  Its own route and no document id, because the chart is not fetched the way the documents
+ *  above are: the server decides which chart is theirs and refuses it outright until the
+ *  Diet Chart Fee has been collected. There is nothing to pass, and so nothing to pass that
+ *  belongs to somebody else.
+ *
+ *  A blob for the same reason as below, and the caller owns the URL. */
+export const patientPortalDietChartUrl = async () => {
+  const { data } = await portalApi.get("/patient-portal/diet-chart", {
+    headers: authHeaders(),
+    responseType: "blob",
+  });
+  return URL.createObjectURL(data);
+};
+
 /** The bytes, as an object URL. Fetched as a blob rather than linked to directly: the
     route needs the session token in a header, which a plain <a href> cannot send. The
     caller owns the URL and must revokeObjectURL it when done. */

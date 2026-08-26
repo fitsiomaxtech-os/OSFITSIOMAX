@@ -236,8 +236,30 @@ export const createNutritionCoach = async (payload) => (await api.post("/branch/
 export const assignDiet = async (payload) => (await api.post("/branch/assign-diet", payload)).data;
 export const bookDietAppointment = async (payload) => (await api.post("/branch/diet-appointment", payload)).data;
 export const collectDietFee = async (leadId, payload) => (await api.post(`/leads/${leadId}/collect-diet-fee`, payload)).data;
+// The Diet Chart's own fee. Its own call rather than a flag on the one above, because the
+// two land on different fields and a patient can be sold both — see the backend's
+// collect_diet_chart_fee.
+export const collectDietChartFee = async (leadId, payload) => (await api.post(`/leads/${leadId}/collect-diet-chart-fee`, payload)).data;
 export const collectRehabFee = async (leadId, payload) => (await api.post(`/leads/${leadId}/collect-rehab-fee`, payload)).data;
 export const saveDietConsultationReport = async (leadId, report) => (await api.post(`/diet/consultation-report/${leadId}`, { report })).data;
+
+// ---- The Diet Chart ----
+/** The Nutrition Coach sends a chart. Multipart, and deliberately without an explicit
+ *  Content-Type: the browser has to set it itself so the multipart boundary matches the
+ *  body it just built. Naming it by hand is how an upload arrives as an unparseable form. */
+export const sendDietChart = async (leadId, file, label) => {
+  const form = new FormData();
+  form.append("file", file);
+  if (label) form.append("label", label);
+  return (await api.post(`/diet/chart/${leadId}`, form)).data;
+};
+/** The chart's bytes as an object URL, for staff. Fetched as a blob rather than linked to,
+ *  because the route needs the session token in a header and a plain <a href> cannot send
+ *  one. The caller owns the URL and must revokeObjectURL it when done. */
+export const dietChartUrl = async (leadId) => {
+  const { data } = await api.get(`/diet/chart/${leadId}/download`, { responseType: "blob" });
+  return URL.createObjectURL(data);
+};
 export const setDocumentShared = async (leadId, docId, shared) => (await api.patch(`/leads/${leadId}/documents/${docId}/share`, null, { params: { shared } })).data;
 export const branchDietPatients = async () => (await api.get("/branch/diet-patients")).data;
 
@@ -475,6 +497,22 @@ export const listStoreItems = async (category, itemType) => {
   if (category) params.category = category;
   if (itemType) params.item_type = itemType;
   return (await api.get("/store/items", { params })).data;
+};
+/** Every diet product the branch has priced, from both shelves.
+ *
+ *  Two calls because they are two item types: "diet", the timed bookable item under
+ *  Consultations, and "diet_package", the flat-priced one under the Diet Package tab. A
+ *  branch may have put its Diet Consultation and its Diet Chart on either, and asking for
+ *  only one type is how the Collect Diet Fee button came to tell a branch to add a package
+ *  they had already added. Deduplicated by id in case an item is ever returned by both. */
+export const listDietStoreItems = async () => {
+  const lists = await Promise.all([
+    listStoreItems(undefined, "diet").catch(() => []),
+    listStoreItems(undefined, "diet_package").catch(() => []),
+  ]);
+  const byId = new Map();
+  for (const item of lists.flat()) if (item?.id) byId.set(item.id, item);
+  return [...byId.values()];
 };
 export const updateStoreItem = async (id, payload) => (await api.put(`/store/items/${id}`, payload)).data;
 export const deleteStoreItem = async (id) => (await api.delete(`/store/items/${id}`)).data;

@@ -663,7 +663,7 @@ async def finance_profit(
 
 # "session" = Treatment Fee (the multi-visit Session Package collected after Consultation
 # Fee); everything else collected at/around the consultation itself is "consultation".
-REVENUE_ACTIONS = ["consultation_paid", "package_sold", "package_payment_collected", "treatment_fee_collected", "diet_fee_collected", "rehab_fee_collected", "fee_collected"]
+REVENUE_ACTIONS = ["consultation_paid", "package_sold", "package_payment_collected", "treatment_fee_collected", "diet_fee_collected", "diet_chart_fee_collected", "rehab_fee_collected", "fee_collected"]
 
 # The Consultation Fee itself: the actions that mean "this patient paid to be seen today".
 # Deliberately narrower than _revenue_category(...) == "consultation", which is a reporting
@@ -684,7 +684,11 @@ def _revenue_category(action: str) -> str:
     """
     if action == "treatment_fee_collected":
         return "session"
-    if action == "diet_fee_collected":
+    # Both diet fees land on the one diet line. They are two products, but a branch
+    # asking "how much did diet bring in" means the vertical, not the shelf, and splitting
+    # them into two report lines would answer a question nobody asked while making the one
+    # they did ask take two numbers to read.
+    if action in ("diet_fee_collected", "diet_chart_fee_collected"):
         return "diet"
     if action == "rehab_fee_collected":
         return "rehab"

@@ -1135,6 +1135,10 @@ def _is_converted(lead: dict) -> bool:
         lead.get("treatment_fee_paid") is not None
         or bool(lead.get("session_package_id"))
         or lead.get("diet_fee_paid") is not None
+        # A chart bought and taken home is a service sold, the same as a plan booked. Left
+        # out, a patient whose only purchase was a Diet Chart would sit in the funnel as an
+        # unconverted lead forever, having paid.
+        or lead.get("diet_chart_fee_paid") is not None
     )
 
 

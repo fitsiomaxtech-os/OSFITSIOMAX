@@ -24,16 +24,24 @@ avoided, which matters because v3_reviews' own module docstring records that thi
 class of mistake in this exact collection has already taken the OS down once.
 """
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, File, Form, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime, timezone
+import os
 import uuid
 
 from database import v3_col
 from utils import now_iso, normalize_slot_time, slot_capacity_of, active_doctor_query, ACTIVE_DOCTOR
 from security import hash_password
 from deps import v3_require_roles, v3_require_diet, is_diet_role
+from routers.v3_lead_documents import (
+    ALLOWED_EXTENSIONS,
+    DIET_CHART,
+    DOC_DIR,
+    store_upload,
+)
 from schemas.v3 import V3UserOut
 
 router = APIRouter(prefix="/api/v3")
@@ -235,6 +243,32 @@ async def list_nutrition_coaches(user: V3UserOut = Depends(v3_require_roles("bra
 
 # ============ Branch Admin: putting a patient on a diet plan ============
 
+
+def _require_diet_fee(lead: dict) -> None:
+    """Refuse to put a patient with a Nutritionist until the Diet Consultation Fee is in.
+
+    The order the branch actually works in: the Consultant refers, the Branch Admin
+    collects, and only then is a Nutritionist assigned. It was enforced in the Consultations
+    panel alone, which offered the fee button first and the assign button after it — and a
+    comment there stated that the server refused an unpaid patient, which it did not. Any
+    other caller, and the panel itself the moment its own ordering was edited, could book a
+    coach's day against a patient who had paid nothing for it.
+
+    Read off diet_fee_paid rather than a stage, because the fee is the only record that
+    money changed hands; diet_stage is set by this flow and would be circular.
+
+    Note this is the Diet CONSULTATION fee and not the Diet Chart one. They buy different
+    things: a consultation buys the coach's time, which is what is being booked here, and a
+    chart buys a document. A patient who bought only a chart is never assigned a day, and
+    gating this on the chart fee would refuse the one thing it does pay for.
+    """
+    if lead.get("diet_fee_paid") is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Collect the Diet Consultation Fee before assigning a Nutritionist",
+        )
+
+
 class AssignDietInput(BaseModel):
     lead_id: str
     coach_id: str
@@ -255,6 +289,7 @@ async def assign_diet(
     lead = await v3_col("leads").find_one({"id": payload.lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
+    _require_diet_fee(lead)
 
     coach = await v3_col("doctors").find_one({"id": payload.coach_id, "profile_type": COACH}, {"_id": 0})
     if not coach:
@@ -361,6 +396,12 @@ async def book_diet_appointment(
     is set as a RESULT of booking, so the coach's queue agrees with the booking whether the
     Head Physio recommended diet on the day or the patient asked for it a week later.
 
+    One rule it does enforce, and the only one: the Diet Consultation Fee has to be in
+    first — see _require_diet_fee. That is not a rule about who referred the patient, which
+    is why it sits beside the two above rather than contradicting them. It is a rule about
+    what has been paid for, and booking a coach's hour against nothing is the mistake the
+    branch cannot undo by editing a flag afterwards.
+
     What it must never do is touch `stage`, `branch_stage` or `consultation_stage`. The
     generic book-appointment endpoint resets a lead to the first sales stage, which for a
     patient already at Fee Collected would throw away their whole consultation. That is
@@ -369,6 +410,7 @@ async def book_diet_appointment(
     lead = await v3_col("leads").find_one({"id": payload.lead_id}, {"_id": 0})
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
+    _require_diet_fee(lead)
 
     coach = await v3_col("doctors").find_one({"id": payload.coach_id, "profile_type": COACH}, {"_id": 0})
     if not coach:
@@ -492,6 +534,195 @@ async def save_diet_consultation_report(
     return {"report": text, "saved_at": now, "saved_by": user.full_name}
 
 
+# ============ The Diet Chart ============
+#
+# The second thing sold under the word "diet", and the only document in the OS a patient
+# has to buy before they can see it.
+#
+# It is a file rather than a typed plan: a chart is a laid-out week of meals, prepared in
+# whatever the coach already prepares it in, and asking them to retype it into a textarea
+# would produce a worse chart more slowly. The bytes go through the same `lead_documents`
+# storage every other client document uses — outside the static mount, reachable only
+# through an authenticated route — rather than a second store with its own path handling to
+# get wrong.
+#
+# Sending and showing are two different acts, deliberately. The coach may prepare and send
+# a chart before the fee is collected, and it lands here complete; what the fee buys is the
+# patient's sight of it. So nothing on this side asks about money, and the Client Portal
+# asks about nothing else.
+
+
+def _chart_out(lead: dict, doc: Optional[dict]) -> dict:
+    """One shape for "where is this patient's chart", used by every staff-side reader.
+
+    `visible_to_client` is computed here rather than stored, off the fee as it stands right
+    now, so the coach's board and the patient's portal can never disagree about whether the
+    chart has actually reached them.
+    """
+    paid = lead.get("diet_chart_fee_paid") is not None
+    return {
+        "sent": bool(doc),
+        "document_id": (doc or {}).get("id"),
+        "original_name": (doc or {}).get("original_name"),
+        "content_type": (doc or {}).get("content_type"),
+        "size_bytes": (doc or {}).get("size_bytes"),
+        "sent_at": lead.get("diet_chart_sent_at"),
+        "sent_by": lead.get("diet_chart_sent_by"),
+        "fee_paid": paid,
+        "fee_amount": lead.get("diet_chart_fee_paid"),
+        "visible_to_client": bool(doc) and paid,
+    }
+
+
+async def _current_chart(lead_id: str) -> Optional[dict]:
+    """The chart on file for this patient, or None.
+
+    Found by kind rather than by the lead's diet_chart_document_id, so a chart uploaded
+    before that pointer existed — or one whose pointer was lost — is still the chart. Newest
+    wins, which is the same "one current plan" rule the consultation report follows.
+    """
+    return await v3_col("lead_documents").find_one(
+        {"lead_id": lead_id, "kind": DIET_CHART}, {"_id": 0}, sort=[("created_at", -1)]
+    )
+
+
+@router.get("/diet/chart/{lead_id}")
+async def get_diet_chart(
+    lead_id: str,
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", COACH)),
+):
+    """Where this patient's chart stands — for the coach who writes it and the branch that
+    sells it. Both, because the branch is the one asked "has it gone yet" at the desk."""
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    return _chart_out(lead, await _current_chart(lead_id))
+
+
+@router.post("/diet/chart/{lead_id}")
+async def send_diet_chart(
+    lead_id: str,
+    file: UploadFile = File(...),
+    label: Optional[str] = Form(""),
+    user: V3UserOut = Depends(v3_require_diet),
+):
+    """The Nutrition Coach sends a Diet Chart to the Client Portal.
+
+    Written by the coach alone, the same as the consultation report: Branch Admin books and
+    collects, and what the chart says is a clinical judgement and nobody else's to author.
+
+    Never blocked on the fee. The coach prepares charts as their work reaches them, not as
+    payments land, and a chart that could not be uploaded until the desk had collected would
+    have the coach chasing the till to do their job. Sending is finished work; the fee
+    decides only whether the patient can see it, and the portal decides that when asked.
+
+    Replaces rather than appends. A chart is the current plan and not a log — the same rule
+    the consultation report follows — so a new one supersedes the old, and the old row and
+    its bytes go with it. Left behind, the documents screen would fill with every draft the
+    coach ever sent and the patient's portal would have to guess which one was current.
+
+    The old chart is deleted only after the new one is safely on disk. The other order
+    leaves a patient with no chart at all when an upload is rejected.
+    """
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Patient not found")
+
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="A Diet Chart must be a JPG, PNG, WEBP or PDF file")
+
+    previous = await _current_chart(lead_id)
+
+    doc_id = str(uuid.uuid4())
+    stored_name, size = await store_upload(file, doc_id, ext)
+    now = now_iso()
+    doc = {
+        "id": doc_id,
+        "lead_id": lead_id,
+        "stored_name": stored_name,
+        "original_name": os.path.basename(file.filename or "diet-chart")[:200],
+        "label": (label or "").strip()[:120] or "Diet Chart",
+        "kind": DIET_CHART,
+        # Written false and meant false. The generic sharing flag is not what shows a chart
+        # to a patient — is_shared_with_patient refuses this kind outright — but a row
+        # saying True beside a chart nobody has paid for is a lie waiting to be believed by
+        # the next person to read the collection.
+        "shared_with_patient": False,
+        "content_type": file.content_type or "application/octet-stream",
+        "size_bytes": size,
+        "uploaded_by": user.full_name,
+        "uploaded_by_role": user.role,
+        "created_at": now,
+    }
+    await v3_col("lead_documents").insert_one(doc.copy())
+
+    if previous:
+        await v3_col("lead_documents").delete_one({"id": previous["id"]})
+        old_path = os.path.join(DOC_DIR, previous.get("stored_name") or "")
+        # Guarded the same way the download routes are: a stored_name is data, and data that
+        # resolves outside the documents folder is not a file this may remove.
+        if previous.get("stored_name") and os.path.dirname(os.path.abspath(old_path)) == os.path.abspath(DOC_DIR):
+            try:
+                os.remove(old_path)
+            except OSError:
+                # The row is already gone and the new chart is already in. A file that could
+                # not be removed is litter on disk, not a reason to fail a send that
+                # succeeded.
+                pass
+
+    await v3_col("leads").update_one({"id": lead_id}, {"$set": {
+        "diet_chart_document_id": doc_id,
+        "diet_chart_sent_at": now,
+        "diet_chart_sent_by": user.full_name,
+        # The chart being sent is itself the record that this patient was owed one, exactly
+        # as the fee is. Set here so a patient the coach charted off their own judgement
+        # still reads as a Diet Chart patient on every screen that asks.
+        "diet_recommended": True,
+        "diet_chart": True,
+        "updated_at": now,
+    }})
+    await v3_col("lead_activity").insert_one({
+        "id": str(uuid.uuid4()),
+        "lead_id": lead_id,
+        "action": "diet_chart_sent",
+        # Says plainly whether the patient can actually see it, because "sent" on its own
+        # would read to the branch as "the patient has it" — and unpaid, they do not.
+        "details": (
+            f"Diet Chart sent ({doc['original_name']})"
+            + ("" if lead.get("diet_chart_fee_paid") is not None
+               else " — held from the Client Portal until the Diet Chart Fee is collected")
+        ),
+        "created_by": user.full_name,
+        "created_by_role": user.role,
+        "created_at": now,
+    })
+
+    updated = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    return _chart_out(updated, doc)
+
+
+@router.get("/diet/chart/{lead_id}/download")
+async def download_diet_chart(
+    lead_id: str,
+    user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin", COACH)),
+):
+    """The chart's bytes, for staff.
+
+    Not gated on the fee. The gate exists so a patient cannot read a plan they have not paid
+    for; the coach who wrote it and the branch selling it are exactly who should be able to
+    open it before then, and refusing them would make an unpaid chart unreviewable by
+    anyone, including its author.
+    """
+    doc = await _current_chart(lead_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="No Diet Chart on file")
+    path = os.path.join(DOC_DIR, doc["stored_name"])
+    if os.path.dirname(os.path.abspath(path)) != os.path.abspath(DOC_DIR) or not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="File is missing from storage")
+    return FileResponse(path, media_type=doc.get("content_type"), filename=doc.get("original_name"))
+
+
 @router.get("/branch/diet-patients")
 async def branch_diet_patients(user: V3UserOut = Depends(v3_require_roles("branch_admin", "super_admin"))):
     """Everyone at this branch already on a diet plan, for the Branch Admin's own view."""
@@ -576,6 +807,15 @@ async def diet_consultations(coach_id: Optional[str] = None, user: V3UserOut = D
     ).sort("slot_time", 1).to_list(2000)
     appt_by_lead = {a["lead_id"]: a for a in diet_appts}
 
+    # Every chart on this queue in one query rather than one per patient, the same way the
+    # days and the appointments above are read. Oldest first so the newest overwrites it,
+    # which leaves the current chart per lead — the rule _current_chart follows one at a
+    # time.
+    charts = await v3_col("lead_documents").find(
+        {"lead_id": {"$in": lead_ids}, "kind": DIET_CHART}, {"_id": 0, "stored_name": 0}
+    ).sort("created_at", 1).to_list(2000)
+    chart_by_lead = {c["lead_id"]: c for c in charts}
+
     out = []
     for l in leads:
         days = days_by_lead.get(l["id"], {"total": 0, "done": 0})
@@ -597,6 +837,16 @@ async def diet_consultations(coach_id: Optional[str] = None, user: V3UserOut = D
             "diet_coach_name": l.get("diet_coach_name"),
             # So the coach's queue shows who has been written up and who has not.
             "diet_consultation_report": l.get("diet_consultation_report"),
+            # Which of the two the Consultant actually referred them for, so the coach can
+            # tell a patient who is here for an hour from one who is owed a document. Both
+            # can be true; both false is the plain referral every older consultation carries.
+            "diet_consultation": bool(l.get("diet_consultation")),
+            "diet_chart": bool(l.get("diet_chart")),
+            # Where the chart stands, including whether the patient can actually see it.
+            # The coach needs the difference in front of them: a chart they sent last week
+            # that is still invisible for want of a fee looks, from their side, exactly like
+            # one that arrived — and they are the person the patient asks.
+            "chart": _chart_out(l, chart_by_lead.get(l["id"])),
             "assigned": bool(l.get("diet_coach_id")),
             "total_days": days["total"],
             "completed_days": days["done"],

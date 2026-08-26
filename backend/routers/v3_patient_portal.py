@@ -25,7 +25,7 @@ from database import v3_col
 from utils import now_iso
 from security import hash_password, verify_password
 from deps import v3_require_roles, is_branch_admin_role
-from routers.v3_lead_documents import DOC_DIR, is_shared_with_patient
+from routers.v3_lead_documents import DIET_CHART, DOC_DIR, is_shared_with_patient
 from routers.v3_feedback import (
     AUDIENCE_SUPER, AUTHOR_PATIENT, AUTHOR_STAFF, MAX_MESSAGE,
     STATUS_AWAITING, STATUS_IN_PROGRESS, STATUS_NEW, STATUS_RESOLVED,
@@ -221,6 +221,43 @@ async def patient_portal_logout(authorization: str = Header(...)):
     return {"message": "Logged out"}
 
 
+async def _diet_chart_for_patient(lead: dict) -> dict:
+    """What the Client Portal may say about this patient's Diet Chart.
+
+    The one rule, in one place: the chart is shown once the Diet Chart Fee is collected and
+    not before. The coach can prepare and send it whenever their work reaches them — it sits
+    here complete and invisible until the desk takes the money.
+
+    Read live off the lead every time it is asked, never off a flag written when the chart
+    was sent. A "shared" flag set at send time would be a copy of a payment state that can
+    still change, and the first refund or corrected collection would leave a patient reading
+    a chart they had not paid for with nothing in the system saying why.
+
+    Unpaid, the patient is told a chart is waiting rather than told nothing. Silence would
+    have them ringing the branch to ask whether the Nutritionist had forgotten them, when
+    the actual answer is a fee at the desk. Nothing identifying the chart goes out with that
+    — no document id, no filename — because the id is the key to the download route.
+    """
+    paid = lead.get("diet_chart_fee_paid") is not None
+    doc = await v3_col("lead_documents").find_one(
+        {"lead_id": lead["id"], "kind": DIET_CHART}, {"_id": 0}, sort=[("created_at", -1)]
+    )
+    if not doc:
+        return {"available": False, "awaiting_payment": False}
+    if not paid:
+        return {"available": False, "awaiting_payment": True}
+    return {
+        "available": True,
+        "awaiting_payment": False,
+        "document_id": doc.get("id"),
+        "original_name": doc.get("original_name"),
+        "content_type": doc.get("content_type"),
+        "size_bytes": doc.get("size_bytes"),
+        "sent_at": lead.get("diet_chart_sent_at") or doc.get("created_at"),
+        "sent_by": lead.get("diet_chart_sent_by") or doc.get("uploaded_by"),
+    }
+
+
 async def _build_portal_payload(lead: dict) -> dict:
     """Everything all four Client Portal tabs (Sessions / Treatment / Payment History /
     Profile) render from — shared by the patient's own `/patient-portal/me` and staff's
@@ -326,6 +363,14 @@ async def _build_portal_payload(lead: dict) -> dict:
             "consultation_report": lead.get("diet_consultation_report"),
             "consultation_report_at": lead.get("diet_consultation_report_at"),
             "consultation_report_by": lead.get("diet_consultation_report_by"),
+            # The Diet Chart, and only if it has been paid for. See
+            # _diet_chart_for_patient — the fee is read at the moment this is asked, so the
+            # portal can never show a chart the money has not been taken for.
+            #
+            # Separate from consultation_report above, which is not gated and should not be:
+            # that is the coach's write-up of an appointment the patient already paid to
+            # attend. The chart is a product they buy on its own.
+            "chart": await _diet_chart_for_patient(lead),
             "total_checkins": len(diet_days),
             "completed_checkins": len([d for d in diet_days if d.get("status") == "completed"]),
             "checkins": [
@@ -359,6 +404,14 @@ async def _build_portal_payload(lead: dict) -> dict:
             "diet_fee_total": lead.get("diet_package_price"),
             "diet_fee_paid": lead.get("diet_fee_paid"),
             "diet_payment_mode": lead.get("diet_fee_payment_mode"),
+            # The fourth fee, and its own line rather than a sum into the diet one above. A
+            # patient sold both a consultation and a chart would otherwise see a single
+            # figure they cannot reconcile against either receipt, on the one screen whose
+            # whole job is telling them what they have been charged for.
+            "diet_chart_package_name": lead.get("diet_chart_package_name"),
+            "diet_chart_fee_total": lead.get("diet_chart_package_price"),
+            "diet_chart_fee_paid": lead.get("diet_chart_fee_paid"),
+            "diet_chart_payment_mode": lead.get("diet_chart_fee_payment_mode"),
         },
     }
 
@@ -574,6 +627,39 @@ async def patient_portal_documents(lead_id: str = Depends(_current_patient_lead_
             for d in docs if is_shared_with_patient(d)
         ]
     }
+
+
+@router.get("/patient-portal/diet-chart")
+async def patient_portal_download_diet_chart(lead_id: str = Depends(_current_patient_lead_id)):
+    """The Diet Chart's bytes, for the patient who paid for it.
+
+    Its own route rather than a document id handed to the generic download above, and that
+    is the point: the generic route decides by is_shared_with_patient, which is a flag on a
+    row and cannot see what has been paid. This one re-reads the fee off the lead and
+    refuses without it, so the gate holds on the bytes and not only on the screen that links
+    to them.
+
+    Takes no parameters at all. `lead_id` comes from the session token, and which chart is
+    "the" chart is decided here rather than by the caller — there is nothing to pass, and so
+    nothing to pass that belongs to somebody else.
+
+    The same 404 whether the fee is unpaid or no chart exists. Which of the two it is tells
+    a patient something about their own file that the portal has already said properly in
+    the diet block; repeating it here as the difference between two error codes is just a
+    way to probe.
+    """
+    lead = await v3_col("leads").find_one({"id": lead_id}, {"_id": 0})
+    if not lead or lead.get("diet_chart_fee_paid") is None:
+        raise HTTPException(status_code=404, detail="No Diet Chart is available yet")
+    doc = await v3_col("lead_documents").find_one(
+        {"lead_id": lead_id, "kind": DIET_CHART}, {"_id": 0}, sort=[("created_at", -1)]
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="No Diet Chart is available yet")
+    path = os.path.join(DOC_DIR, doc["stored_name"])
+    if os.path.dirname(os.path.abspath(path)) != os.path.abspath(DOC_DIR) or not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="File is missing from storage")
+    return FileResponse(path, media_type=doc.get("content_type"), filename=doc.get("original_name"))
 
 
 @router.get("/patient-portal/documents/{doc_id}/download")
