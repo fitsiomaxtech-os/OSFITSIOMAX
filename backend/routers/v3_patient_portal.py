@@ -22,6 +22,7 @@ from google.oauth2 import id_token as google_id_token
 from fastapi.responses import FileResponse
 
 from database import v3_col
+from routers.v3_reviews import review_numbers_for_lead
 from utils import now_iso
 from security import hash_password, verify_password
 from deps import v3_require_roles, is_branch_admin_role
@@ -270,6 +271,7 @@ async def _build_portal_payload(lead: dict) -> dict:
     sessions = await v3_col("sessions").find({"lead_id": lead_id}, {"_id": 0}).sort("slot_time", 1).to_list(500)
     assessments = await v3_col("weekly_assessments").find({"lead_id": lead_id}, {"_id": 0}).sort("week_number", 1).to_list(100)
     reviews = await v3_col("reviews").find({"lead_id": lead_id}, {"_id": 0}).sort("raised_at", 1).to_list(50)
+    review_numbers = review_numbers_for_lead(reviews)
     diet_days = await v3_col("diet_sessions").find({"lead_id": lead_id}, {"_id": 0}).sort("slot_time", 1).to_list(200)
     total = len(sessions)
     completed = len([s for s in sessions if s.get("status") == "completed"])
@@ -340,9 +342,13 @@ async def _build_portal_payload(lead: dict) -> dict:
         "session_package_name": lead.get("session_package_name"),
         "session_package_sessions": lead.get("session_package_sessions"),
 
+        # Numbered by the same rule the Physio board uses, so a patient reading their own
+        # reviews and the physio reading theirs are looking at the same week numbers. The
+        # arithmetic that was here divided the closing review down onto the week before it,
+        # and, having no floor of 1, numbered a course shorter than a week "review 0".
         "reviews": [
             {
-                "review_number": (r.get("treatment_days") or 0) // 7,
+                "review_number": review_numbers.get(r.get("id"), 1),
                 "status": r.get("status"),
                 "review_date": r.get("review_date"),
                 "head_physio_suggestions": r.get("head_physio_suggestions"),

@@ -14,7 +14,7 @@ from schemas.v3 import (
 # The interval that actually governs when a review can be raised. Imported rather than
 # redeclared so the Treatment Days popup marks its milestones where the reviews router
 # agrees they are.
-from routers.v3_reviews import REVIEW_AFTER_DAYS
+from routers.v3_reviews import REVIEW_AFTER_DAYS, review_numbers_for_lead
 # Which leads belong to a physio. In its own module because both this board and the
 # reviews router need it, and this one already imports from that one — a helper living
 # in either would close the loop.
@@ -411,6 +411,10 @@ async def physio_lead_sessions(lead_id: str, _: V3UserOut = Depends(v3_require_r
     # so it had to call every milestone "due" — including the ones a Head Physio had already
     # written up, and including the one currently sitting on the Branch Admin's desk.
     review_rows = await v3_col("reviews").find({"lead_id": lead_id}, {"_id": 0}).to_list(100)
+    # Numbered across the lead's whole set rather than one row at a time, so the closing
+    # review that covers the days a whole-week rule left over does not land on the same
+    # milestone as the week before it — see review_numbers_for_lead.
+    numbers = review_numbers_for_lead(review_rows)
     reviews = [
         {
             "id": r.get("id"),
@@ -419,7 +423,7 @@ async def physio_lead_sessions(lead_id: str, _: V3UserOut = Depends(v3_require_r
             # Which milestone this covers, taken from the day count stored when it was
             # raised rather than from its position among the reviews: raising is allowed
             # any time after a milestone, so a review raised on day 9 still covers day 7.
-            "review_number": max(1, (r.get("treatment_days") or 0) // REVIEW_AFTER_DAYS),
+            "review_number": numbers.get(r.get("id"), 1),
             "reason": r.get("reason") or "",
             "physio_notes": r.get("physio_notes") or "",
             "head_physio_name": r.get("head_physio_name") or "",

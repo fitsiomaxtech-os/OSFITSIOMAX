@@ -147,6 +147,44 @@ def _shape(rev: dict) -> dict:
     return {k: v for k, v in rev.items() if k != "_id"}
 
 
+def review_numbers_for_lead(reviews: List[dict]) -> dict:
+    """Which milestone each of a lead's reviews covers, keyed by review id.
+
+    Taken from the day count stored when each was raised rather than from its position
+    among the reviews, because raising is allowed any time after a milestone: a review
+    raised on day 9 still covers day 7, and counting positions would name it the wrong week.
+
+    That division alone cannot separate the closing review from the week before it. A
+    ten-day course reaches one milestone at day 7 and then ends, so the review covering
+    days 8-10 is raised carrying treatment_days 10 -- which divides down to the same 1 as
+    the week before it. Both then claimed milestone 1, the day list found nothing for
+    milestone 2, and a closing review a CONSULTANT had already written up went on reading
+    "Review due" with nothing anyone could do to clear it.
+
+    A remainder cannot be the test either, because the day-9 review has one too and is not
+    a closing review. So a number an earlier review already holds moves to the next free
+    one -- which is exactly where _review_eligibility puts the closing review when it
+    raises it: one past the last whole week.
+
+    Ordered by the day count first, so each week claims its own number before a later
+    review goes looking for a free one, then by raised_at and id so the answer is stable
+    for two raised at the same count.
+    """
+    out: dict = {}
+    used: set = set()
+    ordered = sorted(
+        reviews,
+        key=lambda r: ((r.get("treatment_days") or 0), r.get("raised_at") or "", r.get("id") or ""),
+    )
+    for r in ordered:
+        number = max(1, (r.get("treatment_days") or 0) // REVIEW_AFTER_DAYS)
+        while number in used:
+            number += 1
+        used.add(number)
+        out[r.get("id")] = number
+    return out
+
+
 def _review_eligibility(existing_for_lead: List[dict], treatment_days: int, course_finished: bool = False) -> dict:
     """A new review becomes raisable every REVIEW_AFTER_DAYS treatment days — 7, 14, 21,
     28... not just "7 or more" — so a 28-session package gets exactly 4 review points,
