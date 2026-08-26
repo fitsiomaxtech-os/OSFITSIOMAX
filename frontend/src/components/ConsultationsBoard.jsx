@@ -3010,12 +3010,17 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
               and nothing beside it to tap to dismiss. Capped height, and tapping the
               backdrop closes — the same behaviour as every other popup on this board. */}
           <div className="max-h-[85dvh] w-full space-y-3 overflow-y-auto rounded-xl bg-white p-4 shadow-2xl sm:max-h-[calc(100vh-1rem)] sm:w-[96vw] sm:max-w-5xl sm:p-5">
-            {/* Who this is on the left, where they stand on the right. The expert and the
-                fee badge used to hang below the phone number, which ran the header four
-                lines down the left edge with the whole right half empty — and stacked
-                under the contact line, they read as two more of the patient's details
-                rather than as the state of their consultation. */}
-            <div className="flex items-start justify-between gap-3">
+            {/* Who this is, then where they stand, side by side. The expert and the fee
+                badge used to hang below the phone number, where stacked under the contact
+                line they read as two more of the patient's details rather than as the
+                state of their consultation.
+
+                They sit against the identity block rather than out at the right margin: a
+                header is read left to right, and pinning them to the far edge left a hand
+                of white space in the middle and made two related blocks look like two
+                unrelated ones. The rule between them is what marks them as a separate
+                thing — which is the job the distance was failing to do. */}
+            <div className="flex items-start gap-3">
               <div className="min-w-0">
                 <h3 className="flex min-w-0 items-center gap-2 text-base font-semibold text-slate-900" data-testid="cons-detail-title">
                   <span className="truncate">{selectedLead.name || "Lead"}</span>
@@ -3030,11 +3035,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                   )}
                 </p>
               </div>
-              {/* Right-aligned so the two read as one column against the ragged right edge
-                  of the contact line, and pt-0.5 sits the expert on the name's own line
-                  rather than half a line above it. */}
-              <div className="flex shrink-0 items-start gap-2 pt-0.5">
-                <div className="flex flex-col items-end gap-1">
+              {/* self-stretch runs the rule the full height of the identity block beside
+                  it, so it reads as a division of the header rather than a tick mark
+                  floating next to one line of it. */}
+              {(selectedLead.assigned_physio_name || isConsultant) && (
+                <div className="flex shrink-0 flex-col items-start gap-1 self-stretch border-l border-slate-200 pl-3" data-testid="cons-detail-standing">
                   {selectedLead.assigned_physio_name && (
                     <p className="text-xs font-medium text-emerald-600" data-testid="cons-detail-expert">Expert: {selectedLead.assigned_physio_name}</p>
                   )}
@@ -3049,8 +3054,11 @@ export const ConsultationsBoard = ({ branchId, viewerRole, externalStageFilter, 
                     </span>
                   )}
                 </div>
-                <button onClick={() => setSelectedLead(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-detail-close"><XCircle className="h-4 w-4" /></button>
-              </div>
+              )}
+              {/* Still the corner it has always been in, so ml-auto rather than a place in
+                  the row — with nothing between it and the rule, the two blocks stay
+                  together whatever width the header has. */}
+              <button onClick={() => setSelectedLead(null)} className="ml-auto shrink-0 rounded p-1 text-slate-400 hover:bg-slate-100" data-testid="cons-detail-close"><XCircle className="h-4 w-4" /></button>
             </div>
 
             {/* Sub tabs */}
