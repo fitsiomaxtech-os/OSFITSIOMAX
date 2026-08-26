@@ -52,6 +52,10 @@ const STAGE_TONES = {
   violet: "border-violet-200 bg-violet-50 text-violet-700",
   emerald: "border-emerald-200 bg-emerald-50 text-emerald-700",
   amber: "border-amber-200 bg-amber-50 text-amber-700",
+  // For a patient whose entries don't agree on a stage. Deliberately colourless: the
+  // pill is naming a count rather than a kind of work, and giving it one of the colours
+  // above would claim the whole group is that when only some of it is.
+  slate: "border-slate-200 bg-slate-100 text-slate-600",
 };
 
 // One track per tile. Written out rather than built from the count, because Tailwind reads
@@ -158,7 +162,57 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
     [allRows, allKind],
   );
 
+  /* One row per patient, not one per piece of work.
+   *
+   * A patient legitimately turns up more than once on a day — a consultation and the
+   * review that follows it, or two reviews dispatched against one visit — and this list
+   * printed each as its own row. The trouble is that the columns which would tell those
+   * rows apart are exactly the ones that repeat: same name, same patient number, same
+   * phone, same expert, same date. Four rows for two people reads as four people, and
+   * nothing on screen says otherwise until you stop and compare them character by
+   * character. So the patient appears once and the work they have that day is counted on
+   * the row, where a repeat is a number instead of something you have to notice.
+   *
+   * Identity is the patient number wherever there is one: it is the only field here that
+   * is issued rather than typed, so it is the only one that can carry this safely. Phone
+   * is the fallback, and the name is the last resort — two people sharing a name is a
+   * real thing, so a name only ever groups rows that have neither of the other two and
+   * there is nothing better to go on.
+   */
+  const groupedAllRows = useMemo(() => {
+    const groups = [];
+    const byKey = new Map();
+    for (const r of visibleAllRows) {
+      // Falling back to the row's own key leaves an unidentifiable row standing alone,
+      // which is the right answer: with no number, no phone and no name there is nothing
+      // to say it is the same person as the next one like it.
+      const key = String(r.patientNo || r.phone || r.name || "").trim().toLowerCase() || r.key;
+      let g = byKey.get(key);
+      if (!g) {
+        g = { key: `g-${key}`, name: r.name, patientNo: r.patientNo, phone: r.phone, entries: [] };
+        byKey.set(key, g);
+        groups.push(g);
+      }
+      // A later entry fills in a field the first happened to be missing rather than
+      // overwriting one it already had — grouped on the phone, one row may carry the
+      // patient number and another not, and the row should show it either way.
+      g.patientNo = g.patientNo || r.patientNo;
+      g.phone = g.phone || r.phone;
+      g.entries.push(r);
+    }
+    return groups;
+  }, [visibleAllRows]);
+
   const [loading, setLoading] = useState(false);
+  // The patient whose entries are being listed, held by key rather than by object so a
+  // refresh behind the popup refreshes what it shows. If that patient drops off the day
+  // entirely the lookup comes back empty and the popup closes itself, instead of standing
+  // there describing work that is no longer there.
+  const [entriesForKey, setEntriesForKey] = useState(null);
+  const entriesFor = useMemo(
+    () => (entriesForKey ? groupedAllRows.find((g) => g.key === entriesForKey) || null : null),
+    [entriesForKey, groupedAllRows],
+  );
   // Set by View on the All list, consumed by whichever board owns that row's popup.
   const [autoOpenLead, setAutoOpenLead] = useState(null);
   const [autoOpenReview, setAutoOpenReview] = useState(null);
@@ -174,6 +228,46 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
   const openRow = (r) => {
     if (r.kind === "consult") { setWorkTab("consultations"); setAutoOpenLead(r.leadId); return; }
     setWorkTab("review"); setAutoOpenReview(r.reviewId);
+  };
+
+  /**
+   * View on a grouped row.
+   *
+   * A patient with one thing on the day opens that thing, exactly as before. Putting a
+   * chooser in front of a single entry would be a dialog whose only content is one row
+   * and whose only purpose is to be dismissed — the popup earns its place only where
+   * there is genuinely a choice to make.
+   */
+  const openGroup = (g) => {
+    if (g.entries.length === 1) { openRow(g.entries[0]); return; }
+    setEntriesForKey(g.key);
+  };
+
+  // Closed before routing: openRow switches tab, and leaving this open would strand a
+  // list of one patient's day over a board now showing something else.
+  const chooseEntry = (r) => { setEntriesForKey(null); openRow(r); };
+
+  /* What a column says for a whole group: the shared value where every entry agrees, and
+   * the first with a "+n" where they don't. A group of one collapses to its own value, so
+   * the ordinary row is worded exactly as it always was.
+   *
+   * The "+n" matters more than it looks. Two reviews by two different experts must not
+   * quietly render as one expert's name — that would be the row asserting something
+   * false, which is worse than the repetition this replaced. */
+  const collapse = (entries, pick) => {
+    const seen = [...new Set(entries.map(pick).filter(Boolean))];
+    if (seen.length === 0) return "";
+    if (seen.length === 1) return seen[0];
+    return `${seen[0]} +${seen.length - 1}`;
+  };
+
+  // The Stage pill for a group. One shared stage keeps its own colour and wording; a
+  // mixture is named by its count in the neutral tone, because no single stage is true of
+  // the group and picking one to show would misreport the rest.
+  const groupStage = (g) => {
+    const stages = [...new Set(g.entries.map((e) => e.stage))];
+    if (stages.length === 1) return { label: stages[0], tone: g.entries[0].tone };
+    return { label: `${g.entries.length} entries`, tone: "slate" };
   };
   // One Refresh for the two boards behind this one. Each owns its own fetch, so both are
   // told by token rather than called from here.
@@ -337,36 +431,44 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
               {/* Six columns can't reflow onto a phone, so the same rows render as cards
                   there rather than scrolling sideways past the ones that matter. */}
               <div className="space-y-2 sm:hidden">
-                {visibleAllRows.length === 0 ? (
+                {groupedAllRows.length === 0 ? (
                   <p className="rounded-lg border border-dashed border-slate-200 px-3 py-10 text-center text-sm text-slate-400">Nothing on this day.</p>
-                ) : visibleAllRows.map((r, i) => (
+                ) : groupedAllRows.map((g, i) => {
+                  const st = groupStage(g);
+                  const who = collapse(g.entries, (e) => e.who);
+                  const when = collapse(g.entries, (e) => e.when);
+                  return (
                   // The whole card opens it on a phone — a View link in a corner is a
                   // small target next to a row that is already the thing being tapped.
                   <button
-                    key={r.key}
+                    key={g.key}
                     type="button"
-                    onClick={() => openRow(r)}
+                    onClick={() => openGroup(g)}
                     className="w-full rounded-xl border border-slate-200 bg-white p-3 text-left transition hover:border-sky-200"
-                    data-testid={`hp-all-card-${r.key}`}
+                    data-testid={`hp-all-card-${g.key}`}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <p className="truncate text-sm font-bold text-slate-800">
-                          <span className="mr-1.5 font-semibold text-slate-300">{i + 1}.</span>{r.name}
+                          <span className="mr-1.5 font-semibold text-slate-300">{i + 1}.</span>{g.name}
+                          {g.entries.length > 1 && (
+                            <span className="ml-1.5 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500">×{g.entries.length}</span>
+                          )}
                         </p>
-                        <p className="truncate text-xs text-slate-500">{r.phone || "—"}</p>
+                        <p className="truncate text-xs text-slate-500">{g.phone || "—"}</p>
                       </div>
-                      <span className={`shrink-0 whitespace-nowrap rounded-[5px] border px-2 py-0.5 text-[10px] font-bold ${STAGE_TONES[r.tone]}`}>
-                        {r.stage}
+                      <span className={`shrink-0 whitespace-nowrap rounded-[5px] border px-2 py-0.5 text-[10px] font-bold ${STAGE_TONES[st.tone]}`}>
+                        {st.label}
                       </span>
                     </div>
                     <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
-                      {r.patientNo && <span className="font-mono">{r.patientNo}</span>}
-                      {r.who && <span>· {r.who}</span>}
-                      {r.when && <span>· {r.when}</span>}
+                      {g.patientNo && <span className="font-mono">{g.patientNo}</span>}
+                      {who && <span>· {who}</span>}
+                      {when && <span>· {when}</span>}
                     </div>
                   </button>
-                ))}
+                  );
+                })}
               </div>
 
               <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white sm:block">
@@ -388,35 +490,47 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {visibleAllRows.length === 0 ? (
+                    {groupedAllRows.length === 0 ? (
                       <tr><td colSpan={8} className="px-4 py-10 text-center text-sm text-slate-400">Nothing on this day.</td></tr>
-                    ) : visibleAllRows.map((r, i) => (
-                      <tr key={r.key} className="hover:bg-slate-50" data-testid={`hp-all-row-${r.key}`}>
+                    ) : groupedAllRows.map((g, i) => {
+                      const st = groupStage(g);
+                      const many = g.entries.length > 1;
+                      return (
+                      <tr key={g.key} className="hover:bg-slate-50" data-testid={`hp-all-row-${g.key}`}>
                         {/* Numbers what is on screen — the merged list reorders as the
                             three queues change, so this is a position, never an id. */}
                         <td className="px-4 py-3 text-left text-slate-400">{i + 1}</td>
-                        <td className="px-4 py-3 text-left font-medium text-slate-800">{r.name}</td>
-                        <td className="px-4 py-3 text-center font-mono text-[11px] text-slate-400">{r.patientNo || "—"}</td>
-                        <td className="px-4 py-3 text-center text-slate-600">{r.phone || "—"}</td>
+                        <td className="px-4 py-3 text-left font-medium text-slate-800">
+                          {g.name}
+                          {/* The count sits on the name because that is the thing that
+                              used to be printed twice — it reads as "this patient, twice"
+                              rather than as a second patient. */}
+                          {many && (
+                            <span className="ml-1.5 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500" data-testid={`hp-all-count-${g.key}`}>×{g.entries.length}</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-center font-mono text-[11px] text-slate-400">{g.patientNo || "—"}</td>
+                        <td className="px-4 py-3 text-center text-slate-600">{g.phone || "—"}</td>
                         <td className="px-4 py-3 text-center">
-                          <span className={`inline-flex whitespace-nowrap rounded-[5px] border px-2 py-0.5 text-[10px] font-bold ${STAGE_TONES[r.tone]}`}>
-                            {r.stage}
+                          <span className={`inline-flex whitespace-nowrap rounded-[5px] border px-2 py-0.5 text-[10px] font-bold ${STAGE_TONES[st.tone]}`}>
+                            {st.label}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-center text-slate-600">{r.who || "—"}</td>
-                        <td className="px-4 py-3 text-center text-slate-500">{r.when || "—"}</td>
+                        <td className="px-4 py-3 text-center text-slate-600">{collapse(g.entries, (e) => e.who) || "—"}</td>
+                        <td className="px-4 py-3 text-center text-slate-500">{collapse(g.entries, (e) => e.when) || "—"}</td>
                         <td className="px-4 py-3 text-center">
                           <button
                             type="button"
-                            onClick={() => openRow(r)}
+                            onClick={() => openGroup(g)}
                             className="inline-flex items-center gap-0.5 whitespace-nowrap text-[11px] font-semibold text-sky-600 hover:text-sky-800"
-                            data-testid={`hp-all-view-${r.key}`}
+                            data-testid={`hp-all-view-${g.key}`}
                           >
-                            View <ChevronRight className="h-3.5 w-3.5" />
+                            {many ? `View ${g.entries.length}` : "View"} <ChevronRight className="h-3.5 w-3.5" />
                           </button>
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -425,6 +539,67 @@ export const HeadPhysioBoard = ({ branchId, branchIds, user, search = "", onSear
           )}
 
       </div>
+
+      {/* One patient's work for the day, opened from a row that stands for more than one
+          piece of it. This is a way through to the existing popups rather than a third
+          detail view: each line says what the work is and hands off to the board that
+          owns it, which is the same route View took before the rows were grouped. */}
+      {entriesFor && (
+        <div
+          className="fixed inset-0 z-[65] flex items-center justify-center bg-black/50 p-3"
+          onClick={(e) => { if (e.target === e.currentTarget) setEntriesForKey(null); }}
+          data-testid="hp-all-entries-modal"
+        >
+          <div className="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-3 bg-slate-900 px-5 py-4 text-white">
+              <div className="min-w-0">
+                <p className="truncate text-lg font-bold">{entriesFor.name}</p>
+                {/* The identifying fields sit here, once, instead of down every row of
+                    the list this replaced. */}
+                <p className="mt-0.5 truncate text-[11px] text-slate-300">
+                  {[entriesFor.patientNo, entriesFor.phone].filter(Boolean).join(" · ") || "No patient number on file"}
+                </p>
+              </div>
+              <button
+                onClick={() => setEntriesForKey(null)}
+                className="shrink-0 rounded-lg border-2 border-orange-200 bg-orange-100 p-2 text-orange-600 hover:bg-orange-200"
+                data-testid="hp-all-entries-close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <p className="border-b border-slate-100 bg-slate-50 px-5 py-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+              {entriesFor.entries.length} on this day
+            </p>
+            <div className="flex-1 space-y-2 overflow-y-auto p-4">
+              {entriesFor.entries.map((r, i) => (
+                <button
+                  key={r.key}
+                  type="button"
+                  onClick={() => chooseEntry(r)}
+                  className="flex w-full items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3 text-left transition hover:border-sky-300 hover:bg-sky-50/40"
+                  data-testid={`hp-all-entry-${r.key}`}
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-semibold text-slate-300">{i + 1}.</span>
+                      <span className={`inline-flex whitespace-nowrap rounded-[5px] border px-2 py-0.5 text-[10px] font-bold ${STAGE_TONES[r.tone]}`}>
+                        {r.stage}
+                      </span>
+                    </div>
+                    {/* Expert and time are what actually tell two entries apart once the
+                        patient is settled, so they are the line under the stage. */}
+                    <p className="mt-1.5 truncate text-[11px] text-slate-500">
+                      {[r.who, r.when].filter(Boolean).join(" · ") || "No expert or time recorded"}
+                    </p>
+                  </div>
+                  <ChevronRight className="h-4 w-4 shrink-0 text-slate-300" />
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Sits above the bottom bar on phones so it never covers the nav. */}
       {loading && <div className="fixed bottom-20 right-4 z-40 rounded-md bg-slate-900 px-3 py-2 text-sm text-white sm:bottom-4">Loading...</div>}
