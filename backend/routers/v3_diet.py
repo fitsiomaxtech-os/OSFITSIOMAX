@@ -135,6 +135,52 @@ async def _coach_branch_ids(coach: dict) -> list:
     return [coach["branch_id"]] if coach.get("branch_id") else []
 
 
+async def _coach_record_ids(coach: dict) -> list:
+    """Every `doctors` row this one person holds, not just the one they resolved through.
+
+    A Nutritionist is several records. They hold one per branch since they became
+    multi-branch, and a row created before the user link existed carries no user_id at all,
+    so the HR branch sync cannot see it and adds another beside it — list_nutrition_coaches
+    above exists entirely to fold those back into one name in the picker.
+
+    Which record a patient is filed under is therefore decided by whoever assigned them:
+    the picker hands the Branch Admin the row with the most published slots, and
+    `diet_coach_id` is set to that. The coach's own board resolves a row separately, by
+    find_one on user_id, which is whichever active row comes back first — and can never be
+    a legacy row with no user_id at all.
+
+    When those two disagree the patient vanishes. `diet_coach_id` is set, so they are not
+    unassigned and the "nobody has taken this" arm does not catch them either; they are
+    simply filed under a record their own coach's queue is not asking about. Assigning a
+    patient made them disappear, which is the opposite of what assigning is for.
+
+    So every read of "this coach's patients" asks about all of their records. Matched on
+    the login and the employee link, and by name ONLY for rows carrying no login — that is
+    exactly the legacy row this exists to catch, and it stops short of merging two
+    genuinely different coaches who happen to share a name, which matching on name alone
+    would do.
+    """
+    ors = []
+    if coach.get("user_id"):
+        ors.append({"user_id": coach["user_id"]})
+    if coach.get("employee_id"):
+        ors.append({"employee_id": coach["employee_id"]})
+    name = (coach.get("full_name") or "").strip()
+    if name:
+        # A null match in Mongo also catches the field being absent, which is how the
+        # oldest of these rows are written.
+        ors.append({"full_name": name, "user_id": {"$in": [None, ""]}})
+    if not ors:
+        return [coach["id"]]
+    rows = await v3_col("doctors").find(
+        {"profile_type": COACH, "$or": ors}, {"_id": 0, "id": 1}
+    ).to_list(200)
+    # The resolved row is always in the answer, even if the query above somehow misses it:
+    # a read that returned nothing for the coach standing in front of it would be a worse
+    # failure than the one this fixes.
+    return sorted({coach["id"], *(r["id"] for r in rows)})
+
+
 # ============ Branch Admin: staffing ============
 
 class CreateCoachInput(BaseModel):
@@ -774,10 +820,15 @@ async def diet_consultations(coach_id: Optional[str] = None, user: V3UserOut = D
 
     query = {
         "diet_recommended": True,
+        # Every record this coach holds, not the one they resolved through — see
+        # _coach_record_ids. A patient filed under a sibling record is still this coach's
+        # patient, and matching the single resolved id is what made assigning one to
+        # themselves remove them from their own queue.
+        #
         # Unassigned is written three ways across records of different ages — absent, null,
         # or empty — so all three count as "nobody has taken this one".
         "$or": [
-            {"diet_coach_id": coach["id"]},
+            {"diet_coach_id": {"$in": await _coach_record_ids(coach)}},
             {"diet_coach_id": {"$in": [None, ""]}},
             {"diet_coach_id": {"$exists": False}},
         ],
@@ -860,8 +911,10 @@ async def diet_today(coach_id: Optional[str] = None, user: V3UserOut = Depends(v
     if not coach:
         return {"days": [], "coach_id": None, "coach_name": ""}
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    # Across every record they hold, or a coach's own day is missing the check-ins booked
+    # against a sibling record — see _coach_record_ids.
     days = await v3_col("diet_sessions").find(
-        {"coach_id": coach["id"], "slot_time": {"$regex": f"^{today}"}}, {"_id": 0}
+        {"coach_id": {"$in": await _coach_record_ids(coach)}, "slot_time": {"$regex": f"^{today}"}}, {"_id": 0}
     ).sort("slot_time", 1).to_list(200)
     return {"days": days, "coach_id": coach["id"], "coach_name": coach["full_name"]}
 
@@ -879,7 +932,7 @@ async def diet_calendar(
     now = datetime.now(timezone.utc)
     prefix = f"{year or now.year}-{str(month or now.month).zfill(2)}"
     days = await v3_col("diet_sessions").find(
-        {"coach_id": coach["id"], "slot_time": {"$regex": f"^{prefix}"}}, {"_id": 0}
+        {"coach_id": {"$in": await _coach_record_ids(coach)}, "slot_time": {"$regex": f"^{prefix}"}}, {"_id": 0}
     ).sort("slot_time", 1).to_list(500)
     return {
         "days": days,
@@ -898,12 +951,15 @@ async def diet_patients(coach_id: Optional[str] = None, user: V3UserOut = Depend
     coach = await _resolve_coach(user, coach_id)
     if not coach:
         return {"patients": []}
+    # Every record they hold, for the reason in _coach_record_ids: a patient assigned
+    # through a sibling record is this coach's patient and was missing from this list.
+    record_ids = await _coach_record_ids(coach)
     leads = await v3_col("leads").find(
-        {"diet_coach_id": coach["id"]}, {"_id": 0}
+        {"diet_coach_id": {"$in": record_ids}}, {"_id": 0}
     ).sort("updated_at", -1).to_list(500)
     lead_ids = [l["id"] for l in leads]
     rows = await v3_col("diet_sessions").find(
-        {"coach_id": coach["id"], "lead_id": {"$in": lead_ids}}, {"_id": 0}
+        {"coach_id": {"$in": record_ids}, "lead_id": {"$in": lead_ids}}, {"_id": 0}
     ).sort("slot_time", 1).to_list(5000)
     by_lead: dict = {}
     for r in rows:
