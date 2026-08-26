@@ -749,6 +749,53 @@ async def _sync_expert_branches(user: dict, branch_ids: List[str]) -> None:
         )
 
 
+async def _consultant_login_without_a_link(emp_id: str) -> list:
+    """The Consultant login belonging to an employee whose account carries no link to them.
+
+    Create User's link to an employee is optional, and the two screens are filled in months
+    apart, so a Consultant hired in HR and given a login later has an account with no
+    employee_id on it. Every cascade in update_employee keys off that link. With it missing,
+    posting such a person to a branch wrote their employee row and did nothing whatever to
+    the account — HR printing "Parrys Branch" on the row while that branch's Consultant
+    Calendar stayed empty, and neither screen saying why. The write reported success,
+    because as far as it was concerned there was nothing to cascade to.
+
+    Consultants only, exactly as backfill_consultant_branches_from_employees in seed.py is,
+    and for the same reason: their branches live nowhere but this cascade. Every other desk
+    carries a branch on its login from the moment Create User writes one, so no other desk
+    is sitting waiting to be told.
+
+    A name is accepted only when it resolves to exactly ONE active consultant login that is
+    not already linked to somebody. A name shared by two accounts says nothing about which
+    of them is this person; a namesake on another desk is not this person at all; and an
+    account already linked to a different employee belongs to that employee, not this one.
+    All three are dropped rather than guessed at, because the cost of guessing here is
+    moving someone else's account to a branch they do not work.
+    """
+    emp = await v3_col("employees").find_one(
+        {"id": emp_id}, {"_id": 0, "full_name": 1, "designation": 1},
+    )
+    if not emp:
+        return []
+    key = str(emp.get("full_name") or "").strip().lower()
+    # The designation is what says this employee is on this desk at all. Read through
+    # _slugify_role so "CONSULTANT" and consultant are the one answer they are everywhere
+    # else, and checked against the same family the logins are selected on below.
+    if not key or _slugify_role(str(emp.get("designation") or "")) not in HEAD_PHYSIO_ROLES:
+        return []
+
+    found = []
+    async for u in v3_col("users").find(
+        {"role": {"$in": sorted(HEAD_PHYSIO_ROLES)}, "is_active": True},
+        {"_id": 0, "id": 1, "role": 1, "full_name": 1, "employee_id": 1},
+    ):
+        if u.get("employee_id"):
+            continue
+        if str(u.get("full_name") or "").strip().lower() == key:
+            found.append(u)
+    return found if len(found) == 1 else []
+
+
 @router.patch("/employees/{emp_id}")
 async def update_employee(emp_id: str, payload: EmployeeUpdate, _: V3UserOut = Depends(v3_require_roles("super_admin"))):
     updates = {k: v for k, v in payload.model_dump().items() if v is not None}
@@ -803,6 +850,26 @@ async def update_employee(emp_id: str, payload: EmployeeUpdate, _: V3UserOut = D
         else []
     )
     linked_user_ids = [u["id"] for u in linked_users]
+
+    # Where the link found nothing, the name is tried — for a branch change, and only for a
+    # Consultant. See _consultant_login_without_a_link for why that is the one desk this
+    # matters to and why the match has to be unambiguous.
+    #
+    # Deliberately NOT extended to the rename above. Matching an account by its name in
+    # order to change that name is circular: the second rename would have nothing left to
+    # match on, so the repair would work once and then silently stop.
+    if not linked_user_ids and "branch_id" in updates:
+        by_name = await _consultant_login_without_a_link(emp_id)
+        if by_name:
+            linked_users = by_name
+            linked_user_ids = [u["id"] for u in by_name]
+            # The link is written back FIRST, and not only to save the next save the same
+            # search. Every cascade below filters on {"employee_id": emp_id} — without the
+            # link on the account those filters match nothing, so this write is what makes
+            # the rest of this function reach the login the name just found.
+            await v3_col("users").update_many(
+                {"id": {"$in": linked_user_ids}}, {"$set": {"employee_id": emp_id}},
+            )
 
     if "full_name" in updates and linked_user_ids:
         # Cascade the rename to any linked User account, and from there to their doctors

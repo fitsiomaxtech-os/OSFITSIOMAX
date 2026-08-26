@@ -1792,11 +1792,19 @@ const StructureTab = ({ meta, reloadMeta }) => {
    * can be flattened by an out-of-date copy held on this screen.
    */
   const saveBranches = async (emp, ids) => {
-    const before = (emp.branch_ids && emp.branch_ids.length
-      ? emp.branch_ids
-      : (emp.branch_id ? [emp.branch_id] : []));
-    const same = ids.length === before.length && ids.every((id) => before.includes(id));
-    if (same) return;
+    // Saved even when the selection has not moved.
+    //
+    // This used to return early on an unchanged list, on the reasonable-sounding grounds
+    // that there was nothing to write. What that missed is that the employee row is only
+    // half of the answer: a CONSULTANT is offered at a branch by the branches on their
+    // LOGIN, and if that account was never linked to this employee the two halves can
+    // disagree — the row reading "Parrys Branch" while the account behind it says
+    // somewhere else, or nowhere. Unchanged here has never meant unchanged there.
+    //
+    // So re-picking the same branch is a real instruction and is sent, which is what makes
+    // re-saving the repair for a Consultant already in that state: the endpoint finds the
+    // login by name, links it, and posts the branches for the first time. Costing one
+    // idempotent PATCH to make that reachable in a click is the right side to err on.
     setMovingEmployee(emp.id);
     try {
       await hrUpdateEmployee(emp.id, { branch_ids: ids });
